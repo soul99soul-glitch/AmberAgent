@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.ContextWrapper
 import android.graphics.Bitmap
 import android.os.Build
+import android.util.Log
 import android.view.WindowManager
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
@@ -14,6 +15,8 @@ import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -41,8 +44,14 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.Json
 import app.amber.agent.R
@@ -51,6 +60,7 @@ import app.amber.core.settings.CapabilityFlags
 import app.amber.feature.miniapp.AndroidMiniAppUserConfirmation
 import app.amber.feature.miniapp.CapabilityMiniAppSendGate
 import app.amber.feature.miniapp.MiniAppAiBridge
+import app.amber.feature.miniapp.MiniAppAndroidDeviceCapabilities
 import app.amber.feature.miniapp.MiniAppConversationWriter
 import app.amber.feature.miniapp.MiniAppHttpClient
 import app.amber.feature.miniapp.MiniAppImageProxy
@@ -58,6 +68,7 @@ import app.amber.feature.miniapp.MiniAppRepository
 import app.amber.feature.miniapp.MiniAppSandbox
 import app.amber.feature.miniapp.MiniAppSearchBridge
 import app.amber.feature.miniapp.MiniAppShell
+import app.amber.feature.miniapp.MiniAppSpeechEngine
 import app.amber.feature.miniapp.MiniAppStorage
 import app.amber.feature.miniapp.MiniAppPermission
 import app.amber.feature.miniapp.MiniAppSystemBridge
@@ -81,22 +92,18 @@ fun MiniAppRunnerPage(
     repository: MiniAppRepository = koinInject(),
 ) {
     val scope = rememberCoroutineScope()
-    val loadFailedMessage = stringResource(R.string.miniapp_load_failed)
     var state by remember(appId) { mutableStateOf<MiniAppRunnerState>(MiniAppRunnerState.Loading) }
     var reloadKey by remember(appId) { mutableStateOf(0) }
 
     LaunchedEffect(appId) {
         state = MiniAppRunnerState.Loading
-        val loaded = runCatching { repository.getById(appId) }
-            .getOrElse { error ->
-                state = MiniAppRunnerState.Error(error.message ?: loadFailedMessage)
-                return@LaunchedEffect
+        when (val loaded = loadMiniAppRunnerState { repository.getById(appId) }) {
+            MiniAppRunnerLoadState.Missing -> state = MiniAppRunnerState.Missing
+            is MiniAppRunnerLoadState.Error -> state = MiniAppRunnerState.Error(loaded.message)
+            is MiniAppRunnerLoadState.Ready -> {
+                state = MiniAppRunnerState.Ready(loaded.app)
+                markRunnerVisit(repository, appId)
             }
-        if (loaded == null) {
-            state = MiniAppRunnerState.Missing
-        } else {
-            state = MiniAppRunnerState.Ready(loaded)
-            repository.markRun(appId)
         }
     }
 
@@ -120,13 +127,16 @@ fun MiniAppRunnerPage(
                 message = current.message,
                 modifier = Modifier.fillMaxSize(),
                 onRetry = {
+                    state = MiniAppRunnerState.Loading
                     scope.launch {
-                        val loaded = repository.getById(appId)
-                        if (loaded == null) {
-                            state = MiniAppRunnerState.Missing
-                        } else {
-                            reloadKey++
-                            state = MiniAppRunnerState.Ready(loaded)
+                        when (val loaded = loadMiniAppRunnerState { repository.getById(appId) }) {
+                            MiniAppRunnerLoadState.Missing -> state = MiniAppRunnerState.Missing
+                            is MiniAppRunnerLoadState.Error -> state = MiniAppRunnerState.Error(loaded.message)
+                            is MiniAppRunnerLoadState.Ready -> {
+                                reloadKey++
+                                state = MiniAppRunnerState.Ready(loaded.app)
+                                markRunnerVisit(repository, appId)
+                            }
                         }
                     }
                 },
@@ -225,6 +235,22 @@ private sealed interface MiniAppRunnerState {
     data class Error(val message: String) : MiniAppRunnerState
 }
 
+internal sealed interface MiniAppRunnerLoadState {
+    data object Missing : MiniAppRunnerLoadState
+    data class Ready(val app: MiniAppEntity) : MiniAppRunnerLoadState
+    data class Error(val message: String) : MiniAppRunnerLoadState
+}
+
+internal suspend fun loadMiniAppRunnerState(
+    load: suspend () -> MiniAppEntity?,
+): MiniAppRunnerLoadState = try {
+    load()?.let { MiniAppRunnerLoadState.Ready(it) } ?: MiniAppRunnerLoadState.Missing
+} catch (cancel: CancellationException) {
+    throw cancel
+} catch (error: Throwable) {
+    MiniAppRunnerLoadState.Error(error.message ?: "小应用加载失败")
+}
+
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
 private fun MiniAppWebView(
@@ -275,6 +301,59 @@ private fun MiniAppWebView(
     val isDark = androidx.compose.foundation.isSystemInDarkTheme()
     var webViewRef by remember(app.id) { mutableStateOf<WebView?>(null) }
     var bridgeRef by remember(app.id) { mutableStateOf<MiniAppBridge?>(null) }
+    var systemOwnerRef by remember(app.id) { mutableStateOf<MiniAppAndroidDeviceCapabilities?>(null) }
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val foregroundProvider = remember(lifecycleOwner) {
+        { lifecycleOwner.lifecycle.currentState == Lifecycle.State.RESUMED }
+    }
+
+    // P4 W11: share result comes back through the real ActivityResult flow;
+    // completed means the system hand-off finished, not target-app delivery.
+    val shareResultLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult(),
+    ) { result ->
+        systemOwnerRef?.completeShare(result.resultCode == android.app.Activity.RESULT_OK)
+    }
+
+    // P4 W10/W11: per-runner native system capability owner. Screen/haptics/
+    // share/openURL act on this runner's activity window; speech is a separate
+    // per-runner engine the owner closes on dispose.
+    val systemOwner = remember(app.id, context, lifecycleOwner) {
+        MiniAppAndroidDeviceCapabilities(
+            context = context,
+            activityProvider = { webViewRef?.context?.findActivity() ?: context.findActivity() },
+            speechEngine = MiniAppSpeechEngine(
+                context = context,
+                foregroundProvider = foregroundProvider,
+            ),
+            shareLauncher = { intent ->
+                withContext(Dispatchers.Main) { shareResultLauncher.launch(intent) }
+            },
+            openLauncher = { intent ->
+                withContext(Dispatchers.Main) {
+                    try {
+                        context.startActivity(intent)
+                        true
+                    } catch (error: android.content.ActivityNotFoundException) {
+                        false
+                    }
+                }
+            },
+            foregroundProvider = foregroundProvider,
+        ).also { systemOwnerRef = it }
+    }
+
+    // Background: stop speech and release brightness/keep-awake leases while
+    // the runner is not the active window (iOS willResignActive parity).
+    DisposableEffect(lifecycleOwner, systemOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_PAUSE) {
+                systemOwner.suspendRunner()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
 
     AndroidView(
         modifier = modifier,
@@ -382,6 +461,7 @@ private fun MiniAppWebView(
                         conversationWriter = conversationWriter,
                         workspaceWriter = workspaceWriter,
                         sendGate = sendGate,
+                        systemCapabilityHandler = systemOwner,
                     ).also { bridgeRef = it },
                     "AmberNative",
                 )
@@ -398,11 +478,25 @@ private fun MiniAppWebView(
 
     DisposableEffect(app.id) {
         onDispose {
+            // Owner first: late JS calls get runner_closed, speech stops and
+            // screen leases restore before the WebView itself goes away.
+            systemOwner.close()
+            systemOwnerRef = null
             bridgeRef?.close()
             bridgeRef = null
             webViewRef?.destroy()
             webViewRef = null
         }
+    }
+}
+
+private suspend fun markRunnerVisit(repository: MiniAppRepository, appId: String) {
+    try {
+        repository.markRun(appId)
+    } catch (cancel: CancellationException) {
+        throw cancel
+    } catch (error: Throwable) {
+        Log.w("MiniAppRunner", "Unable to persist runner visit for $appId", error)
     }
 }
 

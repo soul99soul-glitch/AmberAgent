@@ -2,6 +2,7 @@ package app.amber.feature.miniapp
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -38,6 +39,7 @@ class MiniAppSourceChecksTest {
         val html = "<html><body><div>text</span></body></html>"
         val issues = MiniAppSourceChecks.issues(html)
         assertTrue(issues.any { it.message.contains("Mismatched tag") })
+        assertNotNull(MiniAppSourceChecks.tagPairingIssue(html))
         assertFalse(MiniAppSourceChecks.isSavable(html))
     }
 
@@ -46,6 +48,7 @@ class MiniAppSourceChecksTest {
         val html = "<html><body><div>text</div><section>no close</section></body>"
         val issues = MiniAppSourceChecks.issues(html)
         assertTrue(issues.any { it.message.contains("Unclosed tag") })
+        assertNotNull(MiniAppSourceChecks.tagPairingIssue(html))
     }
 
     @Test
@@ -69,6 +72,7 @@ class MiniAppSourceChecksTest {
         val html = "<html><body><script>function f() { return 1; </script></body></html>"
         val issues = MiniAppSourceChecks.issues(html)
         assertTrue(issues.any { it.message.contains("Unbalanced brackets in script") })
+        assertNotNull(MiniAppSourceChecks.scriptBraceIssue(html))
     }
 
     @Test
@@ -76,6 +80,7 @@ class MiniAppSourceChecksTest {
         val html = "<html><head><style>body { color: red; </style></head></html>"
         val issues = MiniAppSourceChecks.issues(html)
         assertTrue(issues.any { it.message.contains("Unbalanced braces in style") })
+        assertNotNull(MiniAppSourceChecks.styleBraceIssue(html))
     }
 
     @Test

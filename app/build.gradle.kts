@@ -752,7 +752,6 @@ dependencies {
     implementation(project(":feature:board:api"))
     implementation(project(":feature:live:api"))
     implementation(project(":feature:modelcouncil:api"))
-    implementation(project(":feature:office:api"))
     implementation(project(":feature:subagent:api"))
     implementation(project(":core:ai-prompts"))
     implementation(project(":core:memory:api"))

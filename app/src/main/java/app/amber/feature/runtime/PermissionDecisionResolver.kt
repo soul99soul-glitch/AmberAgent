@@ -270,6 +270,16 @@ class PermissionDecisionResolver(
                 policy,
             )
         }
+        // Editing the installed website catalog is a user choice. Like a
+        // theme import, this is a per-invocation choice even in unattended mode.
+        if (tool.toolName == "wm_site_add" || tool.toolName == "wm_site_remove") {
+            return decision(
+                PermissionDecisionAction.ASK,
+                "添加或移除网站必须由用户确认站点信息。",
+                "webmount_site_confirmation",
+                policy,
+            )
+        }
         if (tool.toolName == ASK_USER_TOOL_NAME && policy.needsApproval) {
             return decision(PermissionDecisionAction.ASK, localized.askUser, "hitl", policy)
         }

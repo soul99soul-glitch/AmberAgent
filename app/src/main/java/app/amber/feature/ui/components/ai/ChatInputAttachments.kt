@@ -41,6 +41,7 @@ import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -65,6 +66,7 @@ import androidx.core.net.toFile
 import androidx.core.net.toUri
 import coil3.compose.AsyncImage
 import com.dokar.sonner.ToastType
+import com.dokar.sonner.ToasterState
 import com.yalantis.ucrop.UCrop
 import com.yalantis.ucrop.UCropActivity
 import kotlinx.coroutines.Dispatchers
@@ -80,6 +82,7 @@ import com.composables.icons.lucide.Files
 import com.composables.icons.lucide.Image
 import com.composables.icons.lucide.Music
 import com.composables.icons.lucide.Video
+import com.composables.icons.lucide.RefreshCw
 import app.amber.agent.R
 import app.amber.core.ai.vision.ImageAttachmentStatus
 import app.amber.core.ai.vision.ImageAttachmentStatusKind
@@ -94,6 +97,9 @@ import app.amber.feature.ui.components.ui.permission.rememberPermissionState
 import app.amber.feature.ui.components.ui.workspaceColors
 import app.amber.feature.ui.context.LocalSettings
 import app.amber.feature.ui.context.LocalToaster
+import app.amber.feature.ui.hooks.ChatInputAttachmentImport
+import app.amber.feature.ui.hooks.ChatInputAttachmentImportStatus
+import app.amber.feature.ui.hooks.ChatInputAttachmentKind
 import app.amber.feature.ui.hooks.ChatInputState
 import app.amber.feature.ui.pages.chat.LocalChatTheme
 import org.koin.compose.koinInject
@@ -114,6 +120,7 @@ import java.io.File
 @Composable
 internal fun MediaFileInputRow(
     state: ChatInputState,
+    onRetryAttachment: (ChatInputAttachmentImport) -> Unit = {},
 ) {
     val filesManager: FilesManager = koinInject()
     val settings = LocalSettings.current
@@ -135,6 +142,17 @@ internal fun MediaFileInputRow(
         }
     }
 
+    fun removeImport(import: ChatInputAttachmentImport) {
+        val removed = state.removeAttachmentImport(import.id) ?: return
+        removed.part?.let { part ->
+            if (state.shouldDeleteFileOnRemove(part)) {
+                filesManager.deleteChatFiles(listOf(part.attachmentUrl().toUri()))
+            }
+        }
+    }
+
+    val trackedParts = state.attachmentImports.mapNotNull { it.part }.toSet()
+
     Row(
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         modifier = Modifier
@@ -142,86 +160,199 @@ internal fun MediaFileInputRow(
             .padding(horizontal = 6.dp, vertical = 6.dp)
             .horizontalScroll(rememberScrollState())
     ) {
-        state.messageContent.fastForEach { part ->
-            when (part) {
-                is UIMessagePart.Image -> {
-                    val status by produceState(
-                        ImageAttachmentValidator.checking(attachmentStrings),
-                        context,
-                        part.url,
-                        settings.chatModelId,
-                        settings.ocrModelId,
-                        settings.providers,
-                    ) {
-                        value = withContext(Dispatchers.IO) {
-                            ImageAttachmentValidator.inspectImage(part, settings, attachmentStrings)
+        state.attachmentImports.forEach { import ->
+            key(import.id) {
+                when (import.status) {
+                    ChatInputAttachmentImportStatus.IMPORTING,
+                    ChatInputAttachmentImportStatus.FAILED,
+                        -> AttachmentImportChip(
+                        import = import,
+                        onRemove = { removeImport(import) },
+                        onRetry = { onRetryAttachment(import) },
+                        onErrorClick = {
+                            import.errorMessage?.let { toaster.show(it, type = ToastType.Error) }
+                        },
+                    )
+
+                    ChatInputAttachmentImportStatus.READY -> {
+                        import.part?.let { part ->
+                            AttachmentPartChip(
+                                part = part,
+                                imported = import,
+                                settings = settings,
+                                displayNameByRelativePath = displayNameByRelativePath,
+                                displayNameByFileName = displayNameByFileName,
+                                toaster = toaster,
+                                attachmentStrings = attachmentStrings,
+                                onRemove = { removeImport(import) },
+                            )
                         }
                     }
-                    AttachmentChip(
-                        title = attachmentNameFromUrl(
-                            url = part.url,
-                            fallback = "image",
-                            displayNameByRelativePath = displayNameByRelativePath,
-                            displayNameByFileName = displayNameByFileName
-                        ),
-                        leading = {
-                            ImageAttachmentPreview(
-                                url = part.url,
-                                status = status,
-                                onStatusClick = {
-                                    if (status.blocksSend) {
-                                        toaster.show(status.message, type = ToastType.Error)
-                                    }
-                                }
-                            )
-                        },
-                        onRemove = { removePart(part, part.url) }
-                    )
                 }
-
-                is UIMessagePart.Video -> {
-                    AttachmentChip(
-                        title = attachmentNameFromUrl(
-                            url = part.url,
-                            fallback = "video",
-                            displayNameByRelativePath = displayNameByRelativePath,
-                            displayNameByFileName = displayNameByFileName
-                        ),
-                        leading = { AttachmentLeadingIcon(icon = Lucide.Video) },
-                        onRemove = { removePart(part, part.url) }
-                    )
-                }
-
-                is UIMessagePart.Audio -> {
-                    AttachmentChip(
-                        title = attachmentNameFromUrl(
-                            url = part.url,
-                            fallback = "audio",
-                            displayNameByRelativePath = displayNameByRelativePath,
-                            displayNameByFileName = displayNameByFileName
-                        ),
-                        leading = { AttachmentLeadingIcon(icon = Lucide.Music) },
-                        onRemove = { removePart(part, part.url) }
-                    )
-                }
-
-                is UIMessagePart.Document -> {
-                    AttachmentChip(
-                        title = attachmentNameFromUrl(
-                            url = part.url,
-                            fallback = part.fileName,
-                            displayNameByRelativePath = displayNameByRelativePath,
-                            displayNameByFileName = displayNameByFileName
-                        ),
-                        leading = { AttachmentLeadingIcon(icon = Lucide.FileText) },
-                        onRemove = { removePart(part, part.url) }
-                    )
-                }
-
-                else -> Unit
+            }
+        }
+        state.messageContent.fastForEach { part ->
+            if (part !in trackedParts) {
+                AttachmentPartChip(
+                    part = part,
+                    imported = null,
+                    settings = settings,
+                    displayNameByRelativePath = displayNameByRelativePath,
+                    displayNameByFileName = displayNameByFileName,
+                    toaster = toaster,
+                    attachmentStrings = attachmentStrings,
+                    onRemove = { removePart(part, part.attachmentUrl()) },
+                )
             }
         }
     }
+}
+
+@Composable
+private fun AttachmentPartChip(
+    part: UIMessagePart,
+    imported: ChatInputAttachmentImport?,
+    settings: app.amber.core.settings.Settings,
+    displayNameByRelativePath: Map<String, String>,
+    displayNameByFileName: Map<String, String>,
+    toaster: ToasterState,
+    attachmentStrings: ImageAttachmentStrings,
+    onRemove: () -> Unit,
+) {
+    val importedStatus = imported?.let { import ->
+        when {
+            import.readWarning != null -> stringResource(R.string.parity_attachment_read_failed)
+            import.textWasTruncated -> stringResource(R.string.parity_attachment_truncated)
+            import.sizeBytes != null -> formatAttachmentSize(import.sizeBytes)
+            else -> stringResource(R.string.parity_attachment_ready)
+        }
+    }
+    val importedStatusColor = if (imported?.readWarning != null) {
+        MaterialTheme.colorScheme.error
+    } else {
+        LocalChatTheme.current.accentDeep.copy(alpha = 0.78f)
+    }
+    val onStatusClick: (() -> Unit)? = imported?.readWarning?.let { warning ->
+        { toaster.show(warning, type = ToastType.Error) }
+    }
+    val titleFor = { fallback: String ->
+        imported?.displayName ?: attachmentNameFromUrl(
+            url = part.attachmentUrl(),
+            fallback = fallback,
+            displayNameByRelativePath = displayNameByRelativePath,
+            displayNameByFileName = displayNameByFileName,
+        )
+    }
+
+    when (part) {
+        is UIMessagePart.Image -> {
+            val status by produceState(
+                ImageAttachmentValidator.checking(attachmentStrings),
+                part.url,
+                settings.chatModelId,
+                settings.ocrModelId,
+                settings.providers,
+            ) {
+                value = withContext(Dispatchers.IO) {
+                    ImageAttachmentValidator.inspectImage(part, settings, attachmentStrings)
+                }
+            }
+            AttachmentChip(
+                title = titleFor("image"),
+                leading = {
+                    ImageAttachmentPreview(
+                        url = part.url,
+                        status = status,
+                        onStatusClick = {
+                            if (status.blocksSend) {
+                                toaster.show(status.message, type = ToastType.Error)
+                            }
+                        },
+                    )
+                },
+                statusText = importedStatus,
+                statusColor = importedStatusColor,
+                onStatusClick = onStatusClick,
+                onRemove = onRemove,
+            )
+        }
+
+        is UIMessagePart.Video -> AttachmentChip(
+            title = titleFor("video"),
+            leading = { AttachmentLeadingIcon(icon = Lucide.Video) },
+            statusText = importedStatus,
+            statusColor = importedStatusColor,
+            onStatusClick = onStatusClick,
+            onRemove = onRemove,
+        )
+
+        is UIMessagePart.Audio -> AttachmentChip(
+            title = titleFor("audio"),
+            leading = { AttachmentLeadingIcon(icon = Lucide.Music) },
+            statusText = importedStatus,
+            statusColor = importedStatusColor,
+            onStatusClick = onStatusClick,
+            onRemove = onRemove,
+        )
+
+        is UIMessagePart.Document -> AttachmentChip(
+            title = titleFor(part.fileName),
+            leading = { AttachmentLeadingIcon(icon = Lucide.FileText) },
+            statusText = importedStatus,
+            statusColor = importedStatusColor,
+            onStatusClick = onStatusClick,
+            onRemove = onRemove,
+        )
+
+        else -> Unit
+    }
+}
+
+@Composable
+private fun AttachmentImportChip(
+    import: ChatInputAttachmentImport,
+    onRemove: () -> Unit,
+    onRetry: () -> Unit,
+    onErrorClick: () -> Unit,
+) {
+    val isFailed = import.status == ChatInputAttachmentImportStatus.FAILED
+    val statusText = when {
+        isFailed -> stringResource(R.string.parity_attachment_import_failed_short)
+        else -> stringResource(R.string.parity_attachment_importing)
+    }
+    val statusColor = if (isFailed) MaterialTheme.colorScheme.error else LocalChatTheme.current.accentDeep
+    AttachmentChip(
+        title = import.displayName,
+        leading = { AttachmentLeadingIcon(icon = import.kind.icon) },
+        statusText = statusText,
+        statusColor = statusColor,
+        onStatusClick = if (isFailed) onErrorClick else null,
+        onRetry = if (isFailed) onRetry else null,
+        onRemove = onRemove,
+    )
+}
+
+private val ChatInputAttachmentKind.icon: ImageVector
+    get() = when (this) {
+        ChatInputAttachmentKind.IMAGE -> Lucide.Image
+        ChatInputAttachmentKind.VIDEO -> Lucide.Video
+        ChatInputAttachmentKind.AUDIO -> Lucide.Music
+        ChatInputAttachmentKind.DOCUMENT -> Lucide.FileText
+    }
+
+private fun UIMessagePart.attachmentUrl(): String = when (this) {
+    is UIMessagePart.Image -> url
+    is UIMessagePart.Video -> url
+    is UIMessagePart.Audio -> url
+    is UIMessagePart.Document -> url
+    else -> ""
+}
+
+private fun formatAttachmentSize(bytes: Long): String = when {
+    bytes < 1024L -> "$bytes B"
+    bytes < 1024L * 1024L -> "${bytes / 1024L} KB"
+    bytes < 1024L * 1024L * 1024L -> "${bytes / (1024L * 1024L)} MB"
+    else -> "${bytes / (1024L * 1024L * 1024L)} GB"
 }
 
 @Composable
@@ -289,6 +420,10 @@ private fun ImageAttachmentStatus.dotColor(): Color = when (kind) {
 private fun AttachmentChip(
     title: String,
     leading: @Composable () -> Unit,
+    statusText: String? = null,
+    statusColor: Color = LocalChatTheme.current.accentDeep.copy(alpha = 0.78f),
+    onStatusClick: (() -> Unit)? = null,
+    onRetry: (() -> Unit)? = null,
     onRemove: () -> Unit,
 ) {
     val chatTheme = LocalChatTheme.current
@@ -316,6 +451,41 @@ private fun AttachmentChip(
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.widthIn(min = 36.dp, max = 210.dp),
                 )
+                if (!statusText.isNullOrBlank()) {
+                    Text(
+                        text = statusText,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        color = statusColor,
+                        modifier = Modifier
+                            .widthIn(min = 24.dp, max = 84.dp)
+                            .then(
+                                if (onStatusClick != null) {
+                                    Modifier
+                                        .clip(RoundedCornerShape(4.dp))
+                                        .clickable(onClick = onStatusClick)
+                                } else {
+                                    Modifier
+                                }
+                            ),
+                    )
+                }
+                if (onRetry != null) {
+                    Box(
+                        modifier = Modifier
+                            .clip(CircleShape)
+                            .size(40.dp)
+                            .clickable(onClick = onRetry),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            imageVector = Lucide.RefreshCw,
+                            contentDescription = stringResource(R.string.parity_attachment_retry),
+                            tint = chipInk.copy(alpha = 0.82f),
+                            modifier = Modifier.size(15.dp),
+                        )
+                    }
+                }
                 Box(
                     modifier = Modifier
                         .clip(CircleShape)

@@ -1,7 +1,6 @@
 package app.amber.feature.task
 
 import android.content.Context
-import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -10,13 +9,13 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
 import java.io.File
-import java.io.RandomAccessFile
+import java.io.FileOutputStream
+import java.io.IOException
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
 import java.util.concurrent.ConcurrentHashMap
-
-private const val TAG = "AgentTaskStore"
 
 class AgentTaskStore(
     context: Context,
@@ -48,6 +47,9 @@ class AgentTaskStore(
         cancel: (suspend () -> Boolean)? = null,
         retry: (suspend () -> Boolean)? = null,
     ): AgentTaskSnapshot = mutex.withLock {
+        // Install the durable snapshot before publishing it to in-memory consumers. A
+        // failed write must leave both the previous task and its callbacks untouched.
+        persist(snapshot)
         tasks[snapshot.taskId] = snapshot
         if (cancel != null) {
             cancelCallbacks[snapshot.taskId] = cancel
@@ -59,11 +61,16 @@ class AgentTaskStore(
         } else if (!snapshot.retryPolicy.retryable) {
             retryCallbacks.remove(snapshot.taskId)
         }
-        persist(snapshot)
         publish()
         snapshot
     }
 
+    /**
+     * A null [error]/[lastErrorCode] argument preserves the current value for callers that
+     * only update other fields. The clear flags mean "write exactly what was passed":
+     * a non-null argument overwrites the stored value and a null argument clears it, so a
+     * failure reporter can record an error and clear flags can reset both fields.
+     */
     suspend fun update(
         taskId: String,
         status: AgentTaskStatus? = null,
@@ -71,6 +78,8 @@ class AgentTaskStore(
         summary: String? = null,
         error: String? = null,
         lastErrorCode: String? = null,
+        clearError: Boolean = false,
+        clearLastErrorCode: Boolean = false,
         outputPath: String? = null,
         outputOffset: Long? = null,
         cancelCapability: Boolean? = null,
@@ -78,15 +87,16 @@ class AgentTaskStore(
         retryPolicy: AgentTaskRetryPolicy? = null,
         outputRef: AgentTaskOutputRef? = null,
         lastHeartbeatMs: Long? = null,
-        clearError: Boolean = false,
+        expectedSpec: JsonObject? = null,
     ): AgentTaskSnapshot? = mutex.withLock {
         val current = tasks[taskId] ?: return@withLock null
+        if (expectedSpec != null && expectedSpec != current.spec) return@withLock null
         val next = current.copy(
             status = status ?: current.status,
             queueState = queueState ?: status?.toQueueState(current.type) ?: current.queueState,
             summary = summary ?: current.summary,
             error = if (clearError) error else error ?: current.error,
-            lastErrorCode = if (clearError) lastErrorCode else lastErrorCode ?: current.lastErrorCode,
+            lastErrorCode = if (clearError || clearLastErrorCode) lastErrorCode else lastErrorCode ?: current.lastErrorCode,
             outputPath = outputPath ?: current.outputPath,
             outputOffset = outputOffset ?: current.outputOffset,
             cancelCapability = cancelCapability ?: current.cancelCapability,
@@ -96,19 +106,21 @@ class AgentTaskStore(
             lastHeartbeatMs = lastHeartbeatMs ?: current.lastHeartbeatMs,
             updatedAtMs = System.currentTimeMillis(),
         )
-        tasks[taskId] = next
+        // See upsert: persistence is the commit point, publication follows it.
         persist(next)
+        tasks[taskId] = next
         publish()
         next
     }
 
     suspend fun remove(taskId: String): Boolean = mutex.withLock {
+        val existed = tasks.containsKey(taskId)
+        deleteSnapshotFile(taskId)
         val removed = tasks.remove(taskId) != null
         cancelCallbacks.remove(taskId)
         retryCallbacks.remove(taskId)
-        File(taskDir, "$taskId.json").delete()
         publish()
-        removed
+        removed || existed
     }
 
     fun list(type: String? = null, status: AgentTaskStatus? = null): List<AgentTaskSnapshot> =
@@ -173,9 +185,8 @@ class AgentTaskStore(
                 recoveryState = AgentTaskRecoveryState.ACTIVE,
                 retryPolicy = retryPolicy,
                 summary = "Retry requested.",
-                error = null,
-                lastErrorCode = null,
                 clearError = true,
+                clearLastErrorCode = true,
             )
         } else {
             update(
@@ -190,12 +201,16 @@ class AgentTaskStore(
     suspend fun cleanup(taskId: String, deletePrivateOutput: Boolean = false): Boolean = mutex.withLock {
         val current = tasks[taskId] ?: return@withLock false
         if (deletePrivateOutput) {
-            privateOutputFile(current)?.delete()
+            privateOutputFile(current)?.let { output ->
+                if (output.exists() && !output.delete() && output.exists()) {
+                    throw IOException("Failed to delete task output: ${output.absolutePath}")
+                }
+            }
         }
+        deleteSnapshotFile(taskId)
         tasks.remove(taskId)
         cancelCallbacks.remove(taskId)
         retryCallbacks.remove(taskId)
-        File(taskDir, "$taskId.json").delete()
         publish()
         true
     }
@@ -203,9 +218,10 @@ class AgentTaskStore(
     suspend fun reconcileOnStartup(): List<AgentTaskSnapshot> = mutex.withLock {
         val now = System.currentTimeMillis()
         val recovered = tasks.values.map { recoveryManager.recoverOnStartup(it, now) }
+        // Persist all recovered snapshots before exposing any of them to observers.
+        recovered.forEach(::persist)
         recovered.forEach { snapshot ->
             tasks[snapshot.taskId] = snapshot
-            persist(snapshot)
         }
         publish()
         recovered.sortedByDescending { it.updatedAtMs }
@@ -217,8 +233,8 @@ class AgentTaskStore(
                 json.decodeFromString(AgentTaskSnapshot.serializer(), file.readText())
             }.getOrNull() ?: return@forEach
             val restored = recoveryManager.recoverOnStartup(snapshot, System.currentTimeMillis())
-            tasks[restored.taskId] = restored
             if (restored != snapshot) persist(restored)
+            tasks[restored.taskId] = restored
         }
     }
 
@@ -230,28 +246,41 @@ class AgentTaskStore(
         return canonical.takeIf { it.path.startsWith(root.path + File.separator) }
     }
 
+    private fun deleteSnapshotFile(taskId: String) {
+        val file = File(taskDir, "$taskId.json")
+        if (file.exists() && !file.delete() && file.exists()) {
+            throw IOException("Failed to delete agent task snapshot: ${file.absolutePath}")
+        }
+    }
+
     private fun persist(snapshot: AgentTaskSnapshot) {
         val destination = File(taskDir, "${snapshot.taskId}.json")
-        val temp = runCatching {
-            File.createTempFile("task-${snapshot.taskId}-", ".tmp", taskDir)
-        }.getOrElse { error ->
-            Log.w(TAG, "Failed to create task snapshot temp file for ${snapshot.taskId}", error)
-            return
+        val parent = destination.parentFile
+            ?: throw IOException("Cannot resolve task snapshot parent: ${destination.path}")
+        if (!parent.isDirectory) {
+            throw IOException("Task snapshot parent is not a directory: ${parent.path}")
         }
+        val encoded = json.encodeToString(AgentTaskSnapshot.serializer(), snapshot)
+        val temp = File.createTempFile("task-snapshot-", ".tmp", parent)
         try {
-            temp.writeText(
-                json.encodeToString(AgentTaskSnapshot.serializer(), snapshot),
-                Charsets.UTF_8,
-            )
-            RandomAccessFile(temp, "rw").use { it.fd.sync() }
-            Files.move(
-                temp.toPath(),
-                destination.toPath(),
-                StandardCopyOption.ATOMIC_MOVE,
-                StandardCopyOption.REPLACE_EXISTING,
-            )
-        } catch (error: Exception) {
-            Log.w(TAG, "Failed to persist task snapshot for ${snapshot.taskId}", error)
+            FileOutputStream(temp).use { output ->
+                output.write(encoded.toByteArray(Charsets.UTF_8))
+                output.fd.sync()
+            }
+            try {
+                Files.move(
+                    temp.toPath(),
+                    destination.toPath(),
+                    StandardCopyOption.ATOMIC_MOVE,
+                    StandardCopyOption.REPLACE_EXISTING,
+                )
+            } catch (_: java.nio.file.AtomicMoveNotSupportedException) {
+                Files.move(
+                    temp.toPath(),
+                    destination.toPath(),
+                    StandardCopyOption.REPLACE_EXISTING,
+                )
+            }
         } finally {
             temp.delete()
         }

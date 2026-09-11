@@ -8,6 +8,7 @@ import app.amber.feature.webmount.core.WebMountManager
 import app.amber.feature.webmount.cookie.WebMountCookieProvider
 import app.amber.feature.webmount.oauth.WebMountOAuthTokenStore
 import app.amber.feature.webmount.primitives.WebViewPool
+import app.amber.feature.webmount.primitives.WebMountSessionOwner
 import app.amber.feature.webmount.profile.ProfileBridge
 import app.amber.feature.webmount.profile.ProfileRegistry
 import app.amber.feature.webmount.usersites.UserSiteRegistry
@@ -46,10 +47,30 @@ class WebMountPrimitiveTools(
     private val userSiteRegistry: UserSiteRegistry,
     private val oauthStore: WebMountOAuthTokenStore,
     private val settingsStore: SettingsAggregator,
+    private val sessionOwner: WebMountSessionOwner,
 ) {
-    private val deps = WebMountDeps(pool, activityStore, context)
+    private val deps = WebMountDeps(pool, activityStore, sessionOwner, context)
 
-    fun getTools(includeEval: Boolean = false): List<Tool> = listOfNotNull(
+    /** End the run-level lease namespace when ChatService reaches a terminal state. */
+    fun endRun(
+        runId: String,
+        conversationId: String?,
+        reason: String = "run ended",
+        preservePendingHandoff: Boolean = false,
+    ) {
+        sessionOwner.endRun(
+            runId = runId,
+            conversationId = conversationId,
+            reason = reason,
+            preservePendingHandoff = preservePendingHandoff,
+        )
+    }
+
+    fun getTools(
+        includeEval: Boolean = false,
+        conversationId: String? = null,
+        runId: String? = null,
+    ): List<Tool> = listOfNotNull(
         openTool,
         stateTool,
         observeTool,
@@ -80,7 +101,19 @@ class WebMountPrimitiveTools(
         siteAddTool,
         siteRemoveTool,
         profileSynthesizeTool,
-    )
+    ).map { tool ->
+        // Tool.execute only receives JSON. Carry the already resolved
+        // conversation/run scope through private fields so every factory can
+        // acquire the same AGENT lease without introducing global context.
+        // Always pass through the host scope, including the debug catalog
+        // path where both values are null. This strips any model-supplied
+        // reserved fields instead of allowing a caller to forge an identity.
+        tool.copy(
+            execute = { input ->
+                tool.execute(input.withWebMountScope(conversationId, runId))
+            },
+        )
+    }
 
     private val openTool by lazy { createOpenTool(deps, profileRegistry, cookieProvider, manager) }
     private val stateTool by lazy { createStateTool(deps, profileRegistry, cookieProvider, manager) }

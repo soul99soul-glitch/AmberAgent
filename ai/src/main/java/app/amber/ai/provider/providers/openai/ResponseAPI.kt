@@ -20,6 +20,7 @@ import app.amber.ai.provider.providers.StreamTerminationGuard
 import app.amber.ai.provider.providers.groupPartsByToolBoundary
 import app.amber.ai.registry.ModelRegistry
 import app.amber.ai.ui.MessageChunk
+import app.amber.ai.ui.MessageStreamAccumulator
 import app.amber.ai.ui.UIMessage
 import app.amber.ai.ui.UIMessageAnnotation
 import app.amber.ai.ui.UIMessageChoice
@@ -45,6 +46,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.last
 import kotlinx.coroutines.flow.transform
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArrayBuilder
@@ -104,6 +106,9 @@ class ResponseAPI(
         // user switch (defense-in-depth: off never sends store=true).
         val resume = params.responsesResume?.takeIf {
             providerSetting.supportsResponsesResume() && providerSetting.enableResponsesResume
+        }
+        if (resume?.resumeFrom != null) {
+            return streamText(providerSetting, messages, params).last()
         }
         val requestBody = buildRequestBody(
             providerSetting = providerSetting,
@@ -173,6 +178,30 @@ class ResponseAPI(
         // even if a stale resume request reaches the wire.
         val resume = params.responsesResume?.takeIf {
             providerSetting.supportsResponsesResume() && providerSetting.enableResponsesResume
+        }
+        resume?.resumeFrom?.let { cursor ->
+            require(cursor.providerId == providerSetting.id.toString()) {
+                "Stored response belongs to a different provider"
+            }
+            // After process death the cursor can be ahead of the durable
+            // partial. Replay the original response in full and replace that
+            // partial, rather than append a suffix or create a new response.
+            val partial = messages.lastOrNull()?.takeIf { it.role == MessageRole.ASSISTANT }
+            val accumulator = MessageStreamAccumulator(listOf(UIMessage.assistant("")), params.model)
+            return streamStored(providerSetting, cursor.responseId, null, resume.store, resume.runId)
+                .map { chunk ->
+                    accumulator.append(chunk)
+                    val recovered = accumulator.snapshot().last()
+                    chunk.copy(
+                        choices = listOf(UIMessageChoice(
+                            index = 0,
+                            delta = null,
+                            message = recovered.copy(id = partial?.id ?: recovered.id),
+                            finishReason = chunk.choices.firstOrNull()?.finishReason,
+                        )),
+                        usage = null, // the complete snapshot already carries accumulated usage
+                    )
+                }
         }
         val requestBody = buildRequestBody(
             providerSetting = providerSetting,
@@ -462,8 +491,9 @@ class ResponseAPI(
     /**
      * Persist-then-emit drain with P6-01 write-ahead semantics: the sequence
      * is persisted BEFORE the consumer sees the event, so a reconnect can
-     * never re-deliver it; the cursor is cleared once the terminal event is
-     * delivered. Dedup by cursor floor happens inside [storedEventStream].
+     * never re-deliver it. The owning chat flow clears the cursor only after
+     * its final conversation checkpoint and terminal state are durable. Dedup
+     * by cursor floor happens inside [storedEventStream].
      */
     private fun persistDrain(
         events: Flow<StoredQueuedChunk>,
@@ -476,9 +506,6 @@ class ResponseAPI(
             resume.store.save(resume.runId, responseId, event.sequence, providerId)
         }
         emit(event.chunk)
-        if (event.terminal) {
-            resume?.store?.clear(resume.runId)
-        }
     }
 
     private suspend fun storedRequest(
@@ -515,10 +542,19 @@ class ResponseAPI(
             throw Exception("Failed to fetch stored response: ${response.code}")
         }
         val body = response.body?.string() ?: ""
-        val status = runCatching {
-            json.parseToJsonElement(body).jsonObject["status"]?.jsonPrimitiveOrNull?.contentOrNull
-        }.getOrNull()
-        return StoredResponseStatus(status.toStoredResponseState(), responseId)
+        val bodyJson = runCatching { json.parseToJsonElement(body).jsonObject }.getOrNull()
+        val status = bodyJson?.get("status")?.jsonPrimitiveOrNull?.contentOrNull
+        val finalMessage = if (status.toStoredResponseState() == StoredResponseState.COMPLETED) {
+            // A completed GET normally contains the complete `output`. Keep
+            // an empty array as a valid empty response, while a missing field
+            // falls back to the stored SSE replay in recovery.
+            bodyJson
+                ?.takeIf { it["output"]?.jsonArrayOrNull != null }
+                ?.let { runCatching { parseResponseOutput(it) }.getOrNull() }
+        } else {
+            null
+        }
+        return StoredResponseStatus(status.toStoredResponseState(), responseId, finalMessage)
     }
 
     override suspend fun streamStored(

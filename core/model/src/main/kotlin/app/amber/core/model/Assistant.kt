@@ -31,6 +31,13 @@ data class AssistantMemory(
     val sourceRunId: String? = null,
     /** P2-06: write path ("tool" | "auto_extraction" | ...). */
     val sourceTrigger: String? = null,
+    /** Existing memory record metadata retained for the settings editor. */
+    val sourceConversationId: String? = null,
+    val sourceMessageIds: List<String> = emptyList(),
+    val supersedesIds: List<Int> = emptyList(),
+    val createdAt: Long = 0L,
+    val updatedAt: Long = 0L,
+    val lastUsedAt: Long? = null,
 )
 
 @Serializable

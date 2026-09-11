@@ -34,6 +34,23 @@ class LoopbackOAuthCallbackServerTest {
     }
 
     @Test
+    fun `accepts a provider-specific callback path`() = runBlocking {
+        val port = freePort()
+        LoopbackOAuthCallbackServer(port = port, callbackPath = "/oauth-callback").use { server ->
+            val awaiting = async(start = CoroutineStart.UNDISPATCHED) { server.awaitCallback() }
+            sendRequest(
+                port,
+                "GET /oauth-callback?code=abc&state=state-1 HTTP/1.1\r\n" +
+                    "Host: 127.0.0.1\r\n\r\n",
+            )
+
+            val result = withTimeout(1_000) { awaiting.await() }
+            assertEquals("abc", result.code)
+            assertEquals("state-1", result.state)
+        }
+    }
+
+    @Test
     fun `returns provider error and escapes it in failure html`() = runBlocking {
         val port = freePort()
         LoopbackOAuthCallbackServer(port).use { server ->

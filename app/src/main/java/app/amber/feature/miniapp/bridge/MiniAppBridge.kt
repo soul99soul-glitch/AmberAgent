@@ -25,6 +25,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.encodeToJsonElement
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
@@ -35,6 +36,7 @@ import app.amber.feature.miniapp.MiniAppBridgeRequest
 import app.amber.feature.miniapp.MiniAppBridgeResponse
 import app.amber.feature.miniapp.MiniAppConversationWriter
 import app.amber.feature.miniapp.MiniAppEventBus
+import app.amber.feature.miniapp.MiniAppGrantDecision
 import app.amber.feature.miniapp.MiniAppHttpClient
 import app.amber.feature.miniapp.MiniAppLaunchLimiter
 import app.amber.feature.miniapp.MiniAppPermission
@@ -45,6 +47,9 @@ import app.amber.feature.miniapp.MiniAppSendDecision
 import app.amber.feature.miniapp.MiniAppSendGate
 import app.amber.feature.miniapp.MiniAppStorage
 import app.amber.feature.miniapp.MiniAppSystemBridge
+import app.amber.feature.miniapp.MiniAppSystemCapabilityHandler
+import app.amber.feature.miniapp.MiniAppSystemCapabilityRegistry
+import app.amber.feature.miniapp.MiniAppOpenUrlValidator
 import app.amber.feature.miniapp.MiniAppUserConfirmation
 import app.amber.feature.miniapp.MiniAppValidationException
 import app.amber.feature.miniapp.MiniAppWorkspaceWriter
@@ -77,9 +82,23 @@ class MiniAppBridge(
     private val conversationWriter: MiniAppConversationWriter,
     private val workspaceWriter: MiniAppWorkspaceWriter,
     private val sendGate: MiniAppSendGate,
+    private val systemCapabilityHandler: MiniAppSystemCapabilityHandler? = null,
     private val json: Json = Json { ignoreUnknownKeys = true },
 ) {
     private val mainHandler = Handler(Looper.getMainLooper())
+
+    companion object {
+        /** Regular (non-system) methods the bridge can always dispatch. */
+        private val BRIDGE_METHODS = setOf(
+            "storage.get", "storage.set", "storage.remove", "toast", "host.getTheme", "fetch",
+            "search", "clipboard.copy", "host.updateBoardSummary", "host.getConversationContext",
+            "host.sendToConversation", "host.createArtifact", "ai.generate", "sharedStore.get",
+            "sharedStore.set", "sharedStore.remove", "eventBus.subscribe", "eventBus.unsubscribe",
+            "eventBus.publish", "launch", "clipboard.read", "location.getCurrent",
+            "sensor.subscribe", "sensor.unsubscribe",
+        )
+    }
+
     private val sensorManager = context.getSystemService(Context.SENSOR_SERVICE) as SensorManager
     private val sensorListeners = ConcurrentHashMap<String, SensorEventListener>()
     private val eventPublishTimes = ArrayDeque<Long>()
@@ -95,9 +114,24 @@ class MiniAppBridge(
 
     @JavascriptInterface
     fun postMessage(raw: String) {
-        if (closed.get()) return
+        val requestId = runCatching { json.decodeFromString<MiniAppBridgeRequest>(raw).id }.getOrNull()
+        if (closed.get()) {
+            // Late requests after close still get an honest runner_closed reply
+            // instead of silently timing out on the JS side.
+            requestId?.let {
+                sendResponse(
+                    MiniAppBridgeResponse(
+                        id = it,
+                        ok = false,
+                        error = "MiniApp runner is closed",
+                        errorCode = "runner_closed",
+                    )
+                )
+            }
+            return
+        }
         bridgeScope.launch {
-            val response = runCatching {
+            val response = try {
                 val request = json.decodeFromString<MiniAppBridgeRequest>(raw)
                 if (request.token != sessionToken) {
                     throw SecurityException("Invalid MiniApp session token")
@@ -105,37 +139,64 @@ class MiniAppBridge(
                 MiniAppBridgeResponse(
                     id = request.id,
                     ok = true,
-                    data = handle(request.method, request.params)
+                    data = handle(request.method, request.params),
                 )
-            }.getOrElse { error ->
-                val id = runCatching { json.decodeFromString<MiniAppBridgeRequest>(raw).id }.getOrDefault(-1)
-                MiniAppBridgeResponse(
-                    id = id,
-                    ok = false,
-                    error = when (error) {
-                        is SerializationException -> "Invalid bridge request"
-                        is MiniAppBridgeException -> error.message ?: error::class.java.simpleName
-                        else -> {
-                            // Unknown failure: keep internal details out of the
-                            // JS response; the exception only goes to the log.
-                            Log.w("MiniAppBridge", "Bridge request failed", error)
-                            "Bridge request failed"
-                        }
-                    },
-                    // P3-03: stable structured codes — MiniApp-host failures,
-                    // permission denials (sandbox.require) and user denials.
-                    errorCode = when (error) {
-                        is MiniAppBridgeException -> error.code
-                        is SecurityException -> "permission_denied"
-                        else -> "bridge_error"
-                    },
-                )
+            } catch (error: Throwable) {
+                if (error is kotlinx.coroutines.CancellationException) {
+                    // close() cancels the bridge scope mid-request: surface a
+                    // typed runner_closed reply instead of masquerading as a
+                    // generic bridge error. A still-open coroutine only sees
+                    // CancellationException from inner timeouts, which keep
+                    // the generic mapping.
+                    if (closed.get()) {
+                        MiniAppBridgeResponse(
+                            id = requestId ?: -1,
+                            ok = false,
+                            error = "MiniApp runner is closed",
+                            errorCode = "runner_closed",
+                        )
+                    } else {
+                        MiniAppBridgeResponse(
+                            id = requestId ?: -1,
+                            ok = false,
+                            error = "Bridge request failed",
+                            errorCode = "bridge_error",
+                        )
+                    }
+                } else {
+                    MiniAppBridgeResponse(
+                        id = requestId ?: -1,
+                        ok = false,
+                        error = when (error) {
+                            is SerializationException -> "Invalid bridge request"
+                            is MiniAppBridgeException -> error.message ?: error::class.java.simpleName
+                            else -> {
+                                // Unknown failure: keep internal details out of the
+                                // JS response; the exception only goes to the log.
+                                Log.w("MiniAppBridge", "Bridge request failed", error)
+                                "Bridge request failed"
+                            }
+                        },
+                        // P3-03: stable structured codes — MiniApp-host failures,
+                        // permission denials (sandbox.require) and user denials.
+                        errorCode = when (error) {
+                            is MiniAppBridgeException -> error.code
+                            is SecurityException -> "permission_denied"
+                            else -> "bridge_error"
+                        },
+                    )
+                }
             }
             sendResponse(response)
         }
     }
 
     private suspend fun handle(method: String, params: JsonObject): JsonElement {
+        if (method == "app.info") return appInfo()
+        if (method == "app.capabilities") return capabilities()
+        if (method in MiniAppSystemCapabilityRegistry.allSystemMethods) {
+            return dispatchSystem(method, params)
+        }
         return when (method) {
             "storage.get" -> {
                 sandbox.require(MiniAppPermission.Storage)
@@ -449,6 +510,184 @@ class MiniAppBridge(
             else -> throw IllegalArgumentException("Unknown MiniApp bridge method: $method")
         }
     }
+
+    /**
+     * P4 W10: app.info mirrors the iOS payload (platform/bridgeVersion/appId/
+     * title/version/runCount/permissions/grants). The bridge version only
+     * reports 0.3-system-capabilities when the runner's native owner really
+     * supports every system method.
+     */
+    private suspend fun appInfo(): JsonElement {
+        // Durable repository state only — a deleted MiniApp reports Unknown
+        // instead of resurrecting the runner's captured snapshot (iOS parity).
+        val durableApp = repository.getById(appId)
+        val grants = repository.grants(appId).map { grant ->
+            buildJsonObject {
+                put("permission", grant.permission)
+                put("decision", grant.decision)
+                put("updatedAt", grant.updatedAt)
+            }
+        }
+        return buildJsonObject {
+            put("platform", "android")
+            put("bridgeVersion", MiniAppSystemCapabilityRegistry.bridgeVersion(systemCapabilityHandler))
+            put("appId", appId)
+            put("title", durableApp?.title ?: "Unknown MiniApp")
+            put("version", durableApp?.version ?: 0)
+            put("runCount", durableApp?.runCount ?: 0)
+            put("permissions", json.encodeToJsonElement(durableApp?.declaredPermissionList() ?: emptyList()))
+            put("grants", json.encodeToJsonElement(grants))
+        }
+    }
+
+    /**
+     * P4 W10: capability discovery. Read-only: it must never trigger a
+     * permission confirmation. `methods` is the fixed system registry ∩ the
+     * handler's supported set, plus the regular bridge methods.
+     */
+    private suspend fun capabilities(): JsonElement {
+        val durableApp = repository.getById(appId)
+        val declared = durableApp?.declaredPermissionList()?.toSet() ?: emptySet()
+        val systemEnabled = sandbox.systemCapabilitiesEnabled()
+        val methods = buildSet {
+            add("app.info")
+            add("app.capabilities")
+            addAll(BRIDGE_METHODS)
+            addAll(MiniAppSystemCapabilityRegistry.availableMethods(systemCapabilityHandler))
+        }
+        val permissions = MiniAppPermission.entries.map { permission ->
+            buildJsonObject {
+                put("permission", permission.value)
+                put("declared", permission.value in declared)
+                put("enabled", sandbox.isGloballyEnabled(permission))
+                repository.grantDecision(appId, permission.value)?.let { decision ->
+                    put("decision", decision.name)
+                } ?: put("decision", JsonNull)
+            }
+        }
+        return buildJsonObject {
+            put("platform", "android")
+            put("bridgeVersion", MiniAppSystemCapabilityRegistry.bridgeVersion(systemCapabilityHandler))
+            put("systemCapabilitiesEnabled", systemEnabled)
+            put("methods", json.encodeToJsonElement(methods.sorted()))
+            put("permissions", json.encodeToJsonElement(permissions))
+        }
+    }
+
+    /**
+     * P4 W10/W11: system capability dispatch. Order mirrors iOS dispatchSystem:
+     * handler presence → global system toggle → per-method permission (declare
+     * → setting → grant, with confirmation and durable re-read) → openURL
+     * per-call confirmation → audit (action label only) → native dispatch.
+     */
+    private suspend fun dispatchSystem(method: String, params: JsonObject): JsonElement {
+        val handler = systemCapabilityHandler
+            ?: throw MiniAppBridgeException("system_unavailable", "System capabilities are not available in this runner.")
+        if (method !in handler.supportedMethods) {
+            throw MiniAppBridgeException("method_unsupported", "System method is not supported on this runner: $method")
+        }
+        if (!sandbox.systemCapabilitiesEnabled()) {
+            throw SecurityException("System capabilities are disabled in MiniApp settings")
+        }
+        // Validate URL params before any permission dialog: an invalid request
+        // must never prompt the user nor persist a durable grant.
+        when (method) {
+            "openURL" -> MiniAppOpenUrlValidator.validate(
+                params.stringOrNull("url")
+                    ?: throw MiniAppBridgeException("invalid_url", "Missing parameter: url"),
+            )
+            "share" -> params.stringOrNull("url")?.takeIf { it.isNotEmpty() }?.let {
+                MiniAppOpenUrlValidator.validate(it)
+            }
+        }
+        val permission = MiniAppSystemCapabilityRegistry.methodPermissions[method]
+        if (permission != null) {
+            val authorizedApp = requireSystemPermission(method, permission)
+            if (method == "openURL") {
+                val url = MiniAppOpenUrlValidator.validate(params.string("url"))
+                confirm(
+                    "允许打开外部链接？",
+                    "「${appProvider().title}」想打开：\n${externalUrlPreview(url.url)}",
+                ) { JsonNull }
+                requireUnchangedSystemApp(authorizedApp, permission)
+                if (repository.grantDecision(appId, permission.value) != MiniAppGrantDecision.ALLOW) {
+                    throw SecurityException("Permission denied: ${permission.value}")
+                }
+            }
+            audit(method, permission, method, buildJsonObject { put("method", method) })
+        }
+        if (closed.get()) throw MiniAppBridgeException("runner_closed", "MiniApp runner is closed")
+        val result = handler.dispatch(method, params)
+        if (closed.get()) throw MiniAppBridgeException("runner_closed", "MiniApp runner is closed")
+        return result
+    }
+
+    /**
+     * New system permissions need a real durable decision; the legacy
+     * null-grant-means-allowed rule must not silently admit them. After the
+     * user confirms, re-read the durable app and reject the write when the
+     * app/version/htmlHash/declaration/setting changed while the dialog was
+     * open. The runner's appProvider closure is never used as version proof.
+     */
+    private suspend fun requireSystemPermission(method: String, permission: MiniAppPermission): MiniAppEntity {
+        val appAtRequest = repository.getById(appId)
+            ?: throw MiniAppBridgeException("miniapp_not_found", "MiniApp not found: $appId")
+        if (permission.value !in appAtRequest.declaredPermissionList()) {
+            throw SecurityException("Permission denied for $appId: ${permission.value}")
+        }
+        if (!sandbox.isGloballyEnabled(permission)) {
+            throw SecurityException("Permission disabled: ${permission.value}")
+        }
+        when (repository.grantDecision(appId, permission.value)) {
+            MiniAppGrantDecision.DENY -> throw SecurityException("Permission denied: ${permission.value}")
+            MiniAppGrantDecision.ALLOW -> return appAtRequest
+            null -> Unit
+        }
+        val allowed = confirmation.confirm(
+            "允许使用系统能力？",
+            "「${appAtRequest.title}」想使用 ${permission.value} 系统能力（$method）。",
+        )
+        if (closed.get()) throw MiniAppBridgeException("runner_closed", "MiniApp runner is closed")
+        val currentApp = requireUnchangedSystemApp(appAtRequest, permission)
+        if (repository.grantDecision(appId, permission.value) == MiniAppGrantDecision.DENY) {
+            throw SecurityException("Permission denied: ${permission.value}")
+        }
+        repository.setGrant(appId, permission.value, if (allowed) MiniAppGrantDecision.ALLOW else MiniAppGrantDecision.DENY)
+        if (!allowed) {
+            throw MiniAppBridgeException("user_denied", "User denied MiniApp request")
+        }
+        return currentApp
+    }
+
+    private suspend fun requireUnchangedSystemApp(
+        appAtRequest: MiniAppEntity,
+        permission: MiniAppPermission,
+    ): MiniAppEntity {
+        val currentApp = repository.getById(appId)
+        if (currentApp == null ||
+            currentApp.version != appAtRequest.version ||
+            currentApp.htmlHash != appAtRequest.htmlHash ||
+            currentApp.declaredPermissionList().toSet() != appAtRequest.declaredPermissionList().toSet() ||
+            !sandbox.isGloballyEnabled(permission)
+        ) {
+            throw MiniAppBridgeException("miniapp_changed", "MiniApp changed while confirmation was open.")
+        }
+        return currentApp
+    }
+
+    private fun externalUrlPreview(url: String): String {
+        if (url.length <= 300) return url
+        val schemeEnd = url.indexOf("://")
+        val hostStart = if (schemeEnd > 0) schemeEnd + 3 else 0
+        val hostEnd = url.indexOf('/', hostStart).takeIf { it > 0 } ?: url.length
+        val host = url.substring(hostStart, hostEnd)
+        val displayedHost = if (host.length > 200) host.take(100) + "…" + host.takeLast(100) else host
+        val tail = url.substring(hostEnd, minOf(url.length, hostEnd + 80))
+        return "${url.substringBefore("://")}://$displayedHost$tail…\n\n链接较长，已省略部分内容。"
+    }
+
+    private fun MiniAppEntity.declaredPermissionList(): List<String> =
+        runCatching { json.decodeFromString<List<String>>(permissionsJson) }.getOrDefault(emptyList())
 
     private fun sendResponse(response: MiniAppBridgeResponse) {
         val payload = json.encodeToString(response)

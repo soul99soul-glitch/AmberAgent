@@ -281,6 +281,9 @@ class ExecutionPolicyCoveragePinTest {
             "agent_runtime_status",
             "agent_task_cancel", "agent_task_cleanup", "agent_task_list", "agent_task_read",
             "agent_task_retry",
+            // Local reminders share the durable scheduler/approval boundary;
+            // they accept no file path, network URL, or shell command.
+            "reminder_create", "reminder_delete", "reminder_list", "reminder_update",
             // Memory store (its own persistence domain).
             "memory_delete", "memory_list", "memory_tool", "memory_write",
             // Deep-read finish (playbook reads/writes are capability-mapped).
@@ -307,10 +310,6 @@ class ExecutionPolicyCoveragePinTest {
             // Model-council room control (its report writer IS path-mapped).
             "model_council_cancel", "model_council_read", "model_council_start",
             "model_council_status", "model_council_wait",
-            // officepro tools with no /workspace path surface (verified against
-            // FeishuOfficeTools.kt schemas); the workspace_paths family IS mapped.
-            "officepro_dashboard", "officepro_project_list", "officepro_project_update",
-            "officepro_read_screen", "officepro_search", "officepro_status",
             // Novel-tree prefix-scoped reads; the raw-path read/write pair is
             // in UNMODELED_ROOT_PATH_TOOLS (fail-closed) instead.
             "novel_workspace_grep", "novel_workspace_list", "novel_workspace_status",
@@ -329,6 +328,12 @@ class ExecutionPolicyCoveragePinTest {
             // (domain) and share_file (path) are mapped instead.
             "app_info", "app_open", "apps_installed_list", "apps_list",
             "battery_status", "calendar_create", "calendar_list", "device_info",
+            // Calendar mutations retain Android permissions + explicit approval,
+            // matching the existing calendar_create exemption.
+            "calendar_update", "calendar_delete",
+            // Read-only Health Connect aggregation; explicit tool approval and
+            // Health Connect grants own access, with no policy capability yet.
+            "health_summary",
             "device_phone_state", "media_search", "network_status", "settings_open",
             "usage_stats_list", "wifi_status",
             // Notifications and text share (share_file IS path-mapped).

@@ -238,6 +238,7 @@ internal fun createSiteAddTool(
         the settings page) can manage it. The site becomes available immediately — use
         wm_open + wm_extract on it. Setting `needs_login=true` (default) adds a Sign-in
         button on the settings page; the agent can prompt the user to log in there.
+        Requires explicit human approval because it changes the user's Stations list.
         Reversible — the user can delete the site at any time. Idempotent on duplicate id.
     """.trimIndent().replace("\n", " "),
     parameters = {
@@ -251,6 +252,9 @@ internal fun createSiteAddTool(
             required = listOf("name", "url"),
         )
     },
+    needsApproval = true,
+    allowsAutoApproval = false,
+    mandatoryApproval = true,
     execute = { input ->
         deps.track("wm_site_add", "WebMount 新增网站", input) {
             val name = input.requiredString("name").trim()
@@ -271,14 +275,18 @@ internal fun createSiteAddTool(
                 nativeAdapterId = null,
                 iconKey = null,
             )
-            val ok = userSiteRegistry.add(site)
+            val existing = userSiteRegistry.byId(id)
+            val idempotent = existing != null &&
+                existing.copy(addedAtMs = 0L) == site.copy(addedAtMs = 0L)
+            val ok = if (existing == null) userSiteRegistry.add(site) else idempotent
             val payload = buildJsonObject {
                 put("ok", ok)
                 put("site_id", id)
                 put("display_name", name)
                 put("url", url)
                 put("auth_kind", site.authKind.name.lowercase())
-                if (!ok) put("error", "A site with id '$id' already exists. Pick a different name or remove the existing entry first.")
+                if (idempotent) put("idempotent", true)
+                if (!ok) put("error", "A site with id '$id' already exists with different details. Pick a different name or remove the existing entry first.")
             }
             listOf(UIMessagePart.Text(payload.toString()))
         }

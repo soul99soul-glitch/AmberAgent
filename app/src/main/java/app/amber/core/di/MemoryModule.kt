@@ -28,23 +28,23 @@ val memoryModule = module {
 
     single { MemoryCandidateFilter() }
 
-    single { MemoryExtractor(get(), get(), get(), get(), get(), get(), get()) }
+    single { MemoryExtractor(get(), get(), get(), get(), get(), get(), get(), restoreWriteGate = get()) }
 
-    single { MemoryDreamPlanner(get(), get(), get(), get(), get()) }
+    single { MemoryDreamPlanner(get(), get(), get(), get(), get(), get()) }
     single<MemoryDreamPlanProvider> { get<MemoryDreamPlanner>() }
 
-    single { MemoryDreamApplier(get(), get()) }
+    single { MemoryDreamApplier(get(), get(), get()) }
 
-    single { MemoryDreamPlanStore(get(), get()) }
+    single { MemoryDreamPlanStore(get(), get(), get()) }
 
     single { MemoryDreamNotifier(get()) }
     single<MemoryDreamReviewNotifier> { get<MemoryDreamNotifier>() }
 
-    single { MemoryDreamRunCoordinator(get(), get(), get()) }
+    single { MemoryDreamRunCoordinator(get(), get(), get(), get()) }
 
     single { MemoryDreamScheduler(get(), get()) }
 
     single { MemoryFrontmatterCodec() }
 
-    single { MemoryImportExportManager(get(), get()) }
+    single { MemoryImportExportManager(get(), get(), get()) }
 }

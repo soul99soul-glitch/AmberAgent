@@ -843,7 +843,8 @@ internal fun ProviderSetting.providerSlugLabel(): String = when (this) {
 internal fun ProviderSetting.providerAuthLabel(): String = when (this) {
     is ProviderSetting.OpenAI -> when (authMode) {
         OpenAIAuthMode.API_KEY -> if (apiKey.isBlank()) "—" else "key"
-        OpenAIAuthMode.CODEX_OAUTH -> "oauth"
+        OpenAIAuthMode.CODEX_OAUTH,
+        OpenAIAuthMode.GROK_OAUTH -> "oauth"
         OpenAIAuthMode.ZHIPU_CODING_PLAN,
         OpenAIAuthMode.KIMI_CODING_PLAN,
         OpenAIAuthMode.MIMO_CODING_PLAN,
@@ -852,6 +853,7 @@ internal fun ProviderSetting.providerAuthLabel(): String = when (this) {
     is ProviderSetting.Google -> when (authMode) {
         GoogleAuthMode.API_KEY -> if (apiKey.isBlank() && privateKey.isBlank()) "—" else "key"
         GoogleAuthMode.GEMINI_CODE_ASSIST_OAUTH -> "oauth"
+        GoogleAuthMode.ANTIGRAVITY_OAUTH -> "antigravity"
     }
     is ProviderSetting.Claude -> if (apiKey.isBlank()) "—" else "key"
 }

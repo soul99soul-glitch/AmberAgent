@@ -63,6 +63,9 @@ import com.composables.icons.lucide.Newspaper
 import com.composables.icons.lucide.NotebookPen
 import com.composables.icons.lucide.CirclePlay
 import app.amber.agent.R
+import app.amber.agent.Screen
+import app.amber.feature.ui.components.webmount.WebMountTaskCard
+import app.amber.feature.ui.context.LocalNavController
 import app.amber.feature.webmount.core.WebMountCapability
 import app.amber.feature.webmount.core.WebMountManager
 import app.amber.feature.webmount.core.WebMountStationState
@@ -80,6 +83,7 @@ import app.amber.feature.webmount.usersites.AuthKind
 import app.amber.feature.webmount.usersites.UserSite
 import app.amber.feature.webmount.usersites.UserSiteRegistry
 import app.amber.feature.webmount.usersites.userSiteId
+import app.amber.feature.webmount.primitives.WebMountSessionOwner
 import app.amber.feature.ui.components.ui.workspaceColors
 import app.amber.feature.ui.context.LocalToaster
 import app.amber.core.utils.plus
@@ -111,6 +115,9 @@ fun SettingExperimentalWebMountPage(
     val sites by userSiteRegistry.sites.collectAsStateWithLifecycle()
     val globalEnabled by webMountManager.globalEnabledFlow.collectAsStateWithLifecycle()
     val evalEnabled by webMountManager.evalEnabledFlow.collectAsStateWithLifecycle()
+    val webMountSessionOwner: WebMountSessionOwner = koinInject()
+    val webMountSessions by webMountSessionOwner.sessions.collectAsStateWithLifecycle()
+    val navController = LocalNavController.current
     val toaster = LocalToaster.current
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -240,6 +247,22 @@ fun SettingExperimentalWebMountPage(
                             },
                         )
                     }
+                }
+            }
+            if (webMountSessions.isNotEmpty()) {
+                item {
+                    WebMountTaskCard(
+                        sessions = webMountSessions,
+                        onOpenSession = { sessionId, reopen ->
+                            navController.navigate(
+                                Screen.WebMountSession(
+                                    sessionId = sessionId,
+                                    reopen = reopen,
+                                ),
+                            )
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
                 }
             }
             item {

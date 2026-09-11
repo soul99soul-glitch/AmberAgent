@@ -6,7 +6,10 @@ plugins {
 android {
     namespace = "app.amber.feature.terminal"
     compileSdk = 36
-    defaultConfig { minSdk = 26 }
+    defaultConfig {
+        minSdk = 26
+        consumerProguardFiles("consumer-rules.pro")
+    }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -30,4 +33,11 @@ dependencies {
     api(libs.kotlinx.serialization.json)
     implementation(platform(libs.koin.bom))
     implementation(libs.koin.android)
+    implementation("com.github.mwiede:jsch:2.28.7")
+    testImplementation(libs.junit)
+}
+
+tasks.withType<org.gradle.api.tasks.testing.Test>().configureEach {
+    // An explicitly requested loopback run must contact the current temporary server.
+    outputs.upToDateWhen { !providers.environmentVariable("AMBER_SSH_LOOPBACK_FIXTURE").isPresent }
 }

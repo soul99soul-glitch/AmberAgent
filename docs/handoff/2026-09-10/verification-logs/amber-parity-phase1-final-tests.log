@@ -1,0 +1,989 @@
+> Task :core:agent-utils:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :core:agent-utils:compileKotlin UP-TO-DATE
+> Task :core:agent-utils:compileJava NO-SOURCE
+> Task :core:agent-utils:processResources NO-SOURCE
+> Task :core:agent-utils:classes UP-TO-DATE
+> Task :core:agent-utils:jar UP-TO-DATE
+> Task :core:event:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :core:event:compileKotlin UP-TO-DATE
+> Task :core:event:compileJava NO-SOURCE
+> Task :core:event:processResources NO-SOURCE
+> Task :core:event:classes UP-TO-DATE
+> Task :core:event:jar UP-TO-DATE
+> Task :core:agent-runtime:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :core:agent-runtime:compileKotlin UP-TO-DATE
+> Task :core:agent-runtime:compileJava NO-SOURCE
+> Task :core:agent-runtime:processResources NO-SOURCE
+> Task :core:agent-runtime:classes UP-TO-DATE
+> Task :core:agent-runtime:jar UP-TO-DATE
+> Task :feature:deepread:api:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :feature:deepread:api:compileKotlin UP-TO-DATE
+> Task :feature:deepread:api:compileJava NO-SOURCE
+> Task :feature:deepread:api:processResources NO-SOURCE
+> Task :feature:deepread:api:classes UP-TO-DATE
+> Task :feature:deepread:api:jar UP-TO-DATE
+> Task :feature:chat:api:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :feature:chat:api:compileKotlin UP-TO-DATE
+> Task :feature:chat:api:compileJava NO-SOURCE
+> Task :feature:chat:api:processResources NO-SOURCE
+> Task :feature:chat:api:classes UP-TO-DATE
+> Task :feature:chat:api:jar UP-TO-DATE
+> Task :feature:terminal:api:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :feature:terminal:api:compileKotlin UP-TO-DATE
+> Task :feature:terminal:api:compileJava NO-SOURCE
+> Task :feature:terminal:api:processResources NO-SOURCE
+> Task :feature:terminal:api:classes UP-TO-DATE
+> Task :feature:terminal:api:jar UP-TO-DATE
+> Task :feature:board:api:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :feature:board:api:compileKotlin UP-TO-DATE
+> Task :feature:board:api:compileJava NO-SOURCE
+> Task :feature:board:api:processResources NO-SOURCE
+> Task :feature:board:api:classes UP-TO-DATE
+> Task :feature:board:api:jar UP-TO-DATE
+> Task :feature:live:api:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :feature:live:api:compileKotlin UP-TO-DATE
+> Task :feature:live:api:compileJava NO-SOURCE
+> Task :feature:live:api:processResources NO-SOURCE
+> Task :feature:live:api:classes UP-TO-DATE
+> Task :feature:live:api:jar UP-TO-DATE
+> Task :core:ai-prompts:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :core:ai-prompts:compileKotlin UP-TO-DATE
+> Task :core:ai-prompts:compileJava NO-SOURCE
+> Task :core:ai-prompts:processResources NO-SOURCE
+> Task :core:ai-prompts:classes UP-TO-DATE
+> Task :core:ai-prompts:jar UP-TO-DATE
+> Task :core:sync:api:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :core:sync:api:compileKotlin UP-TO-DATE
+> Task :core:sync:api:compileJava NO-SOURCE
+> Task :core:sync:api:processResources NO-SOURCE
+> Task :core:sync:api:classes UP-TO-DATE
+> Task :core:sync:api:jar UP-TO-DATE
+> Task :feature:history:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :feature:history:compileKotlin UP-TO-DATE
+> Task :feature:history:compileJava NO-SOURCE
+> Task :feature:history:processResources NO-SOURCE
+> Task :feature:history:classes UP-TO-DATE
+> Task :feature:history:jar UP-TO-DATE
+> Task :feature:webview:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :feature:webview:compileKotlin UP-TO-DATE
+> Task :feature:webview:compileJava NO-SOURCE
+> Task :feature:webview:processResources NO-SOURCE
+> Task :feature:webview:classes UP-TO-DATE
+> Task :feature:webview:jar UP-TO-DATE
+> Task :ai:preBuild UP-TO-DATE
+> Task :ai:preDebugBuild UP-TO-DATE
+> Task :ai:generateDebugResources UP-TO-DATE
+> Task :ai:packageDebugResources UP-TO-DATE
+> Task :ai:processDebugNavigationResources UP-TO-DATE
+> Task :ai:parseDebugLocalResources UP-TO-DATE
+> Task :ai:generateDebugRFile UP-TO-DATE
+> Task :common:preBuild UP-TO-DATE
+> Task :common:preDebugBuild UP-TO-DATE
+> Task :common:generateDebugResources UP-TO-DATE
+> Task :common:packageDebugResources UP-TO-DATE
+> Task :common:processDebugNavigationResources UP-TO-DATE
+> Task :common:parseDebugLocalResources UP-TO-DATE
+> Task :common:generateDebugRFile UP-TO-DATE
+> Task :common:compileDebugKotlin UP-TO-DATE
+> Task :common:javaPreCompileDebug UP-TO-DATE
+> Task :common:compileDebugJavaWithJavac NO-SOURCE
+> Task :common:bundleLibCompileToJarDebug UP-TO-DATE
+> Task :ai:compileDebugKotlin UP-TO-DATE
+> Task :ai:javaPreCompileDebug UP-TO-DATE
+> Task :ai:compileDebugJavaWithJavac NO-SOURCE
+> Task :ai:bundleLibRuntimeToJarDebug UP-TO-DATE
+> Task :ai:processDebugJavaRes UP-TO-DATE
+> Task :ai:bundleLibCompileToJarDebug UP-TO-DATE
+
+> Task :app:cargoBuildHtmlDiffNormalizer
+    Building arm64-v8a (aarch64-linux-android)
+    Finished `release` profile [optimized] target(s) in 0.16s
+     Copying libraries to /Users/mi/Downloads/AI/AmberAgent/android/app/build/rustJniLibs/android
+
+> Task :app:cargoBuildMarkdownParser
+    Building arm64-v8a (aarch64-linux-android)
+    Finished `release` profile [optimized] target(s) in 0.08s
+     Copying libraries to /Users/mi/Downloads/AI/AmberAgent/android/app/build/rustJniLibs/android
+
+> Task :app:cargoBuildMarkdownPreprocess
+    Building arm64-v8a (aarch64-linux-android)
+    Finished `release` profile [optimized] target(s) in 0.06s
+     Copying libraries to /Users/mi/Downloads/AI/AmberAgent/android/app/build/rustJniLibs/android
+
+> Task :app:cargoBuildReaderExtractor
+    Building arm64-v8a (aarch64-linux-android)
+    Finished `release` profile [optimized] target(s) in 0.12s
+     Copying libraries to /Users/mi/Downloads/AI/AmberAgent/android/app/build/rustJniLibs/android
+
+> Task :app:cargoBuildRegexTransformer
+    Building arm64-v8a (aarch64-linux-android)
+    Finished `release` profile [optimized] target(s) in 0.04s
+     Copying libraries to /Users/mi/Downloads/AI/AmberAgent/android/app/build/rustJniLibs/android
+
+> Task :app:cargoBuildSyncCrypto
+    Building arm64-v8a (aarch64-linux-android)
+    Finished `release` profile [optimized] target(s) in 0.06s
+     Copying libraries to /Users/mi/Downloads/AI/AmberAgent/android/app/build/rustJniLibs/android
+
+> Task :app:prepareEmbeddedTerminalRuntime UP-TO-DATE
+> Task :app:preBuild
+> Task :app:preDebugBuild
+> Task :app:generateDebugBuildConfig UP-TO-DATE
+> Task :ai:extractDebugSupportedLocales UP-TO-DATE
+> Task :app:injectCrashlyticsMappingFileIdDebug UP-TO-DATE
+> Task :app:injectCrashlyticsVersionControlInfoDebug UP-TO-DATE
+> Task :app:processDebugGoogleServices SKIPPED
+> Task :app:extractDebugSupportedLocales
+> Task :app:mapDebugSourceSetPaths
+> Task :common:extractDebugSupportedLocales UP-TO-DATE
+
+> Task :document:cargoBuildOfficeParsers
+    Building arm64-v8a (aarch64-linux-android)
+    Finished `release` profile [optimized] target(s) in 0.11s
+     Copying libraries to /Users/mi/Downloads/AI/AmberAgent/android/document/build/rustJniLibs/android
+
+> Task :document:preBuild
+> Task :document:preDebugBuild
+> Task :document:extractDebugSupportedLocales UP-TO-DATE
+
+> Task :highlight:cargoBuildHighlightParser
+    Building arm64-v8a (aarch64-linux-android)
+    Finished `release` profile [optimized] target(s) in 0.09s
+     Copying libraries to /Users/mi/Downloads/AI/AmberAgent/android/highlight/build/rustJniLibs/android
+
+> Task :highlight:preBuild
+> Task :highlight:preDebugBuild
+> Task :highlight:extractDebugSupportedLocales UP-TO-DATE
+> Task :search:preBuild UP-TO-DATE
+> Task :search:preDebugBuild UP-TO-DATE
+> Task :search:extractDebugSupportedLocales UP-TO-DATE
+> Task :core:agent-runtime-impl:preBuild UP-TO-DATE
+> Task :core:agent-runtime-impl:preDebugBuild UP-TO-DATE
+> Task :core:agent-runtime-impl:extractDebugSupportedLocales UP-TO-DATE
+> Task :core:agent-store-room:preBuild UP-TO-DATE
+> Task :core:agent-store-room:preDebugBuild UP-TO-DATE
+> Task :core:agent-store-room:extractDebugSupportedLocales UP-TO-DATE
+> Task :core:app-infra:preBuild UP-TO-DATE
+> Task :core:app-infra:preDebugBuild UP-TO-DATE
+> Task :core:app-infra:extractDebugSupportedLocales UP-TO-DATE
+> Task :core:model:preBuild UP-TO-DATE
+> Task :core:model:preDebugBuild UP-TO-DATE
+> Task :core:model:extractDebugSupportedLocales UP-TO-DATE
+> Task :core:settings:preBuild UP-TO-DATE
+> Task :core:settings:preDebugBuild UP-TO-DATE
+> Task :core:settings:extractDebugSupportedLocales UP-TO-DATE
+> Task :core:usage:preBuild UP-TO-DATE
+> Task :core:usage:preDebugBuild UP-TO-DATE
+> Task :core:usage:extractDebugSupportedLocales UP-TO-DATE
+> Task :feature:icloud:preBuild UP-TO-DATE
+> Task :feature:icloud:preDebugBuild UP-TO-DATE
+> Task :feature:icloud:extractDebugSupportedLocales UP-TO-DATE
+> Task :feature:modelcouncil:preBuild UP-TO-DATE
+> Task :feature:modelcouncil:preDebugBuild UP-TO-DATE
+> Task :feature:modelcouncil:extractDebugSupportedLocales UP-TO-DATE
+> Task :feature:novel:preBuild UP-TO-DATE
+> Task :feature:novel:preDebugBuild UP-TO-DATE
+> Task :feature:novel:extractDebugSupportedLocales UP-TO-DATE
+> Task :feature:novel-workspace:preBuild UP-TO-DATE
+> Task :feature:novel-workspace:preDebugBuild UP-TO-DATE
+> Task :feature:novel-workspace:extractDebugSupportedLocales UP-TO-DATE
+> Task :feature:subagent:preBuild UP-TO-DATE
+> Task :feature:subagent:preDebugBuild UP-TO-DATE
+> Task :feature:subagent:extractDebugSupportedLocales UP-TO-DATE
+> Task :feature:system:preBuild UP-TO-DATE
+> Task :feature:system:preDebugBuild UP-TO-DATE
+> Task :feature:system:extractDebugSupportedLocales UP-TO-DATE
+> Task :feature:task:preBuild UP-TO-DATE
+> Task :feature:task:preDebugBuild UP-TO-DATE
+> Task :feature:task:extractDebugSupportedLocales UP-TO-DATE
+> Task :feature:terminal:preBuild UP-TO-DATE
+> Task :feature:terminal:preDebugBuild UP-TO-DATE
+> Task :feature:terminal:extractDebugSupportedLocales UP-TO-DATE
+> Task :feature:workspace:preBuild UP-TO-DATE
+> Task :feature:workspace:preDebugBuild UP-TO-DATE
+> Task :feature:workspace:extractDebugSupportedLocales UP-TO-DATE
+> Task :core:ai:api:preBuild UP-TO-DATE
+> Task :core:ai:api:preDebugBuild UP-TO-DATE
+> Task :core:ai:api:extractDebugSupportedLocales UP-TO-DATE
+> Task :core:automation:api:preBuild UP-TO-DATE
+> Task :core:automation:api:preDebugBuild UP-TO-DATE
+> Task :core:automation:api:extractDebugSupportedLocales UP-TO-DATE
+> Task :core:context:api:preBuild UP-TO-DATE
+> Task :core:context:api:preDebugBuild UP-TO-DATE
+> Task :core:context:api:extractDebugSupportedLocales UP-TO-DATE
+> Task :core:memory:api:preBuild UP-TO-DATE
+> Task :core:memory:api:preDebugBuild UP-TO-DATE
+> Task :core:memory:api:extractDebugSupportedLocales UP-TO-DATE
+> Task :feature:board:impl:preBuild UP-TO-DATE
+> Task :feature:board:impl:preDebugBuild UP-TO-DATE
+> Task :feature:board:impl:extractDebugSupportedLocales UP-TO-DATE
+> Task :feature:modelcouncil:api:preBuild UP-TO-DATE
+> Task :feature:modelcouncil:api:preDebugBuild UP-TO-DATE
+> Task :feature:modelcouncil:api:extractDebugSupportedLocales UP-TO-DATE
+> Task :feature:runtime:api:preBuild UP-TO-DATE
+> Task :feature:runtime:api:preDebugBuild UP-TO-DATE
+> Task :feature:runtime:api:extractDebugSupportedLocales UP-TO-DATE
+> Task :feature:subagent:api:preBuild UP-TO-DATE
+> Task :feature:subagent:api:preDebugBuild UP-TO-DATE
+> Task :feature:subagent:api:extractDebugSupportedLocales UP-TO-DATE
+> Task :feature:tools:access:preBuild UP-TO-DATE
+> Task :feature:tools:access:preDebugBuild UP-TO-DATE
+> Task :feature:tools:access:extractDebugSupportedLocales UP-TO-DATE
+> Task :feature:tools:api:preBuild UP-TO-DATE
+> Task :feature:tools:api:preDebugBuild UP-TO-DATE
+> Task :feature:tools:api:extractDebugSupportedLocales UP-TO-DATE
+> Task :feature:tools:impl:preBuild UP-TO-DATE
+> Task :feature:tools:impl:preDebugBuild UP-TO-DATE
+> Task :feature:tools:impl:extractDebugSupportedLocales UP-TO-DATE
+> Task :core:ai:generation:api:preBuild UP-TO-DATE
+> Task :core:ai:generation:api:preDebugBuild UP-TO-DATE
+> Task :core:ai:generation:api:extractDebugSupportedLocales UP-TO-DATE
+> Task :core:ai:transformers:api:preBuild UP-TO-DATE
+> Task :core:ai:transformers:api:preDebugBuild UP-TO-DATE
+> Task :core:ai:transformers:api:extractDebugSupportedLocales UP-TO-DATE
+> Task :app:generateDebugLocaleConfig UP-TO-DATE
+> Task :app:generateDebugResources
+> Task :app:packageDebugResources
+> Task :document:processDebugNavigationResources UP-TO-DATE
+> Task :highlight:processDebugNavigationResources UP-TO-DATE
+> Task :search:processDebugNavigationResources UP-TO-DATE
+> Task :core:agent-runtime-impl:processDebugNavigationResources UP-TO-DATE
+> Task :core:agent-store-room:processDebugNavigationResources UP-TO-DATE
+> Task :core:app-infra:processDebugNavigationResources UP-TO-DATE
+> Task :core:model:processDebugNavigationResources UP-TO-DATE
+> Task :core:settings:processDebugNavigationResources UP-TO-DATE
+> Task :core:usage:processDebugNavigationResources UP-TO-DATE
+> Task :feature:icloud:processDebugNavigationResources UP-TO-DATE
+> Task :feature:modelcouncil:processDebugNavigationResources UP-TO-DATE
+> Task :feature:novel:processDebugNavigationResources UP-TO-DATE
+> Task :feature:novel-workspace:processDebugNavigationResources UP-TO-DATE
+> Task :feature:subagent:processDebugNavigationResources UP-TO-DATE
+> Task :feature:system:processDebugNavigationResources UP-TO-DATE
+> Task :feature:task:processDebugNavigationResources UP-TO-DATE
+> Task :feature:terminal:processDebugNavigationResources UP-TO-DATE
+> Task :feature:workspace:processDebugNavigationResources UP-TO-DATE
+> Task :core:ai:api:processDebugNavigationResources UP-TO-DATE
+> Task :core:automation:api:processDebugNavigationResources UP-TO-DATE
+> Task :core:context:api:processDebugNavigationResources UP-TO-DATE
+> Task :core:memory:api:processDebugNavigationResources UP-TO-DATE
+> Task :feature:board:impl:processDebugNavigationResources UP-TO-DATE
+> Task :feature:modelcouncil:api:processDebugNavigationResources UP-TO-DATE
+> Task :feature:runtime:api:processDebugNavigationResources UP-TO-DATE
+> Task :feature:subagent:api:processDebugNavigationResources UP-TO-DATE
+> Task :feature:tools:access:processDebugNavigationResources UP-TO-DATE
+> Task :feature:tools:api:processDebugNavigationResources UP-TO-DATE
+> Task :feature:tools:impl:processDebugNavigationResources UP-TO-DATE
+> Task :core:ai:generation:api:processDebugNavigationResources UP-TO-DATE
+> Task :core:ai:transformers:api:processDebugNavigationResources UP-TO-DATE
+> Task :app:processDebugNavigationResources
+> Task :document:generateDebugResources UP-TO-DATE
+> Task :document:packageDebugResources UP-TO-DATE
+> Task :document:parseDebugLocalResources UP-TO-DATE
+> Task :document:generateDebugRFile UP-TO-DATE
+> Task :app:parseDebugLocalResources
+> Task :document:compileDebugKotlin UP-TO-DATE
+> Task :document:javaPreCompileDebug UP-TO-DATE
+> Task :document:compileDebugJavaWithJavac UP-TO-DATE
+> Task :document:bundleLibCompileToJarDebug UP-TO-DATE
+> Task :highlight:generateDebugResources UP-TO-DATE
+> Task :highlight:packageDebugResources UP-TO-DATE
+> Task :highlight:parseDebugLocalResources UP-TO-DATE
+> Task :highlight:generateDebugRFile UP-TO-DATE
+> Task :app:generateDebugRFile
+> Task :highlight:compileDebugKotlin UP-TO-DATE
+> Task :highlight:javaPreCompileDebug UP-TO-DATE
+> Task :highlight:compileDebugJavaWithJavac NO-SOURCE
+> Task :highlight:bundleLibCompileToJarDebug UP-TO-DATE
+> Task :search:generateDebugResources UP-TO-DATE
+> Task :search:packageDebugResources UP-TO-DATE
+> Task :search:parseDebugLocalResources UP-TO-DATE
+> Task :search:generateDebugRFile UP-TO-DATE
+> Task :search:compileDebugKotlin UP-TO-DATE
+> Task :search:javaPreCompileDebug UP-TO-DATE
+> Task :search:compileDebugJavaWithJavac NO-SOURCE
+> Task :search:bundleLibCompileToJarDebug UP-TO-DATE
+> Task :core:agent-runtime-impl:generateDebugResources UP-TO-DATE
+> Task :core:agent-runtime-impl:packageDebugResources UP-TO-DATE
+> Task :core:agent-runtime-impl:parseDebugLocalResources UP-TO-DATE
+> Task :core:agent-runtime-impl:generateDebugRFile UP-TO-DATE
+> Task :core:agent-runtime-impl:compileDebugKotlin UP-TO-DATE
+> Task :core:agent-runtime-impl:javaPreCompileDebug UP-TO-DATE
+> Task :core:agent-runtime-impl:compileDebugJavaWithJavac NO-SOURCE
+> Task :core:agent-runtime-impl:bundleLibCompileToJarDebug UP-TO-DATE
+> Task :core:agent-store-room:generateDebugResources UP-TO-DATE
+> Task :core:agent-store-room:packageDebugResources UP-TO-DATE
+> Task :core:agent-store-room:parseDebugLocalResources UP-TO-DATE
+> Task :core:agent-store-room:generateDebugRFile UP-TO-DATE
+> Task :core:agent-store-room:kspDebugKotlin UP-TO-DATE
+> Task :core:agent-store-room:compileDebugKotlin UP-TO-DATE
+> Task :core:agent-store-room:javaPreCompileDebug UP-TO-DATE
+> Task :core:agent-store-room:compileDebugJavaWithJavac NO-SOURCE
+> Task :core:agent-store-room:bundleLibCompileToJarDebug UP-TO-DATE
+> Task :core:app-infra:generateDebugResources UP-TO-DATE
+> Task :core:app-infra:packageDebugResources UP-TO-DATE
+> Task :core:app-infra:parseDebugLocalResources UP-TO-DATE
+> Task :core:app-infra:generateDebugRFile UP-TO-DATE
+> Task :core:app-infra:compileDebugKotlin UP-TO-DATE
+> Task :core:app-infra:javaPreCompileDebug UP-TO-DATE
+> Task :core:app-infra:compileDebugJavaWithJavac NO-SOURCE
+> Task :core:app-infra:bundleLibCompileToJarDebug UP-TO-DATE
+> Task :core:model:generateDebugResources UP-TO-DATE
+> Task :core:model:packageDebugResources UP-TO-DATE
+> Task :core:model:parseDebugLocalResources UP-TO-DATE
+> Task :core:model:generateDebugRFile UP-TO-DATE
+> Task :core:model:compileDebugKotlin UP-TO-DATE
+> Task :core:model:javaPreCompileDebug UP-TO-DATE
+> Task :core:model:compileDebugJavaWithJavac NO-SOURCE
+> Task :core:model:bundleLibCompileToJarDebug UP-TO-DATE
+> Task :core:settings:generateDebugResources UP-TO-DATE
+> Task :core:settings:packageDebugResources UP-TO-DATE
+> Task :core:settings:parseDebugLocalResources UP-TO-DATE
+> Task :core:settings:generateDebugRFile UP-TO-DATE
+> Task :core:ai:api:generateDebugResources UP-TO-DATE
+> Task :core:ai:api:packageDebugResources UP-TO-DATE
+> Task :core:ai:api:parseDebugLocalResources UP-TO-DATE
+> Task :core:ai:api:generateDebugRFile UP-TO-DATE
+> Task :core:ai:api:compileDebugKotlin UP-TO-DATE
+> Task :core:ai:api:javaPreCompileDebug UP-TO-DATE
+> Task :core:ai:api:compileDebugJavaWithJavac NO-SOURCE
+> Task :core:ai:api:bundleLibCompileToJarDebug UP-TO-DATE
+> Task :core:context:api:generateDebugResources UP-TO-DATE
+> Task :core:context:api:packageDebugResources UP-TO-DATE
+> Task :core:context:api:parseDebugLocalResources UP-TO-DATE
+> Task :core:context:api:generateDebugRFile UP-TO-DATE
+> Task :core:context:api:compileDebugKotlin UP-TO-DATE
+> Task :core:context:api:javaPreCompileDebug UP-TO-DATE
+> Task :core:context:api:compileDebugJavaWithJavac NO-SOURCE
+> Task :core:context:api:bundleLibCompileToJarDebug UP-TO-DATE
+> Task :core:memory:api:generateDebugResources UP-TO-DATE
+> Task :core:memory:api:packageDebugResources UP-TO-DATE
+> Task :core:memory:api:parseDebugLocalResources UP-TO-DATE
+> Task :core:memory:api:generateDebugRFile UP-TO-DATE
+> Task :core:memory:api:compileDebugKotlin UP-TO-DATE
+> Task :core:memory:api:javaPreCompileDebug UP-TO-DATE
+> Task :core:memory:api:compileDebugJavaWithJavac NO-SOURCE
+> Task :core:memory:api:bundleLibCompileToJarDebug UP-TO-DATE
+> Task :feature:modelcouncil:api:generateDebugResources UP-TO-DATE
+> Task :feature:modelcouncil:api:packageDebugResources UP-TO-DATE
+> Task :feature:modelcouncil:api:parseDebugLocalResources UP-TO-DATE
+> Task :feature:modelcouncil:api:generateDebugRFile UP-TO-DATE
+> Task :feature:modelcouncil:api:compileDebugKotlin UP-TO-DATE
+> Task :feature:modelcouncil:api:javaPreCompileDebug UP-TO-DATE
+> Task :feature:modelcouncil:api:compileDebugJavaWithJavac NO-SOURCE
+> Task :feature:modelcouncil:api:bundleLibCompileToJarDebug UP-TO-DATE
+> Task :feature:subagent:api:generateDebugResources UP-TO-DATE
+> Task :feature:subagent:api:packageDebugResources UP-TO-DATE
+> Task :feature:subagent:api:parseDebugLocalResources UP-TO-DATE
+> Task :feature:subagent:api:generateDebugRFile UP-TO-DATE
+> Task :feature:subagent:api:compileDebugKotlin UP-TO-DATE
+> Task :feature:subagent:api:javaPreCompileDebug UP-TO-DATE
+> Task :feature:subagent:api:compileDebugJavaWithJavac NO-SOURCE
+> Task :feature:subagent:api:bundleLibCompileToJarDebug UP-TO-DATE
+> Task :core:settings:compileDebugKotlin UP-TO-DATE
+> Task :core:settings:javaPreCompileDebug UP-TO-DATE
+> Task :core:settings:compileDebugJavaWithJavac NO-SOURCE
+> Task :core:settings:bundleLibCompileToJarDebug UP-TO-DATE
+> Task :core:usage:generateDebugResources UP-TO-DATE
+> Task :core:usage:packageDebugResources UP-TO-DATE
+> Task :core:usage:parseDebugLocalResources UP-TO-DATE
+> Task :core:usage:generateDebugRFile UP-TO-DATE
+> Task :core:usage:compileDebugKotlin UP-TO-DATE
+> Task :core:usage:javaPreCompileDebug UP-TO-DATE
+> Task :core:usage:compileDebugJavaWithJavac NO-SOURCE
+> Task :core:usage:bundleLibCompileToJarDebug UP-TO-DATE
+> Task :feature:icloud:generateDebugResources UP-TO-DATE
+> Task :feature:icloud:packageDebugResources UP-TO-DATE
+> Task :feature:icloud:parseDebugLocalResources UP-TO-DATE
+> Task :feature:icloud:generateDebugRFile UP-TO-DATE
+> Task :feature:icloud:compileDebugKotlin UP-TO-DATE
+> Task :feature:icloud:javaPreCompileDebug UP-TO-DATE
+> Task :feature:icloud:compileDebugJavaWithJavac NO-SOURCE
+> Task :feature:icloud:bundleLibCompileToJarDebug UP-TO-DATE
+> Task :feature:modelcouncil:generateDebugResources UP-TO-DATE
+> Task :feature:modelcouncil:packageDebugResources UP-TO-DATE
+> Task :feature:modelcouncil:parseDebugLocalResources UP-TO-DATE
+> Task :feature:modelcouncil:generateDebugRFile UP-TO-DATE
+> Task :feature:task:generateDebugResources UP-TO-DATE
+> Task :feature:task:packageDebugResources UP-TO-DATE
+> Task :feature:task:parseDebugLocalResources UP-TO-DATE
+> Task :feature:task:generateDebugRFile UP-TO-DATE
+> Task :feature:task:compileDebugKotlin UP-TO-DATE
+> Task :feature:task:javaPreCompileDebug UP-TO-DATE
+> Task :feature:task:compileDebugJavaWithJavac NO-SOURCE
+> Task :feature:task:bundleLibCompileToJarDebug UP-TO-DATE
+> Task :feature:terminal:generateDebugResources UP-TO-DATE
+> Task :feature:terminal:packageDebugResources UP-TO-DATE
+> Task :feature:terminal:parseDebugLocalResources UP-TO-DATE
+> Task :feature:terminal:generateDebugRFile UP-TO-DATE
+> Task :feature:workspace:generateDebugResources UP-TO-DATE
+> Task :feature:workspace:packageDebugResources UP-TO-DATE
+> Task :feature:workspace:parseDebugLocalResources UP-TO-DATE
+> Task :feature:workspace:generateDebugRFile UP-TO-DATE
+> Task :feature:workspace:compileDebugKotlin UP-TO-DATE
+> Task :feature:workspace:javaPreCompileDebug UP-TO-DATE
+> Task :feature:workspace:compileDebugJavaWithJavac NO-SOURCE
+> Task :feature:workspace:bundleLibCompileToJarDebug UP-TO-DATE
+> Task :feature:runtime:api:generateDebugResources UP-TO-DATE
+> Task :feature:runtime:api:packageDebugResources UP-TO-DATE
+> Task :feature:runtime:api:parseDebugLocalResources UP-TO-DATE
+> Task :feature:runtime:api:generateDebugRFile UP-TO-DATE
+> Task :feature:runtime:api:compileDebugKotlin UP-TO-DATE
+> Task :feature:runtime:api:javaPreCompileDebug UP-TO-DATE
+> Task :feature:runtime:api:compileDebugJavaWithJavac NO-SOURCE
+> Task :feature:runtime:api:bundleLibCompileToJarDebug UP-TO-DATE
+> Task :feature:terminal:compileDebugKotlin UP-TO-DATE
+> Task :feature:terminal:javaPreCompileDebug UP-TO-DATE
+> Task :feature:terminal:compileDebugJavaWithJavac NO-SOURCE
+> Task :feature:terminal:bundleLibCompileToJarDebug UP-TO-DATE
+> Task :feature:modelcouncil:compileDebugKotlin UP-TO-DATE
+> Task :feature:modelcouncil:javaPreCompileDebug UP-TO-DATE
+> Task :feature:modelcouncil:compileDebugJavaWithJavac NO-SOURCE
+> Task :feature:modelcouncil:bundleLibCompileToJarDebug UP-TO-DATE
+> Task :feature:novel:generateDebugResources UP-TO-DATE
+> Task :feature:novel:packageDebugResources UP-TO-DATE
+> Task :feature:novel:parseDebugLocalResources UP-TO-DATE
+> Task :feature:novel:generateDebugRFile UP-TO-DATE
+> Task :feature:novel-workspace:generateDebugResources UP-TO-DATE
+> Task :feature:novel-workspace:packageDebugResources UP-TO-DATE
+> Task :feature:novel-workspace:parseDebugLocalResources UP-TO-DATE
+> Task :feature:novel-workspace:generateDebugRFile UP-TO-DATE
+> Task :feature:novel-workspace:compileDebugKotlin UP-TO-DATE
+> Task :feature:novel-workspace:javaPreCompileDebug UP-TO-DATE
+> Task :feature:novel-workspace:compileDebugJavaWithJavac NO-SOURCE
+> Task :feature:novel-workspace:bundleLibCompileToJarDebug UP-TO-DATE
+> Task :feature:novel:compileDebugKotlin UP-TO-DATE
+> Task :feature:novel:javaPreCompileDebug UP-TO-DATE
+> Task :feature:novel:compileDebugJavaWithJavac NO-SOURCE
+> Task :feature:novel:bundleLibCompileToJarDebug UP-TO-DATE
+> Task :feature:subagent:generateDebugResources UP-TO-DATE
+> Task :feature:subagent:packageDebugResources UP-TO-DATE
+> Task :feature:subagent:parseDebugLocalResources UP-TO-DATE
+> Task :feature:subagent:generateDebugRFile UP-TO-DATE
+> Task :feature:tools:api:generateDebugResources UP-TO-DATE
+> Task :feature:tools:api:packageDebugResources UP-TO-DATE
+> Task :feature:tools:api:parseDebugLocalResources UP-TO-DATE
+> Task :feature:tools:api:generateDebugRFile UP-TO-DATE
+> Task :feature:tools:api:compileDebugKotlin UP-TO-DATE
+> Task :feature:tools:api:javaPreCompileDebug UP-TO-DATE
+> Task :feature:tools:api:compileDebugJavaWithJavac NO-SOURCE
+> Task :feature:tools:api:bundleLibCompileToJarDebug UP-TO-DATE
+> Task :core:ai:generation:api:generateDebugResources UP-TO-DATE
+> Task :core:ai:generation:api:packageDebugResources UP-TO-DATE
+> Task :core:ai:generation:api:parseDebugLocalResources UP-TO-DATE
+> Task :core:ai:generation:api:generateDebugRFile UP-TO-DATE
+> Task :core:ai:transformers:api:generateDebugResources UP-TO-DATE
+> Task :core:ai:transformers:api:packageDebugResources UP-TO-DATE
+> Task :core:ai:transformers:api:parseDebugLocalResources UP-TO-DATE
+> Task :core:ai:transformers:api:generateDebugRFile UP-TO-DATE
+> Task :core:ai:transformers:api:compileDebugKotlin UP-TO-DATE
+> Task :core:ai:transformers:api:javaPreCompileDebug UP-TO-DATE
+> Task :core:ai:transformers:api:compileDebugJavaWithJavac NO-SOURCE
+> Task :core:ai:transformers:api:bundleLibCompileToJarDebug UP-TO-DATE
+> Task :core:ai:generation:api:compileDebugKotlin UP-TO-DATE
+> Task :core:ai:generation:api:javaPreCompileDebug UP-TO-DATE
+> Task :core:ai:generation:api:compileDebugJavaWithJavac NO-SOURCE
+> Task :core:ai:generation:api:bundleLibCompileToJarDebug UP-TO-DATE
+> Task :feature:subagent:compileDebugKotlin UP-TO-DATE
+> Task :feature:subagent:javaPreCompileDebug UP-TO-DATE
+> Task :feature:subagent:compileDebugJavaWithJavac NO-SOURCE
+> Task :feature:subagent:bundleLibCompileToJarDebug UP-TO-DATE
+> Task :feature:system:generateDebugResources UP-TO-DATE
+> Task :feature:system:packageDebugResources UP-TO-DATE
+> Task :feature:system:parseDebugLocalResources UP-TO-DATE
+> Task :feature:system:generateDebugRFile UP-TO-DATE
+> Task :feature:system:compileDebugKotlin UP-TO-DATE
+> Task :feature:system:javaPreCompileDebug UP-TO-DATE
+> Task :feature:system:compileDebugJavaWithJavac NO-SOURCE
+> Task :feature:system:bundleLibCompileToJarDebug UP-TO-DATE
+> Task :core:automation:api:generateDebugResources UP-TO-DATE
+> Task :core:automation:api:packageDebugResources UP-TO-DATE
+> Task :core:automation:api:parseDebugLocalResources UP-TO-DATE
+> Task :core:automation:api:generateDebugRFile UP-TO-DATE
+> Task :core:automation:api:compileDebugKotlin UP-TO-DATE
+> Task :core:automation:api:javaPreCompileDebug UP-TO-DATE
+> Task :core:automation:api:compileDebugJavaWithJavac NO-SOURCE
+> Task :core:automation:api:bundleLibCompileToJarDebug UP-TO-DATE
+> Task :feature:board:impl:generateDebugResources UP-TO-DATE
+> Task :feature:board:impl:packageDebugResources UP-TO-DATE
+> Task :feature:board:impl:parseDebugLocalResources UP-TO-DATE
+> Task :feature:board:impl:generateDebugRFile UP-TO-DATE
+> Task :feature:board:impl:compileDebugKotlin UP-TO-DATE
+> Task :feature:board:impl:javaPreCompileDebug UP-TO-DATE
+> Task :feature:board:impl:compileDebugJavaWithJavac NO-SOURCE
+> Task :feature:board:impl:bundleLibCompileToJarDebug UP-TO-DATE
+> Task :feature:tools:access:generateDebugResources UP-TO-DATE
+> Task :feature:tools:access:packageDebugResources UP-TO-DATE
+> Task :feature:tools:access:parseDebugLocalResources UP-TO-DATE
+> Task :feature:tools:access:generateDebugRFile UP-TO-DATE
+> Task :feature:tools:access:compileDebugKotlin UP-TO-DATE
+> Task :feature:tools:access:javaPreCompileDebug UP-TO-DATE
+> Task :feature:tools:access:compileDebugJavaWithJavac NO-SOURCE
+> Task :feature:tools:access:bundleLibCompileToJarDebug UP-TO-DATE
+> Task :feature:tools:impl:generateDebugResources UP-TO-DATE
+> Task :feature:tools:impl:packageDebugResources UP-TO-DATE
+> Task :feature:tools:impl:parseDebugLocalResources UP-TO-DATE
+> Task :feature:tools:impl:generateDebugRFile UP-TO-DATE
+> Task :feature:tools:impl:compileDebugKotlin UP-TO-DATE
+> Task :feature:tools:impl:javaPreCompileDebug UP-TO-DATE
+> Task :feature:tools:impl:compileDebugJavaWithJavac NO-SOURCE
+> Task :feature:tools:impl:bundleLibCompileToJarDebug UP-TO-DATE
+> Task :app:javaPreCompileDebug UP-TO-DATE
+> Task :ai:mapDebugSourceSetPaths UP-TO-DATE
+> Task :ai:compileDebugLibraryResources UP-TO-DATE
+> Task :ai:writeDebugAarMetadata UP-TO-DATE
+> Task :common:writeDebugAarMetadata UP-TO-DATE
+> Task :document:writeDebugAarMetadata UP-TO-DATE
+> Task :highlight:writeDebugAarMetadata UP-TO-DATE
+> Task :search:writeDebugAarMetadata UP-TO-DATE
+> Task :core:agent-runtime-impl:writeDebugAarMetadata UP-TO-DATE
+> Task :core:agent-store-room:writeDebugAarMetadata UP-TO-DATE
+> Task :core:app-infra:writeDebugAarMetadata UP-TO-DATE
+> Task :core:model:writeDebugAarMetadata UP-TO-DATE
+> Task :core:settings:writeDebugAarMetadata UP-TO-DATE
+> Task :core:usage:writeDebugAarMetadata UP-TO-DATE
+> Task :feature:icloud:writeDebugAarMetadata UP-TO-DATE
+> Task :feature:modelcouncil:writeDebugAarMetadata UP-TO-DATE
+> Task :feature:novel:writeDebugAarMetadata UP-TO-DATE
+> Task :feature:novel-workspace:writeDebugAarMetadata UP-TO-DATE
+> Task :feature:subagent:writeDebugAarMetadata UP-TO-DATE
+> Task :feature:system:writeDebugAarMetadata UP-TO-DATE
+> Task :feature:task:writeDebugAarMetadata UP-TO-DATE
+> Task :feature:terminal:writeDebugAarMetadata UP-TO-DATE
+> Task :feature:workspace:writeDebugAarMetadata UP-TO-DATE
+> Task :core:ai:api:writeDebugAarMetadata UP-TO-DATE
+> Task :core:automation:api:writeDebugAarMetadata UP-TO-DATE
+> Task :core:context:api:writeDebugAarMetadata UP-TO-DATE
+> Task :core:memory:api:writeDebugAarMetadata UP-TO-DATE
+> Task :feature:board:impl:writeDebugAarMetadata UP-TO-DATE
+> Task :feature:modelcouncil:api:writeDebugAarMetadata UP-TO-DATE
+> Task :feature:runtime:api:writeDebugAarMetadata UP-TO-DATE
+> Task :feature:subagent:api:writeDebugAarMetadata UP-TO-DATE
+> Task :feature:tools:access:writeDebugAarMetadata UP-TO-DATE
+> Task :feature:tools:api:writeDebugAarMetadata UP-TO-DATE
+> Task :feature:tools:impl:writeDebugAarMetadata UP-TO-DATE
+> Task :core:ai:generation:api:writeDebugAarMetadata UP-TO-DATE
+> Task :core:ai:transformers:api:writeDebugAarMetadata UP-TO-DATE
+> Task :app:checkDebugAarMetadata UP-TO-DATE
+> Task :app:compileDebugNavigationResources UP-TO-DATE
+> Task :app:createDebugCompatibleScreenManifests UP-TO-DATE
+> Task :ai:extractDeepLinksDebug UP-TO-DATE
+> Task :ai:processDebugManifest UP-TO-DATE
+> Task :app:extractDeepLinksDebug UP-TO-DATE
+> Task :common:extractDeepLinksDebug UP-TO-DATE
+> Task :common:processDebugManifest UP-TO-DATE
+> Task :document:extractDeepLinksDebug UP-TO-DATE
+> Task :document:processDebugManifest UP-TO-DATE
+> Task :highlight:extractDeepLinksDebug UP-TO-DATE
+> Task :highlight:processDebugManifest UP-TO-DATE
+> Task :search:extractDeepLinksDebug UP-TO-DATE
+> Task :search:processDebugManifest UP-TO-DATE
+> Task :core:agent-runtime-impl:extractDeepLinksDebug UP-TO-DATE
+> Task :core:agent-runtime-impl:processDebugManifest UP-TO-DATE
+> Task :core:agent-store-room:extractDeepLinksDebug UP-TO-DATE
+> Task :core:agent-store-room:processDebugManifest UP-TO-DATE
+> Task :core:app-infra:extractDeepLinksDebug UP-TO-DATE
+> Task :core:app-infra:processDebugManifest UP-TO-DATE
+> Task :core:model:extractDeepLinksDebug UP-TO-DATE
+> Task :core:model:processDebugManifest UP-TO-DATE
+> Task :core:settings:extractDeepLinksDebug UP-TO-DATE
+> Task :core:settings:processDebugManifest UP-TO-DATE
+> Task :core:usage:extractDeepLinksDebug UP-TO-DATE
+> Task :core:usage:processDebugManifest UP-TO-DATE
+> Task :feature:icloud:extractDeepLinksDebug UP-TO-DATE
+> Task :feature:icloud:processDebugManifest UP-TO-DATE
+> Task :feature:modelcouncil:extractDeepLinksDebug UP-TO-DATE
+> Task :feature:modelcouncil:processDebugManifest UP-TO-DATE
+> Task :feature:novel:extractDeepLinksDebug UP-TO-DATE
+> Task :feature:novel:processDebugManifest UP-TO-DATE
+> Task :feature:novel-workspace:extractDeepLinksDebug UP-TO-DATE
+> Task :feature:novel-workspace:processDebugManifest UP-TO-DATE
+> Task :feature:subagent:extractDeepLinksDebug UP-TO-DATE
+> Task :feature:subagent:processDebugManifest UP-TO-DATE
+> Task :feature:system:extractDeepLinksDebug UP-TO-DATE
+> Task :feature:system:processDebugManifest UP-TO-DATE
+> Task :feature:task:extractDeepLinksDebug UP-TO-DATE
+> Task :feature:task:processDebugManifest UP-TO-DATE
+> Task :feature:terminal:extractDeepLinksDebug UP-TO-DATE
+> Task :feature:terminal:processDebugManifest UP-TO-DATE
+> Task :feature:workspace:extractDeepLinksDebug UP-TO-DATE
+> Task :feature:workspace:processDebugManifest UP-TO-DATE
+> Task :core:ai:api:extractDeepLinksDebug UP-TO-DATE
+> Task :core:ai:api:processDebugManifest UP-TO-DATE
+> Task :core:automation:api:extractDeepLinksDebug UP-TO-DATE
+> Task :core:automation:api:processDebugManifest UP-TO-DATE
+> Task :core:context:api:extractDeepLinksDebug UP-TO-DATE
+> Task :core:context:api:processDebugManifest UP-TO-DATE
+> Task :core:memory:api:extractDeepLinksDebug UP-TO-DATE
+> Task :core:memory:api:processDebugManifest UP-TO-DATE
+> Task :feature:board:impl:extractDeepLinksDebug UP-TO-DATE
+> Task :feature:board:impl:processDebugManifest UP-TO-DATE
+> Task :feature:modelcouncil:api:extractDeepLinksDebug UP-TO-DATE
+> Task :feature:modelcouncil:api:processDebugManifest UP-TO-DATE
+> Task :feature:runtime:api:extractDeepLinksDebug UP-TO-DATE
+> Task :feature:runtime:api:processDebugManifest UP-TO-DATE
+> Task :feature:subagent:api:extractDeepLinksDebug UP-TO-DATE
+> Task :feature:subagent:api:processDebugManifest UP-TO-DATE
+> Task :feature:tools:access:extractDeepLinksDebug UP-TO-DATE
+> Task :feature:tools:access:processDebugManifest UP-TO-DATE
+> Task :feature:tools:api:extractDeepLinksDebug UP-TO-DATE
+> Task :feature:tools:api:processDebugManifest UP-TO-DATE
+> Task :feature:tools:impl:extractDeepLinksDebug UP-TO-DATE
+> Task :feature:tools:impl:processDebugManifest UP-TO-DATE
+> Task :core:ai:generation:api:extractDeepLinksDebug UP-TO-DATE
+> Task :core:ai:generation:api:processDebugManifest UP-TO-DATE
+> Task :core:ai:transformers:api:extractDeepLinksDebug UP-TO-DATE
+> Task :core:ai:transformers:api:processDebugManifest UP-TO-DATE
+> Task :app:processDebugMainManifest UP-TO-DATE
+> Task :app:processDebugManifest UP-TO-DATE
+> Task :app:processDebugManifestForPackage UP-TO-DATE
+> Task :common:mapDebugSourceSetPaths UP-TO-DATE
+> Task :common:compileDebugLibraryResources UP-TO-DATE
+> Task :document:mapDebugSourceSetPaths UP-TO-DATE
+> Task :document:compileDebugLibraryResources UP-TO-DATE
+> Task :highlight:mapDebugSourceSetPaths UP-TO-DATE
+> Task :highlight:compileDebugLibraryResources UP-TO-DATE
+> Task :search:mapDebugSourceSetPaths UP-TO-DATE
+> Task :search:compileDebugLibraryResources UP-TO-DATE
+> Task :core:agent-runtime-impl:mapDebugSourceSetPaths UP-TO-DATE
+> Task :core:agent-runtime-impl:compileDebugLibraryResources UP-TO-DATE
+> Task :core:agent-store-room:mapDebugSourceSetPaths UP-TO-DATE
+> Task :core:agent-store-room:compileDebugLibraryResources UP-TO-DATE
+> Task :core:app-infra:mapDebugSourceSetPaths UP-TO-DATE
+> Task :core:app-infra:compileDebugLibraryResources UP-TO-DATE
+> Task :core:model:mapDebugSourceSetPaths UP-TO-DATE
+> Task :core:model:compileDebugLibraryResources UP-TO-DATE
+> Task :core:settings:mapDebugSourceSetPaths UP-TO-DATE
+> Task :core:settings:compileDebugLibraryResources UP-TO-DATE
+> Task :core:usage:mapDebugSourceSetPaths UP-TO-DATE
+> Task :core:usage:compileDebugLibraryResources UP-TO-DATE
+> Task :feature:icloud:mapDebugSourceSetPaths UP-TO-DATE
+> Task :feature:icloud:compileDebugLibraryResources UP-TO-DATE
+> Task :feature:modelcouncil:mapDebugSourceSetPaths UP-TO-DATE
+> Task :feature:modelcouncil:compileDebugLibraryResources UP-TO-DATE
+> Task :feature:novel:mapDebugSourceSetPaths UP-TO-DATE
+> Task :feature:novel:compileDebugLibraryResources UP-TO-DATE
+> Task :feature:novel-workspace:mapDebugSourceSetPaths UP-TO-DATE
+> Task :feature:novel-workspace:compileDebugLibraryResources UP-TO-DATE
+> Task :feature:subagent:mapDebugSourceSetPaths UP-TO-DATE
+> Task :feature:subagent:compileDebugLibraryResources UP-TO-DATE
+> Task :feature:system:mapDebugSourceSetPaths UP-TO-DATE
+> Task :feature:system:compileDebugLibraryResources UP-TO-DATE
+> Task :feature:task:mapDebugSourceSetPaths UP-TO-DATE
+> Task :feature:task:compileDebugLibraryResources UP-TO-DATE
+> Task :feature:terminal:mapDebugSourceSetPaths UP-TO-DATE
+> Task :feature:terminal:compileDebugLibraryResources UP-TO-DATE
+> Task :feature:workspace:mapDebugSourceSetPaths UP-TO-DATE
+> Task :feature:workspace:compileDebugLibraryResources UP-TO-DATE
+> Task :core:ai:api:mapDebugSourceSetPaths UP-TO-DATE
+> Task :core:ai:api:compileDebugLibraryResources UP-TO-DATE
+> Task :core:automation:api:mapDebugSourceSetPaths UP-TO-DATE
+> Task :core:automation:api:compileDebugLibraryResources UP-TO-DATE
+> Task :core:context:api:mapDebugSourceSetPaths UP-TO-DATE
+> Task :core:context:api:compileDebugLibraryResources UP-TO-DATE
+> Task :core:memory:api:mapDebugSourceSetPaths UP-TO-DATE
+> Task :core:memory:api:compileDebugLibraryResources UP-TO-DATE
+> Task :feature:board:impl:mapDebugSourceSetPaths UP-TO-DATE
+> Task :feature:board:impl:compileDebugLibraryResources UP-TO-DATE
+> Task :feature:modelcouncil:api:mapDebugSourceSetPaths UP-TO-DATE
+> Task :feature:modelcouncil:api:compileDebugLibraryResources UP-TO-DATE
+> Task :feature:runtime:api:mapDebugSourceSetPaths UP-TO-DATE
+> Task :feature:runtime:api:compileDebugLibraryResources UP-TO-DATE
+> Task :feature:subagent:api:mapDebugSourceSetPaths UP-TO-DATE
+> Task :feature:subagent:api:compileDebugLibraryResources UP-TO-DATE
+> Task :feature:tools:access:mapDebugSourceSetPaths UP-TO-DATE
+> Task :feature:tools:access:compileDebugLibraryResources UP-TO-DATE
+> Task :feature:tools:api:mapDebugSourceSetPaths UP-TO-DATE
+> Task :feature:tools:api:compileDebugLibraryResources UP-TO-DATE
+> Task :feature:tools:impl:mapDebugSourceSetPaths UP-TO-DATE
+> Task :feature:tools:impl:compileDebugLibraryResources UP-TO-DATE
+> Task :core:ai:generation:api:mapDebugSourceSetPaths UP-TO-DATE
+> Task :core:ai:generation:api:compileDebugLibraryResources UP-TO-DATE
+> Task :core:ai:transformers:api:mapDebugSourceSetPaths UP-TO-DATE
+> Task :core:ai:transformers:api:compileDebugLibraryResources UP-TO-DATE
+> Task :app:preDebugUnitTestBuild
+> Task :app:javaPreCompileDebugUnitTest UP-TO-DATE
+> Task :ai:generateDebugAssets UP-TO-DATE
+> Task :ai:mergeDebugAssets UP-TO-DATE
+> Task :app:generateDebugAssets UP-TO-DATE
+> Task :common:generateDebugAssets UP-TO-DATE
+> Task :common:mergeDebugAssets UP-TO-DATE
+> Task :document:generateDebugAssets UP-TO-DATE
+> Task :document:mergeDebugAssets UP-TO-DATE
+> Task :highlight:generateDebugAssets UP-TO-DATE
+> Task :highlight:mergeDebugAssets UP-TO-DATE
+> Task :search:generateDebugAssets UP-TO-DATE
+> Task :search:mergeDebugAssets UP-TO-DATE
+> Task :core:agent-runtime-impl:generateDebugAssets UP-TO-DATE
+> Task :core:agent-runtime-impl:mergeDebugAssets UP-TO-DATE
+> Task :core:agent-store-room:generateDebugAssets UP-TO-DATE
+> Task :core:agent-store-room:mergeDebugAssets UP-TO-DATE
+> Task :core:app-infra:generateDebugAssets UP-TO-DATE
+> Task :core:app-infra:mergeDebugAssets UP-TO-DATE
+> Task :core:model:generateDebugAssets UP-TO-DATE
+> Task :core:model:mergeDebugAssets UP-TO-DATE
+> Task :core:settings:generateDebugAssets UP-TO-DATE
+> Task :core:settings:mergeDebugAssets UP-TO-DATE
+> Task :core:usage:generateDebugAssets UP-TO-DATE
+> Task :core:usage:mergeDebugAssets UP-TO-DATE
+> Task :feature:icloud:generateDebugAssets UP-TO-DATE
+> Task :feature:icloud:mergeDebugAssets UP-TO-DATE
+> Task :feature:modelcouncil:generateDebugAssets UP-TO-DATE
+> Task :feature:modelcouncil:mergeDebugAssets UP-TO-DATE
+> Task :feature:novel:generateDebugAssets UP-TO-DATE
+> Task :feature:novel:mergeDebugAssets UP-TO-DATE
+> Task :feature:novel-workspace:generateDebugAssets UP-TO-DATE
+> Task :feature:novel-workspace:mergeDebugAssets UP-TO-DATE
+> Task :feature:subagent:generateDebugAssets UP-TO-DATE
+> Task :feature:subagent:mergeDebugAssets UP-TO-DATE
+> Task :feature:system:generateDebugAssets UP-TO-DATE
+> Task :feature:system:mergeDebugAssets UP-TO-DATE
+> Task :feature:task:generateDebugAssets UP-TO-DATE
+> Task :feature:task:mergeDebugAssets UP-TO-DATE
+> Task :feature:terminal:generateDebugAssets UP-TO-DATE
+> Task :feature:terminal:mergeDebugAssets UP-TO-DATE
+> Task :feature:workspace:generateDebugAssets UP-TO-DATE
+> Task :feature:workspace:mergeDebugAssets UP-TO-DATE
+> Task :core:ai:api:generateDebugAssets UP-TO-DATE
+> Task :core:ai:api:mergeDebugAssets UP-TO-DATE
+> Task :core:automation:api:generateDebugAssets UP-TO-DATE
+> Task :core:automation:api:mergeDebugAssets UP-TO-DATE
+> Task :core:context:api:generateDebugAssets UP-TO-DATE
+> Task :core:context:api:mergeDebugAssets UP-TO-DATE
+> Task :core:memory:api:generateDebugAssets UP-TO-DATE
+> Task :core:memory:api:mergeDebugAssets UP-TO-DATE
+> Task :feature:board:impl:generateDebugAssets UP-TO-DATE
+> Task :feature:board:impl:mergeDebugAssets UP-TO-DATE
+> Task :feature:modelcouncil:api:generateDebugAssets UP-TO-DATE
+> Task :feature:modelcouncil:api:mergeDebugAssets UP-TO-DATE
+> Task :feature:runtime:api:generateDebugAssets UP-TO-DATE
+> Task :feature:runtime:api:mergeDebugAssets UP-TO-DATE
+> Task :feature:subagent:api:generateDebugAssets UP-TO-DATE
+> Task :feature:subagent:api:mergeDebugAssets UP-TO-DATE
+> Task :feature:tools:access:generateDebugAssets UP-TO-DATE
+> Task :feature:tools:access:mergeDebugAssets UP-TO-DATE
+> Task :feature:tools:api:generateDebugAssets UP-TO-DATE
+> Task :feature:tools:api:mergeDebugAssets UP-TO-DATE
+> Task :feature:tools:impl:generateDebugAssets UP-TO-DATE
+> Task :feature:tools:impl:mergeDebugAssets UP-TO-DATE
+> Task :core:ai:generation:api:generateDebugAssets UP-TO-DATE
+> Task :core:ai:generation:api:mergeDebugAssets UP-TO-DATE
+> Task :core:ai:transformers:api:generateDebugAssets UP-TO-DATE
+> Task :core:ai:transformers:api:mergeDebugAssets UP-TO-DATE
+> Task :app:mergeDebugAssets UP-TO-DATE
+> Task :app:mergeDebugResources
+> Task :app:processDebugUnitTestManifest UP-TO-DATE
+> Task :common:bundleLibRuntimeToJarDebug UP-TO-DATE
+> Task :common:processDebugJavaRes UP-TO-DATE
+> Task :document:bundleLibRuntimeToJarDebug UP-TO-DATE
+> Task :document:processDebugJavaRes UP-TO-DATE
+> Task :highlight:bundleLibRuntimeToJarDebug UP-TO-DATE
+> Task :highlight:processDebugJavaRes UP-TO-DATE
+> Task :search:bundleLibRuntimeToJarDebug UP-TO-DATE
+> Task :search:processDebugJavaRes UP-TO-DATE
+> Task :core:agent-runtime-impl:bundleLibRuntimeToJarDebug UP-TO-DATE
+> Task :core:agent-runtime-impl:processDebugJavaRes UP-TO-DATE
+> Task :core:agent-store-room:bundleLibRuntimeToJarDebug UP-TO-DATE
+> Task :core:agent-store-room:processDebugJavaRes UP-TO-DATE
+> Task :core:app-infra:bundleLibRuntimeToJarDebug UP-TO-DATE
+> Task :core:app-infra:processDebugJavaRes UP-TO-DATE
+> Task :core:model:bundleLibRuntimeToJarDebug UP-TO-DATE
+> Task :core:model:processDebugJavaRes UP-TO-DATE
+> Task :core:settings:bundleLibRuntimeToJarDebug UP-TO-DATE
+> Task :core:settings:processDebugJavaRes UP-TO-DATE
+> Task :core:usage:bundleLibRuntimeToJarDebug UP-TO-DATE
+> Task :core:usage:processDebugJavaRes UP-TO-DATE
+> Task :feature:icloud:bundleLibRuntimeToJarDebug UP-TO-DATE
+> Task :feature:icloud:processDebugJavaRes UP-TO-DATE
+> Task :feature:modelcouncil:bundleLibRuntimeToJarDebug UP-TO-DATE
+> Task :feature:modelcouncil:processDebugJavaRes UP-TO-DATE
+> Task :feature:novel:bundleLibRuntimeToJarDebug UP-TO-DATE
+> Task :feature:novel:processDebugJavaRes UP-TO-DATE
+> Task :feature:novel-workspace:bundleLibRuntimeToJarDebug UP-TO-DATE
+> Task :feature:novel-workspace:processDebugJavaRes UP-TO-DATE
+> Task :feature:subagent:bundleLibRuntimeToJarDebug UP-TO-DATE
+> Task :feature:subagent:processDebugJavaRes UP-TO-DATE
+> Task :feature:system:bundleLibRuntimeToJarDebug UP-TO-DATE
+> Task :feature:system:processDebugJavaRes UP-TO-DATE
+> Task :feature:task:bundleLibRuntimeToJarDebug UP-TO-DATE
+> Task :feature:task:processDebugJavaRes UP-TO-DATE
+> Task :feature:terminal:bundleLibRuntimeToJarDebug UP-TO-DATE
+> Task :feature:terminal:processDebugJavaRes UP-TO-DATE
+> Task :feature:workspace:bundleLibRuntimeToJarDebug UP-TO-DATE
+> Task :feature:workspace:processDebugJavaRes UP-TO-DATE
+> Task :core:ai:api:bundleLibRuntimeToJarDebug UP-TO-DATE
+> Task :core:ai:api:processDebugJavaRes UP-TO-DATE
+> Task :core:automation:api:bundleLibRuntimeToJarDebug UP-TO-DATE
+> Task :core:automation:api:processDebugJavaRes UP-TO-DATE
+> Task :core:context:api:bundleLibRuntimeToJarDebug UP-TO-DATE
+> Task :core:context:api:processDebugJavaRes UP-TO-DATE
+> Task :core:memory:api:bundleLibRuntimeToJarDebug UP-TO-DATE
+> Task :core:memory:api:processDebugJavaRes UP-TO-DATE
+> Task :feature:board:impl:bundleLibRuntimeToJarDebug UP-TO-DATE
+> Task :feature:board:impl:processDebugJavaRes UP-TO-DATE
+> Task :feature:modelcouncil:api:bundleLibRuntimeToJarDebug UP-TO-DATE
+> Task :feature:modelcouncil:api:processDebugJavaRes UP-TO-DATE
+> Task :feature:runtime:api:bundleLibRuntimeToJarDebug UP-TO-DATE
+> Task :feature:runtime:api:processDebugJavaRes UP-TO-DATE
+> Task :feature:subagent:api:bundleLibRuntimeToJarDebug UP-TO-DATE
+> Task :feature:subagent:api:processDebugJavaRes UP-TO-DATE
+> Task :feature:tools:access:bundleLibRuntimeToJarDebug UP-TO-DATE
+> Task :feature:tools:access:processDebugJavaRes UP-TO-DATE
+> Task :feature:tools:api:bundleLibRuntimeToJarDebug UP-TO-DATE
+> Task :feature:tools:api:processDebugJavaRes UP-TO-DATE
+> Task :feature:tools:impl:bundleLibRuntimeToJarDebug UP-TO-DATE
+> Task :feature:tools:impl:processDebugJavaRes UP-TO-DATE
+> Task :core:ai:generation:api:bundleLibRuntimeToJarDebug UP-TO-DATE
+> Task :core:ai:generation:api:processDebugJavaRes UP-TO-DATE
+> Task :core:ai:transformers:api:bundleLibRuntimeToJarDebug UP-TO-DATE
+> Task :core:ai:transformers:api:processDebugJavaRes UP-TO-DATE
+> Task :feature:task:preDebugUnitTestBuild UP-TO-DATE
+> Task :feature:task:generateDebugUnitTestStubRFile UP-TO-DATE
+> Task :feature:task:compileDebugUnitTestKotlin UP-TO-DATE
+> Task :feature:task:javaPreCompileDebugUnitTest UP-TO-DATE
+> Task :feature:task:compileDebugUnitTestJavaWithJavac NO-SOURCE
+> Task :feature:task:processDebugUnitTestJavaRes UP-TO-DATE
+> Task :feature:task:testDebugUnitTest UP-TO-DATE
+> Task :app:processDebugResources
+> Task :app:packageDebugUnitTestForUnitTest
+> Task :app:generateDebugUnitTestConfig
+> Task :app:kspDebugKotlin
+> Task :app:compileDebugKotlin
+w: file:///Users/mi/Downloads/AI/AmberAgent/android/app/src/main/java/app/amber/agent/RouteActivity.kt:244:33 This declaration needs opt-in. Its usage should be marked with '@coil3.annotation.ExperimentalCoilApi' or '@OptIn(coil3.annotation.ExperimentalCoilApi::class)'
+w: file:///Users/mi/Downloads/AI/AmberAgent/android/app/src/main/java/app/amber/agent/RouteActivity.kt:246:51 This declaration needs opt-in. Its usage should be marked with '@coil3.annotation.ExperimentalCoilApi' or '@OptIn(coil3.annotation.ExperimentalCoilApi::class)'
+w: file:///Users/mi/Downloads/AI/AmberAgent/android/app/src/main/java/app/amber/core/ai/ChatRunCoordinator.kt:442:38 Unnecessary non-null assertion (!!) on a non-null receiver of type 'String'.
+w: file:///Users/mi/Downloads/AI/AmberAgent/android/app/src/main/java/app/amber/core/ai/ChatRunCoordinator.kt:444:50 Unnecessary non-null assertion (!!) on a non-null receiver of type 'ToolEffectLedger'.
+w: file:///Users/mi/Downloads/AI/AmberAgent/android/app/src/main/java/app/amber/core/ai/mcp/McpOAuthClient.kt:326:37 Unnecessary safe call on a non-null receiver of type 'ResponseBody'.
+w: file:///Users/mi/Downloads/AI/AmberAgent/android/app/src/main/java/app/amber/core/ai/mcp/transport/StreamableHttpClientTransport.kt:353:32 'suspend fun ByteReadChannel.readUTF8Line(max: Int = ...): String?' is deprecated. Use readLineStrict or readLine instead. See deprecation notes for more details.
+w: file:///Users/mi/Downloads/AI/AmberAgent/android/app/src/main/java/app/amber/core/ai/tools/ProviderConfigTools.kt:435:36 Unnecessary non-null assertion (!!) on a non-null receiver of type 'String'.
+w: file:///Users/mi/Downloads/AI/AmberAgent/android/app/src/main/java/app/amber/core/ai/tools/ProviderConfigTools.kt:456:54 Elvis operator (?:) always returns the left operand of non-nullable type 'ProviderSetting'.
+w: file:///Users/mi/Downloads/AI/AmberAgent/android/app/src/main/java/app/amber/core/ai/tools/ProviderConfigTools.kt:461:38 No cast needed.
+w: file:///Users/mi/Downloads/AI/AmberAgent/android/app/src/main/java/app/amber/core/ai/tools/ProviderConfigTools.kt:479:38 No cast needed.
+w: file:///Users/mi/Downloads/AI/AmberAgent/android/app/src/main/java/app/amber/core/ai/transformers/TemplateTransformer.kt:25:61 Redundant call of conversion method.
+w: file:///Users/mi/Downloads/AI/AmberAgent/android/app/src/main/java/app/amber/core/ai/transformers/TemplateTransformer.kt:26:61 Redundant call of conversion method.
+w: file:///Users/mi/Downloads/AI/AmberAgent/android/app/src/main/java/app/amber/core/context/TokenBudgetFitter.kt:238:9 'when' is exhaustive so 'else' is redundant here.
+w: file:///Users/mi/Downloads/AI/AmberAgent/android/app/src/main/java/app/amber/core/service/ChatService.kt:1640:25 Unnecessary non-null assertion (!!) on a non-null receiver of type 'ToolEffectLedger'.
+w: file:///Users/mi/Downloads/AI/AmberAgent/android/app/src/main/java/app/amber/core/service/ChatService.kt:1807:52 Unnecessary safe call on a non-null receiver of type 'Uuid'.
+w: file:///Users/mi/Downloads/AI/AmberAgent/android/app/src/main/java/app/amber/core/service/ChatService.kt:3418:45 Java type mismatch: inferred type is 'String?', but 'String' was expected.
+w: file:///Users/mi/Downloads/AI/AmberAgent/android/app/src/main/java/app/amber/core/service/ChatService.kt:3447:52 Java type mismatch: inferred type is 'String?', but 'String' was expected.
+w: file:///Users/mi/Downloads/AI/AmberAgent/android/app/src/main/java/app/amber/core/utils/ContextUtil.kt:315:49 'static field ACTION_MEDIA_SCANNER_SCAN_FILE: String' is deprecated. Deprecated in Java.
+w: file:///Users/mi/Downloads/AI/AmberAgent/android/app/src/main/java/app/amber/core/utils/ContextUtil.kt:363:49 'static field ACTION_MEDIA_SCANNER_SCAN_FILE: String' is deprecated. Deprecated in Java.
+w: file:///Users/mi/Downloads/AI/AmberAgent/android/app/src/main/java/app/amber/core/utils/ContextUtil.kt:418:49 'static field ACTION_MEDIA_SCANNER_SCAN_FILE: String' is deprecated. Deprecated in Java.
+w: file:///Users/mi/Downloads/AI/AmberAgent/android/app/src/main/java/app/amber/feature/home/ContinueCandidateAggregator.kt:35:59 Unchecked cast of 'List<Any>' to 'List<ContinueCandidate>'.
+w: file:///Users/mi/Downloads/AI/AmberAgent/android/app/src/main/java/app/amber/feature/miniapp/MiniAppNetwork.kt:108:32 Unnecessary safe call on a non-null receiver of type 'ResponseBody'.
+w: file:///Users/mi/Downloads/AI/AmberAgent/android/app/src/main/java/app/amber/feature/miniapp/MiniAppNetwork.kt:147:32 Unnecessary safe call on a non-null receiver of type 'ResponseBody'.
+w: file:///Users/mi/Downloads/AI/AmberAgent/android/app/src/main/java/app/amber/feature/recipe/RecipeRunner.kt:152:72 Unnecessary safe call on a non-null receiver of type 'RecipeResumeCheckpoint'.
+w: file:///Users/mi/Downloads/AI/AmberAgent/android/app/src/main/java/app/amber/feature/ui/components/ai/ChatInput.kt:513:41 Unnecessary non-null assertion (!!) on a non-null receiver of type 'ChatInputAttachmentImport'.
+w: file:///Users/mi/Downloads/AI/AmberAgent/android/app/src/main/java/app/amber/feature/ui/components/ai/ChatInput.kt:514:38 Unnecessary non-null assertion (!!) on a non-null receiver of type 'ChatInputAttachmentImport'.
+w: file:///Users/mi/Downloads/AI/AmberAgent/android/app/src/main/java/app/amber/feature/ui/components/ai/ChatInput.kt:531:38 Unnecessary non-null assertion (!!) on a non-null receiver of type 'ChatInputAttachmentImport'.
+w: file:///Users/mi/Downloads/AI/AmberAgent/android/app/src/main/java/app/amber/feature/ui/components/ai/ChatInput.kt:611:69 Unnecessary non-null assertion (!!) on a non-null receiver of type 'UIMessagePart.Document'.
+w: file:///Users/mi/Downloads/AI/AmberAgent/android/app/src/main/java/app/amber/feature/ui/components/ai/ChatInput.kt:621:36 Unnecessary non-null assertion (!!) on a non-null receiver of type 'UIMessagePart.Document'.
+w: file:///Users/mi/Downloads/AI/AmberAgent/android/app/src/main/java/app/amber/feature/ui/components/ai/ChatInput.kt:623:47 Unnecessary non-null assertion (!!) on a non-null receiver of type 'UIMessagePart.Document'.
+w: file:///Users/mi/Downloads/AI/AmberAgent/android/app/src/main/java/app/amber/feature/ui/components/ai/ChatInput.kt:633:65 Unnecessary non-null assertion (!!) on a non-null receiver of type 'UIMessagePart.Document'.
+w: file:///Users/mi/Downloads/AI/AmberAgent/android/app/src/main/java/app/amber/feature/ui/components/ai/ModelList.kt:903:14 This declaration is in a preview state and can be changed in a backwards-incompatible manner with a best-effort migration. Its usage should be marked with '@kotlinx.coroutines.FlowPreview' or '@OptIn(kotlinx.coroutines.FlowPreview::class)' if you accept the drawback of relying on preview API
+w: file:///Users/mi/Downloads/AI/AmberAgent/android/app/src/main/java/app/amber/feature/ui/components/message/ChatMessageCouncilStep.kt:255:17 'fun ScrollableTabRow(selectedTabIndex: Int, modifier: Modifier = ..., containerColor: Color = ..., contentColor: Color = ..., edgePadding: Dp = ..., indicator: ComposableFunction1<List<TabPosition>, Unit> = ..., divider: ComposableFunction0<Unit> = ..., tabs: ComposableFunction0<Unit>): Unit' is deprecated. Replaced with PrimaryScrollableTabRow and SecondaryScrollableTabRow tab variants.
+w: file:///Users/mi/Downloads/AI/AmberAgent/android/app/src/main/java/app/amber/feature/ui/components/message/GeneratedImageCarousel.kt:376:38 Unnecessary safe call on a non-null receiver of type 'ClipDescription'.
+w: file:///Users/mi/Downloads/AI/AmberAgent/android/app/src/main/java/app/amber/feature/ui/components/message/GenerativeWidgetCard.kt:575:49 'var statusBarColor: Int' is deprecated. Deprecated in Java.
+w: file:///Users/mi/Downloads/AI/AmberAgent/android/app/src/main/java/app/amber/feature/ui/components/message/GenerativeWidgetCard.kt:576:53 'var navigationBarColor: Int' is deprecated. Deprecated in Java.
+w: file:///Users/mi/Downloads/AI/AmberAgent/android/app/src/main/java/app/amber/feature/ui/components/message/GenerativeWidgetCard.kt:588:20 'var statusBarColor: Int' is deprecated. Deprecated in Java.
+w: file:///Users/mi/Downloads/AI/AmberAgent/android/app/src/main/java/app/amber/feature/ui/components/message/GenerativeWidgetCard.kt:589:20 'var navigationBarColor: Int' is deprecated. Deprecated in Java.
+w: file:///Users/mi/Downloads/AI/AmberAgent/android/app/src/main/java/app/amber/feature/ui/components/message/GenerativeWidgetCard.kt:603:24 'var statusBarColor: Int' is deprecated. Deprecated in Java.
+w: file:///Users/mi/Downloads/AI/AmberAgent/android/app/src/main/java/app/amber/feature/ui/components/message/GenerativeWidgetCard.kt:604:24 'var navigationBarColor: Int' is deprecated. Deprecated in Java.
+w: file:///Users/mi/Downloads/AI/AmberAgent/android/app/src/main/java/app/amber/feature/ui/components/message/GenerativeWidgetCard.kt:1345:30 'var databaseEnabled: Boolean' is deprecated. Deprecated in Java.
+w: file:///Users/mi/Downloads/AI/AmberAgent/android/app/src/main/java/app/amber/feature/ui/components/message/GenerativeWidgetCard.kt:1348:30 'var allowFileAccessFromFileURLs: Boolean' is deprecated. Deprecated in Java.
+w: file:///Users/mi/Downloads/AI/AmberAgent/android/app/src/main/java/app/amber/feature/ui/components/message/GenerativeWidgetCard.kt:1349:30 'var allowUniversalAccessFromFileURLs: Boolean' is deprecated. Deprecated in Java.
+w: file:///Users/mi/Downloads/AI/AmberAgent/android/app/src/main/java/app/amber/feature/ui/components/richtext/Markdown.kt:139:5 'constructor(flavour: MarkdownFlavourDescriptor): MarkdownParser' is deprecated. Use constructor with CancellationToken.
+w: file:///Users/mi/Downloads/AI/AmberAgent/android/app/src/main/java/app/amber/feature/ui/components/richtext/Markdown.kt:1028:26 'fun buildMarkdownTreeFromString(text: String): ASTNode' is deprecated. Use the CharSequence overload.
+w: file:///Users/mi/Downloads/AI/AmberAgent/android/app/src/main/java/app/amber/feature/ui/components/richtext/Markdown.kt:3116:43 'fun buildMarkdownTreeFromString(text: String): ASTNode' is deprecated. Use the CharSequence overload.
+w: file:///Users/mi/Downloads/AI/AmberAgent/android/app/src/main/java/app/amber/feature/ui/components/richtext/MarkdownNew.kt:135:30 'constructor(flavour: MarkdownFlavourDescriptor): MarkdownParser' is deprecated. Use constructor with CancellationToken.
+w: file:///Users/mi/Downloads/AI/AmberAgent/android/app/src/main/java/app/amber/feature/ui/components/richtext/MarkdownNew.kt:163:23 'fun buildMarkdownTreeFromString(text: String): ASTNode' is deprecated. Use the CharSequence overload.
+w: file:///Users/mi/Downloads/AI/AmberAgent/android/app/src/main/java/app/amber/feature/ui/components/richtext/MarkdownToAnnotatedString.kt:661:52 Unnecessary non-null assertion (!!) on a non-null receiver of type 'HighlightTextColorPalette'.
+w: file:///Users/mi/Downloads/AI/AmberAgent/android/app/src/main/java/app/amber/feature/ui/components/ui/Tooltip.kt:18:44 'fun rememberTooltipPositionProvider(spacingBetweenTooltipAndAnchor: Dp = ...): PopupPositionProvider' is deprecated. Deprecated in favor of rememberTooltipPositionProvider API that takes a preferred positioning. Please use rememberTooltipPositionProvider with TooltipAnchorPosition.Above if this same behavior is desired.
+w: file:///Users/mi/Downloads/AI/AmberAgent/android/app/src/main/java/app/amber/feature/ui/components/workspace/WorkspaceFileSheet.kt:105:13 'fun TabRow(selectedTabIndex: Int, modifier: Modifier = ..., containerColor: Color = ..., contentColor: Color = ..., indicator: ComposableFunction1<List<TabPosition>, Unit> = ..., divider: ComposableFunction0<Unit> = ..., tabs: ComposableFunction0<Unit>): Unit' is deprecated. Replaced with PrimaryTabRow and SecondaryTabRow.
+w: file:///Users/mi/Downloads/AI/AmberAgent/android/app/src/main/java/app/amber/feature/ui/pages/board/DeepReadScreen.kt:629:49 'var statusBarColor: Int' is deprecated. Deprecated in Java.
+w: file:///Users/mi/Downloads/AI/AmberAgent/android/app/src/main/java/app/amber/feature/ui/pages/board/DeepReadScreen.kt:630:53 'var navigationBarColor: Int' is deprecated. Deprecated in Java.
+w: file:///Users/mi/Downloads/AI/AmberAgent/android/app/src/main/java/app/amber/feature/ui/pages/board/DeepReadScreen.kt:638:20 'var statusBarColor: Int' is deprecated. Deprecated in Java.
+w: file:///Users/mi/Downloads/AI/AmberAgent/android/app/src/main/java/app/amber/feature/ui/pages/board/DeepReadScreen.kt:639:20 'var navigationBarColor: Int' is deprecated. Deprecated in Java.
+w: file:///Users/mi/Downloads/AI/AmberAgent/android/app/src/main/java/app/amber/feature/ui/pages/board/DeepReadScreen.kt:656:24 'var statusBarColor: Int' is deprecated. Deprecated in Java.
+w: file:///Users/mi/Downloads/AI/AmberAgent/android/app/src/main/java/app/amber/feature/ui/pages/board/DeepReadScreen.kt:657:24 'var navigationBarColor: Int' is deprecated. Deprecated in Java.
+w: file:///Users/mi/Downloads/AI/AmberAgent/android/app/src/main/java/app/amber/feature/ui/pages/board/DeepReadStaticTemplateWebView.kt:147:14 'var allowFileAccessFromFileURLs: Boolean' is deprecated. Deprecated in Java.
+w: file:///Users/mi/Downloads/AI/AmberAgent/android/app/src/main/java/app/amber/feature/ui/pages/board/DeepReadStaticTemplateWebView.kt:148:14 'var allowUniversalAccessFromFileURLs: Boolean' is deprecated. Deprecated in Java.
+w: file:///Users/mi/Downloads/AI/AmberAgent/android/app/src/main/java/app/amber/feature/ui/pages/chat/ChatPage.kt:215:30 'fun currentWindowDpSize(): DpSize' is deprecated. Going to be removed in the next version. Prefer LocalWindowInfo instead.
+w: file:///Users/mi/Downloads/AI/AmberAgent/android/app/src/main/java/app/amber/feature/ui/pages/councilroom/CouncilRoomDevEntry.kt:42:30 Condition is always 'true'.
+w: file:///Users/mi/Downloads/AI/AmberAgent/android/app/src/main/java/app/amber/feature/ui/pages/miniapp/MiniAppRunnerPage.kt:154:49 'var statusBarColor: Int' is deprecated. Deprecated in Java.
+w: file:///Users/mi/Downloads/AI/AmberAgent/android/app/src/main/java/app/amber/feature/ui/pages/miniapp/MiniAppRunnerPage.kt:155:53 'var navigationBarColor: Int' is deprecated. Deprecated in Java.
+w: file:///Users/mi/Downloads/AI/AmberAgent/android/app/src/main/java/app/amber/feature/ui/pages/miniapp/MiniAppRunnerPage.kt:162:20 'var statusBarColor: Int' is deprecated. Deprecated in Java.
+w: file:///Users/mi/Downloads/AI/AmberAgent/android/app/src/main/java/app/amber/feature/ui/pages/miniapp/MiniAppRunnerPage.kt:163:20 'var navigationBarColor: Int' is deprecated. Deprecated in Java.
+w: file:///Users/mi/Downloads/AI/AmberAgent/android/app/src/main/java/app/amber/feature/ui/pages/miniapp/MiniAppRunnerPage.kt:178:24 'var statusBarColor: Int' is deprecated. Deprecated in Java.
+w: file:///Users/mi/Downloads/AI/AmberAgent/android/app/src/main/java/app/amber/feature/ui/pages/miniapp/MiniAppRunnerPage.kt:179:24 'var navigationBarColor: Int' is deprecated. Deprecated in Java.
+w: file:///Users/mi/Downloads/AI/AmberAgent/android/app/src/main/java/app/amber/feature/ui/pages/miniapp/MiniAppRunnerPage.kt:285:26 'var allowFileAccessFromFileURLs: Boolean' is deprecated. Deprecated in Java.
+w: file:///Users/mi/Downloads/AI/AmberAgent/android/app/src/main/java/app/amber/feature/ui/pages/miniapp/MiniAppRunnerPage.kt:286:26 'var allowUniversalAccessFromFileURLs: Boolean' is deprecated. Deprecated in Java.
+w: file:///Users/mi/Downloads/AI/AmberAgent/android/app/src/main/java/app/amber/feature/ui/pages/miniapp/MiniAppRunnerPage.kt:287:26 'var databaseEnabled: Boolean' is deprecated. Deprecated in Java.
+w: file:///Users/mi/Downloads/AI/AmberAgent/android/app/src/main/java/app/amber/feature/ui/pages/miniapp/MiniAppSourceEditor.kt:292:26 'var allowFileAccessFromFileURLs: Boolean' is deprecated. Deprecated in Java.
+w: file:///Users/mi/Downloads/AI/AmberAgent/android/app/src/main/java/app/amber/feature/ui/pages/miniapp/MiniAppSourceEditor.kt:293:26 'var allowUniversalAccessFromFileURLs: Boolean' is deprecated. Deprecated in Java.
+w: file:///Users/mi/Downloads/AI/AmberAgent/android/app/src/main/java/app/amber/feature/ui/pages/miniapp/MiniAppSourceEditor.kt:294:26 'var databaseEnabled: Boolean' is deprecated. Deprecated in Java.
+w: file:///Users/mi/Downloads/AI/AmberAgent/android/app/src/main/java/app/amber/feature/ui/pages/search/SearchVM.kt:184:24 Non-public primary constructor is exposed via the generated 'copy()' method of the 'data' class.
+
+The generated 'copy()' will change its visibility in future releases.
+
+To suppress the warning do one of the following:
+- Annotate the data class with the '@ConsistentCopyVisibility' annotation.
+- Use the '-Xconsistent-data-class-copy-visibility' compiler flag.
+- Annotate the data class with the '@ExposedCopyVisibility' annotation 
+  (Discouraged, but can be used to keep binary compatibility).
+
+To learn more, see the documentation of the '@ConsistentCopyVisibility' and '@ExposedCopyVisibility' annotations.
+
+This will become an error in language version 2.5. See https://youtrack.jetbrains.com/issue/KT-11914.
+w: file:///Users/mi/Downloads/AI/AmberAgent/android/app/src/main/java/app/amber/feature/ui/pages/sessionhome/SessionHomePage.kt:911:24 'fun rememberSwipeToDismissBoxState(initialValue: SwipeToDismissBoxValue = ..., confirmValueChange: (SwipeToDismissBoxValue) -> Boolean = ..., positionalThreshold: (Float) -> Float = ...): SwipeToDismissBoxState' is deprecated. confirmValueChange is deprecated without replacement. Rather than relying on a callback to veto state changes, the anchor set should not include disallowed anchors. See androidx.compose.foundation.samples.AnchoredDraggableDynamicAnchorsSample for an example of using dynamic anchors over confirmValueChange.
+w: file:///Users/mi/Downloads/AI/AmberAgent/android/app/src/main/java/app/amber/feature/ui/pages/synara/SynaraVM.kt:148:62 The corresponding parameter in the supertype 'WebSocketListener' is named 't'. This may cause problems when calling this function with named arguments.
+w: file:///Users/mi/Downloads/AI/AmberAgent/android/app/src/main/java/app/amber/feature/ui/pages/synara/SynaraWorkspacePage.kt:134:26 'var databaseEnabled: Boolean' is deprecated. Deprecated in Java.
+w: file:///Users/mi/Downloads/AI/AmberAgent/android/app/src/main/java/app/amber/feature/webmount/oauth/PendingOAuthStore.kt:6:8 'class EncryptedSharedPreferences : Any, SharedPreferences' is deprecated. Deprecated in Java.
+w: file:///Users/mi/Downloads/AI/AmberAgent/android/app/src/main/java/app/amber/feature/webmount/oauth/PendingOAuthStore.kt:7:8 'class MasterKey : Any' is deprecated. Deprecated in Java.
+w: file:///Users/mi/Downloads/AI/AmberAgent/android/app/src/main/java/app/amber/feature/webmount/oauth/PendingOAuthStore.kt:112:25 'class MasterKey : Any' is deprecated. Deprecated in Java.
+w: file:///Users/mi/Downloads/AI/AmberAgent/android/app/src/main/java/app/amber/feature/webmount/oauth/PendingOAuthStore.kt:112:35 'constructor(p0: Context): MasterKey.Builder' is deprecated. Deprecated in Java.
+w: file:///Users/mi/Downloads/AI/AmberAgent/android/app/src/main/java/app/amber/feature/webmount/oauth/PendingOAuthStore.kt:113:27 'class MasterKey : Any' is deprecated. Deprecated in Java.
+w: file:///Users/mi/Downloads/AI/AmberAgent/android/app/src/main/java/app/amber/feature/webmount/oauth/PendingOAuthStore.kt:113:37 'enum class KeyScheme : Enum<MasterKey.KeyScheme!>' is deprecated. Deprecated in Java.
+w: file:///Users/mi/Downloads/AI/AmberAgent/android/app/src/main/java/app/amber/feature/webmount/oauth/PendingOAuthStore.kt:115:9 'class EncryptedSharedPreferences : Any, SharedPreferences' is deprecated. Deprecated in Java.
+w: file:///Users/mi/Downloads/AI/AmberAgent/android/app/src/main/java/app/amber/feature/webmount/oauth/PendingOAuthStore.kt:119:13 'class EncryptedSharedPreferences : Any, SharedPreferences' is deprecated. Deprecated in Java.
+w: file:///Users/mi/Downloads/AI/AmberAgent/android/app/src/main/java/app/amber/feature/webmount/oauth/PendingOAuthStore.kt:119:40 'enum class PrefKeyEncryptionScheme : Enum<EncryptedSharedPreferences.PrefKeyEncryptionScheme!>' is deprecated. Deprecated in Java.
+w: file:///Users/mi/Downloads/AI/AmberAgent/android/app/src/main/java/app/amber/feature/webmount/oauth/PendingOAuthStore.kt:120:13 'class EncryptedSharedPreferences : Any, SharedPreferences' is deprecated. Deprecated in Java.
+w: file:///Users/mi/Downloads/AI/AmberAgent/android/app/src/main/java/app/amber/feature/webmount/oauth/PendingOAuthStore.kt:120:40 'enum class PrefValueEncryptionScheme : Enum<EncryptedSharedPreferences.PrefValueEncryptionScheme!>' is deprecated. Deprecated in Java.
+w: file:///Users/mi/Downloads/AI/AmberAgent/android/app/src/main/java/app/amber/feature/webmount/oauth/WebMountOAuthTokenStore.kt:6:8 'class EncryptedSharedPreferences : Any, SharedPreferences' is deprecated. Deprecated in Java.
+w: file:///Users/mi/Downloads/AI/AmberAgent/android/app/src/main/java/app/amber/feature/webmount/oauth/WebMountOAuthTokenStore.kt:7:8 'class MasterKey : Any' is deprecated. Deprecated in Java.
+w: file:///Users/mi/Downloads/AI/AmberAgent/android/app/src/main/java/app/amber/feature/webmount/oauth/WebMountOAuthTokenStore.kt:181:25 'class MasterKey : Any' is deprecated. Deprecated in Java.
+w: file:///Users/mi/Downloads/AI/AmberAgent/android/app/src/main/java/app/amber/feature/webmount/oauth/WebMountOAuthTokenStore.kt:181:35 'constructor(p0: Context): MasterKey.Builder' is deprecated. Deprecated in Java.
+w: file:///Users/mi/Downloads/AI/AmberAgent/android/app/src/main/java/app/amber/feature/webmount/oauth/WebMountOAuthTokenStore.kt:182:27 'class MasterKey : Any' is deprecated. Deprecated in Java.
+w: file:///Users/mi/Downloads/AI/AmberAgent/android/app/src/main/java/app/amber/feature/webmount/oauth/WebMountOAuthTokenStore.kt:182:37 'enum class KeyScheme : Enum<MasterKey.KeyScheme!>' is deprecated. Deprecated in Java.
+w: file:///Users/mi/Downloads/AI/AmberAgent/android/app/src/main/java/app/amber/feature/webmount/oauth/WebMountOAuthTokenStore.kt:184:9 'class EncryptedSharedPreferences : Any, SharedPreferences' is deprecated. Deprecated in Java.
+w: file:///Users/mi/Downloads/AI/AmberAgent/android/app/src/main/java/app/amber/feature/webmount/oauth/WebMountOAuthTokenStore.kt:188:13 'class EncryptedSharedPreferences : Any, SharedPreferences' is deprecated. Deprecated in Java.
+w: file:///Users/mi/Downloads/AI/AmberAgent/android/app/src/main/java/app/amber/feature/webmount/oauth/WebMountOAuthTokenStore.kt:188:40 'enum class PrefKeyEncryptionScheme : Enum<EncryptedSharedPreferences.PrefKeyEncryptionScheme!>' is deprecated. Deprecated in Java.
+w: file:///Users/mi/Downloads/AI/AmberAgent/android/app/src/main/java/app/amber/feature/webmount/oauth/WebMountOAuthTokenStore.kt:189:13 'class EncryptedSharedPreferences : Any, SharedPreferences' is deprecated. Deprecated in Java.
+w: file:///Users/mi/Downloads/AI/AmberAgent/android/app/src/main/java/app/amber/feature/webmount/oauth/WebMountOAuthTokenStore.kt:189:40 'enum class PrefValueEncryptionScheme : Enum<EncryptedSharedPreferences.PrefValueEncryptionScheme!>' is deprecated. Deprecated in Java.
+w: file:///Users/mi/Downloads/AI/AmberAgent/android/app/src/main/java/app/amber/feature/webmount/primitives/WebViewPool.kt:194:9 'var databaseEnabled: Boolean' is deprecated. Deprecated in Java.
+w: file:///Users/mi/Downloads/AI/AmberAgent/android/app/src/main/java/app/amber/feature/webmount/primitives/WebViewPool.kt:265:35 'fun injectFeishuCompatibility(view: WebView?, url: String?): Unit' is deprecated. Use WebViewCompatibility.injectFallback; kept for older WebMount call sites.
+w: file:///Users/mi/Downloads/AI/AmberAgent/android/app/src/main/java/app/amber/feature/webmount/primitives/WebViewPool.kt:288:39 'fun injectFeishuCompatibility(view: WebView?, url: String?): Unit' is deprecated. Use WebViewCompatibility.injectFallback; kept for older WebMount call sites.
+w: file:///Users/mi/Downloads/AI/AmberAgent/android/app/src/main/java/app/amber/feature/webmount/profile/ProfileRegistry.kt:6:8 'class EncryptedSharedPreferences : Any, SharedPreferences' is deprecated. Deprecated in Java.
+w: file:///Users/mi/Downloads/AI/AmberAgent/android/app/src/main/java/app/amber/feature/webmount/profile/ProfileRegistry.kt:7:8 'class MasterKey : Any' is deprecated. Deprecated in Java.
+w: file:///Users/mi/Downloads/AI/AmberAgent/android/app/src/main/java/app/amber/feature/webmount/profile/ProfileRegistry.kt:235:25 'class MasterKey : Any' is deprecated. Deprecated in Java.
+w: file:///Users/mi/Downloads/AI/AmberAgent/android/app/src/main/java/app/amber/feature/webmount/profile/ProfileRegistry.kt:235:35 'constructor(p0: Context): MasterKey.Builder' is deprecated. Deprecated in Java.
+w: file:///Users/mi/Downloads/AI/AmberAgent/android/app/src/main/java/app/amber/feature/webmount/profile/ProfileRegistry.kt:236:27 'class MasterKey : Any' is deprecated. Deprecated in Java.
+w: file:///Users/mi/Downloads/AI/AmberAgent/android/app/src/main/java/app/amber/feature/webmount/profile/ProfileRegistry.kt:236:37 'enum class KeyScheme : Enum<MasterKey.KeyScheme!>' is deprecated. Deprecated in Java.
+w: file:///Users/mi/Downloads/AI/AmberAgent/android/app/src/main/java/app/amber/feature/webmount/profile/ProfileRegistry.kt:238:9 'class EncryptedSharedPreferences : Any, SharedPreferences' is deprecated. Deprecated in Java.
+w: file:///Users/mi/Downloads/AI/AmberAgent/android/app/src/main/java/app/amber/feature/webmount/profile/ProfileRegistry.kt:242:13 'class EncryptedSharedPreferences : Any, SharedPreferences' is deprecated. Deprecated in Java.
+w: file:///Users/mi/Downloads/AI/AmberAgent/android/app/src/main/java/app/amber/feature/webmount/profile/ProfileRegistry.kt:242:40 'enum class PrefKeyEncryptionScheme : Enum<EncryptedSharedPreferences.PrefKeyEncryptionScheme!>' is deprecated. Deprecated in Java.
+w: file:///Users/mi/Downloads/AI/AmberAgent/android/app/src/main/java/app/amber/feature/webmount/profile/ProfileRegistry.kt:243:13 'class EncryptedSharedPreferences : Any, SharedPreferences' is deprecated. Deprecated in Java.
+w: file:///Users/mi/Downloads/AI/AmberAgent/android/app/src/main/java/app/amber/feature/webmount/profile/ProfileRegistry.kt:243:40 'enum class PrefValueEncryptionScheme : Enum<EncryptedSharedPreferences.PrefValueEncryptionScheme!>' is deprecated. Deprecated in Java.
+
+> Task :app:compileDebugJavaWithJavac UP-TO-DATE
+> Task :app:processDebugJavaRes
+> Task :app:bundleDebugClassesToCompileJar
+> Task :app:bundleDebugClassesToRuntimeJar
+> Task :app:kspDebugUnitTestKotlin
+> Task :app:compileDebugUnitTestKotlin
+> Task :app:compileDebugUnitTestJavaWithJavac NO-SOURCE
+> Task :app:processDebugUnitTestJavaRes
+> Task :app:testDebugUnitTest
+
+BUILD SUCCESSFUL in 1m 10s
+637 actionable tasks: 28 executed, 609 up-to-date
+Consider enabling configuration cache to speed up this build: https://docs.gradle.org/9.4.1/userguide/configuration_cache_enabling.html

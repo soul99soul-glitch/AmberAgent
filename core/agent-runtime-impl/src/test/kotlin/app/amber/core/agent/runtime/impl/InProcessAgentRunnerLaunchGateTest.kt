@@ -18,7 +18,9 @@ import app.amber.core.agent.runtime.RunTransitionResult
 import app.amber.core.agent.runtime.TraceSpanRecord
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.test.StandardTestDispatcher
@@ -27,9 +29,13 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.Serializable
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicReference
+import kotlin.coroutines.CoroutineContext
+import kotlin.coroutines.EmptyCoroutineContext
 
 /**
  * Pinning tests for the launch gate (P0 lifecycle gating): the handler runs
@@ -141,6 +147,7 @@ class InProcessAgentRunnerLaunchGateTest {
         store: AgentEventStore,
         scope: CoroutineScope,
         awaitColdStartRecovery: suspend () -> Unit = {},
+        launchContext: () -> CoroutineContext = { EmptyCoroutineContext },
         onInvoke: suspend (invocation: Int) -> FakeArtifact = { FakeArtifact("ok") },
     ): Harness {
         val invocations = AtomicInteger(0)
@@ -166,9 +173,74 @@ class InProcessAgentRunnerLaunchGateTest {
                 store,
                 awaitColdStartRecovery = awaitColdStartRecovery,
                 scope = scope,
+                launchContext = launchContext,
             ),
             invocations,
         )
+    }
+
+    @Test
+    fun `launch captures context before a queued handler executes`() = runTest {
+        val store = RecordingEventStore()
+        val runnerScope = CoroutineScope(SupervisorJob() + StandardTestDispatcher(testScheduler))
+        val capturedAtLaunch = AtomicReference<String?>()
+        val observedByHandler = AtomicReference<String?>()
+        val harness = runnerWithAgent(
+            store = store,
+            scope = runnerScope,
+            launchContext = {
+                capturedAtLaunch.set("before-queued-start")
+                CoroutineName("captured-launch")
+            },
+            onInvoke = {
+                observedByHandler.set(currentCoroutineContext()[CoroutineName]?.name)
+                FakeArtifact("ok")
+            },
+        )
+
+        harness.runner.launch(descriptor.id, FakeInput("v")).getOrThrow()
+
+        // StandardTestDispatcher queues the activation; the launch hook must
+        // still run synchronously on the caller's dispatch path.
+        assertEquals("before-queued-start", capturedAtLaunch.get())
+        assertNull(observedByHandler.get())
+        assertEquals(0, harness.invocations.get())
+
+        advanceUntilIdle()
+
+        assertEquals("captured-launch", observedByHandler.get())
+        assertEquals(1, harness.invocations.get())
+    }
+
+    @Test
+    fun `handler artifact survives a domain completion before generic CAS`() = runTest {
+        val store = RecordingEventStore()
+        val runId = AgentRunId("domain-completed-run")
+        val runnerScope = CoroutineScope(SupervisorJob() + StandardTestDispatcher(testScheduler))
+        val harness = runnerWithAgent(
+            store = store,
+            scope = runnerScope,
+            onInvoke = {
+                // Simulate ChatService publishing its typed terminal after
+                // its final checkpoint, before the generic runner CAS.
+                assertTrue(
+                    store.transitionRun(
+                        runId,
+                        RunStatus.LIVE_STATES,
+                        RunStatus.COMPLETED,
+                        "domain_completed",
+                    ) is RunTransitionResult.Applied
+                )
+                FakeArtifact("handler-artifact")
+            },
+        )
+
+        harness.runner.launch(descriptor.id, FakeInput("v"), requestedRunId = runId).getOrThrow()
+        advanceUntilIdle()
+
+        val snapshot = harness.runner.observe(runId).value
+        assertEquals(RunStatus.COMPLETED, snapshot.status)
+        assertEquals(FakeArtifact("handler-artifact"), snapshot.artifact)
     }
 
     private fun runRecord(runId: AgentRunId, status: RunStatus) = AgentRunRecord(

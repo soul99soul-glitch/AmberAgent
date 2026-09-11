@@ -234,6 +234,27 @@ class ThreadGraphManagerTest {
     }
 
     @Test
+    fun startNodeUsesGenerationUpdateTimestampForFollowupRecovery() = runBlocking {
+        val store = FakeThreadGraphStore()
+        val manager = manager(store)
+        val run = SubAgentRun(
+            runId = "thread_1",
+            parentConversationId = kotlin.uuid.Uuid.random(),
+            definition = definition,
+            task = task,
+            status = SubAgentRunStatus.RUNNING,
+            transcriptPath = "/tmp/thread_1.jsonl",
+            startedAtMs = 1_000,
+            updatedAtMs = 9_000,
+        )
+
+        manager.startNode(run, rootRunId = "parent_run_1")
+
+        assertEquals(1_000L, store.nodes["thread_1"]?.startedAtMs)
+        assertEquals(9_000L, store.nodes["thread_1"]?.updatedAtMs)
+    }
+
+    @Test
     fun parentChainAllowsGrandchildAndRejectsGreatGrandchild() = runBlocking {
         val store = FakeThreadGraphStore()
         val manager = manager(store)

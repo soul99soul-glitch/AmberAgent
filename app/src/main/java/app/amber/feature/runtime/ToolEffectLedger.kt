@@ -4,6 +4,7 @@ import app.amber.agent.data.db.dao.RunTerminalDAO
 import app.amber.agent.data.db.dao.ToolEffectDAO
 import app.amber.agent.data.db.entity.ToolEffectEntity
 import app.amber.ai.ui.UIMessagePart
+import app.amber.core.sync.core.SyncRestoreWriteGate
 import app.amber.feature.tools.ToolEffectClass
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -197,6 +198,7 @@ class RoomToolEffectLedger(
     private val runTerminalDao: RunTerminalDAO,
     private val json: Json,
     private val now: () -> Long = System::currentTimeMillis,
+    private val restoreWriteGate: SyncRestoreWriteGate? = null,
 ) : ToolEffectLedger {
 
     override suspend fun prepare(
@@ -207,7 +209,7 @@ class RoomToolEffectLedger(
         input: String,
         effectClass: ToolEffectClass,
         messagePersistenceCursor: String?,
-    ): ToolEffect {
+    ): ToolEffect = withDurableWrite {
         val argsDigest = argsDigest(input)
         val rows = dao.getByToolCallId(toolCallId)
         // Protocol-mismatch fail-closed check: any row already bound to this
@@ -231,13 +233,13 @@ class RoomToolEffectLedger(
                 it.status == ToolEffectStatus.FINISHED.name &&
                 it.toolName == toolName &&
                 it.argsDigest == argsDigest
-        }?.let { return ToolEffect.from(it) }
+        }?.let { return@withDurableWrite ToolEffect.from(it) }
         // Same run: the previous prepare (approval round) is reused.
         rows.filter { it.isReusable() }
             .firstOrNull {
                 it.runId == runId && it.toolName == toolName && it.argsDigest == argsDigest
             }
-            ?.let { return ToolEffect.from(it) }
+            ?.let { return@withDurableWrite ToolEffect.from(it) }
         // Same conversation, earlier run (crash then resume with a new runId):
         // rebind the effect to the current run instead of duplicating it.
         val conversationId = runTerminalDao.getByRunId(runId)?.conversationId
@@ -257,7 +259,7 @@ class RoomToolEffectLedger(
                     updatedAtMs = now(),
                 )
                 dao.upsert(rebound)
-                return ToolEffect.from(rebound)
+                return@withDurableWrite ToolEffect.from(rebound)
             }
         }
         val nowMs = now()
@@ -281,7 +283,7 @@ class RoomToolEffectLedger(
             updatedAtMs = nowMs,
         )
         dao.upsert(entity)
-        return ToolEffect.from(entity)
+        ToolEffect.from(entity)
     }
 
     private fun protocolMismatch(
@@ -317,96 +319,117 @@ class RoomToolEffectLedger(
         dao.listOutcomeUnknown().map(ToolEffect::from)
 
     override suspend fun markStarted(effectId: String, approvalDigest: String) {
-        val entity = dao.getByEffectId(effectId) ?: return
-        if (entity.status == ToolEffectStatus.STARTED.name) return
-        if (entity.status == ToolEffectStatus.FINISHED.name) return
-        dao.upsert(
-            entity.copy(
-                status = ToolEffectStatus.STARTED.name,
-                approvalDigest = approvalDigest,
-                updatedAtMs = now(),
+        withDurableWrite {
+            val entity = dao.getByEffectId(effectId) ?: return@withDurableWrite
+            if (entity.status == ToolEffectStatus.STARTED.name) return@withDurableWrite
+            if (entity.status == ToolEffectStatus.FINISHED.name) return@withDurableWrite
+            dao.upsert(
+                entity.copy(
+                    status = ToolEffectStatus.STARTED.name,
+                    approvalDigest = approvalDigest,
+                    updatedAtMs = now(),
+                )
             )
-        )
+        }
     }
 
     override suspend fun finish(effectId: String, output: List<UIMessagePart>) {
-        val entity = dao.getByEffectId(effectId) ?: return
-        val payload = runCatching { json.encodeToString(output) }.getOrNull()
-        dao.upsert(
-            entity.copy(
-                status = ToolEffectStatus.FINISHED.name,
-                finishedAtMs = now(),
-                resultSummary = outputSummary(output),
-                resultPayload = payload,
-                errorCategory = null,
-                updatedAtMs = now(),
+        withDurableWrite {
+            val entity = dao.getByEffectId(effectId) ?: return@withDurableWrite
+            val payload = runCatching { json.encodeToString(output) }.getOrNull()
+            dao.upsert(
+                entity.copy(
+                    status = ToolEffectStatus.FINISHED.name,
+                    finishedAtMs = now(),
+                    resultSummary = outputSummary(output),
+                    resultPayload = payload,
+                    errorCategory = null,
+                    updatedAtMs = now(),
+                )
             )
-        )
+        }
     }
 
     override suspend fun markResultPersisted(effectId: String) {
-        val entity = dao.getByEffectId(effectId) ?: return
-        if (entity.status != ToolEffectStatus.FINISHED.name && entity.status != ToolEffectStatus.FAILED.name) return
-        if (entity.resultPayload == null) return
-        dao.upsert(
-            entity.copy(
-                resultPayload = null,
-                updatedAtMs = now(),
+        withDurableWrite {
+            val entity = dao.getByEffectId(effectId) ?: return@withDurableWrite
+            if (entity.status != ToolEffectStatus.FINISHED.name && entity.status != ToolEffectStatus.FAILED.name) {
+                return@withDurableWrite
+            }
+            if (entity.resultPayload == null) return@withDurableWrite
+            dao.upsert(
+                entity.copy(
+                    resultPayload = null,
+                    updatedAtMs = now(),
+                )
             )
-        )
+        }
     }
 
     override suspend fun deleteTerminalOlderThan(maxAgeMs: Long): Int {
-        val cutoffMs = now() - maxAgeMs
-        return dao.deleteTerminalOlderThan(
-            statuses = listOf(
-                ToolEffectStatus.FINISHED.name,
-                ToolEffectStatus.FAILED.name,
-                ToolEffectStatus.RECONCILED.name,
-            ),
-            cutoffMs = cutoffMs,
-        )
+        return withDurableWrite {
+            val cutoffMs = now() - maxAgeMs
+            dao.deleteTerminalOlderThan(
+                statuses = listOf(
+                    ToolEffectStatus.FINISHED.name,
+                    ToolEffectStatus.FAILED.name,
+                    ToolEffectStatus.RECONCILED.name,
+                ),
+                cutoffMs = cutoffMs,
+            )
+        }
     }
 
     override suspend fun fail(effectId: String, errorCategory: String, output: List<UIMessagePart>) {
-        val entity = dao.getByEffectId(effectId) ?: return
-        val payload = runCatching { json.encodeToString(output) }.getOrNull()
-        dao.upsert(
-            entity.copy(
-                status = ToolEffectStatus.FAILED.name,
-                finishedAtMs = now(),
-                resultSummary = outputSummary(output),
-                resultPayload = payload,
-                errorCategory = errorCategory,
-                updatedAtMs = now(),
+        withDurableWrite {
+            val entity = dao.getByEffectId(effectId) ?: return@withDurableWrite
+            val payload = runCatching { json.encodeToString(output) }.getOrNull()
+            dao.upsert(
+                entity.copy(
+                    status = ToolEffectStatus.FAILED.name,
+                    finishedAtMs = now(),
+                    resultSummary = outputSummary(output),
+                    resultPayload = payload,
+                    errorCategory = errorCategory,
+                    updatedAtMs = now(),
+                )
             )
-        )
+        }
     }
 
     override suspend fun markOutcomeUnknown(effectId: String, errorCategory: String) {
-        val entity = dao.getByEffectId(effectId) ?: return
-        dao.upsert(
-            entity.copy(
-                status = ToolEffectStatus.OUTCOME_UNKNOWN.name,
-                errorCategory = errorCategory,
-                updatedAtMs = now(),
+        withDurableWrite {
+            val entity = dao.getByEffectId(effectId) ?: return@withDurableWrite
+            dao.upsert(
+                entity.copy(
+                    status = ToolEffectStatus.OUTCOME_UNKNOWN.name,
+                    errorCategory = errorCategory,
+                    updatedAtMs = now(),
+                )
             )
-        )
+        }
     }
 
     override suspend fun reconcile(effectId: String, retry: Boolean, abandonOutput: List<UIMessagePart>) {
-        val entity = dao.getByEffectId(effectId) ?: return
-        val nowMs = now()
-        dao.upsert(
-            entity.copy(
-                status = ToolEffectStatus.RECONCILED.name,
-                finishedAtMs = if (retry) null else nowMs,
-                resultSummary = if (retry) null else outputSummary(abandonOutput),
-                resultPayload = if (retry) null else runCatching { json.encodeToString(abandonOutput) }.getOrNull(),
-                errorCategory = if (retry) null else "abandoned",
-                updatedAtMs = nowMs,
+        withDurableWrite {
+            val entity = dao.getByEffectId(effectId) ?: return@withDurableWrite
+            val nowMs = now()
+            dao.upsert(
+                entity.copy(
+                    status = ToolEffectStatus.RECONCILED.name,
+                    finishedAtMs = if (retry) null else nowMs,
+                    resultSummary = if (retry) null else outputSummary(abandonOutput),
+                    resultPayload = if (retry) null else runCatching { json.encodeToString(abandonOutput) }.getOrNull(),
+                    errorCategory = if (retry) null else "abandoned",
+                    updatedAtMs = nowMs,
+                )
             )
-        )
+        }
+    }
+
+    private suspend fun <T> withDurableWrite(block: suspend () -> T): T {
+        val gate = restoreWriteGate
+        return if (gate == null) block() else gate.withCurrentWriterOrCancel(block)
     }
 
     private fun outputSummary(output: List<UIMessagePart>): String? {

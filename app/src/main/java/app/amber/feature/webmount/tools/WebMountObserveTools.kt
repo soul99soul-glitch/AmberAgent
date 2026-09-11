@@ -12,6 +12,7 @@ import app.amber.ai.core.Tool
 import app.amber.ai.ui.UIMessagePart
 import app.amber.core.agent.utils.long
 import app.amber.core.agent.utils.requiredString
+import kotlinx.coroutines.CancellationException
 
 internal fun createObserveTool(deps: WebMountDeps): Tool = Tool(
     name = "wm_observe",
@@ -35,40 +36,59 @@ internal fun createObserveTool(deps: WebMountDeps): Tool = Tool(
     execute = { input ->
         deps.track("wm_observe", "WebMount 观察", input) {
             val sessionId = input.requiredString("session_id")
-            val handle = deps.pool.peek(sessionId) ?: error("session not found: $sessionId")
-            val args = buildJsonObject {
-                put("max_text_chars", (input.long("max_text_chars") ?: 12_000L).coerceIn(1_000L, 60_000L))
-                put("max_nodes", (input.long("max_nodes") ?: 80L).coerceIn(1L, 300L))
-                put("max_visual_candidates", (input.long("max_visual_candidates") ?: 30L).coerceIn(0L, 120L))
-            }
-            val state = handle.callBridge("semantic_state", buildJsonObject {}, timeoutMs = 3_000L)
-            val cachedCandidate = WebMountPageSnapshotCache.get(sessionId, "observe", state, args)
-            val restoredRefs = cachedCandidate?.let { observed ->
-                runCatching {
-                    handle.callBridge(
-                        "restore_snapshot_refs",
-                        observed as? JsonObject ?: buildJsonObject {},
-                        timeoutMs = 3_000L,
-                    )
-                }.getOrNull()
-            }
-            val cached = cachedCandidate?.takeIf { restoredRefs?.intField("missing") == 0 }
-            val observed = cached ?: run {
-                handle.callBridge("observe", args, timeoutMs = 12_000L).also {
-                    WebMountPageSnapshotCache.put(sessionId, "observe", state, it, args)
+            deps.withAgentSession(input, sessionId) { lease ->
+                val handle = lease.handle
+                val dispatchWithLease = deps.dispatchWithLease(input, lease)
+                val args = buildJsonObject {
+                    put("max_text_chars", (input.long("max_text_chars") ?: 12_000L).coerceIn(1_000L, 60_000L))
+                    put("max_nodes", (input.long("max_nodes") ?: 80L).coerceIn(1L, 300L))
+                    put("max_visual_candidates", (input.long("max_visual_candidates") ?: 30L).coerceIn(0L, 120L))
                 }
+                val state = handle.callBridge(
+                    "semantic_state",
+                    buildJsonObject {},
+                    timeoutMs = 3_000L,
+                    dispatchWithLease = dispatchWithLease,
+                )
+                val cachedCandidate = WebMountPageSnapshotCache.get(sessionId, "observe", state, args)
+                val restoredRefs = cachedCandidate?.let { observed ->
+                    try {
+                        handle.callBridge(
+                            "restore_snapshot_refs",
+                            observed as? JsonObject ?: buildJsonObject {},
+                            timeoutMs = 3_000L,
+                            dispatchWithLease = dispatchWithLease,
+                        )
+                    } catch (cancel: CancellationException) {
+                        throw cancel
+                    } catch (_: Throwable) {
+                        null
+                    }
+                }
+                val cached = cachedCandidate?.takeIf { restoredRefs?.intField("missing") == 0 }
+                val observed = cached ?: run {
+                    handle.callBridge(
+                        "observe",
+                        args,
+                        timeoutMs = 12_000L,
+                        dispatchWithLease = dispatchWithLease,
+                    ).also {
+                        WebMountPageSnapshotCache.put(sessionId, "observe", state, it, args)
+                    }
+                }
+                val currentUrl = handle.loadState.value.currentUrl
+                val networkMax = (input.long("network_max") ?: 50L).coerceIn(0L, 200L).toInt()
+                val payload = buildJsonObject {
+                    put("session_id", sessionId)
+                    put("cached", cached != null)
+                    restoredRefs?.let { put("ref_restore", it) }
+                    put("network_coverage", handle.bridgeInjectionCoverage)
+                    put("observation", observed)
+                    put("network", handle.networkLog.inspect(currentUrl, networkMax))
+                    putWebMountWindowState(handle)
+                }
+                listOf(UIMessagePart.Text(payload.toString()))
             }
-            val currentUrl = handle.loadState.value.currentUrl
-            val networkMax = (input.long("network_max") ?: 50L).coerceIn(0L, 200L).toInt()
-            val payload = buildJsonObject {
-                put("session_id", sessionId)
-                put("cached", cached != null)
-                restoredRefs?.let { put("ref_restore", it) }
-                put("network_coverage", handle.bridgeInjectionCoverage)
-                put("observation", observed)
-                put("network", handle.networkLog.inspect(currentUrl, networkMax))
-            }
-            listOf(UIMessagePart.Text(payload.toString()))
         }
     },
 )

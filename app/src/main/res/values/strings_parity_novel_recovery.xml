@@ -1,0 +1,5 @@
+<resources>
+    <string name="parity_novel_completed">Batch completed · %1$d / %2$d chapters</string>
+    <string name="parity_novel_cancelled">Batch cancelled · %1$d / %2$d chapters retained</string>
+    <string name="parity_novel_unreadable_jobs">Some batch records cannot be read and will not run. Original files were retained: %1$s</string>
+</resources>

@@ -2,6 +2,7 @@ package app.amber.feature.webmount.tools
 
 import android.app.Application
 import app.amber.feature.runtime.AgentToolActivityStore
+import app.amber.feature.webmount.primitives.WebMountSessionOwner
 import app.amber.feature.webmount.primitives.WebViewPool
 import app.amber.feature.webmount.profile.HostShimRegistry
 import app.amber.feature.webmount.profile.ProfileBridge
@@ -29,10 +30,12 @@ class WebMountSignedFetchToolTest {
                 override fun load(): List<Pair<String, String>> = emptyList()
             },
         )
+        val pool = WebViewPool(context)
         val tool = createSignedFetchTool(
             deps = WebMountDeps(
-                pool = WebViewPool(context),
+                pool = pool,
                 activityStore = AgentToolActivityStore(),
+                owner = WebMountSessionOwner(context, pool),
                 context = context,
             ),
             profileRegistry = profileRegistry,

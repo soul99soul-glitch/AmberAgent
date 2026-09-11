@@ -1,6 +1,5 @@
 package app.amber.feature.ui.pages.sessionhome
 
-import androidx.activity.ComponentActivity
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
@@ -26,11 +25,16 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.SwipeToDismissBox
 import androidx.compose.material3.SwipeToDismissBoxDefaults
 import androidx.compose.material3.SwipeToDismissBoxState
@@ -39,7 +43,11 @@ import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -47,21 +55,22 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.paging.LoadState
-import androidx.paging.compose.collectAsLazyPagingItems
-import androidx.paging.compose.itemKey
 import app.amber.agent.R
 import app.amber.agent.Screen
 import app.amber.core.model.AMBER_AGENT_ID
 import app.amber.core.model.Conversation
 import app.amber.core.repository.ConversationRepository
+import app.amber.core.sync.core.SyncRestoreWriteEpoch
+import app.amber.core.sync.core.SyncRestoreWriteGate
 import app.amber.core.settings.Settings
 import app.amber.core.settings.findModelById
 import app.amber.core.settings.prefs.SettingsAggregator
@@ -71,6 +80,7 @@ import app.amber.feature.modelcouncil.toCouncilParticipant
 import app.amber.feature.ui.components.ui.UIAvatar
 import app.amber.feature.ui.context.LocalNavController
 import app.amber.feature.ui.context.LocalSettings
+import app.amber.feature.ui.context.LocalToaster
 import app.amber.feature.ui.theme.JetBrainsMonoFamily
 import app.amber.feature.ui.theme.LocalAmberTokens
 import app.amber.feature.ui.theme.LocalAmberType
@@ -83,7 +93,6 @@ import java.time.ZoneId
 import kotlin.uuid.Uuid
 import kotlinx.coroutines.launch
 import androidx.compose.material3.Text
-import app.amber.feature.ui.pages.chat.ChatDrawerVM
 import com.composables.icons.lucide.Lucide
 import com.composables.icons.lucide.BookOpenText
 import com.composables.icons.lucide.MessageCircle
@@ -95,12 +104,12 @@ import com.composables.icons.lucide.Grid2x2
 import com.composables.icons.lucide.Pen
 import com.composables.icons.lucide.Pin
 import com.composables.icons.lucide.Search
+import com.composables.icons.lucide.ScanSearch
 import com.composables.icons.lucide.Settings
+import com.dokar.sonner.ToastType
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import org.koin.androidx.compose.koinViewModel
 import org.koin.compose.koinInject
-import app.amber.feature.ui.context.LocalToaster
-import com.dokar.sonner.ToastType
 import kotlinx.coroutines.CancellationException
 
 /**
@@ -111,32 +120,47 @@ import kotlinx.coroutines.CancellationException
  *   Scrollable list: flat search field + feature rail (5 entries) + session rows
  *   FAB (bottom-end): new conversation
  *
- * The session list itself pages from [ChatDrawerVM] (activity-scoped, shared with the
- * chat drawer); delete / pin / title / settings actions go through [SessionHomeVM].
+ * The session list observes persisted conversation summaries; the home search field
+ * filters those summaries locally while the full message search remains a separate route.
  */
 @Composable
 fun SessionHomePage() {
-    val context = LocalContext.current
-    val activity = context as ComponentActivity
     val navController = LocalNavController.current
     val settings = LocalSettings.current
     val tokens = LocalAmberTokens.current
     val toaster = LocalToaster.current
     val vm: SessionHomeVM = koinViewModel()
-    val listVm: ChatDrawerVM = koinViewModel(viewModelStoreOwner = activity)
-
-    val conversations = listVm.conversations.collectAsLazyPagingItems()
+    val conversations = vm.conversations.collectAsStateWithLifecycle().value
+    val conversationsLoaded = vm.conversationsLoaded.collectAsStateWithLifecycle().value
+    val hasConversationError = vm.hasConversationError.collectAsStateWithLifecycle().value
+    var homeSearchQuery by rememberSaveable { mutableStateOf("") }
+    var homeSearchExpanded by rememberSaveable { mutableStateOf(false) }
+    val homeSearchFocusRequester = remember { FocusRequester() }
+    val visibleConversations = filterHomeConversations(
+        conversations = conversations,
+        query = homeSearchQuery,
+        untitledLabel = stringResource(R.string.parity_home_new_conversation),
+    )
     val continueCandidates = vm.continueCandidates.collectAsStateWithLifecycle().value
+    val hasContinueError = vm.hasContinueError.collectAsStateWithLifecycle().value
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
+    val operationError = stringResource(R.string.error_title_operation)
+
+    LaunchedEffect(homeSearchExpanded) {
+        if (homeSearchExpanded) {
+            homeSearchFocusRequester.requestFocus()
+        }
+    }
 
     // Council Room: 首页没有「当前会话」，每次点议会现开一个新会话承载（council_state
     // 以 UPDATE 写在会话行上，行不存在房间会丢，故必须先落库；开房失败则回收占位会话）。
     val councilRoomManager: CouncilRoomManager = koinInject()
     val settingsStore: SettingsAggregator = koinInject()
     val conversationRepo: ConversationRepository = koinInject()
+    val restoreWriteGate: SyncRestoreWriteGate = koinInject()
     val openCouncilRoom: () -> Unit = {
-        scope.launch {
+        scope.launch(SyncRestoreWriteEpoch(restoreWriteGate.currentEpoch())) {
             val targetConversationId = Uuid.random()
             val councilSettings = settingsStore.settingsFlow.value
             val councilConversation = Conversation.ofId(
@@ -146,7 +170,9 @@ fun SessionHomePage() {
             ).updateCurrentMessages(councilSettings.presetMessages)
             var placeholderInserted = false
             try {
-                conversationRepo.insertConversation(councilConversation)
+                restoreWriteGate.withCurrentWriterOrCancel {
+                    conversationRepo.insertConversation(councilConversation)
+                }
                 placeholderInserted = true
                 val guests = councilSettings.agentRuntime.modelCouncil.defaultSeats.map { seat ->
                     seat.toCouncilParticipant().copy(
@@ -190,7 +216,7 @@ fun SessionHomePage() {
                     }
                 }
                 val message = error.message?.takeIf { it.isNotBlank() }
-                    ?: context.getString(R.string.error_title_operation)
+                    ?: operationError
                 toaster.show(message, type = ToastType.Error)
                 android.util.Log.e("SessionHomeCouncil", "failed to open council room", error)
             }
@@ -222,7 +248,21 @@ fun SessionHomePage() {
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 100.dp),
             ) {
                 item(key = "home_search") {
-                    HomeSearchField(onClick = { navController.navigate(Screen.MessageSearch) })
+                    HomeSearchField(
+                        query = homeSearchQuery,
+                        expanded = homeSearchExpanded,
+                        focusRequester = homeSearchFocusRequester,
+                        onExpand = { homeSearchExpanded = true },
+                        onQueryChange = { homeSearchQuery = it },
+                        onClear = { homeSearchQuery = "" },
+                        onOpenFullSearch = {
+                            navController.navigate(Screen.MessageSearch)
+                        },
+                        onCollapse = {
+                            homeSearchQuery = ""
+                            homeSearchExpanded = false
+                        },
+                    )
                 }
                 item(key = "home_features") {
                     HomeFeatureRail(
@@ -250,50 +290,80 @@ fun SessionHomePage() {
                         ContinueCandidateRow(
                             candidate = candidate,
                             onOpen = {
-                                navController.navigate(
-                                    candidate.route.toScreen()
-                                ) { launchSingleTop = true }
+                                scope.launch {
+                                    val canOpen = try {
+                                        canOpenContinueRoute(candidate.route) { conversationId ->
+                                            val uuid = runCatching { Uuid.parse(conversationId) }.getOrNull()
+                                            uuid != null && conversationRepo.existsConversationById(uuid)
+                                        }
+                                    } catch (cancel: kotlinx.coroutines.CancellationException) {
+                                        throw cancel
+                                    } catch (error: Throwable) {
+                                        android.util.Log.e("SessionHomeRoute", "Unable to validate Continue route", error)
+                                        toaster.show("暂时无法打开会话，请稍后重试", type = ToastType.Error)
+                                        return@launch
+                                    }
+                                    if (!canOpen) {
+                                        toaster.show("会话已不存在，无法继续", type = ToastType.Error)
+                                        return@launch
+                                    }
+                                    navController.navigate(candidate.route.toScreen()) {
+                                        launchSingleTop = true
+                                    }
+                                }
                             },
                             onDismiss = { vm.dismissContinueCandidate(candidate) },
                         )
                     }
                 }
 
-                // 首次加载完成前不渲染空态，避免加载瞬间闪现「暂无会话」
-                if (conversations.itemCount == 0 &&
-                    conversations.loadState.refresh is LoadState.NotLoading
-                ) {
-                    item(key = "home_empty") {
-                        HomeEmptyState(modifier = Modifier.padding(vertical = 56.dp))
+                if (hasContinueError) {
+                    item(key = "home_continue_error") {
+                        if (continueCandidates.isEmpty()) {
+                            HomeContinueErrorState(onRetry = vm::retryContinueCandidates)
+                        } else {
+                            HomeContinueInlineError(onRetry = vm::retryContinueCandidates)
+                        }
                     }
                 }
 
-                items(
-                    count = conversations.itemCount,
-                    key = conversations.itemKey { item ->
-                        when (item) {
-                            is app.amber.feature.ui.pages.chat.ConversationListItem.DateHeader -> "date_${item.date}"
-                            is app.amber.feature.ui.pages.chat.ConversationListItem.PinnedHeader -> "pinned_header"
-                            is app.amber.feature.ui.pages.chat.ConversationListItem.Item -> item.conversation.id.toString()
+                if (hasConversationError && conversations.isEmpty()) {
+                    item(key = "home_conversations_error") {
+                        HomeConversationErrorState(onRetry = vm::retryConversations)
+                    }
+                } else {
+                    if (hasConversationError) {
+                        item(key = "home_conversations_error_inline") {
+                            HomeConversationInlineError(onRetry = vm::retryConversations)
                         }
-                    },
-                ) { index ->
-                    val item = conversations[index]
-                    if (item is app.amber.feature.ui.pages.chat.ConversationListItem.Item) {
+                    }
+                    if (conversationsLoaded && visibleConversations.isEmpty() && homeSearchQuery.isNotBlank()) {
+                        item(key = "home_search_empty") {
+                            HomeSearchEmptyState()
+                        }
+                    } else if (conversationsLoaded && conversations.isEmpty()) {
+                        item(key = "home_empty") {
+                            HomeEmptyState(modifier = Modifier.padding(vertical = 56.dp))
+                        }
+                    }
+
+                    items(
+                        items = visibleConversations,
+                        key = { it.id.toString() },
+                    ) { conversation ->
                         HomeSessionRow(
-                            conversation = item.conversation,
+                            conversation = conversation,
                             // 首页是 hub：用 push（保留 SessionHome 在栈底），返回能回到首页；
                             // 不能用 navigateToChatPage（其内部 clearAndNavigate 会清掉首页）
                             onOpen = {
                                 navController.navigate(
-                                    Screen.Chat(id = item.conversation.id.toString())
+                                    Screen.Chat(id = conversation.id.toString())
                                 ) { launchSingleTop = true }
                             },
-                            onDelete = { vm.deleteConversation(item.conversation) },
-                            onTogglePin = { vm.updatePinnedStatus(item.conversation) },
+                            onDelete = { vm.deleteConversation(conversation) },
+                            onTogglePin = { vm.updatePinnedStatus(conversation) },
                         )
                     }
-                    // 分页流里的日期/置顶分隔头在首页设计里不渲染
                 }
             }
         }
@@ -391,7 +461,10 @@ private fun HomeHeader(
             .padding(start = 20.dp, end = 20.dp, top = 8.dp, bottom = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        Row(
+            modifier = Modifier.weight(1f),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             Text(
                 text = "Amber",
                 fontFamily = JetBrainsMonoFamily,
@@ -417,11 +490,13 @@ private fun HomeHeader(
                 letterSpacing = 0.2.sp,
                 color = tokens.ink3,
                 // 与 wordmark 文本基线对齐（HTML align-items: baseline）
-                modifier = Modifier.alignByBaseline(),
+                modifier = Modifier
+                    .weight(1f, fill = false)
+                    .alignByBaseline(),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
         }
-
-        Spacer(Modifier.weight(1f))
 
         Box(
             modifier = Modifier
@@ -481,36 +556,146 @@ private fun todayLabel(): String {
 
 /* ------------------------------------------------------------------ search --- */
 
-/** 扁平搜索栏（外观）——点按进入全站消息搜索页。 */
+/** Home-only title filter; the full message search remains [Screen.MessageSearch]. */
+internal fun filterHomeConversations(
+    conversations: List<Conversation>,
+    query: String,
+    untitledLabel: String,
+): List<Conversation> {
+    val trimmedQuery = query.trim()
+    if (trimmedQuery.isEmpty()) return conversations
+    return conversations.filter { conversation ->
+        (conversation.title.ifBlank { untitledLabel })
+            .contains(trimmedQuery, ignoreCase = true)
+    }
+}
+
+/** Home-only title search with a direct full-message-search escape hatch. */
 @Composable
-private fun HomeSearchField(onClick: () -> Unit) {
+private fun HomeSearchField(
+    query: String,
+    expanded: Boolean,
+    focusRequester: FocusRequester,
+    onExpand: () -> Unit,
+    onQueryChange: (String) -> Unit,
+    onClear: () -> Unit,
+    onOpenFullSearch: () -> Unit,
+    onCollapse: () -> Unit,
+) {
     val tokens = LocalAmberTokens.current
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .padding(horizontal = 20.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(9.dp),
-    ) {
+    if (expanded) {
         Row(
             modifier = Modifier
-                .weight(1f)
-                .padding(top = 9.dp, bottom = 10.dp),
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .heightIn(min = 42.dp)
+                    .clip(androidx.compose.foundation.shape.RoundedCornerShape(12.dp))
+                    .background(tokens.surface2)
+                    .border(1.dp, tokens.line, androidx.compose.foundation.shape.RoundedCornerShape(12.dp))
+                    .padding(horizontal = 12.dp),
+                contentAlignment = Alignment.CenterStart,
+            ) {
+                BasicTextField(
+                    value = query,
+                    onValueChange = onQueryChange,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .focusRequester(focusRequester),
+                    singleLine = true,
+                    textStyle = androidx.compose.ui.text.TextStyle(
+                        fontSize = 14.5.sp,
+                        color = tokens.ink,
+                    ),
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                    keyboardActions = KeyboardActions(onSearch = { onOpenFullSearch() }),
+                    decorationBox = { innerTextField ->
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(9.dp),
+                        ) {
+                            Icon(
+                                imageVector = Lucide.Search,
+                                contentDescription = null,
+                                modifier = Modifier.size(17.dp),
+                                tint = tokens.ink3,
+                            )
+                            Box(modifier = Modifier.weight(1f)) {
+                                if (query.isBlank()) {
+                                    Text(
+                                        text = stringResource(R.string.parity_home_search_sessions),
+                                        fontSize = 14.5.sp,
+                                        color = tokens.ink4,
+                                    )
+                                }
+                                innerTextField()
+                            }
+                        }
+                    },
+                )
+            }
+            IconButton(
+                onClick = if (query.isBlank()) onCollapse else onClear,
+                modifier = Modifier.size(48.dp),
+            ) {
+                Icon(
+                    imageVector = Lucide.X,
+                    contentDescription = stringResource(
+                        if (query.isBlank()) {
+                            R.string.parity_home_search_cancel
+                        } else {
+                            R.string.parity_home_search_clear
+                        }
+                    ),
+                    modifier = Modifier.size(16.dp),
+                    tint = tokens.ink3,
+                )
+            }
+            IconButton(
+                onClick = onOpenFullSearch,
+                modifier = Modifier.size(48.dp),
+            ) {
+                Icon(
+                    imageVector = Lucide.ScanSearch,
+                    contentDescription = stringResource(R.string.parity_home_search_full),
+                    modifier = Modifier.size(19.dp),
+                    tint = tokens.ink2,
+                )
+            }
+        }
+    } else {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = 48.dp)
+                .clickable(onClick = onExpand)
+                .padding(horizontal = 20.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(9.dp),
         ) {
-            Icon(
-                imageVector = Lucide.Search,
-                contentDescription = null,
-                modifier = Modifier.size(17.dp),
-                tint = tokens.ink3,
-            )
-            Text(
-                text = stringResource(R.string.chat_page_search_chats),
-                fontSize = 14.5.sp,
-                color = tokens.ink4,
-            )
+            Row(
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(top = 9.dp, bottom = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(9.dp),
+            ) {
+                Icon(
+                    imageVector = Lucide.Search,
+                    contentDescription = null,
+                    modifier = Modifier.size(17.dp),
+                    tint = tokens.ink3,
+                )
+                Text(
+                    text = stringResource(R.string.chat_page_search_chats),
+                    fontSize = 14.5.sp,
+                    color = tokens.ink4,
+                )
+            }
         }
     }
     Box(
@@ -520,6 +705,121 @@ private fun HomeSearchField(onClick: () -> Unit) {
             .height(1.dp)
             .background(tokens.line),
     )
+}
+
+@Composable
+private fun HomeSearchEmptyState() {
+    val tokens = LocalAmberTokens.current
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 56.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text(
+            text = stringResource(R.string.parity_home_search_no_match),
+            fontSize = 13.5.sp,
+            color = tokens.ink3,
+            textAlign = TextAlign.Center,
+        )
+    }
+}
+
+@Composable
+private fun HomeConversationErrorState(onRetry: () -> Unit) {
+    val tokens = LocalAmberTokens.current
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 56.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text(
+            text = stringResource(R.string.parity_home_conversations_error),
+            fontSize = 13.5.sp,
+            color = tokens.ink3,
+            textAlign = TextAlign.Center,
+        )
+        androidx.compose.material3.TextButton(onClick = onRetry) {
+            Text(stringResource(R.string.parity_home_retry))
+        }
+    }
+}
+
+@Composable
+private fun HomeConversationInlineError(onRetry: () -> Unit) {
+    val tokens = LocalAmberTokens.current
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 20.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Text(
+            text = stringResource(R.string.parity_home_conversations_error),
+            modifier = Modifier
+                .weight(1f)
+                .padding(end = 8.dp),
+            fontSize = 12.5.sp,
+            color = tokens.ink3,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
+        androidx.compose.material3.TextButton(onClick = onRetry) {
+            Text(stringResource(R.string.parity_home_retry))
+        }
+    }
+}
+
+@Composable
+private fun HomeContinueErrorState(onRetry: () -> Unit) {
+    val tokens = LocalAmberTokens.current
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text(
+            text = stringResource(R.string.parity_home_continue_error),
+            fontSize = 13.5.sp,
+            color = tokens.ink3,
+            textAlign = TextAlign.Center,
+        )
+        androidx.compose.material3.TextButton(onClick = onRetry) {
+            Text(stringResource(R.string.parity_home_retry))
+        }
+    }
+}
+
+@Composable
+private fun HomeContinueInlineError(onRetry: () -> Unit) {
+    val tokens = LocalAmberTokens.current
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 20.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Text(
+            text = stringResource(R.string.parity_home_continue_error),
+            modifier = Modifier
+                .weight(1f)
+                .padding(end = 8.dp),
+            fontSize = 12.5.sp,
+            color = tokens.ink3,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
+        androidx.compose.material3.TextButton(onClick = onRetry) {
+            Text(stringResource(R.string.parity_home_retry))
+        }
+    }
 }
 
 /* ------------------------------------------------------------ feature rail --- */
@@ -605,10 +905,42 @@ private fun HomeFeatureRail(
 /* ------------------------------------------------------------- session row --- */
 
 /** P8-08：继续路由 → 应用内页面（点击准确路由到任务焦点）。 */
-private fun ContinueRoute.toScreen(): Screen = when (this) {
+internal fun ContinueRoute.toScreen(): Screen = when (this) {
     is ContinueRoute.CouncilRoom -> Screen.CouncilRoom(conversationId = conversationId)
-    is ContinueRoute.DeepRead -> Screen.DeepRead(topicId = topicId, title = title)
-    is ContinueRoute.Chat -> Screen.Chat(id = conversationId)
+    is ContinueRoute.DeepRead -> Screen.DeepRead(
+        topicId = topicId,
+        title = title,
+        sourceUrl = sourceUrl,
+    )
+    is ContinueRoute.Chat -> Screen.Chat(
+        id = conversationId,
+        messageId = messageId,
+        toolCallId = toolCallId,
+    )
+    is ContinueRoute.ImageGeneration -> Screen.Chat(
+        id = conversationId,
+        messageId = messageId,
+        toolCallId = toolCallId,
+    )
+    is ContinueRoute.MiniAppRunner -> Screen.MiniAppRunner(appId = appId)
+    is ContinueRoute.NovelWorkspace -> Screen.NovelMarkdown(
+        projectId = projectId,
+        branchSlug = branchSlug,
+        jobId = jobId,
+    )
+}
+
+/** Chat-backed Continue routes must still own a persisted conversation at click time. */
+internal suspend fun canOpenContinueRoute(
+    route: ContinueRoute,
+    conversationExists: suspend (String) -> Boolean,
+): Boolean {
+    val conversationId = when (route) {
+        is ContinueRoute.Chat -> route.conversationId
+        is ContinueRoute.ImageGeneration -> route.conversationId
+        else -> return true
+    }
+    return conversationExists(conversationId)
 }
 
 /** 首页「继续」聚合区块标题：mono 标签 + 数量。 */

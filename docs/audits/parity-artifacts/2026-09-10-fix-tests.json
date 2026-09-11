@@ -1,0 +1,712 @@
+{
+  "command_log": "/tmp/amber-phase4-9-fix-final.log",
+  "kind": "targeted JVM regression, not full module suites",
+  "suites": [
+    {
+      "module": "common",
+      "name": "app.amber.common.oauth.LoopbackOAuthCallbackServerTest",
+      "tests": "8",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "timestamp": "2026-09-10T08:38:30.399Z",
+      "testcases": [
+        "parses successful callback and returns success html",
+        "cancelling awaitCallback closes an already accepted client socket",
+        "rejects oversized request line",
+        "returns provider error and escapes it in failure html",
+        "accepted client that never finishes headers times out",
+        "closing server unblocks awaitCallback",
+        "rejects malformed request",
+        "accepts a provider-specific callback path"
+      ]
+    },
+    {
+      "module": "ai",
+      "name": "app.amber.ai.provider.providers.google.AntigravityOAuthTest",
+      "tests": "5",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "timestamp": "2026-09-10T08:41:47.851Z",
+      "testcases": [
+        "redirect keeps the dedicated callback path",
+        "expired token with refresh credential is refreshable",
+        "ready token is usable",
+        "missing and blank tokens are not usable",
+        "model envelope filters malformed and unsupported entries with fallback"
+      ]
+    },
+    {
+      "module": "ai",
+      "name": "app.amber.ai.provider.providers.grok.GrokOAuthTest",
+      "tests": "3",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "timestamp": "2026-09-10T08:41:47.987Z",
+      "testcases": [
+        "parserAcceptsModelsEnvelopeAndFallbackIsNonEmpty",
+        "statusDistinguishesMissingAndRefreshableExpiredToken",
+        "parserAcceptsOpenAiDataModelsAndSkipsMalformedEntries"
+      ]
+    },
+    {
+      "module": "ai",
+      "name": "app.amber.ai.provider.providers.openai.ResponseAPIMessageTest",
+      "tests": "11",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "timestamp": "2026-09-10T08:41:48.103Z",
+      "testcases": [
+        "openai response api should include reasoning summary",
+        "image encoding failure should fail instead of inserting synthetic error text",
+        "complex multi-round scenario with text and tools interleaved",
+        "function_call should be immediately followed by function_call_output",
+        "multi-round tool calls should produce correct function_call and function_call_output pairs",
+        "parseResponseOutput should keep image_generation_call results",
+        "response api should combine custom function tools with built in tools",
+        "volc response api should keep reasoning effort when non auto",
+        "parallel tool calls should produce sequential function_call and output pairs",
+        "content with text should be properly formatted",
+        "volc response api should not include reasoning summary"
+      ]
+    },
+    {
+      "module": "ai",
+      "name": "app.amber.ai.provider.providers.openai.ResponseAPIResumeStreamTest",
+      "tests": "4",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "timestamp": "2026-09-10T08:41:48.435Z",
+      "testcases": [
+        "resumeDisabledKeepsTodayBehaviorNoCursorAndStoreFalse",
+        "disconnectReconnectsToStoredResponseAndDedupsEvents",
+        "replayAfterCursorSkipsAlreadyDeliveredEvents",
+        "userToggleOffNeverSendsStoreTrueEvenWithResumeRequest"
+      ]
+    },
+    {
+      "module": "ai",
+      "name": "app.amber.ai.provider.providers.openai.ResponseAPIStreamReconcileTest",
+      "tests": "19",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "timestamp": "2026-09-10T08:41:48.757Z",
+      "testcases": [
+        "final text matching accumulated merges usage and annotations without duplicating text",
+        "completed output parses url citations into annotations",
+        "arguments delta event parses as append tool delta",
+        "streamed reasoning is not duplicated by final summary",
+        "response incomplete event carries finish reason and partial output",
+        "refusal only in final message is appended as delta",
+        "final tool matches streamed tool by order when call id is unknown",
+        "streamed annotation dedupes with final annotations",
+        "arguments done event parses as replace tool delta",
+        "replace control metadata does not leak into accumulated tool part",
+        "text only in done event is emitted once",
+        "annotation added event parses as annotation-only delta",
+        "response failed event throws provider error",
+        "streamed refusal is not duplicated by final message",
+        "tool args only in final completed are merged into streamed tool",
+        "reasoning only in final output is forwarded",
+        "arguments deltas append and done replaces without duplication",
+        "incomplete response completes partial text without duplication",
+        "tool only in final completed is added as new part"
+      ]
+    },
+    {
+      "module": "app",
+      "name": "app.amber.ai.provider.providers.google.AntigravityOAuthSessionTest",
+      "tests": "2",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "timestamp": "2026-09-10T08:42:10.437Z",
+      "testcases": [
+        "late invalid grant cannot clear a session created after logout",
+        "late successful refresh cannot replace a session created after logout"
+      ]
+    },
+    {
+      "module": "app",
+      "name": "app.amber.ai.provider.providers.grok.GrokOAuthSessionTest",
+      "tests": "2",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "timestamp": "2026-09-10T08:42:10.604Z",
+      "testcases": [
+        "late invalid grant cannot clear a session created after logout",
+        "late successful refresh cannot replace a session created after logout"
+      ]
+    },
+    {
+      "module": "app",
+      "name": "app.amber.core.service.AgentGenerationForegroundServiceLeaseTest",
+      "tests": "2",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "timestamp": "2026-09-10T08:42:10.649Z",
+      "testcases": [
+        "chat lease removal targets only the matching owner key",
+        "removing an absent chat generation leaves the map unchanged"
+      ]
+    },
+    {
+      "module": "app",
+      "name": "app.amber.core.service.ChatErrorFilterTest",
+      "tests": "5",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "timestamp": "2026-09-10T08:42:10.650Z",
+      "testcases": [
+        "A session generating while user switches to B does not leak A error into B",
+        "conversation A generation error does not surface in conversation B",
+        "global error card uses distinct styling from message error",
+        "chat vm exposes per-conversation errors and global errors separately",
+        "global provider config error is separated from per-conversation errors"
+      ]
+    },
+    {
+      "module": "app",
+      "name": "app.amber.core.service.ChatServiceNotificationTest",
+      "tests": "2",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "timestamp": "2026-09-10T08:42:10.658Z",
+      "testcases": [
+        "pending intent request code is also run scoped",
+        "completion notification id is stable and run scoped"
+      ]
+    },
+    {
+      "module": "app",
+      "name": "app.amber.core.service.ConversationSessionQueueTest",
+      "tests": "6",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "timestamp": "2026-09-10T08:42:10.660Z",
+      "testcases": [
+        "movePendingMessageReordersQueue",
+        "stopSemanticsPreserveQueueWithoutDowngrade",
+        "steerMessagesAreInsertedBeforeFollowupMessages",
+        "collectedPendingMessagesKeepStableMarkers",
+        "queueLimitAndCancelAreStable",
+        "pendingMessagesAreDequeuedInFifoOrder"
+      ]
+    },
+    {
+      "module": "app",
+      "name": "app.amber.feature.chat.impl.ChatEventProjectorCheckpointSelectionTest",
+      "tests": "3",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "timestamp": "2026-09-10T08:42:10.674Z",
+      "testcases": [
+        "picks the checkpoint with the highest seq",
+        "returns null when run has no checkpoints",
+        "corrupt checkpoint payload degrades to null instead of throwing"
+      ]
+    },
+    {
+      "module": "app",
+      "name": "app.amber.feature.chat.impl.ChatStreamCheckpointRecorderTest",
+      "tests": "9",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "timestamp": "2026-09-10T08:42:10.685Z",
+      "testcases": [
+        "checkpoints are coalesced and carry increasing seq",
+        "onRunFinished is idempotent",
+        "failure finalizes the run as failed with reason",
+        "cancellation marks the run interrupted",
+        "store failures never propagate into the generation loop",
+        "unfinished run stays running for replay to pick up",
+        "onRunStarted persists a running run with the conversation id",
+        "checkpoint payload round-trips tail id hash and tool states",
+        "completed run is finalized and its checkpoints pruned"
+      ]
+    },
+    {
+      "module": "app",
+      "name": "app.amber.feature.chat.impl.StreamCheckpointCoalescerTest",
+      "tests": "7",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "timestamp": "2026-09-10T08:42:10.749Z",
+      "testcases": [
+        "emits after one second when content changed",
+        "first offer arms the window without emitting",
+        "new tail message resets the char baseline",
+        "message switch does not bypass the time pace cap below char threshold",
+        "emits before one second once 512 new chars accumulated",
+        "never emits when hash unchanged even after interval",
+        "after emit next emit requires another interval or char delta"
+      ]
+    },
+    {
+      "module": "app",
+      "name": "app.amber.feature.health.HealthConnectAvailabilityTest",
+      "tests": "5",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "timestamp": "2026-09-10T08:42:10.750Z",
+      "testcases": [
+        "plannedExerciseOnlyStartsAtApi35",
+        "api34RequiresSystemService",
+        "api33IsUnsupportedEvenIfServiceIsReported",
+        "everyStateHasChineseExplanation",
+        "authorizationAndReadFailuresAreNotSuccess"
+      ]
+    },
+    {
+      "module": "app",
+      "name": "app.amber.feature.health.HealthConnectPaginationTest",
+      "tests": "1",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "timestamp": "2026-09-10T08:42:10.763Z",
+      "testcases": [
+        "production pager sends ascending only on first request and stops at minus one"
+      ]
+    },
+    {
+      "module": "app",
+      "name": "app.amber.feature.health.HealthSummaryModelsTest",
+      "tests": "4",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "timestamp": "2026-09-10T08:42:10.790Z",
+      "testcases": [
+        "epochNearMidnightUsesRequestedTimezone",
+        "jsonMatchesIosDailyKeysAndContainsWeeklySummary",
+        "aggregatesMultipleTypesIntoDailyAndWeeklyShape",
+        "emptyDataHasExplicitZeroDaysAndNullableMetrics"
+      ]
+    },
+    {
+      "module": "app",
+      "name": "app.amber.feature.miniapp.CapabilityMiniAppSendGateTest",
+      "tests": "6",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "timestamp": "2026-09-10T08:42:10.800Z",
+      "testcases": [
+        "askPolicyRequiresConfirmation",
+        "autoPolicyWithHighRiskAutoAllowsSend",
+        "flagOffFallsBackToConfirmDialog",
+        "autoPolicyWithoutHighRiskAutoStillRequiresConfirmation",
+        "unsetPolicyRequiresConfirmation",
+        "disabledPolicyHardDeniesSend"
+      ]
+    },
+    {
+      "module": "app",
+      "name": "app.amber.feature.miniapp.MiniAppAndroidDeviceCapabilitiesTest",
+      "tests": "3",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "timestamp": "2026-09-10T08:42:05.801Z",
+      "testcases": [
+        "waveform capabilities dispatch without invalid timing arrays",
+        "screen brightness is returned as the contract scalar",
+        "generated QR payload decodes through the existing ZXing reader"
+      ]
+    },
+    {
+      "module": "app",
+      "name": "app.amber.feature.miniapp.MiniAppConversationWriterTest",
+      "tests": "6",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "timestamp": "2026-09-10T08:42:10.877Z",
+      "testcases": [
+        "writeDraftReturnsReceiptAndPersistsComposerDraft",
+        "writeAndSendRejectedKeepsDraft",
+        "attachmentsOnlyAllowSandboxBoundaryUrls",
+        "writeDraftToMissingConversationFailsStructured",
+        "writeAndSendAcceptedClearsDraft",
+        "rejectedSendIsDistinguishableFromPlainDraft"
+      ]
+    },
+    {
+      "module": "app",
+      "name": "app.amber.feature.miniapp.MiniAppHtmlValidatorTest",
+      "tests": "3",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "timestamp": "2026-09-10T08:42:12.731Z",
+      "testcases": [
+        "allowsOfflineSingleFileHtml",
+        "rejectsOversizedHtml",
+        "rejectsExternalAndDangerousApis"
+      ]
+    },
+    {
+      "module": "app",
+      "name": "app.amber.feature.miniapp.MiniAppOutputParserTest",
+      "tests": "6",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "timestamp": "2026-09-10T08:42:12.739Z",
+      "testcases": [
+        "parsesMiniAppJsonSurroundedByAssistantText",
+        "rejectsUnknownPermissions",
+        "normalizesCommonPermissionAliases",
+        "parsesFencedMiniAppJson",
+        "acceptsV2Permissions",
+        "acceptsV3Permissions"
+      ]
+    },
+    {
+      "module": "app",
+      "name": "app.amber.feature.miniapp.MiniAppSandboxTest",
+      "tests": "6",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "timestamp": "2026-09-10T08:42:12.747Z",
+      "testcases": [
+        "respectsGrantDeny",
+        "respectsGlobalCapabilitySwitches",
+        "v3AppCapabilitiesDefaultOpen",
+        "requiresDeclaredPermission",
+        "v3PlatformCapabilitiesCanBeEnabledExplicitly",
+        "v3SensitiveCapabilitiesDefaultClosed"
+      ]
+    },
+    {
+      "module": "app",
+      "name": "app.amber.feature.miniapp.MiniAppSourceChecksTest",
+      "tests": "8",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "timestamp": "2026-09-10T08:42:12.749Z",
+      "testcases": [
+        "balancedHtmlPassesAllChecks",
+        "unbalancedScriptBracesAreReported",
+        "unsavedIndicatorHelper",
+        "jsStringContainingHtmlTagIsNotFlagged",
+        "unbalancedClosingTagIsReported",
+        "unclosedTagIsReported",
+        "unbalancedStyleBracesAreReported",
+        "securityRulesStillEnforced"
+      ]
+    },
+    {
+      "module": "app",
+      "name": "app.amber.feature.miniapp.MiniAppSourceEditorVersionTest",
+      "tests": "2",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "timestamp": "2026-09-10T08:42:12.754Z",
+      "testcases": [
+        "editSaveKeepsPreviousAndRevertRestoresIt",
+        "invalidEditedSourceIsRejectedOnSavePath"
+      ]
+    },
+    {
+      "module": "app",
+      "name": "app.amber.feature.miniapp.MiniAppSpeechEngineTest",
+      "tests": "4",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "timestamp": "2026-09-10T08:42:12.815Z",
+      "testcases": [
+        "pause during initialization rejects late success even when foreground again",
+        "foreground guard rejects speech before creating an engine",
+        "completion callback only clears the active utterance",
+        "close during initialization rejects late success and shuts engine down"
+      ]
+    },
+    {
+      "module": "app",
+      "name": "app.amber.feature.miniapp.MiniAppSystemCapabilityBridgeTest",
+      "tests": "15",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "timestamp": "2026-09-10T08:42:12.890Z",
+      "testcases": [
+        "masterSwitchChangedDuringGrantConfirmationWritesNoGrant",
+        "closedBridgeRepliesRunnerClosedToLateRequests",
+        "appInfoReportsDurableAppGrantsAndHonestBridgeVersion",
+        "qrcodeSkipsGrantButNotSystemSwitchAndIsAudited",
+        "undeclaredPermissionAndDisabledSwitchAreDistinctFailures",
+        "openURLValidatesTargetAndConfirmsEveryCall",
+        "appChangedWhileConfirmationOpenRejectsAndWritesNoGrant",
+        "masterSwitchBlocksGrantedSystemCallsAndGrantlessQr",
+        "invalidUrlFailsBeforePermissionDialogAndWritesNoGrant",
+        "appInfoReportsUnknownAfterDurableDelete",
+        "capabilitiesReportsHandlerIntersectionWithoutConfirmation",
+        "userDenialPersistsDenyAndLaterCallsFailWithoutDialog",
+        "openUrlRechecksAppGrantAndSwitchAfterPerCallConfirmation",
+        "unsupportedMethodAndMissingHandlerFailWithoutDialogs",
+        "undecidedPermissionPromptsConfirmsThenPersistsAllow"
+      ]
+    },
+    {
+      "module": "app",
+      "name": "app.amber.feature.miniapp.MiniAppSystemCapabilityProtocolTest",
+      "tests": "13",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "timestamp": "2026-09-10T08:42:13.751Z",
+      "testcases": [
+        "registry maps every system method to its permission",
+        "output parser accepts new system permissions",
+        "available methods are the registry intersected with handler support",
+        "bridge version only reports system-capabilities when the full set is supported",
+        "openURL rejects local private and dangerous targets",
+        "public host check rejects private ranges and accepts public hosts",
+        "openURL rejects control characters whitespace and oversized input",
+        "system gate is off when systemCapabilitiesEnabled is false",
+        "openURL accepts valid ports and public IPv6 with port",
+        "openURL accepts public https mailto and tel",
+        "new system permissions belong to V3 set and enum",
+        "system permissions enabled by default and require declaration",
+        "permission aliases normalize to system permissions"
+      ]
+    },
+    {
+      "module": "app",
+      "name": "app.amber.feature.miniapp.MiniAppUrlGuardTest",
+      "tests": "5",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "timestamp": "2026-09-10T08:42:13.761Z",
+      "testcases": [
+        "allowsPublicHttpsHosts",
+        "rejectsNonHttps",
+        "rejectsPrivateAndLoopbackIpv4",
+        "rejectsPrivateAndLoopbackIpv6",
+        "resolveAllowedUsesSamePrivateAddressGuard"
+      ]
+    },
+    {
+      "module": "app",
+      "name": "app.amber.feature.miniapp.MiniAppWorkspaceWriterTest",
+      "tests": "3",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "timestamp": "2026-09-10T08:42:13.764Z",
+      "testcases": [
+        "createArtifactPersistsAndReturnsOpenableRoute",
+        "migration11to12AddsConversationDraftTableOnly",
+        "duplicateEffectIdReusesExistingArtifact"
+      ]
+    },
+    {
+      "module": "app",
+      "name": "app.amber.feature.miniapp.UIMessagePartMiniAppSerializationTest",
+      "tests": "1",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "timestamp": "2026-09-10T08:42:13.826Z",
+      "testcases": [
+        "miniAppPartRoundTripsWithoutHtml"
+      ]
+    },
+    {
+      "module": "app",
+      "name": "app.amber.feature.reminder.ReminderNotificationIntentTest",
+      "tests": "1",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "timestamp": "2026-09-10T08:42:09.883Z",
+      "testcases": [
+        "notification opens existing chat prefill route"
+      ]
+    },
+    {
+      "module": "app",
+      "name": "app.amber.feature.reminder.ReminderOwnerTest",
+      "tests": "8",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "timestamp": "2026-09-10T08:42:13.832Z",
+      "testcases": [
+        "store commit fire advances durable snapshot and rejects duplicate",
+        "receiver decision only accepts current fire key and requests notify plus reschedule",
+        "remove rejects path traversal id",
+        "next fire uses epoch duration across daylight saving boundaries",
+        "scheduler fire key and reschedule all are idempotent",
+        "scheduler chooses inexact and labels denial",
+        "corrupt record remains visible and disabled",
+        "store round trip and atomic update keep durable snapshot"
+      ]
+    },
+    {
+      "module": "app",
+      "name": "app.amber.feature.reminder.ReminderToolsTest",
+      "tests": "1",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "timestamp": "2026-09-10T08:42:13.850Z",
+      "testcases": [
+        "crud tools use durable store and reschedule changes"
+      ]
+    },
+    {
+      "module": "app",
+      "name": "app.amber.feature.runtime.RunRecoveryServiceResumeTest",
+      "tests": "13",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "timestamp": "2026-09-10T08:42:13.880Z",
+      "testcases": [
+        "recoveryNetworkResultCannotOverwriteConversationCursorOrRuntimeAfterRestore",
+        "unresolvableStoredResponseFallsBackToPhase1AndClearsCursor",
+        "completedCursorAtTerminalUsesCompleteGetBeforeClearingCursor",
+        "serverUnreachableKeepsPauseStatesAndFallsBackForRunningRuns",
+        "missingCursorWithStartedEffectsFallsBackToPhase1Rules",
+        "userToggleOffKeepsPhase1BehaviorForCursorBearingRun",
+        "completedStatusWithoutOutputDoesNotPromoteSeedPartialToFinal",
+        "inProgressStoredResponseStaysResumableWithCursor",
+        "realGenerationWritesCursorThenProcessDeathRecoveryRestores",
+        "completedStoredResponseFetchesOnlyMissingEventsAndFinishesCompletedWithSameRunId",
+        "serverCompletedRunWithStartedEffectsKeepsEffectsHonestWithoutReExecution",
+        "capabilityFlagOffKeepsPhase1BehaviorForCursorBearingRun",
+        "serverCancelledRunWithStartedNonIdempotentEffectMarksOutcomeUnknown"
+      ]
+    },
+    {
+      "module": "app",
+      "name": "app.amber.feature.runtime.RunRecoveryServiceTest",
+      "tests": "9",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "timestamp": "2026-09-10T08:42:14.263Z",
+      "testcases": [
+        "waitingUserRunSurvivesRecoveryForApprovalResume",
+        "finishedEffectResultIsReplayedIntoConversationWithoutReExecution",
+        "recoveryStartedBeforeRestoreDropsOldTerminalAndLedgerWrites",
+        "outcomeUnknownPromptListsEscalatedEffects",
+        "waitingUserWithStartedEffectStaysPausedAndKeepsRunIdForReconcile",
+        "nonIdempotentStartedEffectEscalatesToOutcomeUnknown",
+        "recoverPrunesTerminalEffectsOlderThanRetentionWindow",
+        "readOnlyAndIdempotentStartedEffectsStayRetryable",
+        "preparedEffectIsLeftForApprovalReentry"
+      ]
+    },
+    {
+      "module": "app",
+      "name": "app.amber.feature.runtime.StoredResponseStopCancelTest",
+      "tests": "5",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "timestamp": "2026-09-10T08:42:14.437Z",
+      "testcases": [
+        "confirmedServerCancelIsDecidableAndClearsCursor",
+        "nothingStoredIsDecidableWithoutServerCall",
+        "cancelRaceServerAlreadySettledIsStillDecidable",
+        "failedServerCancelIsUndecidableAndKeepsCursor",
+        "cancelApiThrowingIsUndecidableForCaller"
+      ]
+    },
+    {
+      "module": "app",
+      "name": "app.amber.feature.tools.DynamicShortcutIntentTest",
+      "tests": "1",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "timestamp": "2026-09-10T08:42:14.454Z",
+      "testcases": [
+        "publishedNewChatIntentResolvesToRouteActivity"
+      ]
+    },
+    {
+      "module": "app",
+      "name": "app.amber.feature.tools.DynamicShortcutRouteTest",
+      "tests": "6",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "timestamp": "2026-09-10T08:42:14.467Z",
+      "testcases": [
+        "quick message model keeps stable identity for shortcuts",
+        "conversation shortcut resolves exact conversation id",
+        "blank prompt or unknown kind never resolves",
+        "malformed or missing conversation id never resolves",
+        "new chat shortcut resolves to NewChat route",
+        "quick message shortcut carries prompt verbatim"
+      ]
+    },
+    {
+      "module": "app",
+      "name": "app.amber.feature.ui.pages.setting.ProviderModelCandidatesTest",
+      "tests": "5",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "timestamp": "2026-09-10T08:42:14.469Z",
+      "testcases": [
+        "gemini result is rejected when provider configuration changed",
+        "login seeds only the first fetched model when no model is enabled",
+        "candidates from old credentials are not reused after provider changes",
+        "late codex result is rejected after oauth generation changes",
+        "login keeps existing enabled models while candidates carry the fetched catalog"
+      ]
+    },
+    {
+      "module": "app",
+      "name": "app.amber.feature.ui.pages.setting.components.ProviderConfigureConvertToTest",
+      "tests": "6",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "timestamp": "2026-09-10T08:42:14.479Z",
+      "testcases": [
+        "convertTo should keep original base url when source url is invalid",
+        "convertTo should preserve third-party host and replace version suffix",
+        "convertTo should keep common fields and switch official endpoint to target default",
+        "convertTo should preserve third-party host and append target path when needed",
+        "convertTo should preserve third-party host when switching to claude",
+        "convertTo should return same instance for same type"
+      ]
+    }
+  ],
+  "followup": {
+    "command_log": "/tmp/amber-phase4-9-fix-recovery-order.log",
+    "reason": "Persist COMPLETED before deleting the recovery cursor",
+    "name": "app.amber.feature.runtime.RunRecoveryServiceResumeTest",
+    "tests": "13",
+    "failures": "0",
+    "errors": "0",
+    "skipped": "0",
+    "timestamp": "2026-09-10T08:45:32.028Z"
+  }
+}

@@ -8,6 +8,7 @@ import com.composables.icons.lucide.Trash2
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -20,6 +21,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.Scaffold
@@ -47,6 +49,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.paging.LoadState
 import androidx.paging.compose.collectAsLazyPagingItems
 import androidx.paging.compose.itemKey
 import kotlinx.coroutines.launch
@@ -76,6 +80,10 @@ fun HistoryPage(vm: HistoryVM = koinViewModel()) {
 
     val conversations = vm.conversations.collectAsLazyPagingItems()
     val workspace = workspaceColors()
+    val hasUpstreamError by vm.hasUpstreamError.collectAsStateWithLifecycle()
+    val refreshError = conversations.loadState.refresh as? LoadState.Error
+    val appendError = conversations.loadState.append as? LoadState.Error
+    val isRefreshLoading = conversations.loadState.refresh is LoadState.Loading
 
     Scaffold(
         containerColor = workspace.canvas,
@@ -119,49 +127,116 @@ fun HistoryPage(vm: HistoryVM = koinViewModel()) {
             contentPadding = contentPadding + PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            items(
-                count = conversations.itemCount,
-                key = conversations.itemKey { it.id },
-            ) { index ->
-                val conversation = conversations[index] ?: return@items
-                SwipeableConversationItem(
-                    conversation = conversation,
-                    onClick = {
-                        navigateToChatPage(navController, conversation.id)
-                    },
-                    onDelete = {
-                        scope.launch {
-                            // 先获取完整的对话数据（包含 messageNodes），用于撤销恢复
-                            val fullConversation = vm.getFullConversation(conversation.id) ?: conversation
-                            val deletion = vm.deleteConversation(conversation)
-                            var restoreRequested = false
-                            try {
-                                deletion.await()
-                                val result = snackbarHostState.showSnackbar(
-                                    message = snackMessageDeleted,
-                                    actionLabel = snackMessageUndo,
-                                    withDismissAction = true,
-                                )
-                                if (result == SnackbarResult.ActionPerformed) {
-                                    restoreRequested = true
-                                    vm.restoreConversation(fullConversation).await()
-                                }
-                            } catch (error: CancellationException) {
-                                throw error
-                            } catch (error: Exception) {
-                                snackbarHostState.showSnackbar(
-                                    error.message ?: context.getString(R.string.error_title_operation)
-                                )
-                            } finally {
-                                if (!restoreRequested) vm.purgeDeletedConversation(fullConversation)
-                            }
+            when {
+                hasUpstreamError && conversations.itemCount == 0 -> {
+                    item(key = "history_upstream_error") {
+                        HistoryErrorState(
+                            message = stringResource(R.string.parity_history_load_error),
+                            retryLabel = stringResource(R.string.parity_history_retry),
+                            onRetry = vm::retryUpstream,
+                        )
+                    }
+                }
+
+                refreshError != null && conversations.itemCount == 0 -> {
+                    item(key = "history_refresh_error") {
+                        HistoryErrorState(
+                            message = stringResource(R.string.parity_history_refresh_error),
+                            retryLabel = stringResource(R.string.parity_history_retry),
+                            onRetry = { conversations.retry() },
+                        )
+                    }
+                }
+
+                else -> {
+                    if (isRefreshLoading && conversations.itemCount == 0) {
+                        item(key = "history_refresh_loading") {
+                            LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
                         }
-                    },
-                    onTogglePin = { vm.togglePinStatus(conversation.id) },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .animateItem()
-                )
+                    }
+
+                    // Keep already loaded rows visible if a refresh fails.
+                    if (refreshError != null && conversations.itemCount > 0) {
+                        item(key = "history_refresh_error_inline") {
+                            HistoryInlineError(
+                                message = stringResource(R.string.parity_history_refresh_error),
+                                retryLabel = stringResource(R.string.parity_history_retry),
+                                onRetry = { conversations.retry() },
+                            )
+                        }
+                    }
+
+                    if (hasUpstreamError && conversations.itemCount > 0) {
+                        item(key = "history_upstream_error_inline") {
+                            HistoryInlineError(
+                                message = stringResource(R.string.parity_history_load_error),
+                                retryLabel = stringResource(R.string.parity_history_retry),
+                                onRetry = vm::retryUpstream,
+                            )
+                        }
+                    }
+
+                    if (!isRefreshLoading && refreshError == null && conversations.itemCount == 0) {
+                        item(key = "history_empty") {
+                            HistoryEmptyState()
+                        }
+                    }
+
+                    items(
+                        count = conversations.itemCount,
+                        key = conversations.itemKey { it.id },
+                    ) { index ->
+                        val conversation = conversations[index] ?: return@items
+                        SwipeableConversationItem(
+                            conversation = conversation,
+                            onClick = {
+                                navigateToChatPage(navController, conversation.id)
+                            },
+                            onDelete = {
+                                scope.launch {
+                                    // 先获取完整的对话数据（包含 messageNodes），用于撤销恢复
+                                    val fullConversation = vm.getFullConversation(conversation.id) ?: conversation
+                                    val deletion = vm.deleteConversation(conversation)
+                                    var restoreRequested = false
+                                    try {
+                                        deletion.await()
+                                        val result = snackbarHostState.showSnackbar(
+                                            message = snackMessageDeleted,
+                                            actionLabel = snackMessageUndo,
+                                            withDismissAction = true,
+                                        )
+                                        if (result == SnackbarResult.ActionPerformed) {
+                                            restoreRequested = true
+                                            vm.restoreConversation(fullConversation).await()
+                                        }
+                                    } catch (error: CancellationException) {
+                                        throw error
+                                    } catch (error: Exception) {
+                                        snackbarHostState.showSnackbar(
+                                            error.message ?: context.getString(R.string.error_title_operation)
+                                        )
+                                    } finally {
+                                        if (!restoreRequested) vm.purgeDeletedConversation(fullConversation)
+                                    }
+                                }
+                            },
+                            onTogglePin = { vm.togglePinStatus(conversation.id) },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .animateItem()
+                        )
+                    }
+
+                    if (appendError != null) {
+                        item(key = "history_append_error") {
+                            HistoryInlineError(
+                                message = stringResource(R.string.parity_history_append_error),
+                                retryLabel = stringResource(R.string.parity_history_retry),
+                                onRetry = { conversations.retry() },
+                            )
+                        }
+                    }
+                }
             }
         }
     }
@@ -188,6 +263,74 @@ fun HistoryPage(vm: HistoryVM = koinViewModel()) {
                     Text(stringResource(R.string.history_page_cancel))
                 }
             }
+        )
+    }
+}
+
+@Composable
+private fun HistoryErrorState(
+    message: String,
+    retryLabel: String,
+    onRetry: () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 64.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text(
+            text = message,
+            color = workspaceColors().muted,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
+        TextButton(onClick = onRetry) {
+            Text(retryLabel)
+        }
+    }
+}
+
+@Composable
+private fun HistoryInlineError(
+    message: String,
+    retryLabel: String,
+    onRetry: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 8.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Text(
+            text = message,
+            modifier = Modifier
+                .weight(1f)
+                .padding(end = 8.dp),
+            color = workspaceColors().muted,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
+        TextButton(onClick = onRetry) {
+            Text(retryLabel)
+        }
+    }
+}
+
+@Composable
+private fun HistoryEmptyState() {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 64.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text(
+            text = stringResource(R.string.parity_history_empty),
+            color = workspaceColors().muted,
         )
     }
 }

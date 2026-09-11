@@ -1,0 +1,67 @@
+[
+  {
+    "file": "docs/handoff/2026-09-10/verification-logs/amber-parity-phase1-final-tests.log",
+    "sha256": "ed54b9a6aaa2bbe914dbbfe21b9775adb48149aeae03844faf15a25b0dcf0082",
+    "bytes": 74312
+  },
+  {
+    "file": "docs/handoff/2026-09-10/verification-logs/amber-parity-phase1-auth-build.log",
+    "sha256": "f0843cb176059da193d80f101866286278d5e062957c2075efb1a17f468699cd",
+    "bytes": 57993
+  },
+  {
+    "file": "docs/handoff/2026-09-10/verification-logs/amber-parity-phase1-pdf-final.log",
+    "sha256": "53e91071ac337ffdf7086b284a9e4ca43f97a4cb1cc5844552f70fc70bebde38",
+    "bytes": 57981
+  },
+  {
+    "file": "docs/handoff/2026-09-10/verification-logs/amber-parity-phase1-ime-build.log",
+    "sha256": "6f18f89c6602c33b69cfc41b801b55b05800e048fac9fe30cca0f71f2231d68d",
+    "bytes": 53964
+  },
+  {
+    "file": "docs/handoff/2026-09-10/verification-logs/amber-parity-phase2-runtime-final.log",
+    "sha256": "702cc4b60d6611bbac5c68dd356f7f716b57c53c2e1fb3f8238f6a59c5a0679f",
+    "bytes": 65575
+  },
+  {
+    "file": "docs/handoff/2026-09-10/verification-logs/amber-parity-phase2-migration-final.log",
+    "sha256": "d304714cf030f854c3771bb803f771b4c44d4b49d980ad6b1755784b17c0f88b",
+    "bytes": 56103
+  },
+  {
+    "file": "docs/handoff/2026-09-10/verification-logs/amber-parity-phase2-purge-final.log",
+    "sha256": "f1462808c2cecc0c8a2909f3af427fa3b9e8cf117bb95c44cc624ea85841c746",
+    "bytes": 57340
+  },
+  {
+    "file": "docs/handoff/2026-09-10/verification-logs/amber-parity-phase2-ui-final-build.log",
+    "sha256": "616d8fabcfc10db89bf17f0b9751b997bbe1b120f5330a860c9c0f3eb35d0cce",
+    "bytes": 56970
+  },
+  {
+    "file": "docs/handoff/2026-09-10/verification-logs/amber-parity-phase3-first-tests.log",
+    "sha256": "306aee16adb57974585c10df6f21490cba2bb46aaf1fd4ed79a54480355bbe4a",
+    "bytes": 89693
+  },
+  {
+    "file": "docs/handoff/2026-09-10/verification-logs/amber-parity-phase3-closeout.log",
+    "sha256": "ac0c3fa49c4970ba499a3eb4c4af9d71bc7774265b4e600b248e8bda4f43be31",
+    "bytes": 60601
+  },
+  {
+    "file": "docs/handoff/2026-09-10/verification-logs/amber-parity-phase3-late-dialog-first.log",
+    "sha256": "045d548458be0f4f2acb63361478e888c331a0032f3710725ed2a2dbbd3a977a",
+    "bytes": 3760
+  },
+  {
+    "file": "docs/handoff/2026-09-10/verification-logs/amber-parity-phase3-late-dialog-final-build.log",
+    "sha256": "2ccf3cca23d9824fe4f54f54b63acd5ecb7102dddc06f0b3fbc5ca251d87574d",
+    "bytes": 58133
+  },
+  {
+    "file": "docs/handoff/2026-09-10/verification-logs/amber-parity-phase3-device-closeout.log",
+    "sha256": "ed54ee1d7b51d3e630164709484dfe03d14c343b1fe56b023461342745e29a82",
+    "bytes": 158
+  }
+]

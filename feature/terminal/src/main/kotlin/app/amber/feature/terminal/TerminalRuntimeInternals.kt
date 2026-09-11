@@ -6,6 +6,9 @@ object TerminalInstallPlanner {
     private val packageNameRegex = Regex("[A-Za-z0-9._+:-]+")
 
     fun build(packages: List<String>, runtime: TerminalRuntimeKind = TerminalRuntimeKind.BUILTIN_ALPINE): TerminalInstallPlan {
+        require(runtime != TerminalRuntimeKind.REMOTE_SSH) {
+            "For SSH, run the remote server's package manager explicitly using terminal_job_start and ssh_profile_id."
+        }
         val normalized = packages
             .flatMap { it.split(Regex("[,\\s]+")) }
             .map { it.trim() }
@@ -149,7 +152,7 @@ object TerminalInstallPlanner {
                     }
                 }
 
-                TerminalRuntimeKind.ANDROID_SHELL -> Unit
+                TerminalRuntimeKind.ANDROID_SHELL, TerminalRuntimeKind.REMOTE_SSH -> Unit
             }
             append(verifyCommands.joinToString("\n"))
         }

@@ -1,0 +1,21 @@
+<resources>
+    <string name="parity_history_empty">还没有会话</string>
+    <string name="parity_history_load_error">无法加载聊天历史</string>
+    <string name="parity_history_refresh_error">无法刷新聊天历史</string>
+    <string name="parity_history_append_error">无法加载更多会话</string>
+    <string name="parity_history_retry">重试</string>
+    <string name="parity_search_no_recent_conversations">还没有最近会话</string>
+    <string name="parity_search_recent_error">无法加载最近会话</string>
+    <string name="parity_search_messages_error">无法搜索消息</string>
+    <string name="parity_search_rebuild_error">无法重建消息索引</string>
+    <string name="parity_search_retry">重试</string>
+    <string name="parity_home_search_sessions">搜索会话</string>
+    <string name="parity_home_new_conversation">新对话</string>
+    <string name="parity_home_search_full">搜索消息</string>
+    <string name="parity_home_search_clear">清除搜索</string>
+    <string name="parity_home_search_cancel">取消</string>
+    <string name="parity_home_search_no_match">没有匹配的会话</string>
+    <string name="parity_home_conversations_error">无法加载会话</string>
+    <string name="parity_home_continue_error">无法加载继续项</string>
+    <string name="parity_home_retry">重试</string>
+</resources>

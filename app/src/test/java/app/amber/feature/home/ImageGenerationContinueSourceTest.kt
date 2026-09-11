@@ -5,7 +5,8 @@ import app.amber.feature.runtime.RunTerminalState
 import app.amber.feature.runtime.ToolEffect
 import app.amber.feature.runtime.ToolEffectStatus
 import app.amber.feature.tools.ToolEffectClass
-import java.time.Instant
+import app.amber.agent.data.db.dao.ToolEffectConversationRow
+import app.amber.agent.data.db.entity.ToolEffectEntity
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -22,7 +23,14 @@ class ImageGenerationContinueSourceTest {
         ).single()
 
         assertEquals(ContinueSourceKind.IMAGE_GENERATION, candidate.sourceKind)
-        assertEquals(ContinueRoute.Chat(run.conversationId), candidate.route)
+        assertEquals(
+            ContinueRoute.ImageGeneration(
+                conversationId = run.conversationId,
+                messageId = "message-image",
+                toolCallId = "call-image",
+            ),
+            candidate.route,
+        )
         assertEquals(ContinueStatus.FAILED_RESUMABLE, candidate.status)
         assertTrue(candidate.isRunning)
         assertEquals("Generating", candidate.summary)
@@ -71,6 +79,29 @@ class ImageGenerationContinueSourceTest {
         )
     }
 
+    @Test
+    fun `recent completed image result keeps message and tool call anchors`() {
+        val candidate = imageGenerationCompletedContinueCandidates(
+            listOf(
+                ToolEffectConversationRow(
+                    effect = effectEntity(ToolEffectStatus.FINISHED),
+                    conversationId = "conversation-image",
+                )
+            )
+        ).single()
+
+        assertEquals(ContinueStatus.DRAFT, candidate.status)
+        assertEquals(
+            ContinueRoute.ImageGeneration(
+                conversationId = "conversation-image",
+                messageId = "message-image",
+                toolCallId = "call-image",
+            ),
+            candidate.route,
+        )
+        assertEquals("最近生成的图片", candidate.summary)
+    }
+
     private fun runTerminal(state: RunTerminalState) = RunTerminal(
         runId = "run-image",
         conversationId = "11111111-1111-1111-1111-111111111111",
@@ -100,6 +131,26 @@ class ImageGenerationContinueSourceTest {
         resultSummary = null,
         resultPayload = null,
         errorCategory = null,
-        messagePersistenceCursor = null,
+        messagePersistenceCursor = "message-image",
+    )
+
+    private fun effectEntity(status: ToolEffectStatus) = ToolEffectEntity(
+        effectId = "effect-finished",
+        runId = "run-image",
+        turnId = 0,
+        toolCallId = "call-image",
+        toolName = "generate_image",
+        argsDigest = "digest",
+        approvalDigest = null,
+        effectClass = ToolEffectClass.NON_IDEMPOTENT_WRITE.name,
+        status = status.name,
+        startedAtMs = 1_000L,
+        finishedAtMs = 2_000L,
+        resultSummary = "{\"status\":\"ok\"}",
+        resultPayload = null,
+        errorCategory = null,
+        messagePersistenceCursor = "message-image",
+        createdAtMs = 1_000L,
+        updatedAtMs = 2_000L,
     )
 }

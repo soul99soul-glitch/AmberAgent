@@ -189,33 +189,49 @@ fun SearchPage(vm: SearchVM = koinViewModel()) {
                             )
                         }
                     }
+                    vm.errorKind != null && !vm.hasDisplayedContent -> {
+                        SearchErrorState(
+                            message = stringResource(vm.errorKind!!.messageRes()),
+                            retryLabel = stringResource(R.string.parity_search_retry),
+                            onRetry = vm::retryLastOperation,
+                        )
+                    }
                     vm.searchQuery.isBlank() -> {
                         if (
                             shouldShowRecentConversations(vm.searchQuery, vm.searchFilter) &&
                             vm.recentConversations.isNotEmpty()
                         ) {
-                            LazyColumn(
-                                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
-                                verticalArrangement = Arrangement.spacedBy(8.dp),
-                                modifier = Modifier.fillMaxSize(),
-                            ) {
-                                item {
-                                    Text(
-                                        text = stringResource(R.string.search_page_recent_conversations),
-                                        style = MaterialTheme.typography.titleSmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            Column(modifier = Modifier.fillMaxSize()) {
+                                if (vm.errorKind != null) {
+                                    SearchInlineError(
+                                        message = stringResource(vm.errorKind!!.messageRes()),
+                                        retryLabel = stringResource(R.string.parity_search_retry),
+                                        onRetry = vm::retryLastOperation,
                                     )
                                 }
-                                items(
-                                    items = vm.recentConversations,
-                                    key = { it.id.toString() },
-                                ) { conversation ->
-                                    RecentConversationItem(
-                                        conversation = conversation,
-                                        onClick = {
-                                            navigateToChatPage(navController, conversation.id)
-                                        },
-                                    )
+                                LazyColumn(
+                                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                                    modifier = Modifier.weight(1f),
+                                ) {
+                                    item {
+                                        Text(
+                                            text = stringResource(R.string.search_page_recent_conversations),
+                                            style = MaterialTheme.typography.titleSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                    }
+                                    items(
+                                        items = vm.recentConversations,
+                                        key = { it.id.toString() },
+                                    ) { conversation ->
+                                        RecentConversationItem(
+                                            conversation = conversation,
+                                            onClick = {
+                                                navigateToChatPage(navController, conversation.id)
+                                            },
+                                        )
+                                    }
                                 }
                             }
                         } else if (!vm.isLoading) {
@@ -224,7 +240,11 @@ fun SearchPage(vm: SearchVM = koinViewModel()) {
                                 contentAlignment = Alignment.Center
                             ) {
                                 Text(
-                                    text = stringResource(R.string.search_page_hint),
+                                    text = if (vm.searchFilter == SearchFilter.MESSAGES) {
+                                        stringResource(R.string.search_page_hint)
+                                    } else {
+                                        stringResource(R.string.parity_search_no_recent_conversations)
+                                    },
                                     style = MaterialTheme.typography.bodyMedium,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -246,34 +266,102 @@ fun SearchPage(vm: SearchVM = koinViewModel()) {
                     }
 
                     else -> {
-                        LazyColumn(
-                            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp),
-                            modifier = Modifier.fillMaxSize(),
-                        ) {
-                            items(vm.visibleResults) { result ->
-                                SearchResultItem(
-                                    result = result,
-                                    onClick = {
-                                        // P8-04: 标题命中（nodeId 为 null）打开会话；
-                                        // 正文命中继续跳转具体消息（复用现有跳转）。
-                                        val chatId = Uuid.parse(result.conversationId)
-                                        if (result.nodeId != null) {
-                                            navigateToChatPage(
-                                                navController,
-                                                chatId = chatId,
-                                                nodeId = Uuid.parse(result.nodeId),
-                                            )
-                                        } else {
-                                            navigateToChatPage(navController, chatId = chatId)
-                                        }
-                                    }
+                        Column(modifier = Modifier.fillMaxSize()) {
+                            if (vm.errorKind != null) {
+                                SearchInlineError(
+                                    message = stringResource(vm.errorKind!!.messageRes()),
+                                    retryLabel = stringResource(R.string.parity_search_retry),
+                                    onRetry = vm::retryLastOperation,
                                 )
+                            }
+                            LazyColumn(
+                                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp),
+                                modifier = Modifier.weight(1f),
+                            ) {
+                                items(vm.visibleResults) { result ->
+                                    SearchResultItem(
+                                        result = result,
+                                        onClick = {
+                                            // P8-04: 标题命中（nodeId 为 null）打开会话；
+                                            // 正文命中继续跳转具体消息（复用现有跳转）。
+                                            val chatId = Uuid.parse(result.conversationId)
+                                            if (result.nodeId != null) {
+                                                navigateToChatPage(
+                                                    navController,
+                                                    chatId = chatId,
+                                                    nodeId = Uuid.parse(result.nodeId),
+                                                )
+                                            } else {
+                                                navigateToChatPage(navController, chatId = chatId)
+                                            }
+                                        }
+                                    )
+                                }
                             }
                         }
                     }
                 }
             }
+        }
+    }
+}
+
+private fun SearchErrorKind.messageRes(): Int = when (this) {
+    SearchErrorKind.RECENT_CONVERSATIONS -> R.string.parity_search_recent_error
+    SearchErrorKind.MESSAGES -> R.string.parity_search_messages_error
+    SearchErrorKind.INDEX_REBUILD -> R.string.parity_search_rebuild_error
+}
+
+@Composable
+private fun SearchErrorState(
+    message: String,
+    retryLabel: String,
+    onRetry: () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 24.dp, vertical = 64.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text(
+            text = message,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        TextButton(onClick = onRetry) {
+            Text(retryLabel)
+        }
+    }
+}
+
+@Composable
+private fun SearchInlineError(
+    message: String,
+    retryLabel: String,
+    onRetry: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Text(
+            text = message,
+            modifier = Modifier
+                .weight(1f)
+                .padding(end = 8.dp),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
+        TextButton(onClick = onRetry) {
+            Text(retryLabel)
         }
     }
 }

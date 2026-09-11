@@ -328,6 +328,7 @@ fun SettingSystemAccessPage(
     }
 }
 
+@Composable
 private fun CardGroupScope.permissionItem(
     capability: AgentPermissionCapability,
     status: AgentPermissionStatus,

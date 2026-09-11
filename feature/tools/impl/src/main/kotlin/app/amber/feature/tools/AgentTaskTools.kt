@@ -31,7 +31,7 @@ class AgentTaskTools(
         parameters = {
             InputSchema.Obj(
                 properties = buildJsonObject {
-                    put("type", stringProp("Optional task type filter, such as terminal, subagent, model_council, cron, officepro."))
+                    put("type", stringProp("Optional task type filter, such as terminal, subagent, model_council, or cron."))
                     put("status", stringProp("Optional status filter: queued, running, completed, failed, cancelled, timed_out, interrupted."))
                 }
             )

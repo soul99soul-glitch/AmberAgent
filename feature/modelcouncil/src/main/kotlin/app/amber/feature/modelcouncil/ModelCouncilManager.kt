@@ -971,7 +971,7 @@ object ModelCouncilExternalCliCommandBuilder {
             appendLine("fi")
             appendLine("workspace_root=\"${'$'}PWD\"")
             appendLine("tmp_root=\"${'$'}workspace_root/.amberagent-council-cli-${'$'}$\"")
-            if (runtime == TerminalRuntimeKind.TERMUX_EXTERNAL) {
+            if (runtime == TerminalRuntimeKind.TERMUX_EXTERNAL || runtime == TerminalRuntimeKind.REMOTE_SSH) {
                 appendLine("home_root=\"${'$'}HOME/.amberagent/external-cli-home/${spec.id}\"")
             } else {
                 appendLine("home_root=${homeRoot.shellSingleQuoted()}")

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="restore_apply_failed_retry">Restore failed. The encrypted backup source is retained; verify it again and retry.</string>
+    <string name="restore_partial_commit_retry">Backup data was written, but settings, tokens, or the search index did not finish. Verify the same backup again and retry.</string>
+    <string name="restore_verification_expired">The restore verification has expired. Verify the backup again.</string>
+    <string name="restore_committing">Committing restore; cancellation is unavailable during this step.</string>
+</resources>

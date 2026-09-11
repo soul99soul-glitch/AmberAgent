@@ -18,6 +18,7 @@ import app.amber.core.memory.model.MemoryKind
 import app.amber.core.memory.model.MemoryRecord
 import app.amber.core.memory.model.MemoryScope
 import app.amber.core.model.AssistantMemory
+import app.amber.core.sync.core.SyncRestoreWriteGate
 import app.amber.core.utils.JsonInstant
 import app.amber.feature.runtime.ContentDigest
 
@@ -27,6 +28,7 @@ open class MemoryRepository(
     private val eventDAO: MemoryEventDAO,
     // 生产路径经 DI 恒为非 null；默认 null 仅兼容构造纯 Fake DAO 的单元测试
     private val appDatabase: AppDatabase? = null,
+    private val restoreWriteGate: SyncRestoreWriteGate? = null,
 ) {
     companion object {
         const val GLOBAL_MEMORY_ID = "__global__"
@@ -61,6 +63,14 @@ open class MemoryRepository(
     suspend fun getGlobalMemories(): List<AssistantMemory> =
         memoryDAO.getMemoriesOfAssistant(GLOBAL_MEMORY_ID).map { it.toAssistantMemory() }
 
+    /**
+     * Read one memory for an edit/delete conflict without asking callers to
+     * scan every bucket. The returned revision is the value a subsequent CAS
+     * must bind to.
+     */
+    suspend fun getMemoryById(id: Int): AssistantMemory? =
+        memoryDAO.getMemoryById(id)?.toAssistantMemory()
+
     fun getShortTermMemoriesFlow(): Flow<List<AssistantMemory>> =
         memoryDAO.getMemoriesOfAssistantFlow(SHORT_TERM_MEMORY_ID).map { entities ->
             entities.map { it.toAssistantMemory() }
@@ -88,7 +98,7 @@ open class MemoryRepository(
     suspend fun getAllRecords(): List<MemoryRecord> =
         memoryDAO.getAllMemories().map { it.toRecord() }
 
-    suspend fun deleteMemoriesOfAssistant(assistantId: String) {
+    suspend fun deleteMemoriesOfAssistant(assistantId: String) = withMemoryWriter {
         memoryDAO.deleteMemoriesOfAssistant(assistantId)
     }
 
@@ -104,15 +114,17 @@ open class MemoryRepository(
                 expectedRevision = expectedRevision,
             ).memory
         }
-        memoryDAO.getMemoryById(id) ?: error("Memory record #$id not found")
-        val affected = memoryDAO.updateContentBlind(
-            id = id,
-            content = content,
-            updatedAt = System.currentTimeMillis(),
-        )
-        check(affected > 0) { "Memory record #$id not found" }
-        return memoryDAO.getMemoryById(id)?.toAssistantMemory()
-            ?: error("Memory record #$id not found after update")
+        return withMemoryWriter {
+            memoryDAO.getMemoryById(id) ?: error("Memory record #$id not found")
+            val affected = memoryDAO.updateContentBlind(
+                id = id,
+                content = content,
+                updatedAt = System.currentTimeMillis(),
+            )
+            check(affected > 0) { "Memory record #$id not found" }
+            memoryDAO.getMemoryById(id)?.toAssistantMemory()
+                ?: error("Memory record #$id not found after update")
+        }
     }
 
     suspend fun addMemory(assistantId: String, content: String): AssistantMemory {
@@ -131,6 +143,36 @@ open class MemoryRepository(
         kind: MemoryKind,
         content: String,
         assistantId: String = bucketForScope(scope),
+        sourceConversationId: String? = null,
+        sourceMessageIds: List<String> = emptyList(),
+        supersedesIds: List<Int> = emptyList(),
+        expiresAt: Long? = null,
+        confidence: Float = 1f,
+        pinned: Boolean = false,
+        sourceRunId: String? = null,
+        sourceTrigger: String? = null,
+    ): MemoryRecord = withMemoryWriter {
+        addMemoryInternal(
+            scope = scope,
+            kind = kind,
+            content = content,
+            assistantId = assistantId,
+            sourceConversationId = sourceConversationId,
+            sourceMessageIds = sourceMessageIds,
+            supersedesIds = supersedesIds,
+            expiresAt = expiresAt,
+            confidence = confidence,
+            pinned = pinned,
+            sourceRunId = sourceRunId,
+            sourceTrigger = sourceTrigger,
+        )
+    }
+
+    private suspend fun addMemoryInternal(
+        scope: MemoryScope,
+        kind: MemoryKind,
+        content: String,
+        assistantId: String,
         sourceConversationId: String? = null,
         sourceMessageIds: List<String> = emptyList(),
         supersedesIds: List<Int> = emptyList(),
@@ -164,7 +206,11 @@ open class MemoryRepository(
         return memoryDAO.getMemoryById(id)?.toRecord() ?: error("Created memory #$id not found")
     }
 
-    suspend fun upsertRecord(record: MemoryRecord): MemoryRecord {
+    suspend fun upsertRecord(record: MemoryRecord): MemoryRecord = withMemoryWriter {
+        upsertRecordInternal(record)
+    }
+
+    private suspend fun upsertRecordInternal(record: MemoryRecord): MemoryRecord {
         val entity = record.toEntity()
         if (record.id == 0) {
             val id = memoryDAO.insertMemory(entity).toInt()
@@ -198,7 +244,7 @@ open class MemoryRepository(
         return memoryDAO.getMemoryById(record.id)?.toRecord() ?: record
     }
 
-    suspend fun deleteMemory(id: Int) {
+    suspend fun deleteMemory(id: Int) = withMemoryWriter {
         memoryDAO.deleteMemory(id)
     }
 
@@ -217,6 +263,22 @@ open class MemoryRepository(
         expectedRevision: Long,
         sourceRunId: String? = null,
         sourceTrigger: String? = null,
+    ): MemoryCasUpdateResult = withMemoryWriter {
+        updateContentCasInternal(
+            id = id,
+            content = content,
+            expectedRevision = expectedRevision,
+            sourceRunId = sourceRunId,
+            sourceTrigger = sourceTrigger,
+        )
+    }
+
+    private suspend fun updateContentCasInternal(
+        id: Int,
+        content: String,
+        expectedRevision: Long,
+        sourceRunId: String?,
+        sourceTrigger: String?,
     ): MemoryCasUpdateResult {
         val old = memoryDAO.getMemoryById(id) ?: error("Memory record #$id not found")
         val updatedAt = System.currentTimeMillis()
@@ -242,11 +304,60 @@ open class MemoryRepository(
     }
 
     /**
+     * Settings-page edit: replace content and its editable classification in
+     * one full-record CAS. Moving scope also moves the assistant bucket so
+     * the three library flows stay consistent with the stored scope.
+     */
+    suspend fun updateMemoryCas(memory: AssistantMemory): MemoryCasUpdateResult = withMemoryWriter {
+        updateMemoryCasInternal(memory)
+    }
+
+    private suspend fun updateMemoryCasInternal(memory: AssistantMemory): MemoryCasUpdateResult {
+        val old = memoryDAO.getMemoryById(memory.id) ?: error("Memory record #${memory.id} not found")
+        val updatedAt = System.currentTimeMillis()
+        val affected = memoryDAO.updateRecordCas(
+            id = old.id,
+            assistantId = bucketForScope(memory.scope),
+            content = memory.content,
+            scope = memory.scope.wireName,
+            kind = old.kind,
+            sourceConversationId = old.sourceConversationId,
+            sourceMessageIdsJson = old.sourceMessageIdsJson,
+            supersedesIdsJson = old.supersedesIdsJson,
+            expiresAt = old.expiresAt,
+            confidence = old.confidence,
+            pinned = memory.pinned,
+            archived = old.archived,
+            createdAt = old.createdAt,
+            updatedAt = updatedAt,
+            lastUsedAt = old.lastUsedAt,
+            sourceRunId = old.sourceRunId,
+            sourceTrigger = old.sourceTrigger,
+            expectedRevision = memory.revision,
+        )
+        if (affected == 0) {
+            val current = memoryDAO.getMemoryById(memory.id)
+            throw MemoryStaleException(memory.id, memory.revision, current?.revision ?: 0)
+        }
+        val updated = memoryDAO.getMemoryById(memory.id)?.toAssistantMemory()
+            ?: error("Memory record #${memory.id} not found after update")
+        return MemoryCasUpdateResult(
+            memory = updated,
+            oldDigest = ContentDigest.sha256(old.content),
+            newDigest = ContentDigest.sha256(updated.content),
+        )
+    }
+
+    /**
      * Compare-and-set delete. The revision the approval was bound to must
      * still match, otherwise the delete is rejected (no blind removal).
      * Returns the digest of the removed content for the audit trail.
      */
-    suspend fun deleteMemoryCas(id: Int, expectedRevision: Long): MemoryCasDeleteResult {
+    suspend fun deleteMemoryCas(id: Int, expectedRevision: Long): MemoryCasDeleteResult = withMemoryWriter {
+        deleteMemoryCasInternal(id, expectedRevision)
+    }
+
+    private suspend fun deleteMemoryCasInternal(id: Int, expectedRevision: Long): MemoryCasDeleteResult {
         val old = memoryDAO.getMemoryById(id) ?: error("Memory record #$id not found")
         if (old.revision != expectedRevision) {
             throw MemoryStaleException(id, expectedRevision, old.revision)
@@ -265,7 +376,7 @@ open class MemoryRepository(
     /** Current revision of a memory record, or null when it does not exist. */
     suspend fun memoryRevision(id: Int): Long? = memoryDAO.revisionOf(id)
 
-    suspend fun touchMemories(ids: List<Int>, usedAt: Long = System.currentTimeMillis()) {
+    suspend fun touchMemories(ids: List<Int>, usedAt: Long = System.currentTimeMillis()) = withMemoryWriter {
         if (ids.isNotEmpty()) {
             memoryDAO.touchMemories(ids, usedAt)
         }
@@ -282,36 +393,43 @@ open class MemoryRepository(
     suspend fun getAllCandidates(): List<MemoryCandidate> =
         candidateDAO.getAllCandidates().map { it.toCandidate() }
 
-    suspend fun addCandidate(candidate: MemoryCandidate) {
+    suspend fun addCandidate(candidate: MemoryCandidate) = withMemoryWriter {
         candidateDAO.insert(candidate.toEntity())
     }
 
-    suspend fun addCandidates(candidates: List<MemoryCandidate>) {
-        candidateDAO.insertAll(candidates.map { it.toEntity() })
+    suspend fun addCandidates(candidates: List<MemoryCandidate>) = withMemoryWriter {
+        if (candidates.isNotEmpty()) {
+            candidateDAO.insertAll(candidates.map { it.toEntity() })
+        }
     }
 
-    suspend fun updateCandidate(candidate: MemoryCandidate) {
+    suspend fun updateCandidate(candidate: MemoryCandidate) = withMemoryWriter {
+        updateCandidateInternal(candidate)
+    }
+
+    private suspend fun updateCandidateInternal(candidate: MemoryCandidate) {
         candidateDAO.update(candidate.copy(updatedAt = System.currentTimeMillis()).toEntity())
     }
 
-    suspend fun acceptCandidate(id: String): MemoryRecord {
+    suspend fun acceptCandidate(id: String): MemoryRecord = withMemoryWriter {
         val db = requireNotNull(appDatabase) { "acceptCandidate requires AppDatabase" }
-        return db.withTransaction {
+        db.withTransaction {
             val candidate = candidateDAO.getCandidateById(id)?.toCandidate()
                 ?: error("Memory candidate #$id not found")
             check(candidate.status == MemoryCandidateStatus.PENDING) {
                 "Memory candidate #$id is already ${candidate.status.wireName}"
             }
-            val record = addMemory(
+            val record = addMemoryInternal(
                 scope = candidate.scope,
                 kind = candidate.kind,
                 content = candidate.content,
+                assistantId = bucketForScope(candidate.scope),
                 sourceConversationId = candidate.sourceConversationId,
                 sourceMessageIds = candidate.sourceMessageIds,
                 expiresAt = candidate.expiresAt,
                 confidence = candidate.confidence,
             )
-            updateCandidate(candidate.copy(status = MemoryCandidateStatus.ACCEPTED))
+            updateCandidateInternal(candidate.copy(status = MemoryCandidateStatus.ACCEPTED))
             record
         }
     }
@@ -325,8 +443,13 @@ open class MemoryRepository(
     suspend fun countEventsSince(type: MemoryEventType, createdAfter: Long): Int =
         eventDAO.countEventsSince(type.wireName, createdAfter)
 
-    suspend fun addEvent(event: MemoryEvent) {
+    suspend fun addEvent(event: MemoryEvent) = withMemoryWriter {
         eventDAO.insert(event.toEntity())
+    }
+
+    private suspend fun <T> withMemoryWriter(block: suspend () -> T): T {
+        val gate = restoreWriteGate
+        return if (gate == null) block() else gate.withCurrentWriterOrCancel(block)
     }
 
     private fun MemoryEntity.toAssistantMemory() = AssistantMemory(
@@ -341,6 +464,12 @@ open class MemoryRepository(
         revision = revision,
         sourceRunId = sourceRunId,
         sourceTrigger = sourceTrigger,
+        sourceConversationId = sourceConversationId,
+        sourceMessageIds = decodeStringList(sourceMessageIdsJson),
+        supersedesIds = decodeIntList(supersedesIdsJson),
+        createdAt = createdAt,
+        updatedAt = updatedAt,
+        lastUsedAt = lastUsedAt,
     )
 
     private fun MemoryRecord.toAssistantMemory() = AssistantMemory(
@@ -355,6 +484,12 @@ open class MemoryRepository(
         revision = revision,
         sourceRunId = sourceRunId,
         sourceTrigger = sourceTrigger,
+        sourceConversationId = sourceConversationId,
+        sourceMessageIds = sourceMessageIds,
+        supersedesIds = supersedesIds,
+        createdAt = createdAt,
+        updatedAt = updatedAt,
+        lastUsedAt = lastUsedAt,
     )
 
     private fun MemoryEntity.toRecord() = MemoryRecord(

@@ -11,9 +11,8 @@ package app.amber.ai.provider
  *  - The persisted sequence is written BEFORE an event is emitted to the
  *    consumer (write-ahead), so a reconnect can skip every event with
  *    sequence <= cursor without re-delivering text already shown.
- *  - The cursor is cleared when the terminal event (response.completed /
- *    response.incomplete) is delivered or when the run is settled
- *    server-side by recovery.
+ *  - The owning chat/recovery flow clears the cursor only after the final
+ *    conversation checkpoint and terminal state are durable.
  */
 data class ResponseCursor(
     val responseId: String,
@@ -43,4 +42,6 @@ interface ResponseResumeStore {
 data class ResponsesResumeRequest(
     val runId: String,
     val store: ResponseResumeStore,
+    /** Only the first model round of an explicit continuation reattaches this response. */
+    val resumeFrom: ResponseCursor? = null,
 )

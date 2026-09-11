@@ -13,7 +13,9 @@ enum class ContinueSourceKind {
     COUNCIL,
     DEEP_READ,
     MINIAPP_DRAFT,
+    MINIAPP_RUNNER,
     IMAGE_GENERATION,
+    NOVEL_WORKSPACE,
 }
 
 enum class ContinueStatus {
@@ -34,9 +36,31 @@ enum class ContinueStatus {
 sealed interface ContinueRoute {
     data class CouncilRoom(val conversationId: String) : ContinueRoute
 
-    data class DeepRead(val topicId: String, val title: String) : ContinueRoute
+    data class DeepRead(
+        val topicId: String,
+        val title: String,
+        val sourceUrl: String? = null,
+    ) : ContinueRoute
 
-    data class Chat(val conversationId: String) : ContinueRoute
+    data class Chat(
+        val conversationId: String,
+        val messageId: String? = null,
+        val toolCallId: String? = null,
+    ) : ContinueRoute
+
+    data class ImageGeneration(
+        val conversationId: String,
+        val messageId: String? = null,
+        val toolCallId: String,
+    ) : ContinueRoute
+
+    data class MiniAppRunner(val appId: String) : ContinueRoute
+
+    data class NovelWorkspace(
+        val projectId: String,
+        val branchSlug: String? = null,
+        val jobId: String? = null,
+    ) : ContinueRoute
 }
 
 data class ContinueCandidate(

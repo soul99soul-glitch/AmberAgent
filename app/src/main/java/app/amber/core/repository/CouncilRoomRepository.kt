@@ -11,6 +11,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlin.coroutines.CoroutineContext
+import kotlin.coroutines.EmptyCoroutineContext
 import app.amber.agent.data.db.dao.ConversationDAO
 import app.amber.feature.modelcouncil.CouncilMessageStatus
 import app.amber.feature.modelcouncil.CouncilParticipantStatus
@@ -19,6 +21,8 @@ import app.amber.feature.modelcouncil.CouncilRoomStatus
 import app.amber.feature.modelcouncil.CouncilRoomStore
 import app.amber.feature.modelcouncil.running
 import app.amber.feature.modelcouncil.terminal
+import app.amber.core.sync.core.SyncRestoreWriteEpoch
+import app.amber.core.sync.core.SyncRestoreWriteGate
 import app.amber.core.utils.JsonInstant
 import kotlin.uuid.Uuid
 
@@ -44,12 +48,35 @@ import kotlin.uuid.Uuid
 class CouncilRoomRepository(
     private val conversationDao: ConversationDAO,
     private val appScope: CoroutineScope,
+    private val restoreWriteGate: SyncRestoreWriteGate? = null,
 ) : CouncilRoomStore {
+    override suspend fun captureWriteContext(): CoroutineContext {
+        val gate = restoreWriteGate ?: return EmptyCoroutineContext
+        return currentCoroutineContext()[SyncRestoreWriteEpoch]
+            ?: SyncRestoreWriteEpoch(gate.currentEpoch())
+    }
+
     /** conversationId → active Room state. ConcurrentHashMap so [peekRoom] can read concurrently with locked mutations without a [ConcurrentModificationException] (it is called from the UI thread). Structural put/remove still happen under [lock]. */
     private val active = java.util.concurrent.ConcurrentHashMap<Uuid, RoomSlot>()
 
     /** Serializes per-conversation repository mutations (load + upsert + evict). */
     private val lock = Mutex()
+
+    private val restoreLifecycleRegistration = restoreWriteGate?.addRestoreLifecycleListener(
+        onStarted = {
+            // A debounced slot may still hold a pre-restore snapshot. Cancel
+            // it before the restore starts; the epoch check is the final guard
+            // for a job that already reached its write boundary.
+            active.values.forEach { it.cancelPersist() }
+        },
+        onFinished = { succeeded, dataCommitted ->
+            if (succeeded || dataCommitted) {
+                // The imported DB is authoritative. Do not let an old slot be
+                // flushed after restore and overwrite the newly loaded room.
+                active.clear()
+            }
+        },
+    )
 
     /**
      * Observe a Room. Cold on first access: loads from SQLite if not yet in
@@ -59,17 +86,19 @@ class CouncilRoomRepository(
      * The returned StateFlow is stable across calls for the same id — safe to
      * collect from Compose without re-subscription churn.
      */
-    override suspend fun observeRoom(conversationId: Uuid): StateFlow<CouncilRoom?> = lock.withLock {
-        active.getOrPut(conversationId) { RoomSlot() }.also { slot ->
-            if (!slot.loaded) {
-                slot.loaded = true
-                val stored = runCatching { conversationDao.getCouncilState(conversationId.toString()) }
-                    .getOrNull()
-                stored?.takeIf { it.isNotBlank() }?.let { json ->
-                    slot.flow.value = repairColdLoadedRoom(decodeRoom(json))
+    override suspend fun observeRoom(conversationId: Uuid): StateFlow<CouncilRoom?> = withRestoreWrite {
+        lock.withLock {
+            active.getOrPut(conversationId) { RoomSlot() }.also { slot ->
+                if (!slot.loaded) {
+                    slot.loaded = true
+                    val stored = runCatching { conversationDao.getCouncilState(conversationId.toString()) }
+                        .getOrNull()
+                    stored?.takeIf { it.isNotBlank() }?.let { json ->
+                        slot.flow.value = repairColdLoadedRoom(decodeRoom(json))
+                    }
                 }
-            }
-        }.flow.asStateFlow()
+            }.flow.asStateFlow()
+        }
     }
 
     /** Synchronous peek at the in-memory value; null if not loaded or absent. */
@@ -80,10 +109,15 @@ class CouncilRoomRepository(
      * Safe to call on a hot path (per streaming chunk) — the SQLite write is
      * coalesced.
      */
-    override suspend fun upsertRoom(room: CouncilRoom) = lock.withLock {
-        val slot = active.getOrPut(room.conversationId) { RoomSlot().also { it.loaded = true } }
-        slot.flow.value = room
-        slot.schedulePersist(appScope, conversationDao)
+    override suspend fun upsertRoom(room: CouncilRoom) = withRestoreWrite {
+        val expectedEpoch = restoreWriteGate?.let {
+            currentCoroutineContext()[SyncRestoreWriteEpoch]?.value ?: it.currentEpoch()
+        }
+        lock.withLock {
+            val slot = active.getOrPut(room.conversationId) { RoomSlot().also { it.loaded = true } }
+            slot.flow.value = room
+            slot.schedulePersist(appScope, conversationDao, restoreWriteGate, expectedEpoch)
+        }
     }
 
     /**
@@ -94,15 +128,18 @@ class CouncilRoomRepository(
      * observers saw last.
      */
     override suspend fun closeAndEvict(room: CouncilRoom) {
-        lock.withLock {
-            val slot = active[room.conversationId]
-            if (slot != null) {
-                slot.flow.value = room
-                slot.flushNow(conversationDao)
-                active.remove(room.conversationId)
-            } else {
-                // Slot already evicted (e.g. process restart path); still persist directly.
-                persistRoomDirect(room)
+        withRestoreWrite<Unit> {
+            lock.withLock {
+                val slot = active[room.conversationId]
+                if (slot != null) {
+                    slot.flow.value = room
+                    slot.flushNow(conversationDao)
+                    active.remove(room.conversationId)
+                } else {
+                    // Slot already evicted (e.g. process restart path); still persist directly.
+                    persistRoomDirect(room)
+                }
+                Unit
             }
         }
     }
@@ -112,7 +149,7 @@ class CouncilRoomRepository(
      * Called by the manager when a Room leaves the active set (cap reached /
      * conversation closed). Observe calls after eviction will reload from disk.
      */
-    override suspend fun evict(conversationId: Uuid) {
+    override suspend fun evict(conversationId: Uuid) = withRestoreWrite {
         lock.withLock {
             val slot = active.remove(conversationId) ?: return@withLock
             slot.flushNow(conversationDao)
@@ -121,21 +158,27 @@ class CouncilRoomRepository(
 
     /** Force-flush any pending write for a conversation (e.g. on app background). */
     override suspend fun flush(conversationId: Uuid) {
-        lock.withLock {
-            active[conversationId]?.flushNow(conversationDao)
+        withRestoreWrite<Unit> {
+            lock.withLock {
+                active[conversationId]?.flushNow(conversationDao)
+                Unit
+            }
         }
     }
 
     /** Delete the persisted council_state (and clear memory) for a conversation. */
     override suspend fun deleteRoom(conversationId: Uuid) {
-        lock.withLock {
-            active.remove(conversationId)
-            runCatching {
-                conversationDao.updateCouncilState(
-                    conversationId.toString(),
-                    councilState = null,
-                    updatedAt = System.currentTimeMillis(),
-                )
+        withRestoreWrite<Unit> {
+            lock.withLock {
+                active.remove(conversationId)
+                runCatching {
+                    conversationDao.updateCouncilState(
+                        conversationId.toString(),
+                        councilState = null,
+                        updatedAt = System.currentTimeMillis(),
+                    )
+                }
+                Unit
             }
         }
     }
@@ -205,18 +248,26 @@ class CouncilRoomRepository(
         @Volatile var loaded: Boolean = false
         @Volatile var persistJob: Job? = null
 
+        fun cancelPersist() {
+            persistJob?.cancel()
+            persistJob = null
+        }
+
         fun schedulePersist(
             scope: CoroutineScope,
             dao: ConversationDAO,
+            restoreWriteGate: SyncRestoreWriteGate?,
+            expectedRestoreEpoch: Long?,
         ) {
             persistJob?.cancel()
-            persistJob = scope.launch(Dispatchers.IO) {
+            val context = expectedRestoreEpoch?.let(::SyncRestoreWriteEpoch)
+            persistJob = scope.launch(Dispatchers.IO + (context ?: kotlin.coroutines.EmptyCoroutineContext)) {
                 delay(PERSIST_DEBOUNCE_MS)
                 val currentJob = currentCoroutineContext()[Job]
                 if (persistJob === currentJob) {
                     persistJob = null
                 }
-                persistCurrent(dao)
+                persistCurrent(dao, restoreWriteGate)
             }
         }
 
@@ -226,16 +277,27 @@ class CouncilRoomRepository(
             persistCurrent(dao)
         }
 
-        private suspend fun persistCurrent(dao: ConversationDAO) {
+        private suspend fun persistCurrent(
+            dao: ConversationDAO,
+            restoreWriteGate: SyncRestoreWriteGate? = null,
+        ) {
             val current = flow.value ?: return
             val json = runCatching { JsonInstant.encodeToString(CouncilRoom.serializer(), current) }
                 .getOrNull() ?: return
-            dao.updateCouncilState(
-                id = current.conversationId.toString(),
-                councilState = json,
-                updatedAt = current.updatedAtMs,
-            )
+            val write: suspend () -> Unit = {
+                dao.updateCouncilState(
+                    id = current.conversationId.toString(),
+                    councilState = json,
+                    updatedAt = current.updatedAtMs,
+                )
+            }
+            if (restoreWriteGate == null) write() else restoreWriteGate.withCurrentWriterOrCancel(write)
         }
+    }
+
+    private suspend fun <T> withRestoreWrite(block: suspend () -> T): T {
+        val gate = restoreWriteGate ?: return block()
+        return gate.withCurrentWriterOrCancel(block)
     }
 
     companion object {

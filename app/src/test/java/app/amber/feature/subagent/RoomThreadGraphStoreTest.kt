@@ -2,7 +2,14 @@ package app.amber.feature.subagent
 
 import app.amber.feature.runtime.DurableRuntimeTestBase
 import app.amber.feature.runtime.RoomThreadGraphStore
+import app.amber.core.sync.core.SyncRestoreWriteEpoch
+import app.amber.core.sync.core.SyncRestoreWriteGate
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Test
@@ -128,5 +135,84 @@ class RoomThreadGraphStoreTest : DurableRuntimeTestBase() {
         assertEquals(ThreadDeliveryState.DELIVERED.name, first.single().deliveryState)
         assertEquals(0, second.size)
         assertEquals(ThreadDeliveryState.DELIVERED.name, store.getMessage("msg_claim")!!.deliveryState)
+    }
+
+    @Test
+    fun concurrentDrainClaimsEachQueuedMessageOnce() = runBlocking {
+        val store = RoomThreadGraphStore(database.threadGraphDao())
+        store.upsertNode(node("thread_concurrent"))
+        repeat(24) { index ->
+            store.enqueueMessage(
+                ThreadMessageRecord(
+                    messageId = "msg_concurrent_$index",
+                    threadId = "thread_concurrent",
+                    sender = "parent",
+                    recipient = "thread:thread_concurrent",
+                    kind = "message",
+                    payload = "message $index",
+                    payloadDigest = "digest-$index",
+                    deliveryState = ThreadDeliveryState.QUEUED.name,
+                    createdAtMs = 1_000L + index,
+                    updatedAtMs = 1_000L + index,
+                )
+            )
+        }
+
+        val claims = coroutineScope {
+            (0 until 12).map {
+                async(Dispatchers.IO) { store.claimQueuedMessages("thread_concurrent") }
+            }.awaitAll().flatten()
+        }
+
+        assertEquals(24, claims.size)
+        assertEquals(24, claims.map { it.messageId }.toSet().size)
+        assertEquals(
+            24,
+            store.listMessages("thread_concurrent")
+                .count { it.deliveryState == ThreadDeliveryState.DELIVERED.name },
+        )
+    }
+
+    @Test
+    fun queuedMessageSurvivesStoreRecreationUntilAThreadClaimsIt() = runBlocking {
+        val first = RoomThreadGraphStore(database.threadGraphDao())
+        first.upsertNode(node("thread_restart"))
+        first.enqueueMessage(
+            ThreadMessageRecord(
+                messageId = "msg_restart",
+                threadId = "thread_restart",
+                sender = "parent",
+                recipient = "thread:thread_restart",
+                kind = "message",
+                payload = "survive restart",
+                payloadDigest = "digest",
+                deliveryState = ThreadDeliveryState.QUEUED.name,
+                createdAtMs = 1_000,
+                updatedAtMs = 1_000,
+            )
+        )
+
+        // A process restart between enqueue and generation must leave the
+        // message queued; the next owner can claim it exactly once.
+        val restarted = RoomThreadGraphStore(database.threadGraphDao())
+        assertEquals("survive restart", restarted.listQueuedMessages("thread_restart").single().payload)
+        val claimed = restarted.claimQueuedMessages("thread_restart")
+        assertEquals("msg_restart", claimed.single().messageId)
+        assertEquals(ThreadDeliveryState.DELIVERED.name, restarted.getMessage("msg_restart")!!.deliveryState)
+    }
+
+    @Test
+    fun captureWriteContextPreservesCallerEpochOrCapturesCurrentGateEpoch() = runBlocking {
+        val gate = SyncRestoreWriteGate()
+        val store = RoomThreadGraphStore(database.threadGraphDao(), gate)
+
+        val captured = store.captureWriteContext()
+        assertEquals(gate.currentEpoch(), captured[SyncRestoreWriteEpoch]?.value)
+
+        val callerEpoch = SyncRestoreWriteEpoch(41L)
+        val inherited = withContext(callerEpoch) {
+            store.captureWriteContext()
+        }
+        assertEquals(41L, inherited[SyncRestoreWriteEpoch]?.value)
     }
 }

@@ -239,6 +239,10 @@ private fun DefaultImageGenerationModelSetting(
     vm: SettingVM,
 ) {
     var showPromptSheet by remember { mutableStateOf(false) }
+    // Managed-OAuth providers need their durable token state to count as
+    // usable; the stores are synchronous Keystore reads.
+    val grokAuthStore = koinInject<app.amber.ai.provider.providers.grok.GrokAuthStore>()
+    val antigravityAuthStore = koinInject<app.amber.ai.provider.providers.google.AntigravityAuthStore>()
     SettingModelRow(
         title = stringResource(R.string.setting_model_page_image_gen_model),
         description = stringResource(R.string.setting_model_page_image_gen_model_desc),
@@ -259,7 +263,9 @@ private fun DefaultImageGenerationModelSetting(
             // see "Nano Banana 2" / "gpt-image-2" as pickable options even
             // when the corresponding Gemini / OpenAI provider has no API
             // key wired up, which would 401 on every generation.
-            providers = settings.providers.filter { it.hasUsableAuth() },
+            providers = settings.providers.filter {
+                it.hasUsableAuth(oauthUsable = it.managedOAuthUsable(grokAuthStore, antigravityAuthStore))
+            },
             // Filter by IMAGE so the picker only shows gpt-image-2 / Nano
             // Banana / Codex Image — not chat models. Keep allowClear so the
             // user can clear the explicit choice and return to authenticated auto-selection.
@@ -518,6 +524,10 @@ private fun DefaultOcrModelSetting(
     val context = LocalContext.current
     val healthStrings = remember(context) { VisionModelHealthStrings.from(context) }
     val providerCatalog = koinInject<ProviderCatalog>()
+    // Managed-OAuth providers need their durable token state to count as
+    // usable; the stores are synchronous Keystore reads.
+    val grokAuthStore = koinInject<app.amber.ai.provider.providers.grok.GrokAuthStore>()
+    val antigravityAuthStore = koinInject<app.amber.ai.provider.providers.google.AntigravityAuthStore>()
     val health by produceState(
         initialValue = VisionModelHealthChecker.checking(healthStrings),
         key1 = context,
@@ -1233,4 +1243,30 @@ private fun SettingModelLeadingIcon(
         iconSize = 15.dp,
         tone = tone,
     )
+}
+
+/**
+ * Phase 5 review fix: managed OAuth modes only count as usable when the
+ * durable store really holds a refreshable token; API-key / other modes are
+ * unaffected (null keeps the legacy pure-data judgement).
+ */
+private fun app.amber.ai.provider.ProviderSetting.managedOAuthUsable(
+    grokAuthStore: app.amber.ai.provider.providers.grok.GrokAuthStore,
+    antigravityAuthStore: app.amber.ai.provider.providers.google.AntigravityAuthStore,
+): Boolean? = when (this) {
+    is app.amber.ai.provider.ProviderSetting.OpenAI ->
+        if (authMode == app.amber.ai.provider.OpenAIAuthMode.GROK_OAUTH) {
+            app.amber.ai.provider.providers.grok.GrokAuthStatus
+                .from(grokAuthStore.get(id), System.currentTimeMillis()).usable
+        } else {
+            null
+        }
+    is app.amber.ai.provider.ProviderSetting.Google ->
+        when (authMode) {
+            app.amber.ai.provider.GoogleAuthMode.ANTIGRAVITY_OAUTH ->
+                app.amber.ai.provider.providers.google.AntigravityAuthStatus
+                    .from(antigravityAuthStore.get(id), System.currentTimeMillis()).usable
+            else -> null
+        }
+    else -> null
 }

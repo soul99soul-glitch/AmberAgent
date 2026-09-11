@@ -83,12 +83,12 @@ class SpeculativeToolRunnerTest {
         runner.observe(
             listOf(
                 toolCall("terminal_job_start", id = "call-terminal"),
-                toolCall("officepro_read_screen", id = "call-office"),
+                toolCall("screen_tap", id = "call-screen"),
                 toolCall("agent_task_retry", id = "call-retry"),
             ),
             mapOf(
                 "terminal_job_start" to tool("terminal_job_start", "nope"),
-                "officepro_read_screen" to tool("officepro_read_screen", "nope"),
+                "screen_tap" to tool("screen_tap", "nope"),
                 "agent_task_retry" to tool("agent_task_retry", "nope"),
             ),
         )

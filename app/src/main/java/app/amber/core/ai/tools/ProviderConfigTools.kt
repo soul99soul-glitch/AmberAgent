@@ -13,14 +13,18 @@ import app.amber.ai.core.InputSchema
 import app.amber.ai.core.Tool
 import app.amber.ai.provider.Model
 import app.amber.ai.provider.ModelType
+import app.amber.ai.provider.OpenAIAuthMode
 import app.amber.ai.provider.OpenAIBrand
 import app.amber.ai.provider.ProviderCatalog
 import app.amber.ai.provider.ProviderSetting
 import app.amber.ai.provider.hasUsableAuth
 import app.amber.ai.provider.providers.GoogleProvider
 import app.amber.ai.provider.providers.google.GoogleGeminiAuthStatus
-import app.amber.ai.provider.providers.google.GoogleGeminiAuthStatusCode
+import app.amber.ai.provider.providers.google.AntigravityAuthStatus
+import app.amber.ai.provider.providers.openai.OpenAICodexAuthStore
 import app.amber.ai.provider.providers.openai.OpenAICodexAuthTokens
+import app.amber.ai.provider.providers.grok.GrokAuthStatus
+import app.amber.ai.provider.providers.grok.GrokAuthStore
 import app.amber.ai.ui.UIMessagePart
 import app.amber.core.settings.DEFAULT_AUTO_MODEL_ID
 import app.amber.core.settings.Settings
@@ -65,68 +69,93 @@ fun interface ProviderModelFetcher {
     suspend fun fetch(provider: ProviderSetting): List<Model>
 }
 
+/**
+ * The status tool has one wire shape for managed OAuth providers. Keep the DTO independent
+ * from Google's auth enum so Codex can report its real token state through the same contract.
+ */
+internal data class ManagedProviderAuthStatus(
+    val wireValue: String,
+    val usable: Boolean,
+)
+
+private const val AUTH_STATUS_READY = "ready"
+private const val AUTH_STATUS_NOT_SIGNED_IN = "not_signed_in"
+private const val AUTH_STATUS_TOKEN_MISSING = "token_missing"
+private const val AUTH_STATUS_TOKEN_EXPIRED = "token_expired"
+private const val AUTH_STATUS_CLIENT_UNAVAILABLE = "client_unavailable"
+
+internal fun codexAuthStatus(
+    tokens: OpenAICodexAuthTokens?,
+    nowMillis: Long = System.currentTimeMillis(),
+): ManagedProviderAuthStatus {
+    if (tokens == null) {
+        return ManagedProviderAuthStatus(AUTH_STATUS_NOT_SIGNED_IN, usable = false)
+    }
+    if (tokens.accessToken.isBlank()) {
+        return ManagedProviderAuthStatus(AUTH_STATUS_TOKEN_MISSING, usable = false)
+    }
+    if (tokens.expiresAtMillis <= nowMillis) {
+        // The next request will refresh before use. A stored refresh credential keeps this
+        // session usable; without one the expired access token cannot authenticate a call.
+        return ManagedProviderAuthStatus(
+            AUTH_STATUS_TOKEN_EXPIRED,
+            usable = tokens.refreshToken.isNotBlank(),
+        )
+    }
+    return ManagedProviderAuthStatus(AUTH_STATUS_READY, usable = true)
+}
+
 fun createProviderConfigTools(
     settingsStore: SettingsAggregator,
     secretStore: SecretStore,
     providerCatalog: ProviderCatalog,
     googleProvider: GoogleProvider,
-    codexOAuthTokenResolver: (Uuid) -> OpenAICodexAuthTokens? = { null },
     modelFetcher: ProviderModelFetcher = ProviderModelFetcher { provider ->
-        providerCatalog.text(provider).listModels(provider)
+        if (provider is ProviderSetting.OpenAI) providerCatalog.listModels(provider)
+        else providerCatalog.text(provider).listModels(provider)
     },
+    openAICodexAuthStore: OpenAICodexAuthStore? = null,
+    grokAuthStore: GrokAuthStore? = null,
+    antigravityAuthStore: app.amber.ai.provider.providers.google.AntigravityAuthStore? = null,
 ): List<Tool> {
     // Google OAuth state lives in the provider's encrypted token store, not in
     // Settings/SecretStore. Keep the resolver here so status and refresh use the
     // same concrete provider that sends the request; no token value crosses the
     // tool boundary.
-    val oauthStatusResolver: (ProviderSetting) -> GoogleGeminiAuthStatus? = { provider ->
-        if (provider is ProviderSetting.Google) {
-            runCatching {
-                googleProvider.oauthAuthStatus(provider)
-            }.getOrElse { GoogleGeminiAuthStatus.clientUnavailable() }
-        } else {
-            null
+    val oauthStatusResolver: (ProviderSetting) -> ManagedProviderAuthStatus? = { provider ->
+        when (provider) {
+            is ProviderSetting.Google -> runCatching {
+                val gemini = googleProvider.oauthAuthStatus(provider)
+                if (gemini != null) {
+                    gemini.toManagedStatus() as ManagedProviderAuthStatus?
+                } else {
+                    googleProvider.antigravityAuthStatus(provider)
+                        ?.let { it.toManagedStatus() as ManagedProviderAuthStatus? }
+                }
+            }.getOrElse { ManagedProviderAuthStatus(AUTH_STATUS_CLIENT_UNAVAILABLE, usable = false) }
+            is ProviderSetting.OpenAI -> if (provider.authMode == OpenAIAuthMode.GROK_OAUTH) {
+                grokAuthStore?.let { GrokAuthStatus.from(it.get(provider.id), System.currentTimeMillis()).toManagedStatus() }
+                    ?: ManagedProviderAuthStatus(AUTH_STATUS_CLIENT_UNAVAILABLE, usable = false)
+            } else if (provider.authMode == OpenAIAuthMode.CODEX_OAUTH) {
+                if (openAICodexAuthStore == null) {
+                    ManagedProviderAuthStatus(AUTH_STATUS_CLIENT_UNAVAILABLE, usable = false)
+                } else {
+                    runCatching {
+                        codexAuthStatus(openAICodexAuthStore.get(provider.id))
+                    }.getOrElse { ManagedProviderAuthStatus(AUTH_STATUS_CLIENT_UNAVAILABLE, usable = false) }
+                }
+            } else {
+                null
+            }
+            else -> null
         }
     }
-    val managedOAuthStatusResolver: (ProviderSetting) -> ManagedOAuthStatus? = { provider ->
-        oauthStatusResolver(provider)?.let { status ->
-            ManagedOAuthStatus(status.code.wireValue, status.usable)
-        } ?: codexOAuthStatus(provider, codexOAuthTokenResolver)
-    }
     return listOf(
-        providerConfigStatusTool(settingsStore, secretStore, managedOAuthStatusResolver),
+        providerConfigStatusTool(settingsStore, secretStore, oauthStatusResolver),
         providerConfigApplyTool(settingsStore, secretStore),
         providerRefreshModelsTool(settingsStore, modelFetcher),
         settingsSetModelSlotTool(settingsStore),
     )
-}
-
-private data class ManagedOAuthStatus(
-    val wireValue: String,
-    val usable: Boolean,
-)
-
-private fun codexOAuthStatus(
-    provider: ProviderSetting,
-    tokenResolver: (Uuid) -> OpenAICodexAuthTokens?,
-): ManagedOAuthStatus? {
-    if (provider !is ProviderSetting.OpenAI ||
-        provider.authMode != app.amber.ai.provider.OpenAIAuthMode.CODEX_OAUTH
-    ) {
-        return null
-    }
-    val tokens = tokenResolver(provider.id)
-        ?: return ManagedOAuthStatus("not_signed_in", usable = false)
-    if (tokens.accessToken.isBlank()) {
-        return ManagedOAuthStatus("token_missing", usable = false)
-    }
-    if (tokens.expiresAtMillis <= System.currentTimeMillis()) {
-        return ManagedOAuthStatus(
-            wireValue = "token_expired",
-            usable = tokens.refreshToken.isNotBlank(),
-        )
-    }
-    return ManagedOAuthStatus("ready", usable = true)
 }
 
 // ---------------------------------------------------------------------------
@@ -136,7 +165,7 @@ private fun codexOAuthStatus(
 private fun providerConfigStatusTool(
     settingsStore: SettingsAggregator,
     secretStore: SecretStore,
-    oauthStatusResolver: (ProviderSetting) -> ManagedOAuthStatus?,
+    oauthStatusResolver: (ProviderSetting) -> ManagedProviderAuthStatus?,
 ): Tool = Tool(
     name = TOOL_PROVIDER_CONFIG_STATUS,
     description = "Read-only inventory of configured AI providers, their enabled/model/auth state, and the six default model slots (chat/title/ocr/compress/suggestion/image_generation). All output is redacted: API keys/tokens are never included; API-key providers expose has_api_key and managed OAuth providers expose auth_status/auth_usable; base_url is reported as host only. Use this first to diagnose missing credentials, empty model catalogs, or a dangling chat model before applying changes.",
@@ -175,7 +204,7 @@ private fun statusPayload(
     providerId: String?,
     nameContains: String?,
     includeModels: Boolean,
-    oauthStatusResolver: (ProviderSetting) -> ManagedOAuthStatus?,
+    oauthStatusResolver: (ProviderSetting) -> ManagedProviderAuthStatus?,
 ): JsonObject = buildJsonObject {
     val providers = settings.providers
         .filter { providerId == null || it.id.toString() == providerId }
@@ -201,7 +230,7 @@ private fun statusPayload(
         val oauthStatus = oauthStatusResolver(provider)
         val authUsable = oauthStatus?.usable ?: (provider.hasUsableAuth() || secretStore.hasStoredKey(provider))
         if (provider.enabled) {
-            if (oauthStatus != null && oauthStatus.wireValue != GoogleGeminiAuthStatusCode.READY.wireValue) {
+            if (oauthStatus != null && oauthStatus.wireValue != AUTH_STATUS_READY) {
                 issues += "provider ${provider.name} OAuth auth is ${oauthStatus.wireValue}"
             } else if (!authUsable) {
                 issues += if (oauthStatus != null) {
@@ -228,7 +257,7 @@ private fun providerStatusJson(
     provider: ProviderSetting,
     secretStore: SecretStore,
     includeModels: Boolean,
-    oauthStatusResolver: (ProviderSetting) -> ManagedOAuthStatus?,
+    oauthStatusResolver: (ProviderSetting) -> ManagedProviderAuthStatus?,
 ): JsonObject = buildJsonObject {
     val oauthStatus = oauthStatusResolver(provider)
     val authUsable = oauthStatus?.usable ?: (provider.hasUsableAuth() || secretStore.hasStoredKey(provider))
@@ -241,7 +270,7 @@ private fun providerStatusJson(
     put("base_url_host", provider.hostOnly())
     put("has_api_key", if (oauthStatus != null) false else secretStore.hasStoredKey(provider))
     put("auth_usable", authUsable)
-    put("auth_status", oauthStatus?.wireValue ?: if (authUsable) "ready" else "missing")
+    put("auth_status", oauthStatus?.wireValue ?: if (authUsable) AUTH_STATUS_READY else "missing")
     put("chat_model_count", provider.models.count { it.type == ModelType.CHAT })
     put("image_model_count", provider.models.count { it.type == ModelType.IMAGE })
     if (includeModels) {
@@ -257,6 +286,15 @@ private fun providerStatusJson(
         })
     }
 }
+
+private fun GoogleGeminiAuthStatus.toManagedStatus(): ManagedProviderAuthStatus =
+    ManagedProviderAuthStatus(code.wireValue, usable)
+
+private fun AntigravityAuthStatus.toManagedStatus(): ManagedProviderAuthStatus =
+    ManagedProviderAuthStatus(code.wireValue, usable)
+
+private fun GrokAuthStatus.toManagedStatus(): ManagedProviderAuthStatus =
+    ManagedProviderAuthStatus(code.wireValue, usable)
 
 /**
  * iOS §6.2 status 契约的 brand：仅 OpenAI-compatible 有品牌概念（[OpenAIBrand]），

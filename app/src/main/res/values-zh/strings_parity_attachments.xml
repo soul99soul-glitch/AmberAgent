@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="parity_attachment_importing">导入中</string>
+    <string name="parity_attachment_import_failed_short">导入失败</string>
+    <string name="parity_attachment_import_failed">导入失败：%1$s</string>
+    <string name="parity_attachment_import_failed_detail">文件无法复制，请移除后重试。</string>
+    <string name="parity_attachment_retry">重试导入</string>
+    <string name="parity_attachment_ready">可用</string>
+    <string name="parity_attachment_truncated">正文已截断</string>
+    <string name="parity_attachment_read_failed">正文读取失败</string>
+    <string name="parity_attachment_read_failed_detail">文档正文读取失败，文件仍会作为附件发送。</string>
+</resources>

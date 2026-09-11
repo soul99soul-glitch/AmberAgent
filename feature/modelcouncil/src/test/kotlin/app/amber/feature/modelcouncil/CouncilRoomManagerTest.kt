@@ -32,6 +32,9 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
+import kotlin.coroutines.CoroutineContext
+import kotlin.coroutines.EmptyCoroutineContext
+import kotlinx.coroutines.currentCoroutineContext
 import kotlin.uuid.Uuid
 
 /**
@@ -258,6 +261,26 @@ class CouncilRoomManagerTest {
         assertNull(env.store.peekRoom(env.conversationId))
     }
 
+    @Test
+    fun `background generation carries the store write context`() = runTest {
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        val modelId = Uuid.random()
+        val writeContext = TestWriteContext("restore-epoch")
+        val runner = FakeModelCouncilTextRunner(responseChunks = listOf("Hello"))
+        val env = createEnv(
+            runner = runner,
+            modelId = modelId,
+            writeContext = writeContext,
+        )
+
+        val guest = env.guest(modelId = modelId)
+        env.openWithGuest(guest)
+        env.manager.hostAction(env.conversationId, HostAction.InviteNext(guest.id))
+        advanceUntilIdle()
+
+        assertEquals(listOf(writeContext), runner.writeContexts)
+    }
+
     // ── helpers ──────────────────────────────────────────────────────────────
 
 
@@ -265,12 +288,13 @@ class CouncilRoomManagerTest {
         runner: ModelCouncilTextRunner,
         modelId: Uuid,
         hostModelId: Uuid = modelId,
+        writeContext: CoroutineContext = EmptyCoroutineContext,
     ): TestEnv {
         val testDispatcher = StandardTestDispatcher(testScheduler)
         Dispatchers.setMain(testDispatcher)
         val appScope = AppScope()
         val settingsFlow = MutableStateFlow(settingsWithModel(modelId, hostModelId))
-        val store = FakeCouncilRoomStore()
+        val store = FakeCouncilRoomStore(writeContext)
         val reporter = FakeTaskReporter()
         val manager = CouncilRoomManager(
             appScope = appScope,
@@ -357,6 +381,8 @@ class CouncilRoomManagerTest {
 
         private val _calls = mutableListOf<Call>()
         val calls: List<Call> get() = _calls
+        private val _writeContexts = mutableListOf<TestWriteContext?>()
+        val writeContexts: List<TestWriteContext?> get() = _writeContexts
 
         override suspend fun generate(
             settings: Settings,
@@ -369,6 +395,7 @@ class CouncilRoomManagerTest {
             userImageParts: List<UIMessagePart.Image>,
             onChunk: (String) -> Unit,
         ): ModelCouncilTextResult {
+            _writeContexts += currentCoroutineContext()[TestWriteContext]
             _calls.add(Call(modelId, systemPrompt, userPrompt))
             val resp = byModelId[modelId]
             val chunks = resp?.chunks ?: responseChunks
@@ -394,9 +421,13 @@ class CouncilRoomManagerTest {
         ): String = error("Unexpected external CLI call in test")
     }
 
-    private class FakeCouncilRoomStore : CouncilRoomStore {
+    private class FakeCouncilRoomStore(
+        private val writeContext: CoroutineContext = EmptyCoroutineContext,
+    ) : CouncilRoomStore {
         private val lock = Mutex()
         private val rooms = mutableMapOf<Uuid, MutableStateFlow<CouncilRoom?>>()
+
+        override suspend fun captureWriteContext(): CoroutineContext = writeContext
 
         override suspend fun observeRoom(conversationId: Uuid): StateFlow<CouncilRoom?> =
             lock.withLock {
@@ -428,6 +459,15 @@ class CouncilRoomManagerTest {
         override suspend fun deleteRoom(conversationId: Uuid) {
             lock.withLock { rooms.remove(conversationId) }
         }
+    }
+
+    private class TestWriteContext(
+        val token: String,
+    ) : CoroutineContext.Element {
+        companion object Key : CoroutineContext.Key<TestWriteContext>
+
+        override val key: CoroutineContext.Key<TestWriteContext>
+            get() = Key
     }
 
     private class FakeTaskReporter : CouncilRoomTaskReporter {

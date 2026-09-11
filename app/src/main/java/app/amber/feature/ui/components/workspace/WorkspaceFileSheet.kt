@@ -256,7 +256,7 @@ private fun HeaderRow(onRefresh: () -> Unit, onDismiss: () -> Unit) {
             IconButton(onClick = onRefresh, modifier = Modifier.size(48.dp)) {
                 Icon(
                     Lucide.RefreshCw,
-                    contentDescription = stringResource(R.string.setting_officepro_refresh),
+                    contentDescription = stringResource(R.string.chat_input_usage_refresh),
                     modifier = Modifier.size(20.dp),
                 )
             }

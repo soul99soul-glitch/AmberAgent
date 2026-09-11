@@ -27,6 +27,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlin.coroutines.CoroutineContext
+import kotlin.coroutines.EmptyCoroutineContext
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
 
@@ -50,6 +52,8 @@ class InProcessAgentRunner(
      * handler share one clock.
      */
     scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
+    /** Captured synchronously when [launch] is called, before queued work runs. */
+    private val launchContext: () -> CoroutineContext = { EmptyCoroutineContext },
 ) : AgentRunner {
 
     private val runnerScope = scope
@@ -145,7 +149,11 @@ class InProcessAgentRunner(
             )
         }
 
-        val job = runnerScope.launch(start = CoroutineStart.LAZY) {
+        // Capture at dispatch time, not when a queued coroutine eventually
+        // starts. Restore-sensitive callers pass their epoch here so every
+        // handler and event writer inherits the state that authorized launch.
+        val activationContext = launchContext()
+        val job = runnerScope.launch(context = activationContext, start = CoroutineStart.LAZY) {
             // The map value for this runId (identity-equal to the outer
             // `job` once assigned) — used by the conditional finally remove.
             val self = coroutineContext.job
@@ -251,6 +259,20 @@ class InProcessAgentRunner(
                             artifact = artifact,
                         )
                         runCatching { Log.i(TAG, "Run $runId completed (${finishedAt - now}ms)") }
+                    } else if (
+                        result is RunTransitionResult.Rejected &&
+                        result.current == RunStatus.COMPLETED
+                    ) {
+                        // A domain owner may have published COMPLETED after
+                        // persisting its final artifact but before this generic
+                        // CAS. The persisted state is still this activation's
+                        // successful outcome; keep the handler artifact so
+                        // observers can deliver it.
+                        snapshot.value = snapshot.value.copy(
+                            status = RunStatus.COMPLETED,
+                            finishedAt = snapshot.value.finishedAt ?: System.currentTimeMillis(),
+                            artifact = artifact,
+                        )
                     } else {
                         result.syncSnapshotOnRejection(snapshot)
                     }

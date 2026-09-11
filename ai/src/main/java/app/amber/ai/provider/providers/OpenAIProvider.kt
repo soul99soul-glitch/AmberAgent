@@ -34,6 +34,9 @@ import app.amber.ai.provider.providers.openai.OpenAICodexOAuthClient
 import app.amber.ai.provider.providers.openai.ResponseAPI
 import app.amber.ai.provider.providers.openai.StoredResponseApi
 import app.amber.ai.provider.providers.openai.withCancellableCall
+import app.amber.ai.provider.providers.grok.GrokAuthStore
+import app.amber.ai.provider.providers.grok.GROK_CLI_PROXY_BASE_URL
+import app.amber.ai.provider.providers.grok.GrokOAuthClient
 import app.amber.ai.provider.providers.openai.addOpenAICodexBackendHeaders
 import app.amber.ai.registry.ModelRegistry
 import app.amber.ai.ui.ImageAspectRatio
@@ -66,6 +69,13 @@ class OpenAIProvider(
 ) : TextModelGateway<ProviderSetting.OpenAI>, ImageModelGateway<ProviderSetting.OpenAI> {
     private val keyRoulette = if (context != null) KeyRoulette.lru(context) else KeyRoulette.default()
     private val oauthClient = context?.let { OpenAICodexOAuthClient(client, OpenAICodexAuthStore(it)) }
+    private val grokOAuthClient = context?.let { GrokOAuthClient(client, GrokAuthStore(it)) }
+
+    /** 配置工具读取的脱敏 Grok OAuth 状态，不触碰 token 值。 */
+    fun grokAuthStatus(providerSetting: ProviderSetting.OpenAI) =
+        if (providerSetting.authMode == OpenAIAuthMode.GROK_OAUTH) {
+            grokOAuthClient?.authStatus(providerSetting.id)
+        } else null
 
     private val chatCompletionsAPI = ChatCompletionsAPI(
         client = client,
@@ -89,6 +99,9 @@ class OpenAIProvider(
         withContext(Dispatchers.IO) {
             if (providerSetting.authMode == OpenAIAuthMode.CODEX_OAUTH) {
                 return@withContext listCodexModels(providerSetting)
+            }
+            if (providerSetting.authMode == OpenAIAuthMode.GROK_OAUTH) {
+                return@withContext grokOAuthClient?.listModels(providerSetting.id).orEmpty()
             }
 
             val key = keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString())
@@ -191,46 +204,52 @@ class OpenAIProvider(
         providerSetting: ProviderSetting.OpenAI,
         messages: List<UIMessage>,
         params: TextGenerationParams,
-    ): Flow<MessageChunk> = when {
-        providerSetting.authMode == OpenAIAuthMode.CODEX_OAUTH || providerSetting.useResponseApi -> responseAPI.streamText(
-            providerSetting = providerSetting.codexOAuthSettingIfNeeded(),
-            messages = messages,
-            params = if (providerSetting.authMode == OpenAIAuthMode.CODEX_OAUTH) {
-                params.withCodexResponsesCompatibility()
-            } else {
-                params
-            },
-        )
+    ): Flow<MessageChunk> {
+        val transportSetting = providerSetting.managedOAuthSettingIfNeeded()
+        return when {
+            transportSetting.authMode == OpenAIAuthMode.CODEX_OAUTH || transportSetting.useResponseApi -> responseAPI.streamText(
+                providerSetting = transportSetting,
+                messages = messages,
+                params = if (providerSetting.authMode == OpenAIAuthMode.CODEX_OAUTH) {
+                    params.withCodexResponsesCompatibility()
+                } else {
+                    params
+                },
+            )
 
-        else -> chatCompletionsAPI.streamText(
-            providerSetting = providerSetting,
-            messages = messages,
-            params = params,
-        )
+            else -> chatCompletionsAPI.streamText(
+                providerSetting = transportSetting,
+                messages = messages,
+                params = params,
+            )
+        }
     }
 
     private suspend fun generateTextOnce(
         providerSetting: ProviderSetting.OpenAI,
         messages: List<UIMessage>,
         params: TextGenerationParams,
-    ): MessageChunk = when {
-        providerSetting.authMode == OpenAIAuthMode.CODEX_OAUTH -> generateCodexTextWithStreaming(
-            providerSetting = providerSetting.codexOAuthSettingIfNeeded(),
-            messages = messages,
-            params = params.withCodexResponsesCompatibility(),
-        )
+    ): MessageChunk {
+        val transportSetting = providerSetting.managedOAuthSettingIfNeeded()
+        return when {
+            transportSetting.authMode == OpenAIAuthMode.CODEX_OAUTH -> generateCodexTextWithStreaming(
+                providerSetting = transportSetting,
+                messages = messages,
+                params = params.withCodexResponsesCompatibility(),
+            )
 
-        providerSetting.useResponseApi -> responseAPI.generateText(
-            providerSetting = providerSetting,
-            messages = messages,
-            params = params,
-        )
+            transportSetting.useResponseApi -> responseAPI.generateText(
+                providerSetting = transportSetting,
+                messages = messages,
+                params = params,
+            )
 
-        else -> chatCompletionsAPI.generateText(
-            providerSetting = providerSetting,
-            messages = messages,
-            params = params,
-        )
+            else -> chatCompletionsAPI.generateText(
+                providerSetting = transportSetting,
+                messages = messages,
+                params = params,
+            )
+        }
     }
 
     private suspend fun handleGenerateTextRetry(
@@ -247,7 +266,7 @@ class OpenAIProvider(
                 if (retryError is CancellationException) throw retryError
                 if (providerSetting.shouldRetryGenerateTextWithStreaming(retryError)) {
                     Log.w(TAG, "generateText requires streaming; retrying with stream aggregation", retryError)
-                    generateResponseTextWithStreaming(providerSetting.codexOAuthSettingIfNeeded(), messages, retryParams)
+                    generateResponseTextWithStreaming(providerSetting.managedOAuthSettingIfNeeded(), messages, retryParams)
                 } else {
                     throw retryError
                 }
@@ -256,7 +275,7 @@ class OpenAIProvider(
         if (providerSetting.shouldRetryGenerateTextWithStreaming(error)) {
             Log.w(TAG, "generateText requires streaming; retrying with stream aggregation", error)
             return generateResponseTextWithStreaming(
-                providerSetting.codexOAuthSettingIfNeeded(),
+                providerSetting.managedOAuthSettingIfNeeded(),
                 messages,
                 params.withCodexResponsesCompatibility(),
             )
@@ -410,6 +429,7 @@ class OpenAIProvider(
             // Responses API. Route the call there so ChatGPT Plus / Pro subscribers
             // can produce images through their existing OAuth login without
             // separately paying for an API key. Mirrors openai-oauth / ima2-gen.
+            OpenAIAuthMode.GROK_OAUTH -> error(unsupportedAuthModeMessage(providerSetting.authMode, capability = "image generation"))
             OpenAIAuthMode.CODEX_OAUTH -> {
                 require(params.mode == ImageGenerationMode.CREATE) {
                     "Codex OAuth image generation does not support editing: " +
@@ -630,21 +650,25 @@ class OpenAIProvider(
             OpenAIAuthMode.MIMO_CODING_PLAN,
             OpenAIAuthMode.MINIMAX_TOKEN_PLAN ->
                 keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString())
+            OpenAIAuthMode.GROK_OAUTH -> grokOAuthClient
+                ?.getValidAccessToken(providerSetting.id, forceRefresh)
+                ?: error("Grok OAuth requires an Android context-backed auth store.")
             OpenAIAuthMode.CODEX_OAUTH -> oauthClient
                 ?.getValidAccessToken(providerSetting.id, forceRefresh)
                 ?: error("Codex OAuth requires an Android context-backed auth store.")
         }
     }
 
-    private fun ProviderSetting.OpenAI.codexOAuthSettingIfNeeded(): ProviderSetting.OpenAI {
-        return if (authMode == OpenAIAuthMode.CODEX_OAUTH) {
-            copy(
-                baseUrl = OPENAI_CODEX_BACKEND_BASE_URL,
-                useResponseApi = true,
-            )
-        } else {
-            this
-        }
+    private fun ProviderSetting.OpenAI.managedOAuthSettingIfNeeded(): ProviderSetting.OpenAI = when (authMode) {
+        OpenAIAuthMode.CODEX_OAUTH -> copy(
+            baseUrl = OPENAI_CODEX_BACKEND_BASE_URL,
+            useResponseApi = true,
+        )
+        OpenAIAuthMode.GROK_OAUTH -> copy(
+            baseUrl = GROK_CLI_PROXY_BASE_URL,
+            useResponseApi = false,
+        )
+        else -> this
     }
 
     private suspend fun listCodexModels(providerSetting: ProviderSetting.OpenAI): List<Model> {
@@ -901,6 +925,7 @@ fun Model.isCodexOAuthReviewModel(): Boolean {
 internal fun unsupportedAuthModeMessage(authMode: OpenAIAuthMode, capability: String): String {
     val modeLabel = when (authMode) {
         OpenAIAuthMode.CODEX_OAUTH -> "Codex OAuth"
+        OpenAIAuthMode.GROK_OAUTH -> "Grok OAuth"
         OpenAIAuthMode.ZHIPU_CODING_PLAN,
         OpenAIAuthMode.KIMI_CODING_PLAN,
         OpenAIAuthMode.MIMO_CODING_PLAN -> "Coding Plan"

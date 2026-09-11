@@ -1,5 +1,12 @@
 # 环境配置
 
+## Antigravity OAuth
+
+构建时从仓库根目录的 `local.properties` 读取 `antigravityClientId` 和
+`antigravityClientSecret`，也支持同名 Gradle 属性或环境变量
+`ANTIGRAVITY_CLIENT_ID`、`ANTIGRAVITY_CLIENT_SECRET`。值通过生成的 BuildConfig
+提供，不能提交到版本库。未配置时其余功能可以正常构建，Antigravity 登录会提示客户端未配置。
+
 ## 准备环境
 
 - 安装CMake

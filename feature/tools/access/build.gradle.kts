@@ -28,4 +28,7 @@ dependencies {
     api(project(":feature:workspace"))
     api(libs.kotlinx.coroutines.core)
     api(libs.kotlinx.serialization.json)
+
+    testImplementation(libs.junit)
+    testImplementation(libs.robolectric)
 }

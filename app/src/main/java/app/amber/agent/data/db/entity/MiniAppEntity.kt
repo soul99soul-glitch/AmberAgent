@@ -10,6 +10,7 @@ import androidx.room.PrimaryKey
         Index(value = ["pinned"]),
         Index(value = ["updatedAt"]),
         Index(value = ["sourceConversationId"]),
+        Index(value = ["lastRunAt"]),
     ]
 )
 data class MiniAppEntity(
@@ -36,6 +37,8 @@ data class MiniAppEntity(
     val htmlHash: String? = null,
     val createdAt: Long,
     val updatedAt: Long,
+    /** Last time the user opened this app in the runner; null means never opened. */
+    val lastRunAt: Long? = null,
 )
 
 @Entity(

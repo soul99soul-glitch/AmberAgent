@@ -139,7 +139,7 @@ import kotlinx.serialization.json.JsonPrimitive
         ContinueCandidateDismissEntity::class,
         ThemePackageEntity::class,
     ],
-    version = 16
+    version = 17
 )
 @TypeConverters(TokenUsageConverter::class)
 abstract class AppDatabase : RoomDatabase() {
@@ -554,6 +554,22 @@ abstract class AppDatabase : RoomDatabase() {
         val MIGRATION_15_16 = object : Migration(15, 16) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 canonicalizeAmberOwnership(db, AMBER_AGENT_ID_SQL)
+            }
+        }
+
+        /** P8-08: persist DeepRead source and MiniApp runner visit markers. */
+        val MIGRATION_16_17 = object : Migration(16, 17) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `deep_read_cache` ADD COLUMN `source_url` TEXT")
+                db.execSQL("ALTER TABLE `mini_app` ADD COLUMN `lastRunAt` INTEGER")
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_mini_app_lastRunAt` " +
+                        "ON `mini_app` (`lastRunAt`)"
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_tool_effect_tool_name_status_finished_at_ms` " +
+                        "ON `tool_effect` (`tool_name`, `status`, `finished_at_ms`)"
+                )
             }
         }
 

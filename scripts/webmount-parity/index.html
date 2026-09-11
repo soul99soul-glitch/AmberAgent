@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Amber 浏览器验收</title>
+<style>
+  body { font: 17px/1.5 system-ui; background: #f5f3ee; color: #20211e; max-width: 680px; padding: 24px; margin: auto; }
+  h1 { font-size: 25px; margin: 0 0 8px; }
+  section { background: white; border: 1px solid #dbd9d0; border-radius: 16px; padding: 16px; margin: 18px 0; }
+  h2 { font-size: 19px; margin: 0 0 12px; }
+  button, input, select { font: inherit; padding: 12px; margin: 4px 0; min-height: 48px; box-sizing: border-box; }
+  button { border: 1px solid #bd784d; border-radius: 10px; color: #6b3518; background: #ffefe2; cursor: pointer; }
+  label { display: block; }
+  output { display: block; padding: 8px 0; }
+  #events { white-space: pre-wrap; word-break: break-word; }
+</style>
+<h1>浏览器受控验收页</h1>
+<p>仅使用合成内容。这里不连接任何真实账号，也不发送外部消息。</p>
+<section>
+  <h2>同页接管与状态保留</h2>
+  <label>草稿 <input id="draft" placeholder="输入后接管或交还" autocomplete="off"></label>
+  <button id="save-draft">保存本页草稿</button>
+  <output id="draft-status">未保存</output>
+  <output id="cookie-status"></output>
+</section>
+<section>
+  <h2>动作与旧目标</h2>
+  <button id="action">执行一次</button>
+  <button id="replace-target">替换操作按钮</button>
+  <button id="move-target">移动操作按钮</button>
+  <output id="action-count" data-count="0">执行次数：0</output>
+  <output id="goal" data-complete="true">条件在动作之前已满足</output>
+</section>
+<section>
+  <h2>弹窗与子窗口</h2>
+  <button id="alert">提示</button>
+  <button id="confirm">确认</button>
+  <button id="prompt">输入</button>
+  <button id="popup">打开合成登录子窗口</button>
+  <output id="dialog-result">尚未处理弹窗</output>
+  <output id="login-status">未登录</output>
+</section>
+<section>
+  <h2>动作后通信中断</h2>
+  <button id="bridge-drop">执行并移除页面桥入口</button>
+  <button id="reset">重新载入</button>
+  <output id="events"></output>
+</section>
+<script>
+  let count = 0;
+  const events = document.querySelector('#events');
+  const log = text => { events.textContent += text + '\n'; };
+  const increment = () => {
+    ++count;
+    document.querySelector('#action-count').dataset.count = count;
+    document.querySelector('#action-count').textContent = '执行次数：' + count;
+    log('action:' + count);
+  };
+  document.querySelector('#action').onclick = increment;
+  document.querySelector('#save-draft').onclick = () => {
+    sessionStorage.setItem('parity-draft', document.querySelector('#draft').value);
+    document.cookie = 'amber_parity=synthetic; path=/; SameSite=Lax';
+    document.querySelector('#draft-status').textContent = '本页草稿已保存';
+    document.querySelector('#cookie-status').textContent = document.cookie;
+  };
+  document.querySelector('#draft').value = sessionStorage.getItem('parity-draft') || '';
+  document.querySelector('#replace-target').onclick = () => {
+    const old = document.querySelector('#action');
+    const fresh = old.cloneNode(true);
+    fresh.textContent = '替换后的操作';
+    fresh.onclick = increment;
+    old.replaceWith(fresh);
+  };
+  document.querySelector('#move-target').onclick = () => { document.querySelector('#action').style.marginTop = '140px'; };
+  document.querySelector('#alert').onclick = () => { alert('合成提示'); document.querySelector('#dialog-result').textContent = '提示已关闭'; };
+  document.querySelector('#confirm').onclick = () => { document.querySelector('#dialog-result').textContent = confirm('确认合成操作？') ? '已确认' : '已取消'; };
+  document.querySelector('#prompt').onclick = () => { const v = prompt('输入合成内容', ''); document.querySelector('#dialog-result').textContent = v === null ? '已取消' : v; };
+  document.querySelector('#popup').onclick = () => window.open('popup.html', 'parity-login', 'width=420,height=640');
+  window.addEventListener('message', event => {
+    if (event.origin === location.origin && event.data === 'parity-login-complete') {
+      document.querySelector('#login-status').textContent = '合成登录完成';
+    }
+  });
+  document.querySelector('#bridge-drop').onclick = () => { increment(); delete window.__amberWm_call; };
+  document.querySelector('#reset').onclick = () => location.reload();
+</script>
+</html>

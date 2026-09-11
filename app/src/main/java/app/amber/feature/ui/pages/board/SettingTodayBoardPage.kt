@@ -1056,11 +1056,11 @@ private fun BoardWeightSource.localizedDescription(): String = when (sourceType)
 }
 
 private val BOARD_WEIGHT_SOURCES = listOf(
-    BoardWeightSource(BoardSignalSourceType.NOTIFICATION, "System notifications", "Device notifications and app alerts"),
-    BoardWeightSource(BoardSignalSourceType.CALENDAR, "Calendar", "Today's schedule, meetings, and time blocks"),
-    BoardWeightSource(BoardSignalSourceType.FEISHU_MSG, "Feishu messages", "Unread messages, group chats, and work communication"),
-    BoardWeightSource(BoardSignalSourceType.FEISHU_DOC, "Feishu documents", "Document updates, indexing, and change signals"),
-    BoardWeightSource(BoardSignalSourceType.CHAT_HISTORY, "Chat history", "Actionable tasks and project context from recent chats"),
+    BoardWeightSource(BoardSignalSourceType.NOTIFICATION, "系统通知", "设备通知、应用提醒、重要推送"),
+    BoardWeightSource(BoardSignalSourceType.CALENDAR, "日历", "今日日程、会议和时间安排"),
+    BoardWeightSource(BoardSignalSourceType.FEISHU_MSG, "飞书消息", "未读消息、群聊和工作沟通"),
+    BoardWeightSource(BoardSignalSourceType.FEISHU_DOC, "飞书文档", "文档更新、索引和变更信号"),
+    BoardWeightSource(BoardSignalSourceType.CHAT_HISTORY, "聊天记录", "最近对话中的真实待办和项目上下文"),
 )
 
 private val REVIEW_SIGNAL_SOURCES = setOf(

@@ -52,6 +52,11 @@ interface ConversationDAO {
     @Query("SELECT id, assistant_id as assistantId, title, is_pinned as isPinned, create_at as createAt, update_at as updateAt" +
         CONVERSATION_SUMMARY_EXTRA_COLUMNS +
         " FROM conversationentity ORDER BY is_pinned DESC, update_at DESC")
+    fun getAllSummaries(): Flow<List<LightConversationEntity>>
+
+    @Query("SELECT id, assistant_id as assistantId, title, is_pinned as isPinned, create_at as createAt, update_at as updateAt" +
+        CONVERSATION_SUMMARY_EXTRA_COLUMNS +
+        " FROM conversationentity ORDER BY is_pinned DESC, update_at DESC")
     fun getAllPaging(): PagingSource<Int, LightConversationEntity>
 
     @Query("SELECT * FROM conversationentity ORDER BY is_pinned DESC, update_at DESC LIMIT :limit")
@@ -78,6 +83,9 @@ interface ConversationDAO {
 
     @Query("SELECT * FROM conversationentity WHERE id = :id")
     suspend fun getConversationById(id: String): ConversationEntity?
+
+    @Query("SELECT title FROM conversationentity WHERE id = :id")
+    suspend fun getConversationTitleById(id: String): String?
 
     @Query("SELECT id, assistant_id as assistantId, title, is_pinned as isPinned, create_at as createAt, update_at as updateAt" +
         CONVERSATION_SUMMARY_EXTRA_COLUMNS +

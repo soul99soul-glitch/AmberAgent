@@ -39,6 +39,7 @@ import app.amber.core.di.workspaceModule
 import app.amber.core.files.FilesManager
 import app.amber.core.files.SkillManager
 import app.amber.feature.cron.AgentCronManager
+import app.amber.feature.reminder.ReminderScheduler
 import app.amber.feature.chat.impl.ChatEventProjector
 import app.amber.feature.runtime.ColdStartRuntimeRecoveryGate
 import app.amber.core.settings.prefs.SettingsAggregator
@@ -64,7 +65,6 @@ const val CHAT_COMPLETED_NOTIFICATION_CHANNEL_ID = "chat_completed"
 const val CHAT_LIVE_UPDATE_NOTIFICATION_CHANNEL_ID = "chat_live_update_v3"
 const val SCREEN_CAPTURE_NOTIFICATION_CHANNEL_ID = "screen_capture"
 const val MEMORY_NOTIFICATION_CHANNEL_ID = "memory_tasks"
-const val FEISHU_DOC_CHANGE_CHANNEL_ID = "feishu_doc_change"
 const val BOARD_NOTIFICATION_CHANNEL_ID = "today_board"
 const val DEEP_READ_NOTIFICATION_CHANNEL_ID = "deep_read"
 const val NOVEL_GHOSTWRITE_FAILURE_NOTIFICATION_CHANNEL_ID = "novel_ghostwrite_failure"
@@ -94,6 +94,7 @@ class AmberAgentApp : Application() {
         syncManagedFiles()
 
         recoverInterruptedAgentRuns()
+        recoverInterruptedNovelJobs()
 
         // install bundled agent skills
         installBuiltinSkills()
@@ -121,6 +122,8 @@ class AmberAgentApp : Application() {
 
         // Reschedule persisted mobile cron tasks after app startup.
         rescheduleCronTasks()
+        // Reminder owner is durable and must be reattached after every process start.
+        rescheduleReminders()
 
         // Migrate the persisted shape before cached-settings rescue can write it back.
         migrateAndRescueSettings()
@@ -152,6 +155,22 @@ class AmberAgentApp : Application() {
                 }
             }
         )
+    }
+
+    private fun recoverInterruptedNovelJobs() {
+        get<AppScope>().launch(Dispatchers.IO) {
+            val repository = get<app.amber.feature.novelworkspace.NovelWorkspaceProjectRepository>()
+            val controller = get<app.amber.feature.novel.workspace.NovelWorkspaceGhostwriteController>()
+            for (project in repository.listProjects()) {
+                try {
+                    controller.reconcile(repository.projectDirectory(project.id))
+                } catch (error: kotlinx.coroutines.CancellationException) {
+                    throw error
+                } catch (error: Exception) {
+                    Log.w(TAG, "Novel job recovery deferred for ${project.id}", error)
+                }
+            }
+        }
     }
 
     private fun recoverInterruptedAgentRuns() {
@@ -210,6 +229,13 @@ class AmberAgentApp : Application() {
             }.onFailure {
                 Log.e(TAG, "incrementLaunchCount failed", it)
             }
+        }
+    }
+
+    private fun rescheduleReminders() {
+        get<AppScope>().launch(Dispatchers.IO) {
+            runCatching { get<ReminderScheduler>().rescheduleAll() }
+                .onFailure { Log.e(TAG, "rescheduleReminders failed", it) }
         }
     }
 
@@ -341,9 +367,6 @@ class AmberAgentApp : Application() {
                             // CAS guards against two rapid ON_START events passing the gap check.
                             if (!lastForegroundCompensationMs.compareAndSet(last, now)) return@runCatching
                             get<BoardScheduler>().runOnce()
-                            // Also trigger doc radar check on foreground return
-                            runCatching { get<app.amber.feature.office.radar.DocRadar>().runOnce() }
-                                .onFailure { Log.e(TAG, "DocRadar.runOnce failed", it) }
                         }.onFailure { Log.e(TAG, "foreground compensation failed", it) }
                     }
                 }
@@ -402,13 +425,6 @@ class AmberAgentApp : Application() {
             .setShowBadge(false)
             .build()
         notificationManager.createNotificationChannel(memoryChannel)
-
-        val feishuDocChangeChannel = NotificationChannelCompat
-            .Builder(FEISHU_DOC_CHANGE_CHANNEL_ID, NotificationManagerCompat.IMPORTANCE_HIGH)
-            .setName(getString(R.string.notification_channel_feishu_doc_change))
-            .setVibrationEnabled(true)
-            .build()
-        notificationManager.createNotificationChannel(feishuDocChangeChannel)
 
         val boardChannel = NotificationChannelCompat
             .Builder(BOARD_NOTIFICATION_CHANNEL_ID, NotificationManagerCompat.IMPORTANCE_LOW)

@@ -43,40 +43,44 @@ internal fun createScreenshotTool(deps: WebMountDeps): Tool = Tool(
     execute = { input ->
         deps.track("wm_screenshot", "WebMount 截图", input) {
             val sessionId = input.requiredString("session_id")
-            val handle = deps.pool.peek(sessionId) ?: error("session not found: $sessionId")
-            val fullPage = input.boolean("full_page") ?: false
-            val format = when (input.string("format")?.lowercase()) {
-                "jpeg", "jpg" -> WebViewScreenshot.Format.JPEG
-                else -> WebViewScreenshot.Format.PNG
-            }
-            val quality = (input.long("quality") ?: 85L).coerceIn(1L, 100L).toInt()
-            val result = WebViewScreenshot.capture(handle, fullPage, format, quality)
-            when (result) {
-                is WebViewScreenshot.Result.Success -> {
-                    // Inline the base64 in the Text payload — every provider's
-                    // tool-result serializer drops UIMessagePart.Image, so the
-                    // model never sees standalone Image parts on a tool return.
-                    // The wm_screenshot Tool's `outputBudgetChars` is bumped
-                    // (see ToolRegistry.outputBudgetChars) so the base64 fits.
-                    val mime = if (result.format == "jpeg") "image/jpeg" else "image/png"
-                    val payload = buildJsonObject {
-                        put("session_id", sessionId)
-                        put("ok", true)
-                        put("width", result.width)
-                        put("height", result.height)
-                        put("format", result.format)
-                        put("size_bytes", result.sizeBytes)
-                        put("full_page", fullPage)
-                        put("image_data_url", "data:$mime;base64,${result.base64}")
-                    }
-                    listOf(UIMessagePart.Text(payload.toString()))
+            deps.withAgentSession(input, sessionId) { lease ->
+                val handle = lease.handle
+                val fullPage = input.boolean("full_page") ?: false
+                val format = when (input.string("format")?.lowercase()) {
+                    "jpeg", "jpg" -> WebViewScreenshot.Format.JPEG
+                    else -> WebViewScreenshot.Format.PNG
                 }
-                is WebViewScreenshot.Result.Failed -> {
-                    listOf(UIMessagePart.Text(buildJsonObject {
-                        put("session_id", sessionId)
+                val quality = (input.long("quality") ?: 85L).coerceIn(1L, 100L).toInt()
+                val result = WebViewScreenshot.capture(handle, fullPage, format, quality)
+                when (result) {
+                    is WebViewScreenshot.Result.Success -> {
+                        // Inline the base64 in the Text payload — every provider's
+                        // tool-result serializer drops UIMessagePart.Image, so the
+                        // model never sees standalone Image parts on a tool return.
+                        // The wm_screenshot Tool's `outputBudgetChars` is bumped
+                        // (see ToolRegistry.outputBudgetChars) so the base64 fits.
+                        val mime = if (result.format == "jpeg") "image/jpeg" else "image/png"
+                        val payload = buildJsonObject {
+                            put("session_id", sessionId)
+                            put("ok", true)
+                            put("width", result.width)
+                            put("height", result.height)
+                            put("format", result.format)
+                            put("size_bytes", result.sizeBytes)
+                            put("full_page", fullPage)
+                            put("image_data_url", "data:$mime;base64,${result.base64}")
+                            putWebMountWindowState(handle)
+                        }
+                        listOf(UIMessagePart.Text(payload.toString()))
+                    }
+                    is WebViewScreenshot.Result.Failed -> {
+                        listOf(UIMessagePart.Text(buildJsonObject {
+                            put("session_id", sessionId)
                         put("ok", false)
                         put("error", result.message)
-                    }.toString()))
+                        putWebMountWindowState(handle)
+                        }.toString()))
+                    }
                 }
             }
         }
@@ -102,19 +106,23 @@ internal fun createVisualSnapshotTool(deps: WebMountDeps): Tool = Tool(
     execute = { input ->
         deps.track("wm_visual_snapshot", "WebMount 视觉候选", input) {
             val sessionId = input.requiredString("session_id")
-            val handle = deps.pool.peek(sessionId) ?: error("session not found: $sessionId")
-            val payload = handle.callBridge(
-                "visual_snapshot",
-                buildJsonObject {
-                    put("max_candidates", (input.long("max_candidates") ?: 30L).coerceIn(0L, 120L))
-                },
-                timeoutMs = 5_000L,
-            )
-            listOf(UIMessagePart.Text(buildJsonObject {
-                put("session_id", sessionId)
-                put("remote_vision_used", false)
-                put("result", payload)
-            }.toString()))
+            deps.withAgentSession(input, sessionId) { lease ->
+                val dispatchWithLease = deps.dispatchWithLease(input, lease)
+                val payload = lease.handle.callBridge(
+                    "visual_snapshot",
+                    buildJsonObject {
+                        put("max_candidates", (input.long("max_candidates") ?: 30L).coerceIn(0L, 120L))
+                    },
+                    timeoutMs = 5_000L,
+                    dispatchWithLease = dispatchWithLease,
+                )
+                listOf(UIMessagePart.Text(buildJsonObject {
+                    put("session_id", sessionId)
+                    put("remote_vision_used", false)
+                    put("result", payload)
+                    putWebMountWindowState(lease.handle)
+                }.toString()))
+            }
         }
     },
 )
@@ -134,6 +142,7 @@ internal fun createVisualReadTool(
             properties = buildJsonObject {
                 put("session_id", stringProp("Session id."))
                 put("target", stringProp("Visual candidate ref returned by wm_visual_snapshot or wm_observe."))
+                put("snapshot_id", stringProp("Snapshot id returned with the visual candidate ref."))
                 put("selector", stringProp("Selector fallback for the visual target."))
                 put("x", integerProp("Viewport x for explicit region."))
                 put("y", integerProp("Viewport y for explicit region."))
@@ -151,70 +160,77 @@ internal fun createVisualReadTool(
     execute = { input ->
         deps.track("wm_visual_read", "WebMount 视觉读取", input.safeVisualPreview()) {
             val sessionId = input.requiredString("session_id")
-            val handle = deps.pool.peek(sessionId) ?: error("session not found: $sessionId")
-            val region = input.explicitRegion() ?: run {
-                val target = input.string("target")
-                val selector = input.string("selector")
-                require(target != null || selector != null) {
-                    "wm_visual_read requires target, selector, or explicit x/y/width/height region"
-                }
-                val targetPayload = handle.callBridge(
-                    "target_region",
-                    buildJsonObject {
-                        target?.let { put("target", it) }
-                        selector?.let { put("selector", it) }
-                    },
-                    timeoutMs = 5_000L,
-                )
-                targetPayload.regionFromTarget()
-            }
-            val maxEdge = (input.long("max_edge") ?: 1_280L).coerceIn(320L, 1_600L).toInt()
-            val image = WebViewScreenshot.captureRegion(
-                handle = handle,
-                region = region,
-                format = WebViewScreenshot.Format.JPEG,
-                quality = 70,
-                maxEdge = maxEdge,
-                paddingPx = 8,
-            )
-            when (image) {
-                is WebViewScreenshot.Result.Failed -> listOf(UIMessagePart.Text(buildJsonObject {
-                    put("session_id", sessionId)
-                    put("ok", false)
-                    put("error", image.message)
-                }.toString()))
-                is WebViewScreenshot.Result.Success -> {
-                    val dataUrl = "data:image/jpeg;base64,${image.base64}"
-                    val prompt = input.string("prompt")?.let {
-                        """
-                        Read only the provided cropped webpage region. Answer the user's focused request:
-                        $it
-                        Keep the result compact and factual.
-                        """.trimIndent()
+            deps.withAgentSession(input, sessionId) { lease ->
+                val handle = lease.handle
+                val dispatchWithLease = deps.dispatchWithLease(input, lease)
+                val region = input.explicitRegion() ?: run {
+                    val target = input.string("target")
+                    val selector = input.string("selector")
+                    require(target != null || selector != null) {
+                        "wm_visual_read requires target, selector, or explicit x/y/width/height region"
                     }
-                    val vision = OcrTransformer.performImageRecognition(
-                        part = UIMessagePart.Image(dataUrl),
-                        settings = settingsStore.settingsFlow.value,
-                        promptOverride = prompt,
-                        useCache = false,
-                        strings = OcrStrings.from(deps.context),
+                    val targetPayload = handle.callBridge(
+                        "target_region",
+                        buildJsonObject {
+                            target?.let { put("target", it) }
+                            input.string("snapshot_id")?.let { put("snapshot_id", it) }
+                            selector?.let { put("selector", it) }
+                        },
+                        timeoutMs = 5_000L,
+                        dispatchWithLease = dispatchWithLease,
                     )
-                    listOf(UIMessagePart.Text(buildJsonObject {
+                    targetPayload.regionFromTarget()
+                }
+                val maxEdge = (input.long("max_edge") ?: 1_280L).coerceIn(320L, 1_600L).toInt()
+                val image = WebViewScreenshot.captureRegion(
+                    handle = handle,
+                    region = region,
+                    format = WebViewScreenshot.Format.JPEG,
+                    quality = 70,
+                    maxEdge = maxEdge,
+                    paddingPx = 8,
+                )
+                when (image) {
+                    is WebViewScreenshot.Result.Failed -> listOf(UIMessagePart.Text(buildJsonObject {
                         put("session_id", sessionId)
-                        put("ok", true)
-                        put("remote_vision_used", true)
-                        put("privacy_notice", "Only the cropped WebMount viewport region was sent to the configured vision provider.")
-                        put("region", buildJsonObject {
-                            put("x", region.x)
-                            put("y", region.y)
-                            put("width", region.width)
-                            put("height", region.height)
-                        })
-                        put("image_width", image.width)
-                        put("image_height", image.height)
-                        put("image_size_bytes", image.sizeBytes)
-                        put("result", vision)
+                        put("ok", false)
+                        put("error", image.message)
+                        putWebMountWindowState(handle)
                     }.toString()))
+                    is WebViewScreenshot.Result.Success -> {
+                        val dataUrl = "data:image/jpeg;base64,${image.base64}"
+                        val prompt = input.string("prompt")?.let {
+                            """
+                            Read only the provided cropped webpage region. Answer the user's focused request:
+                            $it
+                            Keep the result compact and factual.
+                            """.trimIndent()
+                        }
+                        val vision = OcrTransformer.performImageRecognition(
+                            part = UIMessagePart.Image(dataUrl),
+                            settings = settingsStore.settingsFlow.value,
+                            promptOverride = prompt,
+                            useCache = false,
+                            strings = deps.context?.let(OcrStrings::from) ?: OcrStrings.english(),
+                        )
+                        listOf(UIMessagePart.Text(buildJsonObject {
+                            put("session_id", sessionId)
+                            put("ok", true)
+                            put("remote_vision_used", true)
+                            put("privacy_notice", "Only the cropped WebMount viewport region was sent to the configured vision provider.")
+                            put("region", buildJsonObject {
+                                put("x", region.x)
+                                put("y", region.y)
+                                put("width", region.width)
+                                put("height", region.height)
+                            })
+                            put("image_width", image.width)
+                            put("image_height", image.height)
+                            put("image_size_bytes", image.sizeBytes)
+                            put("result", vision)
+                            putWebMountWindowState(handle)
+                        }.toString()))
+                    }
                 }
             }
         }

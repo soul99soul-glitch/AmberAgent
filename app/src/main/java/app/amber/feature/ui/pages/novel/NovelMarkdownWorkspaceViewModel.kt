@@ -24,6 +24,7 @@ import app.amber.feature.novelworkspace.NovelWorkspaceBranches
 import app.amber.feature.novelworkspace.NovelWorkspaceCatalog
 import app.amber.feature.novelworkspace.NovelWorkspaceGhostwriteJob
 import app.amber.feature.novelworkspace.NovelWorkspaceGhostwriteJobs
+import app.amber.feature.novelworkspace.NovelWorkspaceFocus
 import app.amber.feature.novelworkspace.NovelWorkspaceGhostwriteMode
 import app.amber.feature.novelworkspace.NovelWorkspaceGhostwriteStage
 import app.amber.feature.novelworkspace.NovelWorkspaceLedger
@@ -94,6 +95,7 @@ data class NovelMarkdownWorkspaceUiState(
     val unresolvedFromOrdinal: Int? = null,
     /** Running/paused ghostwrite batch for this project, if any. */
     val ghostwriteJob: NovelMarkdownGhostwriteUi? = null,
+    val unreadableJobFiles: List<String> = emptyList(),
     /** Per-project writing model override (null = follow global chat model). */
     val writingModelId: String? = null,
     /** Per-project review model override (null = follow the writing model). */
@@ -138,6 +140,7 @@ data class NovelMarkdownGhostwriteUi(
 
 private data class NovelGhostwriteRefresh(
     val job: NovelMarkdownGhostwriteUi?,
+    val unreadableJobFiles: List<String>,
     val chapters: List<NovelMarkdownChapterUi>,
     val drafts: List<NovelMarkdownDraftUi>,
     val catalog: NovelWorkspaceCatalog.NovelWorkspaceCatalogData?,
@@ -154,6 +157,7 @@ class NovelMarkdownWorkspaceViewModel(
     private val turnLauncher: NovelTurnLauncher,
     kernel: RunKernel,
     private val context: Context,
+    private val requestedFocus: NovelWorkspaceFocus = NovelWorkspaceFocus(),
 ) : ViewModel() {
 
     val projectId: String = projectId
@@ -164,6 +168,11 @@ class NovelMarkdownWorkspaceViewModel(
     private var projectDirectory: File? = null
     private var branchId: String? = null
     private var branchSlug: String? = null
+    private var focusedJobId: String? = requestedFocus.jobId
+    /** Deep-link identity is applied once; subsequent reloads follow the user's branch choice. */
+    private var pendingFocus: NovelWorkspaceFocus? = requestedFocus.takeIf {
+        it.branchSlug != null || it.jobId != null
+    }
 
     /** In-flight chat turn; cancellable so the composer's stop button can end it. */
     private var turnJob: kotlinx.coroutines.Job? = null
@@ -195,9 +204,14 @@ class NovelMarkdownWorkspaceViewModel(
             val store = NovelWorkspaceStore(directory)
             val ledger = NovelWorkspaceLedger.load(directory)
             projectDirectory = directory
+            // Notification/deep-link focus is view-only: resolve it against durable state
+            // without changing the app's active branch or resuming a Worker implicitly.
+            val focusRequest = pendingFocus
+            pendingFocus = null
+            val focus = focusRequest?.resolve(store)
             // 活跃分支：.amber/branch.json 标记优先，缺失回退 manifest.mainBranch。
-            val slug = NovelWorkspaceBranches.activeSlug(directory)
-            branchId = NovelWorkspaceLedger.branchId(store, ledger, slug)
+            val slug = focus?.branchSlug ?: NovelWorkspaceBranches.activeSlug(directory)
+            branchId = focus?.branchId ?: NovelWorkspaceLedger.branchId(store, ledger, slug)
             branchSlug = slug
             _state.value = _state.value.copy(
                 loading = false,
@@ -775,6 +789,12 @@ class NovelMarkdownWorkspaceViewModel(
                         }
                     }
                 }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                _state.value = _state.value.copy(
+                    errorMessage = localizedRuntimeError(error, R.string.error_title_operation),
+                )
             } finally {
                 if (_state.value.busy) {
                     _state.value = _state.value.copy(
@@ -991,6 +1011,10 @@ class NovelMarkdownWorkspaceViewModel(
                         locale = context.appLocale(),
                     )
                 }
+                // A notification focus belongs to the branch/job the page initially opened;
+                // after an explicit switch, neither that job nor its branch should win the
+                // next refresh.
+                focusedJobId = null
                 // 提案/草稿卡是上一分支视图的内存态：随切换整体清空，防止跨分支批准。
                 runtime.pendingProposals.value
                     .filter { it.projectDirectory == directory }
@@ -1233,48 +1257,70 @@ class NovelMarkdownWorkspaceViewModel(
         val slug = branchSlug ?: return
         ghostwriteRefreshJob?.cancel()
         ghostwriteRefreshJob = viewModelScope.launch {
-            val refresh = withContext(Dispatchers.IO) {
-                val store = NovelWorkspaceStore(directory)
-                val ledger = NovelWorkspaceLedger.load(directory)
-                val job = (NovelWorkspaceGhostwriteJobs.listActive(directory)
-                    .firstOrNull { it.branchSlug == slug }
-                    // Keep the newest failed batch visible so the author can retry it.
-                    ?: NovelWorkspaceGhostwriteJobs.latestFailed(directory, slug))
-                    ?.let { job ->
-                        NovelMarkdownGhostwriteUi(
-                            jobId = job.id,
-                            executionId = job.executionKey,
-                            branchSlug = job.branchSlug,
-                            target = job.targetChapterCount,
-                            written = NovelWorkspaceGhostwriteJobs.progress(job, store),
-                            startOrdinal = job.startOrdinal,
-                            status = job.status,
-                            stage = job.stage,
-                            currentChapterOrdinal = job.currentChapterOrdinal,
-                            rewriteAttempt = job.rewriteAttempt,
-                            reason = localizedJobReason(job.reason),
-                            mode = job.mode,
-                        )
+            try {
+                val refresh = withContext(Dispatchers.IO) {
+                    // Reconcile the durable job and WorkManager identity before projecting
+                    // it. A WorkManager cancellation racing the UI is handled by the job CAS.
+                    try {
+                        ghostwriteController.reconcile(directory)
+                    } catch (error: CancellationException) {
+                        throw error
+                    } catch (_: Exception) {
+                        // A cold UI may be projected before WorkManager is initialized;
+                        // durable job files remain authoritative for this refresh.
                     }
-                NovelGhostwriteRefresh(
-                    job = job,
-                    chapters = loadChapters(store),
-                    drafts = loadDrafts(store),
-                    catalog = loadCatalog(directory, ledger, slug),
-                    plotStale = NovelWorkspaceLedger.isPlotStale(store, ledger, slug),
-                    unresolvedFromOrdinal = NovelWorkspaceUnresolvedStore.entryFor(directory, slug)?.fromOrdinal,
-                    canUndo = runtime.canUndo(directory, slug),
+                    val store = NovelWorkspaceStore(directory)
+                    val ledger = NovelWorkspaceLedger.load(directory)
+                    val snapshot = NovelWorkspaceGhostwriteJobs.snapshot(directory)
+                    val selectedJob = if (focusedJobId != null) {
+                        snapshot.jobs.firstOrNull { it.id == focusedJobId && it.branchSlug == slug }
+                    } else {
+                        snapshot.jobs.firstOrNull { !it.isTerminal && it.branchSlug == slug }
+                            ?: NovelWorkspaceGhostwriteJobs.latestFailed(directory, slug)
+                    }
+                    val job = selectedJob
+                        ?.let { job ->
+                            NovelMarkdownGhostwriteUi(
+                                jobId = job.id,
+                                executionId = job.executionKey,
+                                branchSlug = job.branchSlug,
+                                target = job.targetChapterCount,
+                                written = NovelWorkspaceGhostwriteJobs.progress(job, store),
+                                startOrdinal = job.startOrdinal,
+                                status = job.status,
+                                stage = job.stage,
+                                currentChapterOrdinal = job.currentChapterOrdinal,
+                                rewriteAttempt = job.rewriteAttempt,
+                                reason = localizedJobReason(job.reason),
+                                mode = job.mode,
+                            )
+                        }
+                    NovelGhostwriteRefresh(
+                        job = job,
+                        unreadableJobFiles = snapshot.unreadableFiles,
+                        chapters = loadChapters(store),
+                        drafts = loadDrafts(store),
+                        catalog = loadCatalog(directory, ledger, slug),
+                        plotStale = NovelWorkspaceLedger.isPlotStale(store, ledger, slug),
+                        unresolvedFromOrdinal = NovelWorkspaceUnresolvedStore.entryFor(directory, slug)?.fromOrdinal,
+                        canUndo = runtime.canUndo(directory, slug),
+                    )
+                }
+                _state.value = _state.value.copy(
+                    ghostwriteJob = refresh.job,
+                    unreadableJobFiles = refresh.unreadableJobFiles,
+                    chapters = refresh.chapters,
+                    drafts = refresh.drafts,
+                    catalog = refresh.catalog,
+                    plotStale = refresh.plotStale,
+                    unresolvedFromOrdinal = refresh.unresolvedFromOrdinal,
+                    canUndo = refresh.canUndo,
                 )
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                _state.value = _state.value.copy(errorMessage = localizedRuntimeError(error, R.string.error_title_operation))
             }
-            _state.value = _state.value.copy(
-                ghostwriteJob = refresh.job,
-                chapters = refresh.chapters,
-                drafts = refresh.drafts,
-                catalog = refresh.catalog,
-                plotStale = refresh.plotStale,
-                unresolvedFromOrdinal = refresh.unresolvedFromOrdinal,
-                canUndo = refresh.canUndo,
-            )
         }
     }
 
@@ -1289,36 +1335,40 @@ class NovelMarkdownWorkspaceViewModel(
             _state.value = _state.value.copy(errorMessage = blocked)
             return
         }
-        runCatching { ghostwriteController.startBatch(directory, projectId, slug, targetChapterCount) }
-            .onSuccess { job ->
-                _state.value = _state.value.copy(
-                    errorMessage = null,
-                    ghostwriteJob = NovelMarkdownGhostwriteUi(
-                        jobId = job.id,
-                        executionId = job.executionKey,
-                        branchSlug = job.branchSlug,
-                        target = job.targetChapterCount,
-                        written = 0,
-                        startOrdinal = job.startOrdinal,
-                        status = job.status,
-                        stage = job.stage,
-                        currentChapterOrdinal = job.currentChapterOrdinal,
-                        rewriteAttempt = job.rewriteAttempt,
-                        mode = job.mode,
-                    ),
-                )
+        viewModelScope.launch {
+            runCatching {
+                ghostwriteController.startBatch(directory, projectId, slug, targetChapterCount)
             }
-            .onFailure {
-                _state.value = _state.value.copy(errorMessage = it.message ?: text(R.string.error_title_operation))
-                refreshGhostwrite()
-            }
+                .onSuccess { job ->
+                    focusedJobId = job.id
+                    _state.value = _state.value.copy(
+                        errorMessage = null,
+                        ghostwriteJob = NovelMarkdownGhostwriteUi(
+                            jobId = job.id,
+                            executionId = job.executionKey,
+                            branchSlug = job.branchSlug,
+                            target = job.targetChapterCount,
+                            written = 0,
+                            startOrdinal = job.startOrdinal,
+                            status = job.status,
+                            stage = job.stage,
+                            currentChapterOrdinal = job.currentChapterOrdinal,
+                            rewriteAttempt = job.rewriteAttempt,
+                            mode = job.mode,
+                        ),
+                    )
+                }
+                .onFailure {
+                    if (it is CancellationException) throw it
+                    _state.value = _state.value.copy(errorMessage = it.message ?: text(R.string.error_title_operation))
+                    refreshGhostwrite()
+                }
+        }
     }
 
     /**
-     * 批量润色既有章节 [fromOrdinal, toOrdinal]（含两端）。范围按正文目录校验（每章必须
-     * 存在）；与代笔互斥——分支上任一 active 批次（无论代笔还是润色）都会拒绝新批次。
-     * 暂停/继续/重试/取消与代笔共用同一套操作（job 层面 mode 无关），进度呈现按
-     * mode 区分文案。
+     * Batch polish for the inclusive ordinal range [fromOrdinal, toOrdinal]. Both batch kinds
+     * share the durable branch claim and pause/resume/CAS semantics.
      */
     fun startPolish(fromOrdinal: Int, toOrdinal: Int) {
         val directory = projectDirectory ?: return
@@ -1333,39 +1383,42 @@ class NovelMarkdownWorkspaceViewModel(
             _state.value = _state.value.copy(errorMessage = text(R.string.novel_no_chapters_to_polish))
             return
         }
-        val blocked = checkBatchStartReady(polish = true)
-        if (blocked != null) {
+        checkBatchStartReady(polish = true)?.let { blocked ->
             _state.value = _state.value.copy(errorMessage = blocked)
             return
         }
-        runCatching {
-            ghostwriteController.startPolishBatch(directory, projectId, slug, fromOrdinal, toOrdinal)
+        viewModelScope.launch {
+            runCatching {
+                ghostwriteController.startPolishBatch(directory, projectId, slug, fromOrdinal, toOrdinal)
+            }
+                .onSuccess { job ->
+                    focusedJobId = job.id
+                    _state.value = _state.value.copy(
+                        errorMessage = null,
+                        ghostwriteJob = NovelMarkdownGhostwriteUi(
+                            jobId = job.id,
+                            executionId = job.executionKey,
+                            branchSlug = job.branchSlug,
+                            target = job.targetChapterCount,
+                            written = 0,
+                            startOrdinal = job.startOrdinal,
+                            status = job.status,
+                            stage = job.stage,
+                            currentChapterOrdinal = job.currentChapterOrdinal,
+                            rewriteAttempt = job.rewriteAttempt,
+                            mode = job.mode,
+                        ),
+                    )
+                }
+                .onFailure {
+                    if (it is CancellationException) throw it
+                    _state.value = _state.value.copy(errorMessage = it.message ?: text(R.string.error_title_operation))
+                    refreshGhostwrite()
+                }
         }
-            .onSuccess { job ->
-                _state.value = _state.value.copy(
-                    errorMessage = null,
-                    ghostwriteJob = NovelMarkdownGhostwriteUi(
-                        jobId = job.id,
-                        executionId = job.executionKey,
-                        branchSlug = job.branchSlug,
-                        target = job.targetChapterCount,
-                        written = 0,
-                        startOrdinal = job.startOrdinal,
-                        status = job.status,
-                        stage = job.stage,
-                        currentChapterOrdinal = job.currentChapterOrdinal,
-                        rewriteAttempt = job.rewriteAttempt,
-                        mode = job.mode,
-                    ),
-                )
-            }
-            .onFailure {
-                _state.value = _state.value.copy(errorMessage = it.message ?: text(R.string.error_title_operation))
-                refreshGhostwrite()
-            }
     }
 
-    /** Shared pre-flight gates for both batch kinds; returns the blocking error or null when clear. */
+    /** Shared pre-flight gates for both batch kinds. */
     private fun checkBatchStartReady(polish: Boolean): String? {
         val directory = projectDirectory
         val slug = branchSlug
@@ -1375,8 +1428,7 @@ class NovelMarkdownWorkspaceViewModel(
         if (resolveWritingModel(settings) == null) {
             return text(R.string.novel_ghostwrite_error_model_missing)
         }
-        // A failed batch remains bound to its frozen plan because retry resumes it.
-        // The author must explicitly dismiss it before editing or starting fresh.
+        // A failed job remains bound to its frozen plan until explicitly dismissed or retried.
         if (_state.value.ghostwriteJob?.status == NovelWorkspaceGhostwriteJob.STATUS_RUNNING ||
             _state.value.ghostwriteJob?.status == NovelWorkspaceGhostwriteJob.STATUS_PAUSED ||
             _state.value.ghostwriteJob?.status == NovelWorkspaceGhostwriteJob.STATUS_FAILED
@@ -1405,45 +1457,52 @@ class NovelMarkdownWorkspaceViewModel(
     }
 
     fun pauseGhostwriteBatch() {
-        val directory = projectDirectory ?: return
-        val current = _state.value.ghostwriteJob ?: return
-        runCatching { ghostwriteController.pause(directory, current.jobId, current.executionId) }
-            .onFailure { _state.value = _state.value.copy(errorMessage = it.message) }
-        refreshGhostwrite()
+        viewModelScope.launch {
+            val directory = projectDirectory ?: return@launch
+            val current = _state.value.ghostwriteJob ?: return@launch
+            runCatching { ghostwriteController.pause(directory, current.jobId, current.executionId) }
+                .onFailure {
+                    if (it is CancellationException) throw it
+                    _state.value = _state.value.copy(errorMessage = it.message)
+                }
+            refreshGhostwrite()
+        }
     }
 
     fun resumeGhostwriteBatch() {
         val directory = projectDirectory ?: return
         val current = _state.value.ghostwriteJob ?: return
         val slug = branchSlug ?: return
-        // job 绑定创建时的分支：作者已切走时先切回原分支才能继续。
         if (current.branchSlug != slug) {
-            _state.value = _state.value.copy(
-                errorMessage = text(R.string.error_title_operation),
-            )
+            _state.value = _state.value.copy(errorMessage = text(R.string.error_title_operation))
             return
         }
-        runCatching {
-            ghostwriteController.resume(
-                directory,
-                projectId,
-                current.jobId,
-                current.executionId,
-                expectedBranchSlug = slug,
-            )
-        }.onSuccess { resumed ->
-            if (resumed != null) {
-                _state.value = _state.value.copy(
-                    errorMessage = null,
-                    ghostwriteJob = current.copy(
-                        executionId = resumed.executionKey,
-                        status = NovelWorkspaceGhostwriteJob.STATUS_RUNNING,
-                        reason = null,
-                    ),
+        viewModelScope.launch {
+            runCatching {
+                ghostwriteController.resume(
+                    directory,
+                    projectId,
+                    current.jobId,
+                    current.executionId,
+                    expectedBranchSlug = slug,
                 )
+            }.onSuccess { resumed ->
+                if (resumed != null) {
+                    _state.value = _state.value.copy(
+                        errorMessage = null,
+                        ghostwriteJob = current.copy(
+                            executionId = resumed.executionKey,
+                            status = NovelWorkspaceGhostwriteJob.STATUS_RUNNING,
+                            reason = null,
+                        ),
+                    )
+                }
+            }.onFailure {
+                if (it is CancellationException) throw it
+                _state.value = _state.value.copy(errorMessage = it.message ?: text(R.string.error_title_operation))
             }
-        }.onFailure { _state.value = _state.value.copy(errorMessage = it.message) }
-        refreshGhostwrite()
+            refreshGhostwrite()
+        }
     }
 
     fun retryFailedGhostwriteBatch() {
@@ -1452,55 +1511,73 @@ class NovelMarkdownWorkspaceViewModel(
         val slug = branchSlug ?: return
         if (current.status != NovelWorkspaceGhostwriteJob.STATUS_FAILED) return
         if (current.branchSlug != slug) {
-            _state.value = _state.value.copy(
-                errorMessage = text(R.string.error_title_operation),
-            )
+            _state.value = _state.value.copy(errorMessage = text(R.string.error_title_operation))
             return
         }
-        runCatching {
-            ghostwriteController.retryFailed(
-                directory,
-                projectId,
-                current.jobId,
-                current.executionId,
-                expectedBranchSlug = slug,
-            )
-        }.onSuccess { resumed ->
-            _state.value = _state.value.copy(
-                errorMessage = null,
-                ghostwriteJob = current.copy(
-                    executionId = resumed.executionKey,
-                    status = NovelWorkspaceGhostwriteJob.STATUS_RUNNING,
-                    reason = null,
-                ),
-            )
-        }.onFailure {
-            _state.value = _state.value.copy(errorMessage = it.message ?: text(R.string.error_title_operation))
+        viewModelScope.launch {
+            runCatching {
+                ghostwriteController.retryFailed(
+                    directory,
+                    projectId,
+                    current.jobId,
+                    current.executionId,
+                    expectedBranchSlug = slug,
+                )
+            }.onSuccess { resumed ->
+                _state.value = _state.value.copy(
+                    errorMessage = null,
+                    ghostwriteJob = current.copy(
+                        executionId = resumed.executionKey,
+                        status = NovelWorkspaceGhostwriteJob.STATUS_RUNNING,
+                        reason = null,
+                    ),
+                )
+            }.onFailure {
+                if (it is CancellationException) throw it
+                _state.value = _state.value.copy(errorMessage = it.message ?: text(R.string.error_title_operation))
+            }
             refreshGhostwrite()
         }
     }
 
     fun cancelGhostwriteBatch() {
-        val directory = projectDirectory ?: return
-        val current = _state.value.ghostwriteJob ?: return
-        runCatching { ghostwriteController.cancel(directory, current.jobId, current.executionId) }
-            .onFailure { _state.value = _state.value.copy(errorMessage = it.message) }
-        refreshGhostwrite()
+        viewModelScope.launch {
+            val directory = projectDirectory ?: return@launch
+            val current = _state.value.ghostwriteJob ?: return@launch
+            runCatching { ghostwriteController.cancel(directory, current.jobId, current.executionId) }
+                .onFailure {
+                    if (it is CancellationException) throw it
+                    _state.value = _state.value.copy(errorMessage = it.message)
+                }
+            refreshGhostwrite()
+        }
     }
 
     /** Drop the read-only failed-batch card so the start form comes back. */
     fun dismissGhostwriteFailure() {
         val directory = projectDirectory ?: return
-        val jobId = _state.value.ghostwriteJob?.jobId ?: return
-        if (_state.value.ghostwriteJob?.status != NovelWorkspaceGhostwriteJob.STATUS_FAILED) return
-        viewModelScope.launch(Dispatchers.IO) {
-            NovelWorkspaceGhostwriteJobs.delete(directory, jobId)
-            _state.value = _state.value.copy(ghostwriteJob = null, errorMessage = null)
+        val current = _state.value.ghostwriteJob ?: return
+        if (current.status != NovelWorkspaceGhostwriteJob.STATUS_FAILED) return
+        viewModelScope.launch {
+            try {
+                val dismissed = withContext(Dispatchers.IO) {
+                    NovelWorkspaceGhostwriteJobs.dismissFailed(directory, current.jobId, current.executionId)
+                }
+                if (dismissed) {
+                    focusedJobId = null
+                    _state.value = _state.value.copy(ghostwriteJob = null, errorMessage = null)
+                } else {
+                    refreshGhostwrite()
+                }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                _state.value = _state.value.copy(
+                    errorMessage = localizedRuntimeError(error, R.string.error_title_operation),
+                )
+            }
         }
     }
-
-    /** Per-project writing model wins over the global chat model; invalid ids fall through. */
-    @OptIn(ExperimentalUuidApi::class)
     private fun resolveWritingModel(settings: app.amber.core.settings.Settings): app.amber.ai.provider.Model? {
         val override = projectDirectory?.let { NovelWorkspaceProjectSettingsStore.load(it).writingModelId }
         if (override != null) {
@@ -1530,7 +1607,7 @@ class NovelMarkdownWorkspaceViewModel(
         val directory = projectDirectory ?: return
         val branch = branchId ?: return
         val slug = branchSlug ?: return
-        if (_state.value.consistencyChecking) return
+        if (_state.value.busy || _state.value.consistencyChecking) return
         val settings = settingsAggregator.settingsFlow.value
         val model = resolveReviewModel(settings)
         if (model == null) {
@@ -1541,43 +1618,76 @@ class NovelMarkdownWorkspaceViewModel(
             consistencyChecking = true,
             consistencyReport = null,
             errorMessage = null,
-            // Consistency check is a read-only turn, but it still drives the agent loop;
-            // hold busy so a second turn can't interleave and cross-talk _state.
             busy = true,
+            streamingText = "",
+            reasoningText = "",
+            toolActivity = null,
         )
-        viewModelScope.launch {
+        turnJob?.cancel()
+        turnJob = viewModelScope.launch {
             var report = ""
-            turnLauncher.launch(
-                NovelWorkspaceRuntime.TurnRequest(
-                    projectDirectory = directory,
-                    branchId = branch,
-                    branchSlug = slug,
-                    userText = localizedPromptText(
-                        chinese = "请对最新一章做一致性检查。",
-                        english = "Review the latest chapter for consistency.",
+            var completed = false
+            try {
+                turnLauncher.launch(
+                    NovelWorkspaceRuntime.TurnRequest(
+                        projectDirectory = directory,
+                        branchId = branch,
+                        branchSlug = slug,
+                        userText = localizedPromptText(
+                            chinese = "请对最新一章做一致性检查。",
+                            english = "Review the latest chapter for consistency.",
+                        ),
+                        systemPrompt = NovelWorkspacePrompts.consistencyReview(
+                            locale = context.appLocale(),
+                        ),
+                        settings = settings,
+                        model = model,
+                        fallbackErrorMessage = text(R.string.error_title_operation),
+                        locale = context.appLocale(),
+                        injection = _state.value.injection,
                     ),
-                    systemPrompt = NovelWorkspacePrompts.consistencyReview(locale = context.appLocale()),
-                    settings = settings,
-                    model = model,
-                    fallbackErrorMessage = text(R.string.error_title_operation),
-                    locale = context.appLocale(),
-                    injection = _state.value.injection,
-                ),
-                runtime,
-            ).events.collect { event ->
-                when (event) {
-                    is NovelWorkspaceRuntime.TurnEvent.Delta -> report += event.text
-                    is NovelWorkspaceRuntime.TurnEvent.Failed ->
-                        _state.value = _state.value.copy(errorMessage = event.message)
-                    else -> Unit
+                    runtime,
+                ).events.collect { event ->
+                    when (event) {
+                        is NovelWorkspaceRuntime.TurnEvent.Delta -> report += event.text
+                        is NovelWorkspaceRuntime.TurnEvent.ReasoningDelta -> {
+                            _state.value = _state.value.copy(
+                                reasoningText = _state.value.reasoningText + event.text,
+                            )
+                        }
+                        is NovelWorkspaceRuntime.TurnEvent.ToolActivity -> {
+                            _state.value = _state.value.copy(toolActivity = toolLabel(event.toolName))
+                        }
+                        is NovelWorkspaceRuntime.TurnEvent.Completed -> {
+                            completed = true
+                            if (event.finalText.isNotBlank()) report = event.finalText
+                        }
+                        is NovelWorkspaceRuntime.TurnEvent.Failed -> {
+                            _state.value = _state.value.copy(errorMessage = event.message)
+                        }
+                    }
                 }
+                _state.value = _state.value.copy(
+                    consistencyChecking = false,
+                    consistencyReport = if (completed) report.ifBlank { null } else null,
+                    busy = false,
+                    canUndo = runtime.canUndo(directory, slug),
+                )
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                _state.value = _state.value.copy(
+                    errorMessage = localizedRuntimeError(error, R.string.error_title_operation),
+                )
+            } finally {
+                _state.value = _state.value.copy(
+                    busy = false,
+                    consistencyChecking = false,
+                    streamingText = "",
+                    reasoningText = "",
+                    toolActivity = null,
+                )
             }
-            _state.value = _state.value.copy(
-                consistencyChecking = false,
-                consistencyReport = report.ifBlank { null },
-                busy = false,
-                canUndo = runtime.canUndo(directory, slug),
-            )
         }
     }
 

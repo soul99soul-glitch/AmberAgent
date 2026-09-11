@@ -3,7 +3,6 @@ package app.amber.feature.ui.pages.setting
 import android.app.Application
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -12,6 +11,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlin.coroutines.cancellation.CancellationException
 import app.amber.agent.R
 import app.amber.core.settings.AgentRuntimeSetting
 import app.amber.core.settings.Settings
@@ -26,11 +26,60 @@ import app.amber.core.memory.export.MemoryImportExportManager
 import app.amber.core.memory.model.MemoryCandidateStatus
 import app.amber.core.memory.model.MemoryEvent
 import app.amber.core.memory.model.MemoryEventType
+import app.amber.core.memory.store.bucketForScope
+import app.amber.core.memory.store.MemoryStaleException
 import app.amber.core.model.AssistantMemory
 import app.amber.core.repository.MemoryRepository
 import java.io.File
 
 internal const val LOW_CONFIDENCE_CANDIDATE_THRESHOLD = 0.60f
+
+internal enum class MemoryMutationOperation {
+    CREATE,
+    UPDATE,
+    DELETE,
+}
+
+/**
+ * State for the settings page's memory writes. A draft is kept in every
+ * non-terminal failure state so the UI never has to reconstruct user input
+ * after a database error or a stale revision.
+ */
+internal sealed interface MemoryMutationState {
+    data object Idle : MemoryMutationState
+
+    data class Saving(
+        val draft: AssistantMemory,
+        val operation: MemoryMutationOperation,
+    ) : MemoryMutationState
+
+    data class Deleting(
+        val draft: AssistantMemory,
+    ) : MemoryMutationState
+
+    data class Saved(
+        val memoryId: Int,
+        val operation: MemoryMutationOperation,
+    ) : MemoryMutationState
+
+    data class Deleted(
+        val memoryId: Int,
+    ) : MemoryMutationState
+
+    data class Conflict(
+        val operation: MemoryMutationOperation,
+        val draft: AssistantMemory,
+        val latest: AssistantMemory?,
+        val expectedRevision: Long,
+        val actualRevision: Long,
+    ) : MemoryMutationState
+
+    data class Failed(
+        val operation: MemoryMutationOperation,
+        val draft: AssistantMemory,
+        val message: String,
+    ) : MemoryMutationState
+}
 
 class SettingAgentMemoryVM(
     private val context: Application,
@@ -47,6 +96,9 @@ class SettingAgentMemoryVM(
 
     private val _operationMessage = MutableStateFlow<String?>(null)
     val operationMessage: StateFlow<String?> = _operationMessage.asStateFlow()
+
+    private val _memoryMutation = MutableStateFlow<MemoryMutationState>(MemoryMutationState.Idle)
+    internal val memoryMutation: StateFlow<MemoryMutationState> = _memoryMutation.asStateFlow()
 
     val settings: StateFlow<Settings> = settingsStore.settingsFlow
         .stateIn(viewModelScope, SharingStarted.Lazily, Settings.dummy())
@@ -77,41 +129,131 @@ class SettingAgentMemoryVM(
         }
     }
 
-    fun addMemory(memory: AssistantMemory, bucket: String = MemoryRepository.GLOBAL_MEMORY_ID) {
-        viewModelScope.launch {
-            memoryRepository.addMemory(
-                assistantId = bucket,
-                content = memory.content,
-            )
-        }
-    }
-
-    fun updateMemory(memory: AssistantMemory) {
+    fun addMemory(memory: AssistantMemory, bucket: String = bucketForScope(memory.scope)) {
+        if (!beginMemoryMutation(memory, MemoryMutationOperation.CREATE)) return
         viewModelScope.launch {
             try {
-                memoryRepository.updateContent(
-                    id = memory.id,
+                val created = memoryRepository.addMemory(
+                    scope = memory.scope,
+                    kind = memory.kind,
+                    assistantId = bucket,
                     content = memory.content,
-                    expectedRevision = memory.revision,
+                    sourceConversationId = memory.sourceConversationId,
+                    sourceMessageIds = memory.sourceMessageIds,
+                    supersedesIds = memory.supersedesIds,
+                    expiresAt = memory.expiresAt,
+                    confidence = memory.confidence,
+                    pinned = memory.pinned,
+                    sourceRunId = memory.sourceRunId,
+                    sourceTrigger = memory.sourceTrigger,
+                )
+                _memoryMutation.value = MemoryMutationState.Saved(
+                    memoryId = created.id,
+                    operation = MemoryMutationOperation.CREATE,
                 )
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Exception) {
-                reportMemoryOperationError(error)
+                failMemoryMutation(MemoryMutationOperation.CREATE, memory, error)
+            }
+        }
+    }
+
+    fun updateMemory(memory: AssistantMemory) {
+        if (!beginMemoryMutation(memory, MemoryMutationOperation.UPDATE)) return
+        viewModelScope.launch {
+            try {
+                val updated = memoryRepository.updateMemoryCas(memory).memory
+                _memoryMutation.value = MemoryMutationState.Saved(
+                    memoryId = updated.id,
+                    operation = MemoryMutationOperation.UPDATE,
+                )
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: MemoryStaleException) {
+                val latest = try {
+                    memoryRepository.getMemoryById(memory.id)
+                } catch (refreshError: CancellationException) {
+                    throw refreshError
+                } catch (refreshError: Exception) {
+                    failMemoryMutation(MemoryMutationOperation.UPDATE, memory, refreshError)
+                    return@launch
+                }
+                _memoryMutation.value = MemoryMutationState.Conflict(
+                    operation = MemoryMutationOperation.UPDATE,
+                    draft = memory,
+                    latest = latest,
+                    expectedRevision = error.expectedRevision,
+                    actualRevision = error.actualRevision,
+                )
+            } catch (error: Exception) {
+                failMemoryMutation(MemoryMutationOperation.UPDATE, memory, error)
             }
         }
     }
 
     fun deleteMemory(memory: AssistantMemory) {
+        if (!beginMemoryMutation(memory, MemoryMutationOperation.DELETE)) return
         viewModelScope.launch {
             try {
-                memoryRepository.deleteMemoryCas(memory.id, expectedRevision = memory.revision)
+                memoryRepository.deleteMemoryCas(memory.id, memory.revision)
+                _memoryMutation.value = MemoryMutationState.Deleted(memory.id)
             } catch (error: CancellationException) {
                 throw error
+            } catch (error: MemoryStaleException) {
+                val latest = try {
+                    memoryRepository.getMemoryById(memory.id)
+                } catch (refreshError: CancellationException) {
+                    throw refreshError
+                } catch (refreshError: Exception) {
+                    failMemoryMutation(MemoryMutationOperation.DELETE, memory, refreshError)
+                    return@launch
+                }
+                _memoryMutation.value = MemoryMutationState.Conflict(
+                    operation = MemoryMutationOperation.DELETE,
+                    draft = memory,
+                    latest = latest,
+                    expectedRevision = error.expectedRevision,
+                    actualRevision = error.actualRevision,
+                )
             } catch (error: Exception) {
-                reportMemoryOperationError(error)
+                failMemoryMutation(MemoryMutationOperation.DELETE, memory, error)
             }
         }
+    }
+
+    private fun beginMemoryMutation(
+        draft: AssistantMemory,
+        operation: MemoryMutationOperation,
+    ): Boolean {
+        if (_memoryMutation.value is MemoryMutationState.Saving ||
+            _memoryMutation.value is MemoryMutationState.Deleting
+        ) {
+            return false
+        }
+        _memoryMutation.value = if (operation == MemoryMutationOperation.DELETE) {
+            MemoryMutationState.Deleting(draft)
+        } else {
+            MemoryMutationState.Saving(draft, operation)
+        }
+        return true
+    }
+
+    private fun failMemoryMutation(
+        operation: MemoryMutationOperation,
+        draft: AssistantMemory,
+        error: Exception,
+    ) {
+        _memoryMutation.value = MemoryMutationState.Failed(
+            operation = operation,
+            draft = draft,
+            message = error.message ?: error::class.simpleName.orEmpty(),
+        )
+    }
+
+    /** Clear a terminal/conflict state after the page has handled it. */
+    fun consumeMemoryMutation() {
+        _memoryMutation.value = MemoryMutationState.Idle
     }
 
     fun acceptCandidate(id: String) {
@@ -277,9 +419,5 @@ class SettingAgentMemoryVM(
 
     fun consumeOperationMessage() {
         _operationMessage.value = null
-    }
-
-    private fun reportMemoryOperationError(error: Exception) {
-        _operationMessage.value = error.message ?: error::class.java.simpleName
     }
 }

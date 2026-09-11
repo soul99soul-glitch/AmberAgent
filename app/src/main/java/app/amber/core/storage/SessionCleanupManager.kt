@@ -4,8 +4,11 @@ import android.content.Context
 import androidx.room.withTransaction
 import app.amber.agent.data.db.AppDatabase
 import app.amber.core.files.FileFolders
+import app.amber.core.sync.core.SyncRestoreWriteEpoch
+import app.amber.core.sync.core.SyncRestoreWriteGate
 import java.io.File
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
 
 /** 一个待清理会话的统计与附件集合。 */
@@ -27,6 +30,7 @@ data class ConversationCleanupTarget(
 data class CleanupDryRun(
     val cutoffAt: Long,
     val targets: List<ConversationCleanupTarget>,
+    val restoreEpoch: Long = 0L,
 ) {
     val conversationCount: Int get() = targets.size
     val messageNodeCount: Int get() = targets.sumOf { it.messageNodeCount }
@@ -54,80 +58,70 @@ data class CleanupResult(
  *
  * DB 事务失败时不会发生物理删除；物理删除失败时会话已删，但对应文件记录
  * 保留，避免把失败的文件删除伪装成完整成功。
+ *
+ * 执行使用恢复 epoch 和短写 gate；物理删除失败时保留对应 managed_files
+ * 行，用户仍可从 Files 页面重试。共享附件保留文件和登记行。
  */
 class SessionCleanupManager(
     private val context: Context,
     private val database: AppDatabase,
+    private val restoreWriteGate: SyncRestoreWriteGate = SyncRestoreWriteGate(),
 ) {
     suspend fun dryRun(cutoffAt: Long): CleanupDryRun = withContext(Dispatchers.IO) {
-        buildPlan(database.openHelper.readableDatabase, cutoffAt)
-    }
-
-    /** 从当前数据库快照选择清理目标；调用方负责提供读或写连接。 */
-    private fun buildPlan(
-        db: androidx.sqlite.db.SupportSQLiteDatabase,
-        cutoffAt: Long,
-    ): CleanupDryRun {
-        val targetIds = db.query(
+        val restoreEpoch = restoreWriteGate.currentEpoch()
+        val db = database.openHelper.readableDatabase
+        val targets = db.query(
             "SELECT id FROM conversationentity WHERE is_pinned = 0 AND update_at < ?",
             arrayOf(cutoffAt.toString()),
         ).use { cursor ->
             buildList {
                 while (cursor.moveToNext()) {
-                    add(cursor.getString(0))
+                    add(buildTarget(db, cursor.getString(0)))
                 }
             }
         }
-        val targetIdSet = targetIds.toSet()
-        // A file can be referenced by more than one conversation (for example
-        // after a fork or an imported history). Keep it alive when any
-        // conversation outside this cleanup batch still references it.
-        val retainedAttachmentPaths = db.query(
-            "SELECT conversation_id, messages FROM message_node",
-        ).use { cursor ->
-            buildSet {
+        val targetIds = targets.mapTo(hashSetOf()) { it.conversationId }
+        val retainedPaths = hashSetOf<String>()
+        if (targets.any { it.attachmentPaths.isNotEmpty() }) {
+            db.query("SELECT conversation_id, messages FROM message_node").use { cursor ->
                 while (cursor.moveToNext()) {
-                    if (cursor.getString(0) !in targetIdSet) {
-                        collectUploadPaths(cursor.getString(1), this)
-                    }
+                    if (cursor.getString(0) !in targetIds) collectUploadPaths(cursor.getString(1), retainedPaths)
                 }
             }
         }
-        val claimedPaths = mutableSetOf<String>()
-        val targets = targetIds.map { conversationId ->
-            val raw = buildTarget(db, conversationId)
-            val paths = raw.attachmentPaths.filter { path ->
-                path !in retainedAttachmentPaths && claimedPaths.add(path)
-            }
-            raw.copy(
-                attachmentPaths = paths,
-                attachmentBytes = managedBytes(db, paths),
-            )
+        val countedPaths = hashSetOf<String>()
+        val deletableTargets = targets.map { target ->
+            val paths = target.attachmentPaths.filter { it !in retainedPaths && countedPaths.add(it) }
+            target.copy(attachmentPaths = paths, attachmentBytes = managedBytes(db, paths))
         }
-        return CleanupDryRun(cutoffAt = cutoffAt, targets = targets)
+        CleanupDryRun(cutoffAt = cutoffAt, targets = deletableTargets, restoreEpoch = restoreEpoch)
     }
 
-    /** 执行清理。入参仅作展示用途；实际删除以重新 dry run 的当前状态为准。 */
-    suspend fun execute(plan: CleanupDryRun): CleanupResult = withContext(Dispatchers.IO) {
-        // 选择和删除会话使用同一 DB transaction，避免在选择后又删掉/更新一部分
-        // 会话。managed_files 留到物理删除成功后再清掉，失败时保留 Files 索引。
-        val current = database.withTransaction {
-            val db = database.openHelper.writableDatabase
-            val selected = buildPlan(db, plan.cutoffAt)
-            if (selected.targets.isEmpty()) {
-                return@withTransaction selected
+    /** 校验预览所属的数据集；删除目标以同一 gate 内重新 dry run 的当前状态为准。 */
+    suspend fun execute(plan: CleanupDryRun): CleanupResult =
+        withContext(Dispatchers.IO + SyncRestoreWriteEpoch(plan.restoreEpoch)) {
+            restoreWriteGate.withCurrentWriterOrCancel {
+                withContext(NonCancellable) { executeCurrent(plan) }
             }
-            deleteDatabaseRows(db, selected)
-            selected
         }
+
+    private suspend fun executeCurrent(plan: CleanupDryRun): CleanupResult {
+        val current = dryRun(plan.cutoffAt)
         if (current.targets.isEmpty()) {
-            return@withContext CleanupResult(0, 0, 0, 0L)
+            return CleanupResult(0, 0, 0, 0L)
         }
-        val physical = deletePhysicalAttachments(current)
+        // Remove conversation rows first but keep managed_files until each
+        // physical delete succeeds, so a failed file remains visible for retry.
+        val selected = database.withTransaction {
+            val db = database.openHelper.writableDatabase
+            deleteDatabaseRows(db, current)
+            current
+        }
+        val physical = deletePhysicalAttachments(selected)
         forgetDeletedManagedFiles(physical.deletedUploadPaths)
-        CleanupResult(
-            conversationCount = current.conversationCount,
-            messageNodeCount = current.messageNodeCount,
+        return CleanupResult(
+            conversationCount = selected.conversationCount,
+            messageNodeCount = selected.messageNodeCount,
             attachmentCount = physical.deletedUploadPaths.size,
             deletedBytes = physical.deletedBytes,
         )
@@ -171,7 +165,7 @@ class SessionCleanupManager(
             "SELECT COUNT(*) FROM message_node WHERE conversation_id = ?",
             arrayOf(conversationId),
         ).use { cursor -> if (cursor.moveToFirst()) cursor.getInt(0) else 0 }
-        val paths = db.query(
+        val referencedPaths = db.query(
             "SELECT messages FROM message_node WHERE conversation_id = ?",
             arrayOf(conversationId),
         ).use { cursor ->
@@ -181,6 +175,11 @@ class SessionCleanupManager(
             }
             found.toList()
         }
+        val paths = if (referencedPaths.isEmpty()) emptyList() else db.query(
+            "SELECT relative_path FROM managed_files WHERE relative_path IN (" +
+                referencedPaths.joinToString(",") { "?" } + ")",
+            referencedPaths.toTypedArray(),
+        ).use { cursor -> buildList { while (cursor.moveToNext()) add(cursor.getString(0)) } }
         return ConversationCleanupTarget(
             conversationId = conversationId,
             messageNodeCount = messageNodeCount,

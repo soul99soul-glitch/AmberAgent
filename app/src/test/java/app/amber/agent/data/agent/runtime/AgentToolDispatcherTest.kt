@@ -1,14 +1,14 @@
 package app.amber.feature.runtime
 
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -17,7 +17,10 @@ import app.amber.ai.ui.ToolApprovalState
 import app.amber.ai.ui.UIMessagePart
 import app.amber.core.ai.GenerationRetrySetting
 import java.io.File
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -69,88 +72,59 @@ class AgentToolDispatcherTest {
     }
 
     @Test
-    fun executeBatchSerializesWebMountCallsInSameSession() = runBlocking {
-        val firstStarted = CompletableDeferred<Unit>()
-        val releaseFirst = CompletableDeferred<Unit>()
-        val secondStarted = CompletableDeferred<Unit>()
-        val first = Tool(
-            name = "wm_state",
+    fun executeBatchSerializesOneParallelGroupButRunsDifferentGroupsTogether() = runBlocking {
+        val firstSameGroupStarted = CompletableDeferred<Unit>()
+        val differentGroupStarted = CompletableDeferred<Unit>()
+        val releaseSameGroup = CompletableDeferred<Unit>()
+        val firstSameGroupCall = AtomicBoolean(true)
+        val sameGroupActive = AtomicInteger(0)
+        val sameGroupOverlap = AtomicBoolean(false)
+        val differentGroupEnteredBeforeRelease = AtomicBoolean(false)
+        val definition = Tool(
+            name = "wm_tab_list",
             description = "",
-            execute = {
-                firstStarted.complete(Unit)
-                releaseFirst.await()
-                listOf(UIMessagePart.Text("first"))
-            },
-        )
-        val second = Tool(
-            name = "wm_extract",
-            description = "",
-            execute = {
-                secondStarted.complete(Unit)
-                listOf(UIMessagePart.Text("second"))
-            },
-        )
-
-        val batch = async {
-            dispatcher.executeBatch(
-                tools = listOf(
-                    toolCall("wm_state", id = "first", input = """{"session_id":"shared"}"""),
-                    toolCall("wm_extract", id = "second", input = """{"session_id":"shared"}"""),
-                ),
-                toolDefinitions = mapOf("wm_state" to first, "wm_extract" to second),
-                autoApproveTools = false,
-            )
-        }
-
-        firstStarted.await()
-        assertEquals(false, secondStarted.isCompleted)
-        releaseFirst.complete(Unit)
-
-        val result = batch.await()
-        assertEquals(listOf("first", "second"), result.map { it.toolCallId })
-    }
-
-    @Test
-    fun executeBatchKeepsDifferentWebMountSessionsParallel() = runBlocking {
-        val firstStarted = CompletableDeferred<Unit>()
-        val releaseFirst = CompletableDeferred<Unit>()
-        val secondStarted = CompletableDeferred<Unit>()
-        val first = Tool(
-            name = "wm_state",
-            description = "",
-            execute = {
-                firstStarted.complete(Unit)
-                releaseFirst.await()
-                listOf(UIMessagePart.Text("first"))
-            },
-        )
-        val second = Tool(
-            name = "wm_extract",
-            description = "",
-            execute = {
-                secondStarted.complete(Unit)
-                listOf(UIMessagePart.Text("second"))
+            execute = { input ->
+                val sessionId = input.jsonObject["session_id"]!!.jsonPrimitive.content
+                if (sessionId == "session-a") {
+                    val active = sameGroupActive.incrementAndGet()
+                    if (active > 1) sameGroupOverlap.set(true)
+                    try {
+                        if (firstSameGroupCall.compareAndSet(true, false)) {
+                            firstSameGroupStarted.complete(Unit)
+                            releaseSameGroup.await()
+                        }
+                        listOf(UIMessagePart.Text(sessionId))
+                    } finally {
+                        sameGroupActive.decrementAndGet()
+                    }
+                } else {
+                    if (!releaseSameGroup.isCompleted) differentGroupEnteredBeforeRelease.set(true)
+                    differentGroupStarted.complete(Unit)
+                    listOf(UIMessagePart.Text(sessionId))
+                }
             },
         )
 
         val batch = async {
             dispatcher.executeBatch(
                 tools = listOf(
-                    toolCall("wm_state", id = "first", input = """{"session_id":"one"}"""),
-                    toolCall("wm_extract", id = "second", input = """{"session_id":"two"}"""),
+                    toolCall("wm_tab_list", id = "same-1", input = """{"session_id":"session-a"}"""),
+                    toolCall("wm_tab_list", id = "same-2", input = """{"session_id":"session-a"}"""),
+                    toolCall("wm_tab_list", id = "different", input = """{"session_id":"session-b"}"""),
                 ),
-                toolDefinitions = mapOf("wm_state" to first, "wm_extract" to second),
+                toolDefinitions = mapOf("wm_tab_list" to definition),
                 autoApproveTools = false,
             )
         }
 
-        firstStarted.await()
-        val secondWasStarted = withTimeoutOrNull(1_000L) { secondStarted.await() } != null
-        releaseFirst.complete(Unit)
+        withTimeout(5_000) { firstSameGroupStarted.await() }
+        withTimeout(5_000) { differentGroupStarted.await() }
+        assertTrue(differentGroupEnteredBeforeRelease.get())
+        assertFalse(sameGroupOverlap.get())
 
-        val result = batch.await()
-        assertTrue("different WebMount sessions should run in parallel", secondWasStarted)
-        assertEquals(listOf("first", "second"), result.map { it.toolCallId })
+        releaseSameGroup.complete(Unit)
+        val result = withTimeout(5_000) { batch.await() }
+        assertEquals(listOf("same-1", "same-2", "different"), result.map { it.toolCallId })
     }
 
     @Test

@@ -40,7 +40,6 @@ dependencies {
     api(project(":feature:board:api"))
     api(project(":feature:live:api"))
     api(project(":feature:modelcouncil:api"))
-    api(project(":feature:office:api"))
     api(project(":feature:subagent:api"))
     api(project(":core:ai-prompts"))
     api(project(":core:memory:api"))

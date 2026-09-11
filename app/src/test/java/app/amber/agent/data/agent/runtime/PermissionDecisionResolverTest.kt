@@ -1,6 +1,7 @@
 package app.amber.feature.runtime
 
 import app.amber.ai.core.Tool
+import app.amber.ai.ui.ToolApprovalState
 import app.amber.ai.ui.UIMessagePart
 import app.amber.feature.modelcouncil.ExternalCliToolRegistry
 import app.amber.feature.tools.EXTERNAL_CLI_COUNCIL_RUNNER_TYPES
@@ -508,6 +509,49 @@ class PermissionDecisionResolverTest {
             assertEquals(ToolRisk.Sensitive, policy.risk)
             assertTrue(policy.mandatoryApproval)
         }
+    }
+
+    @Test
+    fun addingWebsiteAlwaysRequiresItsOwnUserConfirmation() {
+        for (context in listOf(ToolInvocationContext.Normal, ToolInvocationContext.SubAgent)) {
+            for (autoApprove in listOf(false, true)) {
+                val decision = resolver.resolve(
+                    toolDef = mandatoryTool("wm_site_add"),
+                    tool = toolCall("wm_site_add"),
+                    autoApproveTools = autoApprove,
+                    autoApproveHighRiskTools = true,
+                    autoApprovedToolNames = setOf("wm_site_add"),
+                    invocationContext = context,
+                )
+                assertEquals(PermissionDecisionAction.ASK, decision.action)
+                assertEquals("webmount_site_confirmation", decision.source)
+            }
+        }
+    }
+
+    @Test
+    fun removingWebsiteCannotBypassConfirmationInUnattendedMode() {
+        val decision = resolver.resolve(
+            toolDef = mandatoryTool("wm_site_remove"),
+            tool = toolCall("wm_site_remove"),
+            autoApproveTools = true,
+            autoApproveHighRiskTools = true,
+            autoApprovedToolNames = setOf("wm_site_remove"),
+        )
+        assertEquals(PermissionDecisionAction.ASK, decision.action)
+        assertEquals("webmount_site_confirmation", decision.source)
+    }
+
+    @Test
+    fun explicitlyConfirmedWebsiteAdditionCanProceed() {
+        val decision = resolver.resolve(
+            toolDef = mandatoryTool("wm_site_add"),
+            tool = toolCall("wm_site_add").copy(approvalState = ToolApprovalState.Approved),
+            autoApproveTools = false,
+            autoApproveHighRiskTools = false,
+        )
+        assertEquals(PermissionDecisionAction.ALLOW, decision.action)
+        assertEquals("approval_state", decision.source)
     }
 
     private fun approvalTool(name: String, allowsAutoApproval: Boolean = true) = Tool(

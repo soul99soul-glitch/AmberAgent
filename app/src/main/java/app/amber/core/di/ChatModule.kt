@@ -72,6 +72,7 @@ val chatModule = module {
             storedResponseStopCancel = get(),
             secretStore = get(),
             themePackageManager = get(),
+            restoreWriteGate = get(),
         )
     }
     single<ConversationAccess> { get<ChatService>() }

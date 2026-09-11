@@ -5,6 +5,7 @@ import android.util.Log
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.filterNot
 import kotlinx.coroutines.flow.first
@@ -35,11 +36,15 @@ import app.amber.core.agent.runtime.AgentEventWriter
 import app.amber.core.settings.Settings
 import app.amber.core.settings.prefs.SettingsAggregator
 import app.amber.core.settings.resolveTaskChatModel
+import app.amber.core.sync.core.SyncRestoreWriteEpoch
+import app.amber.core.sync.core.SyncRestoreWriteGate
 import java.net.URI
 import java.security.MessageDigest
 import java.time.LocalDate
 import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
+import kotlin.coroutines.CoroutineContext
+import kotlin.coroutines.EmptyCoroutineContext
 import kotlin.uuid.Uuid
 
 class DeepReadAgentRunManager(
@@ -53,6 +58,7 @@ class DeepReadAgentRunManager(
     private val researchHarness: DeepReadResearchHarness,
     private val appScope: AppScope,
     private val artifactRepository: ArtifactRepository? = null,
+    private val restoreWriteGate: SyncRestoreWriteGate? = null,
 ) {
     private val mutexes = ConcurrentHashMap<String, Mutex>()
     private val backgroundRuns = ConcurrentHashMap.newKeySet<String>()
@@ -86,20 +92,22 @@ class DeepReadAgentRunManager(
                 IllegalArgumentException(appContext.getString(R.string.deep_read_demo_failed))
             )
         val topicId = previewTopicId(normalizedSeedUrl)
-        return topicMutex(topicId).withLock {
-            try {
-                hotListRepository.clearDeepRead(topicId)
-                generateStages(
-                    topicId = topicId,
-                    topicTitle = topicTitle,
-                    stages = DeepReadGenerationStage.entries,
-                    seedUrl = normalizedSeedUrl,
-                    force = true,
-                    locale = locale,
-                )
-            } finally {
-                withContext(NonCancellable) {
-                    runCatching { hotListRepository.clearDeepRead(topicId) }
+        return withCapturedRestoreWriteContext {
+            topicMutex(topicId).withLock {
+                try {
+                    hotListRepository.clearDeepRead(topicId)
+                    generateStages(
+                        topicId = topicId,
+                        topicTitle = topicTitle,
+                        stages = DeepReadGenerationStage.entries,
+                        seedUrl = normalizedSeedUrl,
+                        force = true,
+                        locale = locale,
+                    )
+                } finally {
+                    withContext(NonCancellable) {
+                        runCatching { hotListRepository.clearDeepRead(topicId) }
+                    }
                 }
             }
         }
@@ -115,46 +123,54 @@ class DeepReadAgentRunManager(
         runId: String? = null,
         events: AgentEventWriter? = null,
         locale: Locale = Locale.getDefault(),
-    ): Result<DeepReadOutput> = topicMutex(topicId).withLock {
-        if (force) hotListRepository.clearDeepRead(topicId)
+    ): Result<DeepReadOutput> = withCapturedRestoreWriteContext {
+        topicMutex(topicId).withLock {
+            if (force) hotListRepository.clearDeepRead(topicId)
 
-        val cached = if (force) null else fresh(topicId, topicTitle, seedUrl)
-        if (cached?.isComplete() == true) {
-            persistCompletedArtifact(topicId, topicTitle, cached)
-            return@withLock Result.success(cached)
-        }
+            val cached = if (force) null else fresh(topicId, topicTitle, seedUrl)
+            if (cached?.isComplete() == true) {
+                persistCompletedArtifact(topicId, topicTitle, cached)
+                return@withLock Result.success(cached)
+            }
 
-        val missing = missingStages(cached ?: DeepReadOutput())
-        if (shouldDeferDeepReadMissingStages(force, cached, missing, deferMissingStages)) {
-            scheduleBackgroundFill(topicId, topicTitle, missing, seedUrl, locale)
-            return@withLock Result.success(cached ?: DeepReadOutput())
-        }
-        if (!force && cached != null && cached.sectionsReady()) {
-            val completed = cached.copy(
-                generationPhase = DeepReadGenerationPhase.COMPLETE,
-                generationComplete = true,
+            val missing = missingStages(cached ?: DeepReadOutput())
+            if (shouldDeferDeepReadMissingStages(force, cached, missing, deferMissingStages)) {
+                scheduleBackgroundFill(topicId, topicTitle, missing, seedUrl, locale)
+                return@withLock Result.success(cached ?: DeepReadOutput())
+            }
+            if (!force && cached != null && cached.sectionsReady()) {
+                val completed = cached.copy(
+                    generationPhase = DeepReadGenerationPhase.COMPLETE,
+                    generationComplete = true,
+                )
+                hotListRepository.saveDeepRead(
+                    topicId = topicId,
+                    title = topicTitle,
+                    output = completed,
+                    ttlDays = currentDeepReadTtlDays(),
+                    sourceUrl = seedUrl,
+                )
+                persistCompletedArtifact(topicId, topicTitle, completed)
+                return@withLock Result.success(completed)
+            }
+
+            val stagesToGenerate = when {
+                missing.isNotEmpty() -> missing
+                else -> DeepReadGenerationStage.entries
+            }
+
+            generateStages(
+                topicId = topicId,
+                topicTitle = topicTitle,
+                stages = stagesToGenerate,
+                seedUrl = seedUrl,
+                force = force,
+                propagateFailuresWithPartial = propagateFailuresWithPartial,
+                runId = runId,
+                events = events,
+                locale = locale,
             )
-            hotListRepository.saveDeepRead(topicId, topicTitle, completed, ttlDays = currentDeepReadTtlDays())
-            persistCompletedArtifact(topicId, topicTitle, completed)
-            return@withLock Result.success(completed)
         }
-
-        val stagesToGenerate = when {
-            missing.isNotEmpty() -> missing
-            else -> DeepReadGenerationStage.entries
-        }
-
-        generateStages(
-            topicId = topicId,
-            topicTitle = topicTitle,
-            stages = stagesToGenerate,
-            seedUrl = seedUrl,
-            force = force,
-            propagateFailuresWithPartial = propagateFailuresWithPartial,
-            runId = runId,
-            events = events,
-            locale = locale,
-        )
     }
 
     suspend fun runSection(
@@ -166,23 +182,25 @@ class DeepReadAgentRunManager(
         runId: String? = null,
         events: AgentEventWriter? = null,
         locale: Locale = Locale.getDefault(),
-    ): Result<DeepReadOutput> = topicMutex(topicId).withLock {
-        markSectionRunning(topicId, topicTitle, seedUrl, stage)
-        generateStages(
-            topicId = topicId,
-            topicTitle = topicTitle,
-            stages = listOf(stage),
-            seedUrl = seedUrl,
-            markCollecting = false,
-            planningPhase = DeepReadGenerationPhase.WRITING,
-            propagateFailuresWithPartial = propagateFailuresWithPartial,
-            runId = runId,
-            events = events,
-            locale = locale,
-        )
+    ): Result<DeepReadOutput> = withCapturedRestoreWriteContext {
+        topicMutex(topicId).withLock {
+            markSectionRunning(topicId, topicTitle, seedUrl, stage)
+            generateStages(
+                topicId = topicId,
+                topicTitle = topicTitle,
+                stages = listOf(stage),
+                seedUrl = seedUrl,
+                markCollecting = false,
+                planningPhase = DeepReadGenerationPhase.WRITING,
+                propagateFailuresWithPartial = propagateFailuresWithPartial,
+                runId = runId,
+                events = events,
+                locale = locale,
+            )
+        }
     }
 
-    private fun scheduleBackgroundFill(
+    private suspend fun scheduleBackgroundFill(
         topicId: String,
         topicTitle: String,
         stages: List<DeepReadGenerationStage>,
@@ -191,7 +209,7 @@ class DeepReadAgentRunManager(
     ) {
         val key = "$topicId:${stages.joinToString(",") { it.name }}"
         if (!backgroundRuns.add(key)) return
-        appScope.launch {
+        appScope.launch(captureRestoreWriteContext()) {
             try {
                 topicMutex(topicId).withLock {
                     val current = fresh(topicId, topicTitle, seedUrl) ?: DeepReadOutput()
@@ -217,6 +235,19 @@ class DeepReadAgentRunManager(
         }
     }
 
+    private suspend fun captureRestoreWriteContext(): CoroutineContext {
+        currentCoroutineContext()[SyncRestoreWriteEpoch]?.let { return it }
+        val gate = restoreWriteGate ?: return EmptyCoroutineContext
+        // A direct/manual run without an owner token becomes one before the
+        // model call. This only takes the short writer path and releases it
+        // before any network or model work starts.
+        gate.withWriter { Unit }
+        return SyncRestoreWriteEpoch(gate.currentEpoch())
+    }
+
+    private suspend fun <T> withCapturedRestoreWriteContext(block: suspend () -> T): T =
+        withContext(captureRestoreWriteContext()) { block() }
+
     private suspend fun markSectionRunning(
         topicId: String,
         topicTitle: String,
@@ -231,6 +262,7 @@ class DeepReadAgentRunManager(
             title = topicTitle,
             output = next,
             ttlDays = currentDeepReadTtlDays(),
+            sourceUrl = seedUrl,
         )
     }
 
@@ -373,6 +405,7 @@ class DeepReadAgentRunManager(
                         generationComplete = false,
                     ),
                     ttlDays = settings.agentRuntime.todayBoard.deepReadCacheTtlDays,
+                    sourceUrl = seedUrl,
                 )
             }
             val prefetchedSources = sourcePrefetcher.collect(
@@ -393,6 +426,7 @@ class DeepReadAgentRunManager(
                             generationPhase = DeepReadGenerationPhase.IDLE,
                         ),
                         ttlDays = settings.agentRuntime.todayBoard.deepReadCacheTtlDays,
+                        sourceUrl = seedUrl,
                     )
                 }
                 return Result.failure(IllegalStateException(message))

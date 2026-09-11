@@ -7,7 +7,7 @@ import app.amber.feature.system.AgentPermissionBroker
 import app.amber.feature.workspace.WorkspaceManager
 
 /**
- * Thin coordinator for the 28 system-access tools. All per-tool logic lives
+ * Thin coordinator for the 30 system-access tools. All per-tool logic lives
  * in sibling `XxxAccessTools.kt` factories under this package — this class
  * holds only the dependency wiring and the public `getTools()` registry.
  *
@@ -33,6 +33,8 @@ class SystemAccessTools(
         callPhoneTool,
         calendarListTool,
         calendarCreateTool,
+        calendarUpdateTool,
+        calendarDeleteTool,
         mediaSearchTool,
         locationCurrentTool,
         audioRecordOnceTool,
@@ -66,6 +68,8 @@ class SystemAccessTools(
 
     private val calendarListTool by lazy { createCalendarListTool(context, deps) }
     private val calendarCreateTool by lazy { createCalendarCreateTool(context, deps) }
+    private val calendarUpdateTool by lazy { createCalendarUpdateTool(context, deps) }
+    private val calendarDeleteTool by lazy { createCalendarDeleteTool(context, deps) }
 
     private val mediaSearchTool by lazy { createMediaSearchTool(context, deps) }
     private val locationCurrentTool by lazy { createLocationCurrentTool(context, deps) }

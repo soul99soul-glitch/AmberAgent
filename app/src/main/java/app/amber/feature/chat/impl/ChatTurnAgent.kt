@@ -95,7 +95,6 @@ class ChatTurnAgent(
                 when (chunk) {
                     is GenerationChunk.Messages -> {
                         lastMessages = chunk.messages
-                        hooks?.onStreamingMessages?.invoke(runId, chunk.messages)
                         // Stream the latest message list to chat.db so UI updates
                         // in real time (mirrors the legacy path's behavior).
                         val conversationUuid = Uuid.parse(input.conversationId.value)
@@ -110,6 +109,7 @@ class ChatTurnAgent(
                             updated,
                             checkDeletedFiles = false,
                         )
+                        hooks?.onStreamingMessages?.invoke(runId, chunk.messages)
 
                         val lastMsg = lastMessages.lastOrNull()
                         if (lastMsg != null) {
@@ -155,11 +155,17 @@ class ChatTurnAgent(
             scope.events.commitError(e, recoverable = false)
             throw e
         } finally {
-            // Terminal persistence (pause/complete/fail + ledger reconcile)
-            // is owned by the hooks; never let it break the runner's own
-            // status transition.
+            // A successful flow cannot become COMPLETED when its durable
+            // finalization failed. Preserve an earlier provider/cancel error
+            // as the primary cause while retaining any cleanup failure.
             if (hooks != null) {
-                runCatching { hooks.onRunFinished(runId, failure) }
+                try {
+                    hooks.onRunFinished(runId, failure)
+                } catch (cleanupFailure: Throwable) {
+                    val originalFailure = failure
+                    if (originalFailure == null) throw cleanupFailure
+                    if (cleanupFailure !== originalFailure) originalFailure.addSuppressed(cleanupFailure)
+                }
             }
         }
 

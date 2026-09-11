@@ -4,14 +4,21 @@ import app.amber.core.memory.model.MemoryKind
 import app.amber.core.memory.model.MemoryRecord
 import app.amber.core.memory.store.MemoryRepository
 import app.amber.core.utils.JsonInstant
+import app.amber.core.sync.core.SyncRestoreWriteEpoch
+import app.amber.core.sync.core.SyncRestoreWriteGate
 import java.io.File
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
+import kotlin.coroutines.CoroutineContext
+import kotlin.coroutines.EmptyCoroutineContext
+import kotlin.coroutines.coroutineContext
+import kotlinx.coroutines.withContext
 
 class MemoryImportExportManager(
     private val memoryRepository: MemoryRepository,
     private val codec: MemoryFrontmatterCodec = MemoryFrontmatterCodec(),
+    private val restoreWriteGate: SyncRestoreWriteGate? = null,
 ) {
     suspend fun exportTo(directory: File): MemoryExportResult {
         val root = resolveRoot(directory)
@@ -63,6 +70,10 @@ class MemoryImportExportManager(
     }
 
     suspend fun importFrom(root: File): MemoryImportResult {
+        return withContext(captureWriteContext()) { importInternal(root) }
+    }
+
+    private suspend fun importInternal(root: File): MemoryImportResult {
         val resolvedRoot = resolveExistingRoot(root)
         val existingRecords = memoryRepository.getAllRecords()
         var imported = 0
@@ -86,6 +97,13 @@ class MemoryImportExportManager(
                 imported++
             }
         return MemoryImportResult(root = resolvedRoot, importedCount = imported)
+    }
+
+    private suspend fun captureWriteContext(): CoroutineContext {
+        coroutineContext[SyncRestoreWriteEpoch]?.let { return it }
+        val gate = restoreWriteGate ?: return EmptyCoroutineContext
+        gate.withWriter { Unit }
+        return SyncRestoreWriteEpoch(gate.currentEpoch())
     }
 
     private fun fileName(record: MemoryRecord): String {

@@ -5,6 +5,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.serialization.json.Json
 import app.amber.agent.data.db.dao.MemoryDreamPlanDAO
 import app.amber.agent.data.db.entity.MemoryDreamPlanEntity
+import app.amber.core.sync.core.SyncRestoreWriteGate
 import kotlin.uuid.Uuid
 
 enum class MemoryDreamPlanStatus(val wireName: String) {
@@ -36,6 +37,7 @@ data class PersistedMemoryDreamPlan(
 class MemoryDreamPlanStore(
     private val dao: MemoryDreamPlanDAO,
     private val json: Json,
+    private val restoreWriteGate: SyncRestoreWriteGate? = null,
 ) {
     val pendingPlanFlow: Flow<PersistedMemoryDreamPlan?> =
         dao.getPendingPlanFlow().map { entity -> entity?.toPersisted() }
@@ -50,7 +52,7 @@ class MemoryDreamPlanStore(
         plan: MemoryDreamPlan,
         source: MemoryDreamPlanSource,
         now: Long = System.currentTimeMillis(),
-    ): PersistedMemoryDreamPlan {
+    ): PersistedMemoryDreamPlan = withPlanWriter {
         val entity = MemoryDreamPlanEntity(
             id = Uuid.random().toString(),
             planJson = json.encodeToString(MemoryDreamPlan.serializer(), plan),
@@ -66,13 +68,13 @@ class MemoryDreamPlanStore(
             dismissedAt = null,
         )
         dao.replacePending(entity)
-        return entity.toPersisted()
+        entity.toPersisted()
     }
 
     suspend fun recordAutoRun(
         plan: MemoryDreamPlan,
         now: Long = System.currentTimeMillis(),
-    ) {
+    ) = withPlanWriter {
         dao.insert(
             MemoryDreamPlanEntity(
                 id = Uuid.random().toString(),
@@ -95,7 +97,7 @@ class MemoryDreamPlanStore(
         plan: MemoryDreamPlan,
         source: MemoryDreamPlanSource,
         now: Long = System.currentTimeMillis(),
-    ): PersistedMemoryDreamPlan {
+    ): PersistedMemoryDreamPlan = withPlanWriter {
         val entity = MemoryDreamPlanEntity(
             id = Uuid.random().toString(),
             planJson = json.encodeToString(MemoryDreamPlan.serializer(), plan),
@@ -111,15 +113,20 @@ class MemoryDreamPlanStore(
             dismissedAt = null,
         )
         dao.replacePending(entity)
-        return entity.toPersisted()
+        entity.toPersisted()
     }
 
-    suspend fun markApplied(id: String, now: Long = System.currentTimeMillis()) {
+    suspend fun markApplied(id: String, now: Long = System.currentTimeMillis()) = withPlanWriter {
         dao.markApplied(id, now)
     }
 
-    suspend fun markDismissed(id: String, now: Long = System.currentTimeMillis()) {
+    suspend fun markDismissed(id: String, now: Long = System.currentTimeMillis()) = withPlanWriter {
         dao.markDismissed(id, now)
+    }
+
+    private suspend fun <T> withPlanWriter(block: suspend () -> T): T {
+        val gate = restoreWriteGate
+        return if (gate == null) block() else gate.withCurrentWriterOrCancel(block)
     }
 
     private fun MemoryDreamPlanEntity.toPersisted(): PersistedMemoryDreamPlan =

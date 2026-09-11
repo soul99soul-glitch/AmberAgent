@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.filterNot
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
@@ -33,6 +34,7 @@ class MemoryDreamWorker(
                 )
                 Result.success()
             }.getOrElse { error ->
+                if (error is CancellationException) throw error
                 val message = error.message ?: error::class.java.simpleName
                 eventLogger.log(
                     type = MemoryEventType.DREAM_FAILED,

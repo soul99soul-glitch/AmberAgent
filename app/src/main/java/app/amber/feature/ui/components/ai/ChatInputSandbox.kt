@@ -496,7 +496,9 @@ private fun AgentOperationPreviewPeek(
                     overflow = TextOverflow.Ellipsis,
                 )
                 Text(
-                    text = activity.operationPreviewText(context),
+                    text = if (activity.toolName == "agent_idle") {
+                        stringResource(R.string.chat_preview_standby)
+                    } else activity.operationPreviewText(context),
                     color = workspace.muted,
                     style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
                     maxLines = 4,
@@ -699,7 +701,10 @@ private fun SandboxStepPeek(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            SandboxStepStatusIcon(status = activity.status)
+            SandboxStepStatusIcon(
+                status = activity.status,
+                statusDescription = if (activity.toolName == "agent_idle") stringResource(R.string.chat_preview_standby) else null,
+            )
             Text(
                 text = activity.title,
                 modifier = Modifier.weight(1f),
@@ -774,7 +779,7 @@ private fun SandboxStepArrow(
 }
 
 @Composable
-private fun SandboxStepStatusIcon(status: ToolActivityStatus) {
+private fun SandboxStepStatusIcon(status: ToolActivityStatus, statusDescription: String? = null) {
     // V3 ResultPill spec: 16dp accent 实心圆 + 10dp 白勾。失败/取消保留状态色映射。
     val context = LocalContext.current
     val theme = app.amber.feature.ui.pages.chat.LocalChatTheme.current
@@ -790,7 +795,7 @@ private fun SandboxStepStatusIcon(status: ToolActivityStatus) {
     Surface(
         modifier = Modifier
             .size(16.dp)
-            .semantics { stateDescription = sandboxStatusLabel(context, status) },
+            .semantics { stateDescription = statusDescription ?: sandboxStatusLabel(context, status) },
         shape = CircleShape,
         color = bg,
         contentColor = ink,
@@ -835,7 +840,10 @@ private fun SandboxSheetHeader(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            SandboxStepStatusIcon(status = activity.status)
+            SandboxStepStatusIcon(
+                status = activity.status,
+                statusDescription = if (activity.toolName == "agent_idle") stringResource(R.string.chat_preview_standby) else null,
+            )
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = activity.title,

@@ -115,6 +115,7 @@ import app.amber.feature.ui.pages.miniapp.MiniAppSettingsPage
 import app.amber.feature.ui.pages.search.SearchPage
 import app.amber.feature.ui.pages.setting.SettingAboutPage
 import app.amber.feature.ui.pages.setting.SettingAgentExecutionPage
+import app.amber.feature.ui.pages.setting.SettingTtsPage
 import app.amber.feature.ui.pages.setting.SettingAgentExtensionsPage
 import app.amber.feature.ui.pages.setting.SettingAgentMemoryPage
 import app.amber.feature.ui.pages.setting.SettingAgentMemoryCompactionPage
@@ -128,7 +129,6 @@ import app.amber.feature.ui.pages.setting.SettingCronTasksPage
 import app.amber.feature.ui.pages.setting.SettingDisplayPage
 import app.amber.feature.ui.pages.setting.SettingExperimentalICloudPage
 import app.amber.feature.ui.pages.setting.SettingExperimentalModelCouncilPage
-import app.amber.feature.ui.pages.setting.SettingExperimentalOfficeProPage
 import app.amber.feature.ui.pages.setting.SettingExperimentalPage
 import app.amber.feature.ui.pages.setting.SettingExperimentalSubAgentPage
 import app.amber.feature.ui.pages.setting.SettingExperimentalWebMountPage
@@ -155,6 +155,7 @@ import app.amber.feature.ui.pages.setting.SettingSystemAccessPage
 import app.amber.feature.ui.pages.share.handler.ShareHandlerPage
 import app.amber.feature.ui.pages.stats.StatsPage
 import app.amber.feature.ui.pages.webview.WebViewPage
+import app.amber.feature.ui.pages.webmount.WebMountSessionPage
 import app.amber.feature.ui.theme.LocalDarkMode
 import app.amber.feature.ui.theme.AmberAgentTheme
 import app.amber.core.utils.base64Encode
@@ -172,6 +173,7 @@ class RouteActivity : ComponentActivity() {
     private val settingsStore by inject<SettingsAggregator>()
     private val oauthCallbackDispatcher by inject<app.amber.feature.webmount.oauth.OAuthCallbackDispatcher>()
     private val runTerminalStore by inject<RunTerminalStore>()
+    private val conversationRepository by inject<app.amber.core.repository.ConversationRepository>()
     private var navStack: MutableList<NavKey>? = null
     private var newIntentHandler: ((Intent) -> Unit)? = null
     private var shareIntentConsumed = false
@@ -237,6 +239,17 @@ class RouteActivity : ComponentActivity() {
         runBlocking {
             withTimeoutOrNull(2_000) {
                 settingsStore.settingsFlow.first { !it.init }
+            }
+        }
+        // W16-B: refresh dynamic launcher shortcuts after settings are
+        // initialized; failures never block startup.
+        lifecycleScope.launch {
+            runCatching {
+                app.amber.feature.tools.DynamicShortcutPublisher.publish(
+                    context = this@RouteActivity,
+                    settingsStore = settingsStore,
+                    conversationRepository = conversationRepository,
+                )
             }
         }
         setContent {
@@ -333,6 +346,12 @@ class RouteActivity : ComponentActivity() {
         deepReadScreenFromIntent(intent)?.let { screen ->
             navStack?.add(screen)
         }
+        app.amber.feature.novel.workspace.NovelWorkspaceNotificationRoute.screenFrom(intent)?.let { screen ->
+            if (navStack?.lastOrNull() != screen) navStack?.add(screen)
+        }
+        app.amber.feature.tools.DynamicShortcutPublisher.screenFromIntent(intent)?.let { route ->
+            navigateToShortcutRoute(route)
+        }
         newIntentHandler?.invoke(intent)
     }
 
@@ -355,6 +374,9 @@ class RouteActivity : ComponentActivity() {
     }
 
     private fun taskSessionScreenFromIntent(intent: Intent): Screen.Chat? {
+        // Shortcut intents carry their own prompt extra and are consumed by
+        // DynamicShortcutPublisher.screenFromIntent - never route them twice.
+        if (intent.hasExtra(app.amber.feature.tools.DynamicShortcutPublisher.EXTRA_SHORTCUT_KIND)) return null
         val prompt = intent.getStringExtra(EXTRA_OPEN_CHAT_PROMPT)
             ?.takeIf { it.isNotBlank() }
             ?: return null
@@ -363,6 +385,54 @@ class RouteActivity : ComponentActivity() {
             text = prompt.base64Encode(),
         )
     }
+
+    /**
+     * W16-B: launcher shortcut routes reuse the same landing semantics as
+     * notifications - a conversation shortcut opens that exact conversation,
+     * prompts prefill a fresh chat draft without bypassing the send gate.
+     */
+    private fun navigateToShortcutRoute(route: app.amber.feature.tools.DynamicShortcutPublisher.Route) {
+        when (route) {
+            app.amber.feature.tools.DynamicShortcutPublisher.Route.NewChat ->
+                navStack?.add(Screen.Chat(Uuid.random().toString()))
+            is app.amber.feature.tools.DynamicShortcutPublisher.Route.Conversation -> {
+                // A stale shortcut must not resurrect a deleted conversation
+                // with its old UUID; land on a fresh chat instead.
+                lifecycleScope.launch {
+                    val exists = runCatching {
+                        conversationRepository.existsConversationById(route.conversationId)
+                    }.getOrDefault(false)
+                    if (exists) {
+                        navStack?.add(Screen.Chat(route.conversationId.toString()))
+                    } else {
+                        navStack?.add(Screen.Chat(Uuid.random().toString()))
+                    }
+                }
+            }
+            is app.amber.feature.tools.DynamicShortcutPublisher.Route.QuickPrompt ->
+                navStack?.add(Screen.Chat(Uuid.random().toString(), route.prompt.base64Encode()))
+        }
+    }
+
+    private fun shortcutStartScreen(route: app.amber.feature.tools.DynamicShortcutPublisher.Route): Screen =
+        when (route) {
+            app.amber.feature.tools.DynamicShortcutPublisher.Route.NewChat ->
+                Screen.Chat(Uuid.random().toString())
+            is app.amber.feature.tools.DynamicShortcutPublisher.Route.Conversation -> {
+                // Cold start runs before composition; a single indexed DB
+                // lookup keeps this synchronous. Stale shortcuts land on a
+                // fresh chat instead of resurrecting the deleted UUID.
+                val exists = runCatching {
+                    kotlinx.coroutines.runBlocking {
+                        conversationRepository.existsConversationById(route.conversationId)
+                    }
+                }.getOrDefault(false)
+                if (exists) Screen.Chat(route.conversationId.toString())
+                else Screen.Chat(Uuid.random().toString())
+            }
+            is app.amber.feature.tools.DynamicShortcutPublisher.Route.QuickPrompt ->
+                Screen.Chat(Uuid.random().toString(), route.prompt.base64Encode())
+        }
 
     /**
      * P1-05: verify that a notification deep link's runId belongs to its
@@ -417,6 +487,12 @@ class RouteActivity : ComponentActivity() {
             }
             deepReadScreenFromIntent(intent)?.let { screen ->
                 return@remember screen
+            }
+            app.amber.feature.novel.workspace.NovelWorkspaceNotificationRoute.screenFrom(intent)?.let { screen ->
+                return@remember screen
+            }
+            app.amber.feature.tools.DynamicShortcutPublisher.screenFromIntent(intent)?.let { route ->
+                return@remember shortcutStartScreen(route)
             }
             val legacyCreateNew = if (containsPreference(LEGACY_CREATE_NEW_CONVERSATION_ON_START_PREF)) {
                 readBooleanPreference(LEGACY_CREATE_NEW_CONVERSATION_ON_START_PREF, true)
@@ -546,7 +622,9 @@ class RouteActivity : ComponentActivity() {
                                     id = Uuid.parse(key.id),
                                     text = key.text,
                                     files = key.files.map { it.toUri() },
-                                    nodeId = key.nodeId?.let { Uuid.parse(it) }
+                                    nodeId = key.nodeId?.let { Uuid.parse(it) },
+                                    messageId = key.messageId,
+                                    toolCallId = key.toolCallId,
                                 )
                             }
 
@@ -621,6 +699,13 @@ class RouteActivity : ComponentActivity() {
                                 WebViewPage(key.url, key.content)
                             }
 
+                            entry<Screen.WebMountSession> { key ->
+                                WebMountSessionPage(
+                                    sessionId = key.sessionId,
+                                    reopen = key.reopen,
+                                )
+                            }
+
                             entry<Screen.SettingDisplay> {
                                 SettingDisplayPage()
                             }
@@ -682,6 +767,10 @@ class RouteActivity : ComponentActivity() {
                                 SettingAgentExecutionPage()
                             }
 
+                            entry<Screen.SettingTts> {
+                                SettingTtsPage()
+                            }
+
                             entry<Screen.SettingAgentPermissions> {
                                 SettingAgentPermissionsPage()
                             }
@@ -716,10 +805,6 @@ class RouteActivity : ComponentActivity() {
 
                             entry<Screen.SettingExperimentalICloud> {
                                 SettingExperimentalICloudPage()
-                            }
-
-                            entry<Screen.SettingExperimentalOfficePro> {
-                                SettingExperimentalOfficeProPage()
                             }
 
                             entry<Screen.SettingExperimentalSubAgent> {
@@ -773,7 +858,11 @@ class RouteActivity : ComponentActivity() {
                             }
 
                             entry<Screen.NovelMarkdown> { key ->
-                                NovelMarkdownWorkspacePage(projectId = key.projectId)
+                                NovelMarkdownWorkspacePage(
+                                    projectId = key.projectId,
+                                    branchSlug = key.branchSlug,
+                                    jobId = key.jobId,
+                                )
                             }
 
                             entry<Screen.MiniAppRunner> { key ->
@@ -902,7 +991,9 @@ sealed interface Screen : NavKey {
         val id: String,
         val text: String? = null,
         val files: List<String> = emptyList(),
-        val nodeId: String? = null
+        val nodeId: String? = null,
+        val messageId: String? = null,
+        val toolCallId: String? = null,
     ) : Screen
 
     /**
@@ -973,6 +1064,12 @@ sealed interface Screen : NavKey {
     data class WebView(val url: String = "", val content: String = "") : Screen
 
     @Serializable
+    data class WebMountSession(
+        val sessionId: String,
+        val reopen: Boolean = false,
+    ) : Screen
+
+    @Serializable
     data object SettingDisplay : Screen
 
     @Serializable
@@ -1016,6 +1113,7 @@ sealed interface Screen : NavKey {
 
     @Serializable
     data object SettingAgentExecution : Screen
+    data object SettingTts : Screen
 
     @Serializable
     data object SettingAgentPermissions : Screen
@@ -1043,9 +1141,6 @@ sealed interface Screen : NavKey {
 
     @Serializable
     data object SettingExperimentalICloud : Screen
-
-    @Serializable
-    data object SettingExperimentalOfficePro : Screen
 
     @Serializable
     data object SettingExperimentalSubAgent : Screen
@@ -1099,7 +1194,11 @@ sealed interface Screen : NavKey {
     data object NovelProjects : Screen
 
     @Serializable
-    data class NovelMarkdown(val projectId: String) : Screen
+    data class NovelMarkdown(
+        val projectId: String,
+        val branchSlug: String? = null,
+        val jobId: String? = null,
+    ) : Screen
 
     @Serializable
     data class MiniAppRunner(val appId: String) : Screen

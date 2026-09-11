@@ -1,6 +1,7 @@
 package app.amber.feature.tools
 
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
@@ -17,9 +18,11 @@ import app.amber.feature.terminal.TerminalRuntimeKind
 class TerminalTools(
     private val terminalRuntime: TerminalRuntime,
     private val activityStore: AgentToolActivityStore,
+    private val sshProfileStore: app.amber.core.settings.ssh.SshProfileStore,
 ) {
     fun getTools(): List<Tool> = listOf(
         terminalExecuteTool,
+        terminalSshProfilesTool,
         terminalJobStartTool,
         terminalJobReadTool,
         terminalJobWaitTool,
@@ -34,12 +37,14 @@ class TerminalTools(
 
     private val terminalExecuteTool = Tool(
         name = "terminal_execute",
-        description = "Run a one-shot command in the AmberAgent Alpine/proot runtime workspace.",
+        description = "Run a one-shot command in Alpine or over SSH. For SSH pass runtime=remote_ssh and ssh_profile_id from terminal_ssh_profiles. Configure credentials and accept host keys in Settings > Agent Runtime > SSH profiles first.",
         parameters = {
             InputSchema.Obj(
                 properties = buildJsonObject {
                     put("command", stringProp("Command to run."))
                     put("timeout_ms", integerProp("Timeout in milliseconds. Defaults to 60000."))
+                    put("runtime", stringProp("Runtime: builtin_alpine, android_shell, termux_external, remote_ssh. Defaults to builtin_alpine."))
+                    put("ssh_profile_id", stringProp("Saved SSH profile ID; implies remote_ssh when runtime is omitted. Never pass passwords or keys in tool inputs."))
                     put("sync_workspace", booleanProp("For detached long commands, refresh the SAF workspace before start and flush changes back after completion."))
                 },
                 required = listOf("command")
@@ -52,6 +57,8 @@ class TerminalTools(
                 command = input.requiredString("command"),
                 timeoutMillis = input.long("timeout_ms") ?: 60_000L,
                 syncWorkspace = input.boolean("sync_workspace") ?: false,
+                runtime = input.runtime(),
+                sshProfileId = input.string("ssh_profile_id"),
             )
             textJson {
                 put("runtime", result.runtime)
@@ -63,19 +70,46 @@ class TerminalTools(
                 result.status?.let { put("status", it) }
                 put("running", result.running)
                 put("output_log_path", result.outputLogPath)
+                result.sshProfileId?.let { put("ssh_profile_id", it) }
             }
         }
     )
 
+    private val terminalSshProfilesTool = Tool(
+        name = "terminal_ssh_profiles",
+        description = "List saved SSH profiles, their IDs, default selection and host-key trust readiness. Returns no credentials. Add/edit profiles and confirm fingerprints in Settings > Agent Runtime > SSH profiles.",
+        parameters = { InputSchema.Obj(properties = buildJsonObject { }) },
+        execute = {
+            val state = sshProfileStore.snapshot()
+            textJson {
+                state.defaultProfileId?.let { put("default_profile_id", it) }
+                put("profiles", buildJsonArray {
+                    state.profiles.forEach { profile ->
+                        add(buildJsonObject {
+                            put("id", profile.id)
+                            put("name", profile.name)
+                            put("host", profile.host)
+                            put("port", profile.port)
+                            put("username", profile.username)
+                            put("auth_method", profile.authMethod.wireName)
+                            put("host_key_accepted", profile.acceptedHostKeyFingerprint != null)
+                        })
+                    }
+                })
+            }
+        },
+    )
+
     private val terminalJobStartTool = Tool(
         name = "terminal_job_start",
-        description = "Start a long-running terminal command as a background job in the AmberAgent runtime workspace. Use terminal_job_read/wait/stop to observe or cancel it.",
+        description = "Start a terminal command as a background job, locally or over SSH. For SSH pass runtime=remote_ssh and ssh_profile_id from terminal_ssh_profiles. Use terminal_job_read/wait/stop to follow it. Closing SSH does not prove that the remote process stopped.",
         parameters = {
             InputSchema.Obj(
                 properties = buildJsonObject {
                     put("command", stringProp("Command to run."))
                     put("timeout_ms", integerProp("Job timeout in milliseconds. Defaults to 900000."))
-                    put("runtime", stringProp("Runtime: builtin_alpine, android_shell, or termux_external. Defaults to settings."))
+                    put("runtime", stringProp("Runtime: builtin_alpine, android_shell, termux_external, remote_ssh. Defaults to settings."))
+                    put("ssh_profile_id", stringProp("Saved SSH profile ID; implies remote_ssh when runtime is omitted. Omit for the default SSH profile. Credentials must be configured in Settings, never in a command."))
                     put("sync_workspace", booleanProp("Refresh /workspace from SAF before start and flush changes back after completion. Use this when the command reads or writes user workspace files."))
                     put("flush_workspace", booleanProp("Flush /workspace changes back to SAF after completion without refreshing before start."))
                 },
@@ -88,7 +122,8 @@ class TerminalTools(
             val snapshot = terminalRuntime.startJob(
                 command = input.requiredString("command"),
                 timeoutMillis = input.long("timeout_ms") ?: 15 * 60_000L,
-                runtime = TerminalRuntimeKind.fromWire(input.string("runtime")),
+                runtime = input.runtime(),
+                sshProfileId = input.string("ssh_profile_id"),
                 syncWorkspace = input.boolean("sync_workspace") ?: false,
                 flushWorkspace = input.boolean("flush_workspace") ?: false,
             )
@@ -169,7 +204,7 @@ class TerminalTools(
             terminalRuntime.installPackages(
                 packages = input.jsonObject["packages"]?.jsonArrayStrings().orEmpty(),
                 timeoutMillis = input.long("timeout_ms") ?: 0L,
-                runtime = TerminalRuntimeKind.fromWire(input.string("runtime")),
+                runtime = input.runtime(),
             ).toTextJson()
         }
     )
@@ -312,6 +347,11 @@ class TerminalTools(
         put("description", description)
     }
 
+    private fun kotlinx.serialization.json.JsonElement.runtime(): TerminalRuntimeKind? =
+        string("runtime")?.let { value ->
+            requireNotNull(TerminalRuntimeKind.fromWire(value)) { "Unsupported terminal runtime: $value" }
+        }
+
     private fun integerProp(description: String) = buildJsonObject {
         put("type", "integer")
         put("description", description)
@@ -343,6 +383,7 @@ class TerminalTools(
         put("started_at_ms", startedAtMs)
         put("updated_at_ms", updatedAtMs)
         error?.let { put("error", it) }
+        sshProfileId?.let { put("ssh_profile_id", it) }
     }
 
     private fun List<UIMessagePart>.previewText(): String =

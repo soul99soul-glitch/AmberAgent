@@ -10,9 +10,12 @@ import app.amber.ai.provider.Model
 import app.amber.ai.provider.providers.StreamProtocol
 import app.amber.ai.provider.providers.StreamTerminationGuard
 import app.amber.ai.ui.MessageChunk
+import app.amber.ai.ui.MessageStreamAccumulator
+import app.amber.ai.ui.UIMessage
 import app.amber.ai.ui.UIMessagePart
 import app.amber.ai.util.json
 import kotlinx.coroutines.flow.toList
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
@@ -76,6 +79,70 @@ private class FakeSseTransport {
  * driven through a fake SSE transport (no network).
  */
 class ResponseAPIResumeStreamTest {
+
+    @Test
+    fun explicitResumeUsesGetAndReplacesPartialForStreamingAndNonStreaming() = runBlocking {
+        for (streaming in listOf(true, false)) {
+            val transport = FakeSseTransport()
+            val store = InMemoryResumeStore()
+            val setting = providerSetting()
+            val cursor = ResponseCursor("resp_old", 5, setting.id.toString())
+            store.save("run_1", cursor.responseId, cursor.sequence, cursor.providerId)
+            val partial = UIMessage.assistant("ab") // the cursor is ahead of the durable text
+            val accumulator = MessageStreamAccumulator(listOf(partial))
+            val api = ResponseAPI(client = okhttp3.OkHttpClient(), transport = transport::invoke)
+            val requestParams = params(ResponsesResumeRequest("run_1", store, resumeFrom = cursor))
+            val job = launch {
+                withTimeout(10_000) {
+                    if (streaming) {
+                        api.streamText(setting, listOf(partial), requestParams).collect(accumulator::append)
+                    } else {
+                        accumulator.append(api.generateText(setting, listOf(partial), requestParams))
+                    }
+                }
+            }
+            withTimeout(10_000) { while (transport.streams.isEmpty()) yield() }
+            val (request, listener) = transport.streams.single()
+            assertEquals("GET", request.method)
+            assertEquals("https://api.openai.com/v1/responses/resp_old", request.url.toString())
+            listener.onEvent(transport.sources.single(), null, "response.created", createdEvent(0, "resp_old"))
+            for ((index, char) in "abcdef".withIndex()) {
+                listener.onEvent(transport.sources.single(), null, "response.output_text.delta",
+                    deltaEvent(index + 1L, "resp_old", "msg_old", char.toString()))
+            }
+            listener.onEvent(transport.sources.single(), null, "response.completed", completedEvent(7, "resp_old",
+                """[{"type":"message","id":"msg_old","role":"assistant","content":[{"type":"output_text","text":"abcdef"}]}]"""))
+            job.join()
+
+            val recovered = accumulator.snapshot().single()
+            assertEquals(partial.id, recovered.id)
+            assertEquals("abcdef", recovered.parts.filterIsInstance<UIMessagePart.Text>().joinToString("") { it.text })
+            assertEquals(ResponseCursor("resp_old", 7, setting.id.toString()), store.load("run_1"))
+        }
+    }
+
+    @Test
+    fun storedCursorWithoutExplicitContinuationStartsANewModelRound() = runBlocking {
+        val transport = FakeSseTransport()
+        val store = InMemoryResumeStore()
+        val setting = providerSetting()
+        store.save("run_1", "resp_previous_round", 5, setting.id.toString())
+        val api = ResponseAPI(client = okhttp3.OkHttpClient(), transport = transport::invoke)
+        val job = launch {
+            withTimeout(10_000) {
+                api.streamText(setting, listOf(UIMessage.user("next round")),
+                    params(ResponsesResumeRequest("run_1", store))).toList()
+            }
+        }
+        withTimeout(10_000) { while (transport.streams.isEmpty()) yield() }
+        val (request, listener) = transport.streams.single()
+        assertEquals("POST", request.method)
+        assertEquals("https://api.openai.com/v1/responses", request.url.toString())
+        listener.onEvent(transport.sources.single(), null, "response.created", createdEvent(0, "resp_new"))
+        listener.onEvent(transport.sources.single(), null, "response.completed", completedEvent(1, "resp_new", "[]"))
+        job.join()
+        assertEquals("resp_new", store.load("run_1")?.responseId)
+    }
 
     private fun providerSetting(
         baseUrl: String = "https://api.openai.com/v1",
@@ -202,8 +269,10 @@ class ResponseAPIResumeStreamTest {
         // keeps k..o (seq 6..10) — nothing delivered twice.
         assertEquals("abcdeklmno", deltaTexts)
         assertEquals(10, deltaTexts.toSet().size)
-        // Terminal event cleared the cursor.
-        assertNull(store.load("run_1"))
+        // The chat owner clears the cursor after its durable final
+        // conversation checkpoint; this transport-level test has no owner,
+        // so the terminal cursor remains available for recovery.
+        assertEquals(11L, store.load("run_1")?.sequence)
     }
 
     @Test

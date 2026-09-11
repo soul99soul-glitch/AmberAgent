@@ -126,8 +126,11 @@ import org.koin.core.parameter.parametersOf
 @Composable
 fun NovelMarkdownWorkspacePage(
     projectId: String,
+    branchSlug: String? = null,
+    jobId: String? = null,
     viewModel: NovelMarkdownWorkspaceViewModel = koinViewModel(
-        parameters = { parametersOf(projectId) },
+        key = "$projectId:$branchSlug:$jobId",
+        parameters = { parametersOf(projectId, app.amber.feature.novelworkspace.NovelWorkspaceFocus(branchSlug, jobId)) },
     ),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -135,11 +138,20 @@ fun NovelMarkdownWorkspacePage(
     val type = LocalAmberType.current
     val appSettings = LocalSettings.current
     var tab by remember { mutableStateOf(0) }
-    var showGhostwrite by remember { mutableStateOf(false) }
+    var showGhostwrite by remember(projectId, branchSlug, jobId) { mutableStateOf(false) }
     // 批量润色：入口在正文 tab 顶部动作区；进度呈现复用代笔批次的 job 状态槽。
     var showPolish by remember { mutableStateOf(false) }
     // 分支 sheet：分支列表 / 新建 / 切换（TopBar 书名旁的分支 chip 打开）。
     var showBranchSheet by remember { mutableStateOf(false) }
+    LaunchedEffect(jobId, state.ghostwriteJob?.jobId) {
+        if (jobId != null && state.ghostwriteJob?.jobId == jobId) {
+            if (state.ghostwriteJob?.mode == app.amber.feature.novelworkspace.NovelWorkspaceGhostwriteMode.Polish) {
+                showPolish = true
+            } else {
+                showGhostwrite = true
+            }
+        }
+    }
     // Graphite TopModelMenu：与标准 chat 同款——顶栏下方卷帘下拉（替代 ModelSelector 弹层）。
     var modelMenuOpen by remember { mutableStateOf(false) }
     // 审稿模型菜单：复用同一个 TopModelMenu 组件，两个菜单互斥展开。
@@ -432,7 +444,7 @@ fun NovelMarkdownWorkspacePage(
                     contentAlignment = Alignment.Center,
                 ) {
                     Text(
-                        stringResource(R.string.novel_project_missing),
+                        state.errorMessage ?: stringResource(R.string.novel_project_missing),
                         style = type.secondary,
                         color = workspace.muted,
                         textAlign = TextAlign.Center,
@@ -441,12 +453,20 @@ fun NovelMarkdownWorkspacePage(
             }
             else -> {
                 Column(Modifier.fillMaxSize().padding(padding)) {
+                    if (state.unreadableJobFiles.isNotEmpty()) {
+                        Text(
+                            stringResource(R.string.parity_novel_unreadable_jobs, state.unreadableJobFiles.joinToString()),
+                            color = workspace.red,
+                            style = type.meta,
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                        )
+                    }
                     // Compact segmented control — the stock TabRow ate too much height.
                     Row(
                         Modifier
                             .fillMaxWidth()
                             .padding(horizontal = 16.dp, vertical = 6.dp)
-                            .height(40.dp)
+                            .height(48.dp)
                             .clip(RoundedCornerShape(10.dp))
                             .background(workspace.paper)
                             .border(1.dp, workspace.hairline, RoundedCornerShape(10.dp)),
@@ -461,10 +481,10 @@ fun NovelMarkdownWorkspacePage(
                                 Modifier
                                     .weight(1f)
                                     .fillMaxHeight()
+                                    .clickable { tab = index }
                                     .padding(3.dp)
                                     .clip(RoundedCornerShape(7.dp))
-                                    .background(if (selected) workspace.ink else Color.Transparent)
-                                    .clickable { tab = index },
+                                    .background(if (selected) workspace.ink else Color.Transparent),
                                 contentAlignment = Alignment.Center,
                             ) {
                                 Text(
@@ -562,7 +582,7 @@ fun NovelMarkdownWorkspacePage(
         }
     }
 
-    if (showGhostwrite) {
+    if (showGhostwrite && state.exists && !state.loading) {
         MarkdownGhostwriteSheet(
             job = state.ghostwriteJob,
             busy = state.busy,
@@ -825,6 +845,15 @@ private fun MarkdownGhostwriteSheet(
                             onClick = onRetryFailed,
                         )
                     }
+                } else if (job.status == "completed" || job.status == "cancelled") {
+                    Text(
+                        stringResource(
+                            if (job.status == "completed") R.string.parity_novel_completed else R.string.parity_novel_cancelled,
+                            job.written, job.target,
+                        ),
+                        style = type.body,
+                        color = workspace.ink,
+                    )
                 } else {
                     val paused = job.status == "paused"
                     Row(
@@ -1510,7 +1539,7 @@ private fun PanelCtaButton(text: String, enabled: Boolean, onClick: () -> Unit) 
     Box(
         Modifier
             .fillMaxWidth()
-            .height(48.dp)
+            .heightIn(min = 48.dp)
             .clip(RoundedCornerShape(14.dp))
             .background(if (enabled) chatTheme.accent else workspace.row)
             .clickable(enabled = enabled, onClick = onClick),
@@ -1524,7 +1553,7 @@ private fun PanelCtaButton(text: String, enabled: Boolean, onClick: () -> Unit) 
     }
 }
 
-/** 48dp flat round stepper chip. */
+/** Flat round stepper chip with a 48dp touch target. */
 @Composable
 private fun PanelRoundIcon(
     icon: ImageVector,

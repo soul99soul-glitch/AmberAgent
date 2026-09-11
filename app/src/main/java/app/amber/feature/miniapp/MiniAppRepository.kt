@@ -19,6 +19,7 @@ import app.amber.agent.data.db.entity.MiniAppEntity
 import app.amber.agent.data.db.entity.MiniAppGrantEntity
 import app.amber.agent.data.db.entity.MiniAppSharedDataEntity
 import app.amber.agent.data.db.entity.MiniAppVersionEntity
+import app.amber.core.sync.core.SyncRestoreWriteGate
 import java.security.MessageDigest
 import kotlin.uuid.Uuid
 
@@ -31,6 +32,7 @@ class MiniAppRepository(
     private val auditLogDao: MiniAppAuditLogDAO,
     private val sharedDataDao: MiniAppSharedDataDAO,
     private val json: Json,
+    private val restoreWriteGate: SyncRestoreWriteGate? = null,
 ) {
     fun observeAll(): Flow<List<MiniAppEntity>> = dao.observeAll()
 
@@ -40,7 +42,7 @@ class MiniAppRepository(
         output: MiniAppGeneratedOutput,
         sourceConversationId: String? = null,
         sourceMessageId: String? = null,
-    ): MiniAppEntity {
+    ): MiniAppEntity = withDurableWrite {
         MiniAppHtmlValidator.validate(output.html)
         val now = System.currentTimeMillis()
         val htmlHash = sha256(output.html)
@@ -71,7 +73,7 @@ class MiniAppRepository(
                 )
             )
         }
-        return entity
+        entity
     }
 
     suspend fun saveRevision(
@@ -80,10 +82,10 @@ class MiniAppRepository(
         expectedBaseVersion: Int? = null,
         sourceMessageId: String? = null,
         changeNote: String? = null,
-    ): MiniAppEntity? {
+    ): MiniAppEntity? = withDurableWrite {
         MiniAppHtmlValidator.validate(output.html)
         val now = System.currentTimeMillis()
-        return database.withTransaction {
+        database.withTransaction {
             val app = dao.getById(appId) ?: return@withTransaction null
             if (expectedBaseVersion != null && app.version != expectedBaseVersion) {
                 return@withTransaction null
@@ -118,7 +120,7 @@ class MiniAppRepository(
         }
     }
 
-    suspend fun upsert(entity: MiniAppEntity) {
+    suspend fun upsert(entity: MiniAppEntity) = withDurableWrite {
         MiniAppHtmlValidator.validate(entity.htmlContent)
         database.withTransaction {
             dao.upsert(entity)
@@ -136,7 +138,7 @@ class MiniAppRepository(
         }
     }
 
-    suspend fun delete(id: String) {
+    suspend fun delete(id: String) = withDurableWrite {
         database.withTransaction {
             dao.deleteById(id)
             grantDao.deleteForApp(id)
@@ -151,7 +153,16 @@ class MiniAppRepository(
     suspend fun getVersion(appId: String, versionNumber: Int): MiniAppVersionEntity? =
         versionDao.get(appId, versionNumber)
 
-    suspend fun saveNewVersion(app: MiniAppEntity, htmlContent: String, changeNote: String? = null): MiniAppEntity {
+    suspend fun saveNewVersion(app: MiniAppEntity, htmlContent: String, changeNote: String? = null): MiniAppEntity =
+        withDurableWrite {
+            saveNewVersionInternal(app, htmlContent, changeNote)
+        }
+
+    private suspend fun saveNewVersionInternal(
+        app: MiniAppEntity,
+        htmlContent: String,
+        changeNote: String?,
+    ): MiniAppEntity {
         MiniAppHtmlValidator.validate(htmlContent)
         val now = System.currentTimeMillis()
         return database.withTransaction {
@@ -179,13 +190,13 @@ class MiniAppRepository(
         }
     }
 
-    suspend fun restoreVersion(appId: String, versionNumber: Int): MiniAppEntity? {
-        val app = dao.getById(appId) ?: return null
-        val version = versionDao.get(appId, versionNumber) ?: return null
-        return saveNewVersion(app, version.htmlContent, "Restored from v$versionNumber")
+    suspend fun restoreVersion(appId: String, versionNumber: Int): MiniAppEntity? = withDurableWrite {
+        val app = dao.getById(appId) ?: return@withDurableWrite null
+        val version = versionDao.get(appId, versionNumber) ?: return@withDurableWrite null
+        saveNewVersionInternal(app, version.htmlContent, "Restored from v$versionNumber")
     }
 
-    suspend fun setGrant(appId: String, permission: String, decision: MiniAppGrantDecision) {
+    suspend fun setGrant(appId: String, permission: String, decision: MiniAppGrantDecision) = withDurableWrite {
         grantDao.upsert(
             MiniAppGrantEntity(
                 appId = appId,
@@ -196,17 +207,20 @@ class MiniAppRepository(
         )
     }
 
+    suspend fun grants(appId: String): List<MiniAppGrantEntity> = grantDao.listForApp(appId)
+
     suspend fun grantDecision(appId: String, permission: String): MiniAppGrantDecision? {
         return grantDao.get(appId, permission)?.decision?.let {
             runCatching { MiniAppGrantDecision.valueOf(it) }.getOrNull()
         }
     }
 
-    suspend fun markRun(id: String) = dao.markRun(id)
+    suspend fun markRun(id: String) = withDurableWrite { dao.markRun(id, System.currentTimeMillis()) }
 
-    suspend fun setPinned(id: String, pinned: Boolean) = dao.setPinned(id, pinned, System.currentTimeMillis())
+    suspend fun setPinned(id: String, pinned: Boolean) =
+        withDurableWrite { dao.setPinned(id, pinned, System.currentTimeMillis()) }
 
-    suspend fun rename(id: String, title: String, description: String) {
+    suspend fun rename(id: String, title: String, description: String) = withDurableWrite {
         dao.rename(
             id = id,
             title = title.trim().take(40).ifBlank {
@@ -217,7 +231,7 @@ class MiniAppRepository(
         )
     }
 
-    suspend fun updateBoardSummary(id: String, summary: String) {
+    suspend fun updateBoardSummary(id: String, summary: String) = withDurableWrite {
         dao.updateBoardSummary(id, summary.trim().take(500), System.currentTimeMillis())
     }
 
@@ -230,7 +244,7 @@ class MiniAppRepository(
         permission: MiniAppPermission,
         summary: String,
         payload: String,
-    ) {
+    ) = withDurableWrite {
         auditLogDao.insert(
             MiniAppAuditLogEntity(
                 id = Uuid.random().toString(),
@@ -252,7 +266,7 @@ class MiniAppRepository(
         }
     }
 
-    suspend fun sharedSet(appId: String, namespace: String, key: String, value: JsonElement) {
+    suspend fun sharedSet(appId: String, namespace: String, key: String, value: JsonElement) = withDurableWrite {
         val normalized = validateSharedNamespace(appId, namespace)
         val safeKey = validateSharedKey(key)
         val encoded = json.encodeToString(JsonElement.serializer(), value)
@@ -276,7 +290,7 @@ class MiniAppRepository(
         )
     }
 
-    suspend fun sharedRemove(appId: String, namespace: String, key: String) {
+    suspend fun sharedRemove(appId: String, namespace: String, key: String) = withDurableWrite {
         sharedDataDao.delete(validateSharedNamespace(appId, namespace), validateSharedKey(key))
     }
 
@@ -315,6 +329,11 @@ class MiniAppRepository(
             throw MiniAppValidationException("Invalid SharedStore key")
         }
         return normalized
+    }
+
+    private suspend fun <T> withDurableWrite(block: suspend () -> T): T {
+        val gate = restoreWriteGate
+        return if (gate == null) block() else gate.withCurrentWriterOrCancel(block)
     }
 
     private companion object {

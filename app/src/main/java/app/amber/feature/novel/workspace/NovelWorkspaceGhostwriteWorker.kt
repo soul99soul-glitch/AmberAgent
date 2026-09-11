@@ -88,6 +88,12 @@ class NovelWorkspaceGhostwriteWorker(
         if (job.isTerminal) return Result.success()
         if (job.status != NovelWorkspaceGhostwriteJob.STATUS_RUNNING) return Result.success()
 
+        val committedProgress = NovelWorkspaceGhostwriteJobs.progress(job, NovelWorkspaceStore(directory))
+        if (committedProgress >= job.targetChapterCount) {
+            finishJob(directory, job.id, executionId, NovelWorkspaceGhostwriteJob.STATUS_COMPLETED, null)
+            return Result.success()
+        }
+
         // Inject the DI-built coordinator (it owns the runtime) instead of building our own.
         val coordinator = get<NovelWorkspaceGhostwriteCoordinator>()
         val settingsAggregator = get<SettingsAggregator>()
@@ -191,7 +197,7 @@ class NovelWorkspaceGhostwriteWorker(
         }
 
         try {
-            setForeground(foregroundInfo(job, 0, job.targetChapterCount))
+            setForeground(foregroundInfo(job, committedProgress, job.targetChapterCount))
         } catch (error: CancellationException) {
             throw error
         } catch (error: Exception) {
@@ -470,7 +476,9 @@ class NovelWorkspaceGhostwriteWorker(
         target: Int,
         notificationId: Int,
     ): Notification {
-        val launch = Intent(applicationContext, RouteActivity::class.java)
+        val launch = NovelWorkspaceNotificationRoute.intent(
+            applicationContext, checkNotNull(inputData.getString(KEY_PROJECT_ID)), job.branchSlug, job.id,
+        )
         val pendingIntent = PendingIntent.getActivity(
             applicationContext,
             notificationId,

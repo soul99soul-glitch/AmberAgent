@@ -7,10 +7,14 @@ import app.amber.agent.data.db.AppDatabase
 import app.amber.core.settings.ChatFontFamily
 import app.amber.core.settings.DisplaySetting
 import app.amber.core.settings.Settings
+import app.amber.core.sync.core.SyncRestoreWriteEpoch
+import app.amber.core.sync.core.SyncRestoreWriteGate
+import app.amber.core.sync.core.SyncRestoreWriteRejectedException
 import app.amber.core.utils.JsonInstant
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.encodeToString
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -198,6 +202,33 @@ class ThemePackageManagerTest {
         assertTrue(manager.tryOn.value != null)
         assertFalse(manager.discardTryOn(imported.pkg.id, "wrong-digest"))
         assertTrue(manager.tryOn.value != null)
+    }
+
+    @Test
+    fun `stale prepared theme writer is rejected after restore`() = runTest {
+        val initial = Settings(displaySetting = DisplaySetting(amberBaseFamily = "WARM"))
+        val store = FakeThemeSettingsStore(initial)
+        val gate = SyncRestoreWriteGate()
+        val manager = ThemePackageManager(
+            dao = db.themePackageDao(),
+            settingsStore = store,
+            restoreWriteGate = gate,
+        )
+        val imported = manager.importPackage(exportJson(customDisplay())) as ThemePackageImportResult.Preview
+        val staleEpoch = gate.currentEpoch()
+
+        gate.withRestore { gate.markDataCommitted() }
+
+        val failure = runCatching {
+            withContext(SyncRestoreWriteEpoch(staleEpoch)) {
+                manager.applyPrepared(imported.pkg.id, imported.candidateDigest)
+            }
+        }.exceptionOrNull()
+
+        assertTrue(failure is SyncRestoreWriteRejectedException)
+        assertNull(db.themePackageDao().getById(imported.pkg.id))
+        assertEquals(initial, store.current)
+        assertNotNull(manager.tryOn.value)
     }
 
     private class FakeThemeSettingsStore(initial: Settings) : ThemeSettingsStore {

@@ -1,0 +1,21 @@
+<resources>
+    <string name="parity_history_empty">No conversations yet</string>
+    <string name="parity_history_load_error">Couldn’t load conversation history</string>
+    <string name="parity_history_refresh_error">Couldn’t refresh conversation history</string>
+    <string name="parity_history_append_error">Couldn’t load more conversations</string>
+    <string name="parity_history_retry">Retry</string>
+    <string name="parity_search_no_recent_conversations">No recent conversations</string>
+    <string name="parity_search_recent_error">Couldn’t load recent conversations</string>
+    <string name="parity_search_messages_error">Couldn’t search messages</string>
+    <string name="parity_search_rebuild_error">Couldn’t rebuild the message index</string>
+    <string name="parity_search_retry">Retry</string>
+    <string name="parity_home_search_sessions">Search conversations</string>
+    <string name="parity_home_new_conversation">New conversation</string>
+    <string name="parity_home_search_full">Search messages</string>
+    <string name="parity_home_search_clear">Clear search</string>
+    <string name="parity_home_search_cancel">Cancel</string>
+    <string name="parity_home_search_no_match">No matching conversations</string>
+    <string name="parity_home_conversations_error">Couldn’t load conversations</string>
+    <string name="parity_home_continue_error">Couldn’t load Continue items</string>
+    <string name="parity_home_retry">Retry</string>
+</resources>

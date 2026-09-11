@@ -31,6 +31,7 @@ import androidx.room.PrimaryKey
         Index("tool_call_id"),
         Index("status"),
         Index(value = ["run_id", "tool_call_id"]),
+        Index(value = ["tool_name", "status", "finished_at_ms"]),
     ],
 )
 data class ToolEffectEntity(

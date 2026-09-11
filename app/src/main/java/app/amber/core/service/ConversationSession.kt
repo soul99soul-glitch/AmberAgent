@@ -214,6 +214,20 @@ class ConversationSession(
         onPendingMessagesChanged(id, emptyList())
     }
 
+    /**
+     * Drop only volatile session state after a database restore. This deliberately
+     * does not invoke the pending-message persistence callback: the old queue
+     * belongs to the pre-restore snapshot and must not be written back.
+     */
+    fun invalidateAfterRestore() {
+        _generationJob.value?.cancel()
+        _generationJob.value = null
+        state.value = Conversation.ofId(id = id)
+        _timelineLoadState.value = ConversationTimelineLoadState()
+        _pendingUserMessages.value = emptyList()
+        processingStatus.value = null
+    }
+
     private fun scheduleIdleCheck() {
         idleCheckJob?.cancel()
         idleCheckJob = scope.launch {

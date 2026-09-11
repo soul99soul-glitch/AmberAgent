@@ -439,6 +439,17 @@ class ChatVM(
     suspend fun ensureTimelineLoaded(): Conversation =
         chatService.ensureConversationTimelineLoaded(_conversationId)
 
+    /** Resolve a durable Continue anchor without loading the entire timeline. */
+    suspend fun findNodeIdForAnchor(messageId: String?, toolCallId: String?): Uuid? {
+        val nodeId = messageId
+            ?.takeIf { it.isNotBlank() }
+            ?.let { conversationRepo.findNodeIdForMessage(_conversationId, it) }
+            ?: toolCallId
+                ?.takeIf { it.isNotBlank() }
+                ?.let { conversationRepo.findNodeIdContainingToolCall(_conversationId, it) }
+        return nodeId?.let { runCatching { Uuid.parse(it) }.getOrNull() }
+    }
+
     suspend fun loadOlderTimelinePage() {
         chatService.loadOlderTimelinePage(_conversationId)
     }
@@ -471,7 +482,7 @@ class ChatVM(
 
     fun updatePinnedStatus(conversation: Conversation) {
         viewModelScope.launch {
-            conversationRepo.togglePinStatus(conversation.id)
+            chatService.togglePinnedStatus(conversation.id)
         }
     }
 

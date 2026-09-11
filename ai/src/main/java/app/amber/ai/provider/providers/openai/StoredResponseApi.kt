@@ -61,6 +61,13 @@ enum class StoredResponseState {
 data class StoredResponseStatus(
     val state: StoredResponseState,
     val responseId: String,
+    /**
+     * Complete output returned by GET /responses/{id}, when the response
+     * payload contains an `output` field. A present empty output is a valid
+     * completed response; null means this status payload did not include the
+     * complete output and recovery may use the stored event stream.
+     */
+    val finalMessage: MessageChunk? = null,
 )
 
 sealed interface StoredResponseCancelResult {

@@ -1,6 +1,8 @@
 package app.amber.feature.modelcouncil
 
 import kotlinx.coroutines.flow.StateFlow
+import kotlin.coroutines.CoroutineContext
+import kotlin.coroutines.EmptyCoroutineContext
 import kotlin.uuid.Uuid
 
 /**
@@ -20,6 +22,16 @@ import kotlin.uuid.Uuid
  *    active set (bounds memory).
  */
 interface CouncilRoomStore {
+    /**
+     * Capture the write context for a long-running room operation.
+     *
+     * Implementations that coordinate restore can return their existing epoch
+     * element here. The feature module only carries the opaque context; it does
+     * not depend on the app's restore implementation. Test stores and stores
+     * without restore coordination keep the default empty context.
+     */
+    suspend fun captureWriteContext(): CoroutineContext = EmptyCoroutineContext
+
     /**
      * Observe the Room for a conversation. The returned StateFlow is stable
      * across calls for the same id. Emits null if no Room exists.

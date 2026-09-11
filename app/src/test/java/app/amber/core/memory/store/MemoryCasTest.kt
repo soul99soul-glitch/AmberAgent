@@ -9,12 +9,16 @@ import app.amber.agent.data.db.entity.MemoryEventEntity
 import app.amber.core.memory.export.MemoryImportExportManager
 import app.amber.core.memory.model.MemoryKind
 import app.amber.core.memory.model.MemoryScope
+import app.amber.core.sync.core.SyncRestoreWriteEpoch
+import app.amber.core.sync.core.SyncRestoreWriteGate
+import app.amber.core.sync.core.SyncRestoreWriteRejectedException
 import app.amber.feature.runtime.ContentDigest
 import java.io.File
 import java.nio.file.Files
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -333,5 +337,103 @@ class MemoryCasTest {
         } finally {
             root.deleteRecursively()
         }
+    }
+
+    @Test
+    fun `single memory lookup returns the revision used by the settings editor`() = runBlocking {
+        val dao = FakeMemoryDAO()
+        val repo = repository(dao)
+        val created = repo.addMemory(MemoryScope.CORE, MemoryKind.NOTE, "before")
+
+        val opened = repo.getMemoryById(created.id)
+        assertEquals(created.id, opened?.id)
+        assertEquals(1L, opened?.revision)
+
+        repo.updateContentCas(created.id, "after", expectedRevision = opened!!.revision)
+        val refreshed = repo.getMemoryById(created.id)
+        assertEquals("after", refreshed?.content)
+        assertEquals(2L, refreshed?.revision)
+    }
+
+    @Test
+    fun `settings edit updates content scope and pinned in one CAS revision`() = runBlocking {
+        val dao = FakeMemoryDAO()
+        val repo = repository(dao)
+        val created = repo.addMemory(MemoryScope.CORE, MemoryKind.NOTE, "before")
+        val draft = repo.getMemoryById(created.id)!!
+
+        val updated = repo.updateMemoryCas(
+            draft.copy(
+                content = "after",
+                scope = MemoryScope.LONG_TERM,
+                pinned = true,
+            )
+        ).memory
+
+        assertEquals(2L, updated.revision)
+        assertEquals("after", updated.content)
+        assertEquals(MemoryScope.LONG_TERM, updated.scope)
+        assertTrue(updated.pinned)
+        assertEquals(MemoryRepository.LONG_TERM_MEMORY_ID, dao.rows.getValue(created.id).assistantId)
+    }
+
+    @Test
+    fun `full add persists settings classification and pin in one record`() = runBlocking {
+        val dao = FakeMemoryDAO()
+        val repo = repository(dao)
+
+        val created = repo.addMemory(
+            scope = MemoryScope.SHORT_TERM,
+            kind = MemoryKind.PROJECT,
+            content = "current release focus",
+            assistantId = MemoryRepository.SHORT_TERM_MEMORY_ID,
+            sourceConversationId = "conversation-7",
+            sourceMessageIds = listOf("message-1", "message-2"),
+            supersedesIds = listOf(4, 4),
+            expiresAt = 1234L,
+            confidence = 0.42f,
+            pinned = true,
+            sourceRunId = "run-7",
+            sourceTrigger = MemoryRepository.TRIGGER_TOOL,
+        )
+
+        assertEquals(MemoryScope.SHORT_TERM, created.scope)
+        assertEquals(MemoryKind.PROJECT, created.kind)
+        assertEquals("current release focus", created.content)
+        assertEquals(MemoryRepository.SHORT_TERM_MEMORY_ID, created.assistantId)
+        assertEquals("conversation-7", created.sourceConversationId)
+        assertEquals(listOf("message-1", "message-2"), created.sourceMessageIds)
+        assertEquals(listOf(4), created.supersedesIds)
+        assertEquals(1234L, created.expiresAt)
+        assertEquals(0.42f, created.confidence)
+        assertTrue(created.pinned)
+        assertEquals("run-7", created.sourceRunId)
+        assertEquals(MemoryRepository.TRIGGER_TOOL, created.sourceTrigger)
+        assertEquals(1L, created.revision)
+    }
+
+    @Test
+    fun `memory writer rejects a pre-restore epoch instead of replaying its payload`() = runBlocking {
+        val dao = FakeMemoryDAO()
+        val gate = SyncRestoreWriteGate()
+        val repo = MemoryRepository(
+            memoryDAO = dao,
+            candidateDAO = EmptyCandidateDAO(),
+            eventDAO = EmptyEventDAO(),
+            restoreWriteGate = gate,
+        )
+        val preRestoreEpoch = gate.currentEpoch()
+
+        gate.withRestore { gate.markDataCommitted() }
+
+        try {
+            withContext(SyncRestoreWriteEpoch(preRestoreEpoch)) {
+                repo.addMemory(MemoryScope.LONG_TERM, MemoryKind.NOTE, "stale extraction result")
+            }
+            fail("expected SyncRestoreWriteRejectedException")
+        } catch (_: SyncRestoreWriteRejectedException) {
+            // A stale extraction callback is cancelled at the durable writer.
+        }
+        assertTrue(dao.rows.isEmpty())
     }
 }

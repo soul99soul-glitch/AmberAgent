@@ -9,6 +9,8 @@ import kotlinx.coroutines.flow.filterNot
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import app.amber.core.ai.GenerationFailureClassifier
+import app.amber.core.sync.core.SyncRestoreWriteEpoch
+import app.amber.core.sync.core.SyncRestoreWriteGate
 import app.amber.feature.board.BoardRepository
 import app.amber.feature.board.TodayBoardBackgroundStrategy
 import app.amber.feature.board.agent.BoardAgent
@@ -40,6 +42,7 @@ class BoardWorker(
 ) : CoroutineWorker(appContext, params), KoinComponent {
 
     override suspend fun doWork(): Result {
+        val restoreWriteEpoch = get<SyncRestoreWriteGate>().currentEpoch()
         val settings = get<SettingsAggregator>().settingsFlow.filterNot { it.init }.first()
         val board = settings.agentRuntime.todayBoard
         if (!board.enabled) return Result.success()
@@ -61,12 +64,14 @@ class BoardWorker(
         // anchor is re-enqueued in the finally below — doing it upfront with
         // REPLACE on the same unique work name cancels this very run.
         val isAnchor = tags.contains(BoardScheduler.TAG_ANCHOR)
-        try {
-            return runCycle(aggregator, repository, agent, notifier, locale)
-        } finally {
-            if (isAnchor && !isStopped) {
-                withContext(NonCancellable) {
-                    runCatching { scheduler.rescheduleNextAnchor() }
+        return withContext(SyncRestoreWriteEpoch(restoreWriteEpoch)) {
+            try {
+                runCycle(aggregator, repository, agent, notifier, locale)
+            } finally {
+                if (isAnchor && !isStopped) {
+                    withContext(NonCancellable) {
+                        runCatching { scheduler.rescheduleNextAnchor() }
+                    }
                 }
             }
         }

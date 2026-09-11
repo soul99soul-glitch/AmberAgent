@@ -62,7 +62,14 @@ import org.koin.core.parameter.parametersOf
  * layout.
  */
 @Composable
-fun ChatPageSplit(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
+fun ChatPageSplit(
+    id: Uuid,
+    text: String?,
+    files: List<Uri>,
+    nodeId: Uuid? = null,
+    messageId: String? = null,
+    toolCallId: String? = null,
+) {
     val vm: ChatVM = koinViewModel(
         parameters = { parametersOf(id.toString()) }
     )
@@ -82,8 +89,9 @@ fun ChatPageSplit(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = nul
                 style = MaterialTheme.typography.titleLarge,
             )
             Text(
-                "Flip PerfFlags.USE_SPLIT_CHATPAGE_COMPOSABLES = false to " +
-                    "restore the legacy chat UI. id=$id text=$text files=${files.size} nodeId=$nodeId",
+                    "Flip PerfFlags.USE_SPLIT_CHATPAGE_COMPOSABLES = false to " +
+                        "restore the legacy chat UI. id=$id text=$text files=${files.size} " +
+                        "nodeId=$nodeId messageId=$messageId toolCallId=$toolCallId",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

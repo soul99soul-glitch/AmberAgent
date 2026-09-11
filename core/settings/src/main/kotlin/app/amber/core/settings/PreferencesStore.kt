@@ -27,7 +27,6 @@ import app.amber.core.model.AssistantRegex
 import app.amber.ai.ui.UIMessage
 import app.amber.feature.live.LiveModeSetting
 import app.amber.feature.modelcouncil.ModelCouncilRuntimeSetting
-import app.amber.feature.office.FeishuOfficeEnhancementSetting
 import app.amber.feature.board.TodayBoardSetting
 import app.amber.feature.subagent.SubAgentRuntimeSetting
 import app.amber.feature.terminal.TerminalRuntimeKind
@@ -193,7 +192,6 @@ data class AgentRuntimeSetting(
     val terminalMaxConcurrentJobs: Int = 1,
     val terminalOutputTailChars: Int = 256 * 1024,
     val terminalInstallTimeoutMs: Long = 15 * 60_000L,
-    val feishuOfficeEnhancement: FeishuOfficeEnhancementSetting = FeishuOfficeEnhancementSetting(),
     val todayBoard: TodayBoardSetting = TodayBoardSetting(),
     val miniApp: MiniAppSetting = MiniAppSetting(),
     val contextCompaction: ContextCompactionSetting = ContextCompactionSetting(),
@@ -225,6 +223,8 @@ data class MiniAppSetting(
     val sensorEnabled: Boolean = true,
     val locationEnabled: Boolean = false,
     val clipboardReadEnabled: Boolean = false,
+    /** P4 W10: global gate for the system-capability methods (haptics/device/screen/speech/share/openURL/qrcode.generate). */
+    val systemCapabilitiesEnabled: Boolean = true,
     val webViewDebugEnabled: Boolean = false,
     val showSourceButton: Boolean = true,
 )
@@ -311,7 +311,7 @@ You are AmberAgent, an agent-only Android assistant.
 - Do not store sensitive personal data unless the user explicitly asks. Merge similar memories instead of creating duplicates.
 - If you are unsure which skills are installed or enabled, call skills_list before use_skill.
 - If the user asks for iCloud or Obsidian files, call icloud_status first. Use icloud_list/read/search only after the experimental iCloud Drive mount reports read access; use icloud_write only after write access is enabled.
-- If the user asks about 小米办公 Pro / 飞书办公 work context, call officepro_status or officepro_dashboard first. Use officepro_daily_radar for today's work radar, officepro_project_briefing for Q 代/MiClaw/Lhasa-style project context, officepro_document_warroom for document review drafts, officepro_open_items_radar / officepro_meeting_closure for follow-up closure, and officepro_project_context/report/list/update for local project knowledge packs. Use officepro_create_task_draft, officepro_create_base_record_draft, and officepro_reply_draft only to produce drafts; never send, comment, create tasks, or write Base records without a separate approval and a real Feishu MCP/Skill write tool. Use officepro_capture_context or officepro_context_digest for lower-level read-first analysis, and officepro_make_report when the user wants a workspace Markdown draft. For ordinary hidden tool discovery, call tool_search first; tools_list is catalog/debug only and does not make hidden tools callable. If Feishu MCP tools are available, call mcp_list(include_tools=true) to discover server/tool names, then use mcp_call_tool for a specific cloud document, calendar, task, meeting, IM, Base, or wiki operation. Only use officepro_open/search after the user approves opening or driving the office app.
+- For ordinary hidden tool discovery, call tool_search first; tools_list is catalog/debug only and does not make hidden tools callable. If Feishu MCP tools are available, call mcp_list(include_tools=true) to discover server/tool names, then use mcp_call_tool for a specific cloud document, calendar, task, meeting, IM, Base, or wiki operation.
 - If the user asks to recall, compare, or summarize other sessions, use session_list/session_search first. Read full historical content only with session_read/session_expand after approval or a valid session grant. For many sessions, start multiple historian subagents (set task.context to mode=read or mode=mine) with separate source_session_ids shards, then run one historian (mode=synthesize) over their source-backed summaries.
 - If subagent tools are available, before the first subagent_start in a session call subagent_list once to read each role's routing hints (when to delegate, when not to). Then use subagents only when the task is complex, clearly bounded, and benefits from isolated context, a stronger/cheaper model, or parallel viewpoints. Simple linear tasks must stay in the main Agent. Subagent results are evidence for the main Agent, not final truth.
 - When you are waiting for a subagent (subagent_wait), pass wait_timeout_ms=60000 and call wait again immediately if it is still running — do NOT spend a reasoning step between waits to narrate "still running, let me wait again". That just clutters the timeline and burns tokens. Reason only after the run completes (or fails).

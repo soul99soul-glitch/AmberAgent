@@ -40,6 +40,10 @@ enum class GoogleAuthMode {
 
     @SerialName("gemini_code_assist_oauth")
     GEMINI_CODE_ASSIST_OAUTH,
+
+    /** 独立 Antigravity OAuth；服务身份、token store 与 Code Assist 完全分离。 */
+    @SerialName("antigravity_oauth")
+    ANTIGRAVITY_OAUTH,
 }
 
 /**
@@ -54,6 +58,7 @@ fun GoogleAuthMode.fixedBaseUrl(): String? = when (this) {
     // v1internal:loadCodeAssist / v1internal:onboardUser / v1internal:streamGenerateContent
     // — the provider layer appends those when it knows it's running in OAuth mode.
     GoogleAuthMode.GEMINI_CODE_ASSIST_OAUTH -> "https://cloudcode-pa.googleapis.com"
+    GoogleAuthMode.ANTIGRAVITY_OAUTH -> "https://daily-cloudcode-pa.googleapis.com"
 }
 
 @Serializable
@@ -63,6 +68,10 @@ enum class OpenAIAuthMode {
 
     @SerialName("codex_oauth")
     CODEX_OAUTH,
+
+    /** xAI Grok CLI proxy OAuth；token 存在 GrokAuthStore，不依赖 apiKey。 */
+    @SerialName("grok_oauth")
+    GROK_OAUTH,
 
     @SerialName("zhipu_coding_plan")
     ZHIPU_CODING_PLAN,
@@ -116,6 +125,8 @@ enum class OpenAIBrand {
 
 fun OpenAIBrand.availableAuthModes(): List<OpenAIAuthMode> = when (this) {
     OpenAIBrand.GENERIC, OpenAIBrand.DEEPSEEK -> listOf(OpenAIAuthMode.API_KEY)
+    // xAI preset is identified by its stable endpoint/brand at the UI layer; keep the
+    // API-key mode available so Grok OAuth remains an additive capability.
     OpenAIBrand.OPENAI -> listOf(OpenAIAuthMode.API_KEY, OpenAIAuthMode.CODEX_OAUTH)
     OpenAIBrand.ZHIPU -> listOf(OpenAIAuthMode.API_KEY, OpenAIAuthMode.ZHIPU_CODING_PLAN)
     OpenAIBrand.KIMI -> listOf(OpenAIAuthMode.API_KEY, OpenAIAuthMode.KIMI_CODING_PLAN)
@@ -131,6 +142,7 @@ fun OpenAIBrand.availableAuthModes(): List<OpenAIAuthMode> = when (this) {
 fun OpenAIAuthMode.fixedBaseUrl(): String? = when (this) {
     OpenAIAuthMode.API_KEY -> null
     OpenAIAuthMode.CODEX_OAUTH -> "https://chatgpt.com/backend-api/codex"
+    OpenAIAuthMode.GROK_OAUTH -> "https://cli-chat-proxy.grok.com/v1"
     OpenAIAuthMode.ZHIPU_CODING_PLAN -> "https://open.bigmodel.cn/api/coding/paas/v4"
     OpenAIAuthMode.KIMI_CODING_PLAN -> "https://api.kimi.com/coding/v1"
     OpenAIAuthMode.MIMO_CODING_PLAN -> "https://token-plan-cn.xiaomimimo.com/v1"
@@ -393,16 +405,18 @@ sealed class ProviderSetting {
  * 这条 check 会把 seed 的 gpt-image-2 暴露给没配 key 的用户, 401 fail. 提到 ai
  * 模块同包, 两层共用.
  */
-fun ProviderSetting.hasUsableAuth(): Boolean {
+fun ProviderSetting.hasUsableAuth(oauthUsable: Boolean? = null): Boolean {
     if (!enabled) return false
     return when (this) {
         is ProviderSetting.OpenAI -> when (authMode) {
             // OAuth 模式用单独 token, 不依赖用户填的 apiKey
-            OpenAIAuthMode.CODEX_OAUTH -> true
+            OpenAIAuthMode.CODEX_OAUTH,
+            OpenAIAuthMode.GROK_OAUTH -> oauthUsable ?: true
             else -> apiKey.isNotBlank()
         }
         is ProviderSetting.Google -> when (authMode) {
-            GoogleAuthMode.GEMINI_CODE_ASSIST_OAUTH -> true
+            GoogleAuthMode.GEMINI_CODE_ASSIST_OAUTH,
+            GoogleAuthMode.ANTIGRAVITY_OAUTH -> oauthUsable ?: true
             GoogleAuthMode.API_KEY -> when {
                 apiKey.isNotBlank() -> true
                 // Vertex AI + service account 用 privateKey blob 而非 apiKey

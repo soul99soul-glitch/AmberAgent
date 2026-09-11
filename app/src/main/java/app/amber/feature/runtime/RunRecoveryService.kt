@@ -15,9 +15,15 @@ import app.amber.core.agent.runtime.RunTransitionResult
 import app.amber.core.repository.ConversationRepository
 import app.amber.core.settings.Capability
 import app.amber.core.settings.CapabilityFlags
+import app.amber.core.sync.core.SyncRestoreWriteEpoch
+import app.amber.core.sync.core.SyncRestoreWriteGate
 import app.amber.feature.tools.ToolEffectClass
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
+import kotlin.coroutines.CoroutineContext
+import kotlin.coroutines.EmptyCoroutineContext
 import kotlin.uuid.Uuid
 
 private const val TAG = "RunRecoveryService"
@@ -42,8 +48,9 @@ data class OutcomeUnknownPrompt(
  * ledger-replayed results win over the interrupted-tool projection):
  *
  *  - P6-01: runs with a stored server-side OpenAI Response (resume cursor)
- *    are resolved against the server first — completed responses fetch only
- *    the missing events and finish COMPLETED with the same runId; cancelled
+ *    are resolved against the server first — completed responses use the
+ *    complete GET payload (falling back to missing events when it is absent)
+ *    and finish COMPLETED with the same runId; cancelled
  *    / failed responses settle the terminal; in-progress responses stay
  *    RESUMABLE for the in-process resume path. Server unreachable at cold
  *    start keeps pause states resumable and falls back to Phase 1 for
@@ -71,6 +78,7 @@ class RunRecoveryService(
     private val storedResponseGateway: StoredResponseGateway? = null,
     private val capabilityFlags: CapabilityFlags? = null,
     private val resumeStore: ResponseResumeStore? = null,
+    private val restoreWriteGate: SyncRestoreWriteGate? = null,
     // Step 3-4 dual-write convergence: when recovery settles a run_terminal
     // row it also moves the protocol run row to the same state, so the two
     // stores cannot diverge (e.g. stored-response COMPLETED while agent_run
@@ -98,8 +106,11 @@ class RunRecoveryService(
         reason: String,
     ) {
         val store = agentEventStore ?: return
+        val expectedRestoreEpoch = captureRestoreEpoch()
         runCatching {
-            store.transitionRun(AgentRunId(runId), expected, to, reason)
+            withRestoreWrite(expectedRestoreEpoch) {
+                store.transitionRun(AgentRunId(runId), expected, to, reason)
+            }
         }.onSuccess { result ->
             // An illegal rejection is a code bug (caller targeted a state the
             // transition table forbids), not a lost race — never swallow it.
@@ -112,6 +123,17 @@ class RunRecoveryService(
     }
 
     suspend fun recover() {
+        // Recovery reads unfinished runs and may resolve a stored response over
+        // the network before it writes a terminal state or replays a result.
+        // Capture the epoch before any of those reads so an in-flight restore
+        // cannot turn the old recovery into a new writer after it finishes.
+        val expectedRestoreEpoch = captureRestoreEpoch()
+        withContext(restoreEpochContext(expectedRestoreEpoch)) {
+            recoverInternal()
+        }
+    }
+
+    private suspend fun recoverInternal() {
         // M1 retention: terminal effects older than 7 days are never needed
         // again (no replay, no reconciliation) — prune them at cold start so
         // the ledger does not keep full result payloads forever.
@@ -124,11 +146,14 @@ class RunRecoveryService(
         // letting them accumulate forever would bloat agent_event. Best-
         // effort, same as the ledger prune.
         agentEventStore?.let { store ->
+            val expectedRestoreEpoch = captureRestoreEpoch()
             runCatching {
-                store.deleteEventsOfTypeOlderThan(
-                    type = app.amber.feature.chat.api.ChatEventPayload.RequestSnapshot.TYPE,
-                    cutoffMs = System.currentTimeMillis() - TERMINAL_EFFECT_RETENTION_MS,
-                )
+                withRestoreWrite(expectedRestoreEpoch) {
+                    store.deleteEventsOfTypeOlderThan(
+                        type = app.amber.feature.chat.api.ChatEventPayload.RequestSnapshot.TYPE,
+                        cutoffMs = System.currentTimeMillis() - TERMINAL_EFFECT_RETENTION_MS,
+                    )
+                }
             }.onFailure { error ->
                 Log.w(TAG, "recover: request snapshot cleanup failed", error)
             }
@@ -244,10 +269,10 @@ class RunRecoveryService(
      * run should fall through to the Phase 1 crash rules.
      *
      * Server outcomes:
-     *  - COMPLETED: fetch only the missing events (sequence > cursor), merge
-     *    the final message into the conversation, then finish COMPLETED with
-     *    the SAME runId (terminal publish rules identical to Phase 1:
-     *    conversation durable before COMPLETED).
+     *  - COMPLETED: merge the complete GET payload into the conversation (or
+     *    fetch only missing events when that payload is absent), then finish
+     *    COMPLETED with the SAME runId (terminal publish rules identical to
+     *    Phase 1: conversation durable before COMPLETED).
      *  - CANCELLED / FAILED: settle the terminal, clear the cursor.
      *  - IN_PROGRESS: pause RESUMABLE (never terminal) and keep the cursor —
      *    the in-process resume path re-attaches when the conversation is
@@ -287,13 +312,22 @@ class RunRecoveryService(
         }
         when (status.state) {
             StoredResponseState.COMPLETED -> {
-                val finalMessage = fetchMissingEvents(session, run, store)
-                if (finalMessage != null) {
-                    mergeFinalMessage(run.conversationId, finalMessage)
+                // GET /responses/{id} carries the authoritative final output
+                // for a completed response. It is required here because the
+                // terminal event may already have advanced the cursor before
+                // the consumer durably saved its message; replaying from that
+                // cursor would then return no event at all.
+                val finalMessage = status.finalMessage?.choices?.firstOrNull()?.message
+                    ?: fetchMissingEvents(session, run, store)
+                check(finalMessage != null) {
+                    "Completed stored response ${session.cursor.responseId} has no recoverable output"
                 }
+                check(mergeFinalMessage(run.conversationId, finalMessage)) {
+                    "Completed stored response ${session.cursor.responseId} could not be persisted"
+                }
+                runTerminalStore.finish(run.runId, RunTerminalState.COMPLETED, null)
                 runCatching { resumeStore?.clear(run.runId) }
                     .onFailure { error -> Log.w(TAG, "resolveStoredResponse: cursor clear failed", error) }
-                runTerminalStore.finish(run.runId, RunTerminalState.COMPLETED, null)
                 // Dual-write convergence (Step 3): without this, the protocol
                 // row would later be stomped INTERRUPTED by replayUnfinished
                 // while run_terminal says COMPLETED. The row may be parked
@@ -359,6 +393,7 @@ class RunRecoveryService(
         val api = session.api ?: return null
         val seed = conversation.currentMessages.ifEmpty { listOf(UIMessage.assistant("")) }
         val accumulator = MessageStreamAccumulator(initialMessages = seed, model = null)
+        var receivedRecoverableOutput = false
         api.streamStored(
             providerSetting = providerSetting,
             responseId = session.cursor.responseId,
@@ -366,9 +401,16 @@ class RunRecoveryService(
             store = store,
             runId = run.runId,
         ).collect { chunk ->
+            val choice = chunk.choices.firstOrNull()
+            if (choice?.message != null || choice?.delta?.parts?.isNotEmpty() == true) {
+                receivedRecoverableOutput = true
+            }
             accumulator.append(chunk)
         }
-        return accumulator.snapshot().lastOrNull()
+        // A cursor at the terminal sequence legitimately produces no replayed
+        // chunks. Do not mistake the seeded local partial for the completed
+        // server message; leave the cursor for a later retry instead.
+        return accumulator.snapshot().lastOrNull().takeIf { receivedRecoverableOutput }
     }
 
     /**
@@ -377,9 +419,10 @@ class RunRecoveryService(
      * interrupted partial stays as an earlier variant, mirroring the normal
      * streaming merge); a missing assistant node appends a new one.
      */
-    private suspend fun mergeFinalMessage(conversationId: String, finalMessage: UIMessage) {
-        val id = runCatching { Uuid.parse(conversationId) }.getOrNull() ?: return
-        val conversation = conversationRepo.getConversationById(id) ?: return
+    private suspend fun mergeFinalMessage(conversationId: String, finalMessage: UIMessage): Boolean {
+        val expectedRestoreEpoch = captureRestoreEpoch()
+        val id = runCatching { Uuid.parse(conversationId) }.getOrNull() ?: return false
+        val conversation = conversationRepo.getConversationById(id) ?: return false
         val nodes = conversation.messageNodes.toMutableList()
         val lastAssistantIndex = nodes.indexOfLast { it.currentMessage.role == MessageRole.ASSISTANT }
         val updated = if (lastAssistantIndex >= 0) {
@@ -392,8 +435,11 @@ class RunRecoveryService(
         } else {
             conversation.copy(messageNodes = nodes + MessageNode(messages = listOf(finalMessage)))
         }
-        conversationRepo.updateConversation(updated)
+        withRestoreWrite(expectedRestoreEpoch) {
+            conversationRepo.updateConversation(updated)
+        }
         Log.i(TAG, "Merged recovered final message into conversation $conversationId")
+        return true
     }
 
     /**
@@ -436,6 +482,7 @@ class RunRecoveryService(
      * replayed from the ledger — the tool is NOT re-executed.
      */
     private suspend fun replayFinishedResults(runId: String, conversationId: String) {
+        val expectedRestoreEpoch = captureRestoreEpoch()
         val conversation = runCatching { Uuid.parse(conversationId) }
             .getOrNull()
             ?.let { conversationRepo.getConversationById(it) }
@@ -464,9 +511,11 @@ class RunRecoveryService(
             )
         }
         if (!changed) return
-        conversationRepo.updateConversation(
-            conversation.copy(messageNodes = updatedNodes)
-        )
+        withRestoreWrite(expectedRestoreEpoch) {
+            conversationRepo.updateConversation(
+                conversation.copy(messageNodes = updatedNodes)
+            )
+        }
         // M1: the result is durable in the conversation now — drop the replay
         // payload (the replay window ends once the result lands).
         for (effect in finished) {
@@ -487,4 +536,25 @@ class RunRecoveryService(
             emptyList()
         }
     }
+
+    private suspend fun captureRestoreEpoch(): Long? {
+        val gate = restoreWriteGate ?: return null
+        return currentCoroutineContext()[SyncRestoreWriteEpoch]?.value ?: gate.currentEpoch()
+    }
+
+    private suspend fun <T> withRestoreWrite(
+        expectedRestoreEpoch: Long?,
+        block: suspend () -> T,
+    ): T {
+        val gate = restoreWriteGate ?: return block()
+        val epoch = expectedRestoreEpoch
+            ?: currentCoroutineContext()[SyncRestoreWriteEpoch]?.value
+            ?: gate.currentEpoch()
+        return withContext(SyncRestoreWriteEpoch(epoch)) {
+            gate.withCurrentWriterOrCancel(block)
+        }
+    }
+
+    private fun restoreEpochContext(expectedRestoreEpoch: Long?): CoroutineContext =
+        expectedRestoreEpoch?.let(::SyncRestoreWriteEpoch) ?: EmptyCoroutineContext
 }

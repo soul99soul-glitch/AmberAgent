@@ -4,6 +4,7 @@ import app.amber.agent.data.db.dao.ConversationDAO
 import app.amber.agent.data.db.dao.ConversationDraftDAO
 import app.amber.agent.data.db.entity.ConversationDraftEntity
 import app.amber.ai.ui.UIMessagePart
+import app.amber.core.sync.core.SyncRestoreWriteGate
 import app.amber.core.utils.JsonInstant
 import kotlinx.serialization.Serializable
 import kotlin.uuid.ExperimentalUuidApi
@@ -37,6 +38,7 @@ data class ConversationDraft(
 class ConversationDraftStore(
     private val dao: ConversationDraftDAO,
     private val conversationDao: ConversationDAO,
+    private val restoreWriteGate: SyncRestoreWriteGate? = null,
 ) {
     /** Whether the target conversation exists (P3-03: 目标会话不存在 → 明确失败). */
     suspend fun conversationExists(conversationId: String): Boolean =
@@ -51,27 +53,30 @@ class ConversationDraftStore(
         text: String,
         attachments: List<UIMessagePart>,
     ): ConversationDraft {
-        if (!conversationExists(conversationId)) {
-            throw MiniAppBridgeException("conversation_not_found", "目标会话不存在")
-        }
-        val now = System.currentTimeMillis()
-        val draft = ConversationDraft(
-            conversationId = conversationId,
-            draftId = Uuid.random().toString(),
-            text = text,
-            attachments = attachments,
-            updatedAtMs = now,
-        )
-        dao.upsert(
-            ConversationDraftEntity(
-                conversationId = draft.conversationId,
-                draftId = draft.draftId,
-                text = draft.text,
-                attachmentsJson = JsonInstant.encodeToString(draft.attachments),
+        val persist: suspend () -> ConversationDraft = {
+            if (!conversationExists(conversationId)) {
+                throw MiniAppBridgeException("conversation_not_found", "目标会话不存在")
+            }
+            val now = System.currentTimeMillis()
+            val draft = ConversationDraft(
+                conversationId = conversationId,
+                draftId = Uuid.random().toString(),
+                text = text,
+                attachments = attachments,
                 updatedAtMs = now,
             )
-        )
-        return draft
+            dao.upsert(
+                ConversationDraftEntity(
+                    conversationId = draft.conversationId,
+                    draftId = draft.draftId,
+                    text = draft.text,
+                    attachmentsJson = JsonInstant.encodeToString(draft.attachments),
+                    updatedAtMs = now,
+                )
+            )
+            draft
+        }
+        return if (restoreWriteGate == null) persist() else restoreWriteGate.withCurrentWriterOrCancel(persist)
     }
 
     suspend fun load(conversationId: String): ConversationDraft? {
@@ -89,6 +94,9 @@ class ConversationDraftStore(
     }
 
     suspend fun clear(conversationId: String) {
-        dao.delete(conversationId)
+        val persist: suspend () -> Unit = {
+            dao.delete(conversationId)
+        }
+        if (restoreWriteGate == null) persist() else restoreWriteGate.withCurrentWriterOrCancel(persist)
     }
 }

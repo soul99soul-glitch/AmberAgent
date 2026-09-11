@@ -1,0 +1,14 @@
+<resources>
+    <string name="chat_preview_standby">Standby</string>
+    <string name="chat_setup_missing_provider">Add a provider to start chatting</string>
+    <string name="chat_setup_missing_model">Choose a model to start chatting</string>
+    <string name="chat_setup_disabled_provider">Enable this provider to send messages</string>
+    <string name="chat_setup_invalid_address">Correct the provider address</string>
+    <string name="chat_setup_missing_key">Add an API key to this provider</string>
+    <string name="chat_setup_codex_sign_in">Sign in to ChatGPT for this provider</string>
+    <string name="chat_setup_gemini_sign_in">Sign in to Google for this provider</string>
+    <string name="chat_setup_grok_sign_in">Sign in to Grok for this provider</string>
+    <string name="chat_setup_antigravity_sign_in">Sign in to Antigravity for this provider</string>
+    <string name="chat_setup_configure">Configure</string>
+    <string name="chat_setup_choose_model">Choose model</string>
+</resources>

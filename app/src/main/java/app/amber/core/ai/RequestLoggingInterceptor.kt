@@ -68,8 +68,12 @@ class RequestLoggingInterceptor(
         val startTime = System.currentTimeMillis()
 
         val requestHeaders = request.headers.toRedactedMap()
-        // Bodies carry prompts and OAuth secrets; keep them out of non-debug builds.
-        val requestBody = if (BuildConfig.DEBUG) {
+        // Bodies carry prompts; OAuth token endpoints additionally carry
+        // refresh_token / client_secret form fields. Never log bodies for
+        // auth endpoints in any build, and keep bodies out of release builds.
+        val isAuthEndpoint = request.url.encodedPath.contains("/oauth", ignoreCase = true) ||
+            request.url.encodedPath.contains("/token", ignoreCase = true)
+        val requestBody = if (BuildConfig.DEBUG && !isAuthEndpoint) {
             request.body?.let { body ->
                 val buffer = Buffer()
                 body.writeTo(buffer)

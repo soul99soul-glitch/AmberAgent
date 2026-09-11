@@ -53,12 +53,19 @@ import app.amber.ai.provider.ProviderSetting
 import app.amber.ai.provider.availableAuthModes
 import app.amber.ai.provider.fixedBaseUrl
 import app.amber.ai.provider.hasUsableAuth
-import app.amber.ai.provider.providers.defaultCodexOAuthModelList
 import app.amber.ai.provider.providers.google.GoogleGeminiAuthStore
 import app.amber.ai.provider.providers.google.GoogleGeminiAuthTokens
 import app.amber.ai.provider.providers.google.GoogleGeminiOAuthClient
+import app.amber.ai.provider.providers.google.AntigravityAuthStore
+import app.amber.ai.provider.providers.google.AntigravityOAuthTokens
+import app.amber.ai.provider.providers.google.AntigravityOAuthClient
+import app.amber.ai.provider.providers.google.defaultAntigravityModels
 import app.amber.ai.provider.providers.google.OBSOLETE_GEMINI_OAUTH_MODEL_IDS
 import app.amber.ai.provider.providers.google.defaultGeminiOAuthModelList
+import app.amber.ai.provider.providers.grok.GROK_CLI_PROXY_BASE_URL
+import app.amber.ai.provider.providers.grok.GrokAuthStore
+import app.amber.ai.provider.providers.grok.GrokOAuthClient
+import app.amber.ai.provider.providers.grok.defaultGrokOAuthModels
 import app.amber.ai.provider.providers.isCodexOAuthReviewModel
 import app.amber.ai.provider.providers.openai.OPENAI_CODEX_BACKEND_BASE_URL
 import app.amber.ai.provider.providers.openai.OpenAICodexAuthStore
@@ -113,6 +120,8 @@ internal fun SettingProviderConfigPage(
     provider: ProviderSetting,
     onEdit: (ProviderSetting) -> Unit,
     onDelete: () -> Unit,
+    onModelsFetched: (ProviderModelCandidates) -> Unit = {},
+    onModelCandidatesInvalidated: () -> Unit = {},
 ) {
     var internalProvider by remember(provider) { mutableStateOf(provider) }
     var showDeleteDialog by remember { mutableStateOf(false) }
@@ -124,6 +133,8 @@ internal fun SettingProviderConfigPage(
             internalProvider = it
             onEdit(it)
         },
+        onModelsFetched = onModelsFetched,
+        onModelCandidatesInvalidated = onModelCandidatesInvalidated,
     ) { currentProvider ->
         ProviderConsoleActions(
             provider = currentProvider,
@@ -201,6 +212,8 @@ internal fun ProviderConsole(
     autoStartOAuth: Boolean = false,
     onAutoStartConsumed: () -> Unit = {},
     onCommit: (ProviderSetting) -> Unit = onEdit,
+    onModelsFetched: (ProviderModelCandidates) -> Unit = {},
+    onModelCandidatesInvalidated: () -> Unit = {},
     actionContent: (@Composable (ProviderSetting) -> Unit)? = null,
 ) {
     val t = LocalAmberTokens.current
@@ -229,6 +242,8 @@ internal fun ProviderConsole(
                 provider = provider,
                 onEdit = onEdit,
                 onCommit = onCommit,
+                onModelsFetched = onModelsFetched,
+                onModelCandidatesInvalidated = onModelCandidatesInvalidated,
                 autoStartOAuth = autoStartOAuth,
                 onAutoStartConsumed = onAutoStartConsumed,
             )
@@ -351,6 +366,8 @@ private fun ProviderAuthSection(
     provider: ProviderSetting,
     onEdit: (ProviderSetting) -> Unit,
     onCommit: (ProviderSetting) -> Unit,
+    onModelsFetched: (ProviderModelCandidates) -> Unit,
+    onModelCandidatesInvalidated: () -> Unit,
     autoStartOAuth: Boolean,
     onAutoStartConsumed: () -> Unit,
 ) {
@@ -361,6 +378,8 @@ private fun ProviderAuthSection(
                 provider = provider,
                 onEdit = onEdit,
                 onCommit = onCommit,
+                onModelsFetched = onModelsFetched,
+                onModelCandidatesInvalidated = onModelCandidatesInvalidated,
                 autoStartOAuth = autoStartOAuth,
                 onAutoStartConsumed = onAutoStartConsumed,
             )
@@ -384,10 +403,15 @@ private fun OpenAIAuthConsole(
     provider: ProviderSetting.OpenAI,
     onEdit: (ProviderSetting.OpenAI) -> Unit,
     onCommit: (ProviderSetting.OpenAI) -> Unit,
+    onModelsFetched: (ProviderModelCandidates) -> Unit,
+    onModelCandidatesInvalidated: () -> Unit,
     autoStartOAuth: Boolean,
     onAutoStartConsumed: () -> Unit,
 ) {
-    val availableModes = provider.brand.availableAuthModes()
+    val isGrok = provider.isGrokProvider()
+    val availableModes = if (isGrok) {
+        listOf(OpenAIAuthMode.API_KEY, OpenAIAuthMode.GROK_OAUTH)
+    } else provider.brand.availableAuthModes()
     if (availableModes.size > 1) {
         ProviderPillSeg(
             options = availableModes.map { ProviderSegOption(it, it.openAIAuthLabel()) },
@@ -410,6 +434,16 @@ private fun OpenAIAuthConsole(
     when {
         provider.authMode == OpenAIAuthMode.CODEX_OAUTH -> {
             CodexOAuthConsole(
+                provider = provider,
+                onCommit = onCommit,
+                onModelsFetched = onModelsFetched,
+                onModelCandidatesInvalidated = onModelCandidatesInvalidated,
+                autoStartOAuth = autoStartOAuth,
+                onAutoStartConsumed = onAutoStartConsumed,
+            )
+        }
+        provider.authMode == OpenAIAuthMode.GROK_OAUTH -> {
+            GrokOAuthConsole(
                 provider = provider,
                 onCommit = onCommit,
                 autoStartOAuth = autoStartOAuth,
@@ -439,7 +473,8 @@ private fun GoogleAuthConsole(
     ProviderPillSeg(
         options = listOf(
             ProviderSegOption(GoogleAuthMode.API_KEY, "API Key"),
-            ProviderSegOption(GoogleAuthMode.GEMINI_CODE_ASSIST_OAUTH, "OAuth"),
+            ProviderSegOption(GoogleAuthMode.GEMINI_CODE_ASSIST_OAUTH, "Code Assist"),
+            ProviderSegOption(GoogleAuthMode.ANTIGRAVITY_OAUTH, "Antigravity"),
         ),
         selected = provider.authMode,
         onSelected = { mode -> onEdit(provider.switchGoogleAuthMode(mode)) },
@@ -478,6 +513,95 @@ private fun GoogleAuthConsole(
                 onAutoStartConsumed = onAutoStartConsumed,
             )
         }
+        GoogleAuthMode.ANTIGRAVITY_OAUTH -> {
+            AntigravityOAuthConsole(
+                provider = provider,
+                onCommit = onCommit,
+                autoStartOAuth = autoStartOAuth,
+                onAutoStartConsumed = onAutoStartConsumed,
+            )
+        }
+    }
+}
+
+@Composable
+private fun GrokOAuthConsole(
+    provider: ProviderSetting.OpenAI,
+    onCommit: (ProviderSetting.OpenAI) -> Unit,
+    autoStartOAuth: Boolean,
+    onAutoStartConsumed: () -> Unit,
+) {
+    val context = LocalContext.current
+    val toaster = LocalToaster.current
+    val scope = rememberCoroutineScope()
+    val httpClient = koinInject<OkHttpClient>()
+    val store = koinInject<GrokAuthStore>()
+    val client = remember(httpClient, store) { GrokOAuthClient(httpClient, store) }
+    var tokens by remember(provider.id) { mutableStateOf(store.get(provider.id)) }
+    val latestProvider by rememberUpdatedState(provider)
+    LaunchedEffect(provider.id, provider.authMode) {
+        if (provider.authMode == OpenAIAuthMode.GROK_OAUTH && store.getBackup(provider.id) == null) {
+            store.saveBackup(provider.id, provider.baseUrl)
+        }
+    }
+    var busy by remember(provider.id) { mutableStateOf(false) }
+
+    suspend fun login() {
+        if (busy) return
+        busy = true
+        try {
+            val result = client.authorize(context, provider.id)
+            val current = latestProvider
+            val loginGeneration = client.sessionGeneration(provider.id)
+            if (current.id != provider.id || client.sessionGeneration(provider.id) != loginGeneration) return
+            tokens = client.cached(provider.id) ?: return
+            onCommit(current.copy(baseUrl = GROK_CLI_PROXY_BASE_URL, useResponseApi = false, chatCompletionsPath = "/chat/completions"))
+            toaster.show("已登录 Grok（${result.email ?: "账号"}）", type = ToastType.Success)
+        } catch (error: CancellationException) {
+            throw error
+        } catch (e: Exception) {
+            toaster.show("Grok 登录失败：${e.message ?: e}", type = ToastType.Error)
+        } finally {
+            busy = false
+        }
+    }
+
+    LaunchedEffect(provider.id) {
+        if (autoStartOAuth && tokens == null && !busy) {
+            onAutoStartConsumed()
+            login()
+        }
+    }
+    ProviderLabeledField("API Base URL") {
+        ProviderTextField(value = GROK_CLI_PROXY_BASE_URL, onValueChange = {}, mono = true, readOnly = true)
+    }
+    ProviderMonoNote(tokens?.let { "已登录 Grok${it.email?.let { email -> "：$email" } ?: ""}" } ?: "尚未登录 Grok")
+    ProviderCommandButton(
+        text = if (tokens == null) "登录 Grok" else "重新登录 Grok",
+        accent = tokens == null,
+        onClick = { scope.launch { login() } },
+        modifier = Modifier.fillMaxWidth(),
+    )
+    if (tokens != null) {
+        ProviderCommandButton(
+            text = "退出 Grok",
+            onClick = {
+                client.logout(provider.id)
+                tokens = null
+                onCommit(
+                    provider.copy(
+                        authMode = OpenAIAuthMode.API_KEY,
+                        baseUrl = store.getBackup(provider.id) ?: "https://api.x.ai/v1",
+                        // The xAI API-key preset uses the Responses API; Grok
+                        // mode had forced chat-completions, so restore it.
+                        useResponseApi = true,
+                    ),
+                )
+                store.clearBackup(provider.id)
+                toaster.show("已退出 Grok", type = ToastType.Success)
+            },
+            modifier = Modifier.fillMaxWidth(),
+        )
     }
 }
 
@@ -522,10 +646,12 @@ private fun OpenAIEndpointFields(
     provider: ProviderSetting.OpenAI,
     onEdit: (ProviderSetting.OpenAI) -> Unit,
 ) {
-    val fixed = provider.authMode == OpenAIAuthMode.CODEX_OAUTH
+    // Grok OAuth pins the CLI proxy endpoint exactly like Codex does.
+    val fixed = provider.authMode == OpenAIAuthMode.CODEX_OAUTH ||
+        provider.authMode == OpenAIAuthMode.GROK_OAUTH
     ProviderLabeledField("API Base URL") {
         ProviderTextField(
-            value = if (fixed) OPENAI_CODEX_BACKEND_BASE_URL else provider.baseUrl,
+            value = if (fixed) checkNotNull(provider.authMode.fixedBaseUrl()) else provider.baseUrl,
             onValueChange = { onEdit(provider.copy(baseUrl = it.trim())) },
             mono = true,
             readOnly = fixed,
@@ -568,10 +694,10 @@ private fun GoogleEndpointFields(
 ) {
     val serviceAccountJsonLauncher = rememberGoogleServiceAccountImport(provider, onEdit)
 
-    if (provider.authMode == GoogleAuthMode.GEMINI_CODE_ASSIST_OAUTH) {
+    if (provider.authMode == GoogleAuthMode.GEMINI_CODE_ASSIST_OAUTH || provider.authMode == GoogleAuthMode.ANTIGRAVITY_OAUTH) {
         ProviderLabeledField("API Base URL") {
             ProviderTextField(
-                value = checkNotNull(GoogleAuthMode.GEMINI_CODE_ASSIST_OAUTH.fixedBaseUrl()),
+                value = checkNotNull(provider.authMode.fixedBaseUrl()),
                 onValueChange = {},
                 mono = true,
                 readOnly = true,
@@ -775,6 +901,8 @@ private fun ProviderSwitchRow(
 private fun CodexOAuthConsole(
     provider: ProviderSetting.OpenAI,
     onCommit: (ProviderSetting.OpenAI) -> Unit,
+    onModelsFetched: (ProviderModelCandidates) -> Unit,
+    onModelCandidatesInvalidated: () -> Unit,
     autoStartOAuth: Boolean,
     onAutoStartConsumed: () -> Unit,
 ) {
@@ -789,9 +917,17 @@ private fun CodexOAuthConsole(
     var oauthBusy by remember(provider.id) { mutableStateOf(false) }
     var oauthDeviceCode by remember(provider.id) { mutableStateOf<String?>(null) }
     var oauthVerificationUrl by remember(provider.id) { mutableStateOf<String?>(null) }
+    var oauthGeneration by remember(provider.id) { mutableStateOf(0) }
+    val latestProvider by rememberUpdatedState(provider)
+    val latestOnCommit by rememberUpdatedState(onCommit)
+    val latestOnModelsFetched by rememberUpdatedState(onModelsFetched)
+    val latestOnModelCandidatesInvalidated by rememberUpdatedState(onModelCandidatesInvalidated)
 
     suspend fun runCodexLogin() {
         if (oauthBusy) return
+        oauthGeneration += 1
+        val loginGeneration = oauthGeneration
+        latestOnModelCandidatesInvalidated()
         oauthBusy = true
         try {
             val authorization = oauthClient.requestDeviceCode()
@@ -803,24 +939,45 @@ private fun CodexOAuthConsole(
                 context.getString(R.string.setting_provider_page_codex_oauth_code_copied, authorization.userCode),
                 type = ToastType.Info,
             )
-            oauthTokens = oauthClient.pollDeviceCode(provider.id, authorization)
+            val tokens = oauthClient.pollDeviceCode(provider.id, authorization)
+            if (loginGeneration != oauthGeneration) return
+            oauthTokens = tokens
             oauthDeviceCode = null
             oauthVerificationUrl = null
-            val fetchedModels = runCatching {
-                providerCatalog.text(provider)
-                    .listModels(provider.codexOAuthReadyCopy())
-                    .sortedBy { it.modelId }
-            }.getOrNull()?.takeIf { it.isNotEmpty() } ?: defaultCodexOAuthModelList()
-            val newSelection = if (provider.models.withoutCodexReviewModels().isEmpty()) {
-                listOfNotNull(fetchedModels.firstOrNull())
+            val readyProvider = provider.codexOAuthReadyCopy()
+            val fetchedModels = providerCatalog.text(provider)
+                .listModels(readyProvider)
+                .sortedBy { it.modelId }
+            if (loginGeneration != oauthGeneration) return
+            val currentProvider = latestProvider
+            if (codexOAuthResultIsCurrent(
+                    requestGeneration = loginGeneration,
+                    currentGeneration = oauthGeneration,
+                    requestKey = readyProvider.modelListRequestKey(),
+                    currentProvider = currentProvider,
+                )
+            ) {
+                latestOnModelsFetched(
+                    ProviderModelCandidates(
+                        requestKey = readyProvider.modelListRequestKey(),
+                        models = fetchedModels,
+                    )
+                )
+                val newSelection = currentProvider.codexOAuthLoginSelection(fetchedModels)
+                latestOnCommit(currentProvider.copy(models = newSelection))
+                toaster.show(
+                    context.getString(R.string.setting_provider_page_codex_oauth_login_success_with_models, fetchedModels.size),
+                    type = ToastType.Success,
+                )
             } else {
-                provider.models.withoutCodexReviewModels()
+                // The user changed the provider while the catalog request was in
+                // flight. Keep the OAuth result, but do not write a stale provider
+                // snapshot back over the newer draft.
+                toaster.show(
+                    context.getString(R.string.setting_provider_page_codex_oauth_signed_in),
+                    type = ToastType.Info,
+                )
             }
-            onCommit(provider.copy(models = newSelection))
-            toaster.show(
-                context.getString(R.string.setting_provider_page_codex_oauth_login_success_with_models, fetchedModels.size),
-                type = ToastType.Success,
-            )
         } catch (error: CancellationException) {
             throw error
         } catch (e: Exception) {
@@ -903,31 +1060,56 @@ private fun CodexOAuthConsole(
         ProviderCommandButton(
             text = stringResource(R.string.setting_provider_page_codex_oauth_fetch_models),
             onClick = {
-                scope.launch {
-                    oauthBusy = true
-                    try {
-                        val fetchedModels = runCatching {
-                            providerCatalog.text(provider)
-                                .listModels(provider.codexOAuthReadyCopy())
+                if (!oauthBusy) {
+                    scope.launch {
+                        oauthBusy = true
+                        try {
+                            val fetchGeneration = oauthGeneration
+                            val readyProvider = provider.codexOAuthReadyCopy()
+                            val fetchedModels = providerCatalog.text(provider)
+                                .listModels(readyProvider)
                                 .sortedBy { it.modelId }
-                        }.getOrNull()?.takeIf { it.isNotEmpty() } ?: defaultCodexOAuthModelList()
-                        val newSelection = if (provider.models.withoutCodexReviewModels().isEmpty()) {
-                            listOfNotNull(fetchedModels.firstOrNull())
-                        } else {
-                            provider.models.withoutCodexReviewModels()
+                            val currentProvider = latestProvider
+                            if (!codexOAuthResultIsCurrent(
+                                    requestGeneration = fetchGeneration,
+                                    currentGeneration = oauthGeneration,
+                                    requestKey = readyProvider.modelListRequestKey(),
+                                    currentProvider = currentProvider,
+                                )
+                            ) {
+                                return@launch
+                            }
+                            latestOnModelsFetched(
+                                ProviderModelCandidates(
+                                    requestKey = readyProvider.modelListRequestKey(),
+                                    models = fetchedModels,
+                                )
+                            )
+                            val cleanedModels = currentProvider.models.withoutCodexReviewModels()
+                            if (cleanedModels != currentProvider.models) {
+                                latestOnCommit(currentProvider.copy(models = cleanedModels))
+                            }
+                            if (fetchedModels.isEmpty()) {
+                                toaster.show(
+                                    context.getString(R.string.setting_provider_page_no_models),
+                                    type = ToastType.Info,
+                                )
+                            } else {
+                                toaster.show(
+                                    context.getString(R.string.setting_provider_page_codex_oauth_models_loaded, fetchedModels.size),
+                                    type = ToastType.Success,
+                                )
+                            }
+                        } catch (error: CancellationException) {
+                            throw error
+                        } catch (e: Exception) {
+                            toaster.show(
+                                context.getString(R.string.setting_provider_page_codex_oauth_models_failed, e.message ?: e.toString()),
+                                type = ToastType.Error,
+                            )
+                        } finally {
+                            oauthBusy = false
                         }
-                        onCommit(provider.copy(models = newSelection))
-                        toaster.show(
-                            context.getString(R.string.setting_provider_page_codex_oauth_models_loaded, fetchedModels.size),
-                            type = ToastType.Success,
-                        )
-                    } catch (e: Exception) {
-                        toaster.show(
-                            context.getString(R.string.setting_provider_page_codex_oauth_models_failed, e.message ?: e.toString()),
-                            type = ToastType.Error,
-                        )
-                    } finally {
-                        oauthBusy = false
                     }
                 }
             },
@@ -936,21 +1118,25 @@ private fun CodexOAuthConsole(
         ProviderCommandButton(
             text = stringResource(R.string.setting_provider_page_codex_oauth_refresh),
             onClick = {
-                scope.launch {
-                    oauthBusy = true
-                    try {
-                        oauthTokens = oauthClient.refresh(provider.id)
-                        toaster.show(
-                            context.getString(R.string.setting_provider_page_codex_oauth_refresh_success),
-                            type = ToastType.Success,
-                        )
-                    } catch (e: Exception) {
-                        toaster.show(
-                            context.getString(R.string.setting_provider_page_codex_oauth_refresh_failed, e.message ?: e.toString()),
-                            type = ToastType.Error,
-                        )
-                    } finally {
-                        oauthBusy = false
+                if (!oauthBusy) {
+                    scope.launch {
+                        oauthBusy = true
+                        try {
+                            oauthTokens = oauthClient.refresh(provider.id)
+                            toaster.show(
+                                context.getString(R.string.setting_provider_page_codex_oauth_refresh_success),
+                                type = ToastType.Success,
+                            )
+                        } catch (error: CancellationException) {
+                            throw error
+                        } catch (e: Exception) {
+                            toaster.show(
+                                context.getString(R.string.setting_provider_page_codex_oauth_refresh_failed, e.message ?: e.toString()),
+                                type = ToastType.Error,
+                            )
+                        } finally {
+                            oauthBusy = false
+                        }
                     }
                 }
             },
@@ -959,6 +1145,8 @@ private fun CodexOAuthConsole(
         ProviderCommandButton(
             text = stringResource(R.string.setting_provider_page_codex_oauth_logout),
             onClick = {
+                oauthGeneration += 1
+                latestOnModelCandidatesInvalidated()
                 oauthClient.logout(provider.id)
                 oauthTokens = null
                 oauthDeviceCode = null
@@ -989,9 +1177,12 @@ private fun GeminiOAuthConsole(
         mutableStateOf<GoogleGeminiAuthTokens?>(geminiAuthStore.get(provider.id))
     }
     var geminiOAuthBusy by remember(provider.id) { mutableStateOf(false) }
+    val latestProvider by rememberUpdatedState(provider)
+    val latestOnCommit by rememberUpdatedState(onCommit)
 
     suspend fun runGeminiLogin() {
         if (geminiOAuthBusy) return
+        val loginRequestKey = provider.modelListRequestKey()
         geminiOAuthBusy = true
         try {
             val tokens = geminiOAuthClient.authorize(
@@ -999,18 +1190,26 @@ private fun GeminiOAuthConsole(
                 provider.id,
                 loopbackCopy = OAuthDisplayLocalizer.loopback(context),
             )
+            val currentProvider = latestProvider
+            if (!geminiOAuthResultIsCurrent(loginRequestKey, currentProvider)) {
+                toaster.show(
+                    context.getString(R.string.setting_provider_page_gemini_oauth_signed_in),
+                    type = ToastType.Info,
+                )
+                return
+            }
             geminiTokens = tokens
-            val isAllObsolete = provider.models.isNotEmpty() &&
-                provider.models.all { it.modelId in OBSOLETE_GEMINI_OAUTH_MODEL_IDS }
-            val newSelection = if (provider.models.isEmpty() || isAllObsolete) {
+            val isAllObsolete = currentProvider.models.isNotEmpty() &&
+                currentProvider.models.all { it.modelId in OBSOLETE_GEMINI_OAUTH_MODEL_IDS }
+            val newSelection = if (currentProvider.models.isEmpty() || isAllObsolete) {
                 defaultGeminiOAuthModelList()
             } else {
-                provider.models
+                currentProvider.models
             }
-            onCommit(
-                provider.copy(
+            latestOnCommit(
+                currentProvider.copy(
                     models = newSelection,
-                    name = if (provider.name == "Google") "Gemini OAuth" else provider.name,
+                    name = if (currentProvider.name == "Google") "Gemini OAuth" else currentProvider.name,
                 )
             )
             toaster.show(
@@ -1087,7 +1286,7 @@ private fun GeminiOAuthConsole(
 }
 
 @Composable
-private fun ProviderMonoNote(text: String) {
+internal fun ProviderMonoNote(text: String) {
     val t = LocalAmberTokens.current
     val type = LocalAmberType.current
     Text(
@@ -1129,8 +1328,17 @@ private fun rememberGoogleServiceAccountImport(
     }
 }
 
+internal fun ProviderSetting.OpenAI.isGrokProvider(): Boolean =
+    name.equals("xAI", ignoreCase = true) || baseUrl.contains("api.x.ai", ignoreCase = true) ||
+        baseUrl.contains("cli-chat-proxy.grok.com", ignoreCase = true)
+
 private fun ProviderSetting.OpenAI.switchOpenAIAuthMode(mode: OpenAIAuthMode): ProviderSetting.OpenAI {
     val pinned = mode.fixedBaseUrl()
+    if (mode == OpenAIAuthMode.GROK_OAUTH) {
+        // Keep the API-key endpoint until OAuth succeeds. GrokOAuthConsole
+        // snapshots this value before committing the proxy endpoint.
+        return copy(authMode = mode, useResponseApi = false, chatCompletionsPath = "/chat/completions")
+    }
     return when (mode) {
         OpenAIAuthMode.CODEX_OAUTH -> copy(
             authMode = OpenAIAuthMode.CODEX_OAUTH,
@@ -1161,18 +1369,22 @@ private fun ProviderSetting.OpenAI.switchOpenAIAuthMode(mode: OpenAIAuthMode): P
 private fun ProviderSetting.Google.switchGoogleAuthMode(mode: GoogleAuthMode): ProviderSetting.Google {
     val pinned = mode.fixedBaseUrl()
     return when (mode) {
-        GoogleAuthMode.GEMINI_CODE_ASSIST_OAUTH -> copy(
-            authMode = mode,
-            baseUrl = pinned ?: baseUrl,
-            vertexAI = false,
-            useServiceAccount = false,
-            apiKey = "",
-            privateKey = "",
-            serviceAccountEmail = "",
-            projectId = "",
-        )
+        GoogleAuthMode.GEMINI_CODE_ASSIST_OAUTH,
+        GoogleAuthMode.ANTIGRAVITY_OAUTH -> {
+            // Entering a managed mode must not destroy a working API-key /
+            // service-account configuration before login actually succeeds:
+            // cancel or logout keeps the original fields intact. The OAuth
+            // console clears them in its onCommit (post-login) path instead.
+            copy(
+                authMode = mode,
+                baseUrl = pinned ?: baseUrl,
+            )
+        }
         GoogleAuthMode.API_KEY -> {
-            val knownPinnedUrls = setOfNotNull(GoogleAuthMode.GEMINI_CODE_ASSIST_OAUTH.fixedBaseUrl())
+            val knownPinnedUrls = setOfNotNull(
+                GoogleAuthMode.GEMINI_CODE_ASSIST_OAUTH.fixedBaseUrl(),
+                GoogleAuthMode.ANTIGRAVITY_OAUTH.fixedBaseUrl(),
+            )
             val restoredBaseUrl = if (baseUrl in knownPinnedUrls) {
                 (resetBaseUrlToDefault() as ProviderSetting.Google).baseUrl
             } else {
@@ -1186,6 +1398,7 @@ private fun ProviderSetting.Google.switchGoogleAuthMode(mode: GoogleAuthMode): P
 private fun OpenAIAuthMode.openAIAuthLabel(): String = when (this) {
     OpenAIAuthMode.API_KEY -> "API Key"
     OpenAIAuthMode.CODEX_OAUTH -> "OAuth"
+    OpenAIAuthMode.GROK_OAUTH -> "Grok"
     OpenAIAuthMode.ZHIPU_CODING_PLAN,
     OpenAIAuthMode.KIMI_CODING_PLAN,
     OpenAIAuthMode.MIMO_CODING_PLAN,
@@ -1205,5 +1418,5 @@ private fun ProviderSetting.OpenAI.codexOAuthReadyCopy(): ProviderSetting.OpenAI
     useResponseApi = true,
 )
 
-private fun List<Model>.withoutCodexReviewModels(): List<Model> =
+internal fun List<Model>.withoutCodexReviewModels(): List<Model> =
     filterNot { it.isCodexOAuthReviewModel() }

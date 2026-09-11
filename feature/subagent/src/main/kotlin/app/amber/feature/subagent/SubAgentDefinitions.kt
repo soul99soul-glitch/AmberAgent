@@ -12,7 +12,7 @@ package app.amber.feature.subagent
  *   - writer     — Chinese-first prose with quality bar (Chinese-strong model)
  *   - fixer      — bounded mechanical execution: translate / format / extract (cheap fast model)
  *
- * Tool-specific scenarios (OfficePro, Terminal) are deliberately NOT subagents — they're better
+ * Tool-specific scenarios (Terminal) are deliberately NOT subagents — they're better
  * served by the main agent calling the underlying tools directly, since model independence
  * doesn't help and the extra dispatch hop just adds latency.
  *

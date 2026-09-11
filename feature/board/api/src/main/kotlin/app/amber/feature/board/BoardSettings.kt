@@ -149,7 +149,6 @@ object BoardSignalSourceType {
         NOTIFICATION,
         CALENDAR,
         FEISHU_MSG,
-        FEISHU_DOC,
         CHAT_HISTORY,
         TIME,
     )

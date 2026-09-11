@@ -8,16 +8,26 @@ import app.amber.core.memory.model.MemoryScope
 import app.amber.core.memory.safety.isSensitiveMemoryContent
 import app.amber.core.memory.store.MemoryRepository
 import app.amber.core.memory.telemetry.MemoryEventLogger
+import app.amber.core.sync.core.SyncRestoreWriteEpoch
+import app.amber.core.sync.core.SyncRestoreWriteGate
+import kotlin.coroutines.CoroutineContext
+import kotlin.coroutines.EmptyCoroutineContext
+import kotlin.coroutines.coroutineContext
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
 class MemoryDreamApplier(
     private val memoryRepository: MemoryRepository,
     private val eventLogger: MemoryEventLogger,
+    private val restoreWriteGate: SyncRestoreWriteGate? = null,
 ) {
     private val applyMutex = Mutex()
 
-    suspend fun apply(plan: MemoryDreamPlan): MemoryDreamPlan = applyMutex.withLock {
+    suspend fun apply(plan: MemoryDreamPlan): MemoryDreamPlan =
+        withContext(captureWriteContext()) { applyInternal(plan) }
+
+    private suspend fun applyInternal(plan: MemoryDreamPlan): MemoryDreamPlan = applyMutex.withLock {
         val records = memoryRepository.getAllRecords().associateBy { it.id }.toMutableMap()
         val applicablePlan = plan.onlyApplicableToManagedMemories(records)
         if (!applicablePlan.hasChanges) return@withLock applicablePlan
@@ -119,6 +129,15 @@ class MemoryDreamApplier(
             message = applicablePlan.summaryText("Applied dream diff"),
         )
         applicablePlan
+    }
+
+    private suspend fun captureWriteContext(): CoroutineContext {
+        coroutineContext[SyncRestoreWriteEpoch]?.let { return it }
+        val gate = restoreWriteGate ?: return EmptyCoroutineContext
+        // Re-read the records after an in-flight restore has completed, then
+        // carry the resulting generation through every short repository write.
+        gate.withWriter { Unit }
+        return SyncRestoreWriteEpoch(gate.currentEpoch())
     }
 
     private fun MemoryDreamPlan.onlyApplicableToManagedMemories(

@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="parity_attachment_importing">Importing</string>
+    <string name="parity_attachment_import_failed_short">Import failed</string>
+    <string name="parity_attachment_import_failed">Failed to import: %1$s</string>
+    <string name="parity_attachment_import_failed_detail">The file could not be copied. Remove it or retry.</string>
+    <string name="parity_attachment_retry">Retry import</string>
+    <string name="parity_attachment_ready">Ready</string>
+    <string name="parity_attachment_truncated">Text truncated</string>
+    <string name="parity_attachment_read_failed">Text read failed</string>
+    <string name="parity_attachment_read_failed_detail">The document text could not be read. It will remain attached without inline text.</string>
+</resources>

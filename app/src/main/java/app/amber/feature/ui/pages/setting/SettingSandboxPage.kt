@@ -198,6 +198,10 @@ fun SettingSandboxPage(
             }
 
             item {
+                SettingSshProfilesSection(terminalRuntime = terminalRuntime)
+            }
+
+            item {
                 // Runtime section: an inline status block above the operational items.
                 // The previous Alpine + "终端会话" rows were styled like clickable
                 // ListItems but had no action — confusing affordance. Now the install
@@ -259,6 +263,9 @@ fun SettingSandboxPage(
 
                                         TerminalRuntimeKind.TERMUX_EXTERNAL ->
                                             stringResource(R.string.setting_sandbox_terminal_runtime_termux)
+
+                                        TerminalRuntimeKind.REMOTE_SSH ->
+                                            stringResource(R.string.setting_sandbox_terminal_runtime_ssh)
                                     }
                                 },
                                 // V3 ValueChip 内容自适应,

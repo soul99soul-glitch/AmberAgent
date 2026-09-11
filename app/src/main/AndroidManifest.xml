@@ -37,11 +37,18 @@
   <uses-permission android:name="android.permission.BLUETOOTH_ADVERTISE" />
   <uses-permission android:name="android.permission.NEARBY_WIFI_DEVICES" />
   <uses-permission android:name="android.permission.ACTIVITY_RECOGNITION" />
+  <!-- Health Connect platform permissions (API 34+; no Jetpack client dependency). -->
+  <uses-permission android:name="android.permission.health.READ_STEPS" />
+  <uses-permission android:name="android.permission.health.READ_HEART_RATE" />
+  <uses-permission android:name="android.permission.health.READ_SLEEP" />
+  <uses-permission android:name="android.permission.health.READ_WEIGHT" />
+  <uses-permission android:name="android.permission.VIBRATE" />
   <uses-permission
     android:name="android.permission.PACKAGE_USAGE_STATS"
     tools:ignore="ProtectedPermissions" />
   <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
   <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+  <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
   <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
   <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
   <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
@@ -217,6 +224,19 @@
     <receiver
       android:name="app.amber.feature.terminal.TermuxCommandResultReceiver"
       android:exported="false" />
+    <receiver
+      android:name="app.amber.feature.reminder.ReminderReceiver"
+      android:exported="false" />
+    <receiver
+      android:name="app.amber.feature.reminder.ReminderRescheduleReceiver"
+      android:exported="false">
+      <intent-filter>
+        <action android:name="android.intent.action.BOOT_COMPLETED" />
+        <action android:name="android.intent.action.TIME_SET" />
+        <action android:name="android.intent.action.TIMEZONE_CHANGED" />
+        <action android:name="android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED" />
+      </intent-filter>
+    </receiver>
 
     <service
       android:name="app.amber.core.service.AgentGenerationForegroundService"

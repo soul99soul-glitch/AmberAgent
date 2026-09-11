@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MiniApp 系统能力验收</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; padding: 20px; font: 16px/1.5 system-ui, sans-serif; color: #26221e; background: #faf8f4; }
+    h1 { font-size: 25px; margin: 0 0 12px; }
+    h2 { font-size: 19px; margin: 0 0 12px; }
+    section { background: white; border: 1px solid #ded8cf; border-radius: 16px; padding: 16px; margin: 18px 0; }
+    .actions { display: flex; flex-wrap: wrap; gap: 8px; }
+    button { min-height: 48px; padding: 10px 14px; font: inherit; color: #743916; background: #fff0e1; border: 1px solid #b96b3c; border-radius: 10px; }
+    button:disabled { opacity: .55; }
+    pre { white-space: pre-wrap; overflow-wrap: anywhere; font: 13px/1.5 ui-monospace, monospace; }
+    #qr { display: block; max-width: 100%; height: auto; margin: 12px auto; }
+    .note { color: #665d54; }
+    [data-error="true"] { color: #a12b28; }
+  </style>
+</head>
+<body>
+  <h1>小应用系统能力验收</h1>
+  <p class="note">合成数据。分享仅打开系统面板，验收时取消；不向任何联系人发送内容。</p>
+  <section>
+    <h2>能力与授权</h2>
+    <div class="actions"><button id="info">应用信息</button><button id="capabilities">能力列表</button><button id="device">设备信息</button><button id="battery">电量</button></div>
+  </section>
+  <section>
+    <h2>震动与屏幕</h2>
+    <div class="actions"><button id="haptic">轻触反馈</button><button id="brightness">读取亮度</button><button id="dim">亮度 60%</button><button id="awake">保持唤醒</button><button id="sleep">允许息屏</button></div>
+    <p class="note">调整后离开小应用，检查系统亮度与常亮状态恢复。</p>
+  </section>
+  <section>
+    <h2>语音</h2>
+    <div class="actions"><button id="voices">可用语音</button><button id="speak">朗读</button><button id="pause">暂停</button><button id="resume">继续</button><button id="stop">停止</button></div>
+  </section>
+  <section>
+    <h2>二维码与系统入口</h2>
+    <div class="actions"><button id="qrcode">生成二维码</button><button id="share">打开分享面板</button><button id="bad-url">拒绝本地外链</button></div>
+    <img id="qr" alt="生成后的测试二维码" hidden>
+  </section>
+  <section aria-live="polite"><h2>调用结果</h2><pre id="result">请选择一项能力。</pre></section>
+  <script>
+    const output = document.querySelector('#result');
+    function bind(id, action) {
+      document.getElementById(id).addEventListener('click', async function () {
+        this.disabled = true;
+        output.textContent = id + '：等待结果';
+        output.dataset.error = 'false';
+        try {
+          const result = await action();
+          output.textContent = id + '\n' + JSON.stringify(result, null, 2);
+          output.dataset.action = id;
+        } catch (error) {
+          output.textContent = id + '\n' + (error.code || 'error') + ': ' + error.message;
+          output.dataset.error = 'true';
+          output.dataset.action = id;
+        } finally { this.disabled = false; }
+      });
+    }
+    bind('info', () => Amber.getAppInfo());
+    bind('capabilities', () => Amber.getCapabilities());
+    bind('device', () => Amber.device.getInfo());
+    bind('battery', () => Amber.device.getBattery());
+    bind('haptic', () => Amber.haptics.impact({style: 'light', intensity: 0.5}));
+    bind('brightness', () => Amber.screen.getBrightness());
+    bind('dim', () => Amber.screen.setBrightness(0.6));
+    bind('awake', () => Amber.screen.setKeepAwake(true));
+    bind('sleep', () => Amber.screen.setKeepAwake(false));
+    bind('voices', () => Amber.speech.getVoices());
+    bind('speak', () => Amber.speech.speak({text: '这是一段合成的系统语音验收内容。暂停后继续，离开页面应停止朗读。', language: 'zh-CN', rate: 0.5}));
+    bind('pause', () => Amber.speech.pause());
+    bind('resume', () => Amber.speech.resume());
+    bind('stop', () => Amber.speech.stop());
+    bind('qrcode', async () => {
+      const result = await Amber.qrcode.generate({text: 'amber-miniapp-parity-2026', size: 256});
+      const image = document.getElementById('qr');
+      image.src = result.dataURL;
+      image.hidden = false;
+      return {width: result.width, height: result.height, dataURL: result.dataURL.slice(0, 30) + '…'};
+    });
+    bind('share', () => Amber.share({text: '合成验收内容，请在分享面板取消。'}));
+    bind('bad-url', () => Amber.openURL('https://127.0.0.1/private'));
+  </script>
+</body>
+</html>

@@ -66,6 +66,8 @@ val novelModule = module {
             turnLauncher = get(),
             kernel = get(),
             context = androidContext(),
+            requestedFocus = parameters.getOrNull<app.amber.feature.novelworkspace.NovelWorkspaceFocus>()
+                ?: app.amber.feature.novelworkspace.NovelWorkspaceFocus(),
         )
     }
 }

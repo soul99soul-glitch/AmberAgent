@@ -17,6 +17,9 @@ import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.filterNot
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import app.amber.core.sync.core.SyncRestoreWriteEpoch
+import app.amber.core.sync.core.SyncRestoreWriteGate
 import app.amber.feature.deepread.api.DeepReadDescriptor
 import app.amber.feature.deepread.api.DeepReadInput
 import org.koin.core.component.KoinComponent
@@ -28,6 +31,13 @@ class DeepReadWorker(
     params: WorkerParameters,
 ) : CoroutineWorker(appContext, params), KoinComponent {
     override suspend fun doWork(): Result {
+        val restoreWriteEpoch = get<SyncRestoreWriteGate>().currentEpoch()
+        return withContext(SyncRestoreWriteEpoch(restoreWriteEpoch)) {
+            doWorkInternal()
+        }
+    }
+
+    private suspend fun doWorkInternal(): Result {
         val topicId = inputData.getString(KEY_TOPIC_ID)?.takeIf { it.isNotBlank() }
             ?: return Result.failure()
         val title = inputData.getString(KEY_TITLE)?.takeIf { it.isNotBlank() }
@@ -56,6 +66,7 @@ class DeepReadWorker(
                 title = title,
                 output = failureOutput(cached, reason),
                 ttlDays = ttlDays,
+                sourceUrl = sourceUrl,
             )
             runCatching {
                 notifier.notifyFailed(
@@ -147,6 +158,7 @@ class DeepReadWorker(
                     title = title,
                     output = retryableOutput(cached),
                     ttlDays = ttlDays,
+                    sourceUrl = sourceUrl,
                 )
                 return Result.retry()
             }
@@ -160,6 +172,7 @@ class DeepReadWorker(
                     idleOutput(cached)
                 },
                 ttlDays = ttlDays,
+                sourceUrl = sourceUrl,
             )
             notifier.notifyFailed(
                 topicId = topicId,

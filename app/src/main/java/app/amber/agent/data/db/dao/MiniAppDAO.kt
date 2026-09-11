@@ -7,6 +7,7 @@ import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import kotlinx.coroutines.flow.Flow
 import app.amber.agent.data.db.entity.MiniAppAuditLogEntity
+import app.amber.agent.data.db.entity.MiniAppContinueRow
 import app.amber.agent.data.db.entity.MiniAppEntity
 import app.amber.agent.data.db.entity.MiniAppGrantEntity
 import app.amber.agent.data.db.entity.MiniAppSharedDataEntity
@@ -14,6 +15,28 @@ import app.amber.agent.data.db.entity.MiniAppVersionEntity
 
 @Dao
 interface MiniAppDAO {
+    /**
+     * Recent runner projection. The correlated MAX reads only version rows for
+     * each app and returns no HTML/content payload to the Home flow.
+     */
+    @Query(
+        """
+        SELECT m.id, m.title, m.lastRunAt,
+               COALESCE(
+                   (SELECT MAX(v.createdAt) FROM mini_app_version v WHERE v.appId = m.id),
+                   m.createdAt
+               ) AS latest_version_created_at
+        FROM mini_app m
+        WHERE m.lastRunAt IS NULL
+           OR COALESCE(
+               (SELECT MAX(v.createdAt) FROM mini_app_version v WHERE v.appId = m.id),
+               m.createdAt
+           ) > m.lastRunAt
+        ORDER BY latest_version_created_at DESC
+        """
+    )
+    fun observeContinueCandidates(): Flow<List<MiniAppContinueRow>>
+
     @Query(
         """
         SELECT * FROM mini_app
@@ -37,11 +60,11 @@ interface MiniAppDAO {
     @Query(
         """
         UPDATE mini_app
-        SET runCount = runCount + 1
+        SET runCount = runCount + 1, lastRunAt = :lastRunAt
         WHERE id = :id
         """
     )
-    suspend fun markRun(id: String)
+    suspend fun markRun(id: String, lastRunAt: Long)
 
     @Query(
         """

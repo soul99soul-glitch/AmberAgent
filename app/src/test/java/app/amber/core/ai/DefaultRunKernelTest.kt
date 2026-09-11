@@ -5,6 +5,9 @@ import android.content.res.Configuration
 import app.amber.ai.core.MessageRole
 import app.amber.ai.core.Tool
 import app.amber.ai.provider.Model
+import app.amber.ai.provider.ResponseCursor
+import app.amber.ai.provider.ResponseResumeStore
+import app.amber.ai.provider.ResponsesResumeRequest
 import app.amber.ai.ui.UIMessage
 import app.amber.ai.ui.UIMessagePart
 import app.amber.ai.ui.ToolApprovalState
@@ -93,6 +96,7 @@ class DefaultRunKernelTest {
         executionPolicy: app.amber.feature.runtime.ExecutionPolicy =
             app.amber.feature.runtime.ExecutionPolicy.permissive(),
         settings: Settings = Settings(),
+        responsesResume: ResponsesResumeRequest? = null,
     ): GenerationRunSession {
         var pendingSteer = steer
         return GenerationRunSession(
@@ -108,6 +112,7 @@ class DefaultRunKernelTest {
             },
             onTerminal = { terminals += it },
             executionPolicy = executionPolicy,
+            responsesResume = responsesResume,
         )
     }
 
@@ -278,6 +283,46 @@ class DefaultRunKernelTest {
                     msg.parts.filterIsInstance<UIMessagePart.Text>().any { it.text == "补充一句" }
             },
         )
+    }
+
+    @Test
+    fun `stored response cursor is attached only to the first model round`() = runTest {
+        val resume = ResponsesResumeRequest(
+            runId = "run_resume",
+            store = object : ResponseResumeStore {
+                override suspend fun save(runId: String, responseId: String, sequence: Long, providerId: String) = Unit
+                override suspend fun load(runId: String): ResponseCursor? = null
+                override suspend fun clear(runId: String) = Unit
+            },
+            resumeFrom = ResponseCursor(
+                responseId = "response_1",
+                sequence = 7,
+                providerId = "provider_1",
+            ),
+        )
+        val readOnly = Tool(
+            name = "read_thing",
+            description = "read-only lookup",
+            execute = { listOf(UIMessagePart.Text("tool-result")) },
+        )
+        val engine = FakeRoundEngine(
+            listOf(
+                { toolCallAssistant("call_1", "read_thing") },
+                { textAssistant("完成") },
+            ),
+        )
+
+        kernel(engine).run(
+            session(
+                messages = listOf(UIMessage.user("继续")),
+                tools = listOf(readOnly),
+                responsesResume = resume,
+            ),
+        ).toList()
+
+        assertEquals(resume.resumeFrom, engine.requests[0].responsesResume?.resumeFrom)
+        assertEquals(resume.runId, engine.requests[1].responsesResume?.runId)
+        assertNull(engine.requests[1].responsesResume?.resumeFrom)
     }
 
     @Test

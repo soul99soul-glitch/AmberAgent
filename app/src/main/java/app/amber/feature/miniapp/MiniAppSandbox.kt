@@ -13,6 +13,8 @@ class MiniAppSandbox(
     private val currentSetting: MiniAppSetting
         get() = settingProvider?.invoke() ?: setting
 
+    fun declaredPermissions(): Set<String> = declared
+
     fun require(permission: MiniAppPermission) {
         val setting = currentSetting
         if (!setting.enabled) {
@@ -29,6 +31,12 @@ class MiniAppSandbox(
             MiniAppGrantDecision.ALLOW, null -> Unit
         }
     }
+
+    /** True when the global settings currently allow [permission] (declared state ignored). */
+    fun isGloballyEnabled(permission: MiniAppPermission): Boolean =
+        currentSetting.let { it.enabled && permission.isGloballyEnabled(it) }
+
+    fun systemCapabilitiesEnabled(): Boolean = currentSetting.let { it.enabled && it.systemCapabilitiesEnabled }
 
     private fun MiniAppPermission.isGloballyEnabled(setting: MiniAppSetting): Boolean {
         return when (this) {
@@ -50,6 +58,12 @@ class MiniAppSandbox(
             MiniAppPermission.Sensor -> setting.sensorEnabled
             MiniAppPermission.Location -> setting.locationEnabled
             MiniAppPermission.ClipboardRead -> setting.clipboardReadEnabled
+            MiniAppPermission.Haptics,
+            MiniAppPermission.Device,
+            MiniAppPermission.Screen,
+            MiniAppPermission.Speech,
+            MiniAppPermission.Share,
+            MiniAppPermission.OpenURL -> setting.systemCapabilitiesEnabled
         }
     }
 }

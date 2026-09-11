@@ -1,6 +1,7 @@
 package app.amber.feature.task
 
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.serialization.json.JsonObject
 
 class AgentTaskScheduler(
     private val taskStore: AgentTaskStore,
@@ -35,16 +36,28 @@ class AgentTaskScheduler(
         retry = retry,
     )
 
-    suspend fun complete(taskId: String, summary: String? = null): AgentTaskSnapshot? =
+    suspend fun complete(
+        taskId: String,
+        summary: String? = null,
+        expectedSpec: JsonObject? = null,
+    ): AgentTaskSnapshot? =
         taskStore.update(
             taskId = taskId,
             status = AgentTaskStatus.COMPLETED,
             queueState = AgentTaskQueueState.TERMINAL,
             summary = summary,
             cancelCapability = false,
+            clearError = true,
+            clearLastErrorCode = true,
+            expectedSpec = expectedSpec,
         )
 
-    suspend fun fail(taskId: String, message: String, code: String = "failed"): AgentTaskSnapshot? =
+    suspend fun fail(
+        taskId: String,
+        message: String,
+        code: String = "failed",
+        expectedSpec: JsonObject? = null,
+    ): AgentTaskSnapshot? =
         taskStore.update(
             taskId = taskId,
             status = AgentTaskStatus.FAILED,
@@ -52,6 +65,7 @@ class AgentTaskScheduler(
             error = message,
             lastErrorCode = code,
             cancelCapability = false,
+            expectedSpec = expectedSpec,
         )
 
     suspend fun cancel(taskId: String): AgentTaskSnapshot = taskStore.cancel(taskId)

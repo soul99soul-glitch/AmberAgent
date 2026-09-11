@@ -1,16 +1,14 @@
 package app.amber.feature.ui.components.ui
 
-import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ListItem
@@ -29,7 +27,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.util.fastForEachIndexed
 import app.amber.feature.ui.theme.CustomColors
 
 // V3 settings-screen.jsx:79 borderRadius: 18 —— 之前 12dp 偏紧、不像 editorial 卡
@@ -49,8 +46,9 @@ data class CardGroupItem(
 )
 
 class CardGroupScope {
-    internal val items = mutableListOf<CardGroupItem>()
+    internal var defaultColors: ListItemColors? = null
 
+    @Composable
     fun item(
         onClick: (() -> Unit)? = null,
         modifier: Modifier = Modifier,
@@ -61,8 +59,8 @@ class CardGroupScope {
         colors: ListItemColors? = null,
         headlineContent: @Composable () -> Unit,
     ) {
-        items.add(
-            CardGroupItem(
+        CardGroupListItem(
+            item = CardGroupItem(
                 onClick = onClick,
                 modifier = modifier,
                 overlineContent = overlineContent,
@@ -71,18 +69,20 @@ class CardGroupScope {
                 leadingContent = leadingContent,
                 trailingContent = trailingContent,
                 colors = colors,
-            )
+            ),
+            defaultColors = defaultColors,
         )
     }
 
-    /** 注册一个纯自定义行：内容原样渲染进卡片（带 ListItem 内边距与卡片圆角）。 */
+    /** 渲染一个纯自定义行：内容原样渲染进卡片（带 ListItem 内边距与卡片圆角）。 */
+    @Composable
     fun rawItem(
         modifier: Modifier = Modifier,
         colors: ListItemColors? = null,
         content: @Composable () -> Unit,
     ) {
-        items.add(
-            CardGroupItem(
+        CardGroupListItem(
+            item = CardGroupItem(
                 onClick = null,
                 modifier = modifier,
                 overlineContent = null,
@@ -91,7 +91,8 @@ class CardGroupScope {
                 leadingContent = null,
                 trailingContent = null,
                 colors = colors,
-            )
+            ),
+            defaultColors = defaultColors,
         )
     }
 }
@@ -99,18 +100,12 @@ class CardGroupScope {
 @Composable
 private fun CardGroupListItem(
     item: CardGroupItem,
-    count: Int,
-    index: Int,
     defaultColors: ListItemColors?,
 ) {
-    val isFirst = index == 0
-    val isLast = index == count - 1
-
     val interactionSource = remember { MutableInteractionSource() }
     val isPressed by interactionSource.collectIsPressedAsState()
 
-    val topCorner = if (isPressed || count == 1 || isFirst) CardGroupCorner else CardGroupInnerCorner
-    val bottomCorner = if (isPressed || count == 1 || isLast) CardGroupCorner else CardGroupInnerCorner
+    val corner = if (isPressed) CardGroupCorner else CardGroupInnerCorner
 
     ListItem(
         headlineContent = item.headlineContent,
@@ -118,10 +113,10 @@ private fun CardGroupListItem(
             .fillMaxWidth()
             .clip(
                 RoundedCornerShape(
-                    topStart = topCorner,
-                    topEnd = topCorner,
-                    bottomStart = bottomCorner,
-                    bottomEnd = bottomCorner,
+                    topStart = corner,
+                    topEnd = corner,
+                    bottomStart = corner,
+                    bottomEnd = corner,
                 )
             )
             .then(
@@ -149,7 +144,7 @@ fun CardGroup(
     content: @Composable CardGroupScope.() -> Unit,
 ) {
     val scope = CardGroupScope()
-    scope.content()
+    scope.defaultColors = colors
 
     Column(modifier = modifier) {
         if (title != null) {
@@ -161,12 +156,13 @@ fun CardGroup(
                 }
             }
         }
-        val count = scope.items.size
-        scope.items.fastForEachIndexed { index, item ->
-            CardGroupListItem(item = item, count = count, index = index, defaultColors = colors)
-            if (index != count - 1) {
-                Spacer(modifier = Modifier.height(CardGroupItemSpacing))
-            }
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(CardGroupCorner)),
+            verticalArrangement = Arrangement.spacedBy(CardGroupItemSpacing),
+        ) {
+            scope.content()
         }
     }
 }

@@ -1,0 +1,5 @@
+<resources>
+    <string name="parity_novel_completed">批次已完成 · 已写 %1$d / %2$d 章</string>
+    <string name="parity_novel_cancelled">批次已取消 · 已保留 %1$d / %2$d 章</string>
+    <string name="parity_novel_unreadable_jobs">部分代笔记录无法读取，已停止参与执行，原文件仍保留：%1$s</string>
+</resources>

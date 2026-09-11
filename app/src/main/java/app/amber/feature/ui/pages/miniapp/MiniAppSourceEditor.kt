@@ -9,12 +9,14 @@ import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
@@ -45,6 +47,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.viewinterop.AndroidView
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import app.amber.agent.R
@@ -81,10 +84,27 @@ fun MiniAppSourceEditorDialog(
     val unsaved = MiniAppSourceChecks.hasUnsavedChanges(app.htmlContent, editorText)
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
+    var showDiscardConfirmation by remember { mutableStateOf(false) }
     val saveFailedMessage = stringResource(R.string.miniapp_save_failed)
 
+    fun requestDismiss() {
+        when (miniAppEditorDismissAction(unsaved = unsaved, saving = saving)) {
+            MiniAppEditorDismissAction.IGNORE -> Unit
+            MiniAppEditorDismissAction.CONFIRM -> showDiscardConfirmation = true
+            MiniAppEditorDismissAction.DISMISS -> onDismiss()
+        }
+    }
+
+    BackHandler {
+        if (showDiscardConfirmation) {
+            showDiscardConfirmation = false
+        } else {
+            requestDismiss()
+        }
+    }
+
     AlertDialog(
-        onDismissRequest = onDismiss,
+        onDismissRequest = ::requestDismiss,
         title = {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
@@ -114,7 +134,13 @@ fun MiniAppSourceEditorDialog(
             }
         },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Column(
+                modifier = Modifier
+                    .heightIn(max = 420.dp)
+                    .verticalScroll(rememberScrollState())
+                    .imePadding(),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
                 when (mode) {
                     MODE_VIEW -> {
                         SelectionContainer {
@@ -144,6 +170,7 @@ fun MiniAppSourceEditorDialog(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .heightIn(max = 380.dp),
+                            enabled = !saving,
                             textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = JetbrainsMono),
                             minLines = 14,
                         )
@@ -183,16 +210,17 @@ fun MiniAppSourceEditorDialog(
                                     return@launch
                                 }
                                 saving = true
-                                runCatching {
+                                try {
                                     repository.saveNewVersion(
                                         app = app,
                                         htmlContent = editorText,
                                         changeNote = "Edited in source editor",
                                     )
-                                }.onSuccess {
                                     saving = false
                                     onDismiss()
-                                }.onFailure { error ->
+                                } catch (error: CancellationException) {
+                                    throw error
+                                } catch (error: Throwable) {
                                     saving = false
                                     issues = listOf(
                                         MiniAppSourceChecks.Issue(error.message ?: saveFailedMessage)
@@ -209,14 +237,21 @@ fun MiniAppSourceEditorDialog(
                     }
                 }
 
-                else -> TextButton(onClick = { mode = MODE_EDIT }) { Text(stringResource(R.string.miniapp_back_to_edit)) }
+                else -> TextButton(
+                    onClick = { mode = MODE_EDIT },
+                    enabled = !saving,
+                ) { Text(stringResource(R.string.miniapp_back_to_edit)) }
             }
         },
         dismissButton = {
             when (mode) {
-                MODE_VIEW -> TextButton(onClick = onDismiss) { Text(stringResource(R.string.update_card_close)) }
+                MODE_VIEW -> TextButton(
+                    onClick = ::requestDismiss,
+                    enabled = !saving,
+                ) { Text(stringResource(R.string.update_card_close)) }
                 MODE_EDIT -> Row {
                     TextButton(
+                        enabled = !saving,
                         onClick = {
                             if (unsaved) {
                                 editorText = app.htmlContent
@@ -227,11 +262,13 @@ fun MiniAppSourceEditorDialog(
                         },
                     ) { Text(stringResource(R.string.miniapp_discard_changes)) }
                     TextButton(
+                        enabled = !saving,
                         onClick = { mode = MODE_PREVIEW },
                     ) { Text(stringResource(R.string.code_block_preview)) }
                 }
                 else -> Row {
                     TextButton(
+                        enabled = !saving,
                         onClick = {
                             if (unsaved) {
                                 editorText = app.htmlContent
@@ -241,17 +278,62 @@ fun MiniAppSourceEditorDialog(
                             mode = MODE_EDIT
                         },
                     ) { Text(stringResource(R.string.miniapp_discard_changes)) }
-                    TextButton(onClick = onDismiss) { Text(stringResource(R.string.update_card_close)) }
+                    TextButton(
+                        onClick = ::requestDismiss,
+                        enabled = !saving,
+                    ) { Text(stringResource(R.string.update_card_close)) }
                 }
             }
         },
     )
+
+    if (showDiscardConfirmation) {
+        AlertDialog(
+            onDismissRequest = { showDiscardConfirmation = false },
+            title = {
+                Text(stringResource(R.string.parity_miniapp_source_unsaved_title))
+            },
+            text = {
+                Text(stringResource(R.string.parity_miniapp_source_unsaved_message))
+            },
+            dismissButton = {
+                TextButton(onClick = { showDiscardConfirmation = false }) {
+                    Text(stringResource(R.string.parity_miniapp_source_keep_editing))
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showDiscardConfirmation = false
+                        onDismiss()
+                    },
+                ) {
+                    Text(stringResource(R.string.parity_miniapp_source_discard))
+                }
+            },
+        )
+    }
 
 }
 
 private const val MODE_VIEW = 0
 private const val MODE_EDIT = 1
 private const val MODE_PREVIEW = 2
+
+internal enum class MiniAppEditorDismissAction {
+    IGNORE,
+    CONFIRM,
+    DISMISS,
+}
+
+internal fun miniAppEditorDismissAction(
+    unsaved: Boolean,
+    saving: Boolean,
+): MiniAppEditorDismissAction = when {
+    saving -> MiniAppEditorDismissAction.IGNORE
+    unsaved -> MiniAppEditorDismissAction.CONFIRM
+    else -> MiniAppEditorDismissAction.DISMISS
+}
 
 /**
  * Sandboxed preview of the (possibly unsaved) source: same MiniAppShell CSP

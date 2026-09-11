@@ -1,6 +1,7 @@
 package app.amber.feature.webmount.profile
 
 import android.util.Log
+import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
@@ -10,6 +11,7 @@ import kotlinx.serialization.json.add
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import app.amber.feature.webmount.primitives.SessionHandle
+import app.amber.feature.webmount.primitives.WebMountLeaseInvalidatedException
 import java.util.concurrent.ConcurrentHashMap
 
 /**
@@ -115,6 +117,7 @@ class ProfileBridge(
         args: List<JsonElement>,
         timeoutMs: Long = 8_000L,
         requestedUrlHost: String,
+        dispatchWithLease: ((() -> Unit) -> Boolean)? = null,
     ): SignResult {
         val script = entry.profile.scripts[scriptKey]
             ?: return SignResult.Error("Profile ${entry.profile.id} has no script '$scriptKey'")
@@ -165,7 +168,12 @@ class ProfileBridge(
                 fnName = fnName,
                 args = kotlinx.serialization.json.JsonArray(args),
                 timeoutMs = timeoutMs,
+                dispatchWithLease = dispatchWithLease,
             )
+        } catch (cancel: CancellationException) {
+            throw cancel
+        } catch (invalidated: WebMountLeaseInvalidatedException) {
+            throw invalidated
         } catch (error: Throwable) {
             return SignResult.Error("callPageFn '$fnName' failed: ${error.message ?: error.toString()}")
         }

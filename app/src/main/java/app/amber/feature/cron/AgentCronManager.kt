@@ -234,7 +234,12 @@ class AgentCronManager(
                     }
                 }
             }
-            agentTaskStore.update(id, status = AgentTaskStatus.RUNNING, clearError = true)
+            agentTaskStore.update(
+                id,
+                status = AgentTaskStatus.RUNNING,
+                clearError = true,
+                clearLastErrorCode = true,
+            )
             true
         }
     }
@@ -260,6 +265,7 @@ class AgentCronManager(
                 status = AgentTaskStatus.COMPLETED,
                 summary = "Cron run completed.",
                 clearError = true,
+                clearLastErrorCode = true,
             )
             true
         }
@@ -286,6 +292,7 @@ class AgentCronManager(
                 status = AgentTaskStatus.FAILED,
                 error = message.take(500),
                 clearError = true,
+                clearLastErrorCode = true,
             )
             true
         }

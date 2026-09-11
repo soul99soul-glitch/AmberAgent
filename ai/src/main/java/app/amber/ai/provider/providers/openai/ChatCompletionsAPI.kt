@@ -568,6 +568,18 @@ class ChatCompletionsAPI(
         token: String,
     ): Request.Builder {
         val host = providerSetting.baseUrl.toHttpUrl().host
+        if (providerSetting.authMode == OpenAIAuthMode.GROK_OAUTH) {
+            // The Grok CLI proxy rejects requests without its client identity
+            // headers (iOS parity); these are only applied on the OAuth path.
+            addHeader("Authorization", "Bearer $token")
+            header("User-Agent", "grok-shell/0.2.101 (android; arm64)")
+            header("x-grok-client-identifier", "grok-shell")
+            header("x-grok-client-version", "0.2.101")
+            header("x-grok-client-mode", "interactive")
+            header("X-XAI-Token-Auth", "xai-grok-cli")
+            header("x-authenticateresponse", "authenticate-response")
+            return this
+        }
         return if (providerSetting.authMode == OpenAIAuthMode.MIMO_CODING_PLAN ||
             host.startsWith("token-plan-") && host.endsWith("xiaomimimo.com")
         ) {

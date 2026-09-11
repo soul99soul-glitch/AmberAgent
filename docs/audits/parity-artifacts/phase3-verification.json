@@ -1,0 +1,566 @@
+{
+  "phase": 3,
+  "jvm": [
+    {
+      "class": "app.amber.feature.runtime.AgentToolDispatcherTest",
+      "name": "toolExceptionReturnsShortStructuredFailure",
+      "seconds": 0.029,
+      "passed": true
+    },
+    {
+      "class": "app.amber.feature.runtime.AgentToolDispatcherTest",
+      "name": "executeBatchSerializesOneParallelGroupButRunsDifferentGroupsTogether",
+      "seconds": 0.01,
+      "passed": true
+    },
+    {
+      "class": "app.amber.feature.runtime.AgentToolDispatcherTest",
+      "name": "safeReadOnlyToolRetriesTransientFailure",
+      "seconds": 0.003,
+      "passed": true
+    },
+    {
+      "class": "app.amber.feature.runtime.AgentToolDispatcherTest",
+      "name": "approvedCallWithMatchingArgsExecutesWithoutLedgerContext",
+      "seconds": 0.05,
+      "passed": true
+    },
+    {
+      "class": "app.amber.feature.runtime.AgentToolDispatcherTest",
+      "name": "executeAddsPermissionTraceMetadata",
+      "seconds": 0.001,
+      "passed": true
+    },
+    {
+      "class": "app.amber.feature.runtime.AgentToolDispatcherTest",
+      "name": "approvedCallWithMissingApprovalRecordIsBlockedWithoutLedgerContext",
+      "seconds": 0.002,
+      "passed": true
+    },
+    {
+      "class": "app.amber.feature.runtime.AgentToolDispatcherTest",
+      "name": "hookFailureDoesNotInterruptToolExecutionButCancellationPropagates",
+      "seconds": 0.001,
+      "passed": true
+    },
+    {
+      "class": "app.amber.feature.runtime.AgentToolDispatcherTest",
+      "name": "mutatingToolDoesNotAutoRetry",
+      "seconds": 0.001,
+      "passed": true
+    },
+    {
+      "class": "app.amber.feature.runtime.AgentToolDispatcherTest",
+      "name": "executeBatchKeepsOriginalOrderForReadOnlyTools",
+      "seconds": 0.001,
+      "passed": true
+    },
+    {
+      "class": "app.amber.feature.runtime.AgentToolDispatcherTest",
+      "name": "approvedCallWithChangedArgsIsBlockedWithoutLedgerContext",
+      "seconds": 0.002,
+      "passed": true
+    },
+    {
+      "class": "app.amber.feature.runtime.AgentToolDispatcherTest",
+      "name": "validationHookCanReturnStructuredFailure",
+      "seconds": 0.001,
+      "passed": true
+    },
+    {
+      "class": "app.amber.feature.runtime.AgentToolDispatcherTest",
+      "name": "hookObservesSuccessfulAndFailedCalls",
+      "seconds": 0.002,
+      "passed": true
+    },
+    {
+      "class": "app.amber.feature.runtime.PermissionDecisionResolverTest",
+      "name": "mandatoryApprovalStillRequiresPromptWithRegularAutoApproveOnly",
+      "seconds": 0.001,
+      "passed": true
+    },
+    {
+      "class": "app.amber.feature.runtime.PermissionDecisionResolverTest",
+      "name": "traceExplainsAlwaysAskHold",
+      "seconds": 0.0,
+      "passed": true
+    },
+    {
+      "class": "app.amber.feature.runtime.PermissionDecisionResolverTest",
+      "name": "askUserAlwaysNeedsHumanAnswerEvenWhenUnattendedExecutionIsEnabled",
+      "seconds": 0.001,
+      "passed": true
+    },
+    {
+      "class": "app.amber.feature.runtime.PermissionDecisionResolverTest",
+      "name": "subAgentCanUseHighRiskAutoApprovalWhenExplicitlyEnabled",
+      "seconds": 0.0,
+      "passed": true
+    },
+    {
+      "class": "app.amber.feature.runtime.PermissionDecisionResolverTest",
+      "name": "externalCliCouncilSeatCanUseHighRiskAutoApproval",
+      "seconds": 0.0,
+      "passed": true
+    },
+    {
+      "class": "app.amber.feature.runtime.PermissionDecisionResolverTest",
+      "name": "removingWebsiteCannotBypassConfirmationInUnattendedMode",
+      "seconds": 0.0,
+      "passed": true
+    },
+    {
+      "class": "app.amber.feature.runtime.PermissionDecisionResolverTest",
+      "name": "highRiskToolStillHoldsWithoutHighRiskAutoApproval",
+      "seconds": 0.0,
+      "passed": true
+    },
+    {
+      "class": "app.amber.feature.runtime.PermissionDecisionResolverTest",
+      "name": "subAgentHistoryReadRequiresGrantForSilentApproval",
+      "seconds": 0.001,
+      "passed": true
+    },
+    {
+      "class": "app.amber.feature.runtime.PermissionDecisionResolverTest",
+      "name": "subAgentStillNeedsApprovalWithoutHighRiskAutoApproval",
+      "seconds": 0.0,
+      "passed": true
+    },
+    {
+      "class": "app.amber.feature.runtime.PermissionDecisionResolverTest",
+      "name": "subAgentCanStartNestedSubAgentWhenUnattendedAutoApprovalIsEnabled",
+      "seconds": 0.0,
+      "passed": true
+    },
+    {
+      "class": "app.amber.feature.runtime.PermissionDecisionResolverTest",
+      "name": "traceExplainsCronApprovalHold",
+      "seconds": 0.0,
+      "passed": true
+    },
+    {
+      "class": "app.amber.feature.runtime.PermissionDecisionResolverTest",
+      "name": "mandatoryApprovalOverridesPriorRunTrust",
+      "seconds": 0.0,
+      "passed": true
+    },
+    {
+      "class": "app.amber.feature.runtime.PermissionDecisionResolverTest",
+      "name": "runPlanUpdateKeepsInternalReadOnlyPolicyDespiteUpdateToken",
+      "seconds": 0.0,
+      "passed": true
+    },
+    {
+      "class": "app.amber.feature.runtime.PermissionDecisionResolverTest",
+      "name": "memoryToolPolicyDistinguishesReadsFromMutations",
+      "seconds": 0.0,
+      "passed": true
+    },
+    {
+      "class": "app.amber.feature.runtime.PermissionDecisionResolverTest",
+      "name": "httpMethodPolicyDistinguishesReadsFromMutations",
+      "seconds": 0.0,
+      "passed": true
+    },
+    {
+      "class": "app.amber.feature.runtime.PermissionDecisionResolverTest",
+      "name": "subAgentHistoryReadWithGrantIsSilentlyApproved",
+      "seconds": 0.001,
+      "passed": true
+    },
+    {
+      "class": "app.amber.feature.runtime.PermissionDecisionResolverTest",
+      "name": "writeActionToolFamiliesAskButReadOnlySiblingsAllowWithRegularAutoApproval",
+      "seconds": 0.0,
+      "passed": true
+    },
+    {
+      "class": "app.amber.feature.runtime.PermissionDecisionResolverTest",
+      "name": "subAgentSensitiveToolUsesUnattendedAutoApproval",
+      "seconds": 0.001,
+      "passed": true
+    },
+    {
+      "class": "app.amber.feature.runtime.PermissionDecisionResolverTest",
+      "name": "directPhoneCallAndDialerUseUnattendedAutoApproval",
+      "seconds": 0.0,
+      "passed": true
+    },
+    {
+      "class": "app.amber.feature.runtime.PermissionDecisionResolverTest",
+      "name": "subAgentStartUsesGlobalAutoApprovalInMainContext",
+      "seconds": 0.0,
+      "passed": true
+    },
+    {
+      "class": "app.amber.feature.runtime.PermissionDecisionResolverTest",
+      "name": "addingWebsiteAlwaysRequiresItsOwnUserConfirmation",
+      "seconds": 0.0,
+      "passed": true
+    },
+    {
+      "class": "app.amber.feature.runtime.PermissionDecisionResolverTest",
+      "name": "explicitlyConfirmedWebsiteAdditionCanProceed",
+      "seconds": 0.0,
+      "passed": true
+    },
+    {
+      "class": "app.amber.feature.runtime.PermissionDecisionResolverTest",
+      "name": "workspaceWriteUsesUnattendedAutoApprovalEvenWhenOrdinaryAutoApprovalIsDisabledForTool",
+      "seconds": 0.0,
+      "passed": true
+    },
+    {
+      "class": "app.amber.feature.runtime.PermissionDecisionResolverTest",
+      "name": "mandatoryApprovalCanBeBypassedByExplicitHighRiskAutoApprove",
+      "seconds": 0.0,
+      "passed": true
+    },
+    {
+      "class": "app.amber.feature.runtime.PermissionDecisionResolverTest",
+      "name": "externalCliRunnerTypeGuardStaysInSyncWithRegistry",
+      "seconds": 0.003,
+      "passed": true
+    },
+    {
+      "class": "app.amber.feature.runtime.PermissionDecisionResolverTest",
+      "name": "implicitMutatingOrDangerousCategoryToolsFailClosedForAutoApproval",
+      "seconds": 0.0,
+      "passed": true
+    },
+    {
+      "class": "app.amber.feature.runtime.PermissionDecisionResolverTest",
+      "name": "missingToolExplainsToolSearchRecovery",
+      "seconds": 0.0,
+      "passed": true
+    },
+    {
+      "class": "app.amber.feature.runtime.PermissionDecisionResolverTest",
+      "name": "subAgentCloudToolUsesUnattendedAutoApproval",
+      "seconds": 0.0,
+      "passed": true
+    },
+    {
+      "class": "app.amber.feature.subagent.RoomThreadGraphStoreTest",
+      "name": "claimQueuedMessagesIsSingleConsumer",
+      "seconds": 2.276,
+      "passed": true
+    },
+    {
+      "class": "app.amber.feature.subagent.RoomThreadGraphStoreTest",
+      "name": "nodeAndResultSurviveStoreRecreation",
+      "seconds": 0.03,
+      "passed": true
+    },
+    {
+      "class": "app.amber.feature.subagent.RoomThreadGraphStoreTest",
+      "name": "messageDeliveryStatesArePersisted",
+      "seconds": 0.023,
+      "passed": true
+    },
+    {
+      "class": "app.amber.feature.subagent.RoomThreadGraphStoreTest",
+      "name": "captureWriteContextPreservesCallerEpochOrCapturesCurrentGateEpoch",
+      "seconds": 0.021,
+      "passed": true
+    },
+    {
+      "class": "app.amber.feature.subagent.RoomThreadGraphStoreTest",
+      "name": "queuedMessageSurvivesStoreRecreationUntilAThreadClaimsIt",
+      "seconds": 0.02,
+      "passed": true
+    },
+    {
+      "class": "app.amber.feature.subagent.RoomThreadGraphStoreTest",
+      "name": "concurrentDrainClaimsEachQueuedMessageOnce",
+      "seconds": 0.041,
+      "passed": true
+    },
+    {
+      "class": "app.amber.feature.subagent.SubAgentThreadGraphIntegrationTest",
+      "name": "waitCompletesFromAgentTaskTerminalFlow",
+      "seconds": 0.306,
+      "passed": true
+    },
+    {
+      "class": "app.amber.feature.subagent.SubAgentThreadGraphIntegrationTest",
+      "name": "staleGenerationTerminalDoesNotOverwriteThreadAfterRestore",
+      "seconds": 0.091,
+      "passed": true
+    },
+    {
+      "class": "app.amber.feature.subagent.SubAgentThreadGraphIntegrationTest",
+      "name": "startCompleteThenRestartReadReturnsFinalAnswer",
+      "seconds": 0.041,
+      "passed": true
+    },
+    {
+      "class": "app.amber.feature.subagent.SubAgentThreadGraphIntegrationTest",
+      "name": "flagOffKeepsLegacyInMemoryBehaviorWithoutPersistence",
+      "seconds": 0.056,
+      "passed": true
+    },
+    {
+      "class": "app.amber.feature.subagent.SubAgentThreadGraphIntegrationTest",
+      "name": "interruptKeepsThreadAndFollowupContinuesIt",
+      "seconds": 0.114,
+      "passed": true
+    },
+    {
+      "class": "app.amber.feature.subagent.SubAgentThreadGraphIntegrationTest",
+      "name": "sendMessageToIdleThreadStaysQueuedThenPersistedAfterFollowup",
+      "seconds": 0.098,
+      "passed": true
+    },
+    {
+      "class": "app.amber.feature.subagent.SubAgentThreadGraphIntegrationTest",
+      "name": "sameInstanceFollowupAfterInterruptSucceeds",
+      "seconds": 0.085,
+      "passed": true
+    },
+    {
+      "class": "app.amber.feature.subagent.SubAgentThreadGraphIntegrationTest",
+      "name": "coldStartCancelOfStaleRunningThread",
+      "seconds": 0.027,
+      "passed": true
+    },
+    {
+      "class": "app.amber.feature.subagent.SubAgentThreadGraphIntegrationTest",
+      "name": "runScopedToolProviderReceivesOpaqueGenerationScopeId",
+      "seconds": 0.052,
+      "passed": true
+    },
+    {
+      "class": "app.amber.feature.subagent.SubAgentThreadGraphIntegrationTest",
+      "name": "productionStartPreservesParentAndRejectsThirdGeneration",
+      "seconds": 0.057,
+      "passed": true
+    },
+    {
+      "class": "app.amber.feature.subagent.SubAgentThreadGraphIntegrationTest",
+      "name": "childRunWiresLedgerPathAndWaitingUserPausesThread",
+      "seconds": 0.076,
+      "passed": true
+    },
+    {
+      "class": "app.amber.feature.subagent.SubAgentThreadGraphIntegrationTest",
+      "name": "sendMessageToLiveThreadIsDeliveredAndPersistedWithResult",
+      "seconds": 0.049,
+      "passed": true
+    },
+    {
+      "class": "app.amber.feature.subagent.SubAgentThreadGraphIntegrationTest",
+      "name": "waitAfterRestartReconcilesDeadRunningThread",
+      "seconds": 0.044,
+      "passed": true
+    },
+    {
+      "class": "app.amber.feature.subagent.SubAgentThreadGraphIntegrationTest",
+      "name": "cancelByRootRunCascadesToLiveAndStaleChildren",
+      "seconds": 0.08,
+      "passed": true
+    },
+    {
+      "class": "app.amber.feature.subagent.SubAgentThreadGraphIntegrationTest",
+      "name": "followupAndCancelCompetitionCannotResurrectCancelledThread",
+      "seconds": 0.023,
+      "passed": true
+    },
+    {
+      "class": "app.amber.feature.subagent.SubAgentThreadGraphIntegrationTest",
+      "name": "coldStartFollowupRequeuesDeliveredMessagesBeforeDrain",
+      "seconds": 0.08,
+      "passed": true
+    },
+    {
+      "class": "app.amber.feature.subagent.SubAgentThreadGraphIntegrationTest",
+      "name": "followupStateFlowPublishesTerminalWithoutAnotherToolRead",
+      "seconds": 0.046,
+      "passed": true
+    },
+    {
+      "class": "app.amber.feature.subagent.ThreadGraphManagerTest",
+      "name": "startNodeUsesGenerationUpdateTimestampForFollowupRecovery",
+      "seconds": 0.003,
+      "passed": true
+    },
+    {
+      "class": "app.amber.feature.subagent.ThreadGraphManagerTest",
+      "name": "parentChainAllowsGrandchildAndRejectsGreatGrandchild",
+      "seconds": 0.001,
+      "passed": true
+    },
+    {
+      "class": "app.amber.feature.subagent.ThreadGraphManagerTest",
+      "name": "followupMessageMovesQueuedDeliveredPersisted",
+      "seconds": 0.002,
+      "passed": true
+    },
+    {
+      "class": "app.amber.feature.subagent.ThreadGraphManagerTest",
+      "name": "restorePayloadReturnsCompletedResultWithFinalAnswer",
+      "seconds": 0.001,
+      "passed": true
+    },
+    {
+      "class": "app.amber.feature.subagent.ThreadGraphManagerTest",
+      "name": "unknownThreadReturnsNull",
+      "seconds": 0.0,
+      "passed": true
+    },
+    {
+      "class": "app.amber.feature.subagent.ThreadGraphManagerTest",
+      "name": "restorePayloadReconcilesStaleRunningThreadToInterrupted",
+      "seconds": 0.001,
+      "passed": true
+    },
+    {
+      "class": "app.amber.feature.subagent.ThreadGraphManagerTest",
+      "name": "drainQueuedClaimsEachMessageOnlyOnce",
+      "seconds": 0.0,
+      "passed": true
+    },
+    {
+      "class": "app.amber.feature.subagent.ThreadGraphManagerTest",
+      "name": "sendMessageQueuedWhenIdleAndPersistedAfterResult",
+      "seconds": 0.001,
+      "passed": true
+    },
+    {
+      "class": "app.amber.feature.subagent.ThreadGraphManagerTest",
+      "name": "prepareStartUsesPersistedParentAndRoot",
+      "seconds": 0.0,
+      "passed": true
+    },
+    {
+      "class": "app.amber.feature.subagent.ThreadGraphManagerTest",
+      "name": "finishNodeInterruptedKeepsThreadAndTerminalReason",
+      "seconds": 0.001,
+      "passed": true
+    },
+    {
+      "class": "app.amber.feature.subagent.ThreadGraphManagerTest",
+      "name": "listByRootRunFindsCascadeTargets",
+      "seconds": 0.0,
+      "passed": true
+    },
+    {
+      "class": "app.amber.feature.subagent.ThreadGraphManagerTest",
+      "name": "cancelPersistedMarksStaleThreadCancelled",
+      "seconds": 0.001,
+      "passed": true
+    },
+    {
+      "class": "app.amber.feature.ui.components.message.ChatMessageCotTest",
+      "name": "queued message keeps prior result but card reports pending receipt",
+      "seconds": 0.002,
+      "passed": true
+    },
+    {
+      "class": "app.amber.feature.ui.components.message.ChatMessageCotTest",
+      "name": "followup send and interrupt share the original subagent card",
+      "seconds": 0.001,
+      "passed": true
+    },
+    {
+      "class": "app.amber.feature.ui.components.message.ChatMessageCotTest",
+      "name": "blank reasoning markers do not split adjacent visible text",
+      "seconds": 0.0,
+      "passed": true
+    },
+    {
+      "class": "app.amber.feature.ui.components.message.ChatMessageCotTest",
+      "name": "followup starts a distinct current turn",
+      "seconds": 0.001,
+      "passed": true
+    },
+    {
+      "class": "app.amber.feature.ui.components.message.ChatMessageCouncilStepTest",
+      "name": "latest interrupted tool status wins over an older running transcript",
+      "seconds": 0.041,
+      "passed": true
+    },
+    {
+      "class": "app.amber.feature.ui.components.message.ChatMessageCouncilStepTest",
+      "name": "cold start restores seats and final text from council transcript",
+      "seconds": 0.008,
+      "passed": true
+    },
+    {
+      "class": "app.amber.feature.ui.components.message.ChatMessageCouncilStepTest",
+      "name": "partial failure is rendered as failed tool status",
+      "seconds": 0.001,
+      "passed": true
+    },
+    {
+      "class": "app.amber.feature.ui.components.message.ChatMessageTouchTargetTest",
+      "name": "chainOfThoughtCollapseControlExposes48DpClickTarget",
+      "seconds": 4.607,
+      "passed": true
+    },
+    {
+      "class": "app.amber.feature.ui.components.message.ChatMessageTouchTargetTest",
+      "name": "agentToolCallCapsuleKeepsCompactVisualAndExposes48DpClickTarget",
+      "seconds": 0.066,
+      "passed": true
+    },
+    {
+      "class": "app.amber.feature.ui.components.message.ChatMessageTouchTargetTest",
+      "name": "chainOfThoughtStepExposes48DpClickTargetAndExpandsContent",
+      "seconds": 0.074,
+      "passed": true
+    },
+    {
+      "class": "app.amber.feature.ui.components.webmount.WebMountTaskCardTest",
+      "name": "needsReopenOffersExplicitReopenAction",
+      "seconds": 0.045,
+      "passed": true
+    },
+    {
+      "class": "app.amber.feature.ui.components.webmount.WebMountTaskCardTest",
+      "name": "agentOwnedSessionRemainsViewOnlyEntry",
+      "seconds": 0.028,
+      "passed": true
+    },
+    {
+      "class": "app.amber.feature.ui.components.webmount.WebMountTaskCardTest",
+      "name": "multipleSessionsStayBoundedAndScrollToLastAtLargeFont",
+      "seconds": 0.071,
+      "passed": true
+    },
+    {
+      "class": "app.amber.feature.webmount.WebMountScopeAndPolicyTest",
+      "name": "hostScopeReplacesModelSuppliedIdentityAndFailsClosedWhenAbsent",
+      "seconds": 0.007,
+      "passed": true
+    },
+    {
+      "class": "app.amber.feature.webmount.WebMountScopeAndPolicyTest",
+      "name": "siteAddFactoryAndRegistryPolicyRequireExplicitApproval",
+      "seconds": 0.025,
+      "passed": true
+    }
+  ],
+  "settings_tests_previously_passed": 7,
+  "device_tests": 17,
+  "logs": [
+    {
+      "path": "/tmp/amber-parity-phase3-closeout.log",
+      "sha256": "ac0c3fa49c4970ba499a3eb4c4af9d71bc7774265b4e600b248e8bda4f43be31"
+    },
+    {
+      "path": "/tmp/amber-parity-phase3-device-closeout.log",
+      "sha256": "ed54ee1d7b51d3e630164709484dfe03d14c343b1fe56b023461342745e29a82"
+    },
+    {
+      "path": "/tmp/amber-parity-phase3-late-dialog-first.log",
+      "sha256": "045d548458be0f4f2acb63361478e888c331a0032f3710725ed2a2dbbd3a977a"
+    },
+    {
+      "path": "/tmp/amber-parity-phase3-late-dialog-final-build.log",
+      "sha256": "2ccf3cca23d9824fe4f54f54b63acd5ecb7102dddc06f0b3fbc5ca251d87574d"
+    }
+  ],
+  "device_scope": "emulator-5554, synthetic localhost fixtures; no real SSO"
+}

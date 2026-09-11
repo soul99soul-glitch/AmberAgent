@@ -21,6 +21,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.material3.surfaceColorAtElevation
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -124,7 +125,7 @@ fun <T> ChainOfThought(
 
                 // 显示展开/折叠按钮（统一在顶部）
                 if (canCollapse) {
-                    Row(
+                    Box(
                         modifier = Modifier
                             .then(
                                 if (shouldFillCollapseControlWidth) {
@@ -135,36 +136,41 @@ fun <T> ChainOfThought(
                             )
                             .clip(MaterialTheme.shapes.small)
                             .clickable { expanded = !expanded }
-                            .padding(vertical = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically,
+                            .minimumInteractiveComponentSize(),
+                        contentAlignment = Alignment.CenterStart,
                     ) {
-                        // 左侧：图标区域（24.dp，和步骤图标对齐）
-                        Box(
-                            modifier = Modifier.width(24.dp),
-                            contentAlignment = Alignment.Center,
+                        Row(
+                            modifier = Modifier.padding(vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            Icon(
-                                imageVector = if (expanded) Lucide.ArrowUp else Lucide.ArrowDown,
-                                contentDescription = null,
-                                modifier = Modifier.size(16.dp),
-                                tint = MaterialTheme.colorScheme.primary,
+                            // 左侧：图标区域（24.dp，和步骤图标对齐）
+                            Box(
+                                modifier = Modifier.width(24.dp),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Icon(
+                                    imageVector = if (expanded) Lucide.ArrowUp else Lucide.ArrowDown,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp),
+                                    tint = MaterialTheme.colorScheme.primary,
+                                )
+                            }
+
+                            // 右侧：文字区域（8.dp 间距后开始，和步骤 label 对齐）
+                            Text(
+                                modifier = Modifier.padding(start = 8.dp),
+                                text = if (expanded) {
+                                    stringResource(R.string.chain_of_thought_collapse)
+                                } else {
+                                    stringResource(
+                                        R.string.chain_of_thought_show_more_steps,
+                                        steps.size - collapsedVisibleCount
+                                    )
+                                },
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.primary,
                             )
                         }
-
-                        // 右侧：文字区域（8.dp 间距后开始，和步骤 label 对齐）
-                        Text(
-                            modifier = Modifier.padding(start = 8.dp),
-                            text = if (expanded) {
-                                stringResource(R.string.chain_of_thought_collapse)
-                            } else {
-                                stringResource(
-                                    R.string.chain_of_thought_show_more_steps,
-                                    steps.size - collapsedVisibleCount
-                                )
-                            },
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.primary,
-                        )
                     }
                 }
 
@@ -336,7 +342,7 @@ private class ChainOfThoughtScopeImpl : ChainOfThoughtScope {
             ),
         ) {
             // Label 行：Icon + Label + Extra + 指示器
-            Row(
+            Box(
                 modifier = Modifier
                     .then(
                         if (shouldFillMaxWidth) {
@@ -345,85 +351,94 @@ private class ChainOfThoughtScopeImpl : ChainOfThoughtScope {
                             Modifier
                         }
                     )
-                    .then(
-                        if (onClick != null) {
-                            Modifier
-                                .clip(MaterialTheme.shapes.small)
-                                .clickable { onClick() }
-                        } else if (hasContent) {
-                            Modifier
-                                .clip(MaterialTheme.shapes.small)
-                                .clickable { onExpandedChange(!expanded) }
-                        } else {
-                            Modifier
-                        }
-                    )
-                    .padding(vertical = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically,
+                    .then(if (onClick != null || hasContent) {
+                        Modifier
+                            .clip(MaterialTheme.shapes.small)
+                            .clickable {
+                                if (onClick != null) onClick() else onExpandedChange(!expanded)
+                            }
+                            .minimumInteractiveComponentSize()
+                    } else {
+                        Modifier
+                    }),
+                contentAlignment = Alignment.CenterStart,
             ) {
-                // Icon（不透明背景遮住背后的连线）
-                Box(
-                    modifier = Modifier.width(24.dp),
-                    contentAlignment = Alignment.Center,
+                Row(
+                    modifier = Modifier
+                        .then(
+                            if (shouldFillMaxWidth) {
+                                Modifier.fillMaxWidth()
+                            } else {
+                                Modifier
+                            }
+                        )
+                        .padding(vertical = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
+                    // Icon（不透明背景遮住背后的连线）
                     Box(
-                        modifier = Modifier
-                            .size(20.dp)
-                            .background(LocalCardColor.current),
+                        modifier = Modifier.width(24.dp),
                         contentAlignment = Alignment.Center,
                     ) {
-                        if (icon != null) {
-                            Box(
-                                modifier = Modifier.size(14.dp),
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                icon()
+                        Box(
+                            modifier = Modifier
+                                .size(20.dp)
+                                .background(LocalCardColor.current),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            if (icon != null) {
+                                Box(
+                                    modifier = Modifier.size(14.dp),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    icon()
+                                }
+                            } else {
+                                Box(
+                                    modifier = Modifier
+                                        .size(8.dp)
+                                        .clip(CircleShape)
+                                        .background(MaterialTheme.colorScheme.onSurfaceVariant)
+                                )
                             }
-                        } else {
-                            Box(
-                                modifier = Modifier
-                                    .size(8.dp)
-                                    .clip(CircleShape)
-                                    .background(MaterialTheme.colorScheme.onSurfaceVariant)
-                            )
                         }
                     }
-                }
 
-                // Label
-                Box(
-                    modifier = Modifier.then(
-                        if (shouldFillMaxWidth) {
-                            Modifier.weight(1f)
-                        } else {
-                            Modifier
-                        }
-                    )
-                ) {
-                    label()
-                }
+                    // Label
+                    Box(
+                        modifier = Modifier.then(
+                            if (shouldFillMaxWidth) {
+                                Modifier.weight(1f)
+                            } else {
+                                Modifier
+                            }
+                        )
+                    ) {
+                        label()
+                    }
 
-                // Extra
-                if (extra != null) {
-                    extra()
-                }
+                    // Extra
+                    if (extra != null) {
+                        extra()
+                    }
 
-                // 指示器：onClick 显示向右箭头，content 显示展开/折叠箭头
-                if (onClick != null) {
-                    Icon(
-                        imageVector = Lucide.ArrowRight,
-                        contentDescription = null,
-                        modifier = Modifier.size(16.dp),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                } else if (hasContent) {
-                    Icon(
-                        imageVector = if (expanded) Lucide.ArrowUp else Lucide.ArrowDown,
-                        contentDescription = null,
-                        modifier = Modifier.size(16.dp),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+                    // 指示器：onClick 显示向右箭头，content 显示展开/折叠箭头
+                    if (onClick != null) {
+                        Icon(
+                            imageVector = Lucide.ArrowRight,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    } else if (hasContent) {
+                        Icon(
+                            imageVector = if (expanded) Lucide.ArrowUp else Lucide.ArrowDown,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                 }
             }
 

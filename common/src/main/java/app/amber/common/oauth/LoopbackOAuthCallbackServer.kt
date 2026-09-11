@@ -62,6 +62,7 @@ data class LoopbackOAuthCopy(
 class LoopbackOAuthCallbackServer(
     val port: Int = DEFAULT_PORT,
     private val acceptedSocketReadTimeoutMillis: Int = DEFAULT_ACCEPTED_SOCKET_READ_TIMEOUT_MILLIS,
+    val callbackPath: String = DEFAULT_CALLBACK_PATH,
     private val copy: LoopbackOAuthCopy = LoopbackOAuthCopy.ENGLISH,
 ) : Closeable {
     private val serverSocket: ServerSocket = try {
@@ -166,9 +167,16 @@ class LoopbackOAuthCallbackServer(
         val method = parts[0]
         val target = parts[1]
         val path = target.substringBefore('?')
-        if (method != "GET" || path != "/callback") {
+        if (method != "GET" || path != callbackPath) {
             return HandledRequest(
-                result = failure("ignored_non_callback_path", copy.waitingForCallback),
+                result = failure(
+                    "ignored_non_callback_path",
+                    if (callbackPath == DEFAULT_CALLBACK_PATH) {
+                        copy.waitingForCallback
+                    } else {
+                        copy.waitingForCallback.replace(DEFAULT_CALLBACK_PATH, callbackPath)
+                    },
+                ),
                 terminal = false,
                 statusCode = 404,
             )
@@ -268,6 +276,7 @@ class LoopbackOAuthCallbackServer(
         private const val MAX_HEADER_BYTES = 16 * 1024
 
         const val DEFAULT_PORT = 53682
+        const val DEFAULT_CALLBACK_PATH = "/callback"
         const val DEFAULT_REDIRECT_URI = "http://127.0.0.1:$DEFAULT_PORT/callback"
 
         private fun failure(error: String, description: String?): OAuthCallbackResult =

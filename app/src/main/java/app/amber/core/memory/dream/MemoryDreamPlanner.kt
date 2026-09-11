@@ -6,6 +6,8 @@ import kotlinx.serialization.json.floatOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.withContext
 import app.amber.ai.provider.ProviderCatalog
 import app.amber.ai.provider.TextGenerationParams
 import app.amber.ai.ui.UIMessage
@@ -24,6 +26,11 @@ import app.amber.core.memory.model.MemoryScope
 import app.amber.core.memory.prompt.MemoryDreamPrompt
 import app.amber.core.memory.store.MemoryRepository
 import app.amber.core.memory.telemetry.MemoryEventLogger
+import app.amber.core.sync.core.SyncRestoreWriteEpoch
+import app.amber.core.sync.core.SyncRestoreWriteGate
+import kotlin.coroutines.CoroutineContext
+import kotlin.coroutines.EmptyCoroutineContext
+import kotlin.coroutines.coroutineContext
 
 interface MemoryDreamPlanProvider {
     suspend fun plan(): MemoryDreamPlan
@@ -35,8 +42,12 @@ class MemoryDreamPlanner(
     private val json: Json,
     private val memoryRepository: MemoryRepository,
     private val eventLogger: MemoryEventLogger,
+    private val restoreWriteGate: SyncRestoreWriteGate? = null,
 ) : MemoryDreamPlanProvider {
-    override suspend fun plan(): MemoryDreamPlan {
+    override suspend fun plan(): MemoryDreamPlan =
+        withContext(captureWriteContext()) { planInternal() }
+
+    private suspend fun planInternal(): MemoryDreamPlan {
         val now = System.currentTimeMillis()
         val settings = settingsStore.settingsFlow.value
         val records = memoryRepository.getAllRecords()
@@ -46,9 +57,13 @@ class MemoryDreamPlanner(
         } else {
             MemoryDreamPlan()
         }
-        val modelPlan = runCatching {
+        val modelPlan = try {
             planWithModel(settings, records, candidates)
-        }.getOrNull()
+        } catch (error: CancellationException) {
+            throw error
+        } catch (_: Throwable) {
+            null
+        }
 
         val plan = localPlan.mergeWith(modelPlan)
         eventLogger.log(
@@ -69,6 +84,16 @@ class MemoryDreamPlanner(
             },
         )
         return plan
+    }
+
+    private suspend fun captureWriteContext(): CoroutineContext {
+        coroutineContext[SyncRestoreWriteEpoch]?.let { return it }
+        val gate = restoreWriteGate ?: return EmptyCoroutineContext
+        // A manual/background owner without a token waits for an active restore
+        // to finish before taking its snapshot. The no-op lock is released
+        // before the model call, so restore is never held behind network work.
+        gate.withWriter { Unit }
+        return SyncRestoreWriteEpoch(gate.currentEpoch())
     }
 
     private suspend fun planWithModel(

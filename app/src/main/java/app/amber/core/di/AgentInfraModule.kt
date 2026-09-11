@@ -9,7 +9,12 @@ import app.amber.feature.runtime.ToolActivityTitleLocalizer
 import app.amber.feature.runtime.ToolActivityTitleResolver
 import app.amber.feature.cron.AgentCronManager
 import app.amber.feature.live.LiveModeManager
+import app.amber.feature.reminder.AndroidReminderAlarmOperations
+import app.amber.feature.reminder.ReminderScheduler
+import app.amber.feature.reminder.ReminderStore
+import app.amber.feature.reminder.ReminderTools
 import app.amber.feature.system.AgentPermissionBroker
+import app.amber.feature.health.HealthSummaryReader
 import app.amber.feature.task.AgentTaskScheduler
 import app.amber.feature.task.AgentTaskStore
 import app.amber.feature.terminal.AlpineRuntimeInstaller
@@ -63,9 +68,11 @@ val agentInfraModule = module {
 
     single { AlpineRuntimeInstaller(get()) }
 
-    single { TerminalRuntime(get(), get(), get(), get(), get(), get(), get()) }
+    single { app.amber.feature.terminal.SshClient() }
 
-    single { TerminalTools(get(), get()) }
+    single { TerminalRuntime(get(), get(), get(), get(), get(), get(), get(), get(), get()) }
+
+    single { TerminalTools(get(), get(), get()) }
 
     single { ScreenCaptureManager(get()) }
 
@@ -73,9 +80,22 @@ val agentInfraModule = module {
 
     single { AgentPermissionBroker(get(), BuildConfig.DEBUG) }
 
+    single { HealthSummaryReader(get()) }
+
     single { SystemAccessTools(get(), get(), get(), get()) }
 
     single { AgentCronManager(get(), get(), get()) }
+
+    single { ReminderStore(get<android.content.Context>()) }
+    single<app.amber.feature.reminder.ReminderAlarmOperations> { AndroidReminderAlarmOperations(get()) }
+    single {
+        ReminderScheduler(
+            store = get(),
+            operations = get(),
+            exactAlarmAllowed = { ReminderScheduler.exactAlarmAllowed(get<android.content.Context>()) },
+        )
+    }
+    single { ReminderTools(get(), get()) }
 
     single { AgentCronTools(get()) }
 }

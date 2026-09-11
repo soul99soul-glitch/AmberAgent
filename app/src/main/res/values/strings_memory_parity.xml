@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="setting_agent_memory_add_title">Add Memory</string>
+    <string name="setting_agent_memory_write_error">Save failed: %1$s</string>
+    <string name="setting_agent_memory_delete_error">Delete failed: %1$s</string>
+    <string name="setting_agent_memory_saving">Saving…</string>
+    <string name="setting_agent_memory_deleting">Deleting…</string>
+    <string name="setting_agent_memory_edit_conflict_title">Memory changed</string>
+    <string name="setting_agent_memory_edit_conflict_message">This memory changed while you were editing it. Your draft is still open. Review the current version before choosing what to keep.</string>
+    <string name="setting_agent_memory_delete_conflict_title">Memory changed before deletion</string>
+    <string name="setting_agent_memory_delete_conflict_message">This memory changed before the delete could be applied. Review the current version and confirm again.</string>
+    <string name="setting_agent_memory_conflict_latest_label">Current version · revision %1$d</string>
+    <string name="setting_agent_memory_conflict_deleted">The memory was deleted by another writer. Your draft is still preserved in the editor.</string>
+    <string name="setting_agent_memory_use_latest">Use current version</string>
+    <string name="setting_agent_memory_retry_delete">Review and retry</string>
+    <string name="setting_agent_memory_keep_draft">Keep my draft</string>
+    <string name="setting_agent_memory_metadata_source">Source</string>
+    <string name="setting_agent_memory_metadata_confidence">Confidence</string>
+    <string name="setting_agent_memory_metadata_updated">Updated</string>
+    <string name="setting_agent_memory_metadata_last_used">Last used</string>
+    <string name="setting_agent_memory_metadata_kind">Type</string>
+    <string name="setting_agent_memory_classification">Classification</string>
+    <string name="setting_agent_memory_scope">Memory layer</string>
+    <string name="setting_agent_memory_scope_desc">Controls when this memory is used in chat.</string>
+    <string name="setting_agent_memory_pinned">Pinned</string>
+    <string name="setting_agent_memory_pinned_desc">Pinned memories are considered first during recall.</string>
+    <string name="setting_agent_memory_scope_core">Core</string>
+    <string name="setting_agent_memory_scope_short_term">Short-term</string>
+    <string name="setting_agent_memory_scope_long_term">Long-term</string>
+    <string name="setting_agent_memory_kind_user">User</string>
+    <string name="setting_agent_memory_kind_feedback">Feedback</string>
+    <string name="setting_agent_memory_kind_project">Project</string>
+    <string name="setting_agent_memory_kind_reference">Reference</string>
+    <string name="setting_agent_memory_kind_routine">Routine</string>
+    <string name="setting_agent_memory_kind_note">Note</string>
+    <string name="setting_agent_memory_source_chat">From chat</string>
+    <string name="setting_agent_memory_source_messages">Linked messages: %1$d</string>
+    <string name="setting_agent_memory_source_supersedes">Replaces older memories: %1$d</string>
+    <string name="setting_agent_memory_source_auto_extraction">Automatic extraction</string>
+    <string name="setting_agent_memory_source_tool">Tool write</string>
+    <string name="setting_agent_memory_source_run">Task run</string>
+    <string name="setting_agent_memory_source_manual">Manual or unlabelled write</string>
+    <string name="setting_agent_memory_info_content_description">Explain memory section</string>
+    <string name="setting_agent_memory_add_content_description">Add memory</string>
+</resources>

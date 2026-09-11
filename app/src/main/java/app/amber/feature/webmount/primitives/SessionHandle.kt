@@ -1,8 +1,11 @@
 package app.amber.feature.webmount.primitives
 
 import android.annotation.SuppressLint
+import android.os.Handler
 import android.os.Looper
 import android.util.Log
+import android.webkit.JsPromptResult
+import android.webkit.JsResult
 import android.webkit.WebView
 import androidx.webkit.ScriptHandler
 import androidx.webkit.WebViewCompat
@@ -47,10 +50,27 @@ class SessionHandle internal constructor(
     val loadState: StateFlow<LoadState> = _loadState.asStateFlow()
 
     private val loadSeq = AtomicLong(0L)
+    private val popupSeq = AtomicLong(0L)
     internal val pendingLoad = AtomicReference<LoadCompletion?>(null)
     val lastActivityMs: AtomicLong = AtomicLong(System.currentTimeMillis())
     private var documentStartOrigin: String? = null
     private val documentStartHandlers = mutableListOf<ScriptHandler>()
+    private val popupLock = Any()
+    /** WebView.post can remain queued forever for a detached/headless view. */
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private val popupViews = linkedMapOf<String, WebView>()
+    private val pendingDialogs = linkedMapOf<String, PendingJsDialog>()
+    /** The run that may currently create an agent-owned JS dialog. */
+    private var dialogOwnerLeaseId: String? = null
+    private var dialogOwnerRunId: String? = null
+
+    private val _popups = MutableStateFlow<List<PopupInfo>>(emptyList())
+    /** Popups opened by this session. The primary WebView remains the source of truth. */
+    val popups: StateFlow<List<PopupInfo>> = _popups.asStateFlow()
+
+    private val _jsDialogs = MutableStateFlow<List<JsDialogInfo>>(emptyList())
+    /** Pending JavaScript dialogs; UI must resolve them through [resolveJsDialog]. */
+    val jsDialogs: StateFlow<List<JsDialogInfo>> = _jsDialogs.asStateFlow()
 
     @Volatile
     var bridgeInjectionCoverage: String = "page_finished"
@@ -64,12 +84,16 @@ class SessionHandle internal constructor(
      * Load [url] and suspend until `onPageFinished` matches the new load id,
      * or [timeoutMs] elapses. Returns the latest [LoadState] either way.
      */
-    suspend fun loadUrl(url: String, timeoutMs: Long = DEFAULT_LOAD_TIMEOUT_MS): LoadState {
+    suspend fun loadUrl(
+        url: String,
+        timeoutMs: Long = DEFAULT_LOAD_TIMEOUT_MS,
+        dispatchWithLease: ((() -> Unit) -> Boolean)? = null,
+    ): LoadState {
         ensureAlive()
         val request = newLoadRequest()
         try {
             withContext(Dispatchers.Main) {
-                startLoadAndNavigate(request, url)
+                startLoadAndNavigate(request, url, dispatchWithLease)
             }
             withTimeoutOrNull(timeoutMs) { request.completion.await() }
         } finally {
@@ -86,13 +110,16 @@ class SessionHandle internal constructor(
      * `_loadState` so the next `wm_state` call sees the new requested URL.
      * Used by `wm_open` with `wait="none"`.
      */
-    suspend fun loadUrlNoWait(url: String): LoadState {
+    suspend fun loadUrlNoWait(
+        url: String,
+        dispatchWithLease: ((() -> Unit) -> Boolean)? = null,
+    ): LoadState {
         ensureAlive()
         val request = newLoadRequest()
         var navigated = false
         try {
             withContext(Dispatchers.Main) {
-                startLoadAndNavigate(request, url)
+                startLoadAndNavigate(request, url, dispatchWithLease)
                 navigated = true
             }
         } finally {
@@ -112,7 +139,11 @@ class SessionHandle internal constructor(
     }
 
     /** Install the load state and navigate on Main as one serialized section. */
-    private fun startLoadAndNavigate(request: LoadCompletion, url: String) {
+    private fun startLoadAndNavigate(
+        request: LoadCompletion,
+        url: String,
+        dispatchWithLease: ((() -> Unit) -> Boolean)?,
+    ) {
         ensureAlive()
         val prior = pendingLoad.getAndSet(request)
         prior?.completion?.completeExceptionally(
@@ -130,8 +161,10 @@ class SessionHandle internal constructor(
             updatedAtMs = System.currentTimeMillis(),
         )
         try {
-            installDocumentStartBridge(url)
-            webView.loadUrl(url)
+            dispatchOnMain(dispatchWithLease, "loadUrl") {
+                installDocumentStartBridge(url)
+                webView.loadUrl(url)
+            }
         } catch (error: Exception) {
             clearPendingLoad(
                 request,
@@ -175,11 +208,17 @@ class SessionHandle internal constructor(
      * (the value passed back from `evaluateJavascript`). Caller is responsible
      * for parsing.
      */
-    suspend fun evalRaw(script: String, timeoutMs: Long = DEFAULT_EVAL_TIMEOUT_MS): String? {
+    suspend fun evalRaw(
+        script: String,
+        timeoutMs: Long = DEFAULT_EVAL_TIMEOUT_MS,
+        dispatchWithLease: ((() -> Unit) -> Boolean)? = null,
+    ): String? {
         ensureAlive()
         val deferred = CompletableDeferred<String?>()
         withContext(Dispatchers.Main) {
-            webView.evaluateJavascript(script) { value -> deferred.complete(value) }
+            dispatchOnMain(dispatchWithLease, "evalRaw") {
+                webView.evaluateJavascript(script) { value -> deferred.complete(value) }
+            }
         }
         return withTimeoutOrNull(timeoutMs) { deferred.await() }
     }
@@ -192,6 +231,7 @@ class SessionHandle internal constructor(
         method: String,
         args: JsonObject = EMPTY_ARGS,
         timeoutMs: Long = DEFAULT_BRIDGE_TIMEOUT_MS,
+        dispatchWithLease: ((() -> Unit) -> Boolean)? = null,
     ): JsonElement {
         ensureAlive()
         val requestId = UUID.randomUUID().toString()
@@ -208,7 +248,9 @@ class SessionHandle internal constructor(
             // Keep dispatch inside the cleanup scope. Cancellation between
             // expect() and entering Dispatchers.Main must not leak the entry.
             withContext(Dispatchers.Main) {
-                webView.evaluateJavascript(script, null)
+                dispatchOnMain(dispatchWithLease, "callBridge") {
+                    webView.evaluateJavascript(script, null)
+                }
             }
             withTimeoutOrNull(timeoutMs) { deferred.await() }
         } finally {
@@ -226,7 +268,7 @@ class SessionHandle internal constructor(
     internal fun reinjectBridge() {
         if (destroyed) return
         if (Looper.myLooper() != Looper.getMainLooper()) {
-            webView.post { reinjectBridge() }
+            mainHandler.post { reinjectBridge() }
             return
         }
         webView.evaluateJavascript(bridgeBootstrapJs, null)
@@ -242,10 +284,302 @@ class SessionHandle internal constructor(
     internal fun injectHostShim(source: String) {
         if (destroyed) return
         if (Looper.myLooper() != Looper.getMainLooper()) {
-            webView.post { injectHostShim(source) }
+            mainHandler.post { injectHostShim(source) }
             return
         }
         webView.evaluateJavascript(source, null)
+    }
+
+    /**
+     * Inject the shared bridge into a popup WebView. Popup windows use the
+     * same [JsBridge] and cookie jar as their opener, but a navigation resets
+     * their JavaScript realm, so [WebViewPool] calls this again on finish.
+     */
+    internal fun injectBridgeInto(view: WebView) {
+        if (destroyed) return
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            mainHandler.post { injectBridgeInto(view) }
+            return
+        }
+        view.evaluateJavascript(bridgeBootstrapJs, null)
+    }
+
+    // ------------------------------------------------------- popup / dialogs
+
+    internal fun nextPopupId(): String = "$sessionId-popup-${popupSeq.incrementAndGet()}"
+
+    internal fun registerPopup(
+        popupId: String,
+        popup: WebView,
+        isDialogWindow: Boolean,
+    ) {
+        synchronized(popupLock) {
+            popupViews[popupId] = popup
+            _popups.value = popupViews.map { (id, view) ->
+                PopupInfo(
+                    popupId = id,
+                    url = view.url,
+                    title = view.title,
+                    isDialogWindow = if (id == popupId) isDialogWindow else _popups.value
+                        .firstOrNull { it.popupId == id }
+                        ?.isDialogWindow == true,
+                    createdAtMs = _popups.value.firstOrNull { it.popupId == id }?.createdAtMs
+                        ?: System.currentTimeMillis(),
+                    webView = view,
+                )
+            }
+        }
+    }
+
+    internal fun updatePopup(popupId: String, url: String? = null, title: String? = null) {
+        synchronized(popupLock) {
+            val popup = popupViews[popupId] ?: return
+            val previous = _popups.value.firstOrNull { it.popupId == popupId }
+            _popups.value = _popups.value.map { info ->
+                if (info.popupId == popupId) {
+                    info.copy(
+                        url = url ?: popup.url ?: info.url,
+                        title = title ?: popup.title ?: info.title,
+                    )
+                } else {
+                    info
+                }
+            }.ifEmpty {
+                listOf(
+                    PopupInfo(
+                        popupId = popupId,
+                        url = url ?: popup.url,
+                        title = title ?: popup.title,
+                        isDialogWindow = previous?.isDialogWindow == true,
+                        createdAtMs = previous?.createdAtMs ?: System.currentTimeMillis(),
+                        webView = popup,
+                    )
+                )
+            }
+        }
+    }
+
+    internal fun popupWebView(popupId: String): WebView? = synchronized(popupLock) {
+        popupViews[popupId]
+    }
+
+    /** Close one popup and invalidate its view. Must be safe from any thread. */
+    internal fun closePopup(popupId: String, reason: String = "popup closed") {
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            mainHandler.post { closePopup(popupId, reason) }
+            return
+        }
+        val popup = synchronized(popupLock) {
+            val removed = popupViews.remove(popupId)
+            _popups.value = _popups.value.filterNot { it.popupId == popupId }
+            removed
+        } ?: return
+        cancelPendingJsDialogsFor(popup, reason)
+        runCatching {
+            popup.stopLoading()
+            popup.destroy()
+        }.onFailure { Log.w(TAG, "[$sessionId] popup close failed", it) }
+    }
+
+    internal fun closePopup(window: WebView, reason: String = "popup closed") {
+        val popupId = synchronized(popupLock) {
+            popupViews.entries.firstOrNull { it.value === window }?.key
+        } ?: return
+        closePopup(popupId, reason)
+    }
+
+    internal fun enqueueJsDialog(
+        type: JsDialogType,
+        view: WebView?,
+        url: String?,
+        message: String,
+        defaultValue: String?,
+        result: JsResult,
+    ): String {
+        val dialogId = "$sessionId-dialog-${UUID.randomUUID()}"
+        val accepted = synchronized(popupLock) {
+            // Page timers can outlive the run that scheduled them. An idle
+            // session has nobody to answer a new dialog; existing explicit
+            // handoffs stay in pendingDialogs until the human resolves them.
+            if (dialogOwnerLeaseId == null) return@synchronized false
+            pendingDialogs[dialogId] = PendingJsDialog(
+                info = JsDialogInfo(
+                    dialogId = dialogId,
+                    windowId = windowIdFor(view),
+                    type = type,
+                    url = url,
+                    message = message,
+                    defaultValue = defaultValue,
+                ),
+                result = result,
+                sourceView = view,
+                leaseId = dialogOwnerLeaseId,
+                runId = dialogOwnerRunId,
+            )
+            _jsDialogs.value = pendingDialogs.values.map { it.info }
+            true
+        }
+        if (!accepted) result.cancel()
+        return dialogId
+    }
+
+    /** Bind future dialogs to the current owner lease; null means idle. */
+    internal fun setDialogLeaseContext(leaseId: String?, runId: String?) {
+        synchronized(popupLock) {
+            dialogOwnerLeaseId = leaseId
+            dialogOwnerRunId = runId
+        }
+    }
+
+    /** Clear an old run context without disturbing a newer human context. */
+    internal fun clearDialogLeaseContext(runId: String) {
+        synchronized(popupLock) {
+            if (dialogOwnerRunId == runId) {
+                dialogOwnerLeaseId = null
+                dialogOwnerRunId = null
+            }
+        }
+    }
+
+    /**
+     * Atomically clear an old run context and remove only dialogs tagged with
+     * that run. The returned entries can be cancelled after the owner lock is
+     * released, so a concurrent HUMAN transition cannot be swept accidentally.
+     */
+    internal fun takePendingJsDialogsForRun(runId: String): List<PendingJsDialog> {
+        val normalizedRunId = runId.trim().takeIf { it.isNotEmpty() } ?: return emptyList()
+        return synchronized(popupLock) {
+            if (dialogOwnerRunId == normalizedRunId) {
+                dialogOwnerLeaseId = null
+                dialogOwnerRunId = null
+            }
+            val snapshot = pendingDialogs.values.filter { it.runId == normalizedRunId }
+            if (snapshot.isNotEmpty()) {
+                snapshot.forEach { pendingDialogs.remove(it.info.dialogId) }
+                _jsDialogs.value = pendingDialogs.values.map { it.info }
+            }
+            snapshot
+        }
+    }
+
+    /** Remove dialogs created by one lease while the owner transition is locked. */
+    internal fun takePendingJsDialogsForLease(leaseId: String): List<PendingJsDialog> {
+        val normalizedLeaseId = leaseId.trim().takeIf { it.isNotEmpty() } ?: return emptyList()
+        return synchronized(popupLock) {
+            if (dialogOwnerLeaseId == normalizedLeaseId) {
+                dialogOwnerLeaseId = null
+                dialogOwnerRunId = null
+            }
+            val snapshot = pendingDialogs.values.filter { it.leaseId == normalizedLeaseId }
+            if (snapshot.isNotEmpty()) {
+                snapshot.forEach { pendingDialogs.remove(it.info.dialogId) }
+                _jsDialogs.value = pendingDialogs.values.map { it.info }
+            }
+            snapshot
+        }
+    }
+
+    /** Atomically remove every pending dialog, used when a HUMAN lease leaves. */
+    internal fun takeAllPendingJsDialogs(): List<PendingJsDialog> = synchronized(popupLock) {
+        val snapshot = pendingDialogs.values.toList()
+        pendingDialogs.clear()
+        dialogOwnerLeaseId = null
+        dialogOwnerRunId = null
+        _jsDialogs.value = emptyList()
+        snapshot
+    }
+
+    /** Resolve a pending alert/confirm/prompt. The WebChrome callbacks run on main. */
+    fun resolveJsDialog(dialogId: String, confirmed: Boolean, value: String? = null) {
+        val pending = synchronized(popupLock) {
+            val removed = pendingDialogs.remove(dialogId)
+            _jsDialogs.value = pendingDialogs.values.map { it.info }
+            removed
+        } ?: return
+        dispatchJsDialogResult(pending, confirmed, value, "resolve")
+    }
+
+    /** Cancel unresolved dialogs when the current human/agent lease leaves. */
+    internal fun cancelPendingJsDialogs(reason: String = "lease released") {
+        val dialogs = synchronized(popupLock) {
+            val snapshot = pendingDialogs.values.toList()
+            pendingDialogs.clear()
+            _jsDialogs.value = emptyList()
+            snapshot
+        }
+        dispatchJsDialogCancellation(dialogs, reason)
+    }
+
+    /** Cancel dialogs owned by one window when it navigates, closes, or leaves. */
+    internal fun cancelPendingJsDialogsFor(view: WebView, reason: String = "window left") {
+        val dialogs = synchronized(popupLock) {
+            val snapshot = pendingDialogs.values.filter { it.sourceView === view }
+            if (snapshot.isNotEmpty()) {
+                snapshot.forEach { pendingDialogs.remove(it.info.dialogId) }
+                _jsDialogs.value = pendingDialogs.values.map { it.info }
+            }
+            snapshot
+        }
+        dispatchJsDialogCancellation(dialogs, reason)
+    }
+
+    private fun dispatchJsDialogResult(
+        pending: PendingJsDialog,
+        confirmed: Boolean,
+        value: String?,
+        operation: String,
+    ) {
+        val resolve = {
+            runCatching {
+                if (!confirmed) {
+                    pending.result.cancel()
+                } else if (pending.result is JsPromptResult) {
+                    pending.result.confirm(value.orEmpty())
+                } else {
+                    pending.result.confirm()
+                }
+            }.onFailure { Log.w(TAG, "[$sessionId] JS dialog $operation failed", it) }
+        }
+        if (Looper.myLooper() == Looper.getMainLooper()) resolve() else mainHandler.post { resolve() }
+    }
+
+    internal fun dispatchJsDialogCancellation(
+        dialogs: List<PendingJsDialog>,
+        reason: String,
+    ) {
+        if (dialogs.isEmpty()) return
+        val cancel = {
+            dialogs.forEach { pending ->
+                runCatching { pending.result.cancel() }
+                    .onFailure { Log.w(TAG, "[$sessionId] JS dialog cancellation failed: $reason", it) }
+            }
+        }
+        if (Looper.myLooper() == Looper.getMainLooper()) cancel() else mainHandler.post { cancel() }
+    }
+
+    private fun windowIdFor(view: WebView?): String = synchronized(popupLock) {
+        view?.let { candidate ->
+            popupViews.entries.firstOrNull { it.value === candidate }?.key
+        } ?: sessionId
+    }
+
+    /** Cancel dialogs and close popups when a session is destroyed. */
+    private fun closeTransientOverlays(reason: String) {
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            mainHandler.post { closeTransientOverlays(reason) }
+            return
+        }
+        val dialogs = synchronized(popupLock) {
+            val snapshot = pendingDialogs.values.toList()
+            pendingDialogs.clear()
+            dialogOwnerLeaseId = null
+            dialogOwnerRunId = null
+            _jsDialogs.value = emptyList()
+            snapshot
+        }
+        dialogs.forEach { pending -> runCatching { pending.result.cancel() } }
+        val popupIds = synchronized(popupLock) { popupViews.keys.toList() }
+        popupIds.forEach { closePopup(it, reason) }
     }
 
     /**
@@ -289,6 +623,7 @@ class SessionHandle internal constructor(
         fnName: String,
         args: kotlinx.serialization.json.JsonArray,
         timeoutMs: Long = 10_000L,
+        dispatchWithLease: ((() -> Unit) -> Boolean)? = null,
     ): JsonElement {
         ensureAlive()
         val requestId = UUID.randomUUID().toString()
@@ -311,7 +646,9 @@ class SessionHandle internal constructor(
 
         val result = try {
             withContext(Dispatchers.Main) {
-                webView.evaluateJavascript(script, null)
+                dispatchOnMain(dispatchWithLease, "callPageFn") {
+                    webView.evaluateJavascript(script, null)
+                }
             }
             withTimeoutOrNull(timeoutMs) { deferred.await() }
         } finally {
@@ -384,7 +721,7 @@ class SessionHandle internal constructor(
         jsBridge.cancelAll(reason)
         pendingLoad.getAndSet(null)?.completion?.complete(Unit)
         if (Looper.myLooper() != Looper.getMainLooper()) {
-            webView.post { destroyInternalOnMain() }
+            mainHandler.post { destroyInternalOnMain() }
         } else {
             destroyInternalOnMain()
         }
@@ -392,6 +729,7 @@ class SessionHandle internal constructor(
 
     private fun destroyInternalOnMain() {
         runCatching {
+            closeTransientOverlays("session destroyed")
             documentStartHandlers.forEach { handler -> runCatching { handler.remove() } }
             documentStartHandlers.clear()
             webView.stopLoading()
@@ -402,6 +740,19 @@ class SessionHandle internal constructor(
 
     private fun ensureAlive() {
         check(!destroyed) { "session $sessionId already destroyed" }
+    }
+
+    private fun dispatchOnMain(
+        dispatchWithLease: ((() -> Unit) -> Boolean)?,
+        operation: String,
+        action: () -> Unit,
+    ) {
+        if (dispatchWithLease == null) {
+            action()
+            return
+        }
+        if (dispatchWithLease(action)) return
+        throw WebMountLeaseInvalidatedException("webmount lease invalidated before $operation dispatch")
     }
 
     private fun installDocumentStartBridge(url: String) {
@@ -482,6 +833,38 @@ class SessionHandle internal constructor(
     internal class LoadCompletion(
         val loadId: Long,
         val completion: CompletableDeferred<Unit>,
+    )
+
+    data class PopupInfo internal constructor(
+        val popupId: String,
+        val url: String?,
+        val title: String?,
+        val isDialogWindow: Boolean,
+        val createdAtMs: Long,
+        internal val webView: WebView,
+    )
+
+    enum class JsDialogType {
+        ALERT,
+        CONFIRM,
+        PROMPT,
+    }
+
+    data class JsDialogInfo internal constructor(
+        val dialogId: String,
+        val windowId: String,
+        val type: JsDialogType,
+        val url: String?,
+        val message: String,
+        val defaultValue: String?,
+    )
+
+    internal data class PendingJsDialog(
+        val info: JsDialogInfo,
+        val result: JsResult,
+        val sourceView: WebView?,
+        val leaseId: String?,
+        val runId: String?,
     )
 
     companion object {

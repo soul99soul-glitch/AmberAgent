@@ -28,7 +28,6 @@ object SubAgentValidator {
         "tools_list", "file_list", "file_read", "file_search",
         "conversation_search", "conversation_expand",
         "session_list", "session_search",
-        "officepro_status", "officepro_dashboard",
         "search_web", "scrape_web",
         "apps_list", "apps_installed_list", "permissions_status", "skills_list", "mcp_list",
     )

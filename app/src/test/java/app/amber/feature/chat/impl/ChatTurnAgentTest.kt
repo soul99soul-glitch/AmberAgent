@@ -252,6 +252,42 @@ class ChatTurnAgentTest {
     }
 
     @Test
+    fun `streaming hook observes the conversation after generated messages are merged`() = runTest {
+        val captured = CapturedCall()
+        val conversationId = Uuid.random()
+        val conversation = conversation(conversationId)
+        val access = FakeConversationAccess(conversation)
+        val observed = mutableListOf<Conversation>()
+        val hooks = ChatRunHooks(
+            durable = true,
+            onStreamingMessages = { _, _ ->
+                observed += access.getConversationFlow(conversationId).value
+            },
+        )
+        val agent = ChatTurnAgent(
+            kernel = FakeKernel(captured, replyText = "最新回答"),
+            sessionResolver = object : ChatSessionResolver {
+                override suspend fun resolve(
+                    input: ChatTurnInput,
+                    runId: String,
+                    events: app.amber.core.agent.runtime.AgentEventWriter?,
+                ) =
+                    sessionOf(conversation, hooks)
+            },
+            conversationAccess = access,
+        )
+
+        agent.handler.handle(input(conversationId), LegacyRunScope(runId = AgentRunId("kernel-run-stream")))
+
+        val observedConversation = observed.single()
+        assertEquals(1, observedConversation.messageNodes.size)
+        assertEquals(
+            "最新回答",
+            (observedConversation.messageNodes.single().currentMessage.parts.single() as UIMessagePart.Text).text,
+        )
+    }
+
+    @Test
     fun `responses resume request is resolved per runId`() = runTest {
         val captured = CapturedCall()
         val hooks = RecordingHooks()
@@ -372,6 +408,76 @@ class ChatTurnAgentTest {
         assertSame(boom, thrown)
         assertEquals(listOf(runId.value), hooks.started)
         assertEquals(listOf(runId.value to boom), hooks.finishes)
+    }
+
+    @Test
+    fun `finish hook failure propagates after a successful generation`() = runTest {
+        val captured = CapturedCall()
+        val cleanupFailure = IllegalStateException("finish hook failed")
+        val conversationId = Uuid.random()
+        val conversation = conversation(conversationId)
+        val access = FakeConversationAccess(conversation)
+        val hooks = ChatRunHooks(
+            durable = true,
+            onRunFinished = { _, cause ->
+                assertNull(cause)
+                throw cleanupFailure
+            },
+        )
+        val agent = ChatTurnAgent(
+            kernel = FakeKernel(captured),
+            sessionResolver = object : ChatSessionResolver {
+                override suspend fun resolve(
+                    input: ChatTurnInput,
+                    runId: String,
+                    events: app.amber.core.agent.runtime.AgentEventWriter?,
+                ) =
+                    sessionOf(conversation, hooks)
+            },
+            conversationAccess = access,
+        )
+
+        val thrown = runCatching {
+            agent.handler.handle(input(conversationId), LegacyRunScope(runId = AgentRunId("kernel-run-finish-fail")))
+        }.exceptionOrNull()
+
+        assertSame(cleanupFailure, thrown)
+    }
+
+    @Test
+    fun `finish hook failure is suppressed when generation already failed`() = runTest {
+        val captured = CapturedCall()
+        val generationFailure = IllegalStateException("provider exploded")
+        val cleanupFailure = IllegalStateException("finish hook failed")
+        val conversationId = Uuid.random()
+        val conversation = conversation(conversationId)
+        val access = FakeConversationAccess(conversation)
+        val hooks = ChatRunHooks(
+            durable = true,
+            onRunFinished = { _, cause ->
+                assertSame(generationFailure, cause)
+                throw cleanupFailure
+            },
+        )
+        val agent = ChatTurnAgent(
+            kernel = FakeKernel(captured, failure = generationFailure),
+            sessionResolver = object : ChatSessionResolver {
+                override suspend fun resolve(
+                    input: ChatTurnInput,
+                    runId: String,
+                    events: app.amber.core.agent.runtime.AgentEventWriter?,
+                ) =
+                    sessionOf(conversation, hooks)
+            },
+            conversationAccess = access,
+        )
+
+        val thrown = runCatching {
+            agent.handler.handle(input(conversationId), LegacyRunScope(runId = AgentRunId("kernel-run-finish-after-fail")))
+        }.exceptionOrNull()
+
+        assertSame(generationFailure, thrown)
+        assertTrue(generationFailure.getSuppressed().contains(cleanupFailure))
     }
 
     @Test

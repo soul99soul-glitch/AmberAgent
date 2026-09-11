@@ -7,11 +7,13 @@ import app.amber.agent.R
 import app.amber.ai.core.Tool
 import app.amber.ai.provider.Model
 import app.amber.ai.provider.ModelType
+import app.amber.ai.provider.OpenAIAuthMode
 import app.amber.ai.provider.OpenAIBrand
 import app.amber.ai.provider.ProviderCatalog
 import app.amber.ai.provider.ProviderSetting
 import app.amber.ai.provider.GoogleAuthMode
 import app.amber.ai.provider.providers.openai.OpenAICodexAuthStore
+import app.amber.ai.provider.providers.openai.OpenAICodexAuthTokens
 import app.amber.ai.ui.ToolApprovalState
 import app.amber.ai.ui.UIMessagePart
 import app.amber.core.localization.OAuthDisplayLocalizer
@@ -93,7 +95,7 @@ class ProviderConfigToolsTest {
     private lateinit var secretBackend: SecretStoreBackend
     private lateinit var providerCatalog: ProviderCatalog
     private lateinit var googleProvider: app.amber.ai.provider.providers.GoogleProvider
-    private lateinit var codexAuthStore: OpenAICodexAuthStore
+    private lateinit var openAICodexAuthStore: OpenAICodexAuthStore
     private val mainDispatcher = UnconfinedTestDispatcher()
 
     private val openAiProvider = ProviderSetting.OpenAI(
@@ -123,18 +125,11 @@ class ProviderConfigToolsTest {
         ),
     )
 
-    private val codexOAuthProvider = ProviderSetting.OpenAI(
+    private val codexOAuthProvider = openAiProvider.copy(
         id = Uuid.parse("1eeea727-0000-4000-8000-000000000031"),
         name = "TestCodexOAuth",
-        enabled = true,
-        authMode = app.amber.ai.provider.OpenAIAuthMode.CODEX_OAUTH,
-        models = listOf(
-            Model(
-                id = Uuid.parse("1eeea727-0000-4000-8000-000000000032"),
-                modelId = "gpt-5.4",
-                displayName = "GPT-5.4",
-            ),
-        ),
+        authMode = OpenAIAuthMode.CODEX_OAUTH,
+        apiKey = "",
     )
 
     @Before
@@ -185,7 +180,8 @@ class ProviderConfigToolsTest {
             context = context,
             oauthCopy = OAuthDisplayLocalizer.googleGeminiOAuth(context),
         )
-        codexAuthStore = OpenAICodexAuthStore(context)
+        openAICodexAuthStore = OpenAICodexAuthStore(context)
+        openAICodexAuthStore.clear(codexOAuthProvider.id)
         providerCatalog = ProviderCatalog(
             openAIProvider = app.amber.ai.provider.providers.OpenAIProvider(httpClient, context),
             googleProvider = googleProvider,
@@ -226,8 +222,8 @@ class ProviderConfigToolsTest {
             secretStore,
             providerCatalog,
             googleProvider,
-            codexOAuthTokenResolver = codexAuthStore::get,
-            modelFetcher = modelFetcher,
+            modelFetcher,
+            openAICodexAuthStore,
         )
 
     private fun tool(name: String, modelFetcher: ProviderModelFetcher = ProviderModelFetcher { emptyList() }): Tool =
@@ -311,7 +307,7 @@ class ProviderConfigToolsTest {
                 brokenStore,
                 providerCatalog,
                 googleProvider,
-                modelFetcher = ProviderModelFetcher { emptyList() },
+                ProviderModelFetcher { emptyList() },
             )
                 .first { it.name == TOOL_PROVIDER_CONFIG_STATUS },
             """{}""",
@@ -341,20 +337,40 @@ class ProviderConfigToolsTest {
     }
 
     @Test
-    fun `status does not treat Codex OAuth without a session as ready`() = runBlocking {
+    fun `status reports Codex OAuth as not signed in when its token store is empty`() = runBlocking {
         seed(
             app.amber.core.settings.Settings.dummy().copy(
                 init = false,
                 providers = listOf(codexOAuthProvider),
             )
         )
+
         val result = runTool(tool(TOOL_PROVIDER_CONFIG_STATUS), "{\"provider_name_contains\":\"TestCodexOAuth\"}")
         val providerJson = result["providers"]!!.jsonArray.first().jsonObject
+
         assertEquals(false, providerJson["has_api_key"]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull())
         assertEquals(false, providerJson["auth_usable"]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull())
         assertEquals("not_signed_in", providerJson["auth_status"]?.jsonPrimitive?.contentOrNull)
-        val issues = result["issues"]!!.jsonArray.map { it.jsonPrimitive.contentOrNull.orEmpty() }
-        assertTrue(issues.any { it.contains("OAuth auth is not_signed_in") })
+        assertTrue(
+            result["issues"]!!.jsonArray.any {
+                it.jsonPrimitive.contentOrNull.orEmpty().contains("OAuth auth is not_signed_in")
+            }
+        )
+    }
+
+    @Test
+    fun `expired Codex access token with refresh credential remains usable`() {
+        val status = codexAuthStatus(
+            OpenAICodexAuthTokens(
+                accessToken = "expired-access-token",
+                refreshToken = "refresh-token",
+                expiresAtMillis = 1_000L,
+            ),
+            nowMillis = 2_000L,
+        )
+
+        assertEquals("token_expired", status.wireValue)
+        assertTrue(status.usable)
     }
 
     @Test

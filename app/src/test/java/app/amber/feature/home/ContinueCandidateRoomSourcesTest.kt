@@ -7,6 +7,10 @@ import app.amber.agent.data.db.AppDatabase
 import app.amber.agent.data.db.entity.ConversationDraftEntity
 import app.amber.agent.data.db.entity.ConversationEntity
 import app.amber.agent.data.db.entity.DeepReadCacheEntity
+import app.amber.agent.data.db.entity.MiniAppEntity
+import app.amber.agent.data.db.entity.MiniAppVersionEntity
+import app.amber.agent.data.db.entity.RunTerminalEntity
+import app.amber.agent.data.db.entity.ToolEffectEntity
 import app.amber.core.utils.JsonInstant
 import app.amber.feature.board.hotlist.deepread.DeepReadGenerationPhase
 import app.amber.feature.board.hotlist.deepread.DeepReadGenerationStage
@@ -15,6 +19,7 @@ import app.amber.feature.board.hotlist.deepread.DeepReadSectionState
 import app.amber.feature.board.hotlist.deepread.DeepReadSectionStatus
 import app.amber.feature.modelcouncil.CouncilRoom
 import app.amber.feature.modelcouncil.CouncilRoomStatus
+import app.amber.feature.tools.ToolEffectClass
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import org.junit.After
@@ -140,6 +145,8 @@ class ContinueCandidateRoomSourcesTest {
         output: DeepReadOutput,
         expiresAt: Long = nowMs + 86_400_000L,
         title: String = "话题 $topicId",
+        sourceUrl: String? = null,
+        pinned: Boolean = false,
     ) {
         db.hotListDao().upsertDeepRead(
             DeepReadCacheEntity(
@@ -149,6 +156,8 @@ class ContinueCandidateRoomSourcesTest {
                 createdAt = nowMs,
                 expiresAt = expiresAt,
                 updatedAt = nowMs,
+                pinned = pinned,
+                sourceUrl = sourceUrl,
             )
         )
     }
@@ -173,8 +182,54 @@ class ContinueCandidateRoomSourcesTest {
         val candidate = result.single()
         assertEquals(ContinueSourceKind.DEEP_READ, candidate.sourceKind)
         assertEquals(ContinueStatus.FAILED_RESUMABLE, candidate.status)
-        assertEquals(ContinueRoute.DeepRead(topicId = "t1", title = "话题 t1"), candidate.route)
+        assertEquals(
+            ContinueRoute.DeepRead(
+                topicId = "t1",
+                title = "话题 t1",
+                sourceUrl = null,
+            ),
+            candidate.route,
+        )
         assertTrue(candidate.summary.contains("1/4"))
+    }
+
+    @Test
+    fun `deep read Continue preserves its source URL`() = runTest {
+        insertDeepRead(
+            topicId = "with-source",
+            output = partialOutput(),
+            sourceUrl = "https://example.com/article",
+        )
+        val candidate = DeepReadContinueSource(db.hotListDao(), context) { now }
+            .observe()
+            .first()
+            .single()
+
+        assertEquals(
+            ContinueRoute.DeepRead(
+                topicId = "with-source",
+                title = "话题 with-source",
+                sourceUrl = "https://example.com/article",
+            ),
+            candidate.route,
+        )
+    }
+
+    @Test
+    fun `pinned incomplete deep read remains a candidate after expiry`() = runTest {
+        insertDeepRead(
+            topicId = "pinned-expired",
+            output = partialOutput(),
+            expiresAt = nowMs - 1,
+            pinned = true,
+        )
+
+        val candidates = DeepReadContinueSource(hotListDao = db.hotListDao(), context = context) { now }
+            .observe()
+            .first()
+
+        assertEquals(1, candidates.size)
+        assertEquals("pinned-expired", candidates.single().sourceId)
     }
 
     @Test
@@ -257,6 +312,106 @@ class ContinueCandidateRoomSourcesTest {
         assertEquals(1, source.observe().first().size)
         db.conversationDao().deleteById("conv-draft-3")
         assertEquals(0, source.observe().first().size)
+    }
+
+    // --------------------------------------------------------- MiniApp runner ---
+
+    @Test
+    fun `recent image query returns conversation and tool anchors without message payload`() = runTest {
+        val conversationId = "conversation-image"
+        insertConversation(conversationId)
+        db.runTerminalDao().insertIgnore(
+            RunTerminalEntity(
+                runId = "run-image",
+                conversationId = conversationId,
+                assistantId = null,
+                state = "COMPLETED",
+                pauseReason = null,
+                startedAtMs = nowMs - 10,
+                updatedAtMs = nowMs,
+                finishedAtMs = nowMs,
+            )
+        )
+        db.toolEffectDao().upsert(
+            ToolEffectEntity(
+                effectId = "effect-image",
+                runId = "run-image",
+                turnId = 1,
+                toolCallId = "call-image",
+                toolName = "generate_image",
+                argsDigest = "digest",
+                approvalDigest = null,
+                effectClass = ToolEffectClass.NON_IDEMPOTENT_WRITE.name,
+                status = "FINISHED",
+                startedAtMs = nowMs - 10,
+                finishedAtMs = nowMs,
+                resultSummary = "done",
+                resultPayload = "{\"url\":\"file:///image.png\"}",
+                errorCategory = null,
+                messagePersistenceCursor = "message-image",
+                createdAtMs = nowMs - 10,
+                updatedAtMs = nowMs,
+            )
+        )
+
+        val rows = db.toolEffectDao().listRecentFinishedWithConversation(
+            toolName = "generate_image",
+            sinceMs = nowMs - 1_000,
+            limit = 10,
+        )
+
+        assertEquals(1, rows.size)
+        assertEquals(conversationId, rows.single().conversationId)
+        assertEquals("call-image", rows.single().effect.toolCallId)
+        assertEquals("message-image", rows.single().effect.messagePersistenceCursor)
+    }
+
+    @Test
+    fun `mini app runner projects never opened and newer versions then clears after run`() = runTest {
+        val appId = "mini-runner-1"
+        db.miniAppDao().upsert(
+            MiniAppEntity(
+                id = appId,
+                title = "阅读助手",
+                description = "desc",
+                htmlContent = "<p>app</p>",
+                createdAt = nowMs,
+                updatedAt = nowMs,
+            )
+        )
+        db.miniAppVersionDao().upsert(
+            MiniAppVersionEntity(
+                appId = appId,
+                versionNumber = 1,
+                htmlContent = "<p>app</p>",
+                htmlHash = "hash",
+                createdAt = nowMs,
+            )
+        )
+        val source = MiniAppRunnerContinueSource(db.miniAppDao())
+
+        val first = source.observe().first().single()
+        assertEquals(ContinueSourceKind.MINIAPP_RUNNER, first.sourceKind)
+        assertEquals(ContinueRoute.MiniAppRunner(appId), first.route)
+        assertEquals("已生成，尚未打开", first.summary)
+
+        db.miniAppDao().markRun(appId, nowMs + 1)
+        assertTrue(source.observe().first().isEmpty())
+
+        db.miniAppVersionDao().upsert(
+            MiniAppVersionEntity(
+                appId = appId,
+                versionNumber = 2,
+                htmlContent = "<p>new</p>",
+                htmlHash = "hash-2",
+                createdAt = nowMs + 2,
+            )
+        )
+        val updated = source.observe().first().single()
+        assertEquals("有新版本尚未打开", updated.summary)
+
+        db.miniAppDao().deleteById(appId)
+        assertTrue(source.observe().first().isEmpty())
     }
 
     // -------------------------------------------------------------- dismiss ---

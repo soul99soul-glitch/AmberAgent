@@ -1,5 +1,8 @@
 package app.amber.core.di
 
+import android.content.Context
+import app.amber.core.conversation.exchange.ConversationExchangeFileHandler
+import app.amber.core.conversation.exchange.ConversationExchangeService
 import app.amber.feature.board.BoardRepository
 import app.amber.feature.board.hotlist.HotListRepository
 import app.amber.feature.miniapp.MiniAppRepository
@@ -12,15 +15,34 @@ import app.amber.core.repository.FilesRepository
 import app.amber.core.repository.ImageGenerationRepository
 import app.amber.core.repository.MemoryRepository
 import app.amber.core.memory.recall.MemoryRecallStore
+import app.amber.core.sync.core.SyncRestoreWriteGate
 import org.koin.dsl.module
 
 val repositoryModule = module {
     single {
-        ConversationRepository(get(), get(), get(), get(), get(), get(), get())
+        ConversationRepository(
+            conversationDAO = get(),
+            messageNodeDAO = get(),
+            messageStatsDAO = get(),
+            favoriteDAO = get(),
+            database = get(),
+            filesManager = get(),
+            messageFtsManager = get(),
+            restoreWriteGate = get(),
+        )
+    }
+
+    single { ConversationExchangeService(get(), get()) }
+
+    single {
+        ConversationExchangeFileHandler(
+            contentResolver = get<Context>().contentResolver,
+            service = get(),
+        )
     }
 
     single {
-        MemoryRepository(get(), get(), get(), get())
+        MemoryRepository(get(), get(), get(), get(), get())
     }
 
     single<app.amber.core.memory.store.MemoryRepository> {
@@ -49,11 +71,11 @@ val repositoryModule = module {
     }
 
     single {
-        FavoriteRepository(get())
+        FavoriteRepository(get(), get<SyncRestoreWriteGate>())
     }
 
     single {
-        FilesManager(get(), get(), get())
+        FilesManager(get(), get(), get(), get<SyncRestoreWriteGate>())
     }
 
     single {
@@ -61,14 +83,24 @@ val repositoryModule = module {
     }
 
     single {
-        BoardRepository(get(), get(), get(), get(), get())
+        BoardRepository(get(), get(), get(), get(), get(), get())
     }
 
     single {
-        HotListRepository(get(), get())
+        HotListRepository(get(), get(), get<SyncRestoreWriteGate>())
     }
 
     single {
-        MiniAppRepository(get(), get(), get(), get(), get(), get(), get(), get())
+        MiniAppRepository(
+            context = get(),
+            database = get(),
+            dao = get(),
+            grantDao = get(),
+            versionDao = get(),
+            auditLogDao = get(),
+            sharedDataDao = get(),
+            json = get(),
+            restoreWriteGate = get(),
+        )
     }
 }

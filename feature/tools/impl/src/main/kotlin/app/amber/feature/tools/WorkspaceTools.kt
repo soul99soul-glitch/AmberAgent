@@ -81,7 +81,7 @@ class WorkspaceTools(
 
     private val fileWriteTool = Tool(
         name = "file_write",
-        description = "Write UTF-8 text to a file in /workspace. Creates parent folders. Put files in the matching subdirectory:\n- notes/ for .md, .txt, Markdown notes and documentation\n- reports/ for analysis reports, briefings, summaries\n- ppt/ or slides/ for presentation slides, slide specs\n- scripts/ for code, scripts, config files (.py, .sh, .json, .kt)\n- data/ for datasets, CSV, JSON data files\n- officepro/ for Feishu office documents and drafts\nOnly put files at the workspace root when none of the above apply.",
+        description = "Write UTF-8 text to a file in /workspace. Creates parent folders. Put files in the matching subdirectory:\n- notes/ for .md, .txt, Markdown notes and documentation\n- reports/ for analysis reports, briefings, summaries\n- ppt/ or slides/ for presentation slides, slide specs\n- scripts/ for code, scripts, config files (.py, .sh, .json, .kt)\n- data/ for datasets, CSV, JSON data files\nOnly put files at the workspace root when none of the above apply.",
         parameters = {
             obj(
                 "path" to stringProp("Workspace-relative file path to write."),

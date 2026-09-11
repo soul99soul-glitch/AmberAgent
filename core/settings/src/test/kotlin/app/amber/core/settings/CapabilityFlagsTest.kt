@@ -18,9 +18,17 @@ class CapabilityFlagsTest {
     val tempFolder = TemporaryFolder()
 
     @Test
-    fun releaseDefaultsEnableOnlyDurableRuntimeCore() = runBlocking {
+    fun releaseDefaultsEnableDurableRuntimeAndBackupProviders() = runBlocking {
         val flags = CapabilityFlags(createStore())
-        val expected = setOf(Capability.DurableToolEffects, Capability.TypedRunTerminal)
+        val expected = setOf(
+            Capability.DurableToolEffects,
+            Capability.TypedRunTerminal,
+            Capability.SyncProviderV2,
+            Capability.ThreadGraphV2,
+            // Phase 6: enabled after the Q08 mixed-state gate closed
+            // (server COMPLETED + local started effects stay honest).
+            Capability.OpenAIResponsesResume,
+        )
         assertEquals(expected, flags.flow.first().enabled)
         Capability.entries.filterNot { it.defaultEnabled }.forEach { capability ->
             assertFalse("$capability must default off", flags.isEnabled(capability))
@@ -67,6 +75,24 @@ class CapabilityFlagsTest {
                 flags.isEnabled(capability),
             )
         }
+    }
+
+    @Test
+    fun backupProviderExplicitDisableSurvivesDefaultUpgrade() = runBlocking {
+        val store = createStore()
+        CapabilityFlags(store).setEnabled(Capability.SyncProviderV2, false)
+        val restarted = CapabilityFlags(store)
+        assertFalse(restarted.isEnabled(Capability.SyncProviderV2))
+        assertFalse(Capability.SyncProviderV2 in restarted.flow.first().enabled)
+    }
+
+    @Test
+    fun threadGraphExplicitDisableSurvivesDefaultUpgrade() = runBlocking {
+        val store = createStore()
+        CapabilityFlags(store).setEnabled(Capability.ThreadGraphV2, false)
+        val restarted = CapabilityFlags(store)
+        assertFalse(restarted.isEnabled(Capability.ThreadGraphV2))
+        assertFalse(Capability.ThreadGraphV2 in restarted.flow.first().enabled)
     }
 
     @Test

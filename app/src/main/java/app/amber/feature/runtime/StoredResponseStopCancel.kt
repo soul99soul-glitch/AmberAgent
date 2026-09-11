@@ -18,6 +18,17 @@ class StoredResponseStopCancel(
     private val gateway: StoredResponseGateway,
     private val resumeStore: ResponseResumeStore,
 ) {
+    /** Regeneration may start a new run only after the previous response is settled. */
+    suspend fun cancelForRegeneration(runId: String, terminals: RunTerminalStore): Boolean {
+        val cancelled = cancelStored(runId)
+        if (cancelled) {
+            terminals.finish(runId, RunTerminalState.CANCELLED, PauseReason.USER_STOP)
+        } else {
+            terminals.pause(runId, RunTerminalState.WAITING_EXTERNAL, PauseReason.USER_STOP)
+        }
+        return cancelled
+    }
+
     /**
      * @return true when the server outcome is decidable (nothing stored, or
      * the cancel was confirmed — cursor cleared). false when the cancel

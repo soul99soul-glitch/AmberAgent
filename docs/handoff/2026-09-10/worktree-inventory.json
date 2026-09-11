@@ -1,0 +1,2265 @@
+{
+  "captured_at": "2026-09-10T00:55:18.758345+08:00",
+  "android_root": "/Users/mi/Downloads/AI/AmberAgent/android",
+  "branch": "main",
+  "head": "ab984f6df1d6b5f9bae2b007ccdcf43f1d467e62",
+  "initial_dirty_tracked_count": 39,
+  "note": "All changed tracked/untracked non-ignored files except this handoff directory; hashes identify state, not provenance or a source backup. No commits made.",
+  "counts_by_status": {
+    " M": 181,
+    " D": 10,
+    "??": 131
+  },
+  "files": [
+    {
+      "status": " M",
+      "path": "ai/src/main/java/app/amber/ai/ui/Message.kt",
+      "exists": true,
+      "bytes": 25944,
+      "sha256": "907c1d782e6e87ff59556fa30929acdde6f2c3db60f93cef294c3b93c3da838e"
+    },
+    {
+      "status": " M",
+      "path": "app/build.gradle.kts",
+      "exists": true,
+      "bytes": 34097,
+      "sha256": "3bda2116040580ab92fd76f473244417317606522667c8fd130ff3c06d77b3ed"
+    },
+    {
+      "status": " M",
+      "path": "app/src/androidTest/java/app/amber/agent/data/db/AppDatabaseMigrationTest.kt",
+      "exists": true,
+      "bytes": 7625,
+      "sha256": "791dd6b9f1d358421ad015b07750d0f9554cd4e03244b660db119d554432aa9b"
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/assets/builtin-skills/监控文档/SKILL.md",
+      "exists": true,
+      "bytes": 1149,
+      "sha256": "1e40f5a58c8d4b9a2b0b7b244f881e3a6a5c9a1f368ebd57e590b95600939dbf"
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/assets/webmount/bridge.js",
+      "exists": true,
+      "bytes": 63355,
+      "sha256": "57e18468f80f262c23e8d9deb944648fc3d8c7655fca9805eb412567fffb4766"
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/java/app/amber/agent/AmberAgentApp.kt",
+      "exists": true,
+      "bytes": 19037,
+      "sha256": "216f91b9b1d49d423702a329cfe45dd99d2234e6fbe424101614039f06085ba5"
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/java/app/amber/agent/RouteActivity.kt",
+      "exists": true,
+      "bytes": 47454,
+      "sha256": "56694de7f8c365d5b1cca514db7aba2105415fbab6c14a51d9a01d2df87b8e1a"
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/java/app/amber/agent/data/db/AppDatabase.kt",
+      "exists": true,
+      "bytes": 28260,
+      "sha256": "99cdda5817ba49565152f92f1a3f7eade956dee0339437a9a3715acb4a4213ab"
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/java/app/amber/agent/data/db/dao/ConversationDAO.kt",
+      "exists": true,
+      "bytes": 9273,
+      "sha256": "ef8aff3df33bc0169412544ea1d763cea587d8a0c9a5928371d681bfc6952c2d"
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/java/app/amber/agent/data/db/dao/MessageNodeDAO.kt",
+      "exists": true,
+      "bytes": 6064,
+      "sha256": "ae5b8c851f279a724d8ba6fbd7eb343f51ab8cc63a5834c61ae935b579ea9131"
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/java/app/amber/agent/data/db/dao/MiniAppDAO.kt",
+      "exists": true,
+      "bytes": 5817,
+      "sha256": "affde5eb3f00933cec4650eca27707d865e2f1264a2ed1694f4f2ac6f2a69308"
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/java/app/amber/agent/data/db/dao/ToolEffectDAO.kt",
+      "exists": true,
+      "bytes": 2348,
+      "sha256": "0deea95e8f12822e1ea78b14a5ede0e7464d27f8a0b73239276ca76e8dbed657"
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/java/app/amber/agent/data/db/entity/HotListEntities.kt",
+      "exists": true,
+      "bytes": 2807,
+      "sha256": "b5077d0c5d4be8f7a54b741ae9a3bf88e36ca5499cb87b3e5d342f24f9e91b99"
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/java/app/amber/agent/data/db/entity/MiniAppEntity.kt",
+      "exists": true,
+      "bytes": 2752,
+      "sha256": "d5d3bb6732dc043d5d7d1c31702450cb86b9d31845310cb1e4a248b24496d4ef"
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/java/app/amber/agent/data/db/entity/ToolEffectEntity.kt",
+      "exists": true,
+      "bytes": 2471,
+      "sha256": "4c3b9cfe35720b39c3aaab499359276ceb1ff770b86f8434d7ca5894bb8e9f7f"
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/java/app/amber/agent/data/db/fts/MessageFtsManager.kt",
+      "exists": true,
+      "bytes": 14608,
+      "sha256": "5bee7dbdf7e5ad54299530cdda263b79d9a8db05185b9cfca562c89e025e2cff"
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/java/app/amber/agent/data/workspace/ArtifactRepository.kt",
+      "exists": true,
+      "bytes": 25042,
+      "sha256": "19d40394a151296eea31a02097477fe88c747ddf7f413268e740c71b718e2f1b"
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/java/app/amber/core/ai/tools/LocalTools.kt",
+      "exists": true,
+      "bytes": 11040,
+      "sha256": "2c0993bcf92d6c52db5582816270e00483e9f48bb797b4df51f42ec2563e9119"
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/java/app/amber/core/ai/tools/ProviderConfigTools.kt",
+      "exists": true,
+      "bytes": 47557,
+      "sha256": "e6b0d35c463074cdda685ca5cd1caaafe999b20877232e84686cbd475c661bd9"
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/java/app/amber/core/context/AgentCapabilitySnapshotBuilder.kt",
+      "exists": true,
+      "bytes": 2884,
+      "sha256": "c46363012c154379baca24257c2f1203e32ceb3de6fe3a907cf5024df6192e32"
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/java/app/amber/core/context/ConversationContextRepository.kt",
+      "exists": true,
+      "bytes": 8017,
+      "sha256": "7cd3f11e8723466c76526f49aa2a0376c85887638a73e71765af8565204e9e25"
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/java/app/amber/core/di/AgentRuntimeModule.kt",
+      "exists": true,
+      "bytes": 6956,
+      "sha256": "579a91e95f397cc660ea0ebb26221bf7c4bf9e85db7ae3e9d137dc0ad13ac3f6"
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/java/app/amber/core/di/AppModule.kt",
+      "exists": true,
+      "bytes": 1556,
+      "sha256": "22b29361d0b422a25cfc005c5b0a7adf512b5523d69ef6fc4a2097f07208886f"
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/java/app/amber/core/di/BoardModule.kt",
+      "exists": true,
+      "bytes": 6115,
+      "sha256": "ef9225aef025cdcf60549c1d726225aec42a62e7b76c98357d54ec657e8b36e2"
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/java/app/amber/core/di/ChatModule.kt",
+      "exists": true,
+      "bytes": 3122,
+      "sha256": "41e372133f172f804f39d295e97a162ca4211d153d498f8d60468888f985c537"
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/java/app/amber/core/di/DataSourceModule.kt",
+      "exists": true,
+      "bytes": 27689,
+      "sha256": "1bad384502cd5171060e08c612667faf9d8d44e3cf6d4c09efef0ccfad849eaa"
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/java/app/amber/core/di/MemoryModule.kt",
+      "exists": true,
+      "bytes": 1897,
+      "sha256": "58df1dc2ecfbd517d5a0e9e23485dfa2da332b7a48e44f8aad4cf75bb5d441aa"
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/java/app/amber/core/di/NovelModule.kt",
+      "exists": true,
+      "bytes": 2364,
+      "sha256": "1f75a9a6121aa5f2dfd7cf5f38d171ffa72170ecdf1cc54f57ca4d4595b1defb"
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/java/app/amber/core/di/RepositoryModule.kt",
+      "exists": true,
+      "bytes": 2774,
+      "sha256": "776cfcd766e8aa578f981815d1b10e7bd190b364dd475b4195f2536383dc50c3"
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/java/app/amber/core/di/WebMountModule.kt",
+      "exists": true,
+      "bytes": 6501,
+      "sha256": "c81a620aa3f544ab648c597e16093c42fc2ff95b2fcfefbebbd700b8b0c8caef"
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/java/app/amber/core/di/WorkspaceModule.kt",
+      "exists": true,
+      "bytes": 1596,
+      "sha256": "9666a96144ffd040e66b17551551807804dde8cfad628803fd5fa31db8b8a45a"
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/java/app/amber/core/files/FilesManager.kt",
+      "exists": true,
+      "bytes": 33745,
+      "sha256": "07b7681d8fb35d78af0e29027cf877844d751ae2bb7e760dae925fda44a87b71"
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/java/app/amber/core/memory/dream/MemoryDreamApplier.kt",
+      "exists": true,
+      "bytes": 10010,
+      "sha256": "0b65edc7bdf4b6fe73dd6daa776c77577564da6234ec2392f159ef3cce66dffb"
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/java/app/amber/core/memory/dream/MemoryDreamPlanStore.kt",
+      "exists": true,
+      "bytes": 5775,
+      "sha256": "1902cd5f92cba83532bc5033cf93fb6fcde514fbc0ada9e7388c723476be5e09"
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/java/app/amber/core/memory/dream/MemoryDreamPlanner.kt",
+      "exists": true,
+      "bytes": 15908,
+      "sha256": "f6cb73505e62a60d8391014e38b7f712d5fe9169806729828e644a5be6297d56"
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/java/app/amber/core/memory/dream/MemoryDreamRunCoordinator.kt",
+      "exists": true,
+      "bytes": 2826,
+      "sha256": "f32a7baa69ad4c6652854c3f7c22b881869df49ec093737bc0aee0271b617715"
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/java/app/amber/core/memory/dream/MemoryDreamWorker.kt",
+      "exists": true,
+      "bytes": 2630,
+      "sha256": "ba53b3aea62445cd6ac715dec4b21a3b3e2b426bdba0d29bb620ec985001cce1"
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/java/app/amber/core/memory/export/MemoryImportExportManager.kt",
+      "exists": true,
+      "bytes": 5452,
+      "sha256": "3e81fa40d3c48a8afde579cdc4c9515887b9a13e6a8d520faf49498315d0d22c"
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/java/app/amber/core/memory/extraction/MemoryExtractor.kt",
+      "exists": true,
+      "bytes": 15150,
+      "sha256": "9116d9b931023299925f35250c1b83f62dd8bb9dd815c2488051a031753bb1e7"
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/java/app/amber/core/memory/store/MemoryRepository.kt",
+      "exists": true,
+      "bytes": 25338,
+      "sha256": "fca5d878ff5f6d520b3d7d1e4290238be84b3b16db5729c6d6a6fbfd6e121749"
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/java/app/amber/core/repository/ConversationRepository.kt",
+      "exists": true,
+      "bytes": 26744,
+      "sha256": "7b0020f849bdd58b5d7d0725c3479e729022eafc20f60096cba62f140fb6b7a9"
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/java/app/amber/core/repository/CouncilRoomRepository.kt",
+      "exists": true,
+      "bytes": 12807,
+      "sha256": "9f0a074b36243ec29a7885f380ac1fd3f9090087f368962e9c16b7d6d7b78ef7"
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/java/app/amber/core/repository/FavoriteRepository.kt",
+      "exists": true,
+      "bytes": 2191,
+      "sha256": "ab84d793bec0e5524ffd849e6105e7d3299de73bef1f38e441705b6a0f3c24e1"
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/java/app/amber/core/repository/MemoryRepository.kt",
+      "exists": true,
+      "bytes": 1251,
+      "sha256": "4c849f6e63108965455f2ac4fba06e0f81abdc4e90cad32cafb9a750638149a4"
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/java/app/amber/core/service/AiAuxiliaryGenerator.kt",
+      "exists": true,
+      "bytes": 7064,
+      "sha256": "fe3d443014a08264f3ef5ce6d07a4c809f5b189f053d30bf02841902feb94dfc"
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/java/app/amber/core/service/ChatService.kt",
+      "exists": true,
+      "bytes": 174011,
+      "sha256": "b9b2d9a50cfb29621435ae72af1dec8b739580aedcc1b8bc39d3184f52f8b74a"
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/java/app/amber/core/service/ConversationSession.kt",
+      "exists": true,
+      "bytes": 8368,
+      "sha256": "a9be894248f8283ed6738d7799878066f3a5965b0ede1f10c7a08695eb20ac72"
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/java/app/amber/core/storage/SessionCleanupManager.kt",
+      "exists": true,
+      "bytes": 10071,
+      "sha256": "5a745a0e8c2614df5f5fd4f14a055cc4b6ff1de7ff1c2a8d0b6ffe5193f91aa3"
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/java/app/amber/core/sync/core/SyncArchiveManager.kt",
+      "exists": true,
+      "bytes": 57622,
+      "sha256": "fdc6b631ab3f9432e295d7b99043974921391b6dc0bff37d6c6f35df5f517160"
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/java/app/amber/feature/board/BoardRepository.kt",
+      "exists": true,
+      "bytes": 7562,
+      "sha256": "d5907848b259d8d585185a287cf43a8355a755a12ea137d25d7f500c331a95aa"
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/java/app/amber/feature/board/agent/DailyReviewAgent.kt",
+      "exists": true,
+      "bytes": 11198,
+      "sha256": "741e3ebec080621afc037db08fc077f9faad6a730864c5ea2ce4523cab14ed44"
+    },
+    {
+      "status": " D",
+      "path": "app/src/main/java/app/amber/feature/board/collector/FeishuDocSignalCollector.kt",
+      "exists": false
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/java/app/amber/feature/board/hotlist/HotListRepository.kt",
+      "exists": true,
+      "bytes": 13961,
+      "sha256": "8293b75f7a97305233bc3393bec6fbc23693de1630faa1909d2742d9dfeba9d9"
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/java/app/amber/feature/board/hotlist/HotListScheduler.kt",
+      "exists": true,
+      "bytes": 6452,
+      "sha256": "a0d517ef18c97d02d3ba35d31fb094fec1e65c1c9d2b1dec2a563dc3a688b8c8"
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/java/app/amber/feature/board/hotlist/deepread/DeepReadAgentRunManager.kt",
+      "exists": true,
+      "bytes": 52788,
+      "sha256": "3c33bca985f799dc1ff62779ed2e09c631ead584ab14bc0678ff581cdbf70085"
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/java/app/amber/feature/board/hotlist/deepread/DeepReadWorker.kt",
+      "exists": true,
+      "bytes": 13284,
+      "sha256": "14f27fcc5d81294ebbc66563e2653fd7d6badf1dceb9dfd844b28364574e6c86"
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/java/app/amber/feature/board/worker/BoardWorker.kt",
+      "exists": true,
+      "bytes": 7186,
+      "sha256": "1fc0f0384368dfd532f91c9cde707183730aae4b91ec43814c64635b383d7218"
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/java/app/amber/feature/chat/impl/ChatEventProjector.kt",
+      "exists": true,
+      "bytes": 7633,
+      "sha256": "a3d2aeea15142c46f12b84975cbd3323a7325caae09da1d8ab8cc7c77b42ad23"
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/java/app/amber/feature/cron/AgentCronManager.kt",
+      "exists": true,
+      "bytes": 16338,
+      "sha256": "a8483187a1dc3cef1332be0021cfbe808eb793f795ceaed7699a8ac9d3f0bd1d"
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/java/app/amber/feature/home/ContinueCandidate.kt",
+      "exists": true,
+      "bytes": 3581,
+      "sha256": "6513e4ec58c696bdd227d0ef2db5e0284a96063679fea0509bf0ac0926e8695d"
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/java/app/amber/feature/home/DeepReadContinueSource.kt",
+      "exists": true,
+      "bytes": 3018,
+      "sha256": "9e8ec5159ecc749037053afafc41ce3a917017e80adab85e682c6d20eee42a0a"
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/java/app/amber/feature/home/ImageGenerationContinueSource.kt",
+      "exists": true,
+      "bytes": 5807,
+      "sha256": "3011d0632c7b0f3aedc847950ae40fb6d36d53da2dd21487f9e9c18edb74588c"
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/java/app/amber/feature/home/RoomContinueDismissStore.kt",
+      "exists": true,
+      "bytes": 1376,
+      "sha256": "a9213906b112861904ebacb4f5059709fd3c964a3647c807151a36ee14640f92"
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/java/app/amber/feature/miniapp/ConversationDraftStore.kt",
+      "exists": true,
+      "bytes": 3998,
+      "sha256": "851093291f6b1c3a67ba5b71b6dceec91300e39c341e570af4d7fc7e81ea7968"
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/java/app/amber/feature/miniapp/MiniAppRepository.kt",
+      "exists": true,
+      "bytes": 13333,
+      "sha256": "61e41ae4daffe364ac96128178d1e63bf3ee6dd63c57444bca4266b4e78c4daf"
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/java/app/amber/feature/novel/workspace/NovelWorkspaceGhostwriteController.kt",
+      "exists": true,
+      "bytes": 8900,
+      "sha256": "627e764461a0873eff6c9d14994d9a21769823f53e4406946e9382501268573a"
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/java/app/amber/feature/novel/workspace/NovelWorkspaceGhostwriteWorker.kt",
+      "exists": true,
+      "bytes": 13384,
+      "sha256": "e63d572d5d9aafc5e65fd7769cf0abc81db61c202f149c4bc52dbf59381f8616"
+    },
+    {
+      "status": " D",
+      "path": "app/src/main/java/app/amber/feature/office/FeishuOfficeEnhancementManager.kt",
+      "exists": false
+    },
+    {
+      "status": " D",
+      "path": "app/src/main/java/app/amber/feature/office/radar/DocRadar.kt",
+      "exists": false
+    },
+    {
+      "status": " D",
+      "path": "app/src/main/java/app/amber/feature/office/radar/FeishuChangeNotifier.kt",
+      "exists": false
+    },
+    {
+      "status": " D",
+      "path": "app/src/main/java/app/amber/feature/office/radar/FeishuDocRadarWorker.kt",
+      "exists": false
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/java/app/amber/feature/runtime/AgentToolDispatcher.kt",
+      "exists": true,
+      "bytes": 30216,
+      "sha256": "28949f333338240368f7425ff3de59c9f0be28c673b6e57fd7f2b52fd422dd0b"
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/java/app/amber/feature/runtime/PermissionDecisionResolver.kt",
+      "exists": true,
+      "bytes": 17806,
+      "sha256": "2ef9403069ea84fe83538e21f7aca6a1d813dc092c0308a959422828b5817227"
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/java/app/amber/feature/runtime/RoomResponseResumeStore.kt",
+      "exists": true,
+      "bytes": 1528,
+      "sha256": "a41ae75cfc58c81b0395e90d93a8ce1a81778afd2187a5a5f11d6c2a932b3c1a"
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/java/app/amber/feature/runtime/RoomThreadGraphStore.kt",
+      "exists": true,
+      "bytes": 6972,
+      "sha256": "16175aa0a648e13f8b3e6dd3f698351b91d634bbd1410d64278ac5f1a0013328"
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/java/app/amber/feature/runtime/RunRecoveryService.kt",
+      "exists": true,
+      "bytes": 20857,
+      "sha256": "7c9e6aa3500531b277093f449243c9301b9673f5482ae0aa7f18ac58948a6466"
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/java/app/amber/feature/runtime/RunTerminalStore.kt",
+      "exists": true,
+      "bytes": 8184,
+      "sha256": "dd98bd1f07408840bd3836936f2d7ff753f54c5876e8458c9798571a8c5f3ffd"
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/java/app/amber/feature/runtime/ToolEffectLedger.kt",
+      "exists": true,
+      "bytes": 15991,
+      "sha256": "bf66be532dcd171386454a2de46318ee54d4d48f373ce2aedaf49e3a55c6c8f3"
+    },
+    {
+      "status": " D",
+      "path": "app/src/main/java/app/amber/feature/tools/FeishuOfficeTools.kt",
+      "exists": false
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/java/app/amber/feature/ui/components/ai/ChatInput.kt",
+      "exists": true,
+      "bytes": 53116,
+      "sha256": "16a256855fa16497f07c114d81c91c87a9fc349424af749429a6559a437d9ec1"
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/java/app/amber/feature/ui/components/ai/ChatInputAttachments.kt",
+      "exists": true,
+      "bytes": 28738,
+      "sha256": "599b37b0fc42f5c20b121c59766d04f186028d758709fd935576695cc51caa4f"
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/java/app/amber/feature/ui/components/ai/ChatInputComposers.kt",
+      "exists": true,
+      "bytes": 47030,
+      "sha256": "60de8b2fe4cf1858cbfa0d7536407743451d0d255166224d850e091078d6b7e9"
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/java/app/amber/feature/ui/components/ai/ChatInputSandbox.kt",
+      "exists": true,
+      "bytes": 45102,
+      "sha256": "f3bfc755de6ee0e31fe82cd4d0c768a1e5c8bb55eb249eb6c3b4e9ee69aef1c7"
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/java/app/amber/feature/ui/components/message/ChatMessageCot.kt",
+      "exists": true,
+      "bytes": 12582,
+      "sha256": "468d6e849650a939788e942c5f1cae0b7d023d808e1563f8cccbe4946a0327ea"
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/java/app/amber/feature/ui/components/message/ChatMessageCouncilStep.kt",
+      "exists": true,
+      "bytes": 35507,
+      "sha256": "59acbfa61d4be62f892ee33e9d411bee91da6c8289f98a891327eb4eefa608f9"
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/java/app/amber/feature/ui/components/message/ChatMessageSubAgentStep.kt",
+      "exists": true,
+      "bytes": 25951,
+      "sha256": "023bbe1c56b7574a4d27f1db6ea806a1d5573b30afea0465f5322e18c79dcd83"
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/java/app/amber/feature/ui/components/message/ChatMessageTools.kt",
+      "exists": true,
+      "bytes": 41645,
+      "sha256": "c78c6b8a0a5c21112a4bc07f59a199bd69c313f4cb56a191ae73d7f29595e468"
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/java/app/amber/feature/ui/components/ui/CardGroup.kt",
+      "exists": true,
+      "bytes": 7204,
+      "sha256": "f807441a668979b36d2459060cd46814719203edea3195bceddb6c8745ca30bf"
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/java/app/amber/feature/ui/components/ui/ChainOfThought.kt",
+      "exists": true,
+      "bytes": 26629,
+      "sha256": "4ec6827b61ef8e394f13c43d1cdf710d044f9d760ba17b548c14283c1beabc67"
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/java/app/amber/feature/ui/hooks/ChatInputState.kt",
+      "exists": true,
+      "bytes": 14952,
+      "sha256": "5300c16b75787d442a0ded738bc9f37fccfe86a231d413b7da110d3b5b46c2a6"
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/java/app/amber/feature/ui/pages/backup/BackupPage.kt",
+      "exists": true,
+      "bytes": 62263,
+      "sha256": "5b2d0a5315d2431c2869dce2ea48b38e8de58af7aa1ae7014be8ec048277773a"
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/java/app/amber/feature/ui/pages/backup/BackupVM.kt",
+      "exists": true,
+      "bytes": 58828,
+      "sha256": "4e6ee13705d02ba674d842de73d6830bcd4ccf998db7972b53925a877cefe856"
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/java/app/amber/feature/ui/pages/board/BoardPage.kt",
+      "exists": true,
+      "bytes": 26632,
+      "sha256": "6a833cae8df72b39dce6912c028ec4f8fd88e3ec8c8a7e5a4b4afd150e0a0d05"
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/java/app/amber/feature/ui/pages/board/DeepReadHistoryPage.kt",
+      "exists": true,
+      "bytes": 6529,
+      "sha256": "e2b98fdb22d5a739e9e9165feb91102c4c1a30b242e61af3514e92840c0d7ef4"
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/java/app/amber/feature/ui/pages/board/SettingTodayBoardPage.kt",
+      "exists": true,
+      "bytes": 45636,
+      "sha256": "5a189fb97220d8365b15fed0b590ec37aeb8fd2de1ab7ab71b188c09579f9b1d"
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/java/app/amber/feature/ui/pages/chat/ChatPage.kt",
+      "exists": true,
+      "bytes": 90388,
+      "sha256": "eb23d7b47ff9fbe1ff7a14ec166d001684cbd46ec7c0bb86d7704a45962a4921"
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/java/app/amber/feature/ui/pages/chat/ChatPageSplit.kt",
+      "exists": true,
+      "bytes": 8632,
+      "sha256": "238557ad9dd572ee8546c8e8223f79ae5dc480b237df65c2999867236f98cd56"
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/java/app/amber/feature/ui/pages/chat/ChatVM.kt",
+      "exists": true,
+      "bytes": 22158,
+      "sha256": "2a25c1fb9e613a473baf3b1f6da3a20632e649061b464d1129a2f7be9237d7e3"
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/java/app/amber/feature/ui/pages/debug/DebugVM.kt",
+      "exists": true,
+      "bytes": 7838,
+      "sha256": "dabdb51ee9e0ff2e20a3bcf3f60b79e2735531f7bf6c0cfbd8eb903087324b87"
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/java/app/amber/feature/ui/pages/history/HistoryPage.kt",
+      "exists": true,
+      "bytes": 17458,
+      "sha256": "ac130d46dffd85ef8536b2f5926ce2bb0c3b13d1ca82fdc4e08c9af72b99e8ca"
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/java/app/amber/feature/ui/pages/history/HistoryVM.kt",
+      "exists": true,
+      "bytes": 5124,
+      "sha256": "4a4a92e465806c4e927ce525d33abe01bc0ceab47f5c163efe7964a53336ffee"
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/java/app/amber/feature/ui/pages/miniapp/MiniAppRunnerPage.kt",
+      "exists": true,
+      "bytes": 19206,
+      "sha256": "e13f7676bb44ef0b5e06ba85f2ba185d5ae38b54c91dadd624f94fef009bf328"
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/java/app/amber/feature/ui/pages/miniapp/MiniAppSourceEditor.kt",
+      "exists": true,
+      "bytes": 18237,
+      "sha256": "fe752d25a909cad2afb81453fd2f9baef5af206cad7f790bcda8053a19a25458"
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/java/app/amber/feature/ui/pages/novel/NovelMarkdownWorkspacePage.kt",
+      "exists": true,
+      "bytes": 71151,
+      "sha256": "3724e1588e3a923b1f83d673d0312d1aac200561aca0556f579f5e89759868e5"
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/java/app/amber/feature/ui/pages/novel/NovelMarkdownWorkspaceViewModel.kt",
+      "exists": true,
+      "bytes": 56642,
+      "sha256": "cda205de8dee9c10ced0d1d38ed1a0993128d82ce270a4c91902037e5373d496"
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/java/app/amber/feature/ui/pages/search/SearchPage.kt",
+      "exists": true,
+      "bytes": 21027,
+      "sha256": "fc51a7c55b5ef883e4391745d9bb38cd9a62ed0d208e4a1f0e2b6a7cfbd7903f"
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/java/app/amber/feature/ui/pages/search/SearchVM.kt",
+      "exists": true,
+      "bytes": 6412,
+      "sha256": "fad5713e7ec37a5261b40bf7833428232b0b78a7261971800fe03c2b55c3d0b7"
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/java/app/amber/feature/ui/pages/sessionhome/SessionHomePage.kt",
+      "exists": true,
+      "bytes": 49075,
+      "sha256": "9e5145393276391efe9644703fddcfbd60264e487a051c3ba4ef26a6aa82ee84"
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/java/app/amber/feature/ui/pages/sessionhome/SessionHomeVM.kt",
+      "exists": true,
+      "bytes": 7544,
+      "sha256": "c8bd35f6a37299b8f55e3e4fa3af0e96757cef32203c3471f6dcea6bdd5bff21"
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/java/app/amber/feature/ui/pages/setting/SettingAgentExecutionPage.kt",
+      "exists": true,
+      "bytes": 21742,
+      "sha256": "e210ea635bce2a55af9384543d4816fef7ed90587c1ea412753c1effece52e2c"
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/java/app/amber/feature/ui/pages/setting/SettingAgentMemoryPage.kt",
+      "exists": true,
+      "bytes": 70990,
+      "sha256": "89090ef6e95390ca26d04571466d8c0251da91f627bddc47a12c76b7d2bdcb25"
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/java/app/amber/feature/ui/pages/setting/SettingAgentMemoryVM.kt",
+      "exists": true,
+      "bytes": 16035,
+      "sha256": "467206dac9e72cc9fe6df28a4f4751e349f740a35fa003854745b57b9549eef1"
+    },
+    {
+      "status": " D",
+      "path": "app/src/main/java/app/amber/feature/ui/pages/setting/SettingExperimentalOfficeProPage.kt",
+      "exists": false
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/java/app/amber/feature/ui/pages/setting/SettingExperimentalPage.kt",
+      "exists": true,
+      "bytes": 15648,
+      "sha256": "06444c9d3a28a055e495170febc5a56859e9182a63d9d1b385e73da3246432fa"
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/java/app/amber/feature/ui/pages/setting/SettingExperimentalWebMountPage.kt",
+      "exists": true,
+      "bytes": 63672,
+      "sha256": "55011f763f84034a11eb832d1248760bbfc51c35c4b5bca567e8b533f5373c9b"
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/java/app/amber/feature/ui/pages/setting/SettingPage.kt",
+      "exists": true,
+      "bytes": 22984,
+      "sha256": "d4118373a416caf322df58945fd4ee83caffbe167f66a4de1b6941357ef9de72"
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/java/app/amber/feature/ui/pages/setting/SettingProviderConfigPage.kt",
+      "exists": true,
+      "bytes": 50344,
+      "sha256": "1d6439e0250ec3b390388f416faaf45c67f60fcab080bb3839d085ad8e1af2e4"
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/java/app/amber/feature/ui/pages/setting/SettingProviderDetailPage.kt",
+      "exists": true,
+      "bytes": 9142,
+      "sha256": "affbb85ddf361aa5c4aa18ded8730d860e88851df2ca8281ce5b1ddc9216f557"
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/java/app/amber/feature/ui/pages/setting/SettingProviderModelTabPage.kt",
+      "exists": true,
+      "bytes": 35160,
+      "sha256": "0bb88839e696ecdabbade3f9086f80ff77245fac11f36b4e33539a22fdb078eb"
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/java/app/amber/feature/ui/pages/setting/SettingStoragePage.kt",
+      "exists": true,
+      "bytes": 22474,
+      "sha256": "1498dba87c8e9f66e35c339b3df948c2d5983e1f605009044c53fb169b52b9c1"
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/java/app/amber/feature/ui/pages/setting/SettingSystemAccessPage.kt",
+      "exists": true,
+      "bytes": 19370,
+      "sha256": "f955bfce836f494369f664f913a7562e1c035d77bcddccdc07a9fcf2d84ef156"
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/java/app/amber/feature/ui/pages/setting/SettingVM.kt",
+      "exists": true,
+      "bytes": 1009,
+      "sha256": "7f5af88dc18cf25bcff4a2bc384ad12e84735cdd4be9e7f5d67ac1d02de64362"
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/java/app/amber/feature/ui/pages/synara/SynaraWorkspacePage.kt",
+      "exists": true,
+      "bytes": 17352,
+      "sha256": "c175c77ac71c5d39a9c854b772c7e015dafff61f2be2a69de38c1e1b9cf2ffd6"
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/java/app/amber/feature/ui/theme/ThemePackageManager.kt",
+      "exists": true,
+      "bytes": 11710,
+      "sha256": "650b644635f145d08a75d5e3a7673e6d5b0ea22445bba67b6015c1be9420f83e"
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/java/app/amber/feature/webmount/adapters/feishudocs/FeishuDocsTools.kt",
+      "exists": true,
+      "bytes": 44769,
+      "sha256": "88b40bb96dce8c2a0b8e59b6c05dd15afc244271fe78a2a059b02d6b2dcecedb"
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/java/app/amber/feature/webmount/primitives/SessionHandle.kt",
+      "exists": true,
+      "bytes": 33190,
+      "sha256": "71aba0657997feb06f8f943ff1d8f1622df4b559c127fb49713ebe538baff8cc"
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/java/app/amber/feature/webmount/primitives/WebViewPool.kt",
+      "exists": true,
+      "bytes": 27979,
+      "sha256": "28b7aebc9951f1c41c97fde01ebca2c468c884d1af469724d577ed0e04fb8f07"
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/java/app/amber/feature/webmount/profile/ProfileBridge.kt",
+      "exists": true,
+      "bytes": 10203,
+      "sha256": "a6b96a2d16e85ecbd67edb12ea5297999c2a2222075f0f57015f23ba2ca941d7"
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/java/app/amber/feature/webmount/tools/WebMountCaptureTools.kt",
+      "exists": true,
+      "bytes": 13589,
+      "sha256": "91174c272065701e85926078e422ade386cd013452a28607bc72c4f33810139b"
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/java/app/amber/feature/webmount/tools/WebMountFetchTools.kt",
+      "exists": true,
+      "bytes": 16026,
+      "sha256": "f9460c987a338120b798757c123e3de790daa8aedafd05c169ea16a6fbbd3fa7"
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/java/app/amber/feature/webmount/tools/WebMountInteractionTools.kt",
+      "exists": true,
+      "bytes": 39098,
+      "sha256": "797198d397e1fcce51be32bbd2e79454185d2ea83970a0273efab31a50d0daed"
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/java/app/amber/feature/webmount/tools/WebMountNavigationTools.kt",
+      "exists": true,
+      "bytes": 26618,
+      "sha256": "c6f0eb23943e7f7bfe29cf116883b0075ade978cf9c910f1e0bc6a93ca89be3b"
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/java/app/amber/feature/webmount/tools/WebMountObserveTools.kt",
+      "exists": true,
+      "bytes": 4799,
+      "sha256": "5ac38ead1b3022d89a561fa96d81225be1809cfe43ddfeda1fd6c0ae02cc5291"
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/java/app/amber/feature/webmount/tools/WebMountPrimitiveShared.kt",
+      "exists": true,
+      "bytes": 12066,
+      "sha256": "dec71e03aa8847e7c6d884cfa4bf3840afce3b664dc4b9edb18af97516bbaeec"
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/java/app/amber/feature/webmount/tools/WebMountPrimitiveTools.kt",
+      "exists": true,
+      "bytes": 6805,
+      "sha256": "59abc77034d50932eeac17a52010d60f247ff6d9418268415af8b1338fb18803"
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/java/app/amber/feature/webmount/tools/WebMountSiteTools.kt",
+      "exists": true,
+      "bytes": 25774,
+      "sha256": "1b02311646512c505e63146c1e56afbef55462f560aaea427f11e4daf736e688"
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/java/app/amber/feature/webmount/tools/WebMountTabsTools.kt",
+      "exists": true,
+      "bytes": 7705,
+      "sha256": "8d58c3bdd4f51d8e90b5a9aa71ca1eaf5bdc2d25310a49728e702ac729f7baed"
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/res/values-zh/strings.xml",
+      "exists": true,
+      "bytes": 98165,
+      "sha256": "919899eed276618dd8bb8a377a23f86f7668f030af571813de952ffc247605f5"
+    },
+    {
+      "status": " M",
+      "path": "app/src/main/res/values/strings.xml",
+      "exists": true,
+      "bytes": 100244,
+      "sha256": "92f27e68f9f7aea6fa665c0f45a1fc8155c0f71d6d20bb9d95fe8df25e11e945"
+    },
+    {
+      "status": " M",
+      "path": "app/src/test/java/app/amber/agent/data/agent/board/hotlist/DeepReadRepositoryTest.kt",
+      "exists": true,
+      "bytes": 32605,
+      "sha256": "a1ed7a9951b94fbd49ca7df7c3e36d3c357c3e81c4d40654355e21d6dbd6e636"
+    },
+    {
+      "status": " D",
+      "path": "app/src/test/java/app/amber/agent/data/agent/office/FeishuOfficeEnhancementPlannerTest.kt",
+      "exists": false
+    },
+    {
+      "status": " M",
+      "path": "app/src/test/java/app/amber/agent/data/agent/runtime/AgentToolDispatcherTest.kt",
+      "exists": true,
+      "bytes": 15670,
+      "sha256": "fc5a1661aa96237c0ec6c8df72577ed93fe3f7904b416b5894b0c643104c835c"
+    },
+    {
+      "status": " M",
+      "path": "app/src/test/java/app/amber/agent/data/agent/runtime/PermissionDecisionResolverTest.kt",
+      "exists": true,
+      "bytes": 22775,
+      "sha256": "2e6ba321b2968493fe227556d1178341a9d2ab58ee0c225e77ed687a15f4b742"
+    },
+    {
+      "status": " M",
+      "path": "app/src/test/java/app/amber/agent/data/agent/runtime/SpeculativeToolRunnerTest.kt",
+      "exists": true,
+      "bytes": 5758,
+      "sha256": "032b8422bdd7fa09b9cddc231476c127d08f0053cf5005d9fd5f8eb2c12e175d"
+    },
+    {
+      "status": " M",
+      "path": "app/src/test/java/app/amber/agent/data/agent/subagent/SubAgentValidatorTest.kt",
+      "exists": true,
+      "bytes": 17954,
+      "sha256": "47139fd71ebc6256e0ef7bb9f6e54544ee16305789a58e7162f03693c6d17818"
+    },
+    {
+      "status": " M",
+      "path": "app/src/test/java/app/amber/agent/data/agent/task/AgentTaskModelsTest.kt",
+      "exists": true,
+      "bytes": 1419,
+      "sha256": "90438b4ea3578d20623aea0d8753fb08630cce9458be57df1d5df36cd22cc1b6"
+    },
+    {
+      "status": " M",
+      "path": "app/src/test/java/app/amber/agent/data/agent/task/AgentTaskRecoveryManagerTest.kt",
+      "exists": true,
+      "bytes": 3138,
+      "sha256": "3f31412569a81cdcceb5e6d336347e4db16abf3a6862b5b2ea1e04abba4cc082"
+    },
+    {
+      "status": " M",
+      "path": "app/src/test/java/app/amber/agent/data/db/fts/MessageSearchMergeTest.kt",
+      "exists": true,
+      "bytes": 8166,
+      "sha256": "cac8a7c72d507791e17ecb32dd820875f7d7300ef8611971c7615507af900ee9"
+    },
+    {
+      "status": " M",
+      "path": "app/src/test/java/app/amber/agent/data/sync/SyncArchiveManagerIntegrationTest.kt",
+      "exists": true,
+      "bytes": 15216,
+      "sha256": "60a05883b46d12c10dfb7e9d95cf8186f588ae856b52e07521d5b8a5ae8a64ed"
+    },
+    {
+      "status": " M",
+      "path": "app/src/test/java/app/amber/agent/data/workspace/ArtifactRepositoryTest.kt",
+      "exists": true,
+      "bytes": 18059,
+      "sha256": "95dfc46aa8765617ebfe8ee6f8ba8337a2bb3944ab255d546ef68977b537cbcb"
+    },
+    {
+      "status": " M",
+      "path": "app/src/test/java/app/amber/agent/di/KoinModulesVerifyTest.kt",
+      "exists": true,
+      "bytes": 5608,
+      "sha256": "093d676b125d24f7aded467b092d5e031a2cc117973c7b43e8c8adf0bd2a79cc"
+    },
+    {
+      "status": " M",
+      "path": "app/src/test/java/app/amber/agent/ui/components/message/ChatMessageCotTest.kt",
+      "exists": true,
+      "bytes": 4356,
+      "sha256": "cb8e6f615b6360977a4c2031c1d75a5ee3b63ead62aee22ed64fbe86927d5846"
+    },
+    {
+      "status": " M",
+      "path": "app/src/test/java/app/amber/core/ai/tools/ProviderConfigToolsTest.kt",
+      "exists": true,
+      "bytes": 45608,
+      "sha256": "98860e35cbd002227c2e3aeb4040dfb3a0e2dd198e618b12197b0591091c17b2"
+    },
+    {
+      "status": " M",
+      "path": "app/src/test/java/app/amber/core/memory/store/MemoryCasTest.kt",
+      "exists": true,
+      "bytes": 16425,
+      "sha256": "974e154f840996e7567193dd9c1dd51710e3915b51cb04217dafe74995d89734"
+    },
+    {
+      "status": " M",
+      "path": "app/src/test/java/app/amber/core/storage/StorageCleanupTest.kt",
+      "exists": true,
+      "bytes": 18546,
+      "sha256": "4a7508be4b88bf6e639681899470aee11037c06dca943dc38f4c49a2fc727718"
+    },
+    {
+      "status": " M",
+      "path": "app/src/test/java/app/amber/feature/home/ContinueCandidateRoomSourcesTest.kt",
+      "exists": true,
+      "bytes": 16972,
+      "sha256": "f9ce7c4a4a250eaaee3f00e5e9e198e71ccbc3e6f6157b7952a30699198ad758"
+    },
+    {
+      "status": " M",
+      "path": "app/src/test/java/app/amber/feature/home/ImageGenerationContinueSourceTest.kt",
+      "exists": true,
+      "bytes": 5583,
+      "sha256": "a43c7a99e1253e092168c06578d1d1f30d0b648eef3ddf2315411d9a53184254"
+    },
+    {
+      "status": " M",
+      "path": "app/src/test/java/app/amber/feature/runtime/DurableRuntimeTestBase.kt",
+      "exists": true,
+      "bytes": 3458,
+      "sha256": "8c969e9d05c7c539dc762e5c897677941b8a137e5b7f20c3258777a353543797"
+    },
+    {
+      "status": " M",
+      "path": "app/src/test/java/app/amber/feature/runtime/RunRecoveryServiceResumeTest.kt",
+      "exists": true,
+      "bytes": 26156,
+      "sha256": "20042170a84cce2bc6d2c630330db84ebee086c5bfa4d2b6bffbe91453654b5f"
+    },
+    {
+      "status": " M",
+      "path": "app/src/test/java/app/amber/feature/runtime/RunRecoveryServiceTest.kt",
+      "exists": true,
+      "bytes": 14187,
+      "sha256": "7affcb74a69e86e3787597d3705482e01d945762ac3f5f219f32a0d8a84dbfce"
+    },
+    {
+      "status": " M",
+      "path": "app/src/test/java/app/amber/feature/subagent/RoomThreadGraphStoreTest.kt",
+      "exists": true,
+      "bytes": 8375,
+      "sha256": "fbaa9013999ab158a23d65d4f35b01bb2088387cd59edb967f651c4cb041d100"
+    },
+    {
+      "status": " M",
+      "path": "app/src/test/java/app/amber/feature/subagent/SubAgentThreadGraphIntegrationTest.kt",
+      "exists": true,
+      "bytes": 34747,
+      "sha256": "f04fbdc495c5471732382a3238acdab0c4b384b70991d41aed44e98244e5b5e7"
+    },
+    {
+      "status": " M",
+      "path": "app/src/test/java/app/amber/feature/subagent/ThreadGraphManagerTest.kt",
+      "exists": true,
+      "bytes": 14909,
+      "sha256": "a151a73124fea86f3d505fcefb4892abdedab65972d440f37f5a91f0f24ffe2b"
+    },
+    {
+      "status": " M",
+      "path": "app/src/test/java/app/amber/feature/ui/hooks/ChatInputStateTest.kt",
+      "exists": true,
+      "bytes": 6791,
+      "sha256": "f095bd6774fe310048a078779e328b24a7c85e431bc64eb5b29f9e0025f1c966"
+    },
+    {
+      "status": " M",
+      "path": "app/src/test/java/app/amber/feature/ui/pages/search/SearchVMTest.kt",
+      "exists": true,
+      "bytes": 3818,
+      "sha256": "63fc02baa13e6ee3c6a5b96515410d855761bc469614af4f6856f921b0b6ddbf"
+    },
+    {
+      "status": " M",
+      "path": "app/src/test/java/app/amber/feature/ui/theme/ThemePackageManagerTest.kt",
+      "exists": true,
+      "bytes": 11121,
+      "sha256": "832db7032b538addfe86186ec2e72773cbe0d21a71c71551e6f761bb84d8ce47"
+    },
+    {
+      "status": " M",
+      "path": "core/model/src/main/kotlin/app/amber/core/model/Assistant.kt",
+      "exists": true,
+      "bytes": 6351,
+      "sha256": "a1a09f206d17eb3b4aa0006841d3848db6e89ded23f47d14f399de90e1b75e84"
+    },
+    {
+      "status": " M",
+      "path": "core/settings/build.gradle.kts",
+      "exists": true,
+      "bytes": 1755,
+      "sha256": "88723efd87c9059865edbdcfd7daf30104c62acfb391588e57b18fe9ffbafe5a"
+    },
+    {
+      "status": " M",
+      "path": "core/settings/src/main/kotlin/app/amber/core/settings/CapabilityFlags.kt",
+      "exists": true,
+      "bytes": 3906,
+      "sha256": "5160bbddd005b898fe89eb91aff14f5b03dec597ec1473e4934e05cb131c137f"
+    },
+    {
+      "status": " M",
+      "path": "core/settings/src/main/kotlin/app/amber/core/settings/PreferencesStore.kt",
+      "exists": true,
+      "bytes": 29982,
+      "sha256": "5dd6574634d0a10652e440712fba907895e0c22b723402fed5444a7970027d94"
+    },
+    {
+      "status": " M",
+      "path": "core/settings/src/test/kotlin/app/amber/core/settings/CapabilityFlagsTest.kt",
+      "exists": true,
+      "bytes": 4058,
+      "sha256": "26b2959ebc5307f84ba0694f608a7fd3f2a217f4f6758eef2288298d8bb8698e"
+    },
+    {
+      "status": " M",
+      "path": "feature/board/api/src/main/kotlin/app/amber/feature/board/BoardSettings.kt",
+      "exists": true,
+      "bytes": 6393,
+      "sha256": "2a8cabd4b50ae78d626f710cc984f0270b5b217b102b09f2fa9d89055075d59e"
+    },
+    {
+      "status": " M",
+      "path": "feature/modelcouncil/api/src/main/kotlin/app/amber/feature/modelcouncil/CouncilRoomStore.kt",
+      "exists": true,
+      "bytes": 2572,
+      "sha256": "0777e0bbcaea963cd9aa36f21ce255dea51fc01263cd5b575381a265ae50a455"
+    },
+    {
+      "status": " M",
+      "path": "feature/modelcouncil/src/main/kotlin/app/amber/feature/modelcouncil/CouncilRoomManager.kt",
+      "exists": true,
+      "bytes": 116222,
+      "sha256": "0ff79e0be54a11e7d1dc8c00f18430c8b10f3907b05f4eda997397e31a5d9b36"
+    },
+    {
+      "status": " M",
+      "path": "feature/modelcouncil/src/test/kotlin/app/amber/feature/modelcouncil/CouncilRoomManagerTest.kt",
+      "exists": true,
+      "bytes": 19354,
+      "sha256": "47a85b03441b43564e0bf205978818496f5e12b582f18088604aa421c5d092db"
+    },
+    {
+      "status": " M",
+      "path": "feature/novel-workspace/src/main/kotlin/app/amber/feature/novelworkspace/NovelWorkspaceGhostwriteJobs.kt",
+      "exists": true,
+      "bytes": 11101,
+      "sha256": "4d7f75afeb89766d9a5cb3e4752f27dd7669466c29f159c626e2589288c7e521"
+    },
+    {
+      "status": " D",
+      "path": "feature/office/api/build.gradle.kts",
+      "exists": false
+    },
+    {
+      "status": " D",
+      "path": "feature/office/api/src/main/kotlin/app/amber/feature/office/FeishuOfficeEnhancementModels.kt",
+      "exists": false
+    },
+    {
+      "status": " M",
+      "path": "feature/subagent/src/main/kotlin/app/amber/feature/subagent/SubAgentDefinitions.kt",
+      "exists": true,
+      "bytes": 18901,
+      "sha256": "1bfc3a391c6fc0aedeeb134ce767934789f54f1e077f533c02749b2d12d0488e"
+    },
+    {
+      "status": " M",
+      "path": "feature/subagent/src/main/kotlin/app/amber/feature/subagent/SubAgentManager.kt",
+      "exists": true,
+      "bytes": 50880,
+      "sha256": "686acc1be4a4eac92c9aa81ae01e930be9a9f26ebad440f410cd8994bd416560"
+    },
+    {
+      "status": " M",
+      "path": "feature/subagent/src/main/kotlin/app/amber/feature/subagent/SubAgentValidator.kt",
+      "exists": true,
+      "bytes": 17990,
+      "sha256": "77435017716d41ad335d3b57e82c0abff3e79ca4401ad16906b66775384595ad"
+    },
+    {
+      "status": " M",
+      "path": "feature/subagent/src/main/kotlin/app/amber/feature/subagent/ThreadGraphManager.kt",
+      "exists": true,
+      "bytes": 18853,
+      "sha256": "fad60558bec158bd88c4aee4dbf3a544aa8641a247a41c2dd99e9b0f4ff2876a"
+    },
+    {
+      "status": " M",
+      "path": "feature/subagent/src/main/kotlin/app/amber/feature/subagent/ThreadGraphStore.kt",
+      "exists": true,
+      "bytes": 4957,
+      "sha256": "d8384185beb675523b2a3cab30fb7f1cc1f5a347365aa319db491bef4d37d171"
+    },
+    {
+      "status": " M",
+      "path": "feature/task/build.gradle.kts",
+      "exists": true,
+      "bytes": 619,
+      "sha256": "3063d2820c91112b6a7d5a8ebd71aceb7d3efacb399099b7daabe8bfcb1c695e"
+    },
+    {
+      "status": " M",
+      "path": "feature/task/src/main/kotlin/app/amber/feature/task/AgentTaskScheduler.kt",
+      "exists": true,
+      "bytes": 3564,
+      "sha256": "ff981f3664094f1ac1c8417bf3a491115ef77c8246699c2870765d5a713413b2"
+    },
+    {
+      "status": " M",
+      "path": "feature/task/src/main/kotlin/app/amber/feature/task/AgentTaskStore.kt",
+      "exists": true,
+      "bytes": 12809,
+      "sha256": "d8bef4f0006d33c3491cb3df0c71d2b2f57acc4cb077e86e045732a0f9980dac"
+    },
+    {
+      "status": " M",
+      "path": "feature/tools/api/src/main/kotlin/app/amber/feature/tools/ToolRegistry.kt",
+      "exists": true,
+      "bytes": 35392,
+      "sha256": "d0e0ba82a89750322a4d9f95bea11c091f9276b97545a813a07e2a7ee159372e"
+    },
+    {
+      "status": " M",
+      "path": "feature/tools/impl/src/main/kotlin/app/amber/feature/tools/AgentTaskTools.kt",
+      "exists": true,
+      "bytes": 8501,
+      "sha256": "9bc8e747a5ae0f23db1277e51637d8d964d2e7285c831f260c847b39e682a866"
+    },
+    {
+      "status": " M",
+      "path": "feature/tools/impl/src/main/kotlin/app/amber/feature/tools/SubAgentTools.kt",
+      "exists": true,
+      "bytes": 27021,
+      "sha256": "72eb09dd293b2fd9fc134f3f434487404b6cc2466af3f593508ad8a09788bfa8"
+    },
+    {
+      "status": " M",
+      "path": "feature/tools/impl/src/main/kotlin/app/amber/feature/tools/WorkspaceTools.kt",
+      "exists": true,
+      "bytes": 11675,
+      "sha256": "08ed49fe8e9a203d493e2a7ce2d51da1f695cb5022ab7a9e8dc55e019d75b341"
+    },
+    {
+      "status": " M",
+      "path": "settings.gradle.kts",
+      "exists": true,
+      "bytes": 2948,
+      "sha256": "8609af6609d7cc7aa2767507aa2c76b261b97f962fe4cf10d41eb9f52b6a40d0"
+    },
+    {
+      "status": "??",
+      "path": "app/schemas/app.amber.agent.data.db.AppDatabase/17.json",
+      "exists": true,
+      "bytes": 116927,
+      "sha256": "199c5321c7215be0a9a2a2d3f7e253634bb2235de4848280b122766f68d226e2"
+    },
+    {
+      "status": "??",
+      "path": "app/src/androidTest/java/app/amber/feature/webmount/WebMountLateDialogDeviceTest.kt",
+      "exists": true,
+      "bytes": 4202,
+      "sha256": "c72de72d98162013f540a21499ce13f1e71f7a5d4dbb3b900ef209e39751336f"
+    },
+    {
+      "status": "??",
+      "path": "app/src/androidTest/java/app/amber/feature/webmount/WebMountParityDeviceTest.kt",
+      "exists": true,
+      "bytes": 20063,
+      "sha256": "f8b58daa7be1ed8432f3407b5d38ee840b730ba074f04392c6bdd224e7f09262"
+    },
+    {
+      "status": "??",
+      "path": "app/src/main/java/app/amber/agent/data/db/entity/MiniAppContinueRow.kt",
+      "exists": true,
+      "bytes": 422,
+      "sha256": "7d9180cd0509a42a27708276c00b369b8a7e777b74ef43a68a4e3d19249ecd80"
+    },
+    {
+      "status": "??",
+      "path": "app/src/main/java/app/amber/core/conversation/exchange/ConversationExchange.kt",
+      "exists": true,
+      "bytes": 20260,
+      "sha256": "442d93a79943b74b6e331907dc5a4c30b1c5d9194729b3ab8f61faa3720176ea"
+    },
+    {
+      "status": "??",
+      "path": "app/src/main/java/app/amber/core/sync/core/SyncRestoreWriteGate.kt",
+      "exists": true,
+      "bytes": 5142,
+      "sha256": "4aba224183e7bd18e1dd85369821eaabe3b8c57854606aa69b480ed713ad5196"
+    },
+    {
+      "status": "??",
+      "path": "app/src/main/java/app/amber/feature/home/MiniAppRunnerContinueSource.kt",
+      "exists": true,
+      "bytes": 1330,
+      "sha256": "947df378ef4fc64fda012ecbc7c1a0c74dc8afcbd8f573e2210bb8ac9e69f18b"
+    },
+    {
+      "status": "??",
+      "path": "app/src/main/java/app/amber/feature/home/NovelWorkspaceContinueSource.kt",
+      "exists": true,
+      "bytes": 3556,
+      "sha256": "acb5115ce56c5f6fc40c0808fbc473e741620566a607fe37eb02e1a3ac826a66"
+    },
+    {
+      "status": "??",
+      "path": "app/src/main/java/app/amber/feature/novel/workspace/NovelWorkspaceNotificationRoute.kt",
+      "exists": true,
+      "bytes": 1743,
+      "sha256": "bb92cc3d5475bb0e3ee5948170f1aa49db52c26c0eae6a2064d6c5c3ff4f2b32"
+    },
+    {
+      "status": "??",
+      "path": "app/src/main/java/app/amber/feature/ui/components/webmount/WebMountTaskCard.kt",
+      "exists": true,
+      "bytes": 5731,
+      "sha256": "cf210a0bdef90e1feee8e943f7ada809ee283fbaa7c68cee7c942972fcced042"
+    },
+    {
+      "status": "??",
+      "path": "app/src/main/java/app/amber/feature/ui/pages/chat/ChatConfigurationHint.kt",
+      "exists": true,
+      "bytes": 3626,
+      "sha256": "e65475c2e204daf81a466e220722df9a7403f0631a3fc40998d7f0287fbc9aef"
+    },
+    {
+      "status": "??",
+      "path": "app/src/main/java/app/amber/feature/ui/pages/chat/ChatConfigurationIssue.kt",
+      "exists": true,
+      "bytes": 2579,
+      "sha256": "476f0dffb0b8ff7223dadd09e93956dfb5c190159878fd4eaa7b3199a6cbe8f9"
+    },
+    {
+      "status": "??",
+      "path": "app/src/main/java/app/amber/feature/ui/pages/webmount/WebMountSessionPage.kt",
+      "exists": true,
+      "bytes": 26945,
+      "sha256": "014232323154822767ef7f75e853a61fb6fd0a02f4a45268280b9b1f20a699aa"
+    },
+    {
+      "status": "??",
+      "path": "app/src/main/java/app/amber/feature/webmount/primitives/WebMountSessionOwner.kt",
+      "exists": true,
+      "bytes": 35605,
+      "sha256": "e08bdf1d63fab6ba923b01eec7bc6e3e96996c876521bca70529acb8d4d4e9fc"
+    },
+    {
+      "status": "??",
+      "path": "app/src/main/res/values-zh/parity_history_search.xml",
+      "exists": true,
+      "bytes": 1383,
+      "sha256": "bf5e2c64a1c56210a115c7118a0c561a191f4db93b490cee02260a62af4601ce"
+    },
+    {
+      "status": "??",
+      "path": "app/src/main/res/values-zh/strings_memory_parity.xml",
+      "exists": true,
+      "bytes": 3670,
+      "sha256": "36d639a99b82ca2991ac480c1fd50623e4435c51e86ca7d9aeac19cf5c3ad8a2"
+    },
+    {
+      "status": "??",
+      "path": "app/src/main/res/values-zh/strings_parity_attachments.xml",
+      "exists": true,
+      "bytes": 798,
+      "sha256": "4d454fa715b2d206854cd04911f73957061648cc54e0faa53f99d4d1c61f6489"
+    },
+    {
+      "status": "??",
+      "path": "app/src/main/res/values-zh/strings_parity_chat_setup.xml",
+      "exists": true,
+      "bytes": 821,
+      "sha256": "acb48453187759328e3b18f44bedc70fcf9d662942b8a8248dfb3a1b210ac53e"
+    },
+    {
+      "status": "??",
+      "path": "app/src/main/res/values-zh/strings_parity_novel_recovery.xml",
+      "exists": true,
+      "bytes": 354,
+      "sha256": "3f3ee5393e1c9bb3cbd27423549dbf46f641b7e44ff0492cd5af107cc35b408c"
+    },
+    {
+      "status": "??",
+      "path": "app/src/main/res/values-zh/strings_parity_phase4.xml",
+      "exists": true,
+      "bytes": 914,
+      "sha256": "83e28194967ad20cfdb75217310c42812bf042309d3e40c72d25948e4e833db1"
+    },
+    {
+      "status": "??",
+      "path": "app/src/main/res/values-zh/strings_parity_restore.xml",
+      "exists": true,
+      "bytes": 557,
+      "sha256": "76c8834c638c5f3bdee3514b12a1841997f8370c1bb538f6abbe7f163e4ab41f"
+    },
+    {
+      "status": "??",
+      "path": "app/src/main/res/values-zh/strings_parity_webmount.xml",
+      "exists": true,
+      "bytes": 2568,
+      "sha256": "97fe823862be9d2230c025bafc73dbda9e514f98ca61b7fd322a5e2f02082669"
+    },
+    {
+      "status": "??",
+      "path": "app/src/main/res/values/parity_history_search.xml",
+      "exists": true,
+      "bytes": 1498,
+      "sha256": "4ed7d98a33ff67855286bb31638cc572ab721f656467c9816074cfe679e495ad"
+    },
+    {
+      "status": "??",
+      "path": "app/src/main/res/values/strings_memory_parity.xml",
+      "exists": true,
+      "bytes": 3672,
+      "sha256": "f65902dbb34fc58e31d75c2df5a8eb5c8ce510cf8fa06ff66c1b6900001aecd7"
+    },
+    {
+      "status": "??",
+      "path": "app/src/main/res/values/strings_parity_attachments.xml",
+      "exists": true,
+      "bytes": 826,
+      "sha256": "75efd5735689f795d5d207d475ca3e26a4178033eb4772df2dd84ae5c972efa4"
+    },
+    {
+      "status": "??",
+      "path": "app/src/main/res/values/strings_parity_chat_setup.xml",
+      "exists": true,
+      "bytes": 823,
+      "sha256": "9b22d89d7b89ac9e73aa3922853c20fc7f379ed278ef2892f86ec1d37d93417b"
+    },
+    {
+      "status": "??",
+      "path": "app/src/main/res/values/strings_parity_novel_recovery.xml",
+      "exists": true,
+      "bytes": 360,
+      "sha256": "fc969932abf29bcb61f8497b33224445c24064ecfb9c121ed8c89e87ad64f5af"
+    },
+    {
+      "status": "??",
+      "path": "app/src/main/res/values/strings_parity_phase4.xml",
+      "exists": true,
+      "bytes": 931,
+      "sha256": "8b0f28e6fa0c08c798ad526608730d1feff87ffc5833bf5b12b80fa89bd3c88a"
+    },
+    {
+      "status": "??",
+      "path": "app/src/main/res/values/strings_parity_restore.xml",
+      "exists": true,
+      "bytes": 616,
+      "sha256": "730727c5e5b695a5f3e385190e4f85804db744d44b9c21e885b4fe1f7c3694c2"
+    },
+    {
+      "status": "??",
+      "path": "app/src/main/res/values/strings_parity_webmount.xml",
+      "exists": true,
+      "bytes": 2604,
+      "sha256": "94dabb1d5407e552592995c2d27d37764cad3cc71c0319785f4d5a8b04c548fd"
+    },
+    {
+      "status": "??",
+      "path": "app/src/test/java/app/amber/agent/data/agent/webmount/WebMountScopeAndPolicyTest.kt",
+      "exists": true,
+      "bytes": 2823,
+      "sha256": "59427d3e589a8383acf222b7621f1db4207b1bb0b2eea817941dd496d63daa2d"
+    },
+    {
+      "status": "??",
+      "path": "app/src/test/java/app/amber/agent/data/sync/SyncRestoreWriteGateTest.kt",
+      "exists": true,
+      "bytes": 4337,
+      "sha256": "9fb76398810b0a6a2eabbbab78d697f8f74e644736e61427049fb0656689c4bc"
+    },
+    {
+      "status": "??",
+      "path": "app/src/test/java/app/amber/core/conversation/exchange/ConversationExchangeCodecTest.kt",
+      "exists": true,
+      "bytes": 7372,
+      "sha256": "66aca9110af2c83cce83599dbbb5de5638b29b45af58c49a8c62c301da2fae3b"
+    },
+    {
+      "status": "??",
+      "path": "app/src/test/java/app/amber/core/conversation/exchange/ConversationExchangeInteropTest.kt",
+      "exists": true,
+      "bytes": 1699,
+      "sha256": "635daf8cb9bee4f651655bf81bb9506b9413c89cf51562951d6a50e7b48a100a"
+    },
+    {
+      "status": "??",
+      "path": "app/src/test/java/app/amber/core/conversation/exchange/ConversationExchangeServiceTest.kt",
+      "exists": true,
+      "bytes": 5698,
+      "sha256": "cfc2c6f32fe57f73667b301c0601517cccbf12c6937c3d1df385a7eb65573c3f"
+    },
+    {
+      "status": "??",
+      "path": "app/src/test/java/app/amber/core/files/FilesManagerRestoreGateTest.kt",
+      "exists": true,
+      "bytes": 4681,
+      "sha256": "bf7ea9b5724c81240762a63a72d0a875f3aac8dbd95a3c744e44ca1b386febb7"
+    },
+    {
+      "status": "??",
+      "path": "app/src/test/java/app/amber/core/repository/FavoriteRepositoryRestoreGateTest.kt",
+      "exists": true,
+      "bytes": 2271,
+      "sha256": "be1272fee6ea9e23098dc4237cb13ae68fb17784294630dec54cd5e7a2625fec"
+    },
+    {
+      "status": "??",
+      "path": "app/src/test/java/app/amber/core/sync/core/SyncRestoreVerificationTest.kt",
+      "exists": true,
+      "bytes": 1639,
+      "sha256": "efe27c0225b4b1613bb004d54be0441c1d48dd737496fdfe1e82b55df43571e7"
+    },
+    {
+      "status": "??",
+      "path": "app/src/test/java/app/amber/feature/board/BoardRestoreWriteTest.kt",
+      "exists": true,
+      "bytes": 5577,
+      "sha256": "bb72ff057f9550f2814cde992e67db22918743d488e96f1e70940d525155e323"
+    },
+    {
+      "status": "??",
+      "path": "app/src/test/java/app/amber/feature/board/hotlist/HotListRestoreWriteTest.kt",
+      "exists": true,
+      "bytes": 9856,
+      "sha256": "952ee55641f164f290c21b189e9058c7586348c9234fb75f6d077e8ee7fd0884"
+    },
+    {
+      "status": "??",
+      "path": "app/src/test/java/app/amber/feature/home/NovelWorkspaceContinueSourceTest.kt",
+      "exists": true,
+      "bytes": 2299,
+      "sha256": "c5686a94c8ac45803e326ee5c1c2511da8c84aab75e80a21554dbecefa7ae208"
+    },
+    {
+      "status": "??",
+      "path": "app/src/test/java/app/amber/feature/novel/workspace/NovelWorkspaceControllerTest.kt",
+      "exists": true,
+      "bytes": 4399,
+      "sha256": "3404d4a5a55c04f44604a4084a7d5220937a1669d280cf5f87c1f22b491a4265"
+    },
+    {
+      "status": "??",
+      "path": "app/src/test/java/app/amber/feature/novel/workspace/NovelWorkspaceNotificationRouteTest.kt",
+      "exists": true,
+      "bytes": 1617,
+      "sha256": "ceb7bf28fcb6729c5823926d4bc09118a70e7eaf99c7836a51eb73dbf66667fb"
+    },
+    {
+      "status": "??",
+      "path": "app/src/test/java/app/amber/feature/ui/components/ai/ChatInputAttachmentWarningTest.kt",
+      "exists": true,
+      "bytes": 1549,
+      "sha256": "1fc328949aa3eaccc2a74ff6921f61258c258c46472f36ca6a99657f0681ae34"
+    },
+    {
+      "status": "??",
+      "path": "app/src/test/java/app/amber/feature/ui/components/message/ChatMessageCouncilStepTest.kt",
+      "exists": true,
+      "bytes": 5737,
+      "sha256": "41861f682caf4ffa1d14893c4cc3f6a7074b0ee2d54f5bfb54ff50985f27c388"
+    },
+    {
+      "status": "??",
+      "path": "app/src/test/java/app/amber/feature/ui/components/message/ChatMessageTouchTargetTest.kt",
+      "exists": true,
+      "bytes": 3848,
+      "sha256": "8dc2f63cb76b574e65c4d8cfdf9327710342a3936a583069d9d7f97337ab895f"
+    },
+    {
+      "status": "??",
+      "path": "app/src/test/java/app/amber/feature/ui/components/ui/CardGroupDynamicContentTest.kt",
+      "exists": true,
+      "bytes": 2988,
+      "sha256": "99e315287101fbdbdcbb43b46e7ef71d3f4a01a885f0c81f1afa5a32a3a027aa"
+    },
+    {
+      "status": "??",
+      "path": "app/src/test/java/app/amber/feature/ui/components/webmount/WebMountTaskCardTest.kt",
+      "exists": true,
+      "bytes": 3650,
+      "sha256": "eeb852d9d789fb727e7323468faa189f92e28b5bb902d60e505398b517a691d5"
+    },
+    {
+      "status": "??",
+      "path": "app/src/test/java/app/amber/feature/ui/pages/backup/BackupWebDavDraftTest.kt",
+      "exists": true,
+      "bytes": 1474,
+      "sha256": "1b0863cca34d0917b3a73a62c6f0016442849a0c85f2d8c943da5b565936d199"
+    },
+    {
+      "status": "??",
+      "path": "app/src/test/java/app/amber/feature/ui/pages/chat/ChatConfigurationHintTest.kt",
+      "exists": true,
+      "bytes": 2450,
+      "sha256": "fb2fe7418dbe43f71208e9ca92e8cc2d23f9e409600a98a00e5a7eaadbbaaacb"
+    },
+    {
+      "status": "??",
+      "path": "app/src/test/java/app/amber/feature/ui/pages/chat/ChatConfigurationIssueTest.kt",
+      "exists": true,
+      "bytes": 2818,
+      "sha256": "4f513fc7e237ce1af1029fb401a445fe0f6796ae35a4b7980072f9b16b6d6b11"
+    },
+    {
+      "status": "??",
+      "path": "app/src/test/java/app/amber/feature/ui/pages/history/HistoryPagingStreamTest.kt",
+      "exists": true,
+      "bytes": 1521,
+      "sha256": "a280728a15a55a61a1ac42c68655cda3653af030bb1e9a4dfb6c3570552250db"
+    },
+    {
+      "status": "??",
+      "path": "app/src/test/java/app/amber/feature/ui/pages/miniapp/MiniAppRunnerLoadStateTest.kt",
+      "exists": true,
+      "bytes": 1574,
+      "sha256": "9776abaf6a3305a3a80235e050e73fdca2fafa62e7f225798e17bdb6f6a95c2e"
+    },
+    {
+      "status": "??",
+      "path": "app/src/test/java/app/amber/feature/ui/pages/miniapp/MiniAppSourceEditorStateTest.kt",
+      "exists": true,
+      "bytes": 951,
+      "sha256": "a475e625f8cf7e4aa57e48960ef2f91d6fb5b9edc4fa52a7c5b714624cfee499"
+    },
+    {
+      "status": "??",
+      "path": "app/src/test/java/app/amber/feature/ui/pages/novel/NovelMarkdownWorkspaceViewModelTest.kt",
+      "exists": true,
+      "bytes": 11334,
+      "sha256": "6a92e4661ff769033ef1145717f4a89386a83580312f2d066c762579b461fcda"
+    },
+    {
+      "status": "??",
+      "path": "app/src/test/java/app/amber/feature/ui/pages/search/LatestSearchRequestRunnerTest.kt",
+      "exists": true,
+      "bytes": 1681,
+      "sha256": "a944fa5fdb04fc62937df4fea932b5967adf2aae43ef5091349ed7f3cdfc4897"
+    },
+    {
+      "status": "??",
+      "path": "app/src/test/java/app/amber/feature/ui/pages/sessionhome/SessionHomeContinueStreamTest.kt",
+      "exists": true,
+      "bytes": 2181,
+      "sha256": "b9572f0656e9c15a6279d6405fdb9bd06ea01a6b8025e0655b7b17f0f2a9eb80"
+    },
+    {
+      "status": "??",
+      "path": "app/src/test/java/app/amber/feature/ui/pages/sessionhome/SessionHomeConversationStreamTest.kt",
+      "exists": true,
+      "bytes": 1745,
+      "sha256": "d16daf5b14bc3649d55aaad9c03b802b67cd19788b6b500d3c00ca79f62a1257"
+    },
+    {
+      "status": "??",
+      "path": "app/src/test/java/app/amber/feature/ui/pages/sessionhome/SessionHomeRouteTest.kt",
+      "exists": true,
+      "bytes": 2695,
+      "sha256": "30e865b7485d2458d147359f42f2c138de475f4c2d52867b6fc82ad61c595d83"
+    },
+    {
+      "status": "??",
+      "path": "app/src/test/java/app/amber/feature/ui/pages/setting/ProviderModelCandidatesTest.kt",
+      "exists": true,
+      "bytes": 3500,
+      "sha256": "e6c5e3b74c681cf4a63463677eaa39623dfbef391fe8eb65a8c1510523e02f48"
+    },
+    {
+      "status": "??",
+      "path": "app/src/test/java/app/amber/feature/ui/pages/synara/SynaraWorkspaceLoadStateTest.kt",
+      "exists": true,
+      "bytes": 2028,
+      "sha256": "469aba2202e03f7183d711f8866c438779782af10413a2654d221dca706f01d7"
+    },
+    {
+      "status": "??",
+      "path": "docs/audits/2026-09-09-android-ios-parity-research.md",
+      "exists": true,
+      "bytes": 51244,
+      "sha256": "81e14d1132f5522cadc5e3f0cfd560313e46e461dc62d14bc4f1130f77f33bd5"
+    },
+    {
+      "status": "??",
+      "path": "docs/audits/2026-09-09-parity-wip-baseline.json",
+      "exists": true,
+      "bytes": 4795,
+      "sha256": "0ee3d7d5f97eb0541a55b3a07dbd7eb6a74705caf9e68e22062f51fc1a458215"
+    },
+    {
+      "status": "??",
+      "path": "docs/audits/parity-artifacts/phase0-home.png",
+      "exists": true,
+      "bytes": 98067,
+      "sha256": "79d2355c345db6c4e2c8adc878fe821917bc9761d35bfbc2c61e132b9097ae51"
+    },
+    {
+      "status": "??",
+      "path": "docs/audits/parity-artifacts/phase1-chat-config.png",
+      "exists": true,
+      "bytes": 104945,
+      "sha256": "7bc4fe19320feaa580cdb36c306be21d126c5531a79fb9dd9de271c79c1bee39"
+    },
+    {
+      "status": "??",
+      "path": "docs/audits/parity-artifacts/phase1-chat-final.png",
+      "exists": true,
+      "bytes": 97593,
+      "sha256": "7a559a122beba64dbce4d9eb270be125648f8ffd2c8664002351769660c2f3a4"
+    },
+    {
+      "status": "??",
+      "path": "docs/audits/parity-artifacts/phase1-home-final.png",
+      "exists": true,
+      "bytes": 98034,
+      "sha256": "d052de93640e0fc16016924e4e0b69c89909176147a5e9bc096cd70656ff06fc"
+    },
+    {
+      "status": "??",
+      "path": "docs/audits/parity-artifacts/phase1-home-search.png",
+      "exists": true,
+      "bytes": 167953,
+      "sha256": "16ff02563c62734879594e9b6fc701cead8a716565aa4845fe6c8ff609d40cfa"
+    },
+    {
+      "status": "??",
+      "path": "docs/audits/parity-artifacts/phase1-home.png",
+      "exists": true,
+      "bytes": 98894,
+      "sha256": "8e2ebce18b46b4b72e2a5bf83c6d63f8dcf83c5cf71e3819e5e5eb3db31f4b3a"
+    },
+    {
+      "status": "??",
+      "path": "docs/audits/parity-artifacts/phase1-memory-add.png",
+      "exists": true,
+      "bytes": 142183,
+      "sha256": "9c39d0a6b916b16ae3f29750b3c7cb4fba3df1cdecc6c5f185c1eba221da49aa"
+    },
+    {
+      "status": "??",
+      "path": "docs/audits/parity-artifacts/phase1-memory-large-ime-bottom.png",
+      "exists": true,
+      "bytes": 196374,
+      "sha256": "533626471003de51b85971a791657fbc410cfb6397d72ca92be0a935d8d41dc6"
+    },
+    {
+      "status": "??",
+      "path": "docs/audits/parity-artifacts/phase1-memory-large-ime.png",
+      "exists": true,
+      "bytes": 193966,
+      "sha256": "6ed3aff7d14d20747e20320ffabfd59683449f29eabf1b23eb29592f643cd5a3"
+    },
+    {
+      "status": "??",
+      "path": "docs/audits/parity-artifacts/phase1-memory-large.png",
+      "exists": true,
+      "bytes": 198170,
+      "sha256": "a75b41951311cfb0498478ab1c7bd0aee85af9a8b3d0aba6b62defbf866b3a00"
+    },
+    {
+      "status": "??",
+      "path": "docs/audits/parity-artifacts/phase1-memory-library.png",
+      "exists": true,
+      "bytes": 169190,
+      "sha256": "bf8c50765dc32b68931b0ac0603c7e379be7e5dea1ce41cb506fc1cf44331e7d"
+    },
+    {
+      "status": "??",
+      "path": "docs/audits/parity-artifacts/phase1-memory-saved.png",
+      "exists": true,
+      "bytes": 178824,
+      "sha256": "8318b756300526cc26fd7aab8488e3dd2d26e979b01b09e6d3fee734b4c2c8a0"
+    },
+    {
+      "status": "??",
+      "path": "docs/audits/parity-artifacts/phase1-model-repair.png",
+      "exists": true,
+      "bytes": 155697,
+      "sha256": "310558cd1a9ef8ccf553a8e612b3d1743aa3d84d4e7b0728313747328beb20b4"
+    },
+    {
+      "status": "??",
+      "path": "docs/audits/parity-artifacts/phase1-pdf-read-failed.png",
+      "exists": true,
+      "bytes": 111432,
+      "sha256": "a76c10c0494be65522eb25af99fcf8b98e3db7905a059583b0a53fc5083fa792"
+    },
+    {
+      "status": "??",
+      "path": "docs/audits/parity-artifacts/phase2-android-conversations.zip",
+      "exists": true,
+      "bytes": 809,
+      "sha256": "8bf4f63bcc497d0d9e1c9c9e0c08c003eb25e7388984fae949eeb1efa87fd051"
+    },
+    {
+      "status": "??",
+      "path": "docs/audits/parity-artifacts/phase2-backup-export-dialog.png",
+      "exists": true,
+      "bytes": 190988,
+      "sha256": "cd482d4535717b620171473a543ccdfa6c71a747a4cef8cba06fea23d161ebd7"
+    },
+    {
+      "status": "??",
+      "path": "docs/audits/parity-artifacts/phase2-backup-export-ime.png",
+      "exists": true,
+      "bytes": 197591,
+      "sha256": "4edeb8badb9770813e9e9f98159cb323e68c3b64cf564697bcb9aaf924e7fbfb"
+    },
+    {
+      "status": "??",
+      "path": "docs/audits/parity-artifacts/phase2-backup-export-result.png",
+      "exists": true,
+      "bytes": 232144,
+      "sha256": "4fdbd78bf46ba81bc11fd8ed2d3da2a83fcad19d8d02f7e34239e19ada483e87"
+    },
+    {
+      "status": "??",
+      "path": "docs/audits/parity-artifacts/phase2-backup-large-ime.png",
+      "exists": true,
+      "bytes": 191496,
+      "sha256": "89a9978c80781b57c2144fd08fa74969424def8d51b3364b2da9998cbd7a7a0a"
+    },
+    {
+      "status": "??",
+      "path": "docs/audits/parity-artifacts/phase2-backup-large.png",
+      "exists": true,
+      "bytes": 207522,
+      "sha256": "aa67b1e1ceb3463df7c64542ea22fb90093eb9c0d6a2d85942e37d82e7008be0"
+    },
+    {
+      "status": "??",
+      "path": "docs/audits/parity-artifacts/phase2-conversation-ios-reimport.log",
+      "exists": true,
+      "bytes": 740,
+      "sha256": "64c25b338e56b52dd157321d3ad63837c2ca2309e5cf3f334df175a7e3277f5a"
+    },
+    {
+      "status": "??",
+      "path": "docs/audits/parity-artifacts/phase2-final-import-preview.png",
+      "exists": true,
+      "bytes": 192630,
+      "sha256": "74fd4ec007c6e782269a153dde44f046882d7cb6bc8bd1fab8ea31ebca8f0123"
+    },
+    {
+      "status": "??",
+      "path": "docs/audits/parity-artifacts/phase2-final-imported.png",
+      "exists": true,
+      "bytes": 191612,
+      "sha256": "b153a3f24af012f37724e84c9c02e4e16d2c0827e6fc26f89bff508b1660108d"
+    },
+    {
+      "status": "??",
+      "path": "docs/audits/parity-artifacts/phase2-final-storage.png",
+      "exists": true,
+      "bytes": 183676,
+      "sha256": "5852a0ffd3af5fc6268323483c59ce8047c5512867998e0eec861ccf23da68cd"
+    },
+    {
+      "status": "??",
+      "path": "docs/audits/parity-artifacts/phase2-home-final.png",
+      "exists": true,
+      "bytes": 98890,
+      "sha256": "aaaf0dacdd628fd9d9e0ee5f7df32b6679128167b908460d62691b44a019481a"
+    },
+    {
+      "status": "??",
+      "path": "docs/audits/parity-artifacts/phase2-home-large-final.png",
+      "exists": true,
+      "bytes": 116296,
+      "sha256": "9c6a993856bacc2fd1aec9f2b338e4212436782ab76f9f587bc639d6e85ac4cb"
+    },
+    {
+      "status": "??",
+      "path": "docs/audits/parity-artifacts/phase2-home-recovery.png",
+      "exists": true,
+      "bytes": 163227,
+      "sha256": "7881800e9edb4e6ca537db0e9ab922f8f2b84b91c12a3c9168576173d2bb16f3"
+    },
+    {
+      "status": "??",
+      "path": "docs/audits/parity-artifacts/phase2-ios-conversations.zip",
+      "exists": true,
+      "bytes": 813,
+      "sha256": "569a931af95138f3488a2060a332514a51a7b6f040cc35ce48de5e0139d87081"
+    },
+    {
+      "status": "??",
+      "path": "docs/audits/parity-artifacts/phase2-novel-interrupted.png",
+      "exists": true,
+      "bytes": 211693,
+      "sha256": "b9c45beba166a422ed1631255f51301a9213a2b2071d8b2eab247137eef0b7a4"
+    },
+    {
+      "status": "??",
+      "path": "docs/audits/parity-artifacts/phase2-novel-large-sheet.png",
+      "exists": true,
+      "bytes": 234809,
+      "sha256": "944c40f7e58cb5a32b087aa1a86b5814d72481adc8cf98341458ae45f21c153a"
+    },
+    {
+      "status": "??",
+      "path": "docs/audits/parity-artifacts/phase2-novel-large.png",
+      "exists": true,
+      "bytes": 146079,
+      "sha256": "114b019e1044944b18f69de87df1f3325a14933f51262bd3ea2e9f4e435fd96b"
+    },
+    {
+      "status": "??",
+      "path": "docs/audits/parity-artifacts/phase2-novel-new-batch.png",
+      "exists": true,
+      "bytes": 195297,
+      "sha256": "cd8c99460a3f280f4d0ac84a4a85cc4de46418c66e4c74a58eb94622dcbbc3c4"
+    },
+    {
+      "status": "??",
+      "path": "docs/audits/parity-artifacts/phase3-browser-auto-reopen-final.png",
+      "exists": true,
+      "bytes": 224030,
+      "sha256": "f18057043ca35bae4be35e19e5906b64add58bf27c0280b0c18cdf7455ff7d7f"
+    },
+    {
+      "status": "??",
+      "path": "docs/audits/parity-artifacts/phase3-browser-confirm-final.png",
+      "exists": true,
+      "bytes": 190100,
+      "sha256": "431026b524a238bde411ed1ff72e8490ae7f44cfb7e288cfa658b2c589fbe6e5"
+    },
+    {
+      "status": "??",
+      "path": "docs/audits/parity-artifacts/phase3-browser-draft.png",
+      "exists": true,
+      "bytes": 219363,
+      "sha256": "140532d29925b9c6b16e8d6bdc29090eac6e40421c519fe9442ea6a1898a0a8c"
+    },
+    {
+      "status": "??",
+      "path": "docs/audits/parity-artifacts/phase3-browser-large-ime.png",
+      "exists": true,
+      "bytes": 244560,
+      "sha256": "c0629c89ef44c7af04fd1a0269a170d31a5cfd200257d569ce9d741a9098adf2"
+    },
+    {
+      "status": "??",
+      "path": "docs/audits/parity-artifacts/phase3-browser-large.png",
+      "exists": true,
+      "bytes": 232994,
+      "sha256": "4e376a05e17ac9d69ce363b3f442c66abc51a5ceecbdfa5eb4cd59e91c061962"
+    },
+    {
+      "status": "??",
+      "path": "docs/audits/parity-artifacts/phase3-browser-popup-large.png",
+      "exists": true,
+      "bytes": 167555,
+      "sha256": "af471c1f3f7884090cd8afaa20d71c0ee7eb87a7141da44162d9eb7e51887ee0"
+    },
+    {
+      "status": "??",
+      "path": "docs/audits/parity-artifacts/phase3-browser-popup-parent.png",
+      "exists": true,
+      "bytes": 205714,
+      "sha256": "7070ea48ac6cb5b608774476e51746099549ee54e0b1189617c7b8196744a338"
+    },
+    {
+      "status": "??",
+      "path": "docs/audits/parity-artifacts/phase3-browser-popup-returned-final.png",
+      "exists": true,
+      "bytes": 201808,
+      "sha256": "6400eca0f527ec321dc2637642f59f461f1f322418b01cf335caa36d52968e72"
+    },
+    {
+      "status": "??",
+      "path": "docs/audits/parity-artifacts/phase3-browser-popup-returned.png",
+      "exists": true,
+      "bytes": 79520,
+      "sha256": "329726fc46d9bc9efcab4e00112be53728ce253ca07d73efb0a546f9749833d9"
+    },
+    {
+      "status": "??",
+      "path": "docs/audits/parity-artifacts/phase3-browser-reopened.png",
+      "exists": true,
+      "bytes": 226340,
+      "sha256": "30037e032556d14b5059535c8eb0717d039f2580a047b29843f0a928b2807684"
+    },
+    {
+      "status": "??",
+      "path": "docs/audits/parity-artifacts/phase3-browser-returned.png",
+      "exists": true,
+      "bytes": 228850,
+      "sha256": "ab10dcad153a844fdf1b311467d6af70b9386bfecc77151499adcd7655ee6bc5"
+    },
+    {
+      "status": "??",
+      "path": "docs/audits/parity-artifacts/phase3-device-closeout.log",
+      "exists": true,
+      "bytes": 158,
+      "sha256": "ed54ee1d7b51d3e630164709484dfe03d14c343b1fe56b023461342745e29a82"
+    },
+    {
+      "status": "??",
+      "path": "docs/audits/parity-artifacts/phase3-verification.json",
+      "exists": true,
+      "bytes": 18784,
+      "sha256": "2a8e32701758cb2a65190771f08e25e734a65ce72cc90956ce3048d57680f736"
+    },
+    {
+      "status": "??",
+      "path": "docs/audits/phase2-conversation-exchange.md",
+      "exists": true,
+      "bytes": 11826,
+      "sha256": "5c73394034281e2cf1a1e281e92575e2cace461e03a6388666c2a5f2b7912ba0"
+    },
+    {
+      "status": "??",
+      "path": "docs/audits/phase2-exchange.md",
+      "exists": true,
+      "bytes": 7852,
+      "sha256": "b2b13a03e64436349a837418480213e3dfefdfa1736a6377af94e34974a0c2df"
+    },
+    {
+      "status": "??",
+      "path": "docs/plans/2026-09-09-android-ios-parity-execution.md",
+      "exists": true,
+      "bytes": 28543,
+      "sha256": "37e7d8fc971dc87ffaf3a9889733b6d29f454792d1dc6a6928dae7bbfcb04883"
+    },
+    {
+      "status": "??",
+      "path": "docs/plans/2026-09-09-android-ios-parity-plan.md",
+      "exists": true,
+      "bytes": 25398,
+      "sha256": "b3175eeef6ebafb225544b0d526a8cd099e35fc7c30870c0cd60499a847a73bb"
+    },
+    {
+      "status": "??",
+      "path": "docs/plans/2026-09-09-phase3-browser-contract.md",
+      "exists": true,
+      "bytes": 7034,
+      "sha256": "1cbabfe6a5dc068674ecde2f84221d5d07f61a32a1be56f827c9aad1a1bad3df"
+    },
+    {
+      "status": "??",
+      "path": "docs/plans/2026-09-09-phase4-miniapp-implementation-boundaries.md",
+      "exists": true,
+      "bytes": 20198,
+      "sha256": "ebbd94b16ec550321293fa099c892e944bff3823ad3a6ff59a54119f59e4e582"
+    },
+    {
+      "status": "??",
+      "path": "docs/plans/2026-09-09-phase5-ssh-feasibility.md",
+      "exists": true,
+      "bytes": 7102,
+      "sha256": "cb619a3cb225bebe5653f9545da1ecac870d85190a72a2ce1e1deb5c12f88968"
+    },
+    {
+      "status": "??",
+      "path": "docs/plans/2026-09-09-phase7-8-platform-feasibility.md",
+      "exists": true,
+      "bytes": 20566,
+      "sha256": "7d16227a69a7e7594b0863b1fa00e937736652c7ac29919a0efb2b330c9587d0"
+    },
+    {
+      "status": "??",
+      "path": "docs/plans/2026-09-10-phase5-account-system-boundaries.md",
+      "exists": true,
+      "bytes": 20036,
+      "sha256": "bad514b964ee06bc4a26c8f24e09693a3620782f519703b9d17dd0b6067a05e8"
+    },
+    {
+      "status": "??",
+      "path": "feature/novel-workspace/src/main/kotlin/app/amber/feature/novelworkspace/NovelWorkspaceFocus.kt",
+      "exists": true,
+      "bytes": 1467,
+      "sha256": "2892d8ffd40861e279d04ad92a95fcc4c2a5441bb53b96780526d0fe5670a53b"
+    },
+    {
+      "status": "??",
+      "path": "feature/novel-workspace/src/test/kotlin/app/amber/feature/novelworkspace/NovelWorkspaceExchangeRunnerTest.kt",
+      "exists": true,
+      "bytes": 5485,
+      "sha256": "7a720710458d5aa535be26bd21f0966a81a45b4ece98963589406c2bca81675f"
+    },
+    {
+      "status": "??",
+      "path": "feature/novel-workspace/src/test/kotlin/app/amber/feature/novelworkspace/NovelWorkspaceJobRecoveryTest.kt",
+      "exists": true,
+      "bytes": 6149,
+      "sha256": "5b8d318799da79908cfbe3ddde5b3d127a877248a47ee77741742c272c0e7c2f"
+    },
+    {
+      "status": "??",
+      "path": "feature/task/src/test/kotlin/app/amber/feature/task/AgentTaskStoreTest.kt",
+      "exists": true,
+      "bytes": 7832,
+      "sha256": "014b3ecb622bde661cbdbfa7e0d038c62fbc0e45a615bbe3b76dc144753d0df5"
+    },
+    {
+      "status": "??",
+      "path": "scripts/conversation-exchange/IOSConversationExportRunner.swift",
+      "exists": true,
+      "bytes": 1981,
+      "sha256": "e71caff71e3d2795d4ff8fb19d9dcc6590bf2fcd6d4027fc44aa6e705c522754"
+    },
+    {
+      "status": "??",
+      "path": "scripts/conversation-exchange/IOSConversationImportRunner.swift",
+      "exists": true,
+      "bytes": 1079,
+      "sha256": "a4f9e343f26606bef391419e58b3486c2b30b78a869f642fd4b92cb2a3627799"
+    },
+    {
+      "status": "??",
+      "path": "scripts/miniapp-parity/README.md",
+      "exists": true,
+      "bytes": 797,
+      "sha256": "c450f45d73649e1ef47741f05a8526eb947dc7dbca156532b4b71f7aa20a8154"
+    },
+    {
+      "status": "??",
+      "path": "scripts/miniapp-parity/index.html",
+      "exists": true,
+      "bytes": 4698,
+      "sha256": "2d450a4477e871058331b1bb87eed1382beff957220d56e4445404f6446919ff"
+    },
+    {
+      "status": "??",
+      "path": "scripts/miniapp-parity/seed-emulator.py",
+      "exists": true,
+      "bytes": 2138,
+      "sha256": "6376890a01856abf8a43087db3cfe173e0fa6f511de7850727939ed6bfe428f7"
+    },
+    {
+      "status": "??",
+      "path": "scripts/novel-workspace/W15CrossPlatformRunnerTests.swift",
+      "exists": true,
+      "bytes": 5271,
+      "sha256": "18e5c8452de88658b2f585876be9916276caaa5eb48879d55778b218e36eb98b"
+    },
+    {
+      "status": "??",
+      "path": "scripts/run_novel_workspace_exchange.sh",
+      "exists": true,
+      "bytes": 3541,
+      "sha256": "9b48fb2bf11673a745dffd96ef4e4055cd3904d125447c8cdeb584a517b97254"
+    },
+    {
+      "status": "??",
+      "path": "scripts/webmount-parity/README.md",
+      "exists": true,
+      "bytes": 1311,
+      "sha256": "98d2c665a7656ef55010a2f3f0529175fc5f3b9a514fa621b2cffadd20bd7a33"
+    },
+    {
+      "status": "??",
+      "path": "scripts/webmount-parity/index.html",
+      "exists": true,
+      "bytes": 4503,
+      "sha256": "242b21905a9457da5b495983a008bdda187fc731794548681107871c7d69ba74"
+    },
+    {
+      "status": "??",
+      "path": "scripts/webmount-parity/popup.html",
+      "exists": true,
+      "bytes": 665,
+      "sha256": "f5891046ed8f2d77f95a5efa48c98c3052b841e0810260b743d67f2e50aa52af"
+    }
+  ],
+  "last_verified_apks": [
+    {
+      "path": "app/build/outputs/apk/debug/app-arm64-v8a-debug.apk",
+      "bytes": 107905841,
+      "sha256": "35cbb74f8c4fcf3cee65f248701a918fe4985cb97da5a630f4e429f9654a770a",
+      "mtime": "2026-09-10T00:33:03.246117+08:00",
+      "scope": "Phase 3 final build; does not include Phase 4 UI WIP"
+    },
+    {
+      "path": "app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk",
+      "bytes": 1346328,
+      "sha256": "cc982d7382ae3bacc5605af987e0d15ac67d6a16b25f6fdf21305b84830da5e2",
+      "mtime": "2026-09-10T00:33:06.181480+08:00",
+      "scope": "Phase 3 final build; does not include Phase 4 UI WIP"
+    }
+  ]
+}

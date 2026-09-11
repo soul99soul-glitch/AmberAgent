@@ -9,6 +9,7 @@ import app.amber.core.files.FilesManager
 import app.amber.core.infra.AppScope
 import app.amber.core.repository.ConversationRepository
 import app.amber.core.repository.FilesRepository
+import app.amber.core.sync.core.SyncRestoreWriteGate
 import app.amber.agent.data.db.fts.MessageFtsManager
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
@@ -73,12 +74,13 @@ abstract class DurableRuntimeTestBase {
         database.close()
     }
 
-    protected fun conversationRepository(): ConversationRepository {
+    protected fun conversationRepository(restoreWriteGate: SyncRestoreWriteGate? = null): ConversationRepository {
         val appScope = AppScope()
         val filesManager = FilesManager(
             context = context,
             repository = FilesRepository(database.managedFileDao()),
             appScope = appScope,
+            restoreWriteGate = restoreWriteGate,
         )
         return ConversationRepository(
             conversationDAO = database.conversationDao(),
@@ -88,6 +90,7 @@ abstract class DurableRuntimeTestBase {
             database = database,
             filesManager = filesManager,
             messageFtsManager = MessageFtsManager(database),
+            restoreWriteGate = restoreWriteGate,
         )
     }
 }

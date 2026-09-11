@@ -262,7 +262,11 @@ class DefaultRunKernel(
                         conversation = conversation,
                         speculativeRunner = speculativeRunner,
                         loopBudgetPrompt = loopBudgetPrompt,
-                        responsesResume = responsesResume,
+                        // A stored Responses response can resume only the first
+                        // model round; later rounds must start fresh requests.
+                        responsesResume = responsesResume?.let {
+                            if (stepIndex == 0) it else it.copy(resumeFrom = null)
+                        },
                         // Step 5: thread the durable stream so each model round
                         // leaves a RequestSnapshot at the provider boundary —
                         // gated on the same durablePath that gates the tool

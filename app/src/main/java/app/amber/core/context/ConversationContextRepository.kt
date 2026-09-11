@@ -9,6 +9,7 @@ import app.amber.agent.data.db.entity.ConversationCompactEntity
 import app.amber.agent.data.db.entity.ConversationContextEventEntity
 import app.amber.core.model.Conversation
 import app.amber.core.repository.ConversationRepository
+import app.amber.core.sync.core.SyncRestoreWriteGate
 import app.amber.core.utils.JsonInstant
 import kotlin.uuid.Uuid
 
@@ -16,6 +17,7 @@ class ConversationContextRepository(
     private val compactDAO: ConversationCompactDAO,
     private val eventDAO: ConversationContextEventDAO,
     private val conversationRepository: ConversationRepository,
+    private val restoreWriteGate: SyncRestoreWriteGate? = null,
 ) {
     fun getCompactsFlow(conversationId: Uuid): Flow<List<ConversationCompact>> {
         return compactDAO.getCompactsOfConversation(conversationId.toString()).map { list ->
@@ -31,15 +33,15 @@ class ConversationContextRepository(
         return compactDAO.getCompactById(id)?.toDomain()
     }
 
-    suspend fun insertCompact(compact: ConversationCompact) {
-        compactDAO.insert(compact.toEntity())
+    suspend fun insertCompact(compact: ConversationCompact) = withDurableWrite {
+        insertCompactInternal(compact)
     }
 
     suspend fun copyValidCompactsToConversation(
         sourceConversationId: Uuid,
         targetConversation: Conversation,
         reason: String,
-    ): Int {
+    ): Int = withDurableWrite {
         val targetMessageIds = targetConversation.currentMessages
             .map { it.id.toString() }
             .toSet()
@@ -51,12 +53,12 @@ class ConversationContextRepository(
                     compact.sourceMessageIds.isNotEmpty() &&
                     compact.sourceMessageIds.all { it in targetMessageIds }
             }
-        if (eligibleCompacts.isEmpty()) return 0
+        if (eligibleCompacts.isEmpty()) return@withDurableWrite 0
 
         val idMapping = eligibleCompacts.associate { compact -> compact.id to Uuid.random().toString() }
         val now = System.currentTimeMillis()
         eligibleCompacts.forEach { compact ->
-            insertCompact(
+            insertCompactInternal(
                 compact.copy(
                     id = idMapping.getValue(compact.id),
                     conversationId = targetConversation.id.toString(),
@@ -65,21 +67,35 @@ class ConversationContextRepository(
                 )
             )
         }
-        insertEvent(
+        insertEventInternal(
             conversationId = targetConversation.id,
             eventType = reason,
             summaryId = null,
             message = "Copied ${eligibleCompacts.size} compact summaries from fork parent",
         )
-        return eligibleCompacts.size
+        eligibleCompacts.size
     }
 
-    suspend fun invalidateCompacts(conversationId: Uuid, reason: String) {
+    suspend fun invalidateCompacts(conversationId: Uuid, reason: String) = withDurableWrite {
         compactDAO.deleteByConversation(conversationId.toString())
-        insertEvent(conversationId, "compact_invalidated", null, reason)
+        insertEventInternal(conversationId, "compact_invalidated", null, reason)
     }
 
-    suspend fun insertEvent(conversationId: Uuid, eventType: String, summaryId: String?, message: String) {
+    suspend fun insertEvent(conversationId: Uuid, eventType: String, summaryId: String?, message: String) =
+        withDurableWrite {
+            insertEventInternal(conversationId, eventType, summaryId, message)
+        }
+
+    private suspend fun insertCompactInternal(compact: ConversationCompact) {
+        compactDAO.insert(compact.toEntity())
+    }
+
+    private suspend fun insertEventInternal(
+        conversationId: Uuid,
+        eventType: String,
+        summaryId: String?,
+        message: String,
+    ) {
         eventDAO.insert(
             ConversationContextEventEntity(
                 id = Uuid.random().toString(),
@@ -168,5 +184,10 @@ class ConversationContextRepository(
         val start = (index - 120).coerceAtLeast(0)
         val end = (index + query.length + 120).coerceAtMost(length)
         return substring(start, end)
+    }
+
+    private suspend fun <T> withDurableWrite(block: suspend () -> T): T {
+        val gate = restoreWriteGate
+        return if (gate == null) block() else gate.withCurrentWriterOrCancel(block)
     }
 }
