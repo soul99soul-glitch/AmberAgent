@@ -40,13 +40,12 @@ val LocalExtendColors = compositionLocalOf { ExtendLightColors }
 val LocalDarkMode = compositionLocalOf { false }
 val LocalAmoledDarkMode = compositionLocalOf { false }
 
-private val AMOLED_DARK_BACKGROUND = Color(0xFF000000)
 private val NotionShapes = Shapes(
-    extraSmall = RoundedCornerShape(3.dp),
-    small = RoundedCornerShape(4.dp),
-    medium = RoundedCornerShape(6.dp),
-    large = RoundedCornerShape(8.dp),
-    extraLarge = RoundedCornerShape(10.dp),
+    extraSmall = RoundedCornerShape(4.dp),
+    small = RoundedCornerShape(15.dp),
+    medium = RoundedCornerShape(14.dp),
+    large = RoundedCornerShape(14.dp),
+    extraLarge = RoundedCornerShape(28.dp),
 )
 private val NotionTypography = Typography.copy(
     displayLarge = Typography.displayLarge.copy(fontFamily = HankenGrotesk, fontSize = 30.sp, lineHeight = 38.sp, fontWeight = FontWeight.SemiBold),
@@ -55,15 +54,17 @@ private val NotionTypography = Typography.copy(
     headlineLarge = Typography.headlineLarge.copy(fontFamily = HankenGrotesk, fontSize = 22.sp, lineHeight = 29.sp, fontWeight = FontWeight.SemiBold),
     headlineMedium = Typography.headlineMedium.copy(fontFamily = HankenGrotesk, fontSize = 20.sp, lineHeight = 27.sp, fontWeight = FontWeight.SemiBold),
     headlineSmall = Typography.headlineSmall.copy(fontFamily = HankenGrotesk, fontSize = 18.sp, lineHeight = 24.sp, fontWeight = FontWeight.SemiBold),
-    titleLarge = Typography.titleLarge.copy(fontFamily = HankenGrotesk, fontSize = 18.sp, lineHeight = 24.sp, fontWeight = FontWeight.SemiBold),
-    titleMedium = Typography.titleMedium.copy(fontFamily = HankenGrotesk, fontSize = 15.sp, lineHeight = 21.sp, fontWeight = FontWeight.Medium),
-    titleSmall = Typography.titleSmall.copy(fontFamily = HankenGrotesk, fontSize = 13.sp, lineHeight = 18.sp, fontWeight = FontWeight.Medium),
-    bodyLarge = Typography.bodyLarge.copy(fontFamily = HankenGrotesk, fontSize = 14.sp, lineHeight = 21.sp),
-    bodyMedium = Typography.bodyMedium.copy(fontFamily = HankenGrotesk, fontSize = 13.sp, lineHeight = 20.sp),
-    bodySmall = Typography.bodySmall.copy(fontFamily = HankenGrotesk, fontSize = 12.sp, lineHeight = 18.sp),
-    labelLarge = Typography.labelLarge.copy(fontFamily = HankenGrotesk, fontSize = 12.sp, lineHeight = 17.sp, fontWeight = FontWeight.Medium),
-    labelMedium = Typography.labelMedium.copy(fontFamily = HankenGrotesk, fontSize = 11.sp, lineHeight = 15.sp, fontWeight = FontWeight.Medium),
-    labelSmall = Typography.labelSmall.copy(fontFamily = HankenGrotesk, fontSize = 10.sp, lineHeight = 14.sp, fontWeight = FontWeight.Medium),
+    // Keep the existing AmberTextStyles UI scale: 19/16/15/13. Markdown's display/headline
+    // tiers above intentionally remain untouched so document headings keep their hierarchy.
+    titleLarge = Typography.titleLarge.copy(fontFamily = AmberSans, fontSize = 19.sp, lineHeight = 25.sp, fontWeight = FontWeight.Bold),
+    titleMedium = Typography.titleMedium.copy(fontFamily = AmberSans, fontSize = 16.sp, lineHeight = 21.sp, fontWeight = FontWeight.Bold),
+    titleSmall = Typography.titleSmall.copy(fontFamily = AmberSans, fontSize = 13.sp, lineHeight = 18.sp, fontWeight = FontWeight.Medium),
+    bodyLarge = Typography.bodyLarge.copy(fontFamily = AmberSans, fontSize = 15.sp, lineHeight = 22.sp),
+    bodyMedium = Typography.bodyMedium.copy(fontFamily = AmberSans, fontSize = 15.sp, lineHeight = 22.sp),
+    bodySmall = Typography.bodySmall.copy(fontFamily = AmberSans, fontSize = 13.sp, lineHeight = 18.sp),
+    labelLarge = Typography.labelLarge.copy(fontFamily = AmberSans, fontSize = 15.sp, lineHeight = 22.sp, fontWeight = FontWeight.Medium),
+    labelMedium = Typography.labelMedium.copy(fontFamily = AmberSans, fontSize = 13.sp, lineHeight = 18.sp, fontWeight = FontWeight.Medium),
+    labelSmall = Typography.labelSmall.copy(fontFamily = AmberSans, fontSize = 13.sp, lineHeight = 18.sp, fontWeight = FontWeight.Medium),
 )
 
 private val NotionLightScheme = lightColorScheme(
@@ -154,27 +155,7 @@ fun AmberAgentTheme(
     val amoledDarkMode by rememberAmoledDarkMode()
 
     val colorScheme = if (darkTheme) NotionDarkScheme else NotionLightScheme
-    val colorSchemeConverted = remember(darkTheme, amoledDarkMode, colorScheme) {
-        if (darkTheme && amoledDarkMode) {
-            colorScheme.copy(
-                background = AMOLED_DARK_BACKGROUND,
-                surface = Color(0xFF050505),
-                surfaceVariant = Color(0xFF101010),
-                surfaceContainerLowest = AMOLED_DARK_BACKGROUND,
-                surfaceContainerLow = Color(0xFF050505),
-                surfaceContainer = Color(0xFF080808),
-                surfaceContainerHigh = Color(0xFF0D0D0D),
-                surfaceContainerHighest = Color(0xFF141414),
-                surfaceBright = Color(0xFF0D0D0D),
-                surfaceDim = AMOLED_DARK_BACKGROUND,
-                secondaryContainer = Color(0xFF101010),
-                outline = Color(0xFF34383F),
-                outlineVariant = Color(0xFF20242A),
-            )
-        } else {
-            colorScheme
-        }
-    }
+    val colorSchemeConverted = colorScheme
     val extendColors = if (darkTheme) ExtendDarkColors else ExtendLightColors
 
     // Status / nav bar icon contrast follows the *app* theme (not system night mode).
@@ -221,19 +202,21 @@ fun AmberAgentTheme(
         else -> AmberBase.LIGHT
     }
     val amberAccent = parseAccent(settings.displaySetting.accentColor)
-    val amberTokens = remember(amberBase, amberAccent) { buildAmberTokens(amberBase, amberAccent) }
+    val amberTokens = remember(amberBase, amberAccent, darkTheme, amoledDarkMode) {
+        buildAmberTokens(amberBase, amberAccent).let { tokens ->
+            if (darkTheme && amoledDarkMode) tokens.withAmoledSurfaces() else tokens
+        }
+    }
     val chatTheme = remember(amberTokens) { amberTokens.toChatTheme() }
 
     val themedColorScheme = remember(colorSchemeConverted, chatTheme, amoledDarkMode, darkTheme) {
         run {
-            // AmoledDark 时保留纯黑 bg/surface（省电），其他主题 token 仍跟 chatTheme
-            val useAmoledBlack = amoledDarkMode && darkTheme
             colorSchemeConverted.copy(
-                background = if (useAmoledBlack) colorSchemeConverted.background else chatTheme.bg,
+                background = chatTheme.bg,
                 onBackground = chatTheme.ink,
-                surface = if (useAmoledBlack) colorSchemeConverted.surface else chatTheme.paper,
+                surface = chatTheme.paper,
                 onSurface = chatTheme.ink,
-                surfaceVariant = if (useAmoledBlack) colorSchemeConverted.surfaceVariant else chatTheme.toolPillBg,
+                surfaceVariant = chatTheme.toolPillBg,
                 onSurfaceVariant = chatTheme.inkSoft,
                 // Subagent #6: 5 级 hierarchy 让 NavDrawer / Card / BottomSheet 有深度
                 surfaceContainerLowest = chatTheme.containerLowest,
@@ -247,6 +230,8 @@ fun AmberAgentTheme(
                 surfaceDim = chatTheme.containerLowest,
                 surfaceTint = chatTheme.accent,
                 primary = chatTheme.accent,
+                // Keep error/errorContainer from the base scheme: destructive feedback remains
+                // semantically red when the user changes the accent.
                 // Subagent #3: Midnight 用深字反白 (chatTheme.onAccent)；其他主题仍是白字
                 onPrimary = chatTheme.onAccent,
                 primaryContainer = chatTheme.accentSoft,

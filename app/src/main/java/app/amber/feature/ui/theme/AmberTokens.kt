@@ -40,7 +40,7 @@ enum class AmberBase { LIGHT, DARK, SAGE, SAGE_DARK }
 // ── LIGHT · warm off-white / graphite ──────────────────────────────────────
 internal val AmberLight = AmberTokens(
     bg = Color(0xFFF4F2EC), surface = Color(0xFFFAF9F5), surface2 = Color(0xFFEFECE4), raised = Color(0xFFFFFFFF),
-    ink = Color(0xFF1B1A17), ink2 = Color(0xFF57544C), ink3 = Color(0xFF8F8B80), ink4 = Color(0xFFB6B1A4),
+    ink = Color(0xFF1B1A17), ink2 = Color(0xFF57544C), ink3 = Color(0xFF6E6A61), ink4 = Color(0xFFB6B1A4),
     line = Color(0xFFE4E0D6), line2 = Color(0xFFD6D1C4),
     userBg = Color(0xFF1B1A17), userInk = Color(0xFFF6F4EE), codeBg = Color(0xFFEDEAE1),
     signal = Color(0xFF5E9C6E), accent = Color(0xFFB8623A), accentInk = Color(0xFFFFFFFF), isDark = false,
@@ -49,7 +49,7 @@ internal val AmberLight = AmberTokens(
 // ── DARK · warm graphite ───────────────────────────────────────────────────
 internal val AmberDark = AmberTokens(
     bg = Color(0xFF161512), surface = Color(0xFF1C1B17), surface2 = Color(0xFF211F1A), raised = Color(0xFF23211C),
-    ink = Color(0xFFECE8DF), ink2 = Color(0xFFA8A298), ink3 = Color(0xFF756F64), ink4 = Color(0xFF564F45),
+    ink = Color(0xFFECE8DF), ink2 = Color(0xFFA8A298), ink3 = Color(0xFF8F897E), ink4 = Color(0xFF564F45),
     line = Color(0xFF2E2B25), line2 = Color(0xFF3A362E),
     userBg = Color(0xFFECE8DF), userInk = Color(0xFF1B1A17), codeBg = Color(0xFF211F1A),
     signal = Color(0xFF5E9C6E), accent = Color(0xFFB8623A), accentInk = Color(0xFFFFFFFF), isDark = true,
@@ -58,7 +58,7 @@ internal val AmberDark = AmberTokens(
 // ── SAGE · green-tinted neutrals ───────────────────────────────────────────
 internal val AmberSage = AmberTokens(
     bg = Color(0xFFF0F2EA), surface = Color(0xFFF6F8F0), surface2 = Color(0xFFE7EADF), raised = Color(0xFFFFFFFF),
-    ink = Color(0xFF1B201A), ink2 = Color(0xFF535A4D), ink3 = Color(0xFF888F7E), ink4 = Color(0xFFB0B5A4),
+    ink = Color(0xFF1B201A), ink2 = Color(0xFF535A4D), ink3 = Color(0xFF626B5F), ink4 = Color(0xFFB0B5A4),
     line = Color(0xFFE0E3D6), line2 = Color(0xFFD0D4C4),
     userBg = Color(0xFF1B201A), userInk = Color(0xFFF3F5EC), codeBg = Color(0xFFE8EBDF),
     signal = Color(0xFF2F8F76), accent = Color(0xFFB8623A), accentInk = Color(0xFFFFFFFF), isDark = false,
@@ -67,7 +67,7 @@ internal val AmberSage = AmberTokens(
 // ── SAGE DARK · deep forest graphite ───────────────────────────────────────
 internal val AmberSageDark = AmberTokens(
     bg = Color(0xFF131711), surface = Color(0xFF191D15), surface2 = Color(0xFF1E2219), raised = Color(0xFF20241B),
-    ink = Color(0xFFE6EBDF), ink2 = Color(0xFFA0A896), ink3 = Color(0xFF6E7563), ink4 = Color(0xFF515845),
+    ink = Color(0xFFE6EBDF), ink2 = Color(0xFFA0A896), ink3 = Color(0xFF8D9783), ink4 = Color(0xFF515845),
     line = Color(0xFF2A2E22), line2 = Color(0xFF353A2C),
     userBg = Color(0xFFE6EBDF), userInk = Color(0xFF1B201A), codeBg = Color(0xFF1E2219),
     signal = Color(0xFF4CAF8E), accent = Color(0xFFB8623A), accentInk = Color(0xFFFFFFFF), isDark = true,
@@ -116,3 +116,17 @@ fun accentInkFor(accent: Color): Color = when (accent) {
  */
 fun buildAmberTokens(base: AmberBase, accent: Color): AmberTokens =
     baseTokens(base).copy(accent = accent, accentInk = accentInkFor(accent), signal = accent)
+
+/**
+ * AMOLED keeps the active base's ink and accent semantics while making every shared surface
+ * step a true black OLED-friendly palette. The resulting tokens feed both ChatTheme and M3.
+ */
+internal fun AmberTokens.withAmoledSurfaces(): AmberTokens = copy(
+    bg = Color(0xFF000000),
+    surface = Color(0xFF050505),
+    surface2 = Color(0xFF090909),
+    raised = Color(0xFF0D0D0D),
+    line = Color(0xFF20242A),
+    line2 = Color(0xFF34383F),
+    codeBg = Color(0xFF101010),
+)

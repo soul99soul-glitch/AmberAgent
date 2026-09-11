@@ -2,13 +2,14 @@ package app.amber.feature.ui.components.ui
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -32,13 +33,12 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import app.amber.feature.ui.theme.LocalAmoledDarkMode
-import app.amber.feature.ui.theme.LocalDarkMode
+import app.amber.feature.ui.theme.LocalAmberTokens
+import app.amber.feature.ui.theme.LocalAmberType
+import app.amber.feature.ui.components.ds.pressable
 
 @Immutable
 data class WorkspaceColors(
@@ -68,73 +68,29 @@ enum class WorkspaceTone {
     Danger,
 }
 
+/** Compatibility palette for existing workspace consumers, derived from the active Amber theme. */
 @Composable
 fun workspaceColors(): WorkspaceColors {
+    val t = LocalAmberTokens.current
     val scheme = MaterialTheme.colorScheme
-    if (LocalAmoledDarkMode.current) {
-        return WorkspaceColors(
-            canvas = Color(0xFF000000),
-            paper = Color(0xFF050505),
-            row = Color(0xFF090909),
-            note = Color(0xFF0D0D0D),
-            ink = Color(0xFFF1F3F5),
-            muted = Color(0xFFA7ABB2),
-            faint = Color(0xFF666C74),
-            hairline = Color(0xFF20242A),
-            blue = Color(0xFF4EA6FF),
-            blueContainer = Color(0xFF071B2E),
-            green = Color(0xFF6DD58C),
-            greenContainer = Color(0xFF071A10),
-            amber = Color(0xFFE5B567),
-            amberContainer = Color(0xFF1F170A),
-            red = Color(0xFFFF8F86),
-            redContainer = Color(0xFF21100F),
-        )
-    }
-    return if (LocalDarkMode.current) {
-        WorkspaceColors(
-            canvas = scheme.surfaceContainerLowest,
-            paper = scheme.surface,
-            row = scheme.surfaceContainerLow,
-            note = scheme.surfaceContainer,
-            ink = scheme.onSurface,
-            muted = scheme.onSurfaceVariant,
-            faint = Color(0xFF70757E),
-            hairline = Color(0xFF2B2F35),
-            blue = Color(0xFF4EA6FF),
-            blueContainer = Color(0xFF10263A),
-            green = Color(0xFF6DD58C),
-            greenContainer = Color(0xFF102A1A),
-            amber = Color(0xFFE5B567),
-            amberContainer = Color(0xFF352715),
-            red = Color(0xFFFF8F86),
-            redContainer = Color(0xFF3A1715),
-        )
-    } else {
-        // V3 修复：浅色分支镜像深色分支，从 MaterialTheme.colorScheme 读取核心 surface/text。
-        // Theme.kt 已经把 colorScheme 按 chatTheme override (background=chatTheme.bg,
-        // surface=chatTheme.paper, surfaceContainerLowest/Low/Mid/High/Highest 全套)，
-        // 所以二级页面（settings / providers / history）自动跟随 Whisper/Plain/Paper/Midnight。
-        // 之前硬编码白底导致用户切到 Paper 时 settings 页仍是白底+灰，体感不一致。
-        WorkspaceColors(
-            canvas = scheme.surfaceContainerLowest,
-            paper = scheme.surface,
-            row = scheme.surfaceContainerLow,
-            note = scheme.surfaceContainer,
-            ink = scheme.onSurface,
-            muted = scheme.onSurfaceVariant,
-            faint = Color(0xFF9B9690),                       // 半灰，跨主题保持
-            hairline = scheme.outlineVariant,                // chatTheme.outlineSoft (12% ink)
-            blue = Color(0xFF2383E2),
-            blueContainer = Color(0xFFEAF4FF),
-            green = Color(0xFF168A2D),
-            greenContainer = Color(0xFFEDF9EF),
-            amber = Color(0xFFD37A00),
-            amberContainer = Color(0xFFFFF4E8),
-            red = Color(0xFFC5281C),
-            redContainer = Color(0xFFFFEFED),
-        )
-    }
+    return WorkspaceColors(
+        canvas = t.bg,
+        paper = t.surface,
+        row = t.surface2,
+        note = t.raised,
+        ink = t.ink,
+        muted = t.ink2,
+        faint = t.ink3,
+        hairline = t.line,
+        blue = t.accent,
+        blueContainer = scheme.primaryContainer,
+        green = if (t.isDark) Color(0xFF8BC79B) else Color(0xFF316C42),
+        greenContainer = if (t.isDark) Color(0xFF1E3023) else Color(0xFFE5EFE5),
+        amber = if (t.isDark) Color(0xFFDEB477) else Color(0xFF80571E),
+        amberContainer = if (t.isDark) Color(0xFF342A1C) else Color(0xFFF2EBDD),
+        red = scheme.error,
+        redContainer = scheme.errorContainer,
+    )
 }
 
 @Composable
@@ -181,7 +137,7 @@ fun WorkspaceStatusPill(
         Text(
             text = text,
             modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
-            style = MaterialTheme.typography.labelSmall,
+            style = LocalAmberType.current.tinyTag,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
@@ -192,8 +148,8 @@ fun WorkspaceStatusPill(
 fun WorkspaceLeadingIcon(
     icon: ImageVector,
     modifier: Modifier = Modifier,
-    size: Dp = 28.dp,
-    iconSize: Dp = 17.dp,
+    size: Dp = 32.dp,
+    iconSize: Dp = 18.dp,
     tone: WorkspaceTone = WorkspaceTone.Neutral,
 ) {
     val colors = workspaceColors()
@@ -207,7 +163,7 @@ fun WorkspaceLeadingIcon(
     }
     Surface(
         modifier = modifier.size(size),
-        shape = RoundedCornerShape(6.dp),
+        shape = RoundedCornerShape(9.dp),
         color = when (tone) {
             WorkspaceTone.Neutral -> Color.Transparent
             WorkspaceTone.Accent -> scheme.primaryContainer
@@ -232,8 +188,8 @@ fun WorkspaceIconButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
-    size: Dp = 32.dp,
-    iconSize: Dp = 15.dp,
+    size: Dp = 40.dp,
+    iconSize: Dp = 20.dp,
     showBorder: Boolean = true,
     containerColor: Color? = null,
     tone: WorkspaceTone = WorkspaceTone.Neutral,
@@ -251,9 +207,10 @@ fun WorkspaceIconButton(
     }.copy(alpha = if (enabled) 1f else 0.36f)
     Box(
         modifier = modifier
+            .sizeIn(minWidth = 48.dp, minHeight = 48.dp)
             .size(size)
-            .clip(RoundedCornerShape(6.dp))
-            .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
+            .clip(RoundedCornerShape(9.dp))
+            .pressable(enabled = enabled, role = Role.Button, onClick = onClick)
             .semantics(mergeDescendants = true) {
                 contentDescription?.let { this.contentDescription = it }
             },
@@ -261,7 +218,7 @@ fun WorkspaceIconButton(
     ) {
         Surface(
             modifier = Modifier.size(size),
-            shape = RoundedCornerShape(6.dp),
+            shape = RoundedCornerShape(9.dp),
             color = containerColor ?: if (tone == WorkspaceTone.Accent) scheme.primaryContainer else colors.paper,
             contentColor = contentColor,
             border = if (showBorder) workspaceBorder(alpha = if (enabled) 1f else 0.48f) else null,
@@ -295,8 +252,9 @@ fun WorkspaceTextButton(
     }
     Surface(
         modifier = modifier
+            .heightIn(min = 48.dp)
             .clip(CircleShape)
-            .clickable(onClick = onClick),
+            .pressable(onClick = onClick),
         shape = CircleShape,
         color = container,
         contentColor = contentColor,
@@ -308,7 +266,7 @@ fun WorkspaceTextButton(
         ) {
             Text(
                 text = text,
-                style = MaterialTheme.typography.labelSmall,
+                style = LocalAmberType.current.secondary,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -316,16 +274,7 @@ fun WorkspaceTextButton(
     }
 }
 
-/**
- * V3 settings-shell.jsx SubHeader 设计稿：
- *   - title 22sp W500 ink letterSpacing 0.3 lineHeight 1
- *   - 14dp 上下 padding + 18dp 左右 padding (TopAppBar 默认就是 64dp 高，刚好近似)
- *   - 32dp chevron-back box 内 22dp icon stroke 1.6
- *   - 无 elevation (M3 TopAppBar 默认就是 0)
- *
- * 对外暴露与 [TopAppBar] 一致的 nav/actions/scrollBehavior 接口，
- * 调用方仅传 title 字符串即可统一字号字重；样式 paddings/elevation 走 M3 默认 (已对齐 spec)。
- */
+/** Shared page header: Amber title typography with native insets and scroll behavior. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun WorkspaceTopBar(
@@ -341,10 +290,7 @@ fun WorkspaceTopBar(
         title = {
             Text(
                 text = title,
-                fontSize = 22.sp,
-                fontWeight = FontWeight.Medium,
-                letterSpacing = 0.3.sp,
-                lineHeight = 22.sp,
+                style = LocalAmberType.current.screenTitle,
                 color = workspace.ink,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -358,8 +304,7 @@ fun WorkspaceTopBar(
             scrolledContainerColor = workspace.canvas,
             titleContentColor = workspace.ink,
             navigationIconContentColor = workspace.muted,
-            // V3: action icon 跟主题 accent (Paper 砖红 / Whisper 天蓝 等). 之前硬 workspace.blue.
-            actionIconContentColor = MaterialTheme.colorScheme.primary,
+            actionIconContentColor = workspace.muted,
         ),
     )
 }
