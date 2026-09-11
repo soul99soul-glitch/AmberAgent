@@ -100,6 +100,13 @@ import org.koin.core.qualifier.named
 import java.util.concurrent.TimeUnit
 
 val dataSourceModule = module {
+    single {
+        app.amber.core.settings.ssh.SshProfileStore(
+            dataStore = get<Context>().settingsStore,
+            secretStore = get(),
+        )
+    }
+
     // P1-01: 统一 SecretStore（Android Keystore AES/GCM 加密存储）
     single {
         createAndroidSecretStore(get<Context>())

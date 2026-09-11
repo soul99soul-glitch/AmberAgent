@@ -68,9 +68,11 @@ val agentInfraModule = module {
 
     single { AlpineRuntimeInstaller(get()) }
 
-    single { TerminalRuntime(get(), get(), get(), get(), get(), get(), get()) }
+    single { app.amber.feature.terminal.SshClient() }
 
-    single { TerminalTools(get(), get()) }
+    single { TerminalRuntime(get(), get(), get(), get(), get(), get(), get(), get(), get()) }
+
+    single { TerminalTools(get(), get(), get()) }
 
     single { ScreenCaptureManager(get()) }
 

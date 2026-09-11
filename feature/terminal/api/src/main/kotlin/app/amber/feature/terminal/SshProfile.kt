@@ -3,19 +3,7 @@ package app.amber.feature.terminal
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
-/**
- * W17: managed remote SSH profile models. These are the durable data
- * contracts for the first non-PTY SSH runtime — endpoint, authentication
- * material references and the host-key trust state. Secrets never live here:
- * password / private key / passphrase are stored in the Keystore-backed
- * SecretStore under `scope=ssh, ownerId=profileId` and referenced by field
- * name only.
- *
- * The client backend (audited ARM64 OpenSSH binary or an approved JVM SSH
- * library) is still an open sourcing decision — these models are deliberately
- * client-agnostic so the runtime wiring can land without re-shaping persisted
- * data.
- */
+/** Durable endpoint and host-key trust metadata for one managed SSH profile. */
 @Serializable
 data class SshProfile(
     val id: String,
@@ -23,19 +11,40 @@ data class SshProfile(
     val host: String,
     val port: Int = 22,
     val username: String,
-    /** SecretStore reference — never a literal secret. */
+    /** Authentication method; credential values are resolved separately. */
     val authMethod: SshAuthMethod,
     /** SHA-256 fingerprint of the accepted host key, hex without colons. */
     val acceptedHostKeyFingerprint: String? = null,
     val createdAtMs: Long,
     val updatedAtMs: Long,
+    /** Opaque SecretStore generation; empty means the legacy credential keys. */
+    val credentialRevision: String = "",
 ) {
     init {
+        require(id.isNotBlank()) { "id must not be blank" }
+        require(name.isNotBlank()) { "name must not be blank" }
+        require(name == name.trim()) { "name must not be padded" }
+        require(name.none { it.isISOControl() }) { "name contains control characters" }
         require(host.isNotBlank()) { "host must not be blank" }
+        require(host == host.trim()) { "host must not be padded" }
+        require(host.none { it.isWhitespace() || it.isISOControl() }) {
+            "host contains whitespace"
+        }
         require(username.isNotBlank()) { "username must not be blank" }
+        require(username == username.trim()) { "username must not be padded" }
+        require(username.none { it.isWhitespace() || it.isISOControl() }) {
+            "username contains whitespace"
+        }
         require(port in 1..65535) { "port out of range" }
     }
 }
+
+/** Persisted SSH profiles and the selected default profile. */
+@Serializable
+data class SshProfilesState(
+    val profiles: List<SshProfile> = emptyList(),
+    val defaultProfileId: String? = null,
+)
 
 @Serializable
 enum class SshAuthMethod(val wireName: String) {
@@ -96,4 +105,15 @@ object SshTrustPolicy {
                     "fingerprint must be 32 SHA-256 bytes in hex"
                 }
             }
+
+    /** Formats a stored SHA-256 fingerprint the way OpenSSH displays it. */
+    fun displayFingerprint(raw: String): String {
+        val normalized = normalizeFingerprint(raw)
+        val bytes = ByteArray(normalized.length / 2) { index ->
+            normalized.substring(index * 2, index * 2 + 2).toInt(16).toByte()
+        }
+        return "SHA256:" + java.util.Base64.getEncoder()
+            .withoutPadding()
+            .encodeToString(bytes)
+    }
 }

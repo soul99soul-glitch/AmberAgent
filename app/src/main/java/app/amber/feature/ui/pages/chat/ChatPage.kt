@@ -1622,6 +1622,10 @@ private fun UIMessagePart.Tool.inputPreview(input: kotlinx.serialization.json.Js
 }
 
 private fun UIMessagePart.Tool.defaultRuntime(): String = when {
+    toolName in setOf("terminal_execute", "terminal_job_start") &&
+        inputAsJson().getStringContent("ssh_profile_id") != null -> "remote_ssh"
+    toolName in setOf("terminal_execute", "terminal_job_start") &&
+        inputAsJson().getStringContent("runtime") != null -> inputAsJson().getStringContent("runtime").orEmpty()
     toolName == "search_web" -> "web-search"
     toolName == "scrape_web" -> "webview"
     toolName == "webview_search_open" -> "webview"
@@ -1631,7 +1635,7 @@ private fun UIMessagePart.Tool.defaultRuntime(): String = when {
     toolName.startsWith("icloud_") -> "icloud-web-mount"
     toolName == "terminal_execute" ||
         toolName == "terminal_install_packages" ||
-        toolName.startsWith("terminal_job_") -> "alpine-proot-stage1"
+        toolName.startsWith("terminal_job_") -> "terminal"
     toolName == "terminal_workspace_flush" -> "saf-workspace"
     toolName.startsWith("terminal_session_") -> "alpine-proot-session"
     toolName.startsWith("file_") -> "saf-workspace"
@@ -1641,6 +1645,8 @@ private fun UIMessagePart.Tool.defaultRuntime(): String = when {
 }
 
 private fun UIMessagePart.Tool.defaultWorkspace(): String = when {
+    defaultRuntime() == "remote_ssh" -> inputAsJson().getStringContent("ssh_profile_id").orEmpty()
+    toolName.startsWith("terminal_job_") -> ""
     toolName.startsWith("terminal_") || toolName.startsWith("file_") -> "/workspace"
     toolName.startsWith("icloud_") -> "/icloud"
     else -> ""

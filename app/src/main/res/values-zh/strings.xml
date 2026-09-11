@@ -670,7 +670,7 @@
   <string name="setting_sandbox_terminal_runtime_android_shell">Android shell</string>
   <string name="setting_sandbox_terminal_runtime_termux">Termux</string>
   <string name="setting_sandbox_terminal_jobs_title">并发 Job</string>
-  <string name="setting_sandbox_terminal_jobs_desc">本地运行时会串行使用 /workspace；更高并发仅对外部 Termux job 生效。</string>
+  <string name="setting_sandbox_terminal_jobs_desc">本地运行时会串行使用 /workspace；更高并发可同时运行 SSH 和外部 Termux 任务。</string>
   <string name="setting_sandbox_terminal_jobs_value">%1$d 个</string>
   <string name="setting_sandbox_terminal_output_title">输出尾部</string>
   <string name="setting_sandbox_terminal_output_desc">工具结果保留的输出尾部大小，完整日志仍保存在应用目录。</string>
@@ -787,7 +787,7 @@
   <string name="setting_page_agent_extensions">技能</string>
   <string name="setting_page_agent_extensions_desc">Skill、提示词和外部工具服务</string>
   <string name="setting_page_agent_sandbox">Agent 运行环境</string>
-  <string name="setting_page_agent_sandbox_desc">Workspace、Alpine/proot 和命令运行状态</string>
+  <string name="setting_page_agent_sandbox_desc">工作区、Alpine/proot、SSH 配置和命令运行状态</string>
   <string name="setting_page_agent_execution">运行环境</string>
   <string name="setting_page_agent_execution_desc">工具循环、操作预览、实时状态和 Runtime</string>
   <string name="setting_page_tts">语音合成</string>

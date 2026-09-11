@@ -532,7 +532,7 @@
   <string name="setting_page_agent_extensions">Skills</string>
   <string name="setting_page_agent_extensions_desc">Skills, prompts and external tool servers</string>
   <string name="setting_page_agent_sandbox">Agent Runtime</string>
-  <string name="setting_page_agent_sandbox_desc">Workspace, Alpine/proot and command runtime status</string>
+  <string name="setting_page_agent_sandbox_desc">Workspace, Alpine/proot, SSH profiles and command runtime status</string>
   <string name="setting_page_agent_execution">Runtime</string>
   <string name="setting_page_agent_execution_desc">Tool loop, preview, live status, and runtime environment</string>
   <string name="setting_page_tts">Text-to-Speech</string>
@@ -1049,7 +1049,7 @@
   <string name="setting_sandbox_terminal_runtime_android_shell">Android shell</string>
   <string name="setting_sandbox_terminal_runtime_termux">Termux</string>
   <string name="setting_sandbox_terminal_jobs_title">Concurrent Jobs</string>
-  <string name="setting_sandbox_terminal_jobs_desc">Local runtimes serialize /workspace access. Higher limits only benefit external Termux jobs.</string>
+  <string name="setting_sandbox_terminal_jobs_desc">Local runtimes serialize /workspace access. Higher limits allow concurrent SSH and external Termux jobs.</string>
   <string name="setting_sandbox_terminal_jobs_value">%1$d jobs</string>
   <string name="setting_sandbox_terminal_output_title">Output Tail</string>
   <string name="setting_sandbox_terminal_output_desc">How much output each job keeps in tool results. Full logs stay in app storage.</string>

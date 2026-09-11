@@ -328,24 +328,26 @@ class ModelCouncilValidatorTest {
     }
 
     @Test
-    fun termuxExternalCliHomeStaysOutsideWorkspaceAndAppPrivateSandbox() {
+    fun externalCliHomeUsesTheSelectedHostsHome() {
         val seat = seat("termux-codex", modelAId).copy(
             runnerType = ModelCouncilSeatRunner.EXTERNAL_CLI,
             externalTool = "codex_cli",
             externalRuntime = "termux_external",
         )
 
-        val command = ModelCouncilExternalCliCommandBuilder.build(
-            seat = seat,
-            prompt = "reply ok",
-            timeoutMs = 5_000L,
-            externalCliHomeRoot = externalCliHomeRoot,
-            runtime = TerminalRuntimeKind.TERMUX_EXTERNAL,
-        )
+        listOf(TerminalRuntimeKind.TERMUX_EXTERNAL, TerminalRuntimeKind.REMOTE_SSH).forEach { runtime ->
+            val command = ModelCouncilExternalCliCommandBuilder.build(
+                seat = seat,
+                prompt = "reply ok",
+                timeoutMs = 5_000L,
+                externalCliHomeRoot = externalCliHomeRoot,
+                runtime = runtime,
+            )
 
-        assertTrue(command.contains("home_root=\"${'$'}HOME/.amberagent/external-cli-home/codex_cli\""))
-        assertFalse(command.contains("home_root='$externalCliHomeRoot/codex_cli'"))
-        assertFalse(command.contains(".amberagent-external-cli-home/codex_cli"))
+            assertTrue(command.contains("home_root=\"${'$'}HOME/.amberagent/external-cli-home/codex_cli\""))
+            assertFalse(command.contains("home_root='$externalCliHomeRoot/codex_cli'"))
+            assertFalse(command.contains(".amberagent-external-cli-home/codex_cli"))
+        }
     }
 
     @Test

@@ -108,4 +108,12 @@ class SshTrustPolicyTest {
             runCatching { SshTrustPolicy.normalizeFingerprint("zz") }.isFailure,
         )
     }
+
+    @Test
+    fun `display fingerprint uses OpenSSH SHA256 base64 form`() {
+        assertEquals(
+            "SHA256:qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqo",
+            SshTrustPolicy.displayFingerprint("aa".repeat(32)),
+        )
+    }
 }

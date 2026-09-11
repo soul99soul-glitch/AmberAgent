@@ -242,7 +242,7 @@ class ToolSearchIndex(
             addAll(listOf("文件", "工作区", "搜索文件", "读文件", "写文件"))
         }
         if (name.startsWith("terminal_")) {
-            addAll(listOf("终端", "命令", "脚本", "运行命令", "terminal"))
+            addAll(listOf("终端", "命令", "脚本", "运行命令", "terminal", "ssh", "SSH", "远程服务器"))
         }
         if (name.startsWith("mcp_") || category == "mcp") {
             addAll(listOf("mcp", "MCP", "外部工具"))
