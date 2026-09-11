@@ -16,7 +16,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
-import androidx.compose.material3.TopAppBar
+import app.amber.feature.ui.components.ui.WorkspaceTopBar
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -42,12 +42,10 @@ import kotlinx.coroutines.launch
 import app.amber.agent.R
 import app.amber.feature.ui.components.nav.BackButton
 import app.amber.feature.ui.components.ui.WorkspaceLeadingIcon
-import app.amber.feature.ui.components.ui.WorkspaceStatusPill
 import app.amber.feature.ui.components.ui.WorkspaceTone
 import app.amber.feature.ui.components.ui.workspaceBorder
 import app.amber.feature.ui.components.ui.workspaceColors
 import app.amber.feature.ui.context.LocalNavController
-import app.amber.feature.ui.theme.CustomColors
 import app.amber.feature.ui.theme.LocalAmberType
 import app.amber.core.utils.navigateToChatPage
 import app.amber.core.utils.plus
@@ -68,15 +66,10 @@ fun FavoritePage(vm: FavoriteVM = koinViewModel()) {
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                navigationIcon = {
-                    BackButton()
-                },
-                title = {
-                    Text(stringResource(R.string.favorite_page_title))
-                },
+            WorkspaceTopBar(
+                navigationIcon = { BackButton() },
+                title = stringResource(R.string.favorite_page_title),
                 scrollBehavior = scrollBehavior,
-                colors = CustomColors.topBarColors,
             )
         },
         snackbarHost = {
@@ -97,7 +90,7 @@ fun FavoritePage(vm: FavoriteVM = koinViewModel()) {
 
         LazyColumn(
             contentPadding = innerPadding + PaddingValues(16.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
             modifier = Modifier.fillMaxSize(),
         ) {
             item {
@@ -135,7 +128,7 @@ private fun FavoriteHeader(count: Int) {
     val workspace = workspaceColors()
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(8.dp),
+        shape = RoundedCornerShape(14.dp),
         color = workspace.paper,
         border = workspaceBorder(),
     ) {
@@ -170,13 +163,13 @@ private fun FavoriteEmptyState() {
     val workspace = workspaceColors()
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(8.dp),
+        shape = RoundedCornerShape(14.dp),
         color = workspace.paper,
         border = workspaceBorder(),
     ) {
         Column(
             modifier = Modifier.padding(18.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             WorkspaceLeadingIcon(
                 icon = Lucide.Heart,
@@ -226,7 +219,7 @@ private fun SwipeableFavoriteCard(
                     .fillMaxSize()
                     .background(
                         workspace.redContainer,
-                        RoundedCornerShape(8.dp)
+                        RoundedCornerShape(14.dp)
                     )
                     .padding(horizontal = 20.dp),
                 contentAlignment = Alignment.CenterEnd,
@@ -260,7 +253,7 @@ private fun FavoriteCard(
     Surface(
         onClick = onClick,
         modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(8.dp),
+        shape = RoundedCornerShape(14.dp),
         color = workspace.paper,
         border = workspaceBorder(),
     ) {
@@ -291,9 +284,10 @@ private fun FavoriteCard(
                     style = LocalAmberType.current.secondary,
                     color = workspace.muted,
                 )
-                WorkspaceStatusPill(
+                Text(
                     text = dateText,
-                    tone = WorkspaceTone.Neutral,
+                    style = LocalAmberType.current.meta,
+                    color = workspace.muted,
                 )
             }
         }

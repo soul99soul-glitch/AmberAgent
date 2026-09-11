@@ -101,6 +101,7 @@ private fun CardGroupListItem(
     defaultColors: ListItemColors?,
 ) {
     val interactionSource = remember { MutableInteractionSource() }
+    val type = LocalAmberType.current
 
     ListItem(
         headlineContent = item.headlineContent,
@@ -116,7 +117,9 @@ private fun CardGroupListItem(
                 } else Modifier
             ),
         overlineContent = item.overlineContent,
-        supportingContent = item.supportingContent,
+        supportingContent = item.supportingContent?.let { supporting ->
+            { ProvideTextStyle(type.secondary) { supporting() } }
+        },
         leadingContent = item.leadingContent,
         trailingContent = item.trailingContent,
         colors = item.colors ?: defaultColors ?: CustomColors.listItemColors,

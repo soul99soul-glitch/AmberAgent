@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -42,6 +43,7 @@ import app.amber.feature.ui.components.ai.ModelSelector
 import app.amber.feature.ui.components.ds.pressable
 import app.amber.feature.ui.theme.LocalAmberTokens
 import app.amber.feature.ui.theme.LocalAmberType
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import com.composables.icons.lucide.Lucide
 import com.composables.icons.lucide.Cable
@@ -54,7 +56,6 @@ fun ProviderConnectionTester(
 ) {
     var showTestDialog by remember { mutableStateOf(false) }
     val providerCatalog = koinInject<ProviderCatalog>()
-    val scope = rememberCoroutineScope()
     val context = LocalContext.current
 
     ProviderIconButton(
@@ -65,6 +66,7 @@ fun ProviderConnectionTester(
     )
 
     if (showTestDialog) {
+        val scope = rememberCoroutineScope()
         var model by remember(internalProvider) {
             mutableStateOf(internalProvider.models.firstOrNull { it.type == ModelType.CHAT })
         }
@@ -101,7 +103,10 @@ fun ProviderConnectionTester(
                             ?.filterIsInstance<UIMessagePart.Text>()
                             ?.joinToString("") { it.text } ?: ""
                         nonStreamingState = UiState.Success(text)
-                    }.onFailure { nonStreamingState = UiState.Error(it) }
+                    }.onFailure {
+                        if (it is CancellationException) throw it
+                        nonStreamingState = UiState.Error(it)
+                    }
                 }
                 launch {
                     runCatching {
@@ -121,7 +126,10 @@ fun ProviderConnectionTester(
                                 ?.forEach { streamingText += it.text }
                         }
                         streamingState = UiState.Success("")
-                    }.onFailure { streamingState = UiState.Error(it) }
+                    }.onFailure {
+                        if (it is CancellationException) throw it
+                        streamingState = UiState.Error(it)
+                    }
                 }
                 launch {
                     runCatching {
@@ -164,7 +172,10 @@ fun ProviderConnectionTester(
                             )
                         }
                         toolsState = UiState.Success(result)
-                    }.onFailure { toolsState = UiState.Error(it) }
+                    }.onFailure {
+                        if (it is CancellationException) throw it
+                        toolsState = UiState.Error(it)
+                    }
                 }
             }
         }
@@ -309,7 +320,7 @@ private fun TestResultItem(
             is UiState.Error -> Text(
                 text = state.error.message ?: "Error",
                 style = type.meta.copy(fontSize = 11.sp),
-                color = t.accent,
+                color = MaterialTheme.colorScheme.error,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier
@@ -339,7 +350,7 @@ private fun TestResultItem(
                 Text(
                     text = state.error.message ?: "Error",
                     style = type.secondary,
-                    color = t.accent,
+                    color = MaterialTheme.colorScheme.error,
                 )
                 Text(
                     text = stackTrace,

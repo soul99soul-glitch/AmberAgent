@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -88,12 +89,12 @@ import app.amber.ai.provider.hasUsableAuth
 import app.amber.feature.ui.components.ds.SectionLabel
 import app.amber.feature.ui.components.nav.BackButton
 import app.amber.feature.ui.components.ui.WorkspaceDivider
-import app.amber.feature.ui.components.ui.WorkspaceLeadingIcon
 import app.amber.feature.ui.components.ui.WorkspaceStatusPill
 import app.amber.feature.ui.components.ui.WorkspaceTextButton
 import app.amber.feature.ui.components.ui.WorkspaceTone
 import app.amber.feature.ui.components.ui.WorkspaceTopBar
 import app.amber.feature.ui.components.ui.workspaceColors
+import app.amber.feature.ui.theme.LocalAmberTokens
 import app.amber.feature.ui.theme.LocalAmberType
 import app.amber.core.utils.plus
 import org.koin.androidx.compose.koinViewModel
@@ -119,8 +120,8 @@ fun SettingModelPage(vm: SettingVM = koinViewModel()) {
     ) { contentPadding ->
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
-            contentPadding = contentPadding + PaddingValues(horizontal = 14.dp, vertical = 10.dp),
-            verticalArrangement = Arrangement.spacedBy(18.dp),
+            contentPadding = contentPadding + PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             item("chat") {
                 ModelSection(
@@ -179,44 +180,31 @@ private fun DefaultChatModelSetting(
     settings: Settings,
     vm: SettingVM,
 ) {
-    // V3 设计稿 (settings-models.jsx): hero card 36/20 accent leadingIcon + 15sp W500 title
-    // + 12.5sp inkFaint desc + 12dp 间距 + paddingLeft 50 + inline 22dp logo + 14.5sp accent model
+    // V3 设计稿 (settings-models.jsx): neutral leading tile + readable title/description
+    // + inline model selector. Selection and parameter callbacks stay in SettingVM.
+    val type = LocalAmberType.current
+    val tokens = LocalAmberTokens.current
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 14.dp, vertical = 14.dp),
+            .padding(horizontal = 16.dp, vertical = 12.dp),
     ) {
         Row(
             verticalAlignment = Alignment.Top,
-            horizontalArrangement = Arrangement.spacedBy(14.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            WorkspaceLeadingIcon(
-                icon = Lucide.MessageCircle,
-                size = 36.dp,
-                iconSize = 20.dp,
-                tone = WorkspaceTone.Accent,
-            )
+            SettingModelLeadingIcon(Lucide.MessageCircle)
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = stringResource(R.string.setting_model_page_chat_model),
-                    style = MaterialTheme.typography.titleMedium.copy(
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.Medium,
-                        letterSpacing = 0.2.sp,
-                    ),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
+                    style = type.body.copy(fontWeight = FontWeight.SemiBold),
+                    color = tokens.ink,
                 )
                 Text(
                     text = stringResource(R.string.setting_model_page_chat_model_desc),
-                    style = MaterialTheme.typography.bodySmall.copy(
-                        fontSize = 12.5.sp,
-                        letterSpacing = 0.2.sp,
-                    ),
-                    color = workspaceColors().muted,
+                    style = type.secondary,
+                    color = tokens.ink2,
                     modifier = Modifier.padding(top = 3.dp),
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
                 )
             }
         }
@@ -227,7 +215,7 @@ private fun DefaultChatModelSetting(
             inline = true,
             onSelect = { vm.updateSettings(settings.copy(chatModelId = it.id)) },
             modifier = Modifier
-                .padding(top = 12.dp, start = 50.dp)
+                .padding(top = 12.dp, start = 44.dp)
                 .fillMaxWidth(),
         )
     }
@@ -778,6 +766,8 @@ private fun SettingModelRow(
     trailing: (@Composable () -> Unit)? = null,
     content: @Composable () -> Unit,
 ) {
+    val tokens = LocalAmberTokens.current
+    val type = LocalAmberType.current
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -792,16 +782,15 @@ private fun SettingModelRow(
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = title,
-                    style = MaterialTheme.typography.titleMedium,
+                    style = type.body.copy(fontWeight = FontWeight.SemiBold),
+                    color = tokens.ink,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
                 Text(
                     text = description,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = workspaceColors().muted,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
+                    style = type.secondary,
+                    color = tokens.ink2,
                 )
             }
             trailing?.invoke()
@@ -834,9 +823,9 @@ private fun ModelPickerRow(
         if (description != null) {
             Text(
                 text = description,
-                modifier = Modifier.padding(start = 42.dp),
-                style = MaterialTheme.typography.bodySmall,
-                color = workspaceColors().muted,
+                modifier = Modifier.padding(start = 44.dp),
+                style = LocalAmberType.current.secondary,
+                color = LocalAmberTokens.current.ink2,
             )
         }
         ModelSelector(
@@ -851,7 +840,7 @@ private fun ModelPickerRow(
             preferredInputModality = preferredInputModality,
             onClear = onClear,
             modifier = Modifier
-                .padding(start = 42.dp)
+                .padding(start = 44.dp)
                 .fillMaxWidth(),
         )
     }
@@ -1075,12 +1064,13 @@ private fun ModelSection(
     title: @Composable () -> Unit,
     content: @Composable ColumnScope.() -> Unit,
 ) {
-    val workspace = workspaceColors()
+    val tokens = LocalAmberTokens.current
+    val type = LocalAmberType.current
     Column {
         androidx.compose.runtime.CompositionLocalProvider(
-            androidx.compose.material3.LocalContentColor provides workspace.muted,
+            androidx.compose.material3.LocalContentColor provides tokens.ink2,
         ) {
-            androidx.compose.material3.ProvideTextStyle(MaterialTheme.typography.titleSmall) {
+            androidx.compose.material3.ProvideTextStyle(type.eyebrow) {
                 Box(modifier = Modifier.padding(start = 2.dp, top = 8.dp, bottom = 8.dp)) {
                     title()
                 }
@@ -1088,9 +1078,10 @@ private fun ModelSection(
         }
         Surface(
             modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(12.dp),
-            color = workspace.paper,
-            border = BorderStroke(1.dp, workspace.hairline),
+            shape = RoundedCornerShape(14.dp),
+            color = tokens.surface,
+            contentColor = tokens.ink,
+            border = BorderStroke(1.dp, tokens.line),
         ) {
             Column(
                 modifier = Modifier.padding(vertical = 4.dp),
@@ -1102,7 +1093,7 @@ private fun ModelSection(
 
 @Composable
 private fun ModelSectionDivider() {
-    WorkspaceDivider(modifier = Modifier.padding(start = 56.dp))
+    WorkspaceDivider(modifier = Modifier.padding(start = 60.dp))
 }
 
 @Composable
@@ -1183,10 +1174,12 @@ private fun ReasoningLevel.settingLabel(): String = when (this) {
 private fun GroupDefaultsEntry(
     onClick: () -> Unit,
 ) {
+    val tokens = LocalAmberTokens.current
+    val type = LocalAmberType.current
     Surface(
         onClick = onClick,
-        color = workspaceColors().paper,
-        contentColor = workspaceColors().ink,
+        color = tokens.surface,
+        contentColor = tokens.ink,
     ) {
         Row(
             modifier = Modifier
@@ -1202,16 +1195,12 @@ private fun GroupDefaultsEntry(
             ) {
                 Text(
                     text = stringResource(R.string.setting_model_page_group_session_defaults),
-                    style = MaterialTheme.typography.titleMedium,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
+                    style = type.body.copy(fontWeight = FontWeight.SemiBold),
                 )
                 Text(
                     text = stringResource(R.string.setting_model_page_group_session_defaults_desc),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = workspaceColors().muted,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
+                    style = type.secondary,
+                    color = tokens.ink2,
                 )
             }
             WorkspaceStatusPill(
@@ -1227,10 +1216,26 @@ private fun SettingModelLeadingIcon(
     icon: ImageVector,
     tone: WorkspaceTone = WorkspaceTone.Neutral,
 ) {
-    WorkspaceLeadingIcon(
-        icon = icon,
-        size = 30.dp,
-        iconSize = 15.dp,
-        tone = tone,
-    )
+    val workspace = workspaceColors()
+    val (container, content) = when (tone) {
+        WorkspaceTone.Neutral -> workspace.row to workspace.muted
+        WorkspaceTone.Accent -> workspace.blueContainer to workspace.blue
+        WorkspaceTone.Success -> workspace.greenContainer to workspace.green
+        WorkspaceTone.Warning -> workspace.amberContainer to workspace.amber
+        WorkspaceTone.Danger -> workspace.redContainer to workspace.red
+    }
+    Surface(
+        modifier = Modifier.size(32.dp),
+        shape = RoundedCornerShape(9.dp),
+        color = container,
+        contentColor = content,
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            androidx.compose.material3.Icon(
+                imageVector = icon,
+                contentDescription = null,
+                modifier = Modifier.size(18.dp),
+            )
+        }
+    }
 }

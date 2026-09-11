@@ -7,6 +7,9 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.keyframes
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.foundation.background
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -29,8 +32,10 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SwipeToDismissBox
 import androidx.compose.material3.SwipeToDismissBoxDefaults
 import androidx.compose.material3.SwipeToDismissBoxState
@@ -48,9 +53,10 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -72,6 +78,7 @@ import app.amber.feature.ui.components.ui.UIAvatar
 import app.amber.feature.ui.context.LocalNavController
 import app.amber.feature.ui.context.LocalSettings
 import app.amber.feature.ui.theme.JetBrainsMonoFamily
+import app.amber.feature.ui.theme.AmberTokens
 import app.amber.feature.ui.theme.LocalAmberTokens
 import app.amber.feature.ui.theme.LocalAmberType
 import app.amber.feature.home.ContinueCandidate
@@ -108,7 +115,7 @@ import kotlinx.coroutines.CancellationException
  *
  * Layout (top → bottom):
  *   Header: mono wordmark "Amber" + blinking cursor + date, settings gear, profile avatar
- *   Scrollable list: flat search field + feature rail (5 entries) + session rows
+ *   Scrollable list: rounded search field + hub entries (5 actions) + session rows
  *   FAB (bottom-end): new conversation
  *
  * The session list itself pages from [ChatDrawerVM] (activity-scoped, shared with the
@@ -219,25 +226,23 @@ fun SessionHomePage() {
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth(),
-                contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 100.dp),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 104.dp),
             ) {
                 item(key = "home_search") {
                     HomeSearchField(onClick = { navController.navigate(Screen.MessageSearch) })
                 }
-                item(key = "home_features") {
-                    HomeFeatureRail(
-                        onDeepRead = { navController.navigate(Screen.TodayBoard) },
-                        onMiniApps = { navController.navigate(Screen.MiniAppList) },
-                        onNovel = { navController.navigate(Screen.NovelProjects) },
-                        onWebMount = { navController.navigate(Screen.SettingExperimentalWebMount) },
-                        onCouncil = openCouncilRoom,
-                    )
-                }
-
-                // P8-08 首页「继续」聚合：点击路由到任务焦点，X 暂时隐藏（dismissUntil）
+                // 候选保持独立 Lazy item，避免无上限的聚合列表被一次性组合；各段共享
+                // surface/边框，视觉上仍是一张 hub 卡片。
                 if (continueCandidates.isNotEmpty()) {
                     item(key = "home_continue_header") {
-                        ContinueSectionHeader(count = continueCandidates.size)
+                        ContinueSectionHeader(
+                            modifier = homeHubSegmentModifier(
+                                tokens = tokens,
+                                top = true,
+                                bottom = false,
+                            ),
+                            count = continueCandidates.size,
+                        )
                     }
                     items(
                         count = continueCandidates.size,
@@ -248,15 +253,32 @@ fun SessionHomePage() {
                     ) { index ->
                         val candidate = continueCandidates[index]
                         ContinueCandidateRow(
+                            modifier = homeHubSegmentModifier(
+                                tokens = tokens,
+                                top = false,
+                                bottom = false,
+                            ),
                             candidate = candidate,
                             onOpen = {
-                                navController.navigate(
-                                    candidate.route.toScreen()
-                                ) { launchSingleTop = true }
+                                navController.navigate(candidate.route.toScreen()) { launchSingleTop = true }
                             },
                             onDismiss = { vm.dismissContinueCandidate(candidate) },
                         )
                     }
+                }
+                item(key = "home_features") {
+                    HomeFeatureRail(
+                        modifier = homeHubSegmentModifier(
+                            tokens = tokens,
+                            top = continueCandidates.isEmpty(),
+                            bottom = true,
+                        ),
+                        onDeepRead = { navController.navigate(Screen.TodayBoard) },
+                        onMiniApps = { navController.navigate(Screen.MiniAppList) },
+                        onNovel = { navController.navigate(Screen.NovelProjects) },
+                        onWebMount = { navController.navigate(Screen.SettingExperimentalWebMount) },
+                        onCouncil = openCouncilRoom,
+                    )
                 }
 
                 // 首次加载完成前不渲染空态，避免加载瞬间闪现「暂无会话」
@@ -333,16 +355,16 @@ fun SessionHomePage() {
                         launchSingleTop = true
                     }
                 }
-                // 无障碍最小点按目标 48dp
-                .heightIn(min = 48.dp)
-                .padding(horizontal = 18.dp, vertical = 13.dp),
+                // FAB 按设计最小 56dp；字体放大时允许继续增高。
+                .heightIn(min = 56.dp)
+                .padding(horizontal = 20.dp, vertical = 16.dp),
             contentAlignment = Alignment.Center,
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(
                     imageVector = Lucide.Pen,
                     contentDescription = null,
-                    modifier = Modifier.size(16.dp),
+                    modifier = Modifier.size(18.dp),
                     tint = tokens.accentInk,
                 )
                 Spacer(Modifier.width(7.dp))
@@ -367,6 +389,9 @@ private fun HomeHeader(
 ) {
     val tokens = LocalAmberTokens.current
     val defaultUserName = stringResource(R.string.user_default_name)
+    val type = LocalAmberType.current
+    val cursorHeight = with(LocalDensity.current) { type.screenTitle.fontSize.toDp() }
+    val cursorWidth = cursorHeight * 0.54f
 
     // 终端光标：1.05s steps 闪烁（前半段不透明，后半段隐藏）
     val transition = rememberInfiniteTransition(label = "home-cursor")
@@ -388,40 +413,39 @@ private fun HomeHeader(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(start = 20.dp, end = 20.dp, top = 8.dp, bottom = 12.dp),
+            .padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                text = "Amber",
-                fontFamily = JetBrainsMonoFamily,
-                fontWeight = FontWeight.Bold,
-                fontSize = 23.sp,
-                letterSpacing = (-0.5).sp,
-                color = tokens.ink,
-                modifier = Modifier.alignByBaseline(),
-            )
-            Spacer(Modifier.width(3.dp))
-            // 设计稿光标 0.54em × 1em（wordmark 23sp → 约 12×23）
-            Box(
-                modifier = Modifier
-                    .width(12.dp)
-                    .height(23.dp)
-                    .background(tokens.accent.copy(alpha = cursorAlpha)),
-            )
-            Spacer(Modifier.width(9.dp))
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = "Amber",
+                    style = type.screenTitle.copy(
+                        fontFamily = JetBrainsMonoFamily,
+                        letterSpacing = (-0.5).sp,
+                    ),
+                    color = tokens.ink,
+                )
+                Spacer(Modifier.width(3.dp))
+                // 光标尺寸跟随 wordmark 的字体缩放，保持品牌块比例。
+                Box(
+                    modifier = Modifier
+                        .width(cursorWidth)
+                        .height(cursorHeight)
+                        .background(tokens.accent.copy(alpha = cursorAlpha)),
+                )
+            }
             Text(
                 text = todayLabel(),
-                fontFamily = JetBrainsMonoFamily,
-                fontSize = 11.5.sp,
-                letterSpacing = 0.2.sp,
+                style = type.meta.copy(fontFamily = JetBrainsMonoFamily),
                 color = tokens.ink3,
-                // 与 wordmark 文本基线对齐（HTML align-items: baseline）
-                modifier = Modifier.alignByBaseline(),
+                maxLines = 2,
+                overflow = TextOverflow.Clip,
             )
         }
-
-        Spacer(Modifier.weight(1f))
 
         Box(
             modifier = Modifier
@@ -438,7 +462,7 @@ private fun HomeHeader(
             )
         }
 
-        Spacer(Modifier.width(10.dp))
+        Spacer(Modifier.width(4.dp))
 
         // 头像点击进资料页（onUpdate=null 时 UIAvatar 不弹换头像框，仅响应 onClick）
         Box(
@@ -481,45 +505,60 @@ private fun todayLabel(): String {
 
 /* ------------------------------------------------------------------ search --- */
 
-/** 扁平搜索栏（外观）——点按进入全站消息搜索页。 */
+/** 将多个 Lazy item 拼成一张 hub 卡片，同时保留候选列表的独立虚拟化。 */
+private fun homeHubSegmentModifier(
+    tokens: AmberTokens,
+    top: Boolean,
+    bottom: Boolean,
+): Modifier {
+    val radius = 14.dp
+    val shape = RoundedCornerShape(
+        topStart = if (top) radius else 0.dp,
+        topEnd = if (top) radius else 0.dp,
+        bottomStart = if (bottom) radius else 0.dp,
+        bottomEnd = if (bottom) radius else 0.dp,
+    )
+    return Modifier
+        .fillMaxWidth()
+        .padding(horizontal = 16.dp)
+        .clip(shape)
+        .background(tokens.surface)
+        .border(1.dp, tokens.line, shape)
+}
+
+/** 圆角搜索栏（外观）——点按进入全站消息搜索页。 */
 @Composable
 private fun HomeSearchField(onClick: () -> Unit) {
     val tokens = LocalAmberTokens.current
+    val type = LocalAmberType.current
+    val shape = MaterialTheme.shapes.small
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp)
+            .heightIn(min = 48.dp)
+            .clip(shape)
+            .background(tokens.surface2)
+            .border(1.dp, tokens.line, shape)
             .clickable(onClick = onClick)
-            .padding(horizontal = 20.dp),
+            .padding(horizontal = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(9.dp),
     ) {
-        Row(
-            modifier = Modifier
-                .weight(1f)
-                .padding(top = 9.dp, bottom = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(9.dp),
-        ) {
-            Icon(
-                imageVector = Lucide.Search,
-                contentDescription = null,
-                modifier = Modifier.size(17.dp),
-                tint = tokens.ink3,
-            )
-            Text(
-                text = stringResource(R.string.chat_page_search_chats),
-                fontSize = 14.5.sp,
-                color = tokens.ink4,
-            )
-        }
+        Icon(
+            imageVector = Lucide.Search,
+            contentDescription = null,
+            modifier = Modifier.size(18.dp),
+            tint = tokens.ink3,
+        )
+        Text(
+            text = stringResource(R.string.chat_page_search_chats),
+            style = type.secondary,
+            color = tokens.ink3,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 20.dp)
-            .height(1.dp)
-            .background(tokens.line),
-    )
 }
 
 /* ------------------------------------------------------------ feature rail --- */
@@ -530,9 +569,10 @@ private data class FeatureEntry(
     val onClick: () -> Unit,
 )
 
-/** 功能入口行：5 个入口均分，图标在上、文案在下，中间 1dp 竖分隔线。 */
+/** Five entries share normal-width space; larger text can scroll without squeezing their labels. */
 @Composable
 private fun HomeFeatureRail(
+    modifier: Modifier = Modifier,
     onDeepRead: () -> Unit,
     onMiniApps: () -> Unit,
     onNovel: () -> Unit,
@@ -548,58 +588,58 @@ private fun HomeFeatureRail(
         FeatureEntry(Lucide.MessageCircle, stringResource(R.string.session_home_feature_council), onCouncil),
     )
 
-    Row(
-        modifier = Modifier
+    val labelStyle = LocalAmberType.current.secondary.copy(fontWeight = FontWeight.Medium)
+    val textMeasurer = rememberTextMeasurer()
+    val labelWidth = with(LocalDensity.current) {
+        features.maxOf { feature ->
+            textMeasurer.measure(
+                text = feature.label,
+                style = labelStyle,
+                softWrap = false,
+                maxLines = 1,
+            ).size.width
+        }.toDp()
+    }
+    BoxWithConstraints(
+        modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = 20.dp)
-            .padding(top = 6.dp),
-        verticalAlignment = Alignment.CenterVertically,
+            .padding(horizontal = 8.dp, vertical = 8.dp),
     ) {
-        features.forEachIndexed { index, feature ->
-            if (index > 0) {
-                // 列间 1dp 边界线；宽度由五个 weight(1f) 等分列决定
-                Box(
+        // Measure the actual labels: Android's nonlinear font scaling makes a large sp
+        // surrogate an unreliable minimum width for these smaller labels.
+        val itemWidth = maxOf(maxWidth / features.size, labelWidth + 12.dp)
+        Row(
+            modifier = Modifier.horizontalScroll(rememberScrollState()),
+            verticalAlignment = Alignment.Top,
+        ) {
+            features.forEach { feature ->
+                Column(
                     modifier = Modifier
-                        .width(1.dp)
-                        .height(26.dp)
-                        .background(tokens.line),
-                )
-            }
-            Column(
-                modifier = Modifier
-                    .weight(1f)
-                    .clip(androidx.compose.foundation.shape.RoundedCornerShape(10.dp))
-                    .clickable(onClick = feature.onClick)
-                    .padding(vertical = 12.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                Icon(
-                    imageVector = feature.icon,
-                    contentDescription = feature.label,
-                    modifier = Modifier.size(24.dp),
-                    tint = tokens.accent,
-                )
-                Text(
-                    text = feature.label,
-                    fontSize = 12.5.sp,
-                    fontWeight = FontWeight.Medium,
-                    letterSpacing = 0.2.sp,
-                    color = tokens.ink2,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+                        .width(itemWidth)
+                        .clip(MaterialTheme.shapes.small)
+                        .clickable(onClick = feature.onClick)
+                        .padding(horizontal = 2.dp, vertical = 8.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Icon(
+                        imageVector = feature.icon,
+                        contentDescription = feature.label,
+                        modifier = Modifier.size(24.dp),
+                        tint = tokens.ink2,
+                    )
+                    Text(
+                        text = feature.label,
+                        style = labelStyle,
+                        color = tokens.ink2,
+                        maxLines = 1,
+                        overflow = TextOverflow.Clip,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                    )
+                }
             }
         }
     }
-    // 底线紧贴功能行底部（行内 12dp bottom padding 已给出间距，对齐设计稿 borderBottom）
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 20.dp)
-            .height(1.dp)
-            .background(tokens.line),
-    )
 }
 
 /* ------------------------------------------------------------- session row --- */
@@ -613,12 +653,16 @@ private fun ContinueRoute.toScreen(): Screen = when (this) {
 
 /** 首页「继续」聚合区块标题：mono 标签 + 数量。 */
 @Composable
-private fun ContinueSectionHeader(count: Int) {
+private fun ContinueSectionHeader(
+    modifier: Modifier = Modifier,
+    count: Int,
+) {
     val tokens = LocalAmberTokens.current
+    val type = LocalAmberType.current
     Row(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
-            .padding(start = 20.dp, end = 20.dp, top = 14.dp, bottom = 4.dp),
+            .padding(start = 16.dp, end = 16.dp, top = 14.dp, bottom = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(7.dp),
     ) {
@@ -630,15 +674,12 @@ private fun ContinueSectionHeader(count: Int) {
         )
         Text(
             text = stringResource(R.string.session_home_continue),
-            fontFamily = JetBrainsMonoFamily,
-            fontSize = 12.sp,
-            letterSpacing = 0.4.sp,
+            style = type.meta.copy(fontFamily = JetBrainsMonoFamily, letterSpacing = 0.4.sp),
             color = tokens.ink2,
         )
         Text(
             text = "$count",
-            fontFamily = JetBrainsMonoFamily,
-            fontSize = 10.5.sp,
+            style = type.meta.copy(fontFamily = JetBrainsMonoFamily),
             color = tokens.ink4,
         )
     }
@@ -647,18 +688,20 @@ private fun ContinueSectionHeader(count: Int) {
 /** 单条继续候选：标题 + 摘要 + 状态徽标，右侧 X 暂时隐藏。 */
 @Composable
 private fun ContinueCandidateRow(
+    modifier: Modifier = Modifier.fillMaxWidth(),
     candidate: ContinueCandidate,
     onOpen: () -> Unit,
     onDismiss: () -> Unit,
 ) {
     val tokens = LocalAmberTokens.current
-    Column(modifier = Modifier.fillMaxWidth()) {
+    val type = LocalAmberType.current
+    Column(modifier = modifier) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(tokens.bg)
+                .background(tokens.surface)
                 .clickable(onClick = onOpen)
-                .padding(start = 20.dp, end = 8.dp, top = 10.dp, bottom = 10.dp),
+                .padding(start = 16.dp, end = 4.dp, top = 10.dp, bottom = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Column(
@@ -671,20 +714,19 @@ private fun ContinueCandidateRow(
                 ) {
                     Text(
                         text = candidate.title,
-                        fontSize = 14.5.sp,
-                        fontWeight = FontWeight.SemiBold,
+                        style = type.body.copy(fontWeight = FontWeight.SemiBold),
                         letterSpacing = (-0.2).sp,
                         color = tokens.ink,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f, fill = false),
+                        modifier = Modifier.weight(1f),
                     )
                     ContinueStatusChip(status = candidate.status)
                 }
                 if (candidate.summary.isNotBlank()) {
                     Text(
                         text = candidate.summary,
-                        fontSize = 12.5.sp,
+                        style = type.secondary,
                         color = tokens.ink3,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
@@ -710,7 +752,7 @@ private fun ContinueCandidateRow(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 20.dp)
+                .padding(horizontal = 16.dp)
                 .height(1.dp)
                 .background(tokens.line),
         )
@@ -720,6 +762,7 @@ private fun ContinueCandidateRow(
 @Composable
 private fun ContinueStatusChip(status: ContinueStatus) {
     val tokens = LocalAmberTokens.current
+    val type = LocalAmberType.current
     val (label, color) = when (status) {
         ContinueStatus.WAITING_USER -> stringResource(R.string.session_home_status_waiting) to tokens.accent
         ContinueStatus.FAILED_RESUMABLE -> stringResource(R.string.session_home_status_resumable) to tokens.signal
@@ -733,10 +776,34 @@ private fun ContinueStatusChip(status: ContinueStatus) {
     ) {
         Text(
             text = label,
-            fontFamily = JetBrainsMonoFamily,
-            fontSize = 9.5.sp,
-            letterSpacing = 0.3.sp,
+            style = type.tinyTag.copy(fontFamily = JetBrainsMonoFamily, letterSpacing = 0.3.sp),
             color = color,
+        )
+    }
+}
+
+/** 会话没有可靠的内容分类字段，统一使用中性消息 glyph；置顶只作弱 accent 提示。 */
+@Composable
+private fun SessionGlyph(isPinned: Boolean) {
+    val tokens = LocalAmberTokens.current
+    val shape = RoundedCornerShape(9.dp)
+    Box(
+        modifier = Modifier
+            .size(32.dp)
+            .clip(shape)
+            .background(tokens.surface2)
+            .border(
+                width = 1.dp,
+                color = if (isPinned) tokens.accent.copy(alpha = 0.28f) else tokens.line,
+                shape = shape,
+            ),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            imageVector = Lucide.MessageCircle,
+            contentDescription = null,
+            modifier = Modifier.size(17.dp),
+            tint = if (isPinned) tokens.accent.copy(alpha = 0.72f) else tokens.ink2,
         )
     }
 }
@@ -755,6 +822,7 @@ private fun HomeSessionRow(
     onTogglePin: () -> Unit,
 ) {
     val tokens = LocalAmberTokens.current
+    val type = LocalAmberType.current
     val newMessageLabel = stringResource(R.string.chat_page_new_message)
     val deleteLabel = stringResource(R.string.delete)
     val pinLabel = stringResource(R.string.history_page_pin)
@@ -791,7 +859,7 @@ private fun HomeSessionRow(
                 modifier = Modifier
                     .fillMaxSize()
                     .background(if (isDelete) tokens.accent else tokens.surface2)
-                    .padding(horizontal = 20.dp),
+                    .padding(horizontal = 16.dp),
                 contentAlignment = if (isDelete) Alignment.CenterEnd else Alignment.CenterStart,
             ) {
                 Column(
@@ -814,9 +882,10 @@ private fun HomeSessionRow(
                             conversation.isPinned -> unpinLabel
                             else -> pinLabel
                         },
-                        fontFamily = JetBrainsMonoFamily,
-                        fontSize = 10.sp,
-                        letterSpacing = 0.4.sp,
+                        style = type.tinyTag.copy(
+                            fontFamily = JetBrainsMonoFamily,
+                            letterSpacing = 0.4.sp,
+                        ),
                         color = if (isDelete) tokens.accentInk else tokens.accent,
                     )
                 }
@@ -828,10 +897,14 @@ private fun HomeSessionRow(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(tokens.bg)
+                    .background(tokens.surface)
                     .clickable(onClick = onOpen)
-                    .padding(horizontal = 20.dp, vertical = 12.dp),
+                    .heightIn(min = 52.dp)
+                    .padding(horizontal = 16.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
+                SessionGlyph(isPinned = conversation.isPinned)
+                Spacer(Modifier.width(12.dp))
                 Column(
                     modifier = Modifier.weight(1f),
                     verticalArrangement = Arrangement.spacedBy(4.dp),
@@ -844,8 +917,7 @@ private fun HomeSessionRow(
                             text = conversation.title.ifBlank {
                                 newMessageLabel
                             },
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.SemiBold,
+                            style = type.body.copy(fontWeight = FontWeight.SemiBold),
                             letterSpacing = (-0.2).sp,
                             color = tokens.ink,
                             maxLines = 1,
@@ -857,7 +929,7 @@ private fun HomeSessionRow(
                                 imageVector = Lucide.Pin,
                                 contentDescription = null,
                                 modifier = Modifier.size(16.dp),
-                                tint = tokens.accent,
+                                tint = tokens.accent.copy(alpha = 0.72f),
                             )
                         }
                     }
@@ -869,7 +941,7 @@ private fun HomeSessionRow(
                     if (preview.isNotBlank()) {
                         Text(
                             text = preview,
-                            fontSize = 13.sp,
+                            style = type.secondary,
                             color = tokens.ink3,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
@@ -886,18 +958,17 @@ private fun HomeSessionRow(
                 ) {
                     Text(
                         text = sessionTimeLabel(conversation.updateAt),
-                        fontFamily = JetBrainsMonoFamily,
-                        fontSize = 11.sp,
-                        color = tokens.ink4,
+                        style = type.meta.copy(fontFamily = JetBrainsMonoFamily),
+                        color = tokens.ink3,
                     )
                     SessionCountBadge(count = conversation.messageCount)
                 }
             }
-            // 行分隔线内缩 20dp，与搜索栏/功能行底线及内容 padding 对齐（设计稿 srow-fg 内缩 20px）
+            // 行分隔线内缩 16dp，与首页内容基线对齐。
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 20.dp)
+                    .padding(horizontal = 16.dp)
                     .height(1.dp)
                     .background(tokens.line),
             )
@@ -909,19 +980,20 @@ private fun HomeSessionRow(
 @Composable
 private fun SessionCountBadge(count: Int) {
     val tokens = LocalAmberTokens.current
+    val type = LocalAmberType.current
+    val countColor = tokens.accent
     Box(
         modifier = Modifier
             .heightIn(min = 18.dp)
             .widthIn(min = 18.dp)
-            .border(1.dp, tokens.accent.copy(alpha = 0.45f), CircleShape)
+            .border(1.dp, countColor.copy(alpha = 0.45f), CircleShape)
             .padding(horizontal = 5.dp),
         contentAlignment = Alignment.Center,
     ) {
         Text(
             text = if (count > 99) "99+" else "$count",
-            fontFamily = JetBrainsMonoFamily,
-            fontSize = 10.sp,
-            color = tokens.accent,
+            style = type.tinyTag.copy(fontFamily = JetBrainsMonoFamily),
+            color = countColor,
         )
     }
 }
@@ -955,23 +1027,16 @@ private fun sessionTimeLabel(instant: Instant): String {
 @Composable
 private fun HomeEmptyState(modifier: Modifier = Modifier) {
     val tokens = LocalAmberTokens.current
-    Column(
+    val type = LocalAmberType.current
+    Box(
         modifier = modifier.fillMaxWidth(),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+        contentAlignment = Alignment.Center,
     ) {
         Text(
-            text = "// 0 results",
-            fontFamily = JetBrainsMonoFamily,
-            fontSize = 12.sp,
-            color = tokens.ink4,
-            textAlign = TextAlign.Center,
-        )
-        Text(
             text = stringResource(R.string.session_home_empty_hint),
-            fontSize = 13.5.sp,
+            style = type.body,
             color = tokens.ink3,
-            textAlign = TextAlign.Center,
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
         )
     }
 }

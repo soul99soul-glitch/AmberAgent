@@ -29,7 +29,9 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.TopAppBar
+import app.amber.feature.ui.components.ui.WorkspaceTopBar
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -55,7 +57,6 @@ import app.amber.agent.data.db.fts.SearchHitSource
 import app.amber.core.model.Conversation
 import app.amber.feature.ui.components.nav.BackButton
 import app.amber.feature.ui.context.LocalNavController
-import app.amber.feature.ui.theme.CustomColors
 import app.amber.feature.ui.theme.LocalAmberTokens
 import app.amber.feature.ui.theme.LocalAmberType
 import app.amber.core.utils.navigateToChatPage
@@ -108,9 +109,9 @@ fun SearchPage(vm: SearchVM = koinViewModel()) {
 
     Scaffold(
         topBar = {
-            TopAppBar(
+            WorkspaceTopBar(
                 navigationIcon = { BackButton() },
-                title = { Text(stringResource(R.string.search_page_title)) },
+                title = stringResource(R.string.search_page_title),
                 actions = {
                     IconButton(
                         onClick = { showRebuildDialog = true },
@@ -123,11 +124,10 @@ fun SearchPage(vm: SearchVM = koinViewModel()) {
                     }
                 },
                 scrollBehavior = scrollBehavior,
-                colors = CustomColors.topBarColors,
             )
         },
         modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
-        containerColor = CustomColors.topBarColors.containerColor,
+        containerColor = LocalAmberTokens.current.bg,
     ) { contentPadding ->
         Column(
             modifier = Modifier
@@ -142,7 +142,7 @@ fun SearchPage(vm: SearchVM = koinViewModel()) {
                     .padding(horizontal = 16.dp, vertical = 8.dp)
                     .focusRequester(focusRequester),
                 placeholder = { Text(stringResource(R.string.search_page_placeholder)) },
-                shape = RoundedCornerShape(50),
+                shape = RoundedCornerShape(14.dp),
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                 keyboardActions = KeyboardActions(
@@ -289,8 +289,9 @@ private fun RecentConversationItem(
     }
     Surface(
         onClick = onClick,
-        color = CustomColors.listItemColors.containerColor,
-        shape = MaterialTheme.shapes.large,
+        color = LocalAmberTokens.current.surface,
+        shape = RoundedCornerShape(14.dp),
+        border = BorderStroke(1.dp, LocalAmberTokens.current.line),
     ) {
         Column(
             modifier = Modifier
@@ -358,8 +359,9 @@ private fun SearchResultItem(
 
     Surface(
         onClick = onClick,
-        color = CustomColors.listItemColors.containerColor,
-        shape = MaterialTheme.shapes.large,
+        color = LocalAmberTokens.current.surface,
+        shape = RoundedCornerShape(14.dp),
+        border = BorderStroke(1.dp, LocalAmberTokens.current.line),
     ) {
         Column(
             modifier = Modifier
@@ -380,10 +382,10 @@ private fun SearchResultItem(
                 color = LocalAmberTokens.current.ink2,
             )
             // Graphite §3: timestamp is a machine-fact → MONO (meta), muted ink.
-            Row(
+            FlowRow(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically,
+                verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
                 Text(
                     text = formattedTime,
@@ -401,9 +403,6 @@ private fun SearchResultItem(
                     },
                     style = LocalAmberType.current.meta,
                     color = LocalAmberTokens.current.ink3,
-                    modifier = Modifier.weight(1f),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
                 )
             }
         }

@@ -588,9 +588,11 @@ private fun McpServerConfigModal(state: EditState<McpServerConfig>) {
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End)
                 ) {
+                    val canSave = config.commonOptions.name.isNotBlank()
                     TextButton(
+                        enabled = canSave,
                         onClick = {
-                            if (config.commonOptions.name.isNotBlank()) {
+                            if (canSave) {
                                 state.confirm()
                             }
                         }

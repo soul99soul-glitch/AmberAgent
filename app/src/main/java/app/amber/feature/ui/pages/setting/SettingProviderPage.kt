@@ -147,14 +147,14 @@ fun SettingProviderPage(vm: SettingVM = koinViewModel()) {
                 onlineCount = onlineCount,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 18.dp)
+                    .padding(horizontal = 16.dp)
                     .padding(top = 10.dp, bottom = 2.dp),
             )
             ProviderTerminalFilter(
                 value = searchQuery,
                 onValueChange = { searchQuery = it },
                 placeholder = stringResource(R.string.setting_provider_page_filter_placeholder),
-                modifier = Modifier.padding(horizontal = 18.dp, vertical = 8.dp),
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
             )
 
             LazyColumn(
@@ -162,7 +162,7 @@ fun SettingProviderPage(vm: SettingVM = koinViewModel()) {
                     .fillMaxWidth()
                     .weight(1f)
                     .imePadding(),
-                contentPadding = PaddingValues(horizontal = 18.dp, vertical = 2.dp),
+                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 2.dp),
                 state = lazyListState,
             ) {
                 if (onlineProviders.isNotEmpty()) {
@@ -173,7 +173,11 @@ fun SettingProviderPage(vm: SettingVM = koinViewModel()) {
                         )
                     }
                     item("online_group") {
-                        Column(Modifier.fillMaxWidth().padding(bottom = 4.dp)) {
+                        ProviderCard(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(bottom = 4.dp),
+                        ) {
                             onlineProviders.forEachIndexed { index, provider ->
                                 if (index > 0) ProviderHairline()
                                 ProviderItem(
@@ -195,7 +199,7 @@ fun SettingProviderPage(vm: SettingVM = koinViewModel()) {
                         )
                     }
                     item("disabled_group") {
-                        Column(
+                        ProviderCard(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(bottom = 18.dp)
@@ -617,7 +621,7 @@ private fun ProviderItem(
         modifier = modifier
             .fillMaxWidth()
             .pressable(onClick = onEdit)
-            .padding(horizontal = 4.dp, vertical = 11.dp),
+            .padding(horizontal = 16.dp, vertical = 11.dp),
         horizontalArrangement = Arrangement.spacedBy(12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -638,6 +642,7 @@ private fun ProviderItem(
                     text = provider.name,
                     style = type.body.copy(fontWeight = FontWeight.SemiBold),
                     color = if (provider.enabled) t.ink else t.ink3,
+                    modifier = Modifier.weight(1f, fill = false),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )

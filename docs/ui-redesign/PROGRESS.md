@@ -23,4 +23,16 @@
 
 ## Phase 2
 
-实施中：首页、设置/服务商/模型及入口列表，依据ROUTES保留所有入口。
+已完成：首页、设置/显示/服务商/模型、搜索/收藏/资料/关于，依据ROUTES保留所有入口。Home继续区视觉合并但每个candidate仍是独立Lazy item，未删cap外候选；日期与wordmark分行，16dp基线，中性图标。Provider长名保留状态点。分享state、连接测试取消、MCP空名称、SearXNG密码掩码与Form modifier按审计表精准修正。
+
+- 编译初次缺少SettingModelPage的layout.size导入，补齐后成功。`assembleDebug` + ModelMenuInteraction 5 / ModelContextWindowInput 1，共6通过；最后共享说明字阶调整后的CardGroup测试2通过。
+- 两组独立源码review通过：Home/设置/模型的创建/选择/持久化链，以及Provider/表单/搜索/资料/收藏/隐藏Debug链均未断。
+- 模拟器实际完成Home→Settings→Display，选择Sage、开启/关闭AMOLED；checked状态与纯黑背景一致，更新APK冷启动后设置保留。
+- 仅在新建模拟器中种入3条标注UI验收的本地会话、6条消息，用于实际Room/渲染器的长标题、推理、代码、表格验证。无provider调用，夹具不是网络或完整统计服务验收。
+- 实际截图：phase2-home-dark、settings-dark、display-dark、display-amoled、profile-narrow-large。360dp/fontScale1.3发现等分入口标签断行和图标上下错位；改为真实TextMeasurer测标签宽度、Top对齐、必要时横滚。固定64sp宽度因Android非线性缩放仍不足，已撤掉该中间方案。
+- 最终截图 `device/phase2-home-narrow-large-final.png` 标签单行；实际横滚确认模型议会可达。Profile统计横滚确认第五项完整可见。副标题使用secondary字阶，时间使用ink3；颜色选择补可访问selected语义。
+- 最后rail精准修复后assemble成功10s，独立review已看最终截图并放行。恢复模拟器density/fontScale默认。进入Phase3。
+
+## Phase 3
+
+实施中：聊天与消息、Markdown、导出；保留流式状态机与所有工具/审批owner。

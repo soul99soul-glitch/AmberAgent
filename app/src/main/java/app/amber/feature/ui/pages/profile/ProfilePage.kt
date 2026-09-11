@@ -14,14 +14,15 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.border
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
+import app.amber.feature.ui.components.ui.WorkspaceTopBar
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -47,6 +48,7 @@ import app.amber.feature.ui.components.ui.UIAvatar
 import app.amber.feature.ui.context.LocalSettings
 import app.amber.feature.ui.theme.JetBrainsMonoFamily
 import app.amber.feature.ui.theme.LocalAmberTokens
+import app.amber.feature.ui.theme.LocalAmberType
 import app.amber.feature.ui.pages.stats.StatsVM
 import app.amber.feature.ui.pages.sessionhome.SessionHomeVM
 import app.amber.core.utils.appLocale
@@ -77,10 +79,9 @@ fun ProfilePage(
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = { Text(stringResource(R.string.profile_title), fontWeight = FontWeight.Bold) },
+            WorkspaceTopBar(
+                title = stringResource(R.string.profile_title),
                 navigationIcon = { BackButton() },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = tokens.bg),
             )
         },
         containerColor = tokens.bg,
@@ -90,12 +91,12 @@ fun ProfilePage(
                 .fillMaxSize()
                 .padding(innerPadding)
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = 20.dp),
+                .padding(horizontal = 16.dp),
         ) {
             Spacer(Modifier.height(24.dp))
 
             // 头像 + 昵称 + 徽章
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Column(modifier = Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
                 UIAvatar(
                     name = nickname,
                     value = settings.displaySetting.userAvatar,
@@ -115,19 +116,22 @@ fun ProfilePage(
                 Spacer(Modifier.height(16.dp))
                 Text(
                     text = nickname,
-                    fontSize = 24.sp,
-                    fontWeight = FontWeight.SemiBold,
+                    style = LocalAmberType.current.screenTitle,
                     color = tokens.ink,
                 )
                 Spacer(Modifier.height(6.dp))
                 Row(
+                    modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
                 ) {
                     Text(
                         text = "@${nickname.lowercase(appLocale).replace(" ", "")}",
-                        fontSize = 13.sp,
+                        style = LocalAmberType.current.meta,
                         color = tokens.ink3,
+                        modifier = Modifier.weight(1f, fill = false),
+                        maxLines = 1,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                     )
                     Box(
                         modifier = Modifier
@@ -193,6 +197,7 @@ private fun ProfileStatsCard(stats: app.amber.feature.ui.pages.stats.AppStats) {
             .fillMaxWidth()
             .clip(RoundedCornerShape(14.dp))
             .background(tokens.surface)
+            .border(1.dp, tokens.line, RoundedCornerShape(14.dp))
             .padding(vertical = 16.dp)
             .horizontalScroll(rememberScrollState()),
         verticalAlignment = Alignment.CenterVertically,
@@ -206,26 +211,23 @@ private fun ProfileStatsCard(stats: app.amber.feature.ui.pages.stats.AppStats) {
                         .background(tokens.line),
                 )
             }
-            // 固定列宽，不再 weight 等分挤压；窄屏可左右滑动
+            // Columns grow with their values and font scale; the whole strip can scroll on narrow screens.
             Column(
-                modifier = Modifier.width(72.dp),
+                modifier = Modifier.widthIn(min = 72.dp).padding(horizontal = 12.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 Text(
                     text = value,
-                    fontSize = 15.sp,
-                    fontWeight = FontWeight.SemiBold,
+                    style = LocalAmberType.current.body.copy(fontFamily = JetBrainsMonoFamily, fontWeight = FontWeight.SemiBold),
                     color = tokens.ink,
-                    fontFamily = JetBrainsMonoFamily,
                     maxLines = 1,
                 )
                 Text(
                     text = label,
-                    fontSize = 10.5.sp,
+                    style = LocalAmberType.current.secondary,
                     color = tokens.ink3,
                     maxLines = 1,
-                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                 )
             }
         }

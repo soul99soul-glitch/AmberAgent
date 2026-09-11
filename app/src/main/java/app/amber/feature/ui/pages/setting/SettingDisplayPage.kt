@@ -5,6 +5,8 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.border
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -36,6 +38,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
@@ -97,6 +102,7 @@ private fun <T> WorkspaceSegmentedChoice(
     val capsuleShape = androidx.compose.foundation.shape.CircleShape
     Row(
         modifier = modifier
+            .selectableGroup()
             .clip(capsuleShape)
             .border(1.dp, workspace.hairline, capsuleShape)
             .padding(3.dp),
@@ -105,6 +111,7 @@ private fun <T> WorkspaceSegmentedChoice(
         options.forEach { option ->
             val isSelected = option == selected
             Surface(
+                selected = isSelected,
                 onClick = { onSelected(option) },
                 modifier = Modifier.weight(1f),
                 shape = capsuleShape,
@@ -160,39 +167,23 @@ fun SettingDisplayPage(vm: SettingVM = koinViewModel()) {
     ) { contentPadding ->
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
-            contentPadding = contentPadding + PaddingValues(horizontal = 12.dp, vertical = 10.dp),
+            contentPadding = contentPadding + PaddingValues(horizontal = 14.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(18.dp)
         ) {
             item {
-                Column(
+                // Graphite (D2/D3): base family (Warm/Sage) + independent accent. Light/dark
+                // follows the global color mode; the 9 legacy themes are replaced.
+                val baseFamily = displaySetting.amberBaseFamily
+                CardGroup(
                     modifier = Modifier.padding(horizontal = 2.dp),
-                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                    title = { SectionLabel(stringResource(R.string.setting_page_theme_setting)) },
                 ) {
-                    Text(
-                        text = stringResource(R.string.setting_page_theme_setting),
-                        style = MaterialTheme.typography.titleSmall,
-                        color = workspace.faint,
-                        modifier = Modifier.padding(start = 4.dp, top = 8.dp, bottom = 8.dp)
-                    )
-                    // Graphite (D2/D3): base family (Warm/Sage) + independent accent. Light/dark
-                    // follows the global color mode; the 9 legacy themes are replaced.
-                    val baseFamily = displaySetting.amberBaseFamily
-                    ListItem(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(
-                                RoundedCornerShape(
-                                    topStart = 16.dp,
-                                    topEnd = 16.dp,
-                                    bottomStart = 2.dp,
-                                    bottomEnd = 2.dp
-                                )
-                            ),
+                    item(
                         headlineContent = { Text(stringResource(R.string.setting_display_page_base_family_title)) },
                         supportingContent = {
                             Column(
                                 verticalArrangement = Arrangement.spacedBy(8.dp),
-                                modifier = Modifier.fillMaxWidth()
+                                modifier = Modifier.fillMaxWidth(),
                             ) {
                                 Text(stringResource(R.string.setting_display_page_base_family_desc))
                                 WorkspaceSegmentedChoice(
@@ -211,7 +202,6 @@ fun SettingDisplayPage(vm: SettingVM = koinViewModel()) {
                                                     R.string.setting_display_page_base_family_warm
                                                 },
                                             ),
-                                            maxLines = 1,
                                             textAlign = TextAlign.Center,
                                             modifier = Modifier.fillMaxWidth(),
                                         )
@@ -221,17 +211,15 @@ fun SettingDisplayPage(vm: SettingVM = koinViewModel()) {
                         },
                         colors = CustomColors.listItemColors,
                     )
-                    ListItem(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(2.dp)),
+                    item(
                         headlineContent = { Text(stringResource(R.string.setting_display_page_accent_color_title)) },
                         supportingContent = {
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
+                                    .selectableGroup()
                                     .padding(top = 4.dp),
-                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                horizontalArrangement = Arrangement.spacedBy(4.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
                                 app.amber.feature.ui.theme.AmberAccents.forEach { acc ->
@@ -240,40 +228,41 @@ fun SettingDisplayPage(vm: SettingVM = koinViewModel()) {
                                         displaySetting.accentColor.equals(hex, ignoreCase = true)
                                     Box(
                                         modifier = Modifier
-                                            .size(32.dp)
-                                            .clip(androidx.compose.foundation.shape.CircleShape)
-                                            .background(acc.hex)
-                                            .border(
-                                                width = if (selected) 2.dp else 1.dp,
-                                                color = if (selected) workspace.ink else workspace.hairline,
-                                                shape = androidx.compose.foundation.shape.CircleShape,
+                                            .size(48.dp)
+                                            .selectable(
+                                                selected = selected,
+                                                role = Role.RadioButton,
+                                                onClick = {
+                                                    updateDisplaySetting(displaySetting.copy(accentColor = hex))
+                                                },
                                             )
-                                            .clickable {
-                                                updateDisplaySetting(displaySetting.copy(accentColor = hex))
-                                            },
-                                    )
+                                            .semantics { contentDescription = acc.label },
+                                        contentAlignment = Alignment.Center,
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(32.dp)
+                                                .clip(androidx.compose.foundation.shape.CircleShape)
+                                                .background(acc.hex)
+                                                .border(
+                                                    width = if (selected) 2.dp else 1.dp,
+                                                    color = if (selected) workspace.ink else workspace.hairline,
+                                                    shape = androidx.compose.foundation.shape.CircleShape,
+                                                ),
+                                        )
+                                    }
                                 }
                             }
                         },
                         colors = CustomColors.listItemColors,
                     )
-                    ListItem(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(
-                                RoundedCornerShape(
-                                    topStart = 2.dp,
-                                    topEnd = 2.dp,
-                                    bottomStart = 16.dp,
-                                    bottomEnd = 16.dp
-                                )
-                            ),
+                    item(
                         headlineContent = { Text(stringResource(R.string.setting_display_page_amoled_dark_mode_title)) },
                         supportingContent = { Text(stringResource(R.string.setting_display_page_amoled_dark_mode_desc)) },
                         trailingContent = {
                             Switch(
                                 checked = amoledDarkMode,
-                                onCheckedChange = { amoledDarkMode = it }
+                                onCheckedChange = { amoledDarkMode = it },
                             )
                         },
                         colors = CustomColors.listItemColors,
@@ -322,7 +311,6 @@ fun SettingDisplayPage(vm: SettingVM = koinViewModel()) {
                                     label = { mode ->
                                         Text(
                                             text = mode.launchStartModeLabel(),
-                                            maxLines = 1,
                                             textAlign = TextAlign.Center,
                                             modifier = Modifier.fillMaxWidth(),
                                         )
@@ -354,7 +342,7 @@ fun SettingDisplayPage(vm: SettingVM = koinViewModel()) {
                     verticalArrangement = Arrangement.spacedBy(2.dp)
                 ) {
                     CardGroup(
-                        modifier = Modifier.padding(horizontal = 8.dp),
+                        modifier = Modifier.padding(horizontal = 2.dp),
                         title = { SectionLabel(stringResource(R.string.setting_page_message_display_settings)) },
                     ) {
                         // V3: 聊天主题切换器已移到顶部 (替代旧 "Notion style" 项), 这里去除重复
@@ -521,7 +509,7 @@ fun SettingDisplayPage(vm: SettingVM = koinViewModel()) {
 
             item {
                 CardGroup(
-                    modifier = Modifier.padding(horizontal = 8.dp),
+                    modifier = Modifier.padding(horizontal = 2.dp),
                     title = { SectionLabel(stringResource(R.string.setting_page_code_display_settings)) },
                 ) {
                     item(
@@ -568,7 +556,7 @@ fun SettingDisplayPage(vm: SettingVM = koinViewModel()) {
                     verticalArrangement = Arrangement.spacedBy(2.dp)
                 ) {
                     CardGroup(
-                        modifier = Modifier.padding(horizontal = 8.dp),
+                        modifier = Modifier.padding(horizontal = 2.dp),
                         title = { SectionLabel(stringResource(R.string.setting_page_interaction_notification_settings)) },
                     ) {
                         item(

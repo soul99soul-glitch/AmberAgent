@@ -65,7 +65,6 @@ import app.amber.feature.ui.components.ds.SectionLabel
 import app.amber.feature.ui.components.nav.BackButton
 import app.amber.feature.ui.components.ui.CardGroup
 import app.amber.feature.ui.components.ui.Select
-import app.amber.feature.ui.components.ui.WorkspaceLeadingIcon
 import app.amber.feature.ui.components.ui.WorkspaceTone
 import app.amber.feature.ui.components.ui.WorkspaceTopBar
 import app.amber.feature.ui.components.ui.workspaceColors
@@ -118,8 +117,8 @@ fun SettingPage(vm: SettingVM = koinViewModel()) {
     ) { innerPadding ->
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
-            contentPadding = innerPadding + PaddingValues(horizontal = 12.dp, vertical = 10.dp),
-            verticalArrangement = Arrangement.spacedBy(18.dp),
+            contentPadding = innerPadding + PaddingValues(horizontal = 14.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             if (settings.isNotConfigured()) {
                 item {
@@ -131,7 +130,7 @@ fun SettingPage(vm: SettingVM = koinViewModel()) {
                 var colorMode by rememberColorMode()
                 SectionLabel(
                     text = stringResource(R.string.setting_page_general_settings),
-                    modifier = Modifier.padding(start = 6.dp, bottom = 10.dp),
+                    modifier = Modifier.padding(start = 6.dp, bottom = 8.dp),
                 )
                 CardGroup(
                     modifier = Modifier.padding(horizontal = 2.dp),
@@ -175,7 +174,7 @@ fun SettingPage(vm: SettingVM = koinViewModel()) {
             item("agentRuntimeSettings") {
                 SectionLabel(
                     text = stringResource(R.string.setting_page_agent_runtime),
-                    modifier = Modifier.padding(start = 6.dp, bottom = 10.dp),
+                    modifier = Modifier.padding(start = 6.dp, bottom = 8.dp),
                 )
                 CardGroup(
                     modifier = Modifier.padding(horizontal = 2.dp),
@@ -223,7 +222,7 @@ fun SettingPage(vm: SettingVM = koinViewModel()) {
             item("modelServices") {
                 SectionLabel(
                     text = stringResource(R.string.setting_page_model_and_services),
-                    modifier = Modifier.padding(start = 6.dp, bottom = 10.dp),
+                    modifier = Modifier.padding(start = 6.dp, bottom = 8.dp),
                 )
                 CardGroup(
                     modifier = Modifier.padding(horizontal = 2.dp),
@@ -256,7 +255,7 @@ fun SettingPage(vm: SettingVM = koinViewModel()) {
                 }
                 SectionLabel(
                     text = stringResource(R.string.setting_page_data_settings),
-                    modifier = Modifier.padding(start = 6.dp, bottom = 10.dp),
+                    modifier = Modifier.padding(start = 6.dp, bottom = 8.dp),
                 )
                 CardGroup(
                     modifier = Modifier.padding(horizontal = 2.dp),
@@ -315,15 +314,30 @@ fun SettingPage(vm: SettingVM = koinViewModel()) {
 @Composable
 private fun SettingLeadingIcon(
     icon: ImageVector,
-    tone: WorkspaceTone = WorkspaceTone.Accent,
+    tone: WorkspaceTone = WorkspaceTone.Neutral,
 ) {
-    // 一级设置行对齐 iOS 单行样式：accent tinted 圆角容器 + 21dp stroke icon
-    WorkspaceLeadingIcon(
-        icon = icon,
-        size = 32.dp,
-        iconSize = 21.dp,
-        tone = tone,
-    )
+    val workspace = workspaceColors()
+    val (container, content) = when (tone) {
+        WorkspaceTone.Neutral -> workspace.row to workspace.muted
+        WorkspaceTone.Accent -> workspace.blueContainer to workspace.blue
+        WorkspaceTone.Success -> workspace.greenContainer to workspace.green
+        WorkspaceTone.Warning -> workspace.amberContainer to workspace.amber
+        WorkspaceTone.Danger -> workspace.redContainer to workspace.red
+    }
+    Surface(
+        modifier = Modifier.size(32.dp),
+        shape = androidx.compose.foundation.shape.RoundedCornerShape(9.dp),
+        color = container,
+        contentColor = content,
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                modifier = Modifier.size(18.dp),
+            )
+        }
+    }
 }
 
 @Composable
@@ -341,7 +355,7 @@ private fun ProviderConfigWarningCard(navController: Navigator) {
     val workspace = workspaceColors()
     Card(
         modifier = Modifier.padding(2.dp),
-        shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp),
+        shape = androidx.compose.foundation.shape.RoundedCornerShape(14.dp),
         colors = CardDefaults.cardColors(
             containerColor = workspace.amberContainer
         ),

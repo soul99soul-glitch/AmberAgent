@@ -70,6 +70,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.util.fastAny
 import androidx.compose.ui.util.fastFilter
@@ -736,7 +737,7 @@ private fun ColumnScope.ModelList(
                     style = LocalAmberType.current.meta.copy(
                         fontSize = 10.5.sp,
                         fontWeight = FontWeight.Bold,
-                        letterSpacing = 0.15.sp * (stringResource(R.string.model_list_favorite).length),
+                        letterSpacing = 0.15.em,
                     ),
                     color = tokens.ink3,
                     modifier = Modifier

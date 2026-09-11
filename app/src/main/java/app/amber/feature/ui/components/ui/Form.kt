@@ -34,7 +34,7 @@ fun FormItem(
     ) {
         Column(
             verticalArrangement = Arrangement.spacedBy(4.dp),
-            modifier = modifier.weight(1f)
+            modifier = Modifier.weight(1f)
         ) {
             ProvideTextStyle(
                 value = MaterialTheme.typography.titleMedium

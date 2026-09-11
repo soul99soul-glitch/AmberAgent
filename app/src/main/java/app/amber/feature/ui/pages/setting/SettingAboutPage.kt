@@ -49,7 +49,7 @@ import app.amber.feature.ui.components.ui.CardGroup
 import app.amber.feature.ui.components.ui.WorkspaceTopBar
 import app.amber.feature.ui.components.ui.workspaceColors
 import app.amber.feature.ui.context.LocalNavController
-import app.amber.feature.ui.theme.CustomColors
+import app.amber.feature.ui.theme.LocalAmberType
 import app.amber.core.utils.openUrl
 import app.amber.core.utils.plus
 
@@ -88,7 +88,7 @@ fun SettingAboutPage() {
         ) { onBurst ->
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
-                contentPadding = innerPadding + PaddingValues(8.dp),
+                contentPadding = innerPadding + PaddingValues(16.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
                 item {
@@ -126,9 +126,7 @@ fun SettingAboutPage() {
                 }
 
                 item {
-                    CardGroup(
-                        modifier = Modifier.padding(horizontal = 8.dp),
-                    ) {
+                    CardGroup() {
                         item(
                             modifier = Modifier.combinedClickable(
                                 onClick = {},
@@ -138,14 +136,14 @@ fun SettingAboutPage() {
                             ),
                             leadingContent = { Icon(Lucide.CodeXml, null) },
                             supportingContent = {
-                                Text("${BuildConfig.VERSION_NAME} / ${BuildConfig.VERSION_CODE}")
+                                Text("${BuildConfig.VERSION_NAME} / ${BuildConfig.VERSION_CODE}", style = LocalAmberType.current.meta)
                             },
                             headlineContent = { Text(stringResource(R.string.about_page_version)) },
                         )
                         item(
                             leadingContent = { Icon(Lucide.Smartphone, null) },
                             supportingContent = {
-                                Text("${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL} / Android ${android.os.Build.VERSION.RELEASE} / SDK ${android.os.Build.VERSION.SDK_INT}")
+                                Text("${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL} / Android ${android.os.Build.VERSION.RELEASE} / SDK ${android.os.Build.VERSION.SDK_INT}", style = LocalAmberType.current.meta)
                             },
                             headlineContent = { Text(stringResource(R.string.about_page_system)) },
                         )
@@ -153,9 +151,7 @@ fun SettingAboutPage() {
                 }
 
                 item {
-                    CardGroup(
-                        modifier = Modifier.padding(horizontal = 8.dp),
-                    ) {
+                    CardGroup() {
                         item(
                             leadingContent = { Icon(Lucide.Earth, null) },
                             supportingContent = {
