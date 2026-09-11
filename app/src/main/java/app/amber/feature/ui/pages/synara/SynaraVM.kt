@@ -1,7 +1,9 @@
 package app.amber.feature.ui.pages.synara
 
+import androidx.annotation.StringRes
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import app.amber.agent.R
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withTimeout
@@ -27,9 +29,20 @@ import java.util.concurrent.TimeUnit
 data class SynaraUiState(
     val draft: SynaraConnection = SynaraConnection(),
     val checking: Boolean = false,
-    val lastCheckMessage: String? = null,
+    val lastCheckMessage: SynaraUiMessage? = null,
     val lastCheckOk: Boolean? = null,
 )
+
+data class SynaraUiMessage(
+    @StringRes val resourceId: Int,
+    val formatArgs: List<Any> = emptyList(),
+)
+
+private class SynaraMessageException(
+    @StringRes val resourceId: Int,
+    val formatArgs: List<Any> = emptyList(),
+    cause: Throwable? = null,
+) : Exception(cause)
 
 class SynaraVM(
     private val store: SynaraConnectionStore,
@@ -58,15 +71,20 @@ class SynaraVM(
         _ui.update { it.copy(draft = transform(it.draft), lastCheckMessage = null, lastCheckOk = null) }
     }
 
-    fun reportError(message: String) {
-        _ui.update { it.copy(lastCheckOk = false, lastCheckMessage = message) }
+    fun reportError(@StringRes resourceId: Int, vararg formatArgs: Any) {
+        _ui.update {
+            it.copy(
+                lastCheckOk = false,
+                lastCheckMessage = SynaraUiMessage(resourceId, formatArgs.toList()),
+            )
+        }
     }
 
     fun save(onSaved: (SynaraConnection) -> Unit = {}) {
         val draft = _ui.value.draft
         val error = draft.validationError()
         if (error != null) {
-            _ui.update { it.copy(lastCheckOk = false, lastCheckMessage = error) }
+            reportError(error.resourceId())
             return
         }
         viewModelScope.launch {
@@ -80,7 +98,7 @@ class SynaraVM(
         val draft = _ui.value.draft
         val error = draft.validationError()
         if (error != null) {
-            _ui.update { it.copy(lastCheckOk = false, lastCheckMessage = error) }
+            reportError(error.resourceId())
             return
         }
         viewModelScope.launch {
@@ -90,7 +108,10 @@ class SynaraVM(
                 it.copy(
                     checking = false,
                     lastCheckOk = result.isSuccess,
-                    lastCheckMessage = result.getOrElse { e -> e.message ?: "连接失败" },
+                    lastCheckMessage = result.fold(
+                        onSuccess = { SynaraUiMessage(R.string.synara_connection_verified, listOf(draft.httpBaseUrl())) },
+                        onFailure = { e -> e.toUiMessage() },
+                    ),
                 )
             }
             if (result.isSuccess) {
@@ -100,7 +121,7 @@ class SynaraVM(
         }
     }
 
-    private suspend fun probeConnection(connection: SynaraConnection): Result<String> {
+    private suspend fun probeConnection(connection: SynaraConnection): Result<Unit> {
         return runCatching {
             val healthRequest = Request.Builder()
                 .url(connection.healthUrl())
@@ -114,10 +135,13 @@ class SynaraVM(
             }
             val status = runCatching { JSONObject(healthBody).optString("status") }.getOrDefault("")
             if (!status.equals("ok", ignoreCase = true)) {
-                error("health 未就绪（status=${status.ifBlank { "empty" }}）")
+                throw SynaraMessageException(
+                    resourceId = R.string.synara_health_not_ready,
+                    formatArgs = listOf(status.ifBlank { "empty" }),
+                )
             }
             probeAuthenticatedWebSocket(connection)
-            "健康检查和 Auth Token 验证通过 · ${connection.httpBaseUrl()}"
+            Unit
         }
     }
 
@@ -152,4 +176,22 @@ class SynaraVM(
         )
         continuation.invokeOnCancellation { socket.cancel() }
     }
+}
+
+private fun Throwable.toUiMessage(): SynaraUiMessage {
+    return if (this is SynaraMessageException) {
+        SynaraUiMessage(resourceId, formatArgs)
+    } else {
+        SynaraUiMessage(
+            resourceId = R.string.synara_connection_failed,
+            formatArgs = listOf(message ?: "Connection failed"),
+        )
+    }
+}
+
+internal fun SynaraValidationError.resourceId(): Int = when (this) {
+    SynaraValidationError.MISSING_HOST -> R.string.synara_validation_missing_host
+    SynaraValidationError.INVALID_PORT -> R.string.synara_validation_invalid_port
+    SynaraValidationError.MISSING_TOKEN -> R.string.synara_validation_missing_token
+    SynaraValidationError.CLEARTEXT_HOST_NOT_ALLOWED -> R.string.synara_validation_cleartext_host
 }

@@ -17,6 +17,7 @@ import app.amber.ai.core.InputSchema
 import app.amber.ai.core.Tool
 import app.amber.ai.ui.UIMessagePart
 import app.amber.feature.board.hotlist.HotListRepository
+import java.util.Locale
 import java.util.concurrent.atomic.AtomicInteger
 
 private const val OVERVIEW_SUMMARY_STORAGE_MAX_CHARS = 1_200
@@ -50,17 +51,18 @@ class DeepReadSectionWriterTools(
     val writeCount: Int get() = _writeCount.get()
     val requiredWriteCount: Int get() = _requiredWriteCount.get()
 
-    fun tools(stages: Set<DeepReadGenerationStage>? = null): List<Tool> = buildList {
-        if (stages == null || DeepReadGenerationStage.OVERVIEW in stages) add(overviewTool())
-        if (stages == null || DeepReadGenerationStage.NARRATIVE in stages) add(narrativeTool())
-        if (stages == null || DeepReadGenerationStage.ANALYSIS in stages) add(analysisTool())
-        if (stages == null || DeepReadGenerationStage.EXTENDED_READING in stages) add(extendedReadingTool())
-        add(visualsTool())
-        add(diagramTool())
+    fun tools(
+        stages: Set<DeepReadGenerationStage>? = null,
+        locale: Locale = Locale.CHINESE,
+    ): List<Tool> = buildList {
+        if (stages == null || DeepReadGenerationStage.OVERVIEW in stages) add(overviewTool(locale))
+        if (stages == null || DeepReadGenerationStage.NARRATIVE in stages) add(narrativeTool(locale))
+        if (stages == null || DeepReadGenerationStage.ANALYSIS in stages) add(analysisTool(locale))
+        if (stages == null || DeepReadGenerationStage.EXTENDED_READING in stages) add(extendedReadingTool(locale))
+        add(visualsTool(locale))
+        add(diagramTool(locale))
         add(finishTool())
     }
-
-    fun tools(): List<Tool> = tools(stages = null)
 
     suspend fun markPhase(phase: DeepReadGenerationPhase): DeepReadOutput =
         update { current ->
@@ -133,16 +135,20 @@ class DeepReadSectionWriterTools(
             ?.withInferredSectionStates()
             ?: DeepReadOutput()
 
-    private fun overviewTool() = Tool(
+    private fun overviewTool(locale: Locale) = Tool(
         name = "deep_read_write_overview",
         description = "Internal Deep Read writer. Write the source-backed overview section after using search_web/scrape_web. UI only renders content written through this tool.",
         parameters = {
             InputSchema.Obj(
                 properties = buildJsonObject {
                     put("topic_type", stringProp("event/opinion/product/person."))
-                    put("summary", stringProp("Chinese editorial overview, around 120-250 Chinese characters; keep sentences complete."))
+                    put("summary", stringProp(if (locale.isChineseLocale()) {
+                        "Chinese editorial overview, around 120-250 Chinese characters; keep sentences complete."
+                    } else {
+                        "English editorial overview, around 120-250 characters; keep sentences complete."
+                    }))
                     put("key_entities", stringArrayProp("Key people, companies, products, places, or institutions."))
-                    put("references", readingLinksProp("Sources used in this section."))
+                    put("references", readingLinksProp("Sources used in this section.", locale))
                 },
                 required = listOf("summary"),
             )
@@ -196,15 +202,15 @@ class DeepReadSectionWriterTools(
         },
     )
 
-    private fun narrativeTool() = Tool(
+    private fun narrativeTool(locale: Locale) = Tool(
         name = "deep_read_write_narrative",
         description = "Internal Deep Read writer. Write timeline/story narrative data. Use timeline for events, core_points for opinion/product/person topics.",
         parameters = {
             InputSchema.Obj(
                 properties = buildJsonObject {
-                    put("timeline", timelineProp())
-                    put("core_points", corePointsProp())
-                    put("references", readingLinksProp("Sources used in this section."))
+                    put("timeline", timelineProp(locale))
+                    put("core_points", corePointsProp(locale))
+                    put("references", readingLinksProp("Sources used in this section.", locale))
                 },
             )
         },
@@ -251,17 +257,17 @@ class DeepReadSectionWriterTools(
         },
     )
 
-    private fun analysisTool() = Tool(
+    private fun analysisTool(locale: Locale) = Tool(
         name = "deep_read_write_analysis",
         description = "Internal Deep Read writer. Write the deep analysis section after reasoning over source-backed evidence.",
         parameters = {
             InputSchema.Obj(
                 properties = buildJsonObject {
                     put("core_dispute", stringProp("Central tension or core dispute."))
-                    put("perspectives", perspectivesProp())
-                    put("implications", stringProp("Impact analysis in Chinese."))
+                    put("perspectives", perspectivesProp(locale))
+                    put("implications", stringProp(if (locale.isChineseLocale()) "Impact analysis in Chinese." else "Impact analysis in English."))
                     put("quotes", quotesProp())
-                    put("references", readingLinksProp("Sources used in this section."))
+                    put("references", readingLinksProp("Sources used in this section.", locale))
                 },
             )
         },
@@ -292,14 +298,14 @@ class DeepReadSectionWriterTools(
         },
     )
 
-    private fun extendedReadingTool() = Tool(
+    private fun extendedReadingTool(locale: Locale) = Tool(
         name = "deep_read_write_extended_reading",
         description = "Internal Deep Read writer. Write source-backed extended reading links and optional real image assets.",
         parameters = {
             InputSchema.Obj(
                 properties = buildJsonObject {
-                    put("links", readingLinksProp("Recommended source links."))
-                    put("image_assets", imageAssetsProp())
+                    put("links", readingLinksProp("Recommended source links.", locale))
+                    put("image_assets", imageAssetsProp(locale))
                 },
                 required = listOf("links"),
             )
@@ -333,16 +339,16 @@ class DeepReadSectionWriterTools(
         },
     )
 
-    private fun visualsTool() = Tool(
+    private fun visualsTool(locale: Locale) = Tool(
         name = "deep_read_write_visuals",
         description = "Internal Deep Read visual selector. Select hero/inline images only from the pre-fetched candidate pool; never submit arbitrary URLs.",
         parameters = {
             InputSchema.Obj(
                 properties = buildJsonObject {
                     put("hero_image_url", stringProp("Optional candidate image URL. Must have hero confidence in the candidate pool."))
-                    put("hero_caption", stringProp("Chinese caption for selected hero image."))
+                    put("hero_caption", stringProp(if (locale.isChineseLocale()) "Chinese caption for selected hero image." else "English caption for selected hero image."))
                     put("hero_reason", stringProp("Why this candidate matches the title and is not a logo/icon."))
-                    put("image_assets", imageAssetsProp())
+                    put("image_assets", imageAssetsProp(locale))
                 },
             )
         },
@@ -380,18 +386,18 @@ class DeepReadSectionWriterTools(
         },
     )
 
-    private fun diagramTool() = Tool(
+    private fun diagramTool(locale: Locale) = Tool(
         name = "deep_read_write_diagram",
         description = "Internal Deep Read diagram writer. Submit only a compact structured diagram spec; raw SVG/HTML/JS/external resources are forbidden. Use 3-6 short nodes; flow/causal diagrams may keep a few key cross-node relations but must avoid dense webs.",
         parameters = {
             InputSchema.Obj(
                 properties = buildJsonObject {
                     put("type", stringProp("causal_chain/process_flow/stakeholder_map/system_structure/comparison_matrix."))
-                    put("title", stringProp("Short Chinese title."))
+                    put("title", stringProp(if (locale.isChineseLocale()) "Short Chinese title." else "Short English title."))
                     put("reason", stringProp("Why this topic benefits from a diagram."))
-                    put("nodes", diagramNodesProp())
-                    put("edges", diagramEdgesProp())
-                    put("caption", stringProp("Optional Chinese caption."))
+                    put("nodes", diagramNodesProp(locale))
+                    put("edges", diagramEdgesProp(locale))
+                    put("caption", stringProp(if (locale.isChineseLocale()) "Optional Chinese caption." else "Optional English caption."))
                 },
                 required = listOf("type", "title", "nodes"),
             )
@@ -615,13 +621,13 @@ private fun stringArrayProp(description: String) = buildJsonObject {
     put("items", buildJsonObject { put("type", "string") })
 }
 
-private fun readingLinksProp(description: String) = buildJsonObject {
+private fun readingLinksProp(description: String, locale: Locale) = buildJsonObject {
     put("type", "array")
     put("description", description)
     put("items", buildJsonObject {
         put("type", "object")
         put("properties", buildJsonObject {
-            put("title", stringProp("Chinese title."))
+            put("title", stringProp(if (locale.isChineseLocale()) "Chinese title." else "English title."))
             put("url", stringProp("Source URL."))
             put("source", stringProp("Source name/domain."))
         })
@@ -629,40 +635,40 @@ private fun readingLinksProp(description: String) = buildJsonObject {
     })
 }
 
-private fun timelineProp() = buildJsonObject {
+private fun timelineProp(locale: Locale) = buildJsonObject {
     put("type", "array")
     put("items", buildJsonObject {
         put("type", "object")
         put("properties", buildJsonObject {
             put("date", stringProp("Date or time label."))
-            put("event", stringProp("Event narrative in Chinese."))
+            put("event", stringProp(if (locale.isChineseLocale()) "Event narrative in Chinese." else "Event narrative in English."))
             put("is_highlight", buildJsonObject { put("type", "boolean") })
             put("image_url", stringProp("Optional real source image URL."))
-            put("image_caption", stringProp("Optional Chinese image caption."))
+            put("image_caption", stringProp(if (locale.isChineseLocale()) "Optional Chinese image caption." else "Optional English image caption."))
         })
     })
 }
 
-private fun corePointsProp() = buildJsonObject {
+private fun corePointsProp(locale: Locale) = buildJsonObject {
     put("type", "array")
     put("items", buildJsonObject {
         put("type", "object")
         put("properties", buildJsonObject {
-            put("point", stringProp("Point title in Chinese."))
-            put("supporting", stringProp("Supporting detail in Chinese."))
+            put("point", stringProp(if (locale.isChineseLocale()) "Point title in Chinese." else "Point title in English."))
+            put("supporting", stringProp(if (locale.isChineseLocale()) "Supporting detail in Chinese." else "Supporting detail in English."))
             put("image_url", stringProp("Optional real source image URL."))
-            put("image_caption", stringProp("Optional Chinese image caption."))
+            put("image_caption", stringProp(if (locale.isChineseLocale()) "Optional Chinese image caption." else "Optional English image caption."))
         })
     })
 }
 
-private fun perspectivesProp() = buildJsonObject {
+private fun perspectivesProp(locale: Locale) = buildJsonObject {
     put("type", "array")
     put("items", buildJsonObject {
         put("type", "object")
         put("properties", buildJsonObject {
             put("holder", stringProp("Person, organization, side, or market group."))
-            put("viewpoint", stringProp("Viewpoint in Chinese."))
+            put("viewpoint", stringProp(if (locale.isChineseLocale()) "Viewpoint in Chinese." else "Viewpoint in English."))
         })
     })
 }
@@ -678,13 +684,13 @@ private fun quotesProp() = buildJsonObject {
     })
 }
 
-private fun imageAssetsProp() = buildJsonObject {
+private fun imageAssetsProp(locale: Locale) = buildJsonObject {
     put("type", "array")
     put("items", buildJsonObject {
         put("type", "object")
         put("properties", buildJsonObject {
             put("url", stringProp("Real source/search image URL."))
-            put("caption", stringProp("Chinese caption."))
+            put("caption", stringProp(if (locale.isChineseLocale()) "Chinese caption." else "English caption."))
             put("source", stringProp("Source name/domain."))
             put("quality_hint", stringProp("hero/inline/context/chart/etc."))
             put("selection_reason", stringProp("Why this candidate is useful for the article."))
@@ -692,32 +698,34 @@ private fun imageAssetsProp() = buildJsonObject {
     })
 }
 
-private fun diagramNodesProp() = buildJsonObject {
+private fun diagramNodesProp(locale: Locale) = buildJsonObject {
     put("type", "array")
     put("items", buildJsonObject {
         put("type", "object")
         put("properties", buildJsonObject {
             put("id", stringProp("Stable short id, e.g. n1."))
-            put("label", stringProp("Short Chinese node label, one phrase."))
-            put("note", stringProp("Optional Chinese detail, one compact sentence."))
+            put("label", stringProp(if (locale.isChineseLocale()) "Short Chinese node label, one phrase." else "Short English node label, one phrase."))
+            put("note", stringProp(if (locale.isChineseLocale()) "Optional Chinese detail, one compact sentence." else "Optional English detail, one compact sentence."))
             put("group", stringProp("Optional group/lane label."))
         })
         put("required", JsonArray(listOf(JsonPrimitive("id"), JsonPrimitive("label"))))
     })
 }
 
-private fun diagramEdgesProp() = buildJsonObject {
+private fun diagramEdgesProp(locale: Locale) = buildJsonObject {
     put("type", "array")
     put("items", buildJsonObject {
         put("type", "object")
         put("properties", buildJsonObject {
             put("from", stringProp("Source node id."))
             put("to", stringProp("Target node id."))
-            put("label", stringProp("Optional short Chinese edge label."))
+            put("label", stringProp(if (locale.isChineseLocale()) "Optional short Chinese edge label." else "Optional short English edge label."))
         })
         put("required", JsonArray(listOf(JsonPrimitive("from"), JsonPrimitive("to"))))
     })
 }
+
+private fun Locale.isChineseLocale(): Boolean = language.equals("zh", ignoreCase = true)
 
 private fun JsonElement.objectOrEmpty(): JsonObject =
     runCatching { jsonObject }.getOrDefault(JsonObject(emptyMap()))

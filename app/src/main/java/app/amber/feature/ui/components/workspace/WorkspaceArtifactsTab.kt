@@ -29,6 +29,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -36,6 +37,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
 import com.composables.icons.lucide.Lucide
 import com.composables.icons.lucide.Archive
+import app.amber.agent.R
 import app.amber.agent.data.workspace.Artifact
 import app.amber.agent.data.workspace.ArtifactSourceKind
 import app.amber.agent.data.workspace.ArtifactParseStatus
@@ -60,7 +62,7 @@ fun WorkspaceArtifactsTab(
     if (artifacts.isEmpty()) {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
             Text(
-                text = "还没有保存的 Artifact",
+                text = stringResource(R.string.workspace_no_artifacts),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(top = 48.dp),
@@ -147,8 +149,8 @@ private fun ParseStatusBadge(status: ArtifactParseStatus) {
     ) {
         Text(
             text = when (status) {
-                ArtifactParseStatus.PARSED -> "已解析"
-                ArtifactParseStatus.FAILED -> "解析失败"
+                ArtifactParseStatus.PARSED -> stringResource(R.string.workspace_parse_status_parsed)
+                ArtifactParseStatus.FAILED -> stringResource(R.string.workspace_parse_status_failed)
             },
             modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
             style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Medium),
@@ -171,6 +173,9 @@ private fun ArtifactDetailDialog(
     var sourceAvailable by remember { mutableStateOf(false) }
     var reparseNote by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
+    val reparseCompleted = stringResource(R.string.workspace_reparse_completed)
+    val sourceUnavailable = stringResource(R.string.workspace_source_unavailable)
+    val reparseFailed = stringResource(R.string.workspace_reparse_failed)
 
     LaunchedEffect(artifact.artifactId) {
         referenceCount = vm.referenceCount(artifact.artifactId)
@@ -182,23 +187,29 @@ private fun ArtifactDetailDialog(
         title = { Text(artifact.title, maxLines = 2, overflow = TextOverflow.Ellipsis) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                DetailLine("类型", artifact.type)
+                DetailLine(stringResource(R.string.workspace_detail_type), artifact.type)
                 DetailLine("Workspace", artifact.workspaceId)
-                DetailLine("大小", formatSize(artifact.sizeBytes))
-                DetailLine("摘要", artifact.contentDigest.take(16) + "…")
+                DetailLine(stringResource(R.string.workspace_detail_size), formatSize(artifact.sizeBytes))
+                DetailLine(stringResource(R.string.workspace_detail_summary), artifact.contentDigest.take(16) + "…")
+                val parseStatus = when (artifact.parseStatus) {
+                    ArtifactParseStatus.PARSED -> stringResource(R.string.workspace_parse_status_parsed)
+                    ArtifactParseStatus.FAILED -> stringResource(R.string.workspace_parse_status_failed_short)
+                }
                 DetailLine(
-                    "解析",
+                    stringResource(R.string.workspace_detail_parse),
                     buildString {
-                        append(when (artifact.parseStatus) {
-                            ArtifactParseStatus.PARSED -> "已解析"
-                            ArtifactParseStatus.FAILED -> "失败"
-                        })
+                        append(parseStatus)
                         artifact.parserVersion?.let { append(" · $it") }
                         artifact.parseError?.let { append(" · $it") }
                     }
                 )
-                DetailLine("来源", buildSourceLabel(artifact, sourceAvailable))
-                referenceCount?.let { DetailLine("引用", "$it 处功能") }
+                DetailLine(stringResource(R.string.workspace_detail_source), buildSourceLabel(artifact, sourceAvailable))
+                referenceCount?.let {
+                    DetailLine(
+                        stringResource(R.string.workspace_detail_references),
+                        stringResource(R.string.workspace_reference_count, it),
+                    )
+                }
                 reparseNote?.let {
                     Text(
                         text = it,
@@ -208,7 +219,9 @@ private fun ArtifactDetailDialog(
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     if (artifact.sourceKind == ArtifactSourceKind.CHAT && sourceAvailable) {
-                        TextButton(onClick = onOpenSourceConversation) { Text("打开来源会话") }
+                        TextButton(onClick = onOpenSourceConversation) {
+                            Text(stringResource(R.string.workspace_open_source_conversation))
+                        }
                     }
                     if (artifactsEnabled && artifact.sourceKind == ArtifactSourceKind.CHAT) {
                         TextButton(
@@ -217,31 +230,31 @@ private fun ArtifactDetailDialog(
                                     val result = vm.reparse(artifact.artifactId)
                                     reparseNote = when (result) {
                                         is app.amber.agent.data.workspace.ReparseResult.Success ->
-                                            "重新解析完成"
+                                            reparseCompleted
                                         is app.amber.agent.data.workspace.ReparseResult.Failed ->
                                             if (result.reason == "source_unavailable") {
-                                                "来源会话或消息已删除，无法重新解析"
+                                                sourceUnavailable
                                             } else {
-                                                "重新解析失败"
+                                                reparseFailed
                                             }
                                     }
                                 }
                             }
-                        ) { Text("重新解析") }
+                        ) { Text(stringResource(R.string.workspace_reparse)) }
                     }
                 }
             }
         },
         confirmButton = {
-            TextButton(onClick = onOpenContent) { Text("打开内容") }
+            TextButton(onClick = onOpenContent) { Text(stringResource(R.string.workspace_open_content)) }
         },
         dismissButton = {
             Row {
-                TextButton(onClick = onDismiss) { Text("关闭") }
+                TextButton(onClick = onDismiss) { Text(stringResource(R.string.update_card_close)) }
                 if (artifactsEnabled) {
                     TextButton(
                         onClick = { showDeleteConfirm = true },
-                    ) { Text("删除", color = MaterialTheme.colorScheme.error) }
+                    ) { Text(stringResource(R.string.delete), color = MaterialTheme.colorScheme.error) }
                 }
             }
         },
@@ -250,14 +263,21 @@ private fun ArtifactDetailDialog(
     if (showDeleteConfirm) {
         AlertDialog(
             onDismissRequest = { showDeleteConfirm = false },
-            title = { Text("删除 Artifact") },
+            title = { Text(stringResource(R.string.workspace_delete_artifact_title)) },
             text = {
+                val count = referenceCount ?: 0
+                val deleteMessage = stringResource(R.string.workspace_delete_artifact_message, artifact.title)
+                val referenceMessage = if (count > 0) {
+                    stringResource(R.string.workspace_delete_artifact_references, count)
+                } else {
+                    null
+                }
                 Text(
                     buildString {
-                        append("将永久删除「${artifact.title}」，无法撤销。")
-                        val count = referenceCount ?: 0
-                        if (count > 0) {
-                            append("\n\n该 Artifact 被 $count 处功能引用，删除后这些引用将失效。")
+                        append(deleteMessage)
+                        referenceMessage?.let {
+                            append("\n\n")
+                            append(it)
                         }
                     }
                 )
@@ -269,10 +289,10 @@ private fun ArtifactDetailDialog(
                         onDismiss()
                         vm.delete(artifact.artifactId)
                     }
-                ) { Text("删除", color = MaterialTheme.colorScheme.error) }
+                ) { Text(stringResource(R.string.delete), color = MaterialTheme.colorScheme.error) }
             },
             dismissButton = {
-                TextButton(onClick = { showDeleteConfirm = false }) { Text("取消") }
+                TextButton(onClick = { showDeleteConfirm = false }) { Text(stringResource(R.string.cancel)) }
             },
         )
     }
@@ -296,6 +316,7 @@ private fun DetailLine(label: String, value: String) {
     }
 }
 
+@Composable
 private fun buildArtifactMeta(artifact: Artifact): String {
     val parts = mutableListOf(artifact.workspaceId)
     artifact.sizeBytes.let { parts.add(formatSize(it)) }
@@ -303,17 +324,18 @@ private fun buildArtifactMeta(artifact: Artifact): String {
     return parts.joinToString(" · ")
 }
 
+@Composable
 private fun buildSourceLabel(artifact: Artifact, available: Boolean): String {
     val kind = when (artifact.sourceKind) {
-        ArtifactSourceKind.CHAT -> "聊天"
+        ArtifactSourceKind.CHAT -> stringResource(R.string.workspace_source_chat)
         ArtifactSourceKind.MINIAPP -> "MiniApp"
         ArtifactSourceKind.DEEPREAD -> "DeepRead"
-        ArtifactSourceKind.UNKNOWN -> "未知"
+        ArtifactSourceKind.UNKNOWN -> stringResource(R.string.workspace_source_unknown)
     }
-    val id = artifact.sourceId ?: return "$kind · 无来源 ID"
+    val id = artifact.sourceId ?: return stringResource(R.string.workspace_source_missing_id, kind)
     return when {
         artifact.sourceKind != ArtifactSourceKind.CHAT -> "$kind · $id"
         available -> "$kind · $id"
-        else -> "$kind · $id（来源已删除，不可用）"
+        else -> stringResource(R.string.workspace_source_deleted, kind, id)
     }
 }

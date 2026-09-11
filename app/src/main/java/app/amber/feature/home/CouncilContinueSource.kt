@@ -1,5 +1,7 @@
 package app.amber.feature.home
 
+import android.content.Context
+import app.amber.agent.R
 import app.amber.agent.data.db.dao.ConversationDAO
 import app.amber.core.utils.JsonInstant
 import app.amber.feature.modelcouncil.CouncilRoom
@@ -15,6 +17,7 @@ import java.time.Instant
  * INTERRUPTED，用户重新打开房间即可继续；IDLE 房间等待用户启动。
  */
 class CouncilContinueSource(
+    private val context: Context,
     private val conversationDao: ConversationDAO,
 ) : ContinueCandidateSource {
 
@@ -36,26 +39,27 @@ class CouncilContinueSource(
             ContinueStatus.FAILED_RESUMABLE
         }
         val guestCount = room.activeGuests.size
+        val councilLabel = context.getString(R.string.session_home_feature_council)
         return ContinueCandidate(
             sourceKind = ContinueSourceKind.COUNCIL,
             sourceId = room.conversationId.toString(),
             route = ContinueRoute.CouncilRoom(conversationId = room.conversationId.toString()),
-            title = room.objective.ifBlank { "模型议会" },
-            summary = "模型议会 · $guestCount 位参与者 · ${room.statusLabel()}",
+            title = room.objective.ifBlank { councilLabel },
+            summary = context.getString(R.string.council_room_subtitle, guestCount, room.round) +
+                " · " + room.statusLabel(context),
             lastUpdatedAt = Instant.ofEpochMilli(room.updatedAtMs),
             status = status,
         )
     }
 }
 
-private fun CouncilRoom.statusLabel(): String = when (status) {
-    CouncilRoomStatus.IDLE -> "未开始"
-    CouncilRoomStatus.EXPLORING -> "探索中"
-    CouncilRoomStatus.DEBATING -> "讨论中"
-    CouncilRoomStatus.FINALIZING -> "汇总中"
-    CouncilRoomStatus.INTERRUPTED -> "已中断"
-    CouncilRoomStatus.FINALIZED,
-    CouncilRoomStatus.CANCELLED,
-    CouncilRoomStatus.FAILED,
-    -> status.name
+private fun CouncilRoom.statusLabel(context: Context): String = when (status) {
+    CouncilRoomStatus.IDLE -> context.getString(R.string.council_room_status_idle)
+    CouncilRoomStatus.EXPLORING -> context.getString(R.string.council_room_mode_explore)
+    CouncilRoomStatus.DEBATING -> context.getString(R.string.council_room_mode_debate)
+    CouncilRoomStatus.FINALIZING -> context.getString(R.string.council_room_synthesizing)
+    CouncilRoomStatus.INTERRUPTED -> context.getString(R.string.chat_message_council_status_interrupted)
+    CouncilRoomStatus.FINALIZED -> context.getString(R.string.chat_message_council_status_completed)
+    CouncilRoomStatus.CANCELLED -> context.getString(R.string.chat_message_council_status_cancelled)
+    CouncilRoomStatus.FAILED -> context.getString(R.string.chat_message_council_status_failed)
 }

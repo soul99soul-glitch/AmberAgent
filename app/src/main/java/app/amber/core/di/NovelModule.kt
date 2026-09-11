@@ -2,6 +2,8 @@ package app.amber.core.di
 
 import app.amber.feature.novel.persistence.NovelFileProjectRepository
 import app.amber.feature.novel.persistence.NovelProjectPersisting
+import app.amber.feature.novel.workspace.NovelTurnLauncher
+import app.amber.feature.novel.workspace.NovelTurnPayloads
 import app.amber.feature.novel.workspace.NovelWorkspaceGhostwriteController
 import app.amber.feature.novel.workspace.NovelWorkspaceGhostwriteCoordinator
 import app.amber.feature.novel.workspace.NovelWorkspaceMigrationService
@@ -38,7 +40,11 @@ val novelModule = module {
         )
     }
 
-    single { NovelWorkspaceGhostwriteCoordinator(NovelWorkspaceRuntime(get())) }
+    single { NovelTurnPayloads() }
+
+    single { NovelTurnLauncher(get(), get()) }
+
+    single { NovelWorkspaceGhostwriteCoordinator(NovelWorkspaceRuntime(get()), get()) }
 
     single { NovelWorkspaceGhostwriteController(androidContext(), get()) }
 
@@ -47,6 +53,7 @@ val novelModule = module {
             workspaceRepository = get(),
             workspaceMigrationService = get(),
             legacyRepository = get(),
+            context = androidContext(),
         )
     }
 
@@ -56,7 +63,9 @@ val novelModule = module {
             repository = get(),
             settingsAggregator = get(),
             ghostwriteController = get(),
-            generator = get(),
+            turnLauncher = get(),
+            kernel = get(),
+            context = androidContext(),
             requestedFocus = parameters.getOrNull<app.amber.feature.novelworkspace.NovelWorkspaceFocus>()
                 ?: app.amber.feature.novelworkspace.NovelWorkspaceFocus(),
         )

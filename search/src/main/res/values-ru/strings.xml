@@ -1,7 +1,8 @@
-<?xml version="1.0" encoding="UTF-8"?>
+<?xml version='1.0' encoding='UTF-8'?>
 <resources>
   <string name="bing_desc">Обратите внимание: поиск Bing основан на краулере, может быть нестабильным и не рекомендуется.</string>
   <string name="click_to_get_api_key">Нажмите, чтобы получить ключ API</string>
   <string name="searxng_desc_1">в settings.yml нужно включить поддержку формата json:</string>
   <string name="searxng_desc_2">поиск:\n  форматы:\n    - html\n    - json</string>
+  <string name="metaso_description_prefix">Поиск Metaso:</string>
 </resources>

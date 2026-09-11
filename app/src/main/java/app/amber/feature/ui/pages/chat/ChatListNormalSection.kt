@@ -61,6 +61,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalScrollCaptureInProgress
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import dev.chrisbanes.haze.HazeState
@@ -75,6 +76,7 @@ import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toInstant
 import app.amber.ai.core.MessageRole
 import app.amber.ai.ui.UIMessage
+import app.amber.agent.R
 import com.composables.icons.lucide.Lucide
 import com.composables.icons.lucide.ArrowDown
 import com.composables.icons.lucide.X
@@ -1105,7 +1107,7 @@ private fun BackToBottomButton(
                     modifier = Modifier.size(16.dp),
                 )
                 Text(
-                    text = "回到底部",
+                    text = stringResource(R.string.chat_page_scroll_to_bottom),
                     style = MaterialTheme.typography.labelMedium,
                     color = chatTheme.ink,
                 )

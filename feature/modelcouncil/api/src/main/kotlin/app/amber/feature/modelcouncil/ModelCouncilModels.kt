@@ -233,17 +233,17 @@ object ModelCouncilRolePresets {
         ModelCouncilRolePreset(
             id = "supporter",
             name = "支持者",
-            prompt = "你从支持者立场评审方案，重点证明可行性、价值和最佳落地路径，同时承认必要前提。",
+            prompt = "Review the proposal from a supportive position. Focus on feasibility, value, and the best implementation path while acknowledging necessary assumptions.",
         ),
         ModelCouncilRolePreset(
             id = "opponent",
             name = "反对者",
-            prompt = "你从反对者立场评审方案，重点寻找风险、反例、代价、失败模式和隐藏假设。",
+            prompt = "Review the proposal from a skeptical position. Look for risks, counterexamples, costs, failure modes, and hidden assumptions.",
         ),
         ModelCouncilRolePreset(
             id = "judge",
             name = "裁判",
-            prompt = "你作为裁判综合各方证据，明确哪些结论可信、哪些仍需验证，并给出最终建议。",
+            prompt = "Act as the judge: synthesize the available evidence, state which conclusions are credible or still need validation, and give a final recommendation.",
         ),
     )
 
@@ -251,32 +251,32 @@ object ModelCouncilRolePresets {
         ModelCouncilRolePreset(
             id = "product",
             name = "产品",
-            prompt = "你从产品视角评审，关注用户价值、需求定位、功能取舍、产品决策的取舍逻辑。",
+            prompt = "Review from a product perspective. Focus on user value, problem framing, feature trade-offs, and the reasoning behind product decisions.",
         ),
         ModelCouncilRolePreset(
             id = "marketing",
             name = "营销",
-            prompt = "你从营销视角评审，关注渠道选择、内容策略、增长抓手、获客成本、传播效率。",
+            prompt = "Review from a marketing perspective. Focus on channel choice, content strategy, growth levers, acquisition cost, and reach efficiency.",
         ),
         ModelCouncilRolePreset(
             id = "pr",
             name = "公关",
-            prompt = "你从公关视角评审，关注舆论走向、品牌叙事、危机应对、媒体关系、长期形象。",
+            prompt = "Review from a public-relations perspective. Focus on public sentiment, brand narrative, crisis response, media relationships, and long-term reputation.",
         ),
         ModelCouncilRolePreset(
             id = "engineering",
             name = "工程",
-            prompt = "你从工程视角评审，关注架构复杂度、实现成本、测试覆盖、维护负担、可回滚性。",
+            prompt = "Review from an engineering perspective. Focus on architectural complexity, implementation cost, test coverage, maintenance burden, and rollback safety.",
         ),
         ModelCouncilRolePreset(
             id = "ux",
             name = "用户体验",
-            prompt = "你从用户体验视角评审，关注流程顺畅、交互细节、情感感受、易用性、视觉一致性。",
+            prompt = "Review from a user-experience perspective. Focus on flow, interaction details, emotional response, ease of use, and visual consistency.",
         ),
         ModelCouncilRolePreset(
             id = "risk",
             name = "风险",
-            prompt = "你从风险视角评审，关注隐私、安全、权限边界、数据损坏、误操作、合规底线。",
+            prompt = "Review from a risk perspective. Focus on privacy, security, permission boundaries, data corruption, misuse, and compliance limits.",
         ),
     )
 

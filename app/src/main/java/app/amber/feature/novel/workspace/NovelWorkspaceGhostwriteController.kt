@@ -6,9 +6,12 @@ import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.workDataOf
+import app.amber.agent.R
+import app.amber.core.utils.appLocale
 import app.amber.feature.novelworkspace.NovelWorkspaceGhostwriteJob
 import app.amber.feature.novelworkspace.NovelWorkspaceGhostwriteJobs
 import app.amber.feature.novelworkspace.NovelWorkspaceLedger
+import app.amber.feature.novelworkspace.NovelWorkspaceStore
 import app.amber.feature.novelworkspace.NovelWorkspaceUnresolvedStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
@@ -24,6 +27,7 @@ class NovelWorkspaceGhostwriteController(
     private val context: Context,
     private val coordinator: NovelWorkspaceGhostwriteCoordinator,
 ) {
+    /** Serialize job-file mutations with WorkManager identity lookup/enqueue. */
     private val mutationMutex = Mutex()
 
     suspend fun startBatch(
@@ -33,15 +37,34 @@ class NovelWorkspaceGhostwriteController(
         targetChapterCount: Int,
     ): NovelWorkspaceGhostwriteJob = withContext(Dispatchers.IO) {
         mutationMutex.withLock {
-            require(targetChapterCount > 0) { "targetChapterCount must be positive" }
+            require(targetChapterCount in 1..NovelWorkspaceGhostwriteCoordinator.MAX_GHOSTWRITE_CHAPTERS) {
+                localized(
+                    chinese = "代笔章数必须在 1 到 ${NovelWorkspaceGhostwriteCoordinator.MAX_GHOSTWRITE_CHAPTERS} 之间",
+                    english = "The ghostwrite target must be between 1 and ${NovelWorkspaceGhostwriteCoordinator.MAX_GHOSTWRITE_CHAPTERS} chapters.",
+                )
+            }
+            val store = NovelWorkspaceStore(projectDirectory)
             val ledger = NovelWorkspaceLedger.load(projectDirectory)
-            check(!NovelWorkspaceLedger.isPlotStale(ledger, branchSlug)) {
-                "剧情落后于正文。请切到“讨论”，发送“根据最新正文同步 plot/current.md”，并批准剧情修改后再代笔"
+            // Write mode commits chapters and plot together. A stale plot here is a real
+            // authoring gap; the dangling polish-pointer repair belongs to polish mode.
+            check(!NovelWorkspaceLedger.isPlotStale(store, ledger, branchSlug)) {
+                context.getString(
+                    R.string.novel_ghostwrite_error_stale_plot,
+                    context.getString(R.string.novel_ghostwrite_task_write),
+                )
             }
             check(NovelWorkspaceUnresolvedStore.entryFor(projectDirectory, branchSlug) == null) {
-                "存在未解决的中间章修改，请先处理（确认无碍/重写后章）再代笔"
+                context.getString(
+                    R.string.novel_ghostwrite_error_unresolved_edits,
+                    context.getString(R.string.novel_ghostwrite_task_write),
+                )
             }
-            val job = coordinator.newJob(projectDirectory, branchSlug, targetChapterCount)
+            val job = coordinator.newJob(
+                projectDirectory,
+                branchSlug,
+                targetChapterCount,
+                locale = context.appLocale(),
+            )
             try {
                 enqueue(projectId, job, ExistingWorkPolicy.REPLACE)
             } catch (error: Exception) {
@@ -50,7 +73,46 @@ class NovelWorkspaceGhostwriteController(
                     jobId = job.id,
                     expectedStatuses = setOf(NovelWorkspaceGhostwriteJob.STATUS_RUNNING),
                     newStatus = NovelWorkspaceGhostwriteJob.STATUS_FAILED,
-                    reason = error.message ?: "代笔任务入队失败",
+                    reason = error.message ?: localized(
+                        chinese = "代笔任务入队失败",
+                        english = "Could not enqueue the ghostwrite batch.",
+                    ),
+                    expectedExecutionId = job.executionKey,
+                )
+                throw error
+            }
+            job
+        }
+    }
+
+    /** Start a polishing batch over the inclusive ordinal range [fromOrdinal, toOrdinal]. */
+    suspend fun startPolishBatch(
+        projectDirectory: java.io.File,
+        projectId: String,
+        branchSlug: String,
+        fromOrdinal: Int,
+        toOrdinal: Int,
+    ): NovelWorkspaceGhostwriteJob = withContext(Dispatchers.IO) {
+        mutationMutex.withLock {
+            val job = coordinator.preparePolishBatch(
+                projectDirectory,
+                branchSlug,
+                fromOrdinal,
+                toOrdinal,
+                locale = context.appLocale(),
+            )
+            try {
+                enqueue(projectId, job, ExistingWorkPolicy.REPLACE)
+            } catch (error: Exception) {
+                NovelWorkspaceGhostwriteJobs.transition(
+                    projectDirectory = projectDirectory,
+                    jobId = job.id,
+                    expectedStatuses = setOf(NovelWorkspaceGhostwriteJob.STATUS_RUNNING),
+                    newStatus = NovelWorkspaceGhostwriteJob.STATUS_FAILED,
+                    reason = error.message ?: localized(
+                        chinese = "润色任务入队失败",
+                        english = "Could not enqueue the polishing batch.",
+                    ),
                     expectedExecutionId = job.executionKey,
                 )
                 throw error
@@ -81,41 +143,50 @@ class NovelWorkspaceGhostwriteController(
             .addTag(jobTag(job.id))
             .addTag(executionTag(job.id, job.executionKey))
             .build()
+        // Include the mode so an old queued write cannot cancel a polish enqueue. Branch
+        // exclusivity is still enforced by saveIfNoActive/newPolishJob at the durable layer.
         WorkManager.getInstance(context).enqueueUniqueWork(
-            "$WORK_TAG:$projectId:${job.branchSlug}",
+            "$WORK_TAG:$projectId:${job.branchSlug}:${job.mode.value}",
             policy,
             request,
         ).result.get()
     }
 
+    private fun localized(chinese: String, english: String): String =
+        if (context.appLocale().language.equals("zh", ignoreCase = true)) chinese else english
+
     suspend fun pause(projectDirectory: java.io.File, jobId: String, executionId: String) =
         withContext(Dispatchers.IO) {
-        mutationMutex.withLock {
-            val paused = NovelWorkspaceGhostwriteJobs.transition(
-                projectDirectory = projectDirectory,
-                jobId = jobId,
-                expectedStatuses = setOf(NovelWorkspaceGhostwriteJob.STATUS_RUNNING),
-                newStatus = NovelWorkspaceGhostwriteJob.STATUS_PAUSED,
-                expectedExecutionId = executionId,
-            )
-            if (paused != null) {
-                WorkManager.getInstance(context).cancelAllWorkByTag(executionTag(jobId, executionId)).result.get()
+            mutationMutex.withLock {
+                val paused = NovelWorkspaceGhostwriteJobs.transition(
+                    projectDirectory = projectDirectory,
+                    jobId = jobId,
+                    expectedStatuses = setOf(NovelWorkspaceGhostwriteJob.STATUS_RUNNING),
+                    newStatus = NovelWorkspaceGhostwriteJob.STATUS_PAUSED,
+                    expectedExecutionId = executionId,
+                )
+                if (paused != null) {
+                    WorkManager.getInstance(context)
+                        .cancelAllWorkByTag(executionTag(jobId, executionId))
+                        .result.get()
+                }
             }
         }
-    }
 
-    /** Resume a paused job: flip it back to running and re-enqueue the worker. */
+    /** Resume a paused job and issue a fresh execution identity to its Worker. */
     suspend fun resume(
         projectDirectory: java.io.File,
         projectId: String,
         jobId: String,
         executionId: String,
+        expectedBranchSlug: String? = null,
     ): NovelWorkspaceGhostwriteJob? = withContext(Dispatchers.IO) {
         mutationMutex.withLock {
             val job = NovelWorkspaceGhostwriteJobs.restartPaused(
                 projectDirectory,
                 jobId,
                 expectedExecutionId = executionId,
+                expectedBranchSlug = expectedBranchSlug,
             ) ?: return@withLock null
             try {
                 enqueue(projectId, job, ExistingWorkPolicy.REPLACE)
@@ -139,6 +210,7 @@ class NovelWorkspaceGhostwriteController(
         projectId: String,
         jobId: String,
         executionId: String,
+        expectedBranchSlug: String? = null,
     ): NovelWorkspaceGhostwriteJob = withContext(Dispatchers.IO) {
         mutationMutex.withLock {
             val job = checkNotNull(
@@ -146,9 +218,13 @@ class NovelWorkspaceGhostwriteController(
                     projectDirectory,
                     jobId,
                     expectedExecutionId = executionId,
+                    expectedBranchSlug = expectedBranchSlug,
                 ),
             ) {
-                "该代笔批次已不可继续"
+                localized(
+                    chinese = "该代笔批次已不可继续",
+                    english = "This ghostwrite batch can no longer continue.",
+                )
             }
             try {
                 enqueue(projectId, job, ExistingWorkPolicy.REPLACE)
@@ -158,7 +234,10 @@ class NovelWorkspaceGhostwriteController(
                     jobId = jobId,
                     expectedStatuses = setOf(NovelWorkspaceGhostwriteJob.STATUS_RUNNING),
                     newStatus = NovelWorkspaceGhostwriteJob.STATUS_FAILED,
-                    reason = error.message ?: "代笔任务入队失败",
+                    reason = error.message ?: localized(
+                        chinese = "代笔任务入队失败",
+                        english = "Could not enqueue the ghostwrite batch.",
+                    ),
                     expectedExecutionId = job.executionKey,
                 )
                 throw error
@@ -169,22 +248,22 @@ class NovelWorkspaceGhostwriteController(
 
     suspend fun cancel(projectDirectory: java.io.File, jobId: String, executionId: String) =
         withContext(Dispatchers.IO) {
-        mutationMutex.withLock {
-            val cancelled = NovelWorkspaceGhostwriteJobs.transition(
-                projectDirectory = projectDirectory,
-                jobId = jobId,
-                expectedStatuses = setOf(
-                    NovelWorkspaceGhostwriteJob.STATUS_RUNNING,
-                    NovelWorkspaceGhostwriteJob.STATUS_PAUSED,
-                ),
-                newStatus = NovelWorkspaceGhostwriteJob.STATUS_CANCELLED,
-                expectedExecutionId = executionId,
-            )
-            if (cancelled != null) {
-                WorkManager.getInstance(context).cancelAllWorkByTag(jobTag(jobId)).result.get()
+            mutationMutex.withLock {
+                val cancelled = NovelWorkspaceGhostwriteJobs.transition(
+                    projectDirectory = projectDirectory,
+                    jobId = jobId,
+                    expectedStatuses = setOf(
+                        NovelWorkspaceGhostwriteJob.STATUS_RUNNING,
+                        NovelWorkspaceGhostwriteJob.STATUS_PAUSED,
+                    ),
+                    newStatus = NovelWorkspaceGhostwriteJob.STATUS_CANCELLED,
+                    expectedExecutionId = executionId,
+                )
+                if (cancelled != null) {
+                    WorkManager.getInstance(context).cancelAllWorkByTag(jobTag(jobId)).result.get()
+                }
             }
         }
-    }
 
     /** Serialize the WorkManager lookup with enqueue so a new batch is never mistaken for an orphan. */
     suspend fun reconcile(projectDirectory: java.io.File) = withContext(Dispatchers.IO) {
@@ -194,7 +273,9 @@ class NovelWorkspaceGhostwriteController(
                 if (job.status != NovelWorkspaceGhostwriteJob.STATUS_RUNNING) continue
                 val work = workManager.getWorkInfosByTag(executionTag(job.id, job.executionKey)).get()
                 NovelWorkspaceGhostwriteJobs.recoverUnscheduled(
-                    projectDirectory, job, hasUnfinishedWork = work.any { !it.state.isFinished },
+                    projectDirectory,
+                    job,
+                    hasUnfinishedWork = work.any { !it.state.isFinished },
                 )
             }
         }

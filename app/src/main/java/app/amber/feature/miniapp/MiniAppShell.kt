@@ -1,17 +1,22 @@
 package app.amber.feature.miniapp
 
+import android.content.Context
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import app.amber.agent.R
 
 object MiniAppShell {
     const val BASE_URL = "https://miniapp.amberagent.local/"
 
-    fun inject(html: String, bridgeScript: String, sessionToken: String): String {
+    fun inject(context: Context, html: String, bridgeScript: String, sessionToken: String): String {
         val tokenScript = """
             <script>
             window.__AMBER_MINIAPP_SESSION_TOKEN__ = ${Json.encodeToString(sessionToken)};
             </script>
         """.trimIndent()
+        val offlineImageLabel = Json.encodeToString(
+            context.getString(R.string.miniapp_image_requires_data_uri),
+        )
         val guardScript = """
             <script>
             (function () {
@@ -37,7 +42,7 @@ object MiniAppShell {
                   const normalized = raw.trim().toLowerCase();
                   if (!(normalized.startsWith('data:image/') || normalized.startsWith('https://'))) {
                     img.setAttribute('data-amber-original-src', raw);
-                    img.src = makeOfflineImage('图片需使用内联 data URI');
+                    img.src = makeOfflineImage($offlineImageLabel);
                   }
                 });
               };

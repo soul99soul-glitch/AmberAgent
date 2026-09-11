@@ -1,5 +1,6 @@
 package app.amber.feature.live
 
+import android.content.Context
 import app.amber.ai.core.ReasoningLevel
 import app.amber.ai.provider.Modality
 import app.amber.ai.provider.Model
@@ -9,10 +10,12 @@ import app.amber.ai.provider.TextGenerationParams
 import app.amber.ai.core.MessageRole
 import app.amber.ai.ui.UIMessage
 import app.amber.ai.ui.UIMessagePart
+import app.amber.agent.R
 import app.amber.core.settings.Settings
 import app.amber.core.settings.findModelById
 import app.amber.core.settings.findProvider
 import app.amber.core.settings.getCurrentChatModel
+import java.util.Locale
 import kotlin.uuid.Uuid
 
 /**
@@ -21,6 +24,7 @@ import kotlin.uuid.Uuid
  */
 class LiveAnalyzer(
     private val providerCatalog: ProviderCatalog,
+    private val context: Context,
 ) {
     data class Outcome(
         val card: LiveModeCard,
@@ -50,34 +54,35 @@ class LiveAnalyzer(
         actionLabel: String,
         mode: LiveAnalysisMode,
         screenshotUri: String?,
+        locale: Locale,
     ): Outcome {
         val provider = model.findProvider(settings.providers)
-            ?: throw IllegalStateException("当前模型没有可用服务")
+            ?: throw IllegalStateException(context.getString(R.string.model_list_no_providers))
         val wantVision = mode == LiveAnalysisMode.AGGRESSIVE
         val modelSupportsVision = Modality.IMAGE in model.inputModalities
         val useVision = wantVision && modelSupportsVision && screenshotUri != null
         val degradedReason = when {
             !wantVision -> null
-            !modelSupportsVision -> "伴随模型不支持图片输入，已按保守模式分析"
-            screenshotUri == null -> "截屏不可用，已按保守模式分析"
+            !modelSupportsVision -> context.getString(R.string.live_mode_conservative)
+            screenshotUri == null -> context.getString(R.string.live_mode_conservative)
             else -> null
         }
 
         val messages = if (useVision) {
             listOf(
-                UIMessage.system(LivePrompt.visionSystem),
+                UIMessage.system(LivePrompt.visionSystem(locale)),
                 UIMessage(
                     role = MessageRole.USER,
                     parts = listOf(
-                        UIMessagePart.Text(LivePrompt.user(snapshot, focus, actionLabel)),
+                        UIMessagePart.Text(LivePrompt.user(snapshot, focus, actionLabel, locale)),
                         UIMessagePart.Image(url = screenshotUri),
                     ),
                 ),
             )
         } else {
             listOf(
-                UIMessage.system(LivePrompt.system),
-                UIMessage.user(LivePrompt.user(snapshot, focus, actionLabel)),
+                UIMessage.system(LivePrompt.system(locale)),
+                UIMessage.user(LivePrompt.user(snapshot, focus, actionLabel, locale)),
             )
         }
 
@@ -98,14 +103,15 @@ class LiveAnalyzer(
         )
         val text = result.choices.firstOrNull()?.message?.toText()?.trim().orEmpty()
         return Outcome(
-            card = LivePrompt.parseCard(text, actionLabel),
+            card = LivePrompt.parseCard(text, actionLabel, locale),
             usedVision = useVision,
             degradedReason = degradedReason,
         )
     }
 
     internal object LivePrompt {
-        const val system = """
+        fun system(locale: Locale): String = if (locale.isChineseLocale()) {
+            """
 你是 AmberAgent 的 Live 伴随模式。你正在根据 Android 无障碍 UI 树做只读现场分析。
 
 规则：
@@ -115,43 +121,113 @@ class LiveAnalyzer(
 - 不要命令用户点击，不要假装已经执行操作。
 - 输出要短，适合 360dp 宽的分屏侧栏阅读。
 - 如果信息不足，直接说"不确定"，不要用泛泛建议填充。
-"""
+""".trimIndent()
+        } else {
+            """
+You are AmberAgent's Live companion. Analyze the current Android screen read-only from its Accessibility UI tree.
 
-        fun user(snapshot: LiveScreenSnapshot, focus: String, actionLabel: String): String = buildString {
-            appendLine("当前应用：${snapshot.appLabel.ifBlank { snapshot.packageName }}")
-            appendLine("包名：${snapshot.packageName}")
-            if (snapshot.title.isNotBlank()) appendLine("窗口标题：${snapshot.title}")
-            if (snapshot.windowDebugLabel.isNotBlank()) appendLine("窗口候选：${snapshot.windowDebugLabel}")
-            if (focus.isNotBlank()) appendLine("用户关注点：$focus")
-            appendLine("任务：$actionLabel")
-            appendLine("输出格式：")
-            appendLine(actionContract(actionLabel))
-            appendLine("屏幕正文：")
+Rules:
+- Use only the supplied screen text and limited UI tree; do not claim visual details outside that data.
+- Ignore the status bar, navigation bar, IME, split-screen divider, window frame, tabs, buttons, click state, bounds, and className.
+- Do not analyze "Canvas Window", "split-screen divider", or "multi-window UI" as system chrome unless the screen text is explicitly about it.
+- Do not tell the user to click anything or pretend that an action was executed.
+- Keep the answer short enough for a narrow companion panel.
+- If the information is insufficient, say "Uncertain" instead of filling space with generic advice.
+- Write all user-facing analysis content in ${locale.targetLanguage()}.
+""".trimIndent()
+        }
+
+        fun user(
+            snapshot: LiveScreenSnapshot,
+            focus: String,
+            actionLabel: String,
+            locale: Locale,
+        ): String = buildString {
+            val chinese = locale.isChineseLocale()
+            appendLine("${if (chinese) "当前应用" else "Current app"}: ${snapshot.appLabel.ifBlank { snapshot.packageName }}")
+            appendLine("${if (chinese) "包名" else "Package"}: ${snapshot.packageName}")
+            if (snapshot.title.isNotBlank()) {
+                appendLine("${if (chinese) "窗口标题" else "Window title"}: ${snapshot.title}")
+            }
+            if (snapshot.windowDebugLabel.isNotBlank()) {
+                appendLine("${if (chinese) "窗口候选" else "Window candidate"}: ${snapshot.windowDebugLabel}")
+            }
+            if (focus.isNotBlank()) {
+                appendLine("${if (chinese) "用户关注点" else "User focus"}: $focus")
+            }
+            appendLine("${if (chinese) "任务" else "Task"}: ${promptActionLabel(actionLabel, chinese)}")
+            appendLine(if (chinese) "输出格式：" else "Output format:")
+            appendLine(actionContract(actionLabel, locale))
+            appendLine(if (chinese) "屏幕正文：" else "Screen text:")
             appendLine(snapshot.contentText.ifBlank { snapshot.visibleText }.take(4_000))
             appendLine()
-            appendLine("补充 UI 树，仅用于消歧，不要复述控件框架：")
+            appendLine(
+                if (chinese) {
+                    "补充 UI 树，仅用于消歧，不要复述控件框架："
+                } else {
+                    "Supplemental UI tree, for disambiguation only; do not repeat the control framework:"
+                },
+            )
             appendLine(snapshot.uiTree.take(4_000))
         }
 
-        fun parseCard(text: String, actionLabel: String): LiveModeCard {
-            val conclusion = firstNonBlankSection(text, "结论", "总结", "回复", "正在看什么")
+        fun parseCard(text: String, actionLabel: String, locale: Locale): LiveModeCard {
+            val chinese = locale.isChineseLocale()
+            val conclusionNames = if (chinese) {
+                arrayOf("结论", "总结", "回复", "正在看什么", "Conclusion", "Summary", "Reply", "What is visible")
+            } else {
+                arrayOf("Conclusion", "Summary", "Reply", "What is visible", "结论", "总结", "回复", "正在看什么")
+            }
+            val conclusion = firstNonBlankSection(text, *conclusionNames)
                 .ifBlank { text.lineSequence().firstOrNull { it.isNotBlank() }.orEmpty() }
                 .let { LiveUiTreeProcessor.cleanAnalysisItem(it).orEmpty() }
-                .ifBlank { "不确定" }
+                .ifBlank { if (chinese) "不确定" else "Uncertain" }
             val keyPoints = when (actionLabel) {
-                "找重点" -> sectionItems(text, 3, "重点", "我觉得重点是", "关键信息")
-                "总结" -> sectionItems(text, 3, "事实", "重点", "关键信息")
-                "查风险" -> sectionItems(text, 3, "风险", "风险点", "重点")
-                "写回复" -> sectionItems(text, 1, "语气", "依据", "重点")
-                else -> sectionItems(text, 3, "重点", "我觉得重点是", "判断依据")
+                "找重点" -> sectionItems(text, 3, *(if (chinese) {
+                    arrayOf("重点", "我觉得重点是", "关键信息", "Key points", "Key information")
+                } else {
+                    arrayOf("Key points", "Key information", "重点", "我觉得重点是", "关键信息")
+                }))
+                "总结" -> sectionItems(text, 3, *(if (chinese) {
+                    arrayOf("事实", "重点", "关键信息", "Facts", "Key points", "Key information")
+                } else {
+                    arrayOf("Facts", "Key points", "Key information", "事实", "重点", "关键信息")
+                }))
+                "查风险" -> sectionItems(text, 3, *(if (chinese) {
+                    arrayOf("风险", "风险点", "重点", "Risks", "Risk points", "Key points")
+                } else {
+                    arrayOf("Risks", "Risk points", "Key points", "风险", "风险点", "重点")
+                }))
+                "写回复" -> sectionItems(text, 1, *(if (chinese) {
+                    arrayOf("语气", "依据", "重点", "Tone", "Basis", "Key points")
+                } else {
+                    arrayOf("Tone", "Basis", "Key points", "语气", "依据", "重点")
+                }))
+                else -> sectionItems(text, 3, *(if (chinese) {
+                    arrayOf("重点", "我觉得重点是", "判断依据", "Key points", "Basis", "Key information")
+                } else {
+                    arrayOf("Key points", "Basis", "Key information", "重点", "我觉得重点是", "判断依据")
+                }))
             }
             val suggestions = when (actionLabel) {
                 "找重点" -> emptyList()
                 "总结" -> emptyList()
-                "找下一步" -> sectionItems(text, 3, "下一步", "行动", "建议", "可以怎么做")
+                "找下一步" -> sectionItems(text, 3, *(if (chinese) {
+                    arrayOf("下一步", "行动", "建议", "可以怎么做", "Next steps", "Actions", "Suggestions", "What to do")
+                } else {
+                    arrayOf("Next steps", "Actions", "Suggestions", "What to do", "下一步", "行动", "建议", "可以怎么做")
+                }))
                 "查风险" -> emptyList()
-                "写回复" -> sectionItems(text, 1, "回复", "回复草稿", "建议回复").ifEmpty { listOf(conclusion) }
-                else -> sectionItems(text, 2, "下一步", "建议", "可以怎么做")
+                "写回复" -> sectionItems(text, 1, *(if (chinese) {
+                    arrayOf("回复", "回复草稿", "建议回复", "Reply", "Reply draft", "Suggested reply")
+                } else {
+                    arrayOf("Reply", "Reply draft", "Suggested reply", "回复", "回复草稿", "建议回复")
+                })).ifEmpty { listOf(conclusion) }
+                else -> sectionItems(text, 2, *(if (chinese) {
+                    arrayOf("下一步", "建议", "可以怎么做", "Next steps", "Suggestions", "What to do")
+                } else {
+                    arrayOf("Next steps", "Suggestions", "What to do", "下一步", "建议", "可以怎么做")
+                }))
             }
             return LiveModeCard(
                 watching = conclusion,
@@ -162,13 +238,36 @@ class LiveAnalyzer(
             )
         }
 
-        private fun actionContract(actionLabel: String): String = when (actionLabel) {
-            "找重点" -> "结论：一句话\n重点：\n- 最重要的信息 1\n- 最重要的信息 2\n- 最重要的信息 3"
-            "总结" -> "总结：一句话\n事实：\n- 事实 1\n- 事实 2\n- 事实 3"
-            "找下一步" -> "结论：一句话\n下一步：\n- 建议 1\n- 建议 2\n- 建议 3"
-            "查风险" -> "结论：一句话\n风险：\n- 风险 1\n- 风险 2\n- 风险 3\n如果没有明确风险，只输出：结论：暂未发现明确风险"
-            "写回复" -> "回复：一条可直接发送的短回复\n语气：一句话说明"
-            else -> "结论：一句话\n重点：\n- 要点 1\n- 要点 2\n下一步：\n- 建议 1"
+        private fun actionContract(actionLabel: String, locale: Locale): String {
+            return if (locale.isChineseLocale()) {
+                when (actionLabel) {
+                    "找重点" -> "结论：一句话\n重点：\n- 最重要的信息 1\n- 最重要的信息 2\n- 最重要的信息 3"
+                    "总结" -> "总结：一句话\n事实：\n- 事实 1\n- 事实 2\n- 事实 3"
+                    "找下一步" -> "结论：一句话\n下一步：\n- 建议 1\n- 建议 2\n- 建议 3"
+                    "查风险" -> "结论：一句话\n风险：\n- 风险 1\n- 风险 2\n- 风险 3\n如果没有明确风险，只输出：结论：暂未发现明确风险"
+                    "写回复" -> "回复：一条可直接发送的短回复\n语气：一句话说明"
+                    else -> "结论：一句话\n重点：\n- 要点 1\n- 要点 2\n下一步：\n- 建议 1"
+                }
+            } else {
+                when (actionLabel) {
+                    "找重点" -> "Conclusion: one sentence\nKey points:\n- Key point 1\n- Key point 2\n- Key point 3"
+                    "总结" -> "Summary: one sentence\nFacts:\n- Fact 1\n- Fact 2\n- Fact 3"
+                    "找下一步" -> "Conclusion: one sentence\nNext steps:\n- Suggestion 1\n- Suggestion 2\n- Suggestion 3"
+                    "查风险" -> "Conclusion: one sentence\nRisks:\n- Risk 1\n- Risk 2\n- Risk 3\nIf no clear risk is found, output only: Conclusion: No clear risk found"
+                    "写回复" -> "Reply: one short reply ready to send\nTone: one sentence"
+                    else -> "Conclusion: one sentence\nKey points:\n- Point 1\n- Point 2\nNext steps:\n- Suggestion 1"
+                }
+            }
+        }
+
+        private fun promptActionLabel(actionLabel: String, chinese: Boolean): String = when (actionLabel) {
+            "屏幕分析" -> if (chinese) "屏幕分析" else "screen analysis"
+            "找重点" -> if (chinese) "找重点" else "find key points"
+            "总结" -> if (chinese) "总结" else "summarize"
+            "找下一步" -> if (chinese) "找下一步" else "find the next step"
+            "查风险" -> if (chinese) "查风险" else "check risks"
+            "写回复" -> if (chinese) "写回复" else "draft a reply"
+            else -> actionLabel
         }
 
         private fun firstNonBlankSection(text: String, vararg names: String): String =
@@ -200,13 +299,14 @@ class LiveAnalyzer(
                         trimmed.startsWith("-") ||
                         trimmed.startsWith("•") ||
                         trimmed.startsWith("*") ||
-                        !trimmed.contains("：")
+                        !trimmed.contains("：") && !trimmed.contains(":")
                 }
             return LiveUiTreeProcessor.compactAnalysisItems(rawItems, maxItems)
         }
 
         /** 激进模式：截图为主信号 */
-        const val visionSystem = """
+        fun visionSystem(locale: Locale): String = if (locale.isChineseLocale()) {
+            """
 你是 AmberAgent 的 Live 伴随模式。你会收到一张当前手机屏幕截图，以及辅助的无障碍文字提取。
 
 规则：
@@ -215,6 +315,33 @@ class LiveAnalyzer(
 - 不要命令用户点击，不要假装已经执行操作。
 - 输出要短，适合手机侧栏阅读。
 - 如果信息不足，直接说"不确定"，不要用泛泛建议填充。
-"""
+""".trimIndent()
+        } else {
+            """
+You are AmberAgent's Live companion. You will receive a screenshot of the current phone screen and supplemental Accessibility text.
+
+Rules:
+- Use the screenshot as the primary signal; use Accessibility text only to verify text details such as long numbers or links.
+- Ignore the status bar, navigation bar, IME, floating windows, and other system chrome.
+- Do not tell the user to click anything or pretend that an action was executed.
+- Keep the answer short enough for a phone side panel.
+- If the information is insufficient, say "Uncertain" instead of filling space with generic advice.
+- Write all user-facing analysis content in ${locale.targetLanguage()}.
+""".trimIndent()
+        }
+
+        private fun Locale.isChineseLocale(): Boolean = language.equals("zh", ignoreCase = true)
+
+        private fun Locale.targetLanguage(): String = when (language.lowercase(Locale.ROOT)) {
+            "zh" -> if (country.equals("TW", ignoreCase = true) || script.equals("Hant", ignoreCase = true)) {
+                "繁體中文"
+            } else {
+                "简体中文"
+            }
+            "ja" -> "Japanese"
+            "ko" -> "Korean"
+            "ru" -> "Russian"
+            else -> getDisplayLanguage(Locale.ENGLISH).ifBlank { "English" }
+        }
     }
 }

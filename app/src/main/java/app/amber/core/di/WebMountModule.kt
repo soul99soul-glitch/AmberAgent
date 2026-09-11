@@ -150,6 +150,7 @@ val webMountModule = module {
 
     single {
         WebMountPrimitiveTools(
+            context = get(),
             pool = get(),
             activityStore = get(),
             manager = get(),

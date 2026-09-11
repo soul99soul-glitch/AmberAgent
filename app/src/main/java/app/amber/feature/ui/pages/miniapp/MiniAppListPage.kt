@@ -27,6 +27,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
 import com.composables.icons.lucide.Lucide
 import com.composables.icons.lucide.Settings
+import androidx.compose.ui.res.stringResource
+import app.amber.agent.R
 import app.amber.agent.Screen
 import app.amber.feature.miniapp.MiniAppRepository
 import app.amber.agent.data.db.entity.MiniAppEntity
@@ -54,11 +56,11 @@ fun MiniAppListPage(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("小应用", fontWeight = androidx.compose.ui.text.font.FontWeight.Bold) },
+                title = { Text(stringResource(R.string.miniapp_title), fontWeight = androidx.compose.ui.text.font.FontWeight.Bold) },
                 navigationIcon = { BackButton() },
                 actions = {
                     IconButton(onClick = { navController.navigate(Screen.MiniAppSettings) }) {
-                        Icon(Lucide.Settings, contentDescription = "小应用设置")
+                        Icon(Lucide.Settings, contentDescription = stringResource(R.string.miniapp_settings))
                     }
                 },
             )
@@ -72,7 +74,7 @@ fun MiniAppListPage(
                 contentAlignment = Alignment.Center
             ) {
                 Text(
-                    text = "还没有保存的小应用",
+                    text = stringResource(R.string.miniapp_empty),
                     style = LocalAmberType.current.secondary,
                     color = workspaceColors().muted,
                 )

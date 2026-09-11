@@ -24,6 +24,8 @@ import java.net.URLEncoder
 class GoogleDriveAppDataClient(
     private val httpClient: OkHttpClient,
     private val json: Json,
+    private val authorizationExpiredMessage: String =
+        "Google authorization expired. Reconnect the Google account.",
 ) {
     suspend fun findLatest(accessToken: String): GoogleDriveFile? {
         return listSnapshots(accessToken, pageSize = 1).firstOrNull()
@@ -153,7 +155,7 @@ class GoogleDriveAppDataClient(
                 )
         if (authRequired) {
             throw GoogleDriveAuthRequiredException(
-                message = "Google Drive 授权已失效，请重新连接 Google 账号。",
+                message = authorizationExpiredMessage,
                 accessToken = accessToken,
             )
         }

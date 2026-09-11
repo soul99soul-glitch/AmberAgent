@@ -25,6 +25,7 @@ import app.amber.feature.prompts.AgentPromptConfigRepository
 import app.amber.feature.board.hotlist.deepread.DeepReadPlaybookRepository
 import app.amber.core.settings.prefs.SettingsAggregator
 import app.amber.core.settings.getCurrentImageGenerationModel
+import app.amber.core.utils.appLocale
 import app.amber.core.repository.ImageGenerationRepository
 import app.amber.feature.webview.WebViewOperationStore
 import org.koin.core.context.GlobalContext
@@ -56,7 +57,7 @@ class LocalTools(
 ) {
     val javascriptTool by lazy { createJavascriptTool() }
 
-    val timeTool by lazy { createTimeTool() }
+    val timeTool by lazy { createTimeTool(context.appLocale()) }
 
     val clipboardTool by lazy {
         createClipboardTool(context)
@@ -90,11 +91,11 @@ class LocalTools(
      * place and they share the same registry argument.
      */
     fun registryIntrospectionTools(registry: ToolRegistry): List<Tool> = listOf(
-        createToolsListTool(registry, permissionBroker),
+        createToolsListTool(registry, permissionBroker, context),
         createToolPolicyExplainTool(registry),
     )
 
-    private val permissionsStatusTool by lazy { createPermissionsStatusTool(permissionBroker) }
+    private val permissionsStatusTool by lazy { createPermissionsStatusTool(permissionBroker, context) }
 
     private val healthSummaryTool by lazy { createHealthSummaryTool(healthSummaryReader) }
 

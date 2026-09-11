@@ -56,7 +56,9 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.res.stringResource
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import app.amber.agent.R
 import app.amber.agent.Screen
 import app.amber.feature.modelcouncil.CouncilParticipantStatus
 import app.amber.feature.modelcouncil.CouncilRoom
@@ -206,7 +208,7 @@ private fun CouncilRestartingPlaceholder() {
             )
             Spacer(Modifier.height(12.dp))
             Text(
-                text = "议会重置中…",
+                text = stringResource(R.string.council_room_restarting),
                 style = MaterialTheme.typography.bodyMedium,
                 color = workspace.muted,
             )
@@ -312,7 +314,7 @@ private fun CouncilRoomTopBar(
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    text = "议会聊天",
+                    text = stringResource(R.string.council_room_chat_title),
                     color = chatTheme.ink,
                     fontWeight = FontWeight.SemiBold,
                     style = MaterialTheme.typography.titleMedium,
@@ -322,7 +324,7 @@ private fun CouncilRoomTopBar(
                 if (modeControlsEnabled) {
                     Icon(
                         imageVector = Lucide.ArrowDown,
-                        contentDescription = "切换模式",
+                        contentDescription = stringResource(R.string.council_room_switch_mode),
                         tint = chatTheme.inkFaint,
                         modifier = Modifier
                             .padding(start = 3.dp)
@@ -342,7 +344,7 @@ private fun CouncilRoomTopBar(
         ) {
             Icon(
                 imageVector = Lucide.Users,
-                contentDescription = "成员与综合",
+                contentDescription = stringResource(R.string.council_room_members_and_synthesis),
                 tint = workspace.muted,
             )
         }
@@ -355,7 +357,7 @@ private fun CouncilRoomTopBar(
         ) {
             Icon(
                 imageVector = Lucide.Settings,
-                contentDescription = "议会设置",
+                contentDescription = stringResource(R.string.council_room_settings),
                 tint = workspace.muted,
             )
         }
@@ -376,16 +378,16 @@ private fun CouncilRoomTopBar(
     if (confirmRestart && onRestart != null) {
         AlertDialog(
             onDismissRequest = { confirmRestart = false },
-            title = { Text("重新开始议会？") },
-            text = { Text("当前这场讨论的记录会被清空，议会将以最新的成员设置重新开始。") },
+            title = { Text(stringResource(R.string.council_room_restart_title)) },
+            text = { Text(stringResource(R.string.council_room_restart_message)) },
             confirmButton = {
                 TextButton(onClick = {
                     confirmRestart = false
                     onRestart()
-                }) { Text("重新开始") }
+                }) { Text(stringResource(R.string.council_room_restart)) }
             },
             dismissButton = {
-                TextButton(onClick = { confirmRestart = false }) { Text("取消") }
+                TextButton(onClick = { confirmRestart = false }) { Text(stringResource(R.string.cancel)) }
             },
         )
     }
@@ -406,7 +408,7 @@ private fun CouncilRoomSubtitle(room: CouncilRoom) {
             maxLines = 1,
         )
         Text(
-            text = " · $memberCount 位成员 · 第 $round 轮",
+            text = stringResource(R.string.council_room_subtitle, memberCount, round),
             color = workspace.muted,
             style = MaterialTheme.typography.labelMedium,
             maxLines = 1,
@@ -474,15 +476,15 @@ private fun CouncilModePanel(
             ) {
                 CouncilModeRow(
                     icon = Lucide.MessageCircle,
-                    title = "自由群聊",
-                    subtitle = "成员各自发散、互相补充",
+                    title = stringResource(R.string.council_room_mode_explore),
+                    subtitle = stringResource(R.string.council_room_mode_explore_description),
                     active = current == CouncilRoomMode.EXPLORE,
                     onClick = { onSelect(CouncilRoomMode.EXPLORE) },
                 )
                 CouncilModeRow(
                     icon = Lucide.RefreshCw,
-                    title = "辩论",
-                    subtitle = "逐位轮流、互相质疑与补充",
+                    title = stringResource(R.string.council_room_mode_debate),
+                    subtitle = stringResource(R.string.council_room_mode_debate_description),
                     active = current == CouncilRoomMode.DEBATE,
                     onClick = { onSelect(CouncilRoomMode.DEBATE) },
                 )
@@ -533,8 +535,9 @@ private fun CouncilModeRow(
     }
 }
 
+@Composable
 fun CouncilRoomMode.label(): String = when (this) {
-    CouncilRoomMode.EXPLORE -> "自由群聊"
-    CouncilRoomMode.DEBATE -> "辩论"
-    CouncilRoomMode.SYNTHESIZE -> "综合"
+    CouncilRoomMode.EXPLORE -> stringResource(R.string.council_room_mode_explore)
+    CouncilRoomMode.DEBATE -> stringResource(R.string.council_room_mode_debate)
+    CouncilRoomMode.SYNTHESIZE -> stringResource(R.string.council_room_mode_synthesize)
 }

@@ -16,6 +16,7 @@ import okhttp3.Response
 import okhttp3.internal.closeQuietly
 import okio.IOException
 import java.util.concurrent.TimeUnit
+import java.util.Locale
 import kotlin.coroutines.resumeWithException
 import kotlin.uuid.Uuid
 
@@ -34,6 +35,19 @@ interface SearchService<T : SearchServiceOptions> {
         commonOptions: SearchCommonOptions,
         serviceOptions: T
     ): Result<SearchResult>
+
+    /**
+     * Executes a search with the caller's transient app locale. Services that
+     * do not need locale-specific transport can keep the legacy implementation.
+     * Locale is deliberately not part of [SearchCommonOptions], which is
+     * persisted in settings.
+     */
+    suspend fun search(
+        params: JsonObject,
+        commonOptions: SearchCommonOptions,
+        serviceOptions: T,
+        locale: Locale,
+    ): Result<SearchResult> = search(params, commonOptions, serviceOptions)
 
     suspend fun scrape(
         params: JsonObject,

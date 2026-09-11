@@ -7,6 +7,7 @@ import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
+import app.amber.agent.R
 import app.amber.core.sync.core.SYNC_ARCHIVE_EXTENSION
 import app.amber.core.sync.core.SyncArchiveManager
 import app.amber.core.sync.core.SyncCrypto
@@ -41,7 +42,7 @@ class LocalFolderSyncProvider(
 
     private fun treeUri(): Uri {
         val uri = folderStore.read()?.uri?.let { runCatching { Uri.parse(it) }.getOrNull() }
-            ?: error("尚未选择同步文件夹")
+            ?: error(context.getString(R.string.backup_choose_folder))
         return uri
     }
 
@@ -73,7 +74,7 @@ class LocalFolderSyncProvider(
             if (snapshotId.isBlank()) return@mapNotNull null
             val raw = runCatching {
                 resolver.openInputStream(treeDocumentUri(treeUri, documentId))?.use { input ->
-                    input.readBytesWithinLimit(MAX_SIDECAR_BYTES, displayName)
+                    input.readBytesWithinLimit(MAX_SIDECAR_BYTES, displayName, context)
                 }?.decodeToString()
             }.getOrElse { error ->
                 Log.w(TAG, "跳过无法读取的 sidecar $displayName: ${error.message}")
@@ -96,7 +97,7 @@ class LocalFolderSyncProvider(
 
     override suspend fun previewSnapshot(snapshotId: String): SyncSnapshotManifest =
         listSnapshots().firstOrNull { it.snapshotId == snapshotId }?.manifest
-            ?: error("同步文件夹里找不到快照 $snapshotId")
+            ?: error(context.getString(R.string.backup_folder_no_snapshots))
 
     override suspend fun uploadSnapshot(request: SyncProviderUploadRequest): SyncSnapshot =
         withContext(Dispatchers.IO) {
@@ -140,31 +141,31 @@ class LocalFolderSyncProvider(
                     treeUri,
                     "application/vnd.amberagent.backup+zip",
                     "upload-${System.nanoTime()}.tmp",
-                ) ?: error("无法在同步文件夹创建临时文件")
+                ) ?: error(context.getString(R.string.backup_unavailable))
                 resolver.openOutputStream(tempArchiveUri, "w")?.use { output ->
                     archiveFile.inputStream().buffered().use { input -> input.copyTo(output) }
-                } ?: error("无法写入同步文件夹")
+                } ?: error(context.getString(R.string.backup_unavailable))
                 tempSidecarUri = DocumentsContract.createDocument(
                     resolver,
                     treeUri,
                     "application/json",
                     "upload-${System.nanoTime()}.tmp",
-                ) ?: error("无法在同步文件夹创建临时元数据")
+                ) ?: error(context.getString(R.string.backup_unavailable))
                 resolver.openOutputStream(tempSidecarUri, "w")?.use { output ->
                     output.write(sidecarFile.readBytes())
-                } ?: error("无法写入同步文件夹元数据")
+                } ?: error(context.getString(R.string.backup_unavailable))
 
                 publishedArchiveUri = DocumentsContract.renameDocument(
                     resolver,
                     tempArchiveUri,
                     snapshotArchiveName(plan.snapshotId),
-                ) ?: error("无法在同步文件夹重命名备份文件")
+                ) ?: error(context.getString(R.string.backup_unavailable))
                 tempArchiveUri = null
                 DocumentsContract.renameDocument(
                     resolver,
                     tempSidecarUri,
                     snapshotSidecarName(plan.snapshotId),
-                ) ?: error("无法在同步文件夹重命名元数据")
+                ) ?: error(context.getString(R.string.backup_unavailable))
                 tempSidecarUri = null
 
                 plan.supersededSnapshotId?.let { superseded ->
@@ -195,18 +196,18 @@ class LocalFolderSyncProvider(
         val treeUri = treeUri()
         val resolver = context.contentResolver
         val documentId = findDocumentId(treeUri, snapshotArchiveName(snapshotId))
-            ?: error("同步文件夹里找不到快照 $snapshotId")
+            ?: error(context.getString(R.string.backup_folder_no_snapshots))
         val target = tempFile("download", ".$SYNC_ARCHIVE_EXTENSION")
         try {
             resolver.openInputStream(treeDocumentUri(treeUri, documentId))?.use { input ->
                 target.outputStream().buffered().use { output ->
-                    input.copyToWithinLimit(output, MAX_DOWNLOAD_BYTES, snapshotId)
+                    input.copyToWithinLimit(output, MAX_DOWNLOAD_BYTES, snapshotId, context)
                 }
-            } ?: error("无法读取同步文件夹里的快照")
+            } ?: error(context.getString(R.string.backup_unavailable))
             val manifest = previewSnapshot(snapshotId)
             if (manifest.contentSha256.isNotBlank()) {
                 require(crypto.sha256(target) == manifest.contentSha256) {
-                    "快照内容校验失败（digest 不匹配），已拒绝恢复"
+                    context.getString(R.string.backup_incompatible)
                 }
             }
             archiveManager.inspectArchive(target, snapshotArchiveName(snapshotId))
@@ -277,27 +278,40 @@ fun treeChildDocumentsUri(treeUri: Uri): Uri =
 fun treeDocumentUri(treeUri: Uri, documentId: String): Uri =
     DocumentsContract.buildDocumentUriUsingTree(treeUri, documentId)
 
-private fun java.io.InputStream.readBytesWithinLimit(limit: Int, entryName: String): ByteArray {
+private fun java.io.InputStream.readBytesWithinLimit(
+    limit: Int,
+    entryName: String,
+    context: Context,
+): ByteArray {
     val output = java.io.ByteArrayOutputStream()
     val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
     var total = 0
     while (true) {
         val read = read(buffer)
         if (read < 0) break
-        require(total <= limit - read) { "同步文件夹条目 $entryName 超过 $limit 字节" }
+        require(total <= limit - read) {
+            context.getString(R.string.backup_format_incompatible, entryName)
+        }
         output.write(buffer, 0, read)
         total += read
     }
     return output.toByteArray()
 }
 
-private fun java.io.InputStream.copyToWithinLimit(output: java.io.OutputStream, limit: Long, name: String) {
+private fun java.io.InputStream.copyToWithinLimit(
+    output: java.io.OutputStream,
+    limit: Long,
+    name: String,
+    context: Context,
+): Unit {
     val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
     var total = 0L
     while (true) {
         val read = read(buffer)
         if (read < 0) break
-        require(total <= limit - read) { "快照 $name 超过 $limit 字节下载上限" }
+        require(total <= limit - read) {
+            context.getString(R.string.backup_format_incompatible, name)
+        }
         output.write(buffer, 0, read)
         total += read
     }

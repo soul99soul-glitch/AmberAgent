@@ -29,7 +29,7 @@ class LoopbackOAuthCallbackServerTest {
             assertEquals("abc 123", result.code)
             assertEquals("state-1", result.state)
             assertEquals(null, result.error)
-            assertTrue(response.contains("授权完成"))
+            assertTrue(response.contains("Authorization complete"))
         }
     }
 

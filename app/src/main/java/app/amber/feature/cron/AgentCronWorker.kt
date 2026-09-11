@@ -22,6 +22,7 @@ import app.amber.agent.CHAT_COMPLETED_NOTIFICATION_CHANNEL_ID
 import app.amber.agent.R
 import app.amber.agent.RouteActivity
 import app.amber.core.service.ChatService
+import app.amber.core.utils.appLocale
 import app.amber.core.utils.sendNotification
 import org.koin.core.component.KoinComponent
 import org.koin.core.component.get
@@ -42,10 +43,11 @@ class AgentCronWorker(
             return runCatching {
                 val conversationId = Uuid.parse(task.conversationId)
                 val prompt = buildString {
-                    appendLine("这是 AmberAgent 手机端 Cron 定时任务触发。")
-                    appendLine("任务名称：${task.title}")
-                    appendLine("Cron：${task.cronExpression} (${task.timezoneId})")
-                    if (manualRun) appendLine("触发方式：手动立即运行")
+                    appendLine("This is an AmberAgent mobile Cron task trigger.")
+                    appendLine("Task name: ${task.title}")
+                    appendLine("Cron: ${task.cronExpression} (${task.timezoneId})")
+                    if (manualRun) appendLine("Trigger mode: Run immediately by user request")
+                    appendLine("Respond in app locale ${applicationContext.appLocale().toLanguageTag().ifBlank { "en" }} and preserve stable protocol/schema field names.")
                     appendLine()
                     append(task.prompt)
                 }
@@ -90,16 +92,18 @@ class AgentCronWorker(
         error: Throwable? = null,
     ) {
         val title = if (success) {
-            "Cron 已完成：${task.title}"
+            applicationContext.getString(R.string.cron_notification_completed_title, task.title)
         } else {
-            "Cron 运行失败：${task.title}"
+            applicationContext.getString(R.string.cron_notification_failed_title, task.title)
         }
         val content = if (success) {
-            "点击打开本次定时任务会话"
+            applicationContext.getString(R.string.cron_notification_completed_content)
         } else {
             when (error) {
-                is TimeoutCancellationException -> "生成等待超时，点击查看会话"
-                else -> (error?.message ?: error?.javaClass?.simpleName ?: "未知错误").take(160)
+                is TimeoutCancellationException ->
+                    applicationContext.getString(R.string.cron_notification_timeout_content)
+                else -> (error?.message ?: error?.javaClass?.simpleName
+                    ?: applicationContext.getString(R.string.cron_notification_unknown_error)).take(160)
             }
         }
         applicationContext.sendNotification(
@@ -131,8 +135,8 @@ class AgentCronWorker(
     private fun buildRunningNotification(task: AgentCronTask): Notification =
         NotificationCompat.Builder(applicationContext, CHAT_COMPLETED_NOTIFICATION_CHANNEL_ID)
             .setSmallIcon(R.drawable.amberagent_live_status_icon)
-            .setContentTitle("Cron 正在运行：${task.title}")
-            .setContentText("AmberAgent 正在执行定时任务")
+            .setContentTitle(applicationContext.getString(R.string.cron_notification_running_title, task.title))
+            .setContentText(applicationContext.getString(R.string.cron_notification_running_content))
             .setContentIntent(buildConversationPendingIntent(task.conversationId))
             .setOngoing(true)
             .setOnlyAlertOnce(true)

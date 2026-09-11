@@ -14,6 +14,7 @@ import app.amber.core.agent.utils.boolean
 import app.amber.core.agent.utils.long
 import app.amber.core.agent.utils.requiredString
 import app.amber.core.agent.utils.string
+import app.amber.core.ai.transformers.OcrStrings
 import app.amber.core.ai.transformers.OcrTransformer
 import app.amber.core.settings.prefs.SettingsAggregator
 import app.amber.feature.webmount.primitives.WebViewScreenshot
@@ -209,6 +210,7 @@ internal fun createVisualReadTool(
                             settings = settingsStore.settingsFlow.value,
                             promptOverride = prompt,
                             useCache = false,
+                            strings = deps.context?.let(OcrStrings::from) ?: OcrStrings.english(),
                         )
                         listOf(UIMessagePart.Text(buildJsonObject {
                             put("session_id", sessionId)

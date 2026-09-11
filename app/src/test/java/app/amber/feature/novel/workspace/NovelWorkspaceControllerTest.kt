@@ -8,12 +8,25 @@ import androidx.work.WorkerFactory
 import androidx.work.WorkerParameters
 import androidx.work.impl.WorkManagerImpl
 import androidx.work.impl.utils.futures.SettableFuture
-import app.amber.core.ai.Generator
+import app.amber.ai.core.MessageRole
+import app.amber.ai.ui.UIMessage
+import app.amber.ai.ui.UIMessagePart
+import app.amber.core.ai.GenerationChunk
+import app.amber.core.ai.GenerationRunSession
+import app.amber.core.ai.RunKernel
+import app.amber.core.agent.runtime.InMemoryAgentEventStore
+import app.amber.core.agent.runtime.adapter.LegacyRunScope
+import app.amber.core.agent.runtime.impl.InMemoryAgentRegistry
+import app.amber.core.agent.runtime.impl.InProcessAgentRunner
 import app.amber.feature.novelworkspace.NovelWorkspaceGhostwriteJobs
 import app.amber.feature.novelworkspace.NovelWorkspaceProjectRepository
-import java.lang.reflect.Proxy
+import app.amber.feature.novelworkspace.NovelWorkspaceStore
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withContext
 import org.junit.After
@@ -44,11 +57,30 @@ class NovelWorkspaceControllerTest {
         }).build()
         manager = WorkManagerImpl(context, configuration)
         WorkManagerImpl.setDelegate(manager)
-        // No provider is called by scheduling/recovery; fail if that contract changes.
-        val generator = Proxy.newProxyInstance(Generator::class.java.classLoader, arrayOf(Generator::class.java)) {
-            _, method, _ -> throw AssertionError("Unexpected provider invocation: ${method.name}")
-        } as Generator
-        controller = NovelWorkspaceGhostwriteController(context, NovelWorkspaceGhostwriteCoordinator(NovelWorkspaceRuntime(generator)))
+        // No provider is called by scheduling/recovery; the no-op kernel fails if that contract changes.
+        val payloads = NovelTurnPayloads()
+        val registry = InMemoryAgentRegistry().apply {
+            register(
+                descriptor = NovelTurnDescriptor.value,
+                inputClass = NovelTurnInput::class,
+                inputSerializer = NovelTurnInput.serializer(),
+                artifactSerializer = NovelTurnArtifact.serializer(),
+                factory = { NovelTurnAgent(payloads) },
+            )
+        }
+        val runner = InProcessAgentRunner(
+            registry = registry,
+            eventStore = InMemoryAgentEventStore(),
+            runScopeFactory = { id, _ -> LegacyRunScope(runId = id) },
+            scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined),
+        )
+        controller = NovelWorkspaceGhostwriteController(
+            context,
+            NovelWorkspaceGhostwriteCoordinator(
+                NovelWorkspaceRuntime(NoopKernel),
+                NovelTurnLauncher(runner, payloads),
+            ),
+        )
     }
 
     @After fun tearDown() {
@@ -59,6 +91,7 @@ class NovelWorkspaceControllerTest {
     @Test fun schedulingAndReconciliationShareTheSameDurableWorkIdentity() = runTest {
         val project = NovelWorkspaceProjectRepository(temporary.newFolder()).createBlank("Scheduling fixture")
         val directory = project.projectDirectory
+        seedChapterPlan(directory)
         val starting = async { controller.startBatch(directory, directory.name, "主线", 2) }
         val recovering = async { controller.reconcile(directory) }
         val job = starting.await()
@@ -77,6 +110,7 @@ class NovelWorkspaceControllerTest {
 
     @Test fun asynchronousEnqueueDatabaseFailureIsPersistedAsFailure() = runTest {
         val project = NovelWorkspaceProjectRepository(temporary.newFolder()).createBlank("Enqueue failure fixture")
+        seedChapterPlan(project.projectDirectory)
         withContext(Dispatchers.IO) {
             manager.pruneWork().result.get()
             // Fail the real asynchronous WorkManager transaction after job creation.
@@ -87,5 +121,25 @@ class NovelWorkspaceControllerTest {
         val job = NovelWorkspaceGhostwriteJobs.snapshot(project.projectDirectory).jobs.single()
         assertEquals("failed", job.status)
         assertNotNull(job.reason)
+    }
+
+    private fun seedChapterPlan(directory: java.io.File) {
+        NovelWorkspaceStore(directory).write(
+            "branches/主线/plan/this-chapter.md",
+            "推进下一章的主要冲突，并保留结尾悬念。",
+        )
+    }
+}
+
+private object NoopKernel : RunKernel {
+    override fun run(session: GenerationRunSession): Flow<GenerationChunk> = flow {
+        emit(
+            GenerationChunk.Messages(
+                session.messages + UIMessage(
+                    role = MessageRole.ASSISTANT,
+                    parts = listOf(UIMessagePart.Text("")),
+                ),
+            ),
+        )
     }
 }

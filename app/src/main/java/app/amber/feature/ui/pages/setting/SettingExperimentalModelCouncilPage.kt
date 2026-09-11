@@ -24,6 +24,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -64,6 +65,7 @@ fun SettingExperimentalModelCouncilPage(
     promptConfigRepository: AgentPromptConfigRepository = koinInject(),
 ) {
     val settings by vm.settings.collectAsStateWithLifecycle()
+    val context = LocalContext.current
     val council = settings.agentRuntime.modelCouncil
     val chatModels = remember(settings.providers) {
         settings.providers
@@ -80,6 +82,23 @@ fun SettingExperimentalModelCouncilPage(
     val timeoutOptions = listOf(60_000L, DEFAULT_MODEL_COUNCIL_SEAT_TIMEOUT_MS, 480_000L, EXTENDED_MODEL_COUNCIL_SEAT_TIMEOUT_MS)
     val budgetOptions = listOf(8_000, DEFAULT_MODEL_COUNCIL_OUTPUT_BUDGET_CHARS, 20_000, 40_000, EXTENDED_MODEL_COUNCIL_OUTPUT_BUDGET_CHARS)
     val scope = rememberCoroutineScope()
+    val councilPowerModeLabel = stringResource(R.string.setting_model_council_power_mode)
+    val councilPowerModeStandardLabel = stringResource(R.string.setting_model_council_power_mode_standard)
+    val councilPowerModeFullLabel = stringResource(R.string.setting_model_council_power_mode_full)
+    val councilPowerModeStandardDescription = stringResource(R.string.setting_model_council_power_mode_standard_description)
+    val councilPowerModeFullDescription = stringResource(R.string.setting_model_council_power_mode_full_description)
+    val councilHostModelLabel = stringResource(R.string.setting_model_council_host_model)
+    val councilHostReasoningLabel = stringResource(R.string.setting_model_council_host_reasoning)
+    val councilHostReasoningDefaultLabel = stringResource(R.string.setting_model_council_host_reasoning_default)
+    val councilHostPromptLabel = stringResource(R.string.setting_model_council_host_prompt_label)
+    val councilHostPromptPlaceholder = stringResource(R.string.setting_model_council_host_prompt_placeholder)
+    val councilHostNote = stringResource(R.string.setting_model_council_host_note)
+    val addExternalSeatLabel = stringResource(R.string.setting_model_council_add_external_seat)
+    val externalSeatNote = stringResource(R.string.setting_model_council_external_seat_note)
+    val councilPowerModeDescription = when (council.councilPowerMode) {
+        CouncilPowerMode.STANDARD -> councilPowerModeStandardDescription
+        CouncilPowerMode.FULL -> councilPowerModeFullDescription
+    }
 
     fun update(block: (ModelCouncilRuntimeSetting) -> ModelCouncilRuntimeSetting) {
         val nextCouncil = block(council)
@@ -118,14 +137,14 @@ fun SettingExperimentalModelCouncilPage(
         val seat = ModelCouncilSeat(
             seatId = Uuid.random().toString(),
             name = preset?.name ?: if (runnerType == ModelCouncilSeatRunner.EXTERNAL_CLI) {
-                "外部 CLI 席位"
+                context.getString(R.string.setting_model_council_external_cli)
             } else {
-                "自定义席位 $customIndex"
+                "${context.getString(R.string.setting_model_council_unnamed_seat)} $customIndex"
             },
             role = preset?.id ?: "custom-$customIndex",  // store canonical id; byName tolerates legacy aliases
             modelId = model?.id ?: Uuid.parse(MODEL_COUNCIL_EXTERNAL_MODEL_PLACEHOLDER),
             runnerType = runnerType,
-            systemPrompt = preset?.prompt ?: "请从这个席位的独特视角评估议题，给出清晰、可验证、不过度发散的判断。",
+            systemPrompt = preset?.prompt ?: "From this seat's unique perspective, evaluate the topic with a clear, testable, and focused judgment.",
             outputBudgetChars = council.outputBudgetChars,
             externalTool = if (runnerType == ModelCouncilSeatRunner.EXTERNAL_CLI) EXTERNAL_CLI_DEFAULT_TOOL_ID else "",
         )
@@ -160,7 +179,7 @@ fun SettingExperimentalModelCouncilPage(
                         style = MaterialTheme.typography.bodySmall,
                         color = workspaceColors().muted,
                     )
-                    ModelCouncilPropertyRow(label = "议会模式") {
+                    ModelCouncilPropertyRow(label = councilPowerModeLabel) {
                         Select(
                             options = powerModeOptions,
                             selectedOption = council.councilPowerMode,
@@ -169,23 +188,20 @@ fun SettingExperimentalModelCouncilPage(
                             },
                             optionToString = { mode ->
                                 when (mode) {
-                                    CouncilPowerMode.STANDARD -> "标准"
-                                    CouncilPowerMode.FULL -> "全能"
+                                    CouncilPowerMode.STANDARD -> councilPowerModeStandardLabel
+                                    CouncilPowerMode.FULL -> councilPowerModeFullLabel
                                 }
                             },
                             modifier = Modifier.fillMaxWidth(),
                         )
                     }
                     Text(
-                        text = when (council.councilPowerMode) {
-                            CouncilPowerMode.STANDARD -> "标准：串行发言→综合，主持人被动，速度快。"
-                            CouncilPowerMode.FULL -> "全能：主持人主动编排，可联网搜索/抓取补全信息、轮末点评指引，速度较慢。"
-                        },
+                        text = councilPowerModeDescription,
                         style = MaterialTheme.typography.bodySmall,
                         color = workspaceColors().muted,
                     )
                     Text(
-                        text = "主持人模型",
+                        text = councilHostModelLabel,
                         style = MaterialTheme.typography.labelMedium,
                         color = workspaceColors().faint,
                     )
@@ -197,28 +213,28 @@ fun SettingExperimentalModelCouncilPage(
                         modifier = Modifier.fillMaxWidth(),
                         onSelect = { model -> update { it.copy(hostModelId = model.id) } },
                     )
-                    ModelCouncilPropertyRow(label = "主持人推理强度") {
+                    ModelCouncilPropertyRow(label = councilHostReasoningLabel) {
                         Select(
                             options = reasoningLevelOptions,
                             selectedOption = council.hostReasoningLevel,
                             onOptionSelected = { level ->
                                 update { it.copy(hostReasoningLevel = level) }
                             },
-                            optionToString = { level -> level?.name?.lowercase() ?: "跟随模型默认" },
+                            optionToString = { level -> level?.name?.lowercase() ?: councilHostReasoningDefaultLabel },
                             modifier = Modifier.fillMaxWidth(),
                         )
                     }
                     OutlinedTextField(
                         value = council.hostSystemPrompt,
                         onValueChange = { value -> update { it.copy(hostSystemPrompt = value.take(2_000)) } },
-                        label = { Text("主持人提示词（可选）") },
-                        placeholder = { Text("留空用内置主持人提示；填写则作为风格 / 人设补充追加到内置提示之后") },
+                        label = { Text(councilHostPromptLabel) },
+                        placeholder = { Text(councilHostPromptPlaceholder) },
                         minLines = 2,
                         maxLines = 5,
                         modifier = Modifier.fillMaxWidth(),
                     )
                     Text(
-                        text = "主持人负责开场、引导讨论与综合前的收束；不选模型则跟随对话助手模型。",
+                        text = councilHostNote,
                         style = MaterialTheme.typography.bodySmall,
                         color = workspaceColors().muted,
                     )
@@ -265,13 +281,13 @@ fun SettingExperimentalModelCouncilPage(
                             onClick = { addSeat(ModelCouncilSeatRunner.PROVIDER_MODEL) },
                         )
                         ExperimentActionButton(
-                            text = "添加外部 CLI 席位",
+                            text = addExternalSeatLabel,
                             enabled = chatModels.isNotEmpty() &&
                                 council.defaultSeats.size < council.maxSeats,
                             onClick = { addSeat(ModelCouncilSeatRunner.EXTERNAL_CLI) },
                         )
                     }
-                    ExperimentNote(text = "外部 CLI 席位只会在本轮议会工具调用显式允许外部 CLI 时参与；启动本地终端进程前会要求人工确认。")
+                    ExperimentNote(text = externalSeatNote)
                 }
             }
             item {
@@ -363,6 +379,7 @@ private fun ModelCouncilSeatEditor(
     onPresetSelected: (app.amber.feature.modelcouncil.ModelCouncilRolePreset) -> Unit,
     onDelete: () -> Unit,
 ) {
+    val context = LocalContext.current
     val workspace = workspaceColors()
     val runnerOptions = listOf(ModelCouncilSeatRunner.PROVIDER_MODEL, ModelCouncilSeatRunner.EXTERNAL_CLI)
     val reasoningOptions = listOf<ReasoningLevel?>(null) + ReasoningLevel.entries
@@ -372,6 +389,32 @@ private fun ModelCouncilSeatEditor(
     val selectedExternalTool = externalToolOptions.firstOrNull {
         it.id == ExternalCliToolRegistry.normalizeToolId(seat.externalTool)
     } ?: externalToolOptions.first()
+    val unnamedSeatLabel = stringResource(R.string.setting_model_council_unnamed_seat)
+    val externalSeatSummary = stringResource(
+        R.string.setting_model_council_external_seat_summary,
+        selectedExternalTool.displayName,
+    )
+    val modelSeatSummary = stringResource(
+        R.string.setting_model_council_model_seat_summary,
+        ModelCouncilRolePresets.byName(seat.role)?.name ?: seat.role,
+    )
+    val seatNameLabel = stringResource(R.string.setting_model_council_seat_name)
+    val seatTypeLabel = stringResource(R.string.setting_model_council_seat_type)
+    val externalCliLabel = stringResource(R.string.setting_model_council_external_cli)
+    val rolePresetLabel = stringResource(R.string.setting_model_council_role_preset)
+    val modelLabel = stringResource(R.string.setting_model_council_model)
+    val reasoningLabel = stringResource(R.string.setting_model_council_reasoning)
+    val reasoningDefaultLabel = stringResource(R.string.setting_model_council_reasoning_default)
+    val cliTypeLabel = stringResource(R.string.setting_model_council_cli_type)
+    val runtimeLabel = stringResource(R.string.setting_model_council_runtime)
+    val runtimeFollowTerminalLabel = stringResource(R.string.setting_model_council_runtime_follow_terminal)
+    val runtimeBuiltinAlpineLabel = stringResource(R.string.setting_model_council_runtime_builtin_alpine)
+    val cliModelParameterLabel = stringResource(R.string.setting_model_council_cli_model_parameter)
+    val externalRuntimeNote = stringResource(
+        R.string.setting_model_council_external_runtime_note,
+        selectedExternalTool.binary,
+    )
+    val seatPromptLabel = stringResource(R.string.setting_model_council_seat_prompt)
     val firstChatModel = remember(settingsProviders) {
         settingsProviders.flatMap { it.models }.firstOrNull { it.type == ModelType.CHAT }
     }
@@ -407,18 +450,14 @@ private fun ModelCouncilSeatEditor(
                     verticalArrangement = Arrangement.spacedBy(2.dp),
                 ) {
                     Text(
-                        text = seat.name.ifBlank { "未命名席位" },
+                        text = seat.name.ifBlank { unnamedSeatLabel },
                         style = MaterialTheme.typography.titleSmall,
                         color = workspace.ink,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
                     Text(
-                        text = if (seat.runnerType == ModelCouncilSeatRunner.EXTERNAL_CLI) {
-                            "外部 CLI · ${selectedExternalTool.displayName}"
-                        } else {
-                            "模型席位 · ${ModelCouncilRolePresets.byName(seat.role)?.name ?: seat.role}"
-                        },
+                        text = if (seat.runnerType == ModelCouncilSeatRunner.EXTERNAL_CLI) externalSeatSummary else modelSeatSummary,
                         style = MaterialTheme.typography.bodySmall,
                         color = workspace.muted,
                         maxLines = 1,
@@ -435,12 +474,12 @@ private fun ModelCouncilSeatEditor(
             OutlinedTextField(
                 value = seat.name,
                 onValueChange = { value -> onSeatChanged(seat.copy(name = value.take(40))) },
-                label = { Text("席位名") },
+                label = { Text(seatNameLabel) },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )
 
-            ModelCouncilPropertyRow(label = "席位类型") {
+            ModelCouncilPropertyRow(label = seatTypeLabel) {
                 Select(
                     options = runnerOptions,
                     selectedOption = seat.runnerType,
@@ -466,15 +505,15 @@ private fun ModelCouncilSeatEditor(
                     },
                     optionToString = {
                         when (it) {
-                            ModelCouncilSeatRunner.PROVIDER_MODEL -> "模型"
-                            ModelCouncilSeatRunner.EXTERNAL_CLI -> "外部 CLI"
+                            ModelCouncilSeatRunner.PROVIDER_MODEL -> modelLabel
+                            ModelCouncilSeatRunner.EXTERNAL_CLI -> externalCliLabel
                         }
                     },
                     modifier = Modifier.fillMaxWidth(),
                 )
             }
 
-            ModelCouncilPropertyRow(label = "角色预设") {
+            ModelCouncilPropertyRow(label = rolePresetLabel) {
                 Select(
                     options = ModelCouncilRolePresets.presets,
                     selectedOption = ModelCouncilRolePresets.byName(seat.role) ?: ModelCouncilRolePresets.presets.first(),
@@ -485,7 +524,7 @@ private fun ModelCouncilSeatEditor(
             }
 
             if (seat.runnerType == ModelCouncilSeatRunner.PROVIDER_MODEL) {
-                ModelCouncilPropertyRow(label = "模型") {
+                ModelCouncilPropertyRow(label = modelLabel) {
                     ModelSelector(
                         modelId = seat.modelId,
                         providers = settingsProviders,
@@ -495,17 +534,17 @@ private fun ModelCouncilSeatEditor(
                         onSelect = { model -> onSeatChanged(seat.copy(modelId = model.id)) },
                     )
                 }
-                ModelCouncilPropertyRow(label = "思考档位") {
+                ModelCouncilPropertyRow(label = reasoningLabel) {
                     Select(
                         options = reasoningOptions,
                         selectedOption = seat.reasoningLevel,
                         onOptionSelected = { level -> onSeatChanged(seat.copy(reasoningLevel = level)) },
-                        optionToString = { level -> level?.name?.lowercase() ?: "默认" },
+                        optionToString = { level -> level?.name?.lowercase() ?: reasoningDefaultLabel },
                         modifier = Modifier.fillMaxWidth(),
                     )
                 }
             } else {
-                ModelCouncilPropertyRow(label = "CLI 类型") {
+                ModelCouncilPropertyRow(label = cliTypeLabel) {
                     Select(
                         options = externalToolOptions,
                         selectedOption = selectedExternalTool,
@@ -516,9 +555,13 @@ private fun ModelCouncilSeatEditor(
                                     name = if (
                                         seat.name.isBlank() ||
                                         seat.name == "Gemini CLI 席位" ||
-                                        seat.name == "外部 CLI 席位"
+                                        seat.name == "外部 CLI 席位" ||
+                                        seat.name == context.getString(R.string.setting_model_council_external_cli)
                                     ) {
-                                        "${tool.displayName} 席位"
+                                        context.getString(
+                                            R.string.setting_model_council_external_seat_summary,
+                                            tool.displayName,
+                                        )
                                     } else {
                                         seat.name
                                     },
@@ -529,15 +572,15 @@ private fun ModelCouncilSeatEditor(
                         modifier = Modifier.fillMaxWidth(),
                     )
                 }
-                ModelCouncilPropertyRow(label = "运行时") {
+                ModelCouncilPropertyRow(label = runtimeLabel) {
                     Select(
                         options = runtimeOptions,
                         selectedOption = selectedRuntime,
                         onOptionSelected = { runtime -> onSeatChanged(seat.copy(externalRuntime = runtime)) },
                         optionToString = {
                             when (it) {
-                                "" -> "跟随终端设置"
-                                "builtin_alpine" -> "内置 Alpine"
+                                "" -> runtimeFollowTerminalLabel
+                                "builtin_alpine" -> runtimeBuiltinAlpineLabel
                                 "android_shell" -> "Android Shell"
                                 "termux_external" -> "Termux"
                                 else -> it
@@ -549,18 +592,18 @@ private fun ModelCouncilSeatEditor(
                 OutlinedTextField(
                     value = seat.externalModel,
                     onValueChange = { value -> onSeatChanged(seat.copy(externalModel = value.take(120))) },
-                    label = { Text("CLI 模型参数（可选）") },
+                    label = { Text(cliModelParameterLabel) },
                     placeholder = { Text(selectedExternalTool.modelPlaceholder) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
-                ExperimentNote(text = "外部 CLI 席位会在终端运行时中隔离执行。手机上需要对应运行时能找到 ${selectedExternalTool.binary} 命令；登录状态必须由该 CLI 的 probe 验证。")
+                ExperimentNote(text = externalRuntimeNote)
             }
 
             OutlinedTextField(
                 value = seat.systemPrompt,
                 onValueChange = { value -> onSeatChanged(seat.copy(systemPrompt = value.take(2_000))) },
-                label = { Text("席位提示词") },
+                label = { Text(seatPromptLabel) },
                 minLines = 3,
                 maxLines = 6,
                 modifier = Modifier.fillMaxWidth(),

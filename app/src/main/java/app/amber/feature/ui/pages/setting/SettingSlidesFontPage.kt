@@ -35,6 +35,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -42,6 +43,7 @@ import com.dokar.sonner.ToastType
 import kotlinx.coroutines.launch
 import com.composables.icons.lucide.Lucide
 import com.composables.icons.lucide.EllipsisVertical
+import app.amber.agent.R
 import app.amber.core.font.FontPackCategory
 import app.amber.core.font.FontPackState
 import app.amber.core.font.SlidesFontRepository
@@ -68,11 +70,14 @@ fun SettingSlidesFontPage(
     val scope = rememberCoroutineScope()
     val toaster = LocalToaster.current
     val context = LocalContext.current
+    val fontInstalledToast = stringResource(R.string.setting_slides_font_font_installed)
+    val fontDownloadFailedToast = stringResource(R.string.setting_slides_font_download_failed)
+    val fontDeletedToast = stringResource(R.string.setting_slides_font_font_deleted)
 
     Scaffold(
         topBar = {
             WorkspaceTopBar(
-                title = "Slides 字体资源",
+                title = stringResource(R.string.setting_slides_font_page_title),
                 navigationIcon = { BackButton() },
                 scrollBehavior = scrollBehavior,
             )
@@ -88,7 +93,7 @@ fun SettingSlidesFontPage(
             item {
                 CardGroup(
                     modifier = Modifier.padding(horizontal = 8.dp),
-                    title = { Text("可下载中文字体") },
+                    title = { Text(stringResource(R.string.setting_slides_font_downloadable_fonts)) },
                 ) {
                     fonts.forEach { state ->
                         key(state.pack.id) {
@@ -131,10 +136,10 @@ fun SettingSlidesFontPage(
                                                     runCatching {
                                                         fontRepository.download(state.pack.id)
                                                     }.onSuccess {
-                                                        toaster.show("字体已安装", type = ToastType.Success)
+                                                        toaster.show(fontInstalledToast, type = ToastType.Success)
                                                     }.onFailure { error ->
                                                         toaster.show(
-                                                            error.message ?: "字体下载失败",
+                                                            error.message ?: fontDownloadFailedToast,
                                                             type = ToastType.Error,
                                                         )
                                                     }
@@ -143,11 +148,14 @@ fun SettingSlidesFontPage(
                                             contentPadding = PaddingValues(horizontal = 14.dp, vertical = 4.dp),
                                             modifier = Modifier.height(32.dp),
                                         ) {
-                                            Text("下载", style = MaterialTheme.typography.labelMedium)
+                                            Text(
+                                                stringResource(R.string.setting_slides_font_download),
+                                                style = MaterialTheme.typography.labelMedium,
+                                            )
                                         }
                                     } else {
                                         Text(
-                                            "已安装",
+                                            stringResource(R.string.setting_experimental_installed),
                                             style = MaterialTheme.typography.labelMedium,
                                             color = MaterialTheme.colorScheme.primary,
                                         )
@@ -162,7 +170,7 @@ fun SettingSlidesFontPage(
                                     ) {
                                         Icon(
                                             Lucide.EllipsisVertical,
-                                            contentDescription = "更多",
+                                            contentDescription = stringResource(R.string.more_options),
                                             modifier = Modifier.size(20.dp),
                                         )
                                     }
@@ -171,14 +179,14 @@ fun SettingSlidesFontPage(
                                         onDismissRequest = { showMenu = false },
                                     ) {
                                         DropdownMenuItem(
-                                            text = { Text("来源") },
+                                            text = { Text(stringResource(R.string.setting_slides_font_source)) },
                                             onClick = {
                                                 showMenu = false
                                                 context.openUrl(state.pack.sourcePageUrl)
                                             },
                                         )
                                         DropdownMenuItem(
-                                            text = { Text("许可证") },
+                                            text = { Text(stringResource(R.string.setting_slides_font_license)) },
                                             onClick = {
                                                 showMenu = false
                                                 context.openUrl(state.pack.licenseUrl)
@@ -188,7 +196,7 @@ fun SettingSlidesFontPage(
                                             DropdownMenuItem(
                                                 text = {
                                                     Text(
-                                                        "删除",
+                                                        stringResource(R.string.delete),
                                                         color = MaterialTheme.colorScheme.error,
                                                     )
                                                 },
@@ -196,7 +204,7 @@ fun SettingSlidesFontPage(
                                                     showMenu = false
                                                     scope.launch {
                                                         fontRepository.delete(state.pack.id)
-                                                        toaster.show("已删除字体", type = ToastType.Success)
+                                                        toaster.show(fontDeletedToast, type = ToastType.Success)
                                                     }
                                                 },
                                             )
@@ -229,12 +237,13 @@ private fun StyleBadge(label: String) {
     }
 }
 
+@Composable
 private fun FontPackCategory.label(): String =
     when (this) {
-        FontPackCategory.SERIF -> "宋/明体"
-        FontPackCategory.SANS -> "黑体"
-        FontPackCategory.HANDWRITING -> "手写阅读"
-        FontPackCategory.MONO -> "等宽"
+        FontPackCategory.SERIF -> stringResource(R.string.setting_slides_font_category_serif)
+        FontPackCategory.SANS -> stringResource(R.string.setting_slides_font_category_sans)
+        FontPackCategory.HANDWRITING -> stringResource(R.string.setting_slides_font_category_handwriting)
+        FontPackCategory.MONO -> stringResource(R.string.setting_slides_font_category_mono)
     }
 
 private fun formatBytes(bytes: Long): String =

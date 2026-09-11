@@ -15,13 +15,17 @@ import kotlinx.serialization.json.jsonPrimitive
  * that displays as a fallback preview in the chat timeline.
  */
 object GenerativeWidgetRenderer {
-    fun render(renderer: String?, spec: JsonElement?): String? {
+    fun render(
+        renderer: String?,
+        spec: JsonElement?,
+        copy: GenerativeWidgetCopy = GenerativeWidgetCopy.DEFAULT,
+    ): String? {
         if (GuizangHtmlDeckValidator.isRenderer(renderer)) {
-            val specObject = spec as? JsonObject ?: return renderErrorSvg("full_html: no spec")
+            val specObject = spec as? JsonObject ?: return renderErrorSvg(copy.noSpec(GuizangHtmlDeckValidator.RENDERER))
             val title = specObject.string("title")
                 ?: specObject.string("source")
-                ?: "Full HTML Deck"
-            return renderFullHtmlPreview(title)
+                ?: copy.fullHtmlDeckTitle
+            return renderFullHtmlPreview(title, copy)
         }
         if (renderer?.lowercase() == "slides") {
             val specArray = when (spec) {
@@ -32,16 +36,19 @@ object GenerativeWidgetRenderer {
                 else -> null
             }
             if (specArray != null) {
-                return runCatching { renderSlidesPreview(specArray) }.getOrNull()
-                    ?: renderErrorSvg("slides: rendering failed")
+                return runCatching { renderSlidesPreview(specArray, copy) }.getOrNull()
+                    ?: renderErrorSvg(copy.renderingFailed("slides"))
             }
-            return renderErrorSvg("slides: invalid spec shape")
+            return renderErrorSvg(copy.invalidSpecShape("slides"))
         }
-        val specObject = spec as? JsonObject ?: return renderErrorSvg("${renderer}: no spec")
+        val rendererName = renderer ?: "null"
+        val specObject = spec as? JsonObject ?: return renderErrorSvg(copy.noSpec(rendererName))
         return runCatching {
             when (renderer?.lowercase()) {
-                "chart", "vchart" -> renderChart(specObject) ?: renderErrorSvg("chart: no renderable data")
-                "diagram" -> renderDiagram(specObject) ?: renderErrorSvg("diagram: no renderable data")
+                "chart", "vchart" -> renderChart(specObject, copy)
+                    ?: renderErrorSvg(copy.noRenderableData(rendererName))
+                "diagram" -> renderDiagram(specObject)
+                    ?: renderErrorSvg(copy.noRenderableData(rendererName))
                 else -> null
             }
         }.getOrNull()
@@ -60,7 +67,7 @@ object GenerativeWidgetRenderer {
         """.trimIndent()
     }
 
-    private fun renderFullHtmlPreview(title: String): String {
+    private fun renderFullHtmlPreview(title: String, copy: GenerativeWidgetCopy): String {
         val safeTitle = escape(title).take(56)
         return """
             <svg width="100%" viewBox="0 0 680 220" xmlns="http://www.w3.org/2000/svg">
@@ -73,16 +80,16 @@ object GenerativeWidgetRenderer {
               </defs>
               <rect width="680" height="220" rx="16" fill="url(#g)"/>
               <rect x="26" y="24" width="628" height="172" rx="12" fill="rgba(255,255,255,.13)" stroke="rgba(255,255,255,.35)"/>
-              <text x="52" y="68" font-size="13" letter-spacing="3" fill="rgba(255,255,255,.76)">FULL HTML DECK</text>
+              <text x="52" y="68" font-size="13" letter-spacing="3" fill="rgba(255,255,255,.76)">${escape(copy.fullHtmlDeckBadge)}</text>
               <text x="52" y="116" font-size="28" font-weight="700" fill="#ffffff">$safeTitle</text>
-              <text x="52" y="154" font-size="14" fill="rgba(255,255,255,.78)">Canvas · Motion · fullscreen deck</text>
+              <text x="52" y="154" font-size="14" fill="rgba(255,255,255,.78)">${escape(copy.fullHtmlDeckMeta)}</text>
               <circle cx="594" cy="64" r="20" fill="rgba(255,255,255,.18)"/>
               <circle cx="594" cy="64" r="8" fill="#fff"/>
             </svg>
         """.trimIndent()
     }
 
-    private fun renderChart(spec: JsonObject): String? {
+    private fun renderChart(spec: JsonObject, copy: GenerativeWidgetCopy): String? {
         val type = spec.string("type")?.lowercase().orEmpty()
         val labels = spec.stringArray("x").ifEmpty { spec.stringArray("labels") }.take(24)
         val series = spec["series"]?.jsonArrayOrNull()
@@ -91,7 +98,7 @@ object GenerativeWidgetRenderer {
                 val data = obj.numberArray("data").take(24)
                 if (data.isEmpty()) return@mapNotNull null
                 ChartSeries(
-                    name = obj.string("name")?.take(32).orEmpty().ifBlank { "Value" },
+                    name = obj.string("name")?.take(32).orEmpty().ifBlank { copy.defaultSeriesName },
                     data = data,
                 )
             }
@@ -101,7 +108,7 @@ object GenerativeWidgetRenderer {
         return when (type) {
             "line" -> renderLineChart(labels, series)
             "bar", "column" -> renderBarChart(labels, series)
-            "pie", "donut" -> renderPieLikeChart(labels, series.first())
+            "pie", "donut" -> renderPieLikeChart(labels, series.first(), copy)
             else -> renderBarChart(labels, series)
         }
     }
@@ -160,11 +167,15 @@ object GenerativeWidgetRenderer {
         }
     }
 
-    private fun renderPieLikeChart(labels: List<String>, series: ChartSeries): String {
+    private fun renderPieLikeChart(
+        labels: List<String>,
+        series: ChartSeries,
+        copy: GenerativeWidgetCopy,
+    ): String {
         val total = series.data.sum().takeIf { it > 0.0 } ?: return renderBarChart(labels, listOf(series))
         val colors = listOf("#2563eb", "#16a34a", "#ea580c", "#9333ea", "#0891b2", "#be123c")
         return chartSvg(680, 340) {
-            appendLine("""<text x="34" y="42" font-size="18" font-weight="700" fill="#111827">占比</text>""")
+            appendLine("""<text x="34" y="42" font-size="18" font-weight="700" fill="#111827">${escape(copy.shareLabel)}</text>""")
             var x = 34.0
             series.data.take(labels.size).forEachIndexed { index, value ->
                 val width = (560.0 * value / total).coerceAtLeast(4.0)
@@ -248,11 +259,14 @@ object GenerativeWidgetRenderer {
         }
     }
 
-    private fun renderSlidesPreview(slides: JsonArray): String? {
+    private fun renderSlidesPreview(
+        slides: JsonArray,
+        copy: GenerativeWidgetCopy,
+    ): String? {
         val items = slides.mapNotNull { it as? JsonObject }.take(12)
         if (items.isEmpty()) return null
         val first = items.first()
-        val title = first.string("title").orEmpty().ifBlank { "Slide 1" }
+        val title = first.string("title").orEmpty().ifBlank { copy.slideNumber(1) }
         val subtitle = first.string("subtitle").orEmpty()
         val bulletItems = first["content"]?.jsonArrayOrNull()
             ?.mapNotNull { runCatching { it.jsonPrimitive.content.trim() }.getOrNull() }
@@ -272,7 +286,7 @@ object GenerativeWidgetRenderer {
                 appendLine("""<text x="64" y="${y + 6}" font-size="14" fill="#374151">${escape(item).take(50)}</text>""")
             }
             if (items.size > 1) {
-                appendLine("""<text x="40" y="${height - 28}" font-size="12" fill="#9ca3af">${items.size} slides · 点击展开浏览</text>""")
+                appendLine("""<text x="40" y="${height - 28}" font-size="12" fill="#9ca3af">${escape(copy.slideBrowseHint(items.size))}</text>""")
             }
         }
     }

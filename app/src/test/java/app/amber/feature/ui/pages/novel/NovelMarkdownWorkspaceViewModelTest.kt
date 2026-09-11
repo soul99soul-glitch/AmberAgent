@@ -12,17 +12,32 @@ import app.amber.agent.data.files.CasTestFixtures
 import app.amber.ai.provider.Model
 import app.amber.ai.provider.ProviderSetting
 import app.amber.core.ai.GenerationChunk
-import app.amber.core.ai.Generator
+import app.amber.core.ai.GenerationRunSession
+import app.amber.core.ai.RunKernel
+import app.amber.ai.ui.UIMessage
+import app.amber.ai.ui.UIMessagePart
+import app.amber.core.agent.runtime.InMemoryAgentEventStore
+import app.amber.core.agent.runtime.adapter.LegacyRunScope
+import app.amber.core.agent.runtime.impl.InMemoryAgentRegistry
+import app.amber.core.agent.runtime.impl.InProcessAgentRunner
 import app.amber.core.settings.Settings
+import app.amber.feature.novel.workspace.NovelTurnAgent
+import app.amber.feature.novel.workspace.NovelTurnArtifact
+import app.amber.feature.novel.workspace.NovelTurnDescriptor
+import app.amber.feature.novel.workspace.NovelTurnInput
+import app.amber.feature.novel.workspace.NovelTurnLauncher
+import app.amber.feature.novel.workspace.NovelTurnPayloads
 import app.amber.feature.novel.workspace.NovelWorkspaceGhostwriteController
 import app.amber.feature.novel.workspace.NovelWorkspaceGhostwriteCoordinator
 import app.amber.feature.novel.workspace.NovelWorkspaceRuntime
+import app.amber.feature.novelworkspace.NovelWorkspaceBranches
+import app.amber.feature.novelworkspace.NovelWorkspaceFocus
 import app.amber.feature.novelworkspace.NovelWorkspaceLedger
 import app.amber.feature.novelworkspace.NovelWorkspaceProjectRepository
 import app.amber.feature.novelworkspace.NovelWorkspaceUnresolvedStore
-import java.lang.reflect.InvocationHandler
-import java.lang.reflect.Proxy
 import java.util.concurrent.atomic.AtomicInteger
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.delay
@@ -83,7 +98,7 @@ class NovelMarkdownWorkspaceViewModelTest {
 
     @Test
     fun `rewrite stop clears busy and can start another turn`() = runBlocking {
-        val scripted = ScriptedGenerator(ScriptedGenerator.Behavior.Hang)
+        val scripted = ScriptedKernel(ScriptedKernel.Behavior.Hang)
         val fixture = createFixture(scripted, unresolved = true)
         val viewModel = fixture.viewModel
 
@@ -108,7 +123,7 @@ class NovelMarkdownWorkspaceViewModelTest {
 
     @Test
     fun `consistency stop clears both operation flags and can run again`() = runBlocking {
-        val scripted = ScriptedGenerator(ScriptedGenerator.Behavior.Hang)
+        val scripted = ScriptedKernel(ScriptedKernel.Behavior.Hang)
         val fixture = createFixture(scripted)
         val viewModel = fixture.viewModel
 
@@ -131,9 +146,9 @@ class NovelMarkdownWorkspaceViewModelTest {
 
     @Test
     fun `rewrite provider failure is visible and the next rewrite is executable`() = runBlocking {
-        val scripted = ScriptedGenerator(
-            ScriptedGenerator.Behavior.Fail,
-            ScriptedGenerator.Behavior.Hang,
+        val scripted = ScriptedKernel(
+            ScriptedKernel.Behavior.Fail,
+            ScriptedKernel.Behavior.Hang,
         )
         val fixture = createFixture(scripted, unresolved = true)
         val viewModel = fixture.viewModel
@@ -154,9 +169,9 @@ class NovelMarkdownWorkspaceViewModelTest {
 
     @Test
     fun `consistency partial failure does not publish a report and can run again`() = runBlocking {
-        val scripted = ScriptedGenerator(
-            ScriptedGenerator.Behavior.PartialFail,
-            ScriptedGenerator.Behavior.Hang,
+        val scripted = ScriptedKernel(
+            ScriptedKernel.Behavior.PartialFail,
+            ScriptedKernel.Behavior.Hang,
         )
         val fixture = createFixture(scripted)
         val viewModel = fixture.viewModel
@@ -177,18 +192,39 @@ class NovelMarkdownWorkspaceViewModelTest {
         Unit
     }
 
+    @Test
+    fun `switching branch after a deep link does not reapply the initial focus`() = runBlocking {
+        val scripted = ScriptedKernel(ScriptedKernel.Behavior.Hang)
+        val fixture = createFixture(
+            scripted,
+            focus = NovelWorkspaceFocus(branchSlug = "番外线"),
+            withFork = true,
+        )
+        val viewModel = fixture.viewModel
+
+        awaitState(viewModel) { it.branchSlug == "番外线" }
+        viewModel.switchBranch("主线")
+        awaitState(viewModel) { !it.busy && it.branchSlug == "主线" }
+        assertEquals("主线", viewModel.state.value.branchSlug)
+    }
+
     private data class Fixture(
         val viewModel: NovelMarkdownWorkspaceViewModel,
     )
 
     private suspend fun createFixture(
-        scripted: ScriptedGenerator,
+        scripted: ScriptedKernel,
         unresolved: Boolean = false,
+        focus: NovelWorkspaceFocus = NovelWorkspaceFocus(),
+        withFork: Boolean = false,
     ): Fixture {
         val context = RuntimeEnvironment.getApplication()
         val repository = NovelWorkspaceProjectRepository(temporary.newFolder("workspace"))
         val project = repository.createBlank("View model fixture")
         val directory = project.projectDirectory
+        if (withFork) {
+            NovelWorkspaceBranches.createBranch(directory, "主线", "番外线")
+        }
         if (unresolved) {
             NovelWorkspaceUnresolvedStore.set(
                 projectDirectory = directory,
@@ -224,10 +260,28 @@ class NovelMarkdownWorkspaceViewModelTest {
             }
         }
 
+        val payloads = NovelTurnPayloads()
+        val registry = InMemoryAgentRegistry().apply {
+            register(
+                descriptor = NovelTurnDescriptor.value,
+                inputClass = NovelTurnInput::class,
+                inputSerializer = NovelTurnInput.serializer(),
+                artifactSerializer = NovelTurnArtifact.serializer(),
+                factory = { NovelTurnAgent(payloads) },
+            )
+        }
+        val runner = InProcessAgentRunner(
+            registry = registry,
+            eventStore = InMemoryAgentEventStore(),
+            runScopeFactory = { id, _ -> LegacyRunScope(runId = id) },
+            scope = CoroutineScope(SupervisorJob() + mainDispatcher),
+        )
+        val launcher = NovelTurnLauncher(runner, payloads)
         val controller = NovelWorkspaceGhostwriteController(
             context = context,
             coordinator = NovelWorkspaceGhostwriteCoordinator(
-                NovelWorkspaceRuntime(scripted.generator),
+                NovelWorkspaceRuntime(scripted),
+                launcher,
             ),
         )
         val viewModel = NovelMarkdownWorkspaceViewModel(
@@ -235,7 +289,10 @@ class NovelMarkdownWorkspaceViewModelTest {
             repository = repository,
             settingsAggregator = settings,
             ghostwriteController = controller,
-            generator = scripted.generator,
+            turnLauncher = launcher,
+            kernel = scripted,
+            context = context,
+            requestedFocus = focus,
         )
         awaitState(viewModel) {
             !it.loading && it.exists && (!unresolved || it.unresolvedFromOrdinal == 1)
@@ -255,32 +312,38 @@ class NovelMarkdownWorkspaceViewModelTest {
         viewModel.state.value
     }
 
-    /** A real Generator interface proxy that can hold the runtime in-flight or fail it. */
-    private class ScriptedGenerator(vararg initial: Behavior) {
+    /** A deterministic RunKernel fake that can hold a turn in-flight or fail it. */
+    private class ScriptedKernel(vararg initial: Behavior) : RunKernel {
         enum class Behavior { Hang, Fail, PartialFail }
 
         private val behaviors = initial.toList().also { require(it.isNotEmpty()) }
         val calls = AtomicInteger()
-        val generator: Generator = Proxy.newProxyInstance(
-            Generator::class.java.classLoader,
-            arrayOf(Generator::class.java),
-            InvocationHandler { _, method, _ ->
-                check(method.name == "generateText") { "Unexpected generator method: ${method.name}" }
-                val behavior = behaviors.getOrElse(calls.getAndIncrement()) { behaviors.last() }
-                when (behavior) {
-                    Behavior.Hang -> flow<GenerationChunk> {
-                        emit(GenerationChunk.Messages(listOf(app.amber.ai.ui.UIMessage.assistant("partial output"))))
-                        awaitCancellation()
-                    }
-                    Behavior.Fail -> flow<GenerationChunk> {
-                        throw IllegalStateException("provider unavailable")
-                    }
-                    Behavior.PartialFail -> flow<GenerationChunk> {
-                        emit(GenerationChunk.Messages(listOf(app.amber.ai.ui.UIMessage.assistant("partial output"))))
-                        throw IllegalStateException("provider unavailable")
-                    }
+        override fun run(session: GenerationRunSession) = flow<GenerationChunk> {
+            when (behaviors.getOrElse(calls.getAndIncrement()) { behaviors.last() }) {
+                Behavior.Hang -> {
+                    emit(
+                        GenerationChunk.Messages(
+                            session.messages + UIMessage(
+                                role = app.amber.ai.core.MessageRole.ASSISTANT,
+                                parts = listOf(UIMessagePart.Text("partial output")),
+                            ),
+                        ),
+                    )
+                    awaitCancellation()
                 }
-            },
-        ) as Generator
+                Behavior.Fail -> throw IllegalStateException("provider unavailable")
+                Behavior.PartialFail -> {
+                    emit(
+                        GenerationChunk.Messages(
+                            session.messages + UIMessage(
+                                role = app.amber.ai.core.MessageRole.ASSISTANT,
+                                parts = listOf(UIMessagePart.Text("partial output")),
+                            ),
+                        ),
+                    )
+                    throw IllegalStateException("provider unavailable")
+                }
+            }
+        }
     }
 }

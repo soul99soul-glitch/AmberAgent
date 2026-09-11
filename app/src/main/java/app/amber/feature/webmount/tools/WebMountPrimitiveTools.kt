@@ -1,5 +1,6 @@
 package app.amber.feature.webmount.tools
 
+import android.content.Context
 import app.amber.ai.core.Tool
 import app.amber.core.settings.prefs.SettingsAggregator
 import app.amber.feature.runtime.AgentToolActivityStore
@@ -36,6 +37,7 @@ import app.amber.feature.webmount.usersites.UserSiteRegistry
  * auto-approval and run-trust cannot bypass the prompt.
  */
 class WebMountPrimitiveTools(
+    context: Context,
     private val pool: WebViewPool,
     private val activityStore: AgentToolActivityStore,
     private val manager: WebMountManager,
@@ -47,7 +49,7 @@ class WebMountPrimitiveTools(
     private val settingsStore: SettingsAggregator,
     private val sessionOwner: WebMountSessionOwner,
 ) {
-    private val deps = WebMountDeps(pool, activityStore, sessionOwner)
+    private val deps = WebMountDeps(pool, activityStore, sessionOwner, context)
 
     /** End the run-level lease namespace when ChatService reaches a terminal state. */
     fun endRun(

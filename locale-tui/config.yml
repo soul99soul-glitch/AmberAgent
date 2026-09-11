@@ -12,29 +12,24 @@ modules:
       - "app/src/main/java/**/*.java"
       - "app/src/main/AndroidManifest.xml"
       - "app/src/main/res/xml/*.xml"
-  - name: "ai"
-    res_path: "ai/src/main/res"
-    source_patterns:
-      - "ai/src/main/java/**/*.kt"
-      - "ai/src/main/java/**/*.java"
-  - name: "highlight"
-    res_path: "highlight/src/main/res"
-    source_patterns:
-      - "highlight/src/main/java/**/*.kt"
-      - "highlight/src/main/java/**/*.java"
-      - "highlight/src/main/AndroidManifest.xml"
+      - "app/src/debug/java/**/*.kt"
+      - "app/src/debug/java/**/*.java"
+      - "app/src/debug/AndroidManifest.xml"
+      - "app/src/debug/res/xml/*.xml"
+      - "app/src/graphite/java/**/*.kt"
+      - "app/src/graphite/java/**/*.java"
+      - "app/src/graphite/AndroidManifest.xml"
+      - "app/src/graphite/res/xml/*.xml"
+  # Graphite is an Android build-type overlay, not an independent locale tree.
+  # locale-tui currently supports one res_path and one global language set per
+  # module, so adding app/src/graphite/res would report inherited main strings
+  # as false missing translations. Keep it out until variant-aware merging exists.
   - name: "search"
     res_path: "search/src/main/res"
     source_patterns:
       - "search/src/main/java/**/*.kt"
       - "search/src/main/java/**/*.java"
       - "search/src/main/AndroidManifest.xml"
-  - name: "rag"
-    res_path: "rag/src/main/res"
-    source_patterns:
-      - "rag/src/main/java/**/*.kt"
-      - "rag/src/main/java/**/*.java"
-      - "rag/src/main/AndroidManifest.xml"
 
 # 支持的语言列表
 languages:

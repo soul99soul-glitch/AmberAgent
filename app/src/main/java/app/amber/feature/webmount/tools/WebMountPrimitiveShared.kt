@@ -1,5 +1,6 @@
 package app.amber.feature.webmount.tools
 
+import android.content.Context
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonObjectBuilder
@@ -35,6 +36,8 @@ internal class WebMountDeps(
     val pool: WebViewPool,
     val activityStore: AgentToolActivityStore,
     val owner: WebMountSessionOwner,
+    /** Optional for lightweight factory tests; production wiring supplies the app context. */
+    val context: Context? = null,
 )
 
 internal const val WEBMOUNT_CONVERSATION_ID = "_webmount_conversation_id"

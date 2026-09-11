@@ -36,6 +36,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -46,6 +47,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
 import app.amber.ai.ui.UIMessagePart
+import app.amber.agent.R
 import app.amber.common.http.jsonObjectOrNull
 import com.composables.icons.lucide.Lucide
 import com.composables.icons.lucide.WandSparkles
@@ -55,6 +57,7 @@ import app.amber.feature.subagent.SubAgentRunStatus
 import app.amber.feature.ui.components.richtext.MarkdownBlock
 import app.amber.feature.ui.components.ui.SubAgentAvatar
 import app.amber.feature.ui.components.ui.workspaceColors
+import app.amber.feature.ui.subagent.AppSubAgentDisplayLocalizer
 import org.koin.compose.koinInject
 import java.io.File
 
@@ -79,13 +82,17 @@ fun SubAgentTaskStepView(
     val arguments = remember(anchor.input) { MessageRenderCache.toolInputJson(anchor.input) }
     val subagentId = arguments.getStringContent("subagent_id") ?: "subagent"
     val def = remember(subagentId) { SubAgentDefinitions.find(subagentId) }
+    val context = LocalContext.current
+    val localeTag = context.resources.configuration.locales.toLanguageTags()
+    val displayLocalizer = remember(localeTag) { AppSubAgentDisplayLocalizer(context) }
+    val display = def?.let(displayLocalizer::localize)
     val customName = arguments.jsonObjectOrNull
         ?.payloadObject("custom_subagent")
         ?.getStringContent("name")
         ?.takeIf { it.isNotBlank() }
-    val displayName = extractLatestSubAgentName(step.tools)
+    val displayName = display?.name
+        ?: extractLatestSubAgentName(step.tools)
         ?: customName
-        ?: def?.name
         ?: subagentId
 
     // coalesceSubAgentSteps rebuilds step.tools each render even when contents are identical,
@@ -124,7 +131,7 @@ fun SubAgentTaskStepView(
     }
     val isRunning = cardState.isCurrentTurnActive(effectiveStatus)
 
-    val phaseLabels = def?.phaseLabels.orEmpty()
+    val phaseLabels = display?.phaseLabels.orEmpty()
     // Reset cycle when role's phaseLabels list changes (mid-run edits to a custom role would
     // otherwise leave phaseIndex pointing past the new list's end).
     var phaseIndex by remember(step.runId, phaseLabels) { mutableIntStateOf(0) }
@@ -141,7 +148,7 @@ fun SubAgentTaskStepView(
         else -> phaseLabels.last()
     }
 
-    val statusVerb = cardState.statusVerb(effectiveStatus)
+    val statusVerb = cardState.localizedStatusVerb(effectiveStatus)
     val title = if (isRunning && currentPhase.isNotBlank() && !cardState.isAccepted && !cardState.isDelivered) {
         "@$displayName $statusVerb · $currentPhase"
     } else {
@@ -276,6 +283,22 @@ internal data class SubAgentCardState(
             SubAgentRunStatus.INTERRUPTED -> "已中断"
         }
     }
+}
+
+@Composable
+private fun SubAgentCardState.localizedStatusVerb(effectiveStatus: SubAgentRunStatus): String {
+    if (isQueued || isAccepted || isDelivered) return statusVerb(effectiveStatus)
+    val prefix = if (turn > 1) "第${turn}轮 " else ""
+    val localizedStatus = when (effectiveStatus) {
+        SubAgentRunStatus.RUNNING -> stringResource(R.string.chat_message_subagent_status_working)
+        SubAgentRunStatus.COMPLETED -> stringResource(R.string.chat_message_subagent_status_completed)
+        SubAgentRunStatus.FAILED -> stringResource(R.string.chat_message_subagent_status_failed)
+        SubAgentRunStatus.CANCELLED -> stringResource(R.string.chat_message_subagent_status_cancelled)
+        SubAgentRunStatus.TIMED_OUT -> stringResource(R.string.chat_message_subagent_status_timed_out)
+        SubAgentRunStatus.APPROVAL_REQUIRED -> stringResource(R.string.chat_message_subagent_status_waiting_approval)
+        SubAgentRunStatus.INTERRUPTED -> stringResource(R.string.chat_message_subagent_status_interrupted)
+    }
+    return prefix + localizedStatus
 }
 
 /**
@@ -457,7 +480,7 @@ private fun SubAgentRunSheet(
         timelineStatus
     }
     val isRunning = cardState.isCurrentTurnActive(effectiveStatus)
-    val statusVerb = cardState.statusVerb(effectiveStatus)
+    val statusVerb = cardState.localizedStatusVerb(effectiveStatus)
 
     // Live flow may be null when the manager has no record of this run (process restart, eviction).
     // In that case create an empty fallback flow so collectAsState works.
@@ -579,7 +602,7 @@ private fun SubAgentRunSheet(
                         verticalArrangement = Arrangement.spacedBy(4.dp),
                     ) {
                         Text(
-                            text = "任务",
+                            text = stringResource(R.string.chat_message_subagent_task_label),
                             style = MaterialTheme.typography.labelSmall,
                             color = workspace.faint,
                         )
@@ -604,7 +627,7 @@ private fun SubAgentRunSheet(
             // nothing has streamed in yet.
             if (displayText.isBlank()) {
                 Text(
-                    text = "等待输出...",
+                    text = stringResource(R.string.chat_message_subagent_waiting_output),
                     style = MaterialTheme.typography.bodyMedium,
                     color = workspace.faint,
                     modifier = Modifier.padding(top = 8.dp),

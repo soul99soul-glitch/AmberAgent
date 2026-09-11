@@ -391,17 +391,17 @@ class ModelCouncilManager(
                     .filter { it.seatId == seat.seatId && it.round < round }
                     .sortedBy { it.round }
                 val priorText = priorTurns.joinToString("\n\n") { turn ->
-                    "--- 第 ${turn.round} 轮 ---\n\n${turn.content}"
+                    "--- Round ${turn.round} ---\n\n${turn.content}"
                 }
                 seat.seatId to if (priorText.isNotEmpty()) {
-                    "$priorText\n\n--- 第 $round 轮 ---\n\n"
+                    "$priorText\n\n--- Round $round ---\n\n"
                 } else {
-                    "--- 第 $round 轮 ---\n\n"
+                    "--- Round $round ---\n\n"
                 }
             }
         } else {
             runtimeRun.snapshot.seats.associate { seat ->
-                seat.seatId to "--- 第 $round 轮 ---\n\n"
+                seat.seatId to "--- Round $round ---\n\n"
             }
         }
         val providerGateByKey = runtimeRun.snapshot.seats
@@ -501,7 +501,7 @@ class ModelCouncilManager(
                 modelRunner.generate(
                     settings = settings,
                     modelId = synthesisModelId,
-                    systemPrompt = "你是 AmberAgent 的 Model Council 裁判。只综合证据，不引入未给出的事实。",
+                    systemPrompt = "You are the AmberAgent Model Council judge. Synthesize only the evidence provided; do not introduce unsupported facts.",
                     userPrompt = prompt,
                     outputBudgetChars = setting.outputBudgetChars,
                     reasoningLevel = setting.legacySynthesisReasoningLevel(),

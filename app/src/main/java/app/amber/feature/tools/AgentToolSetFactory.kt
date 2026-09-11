@@ -1,19 +1,26 @@
 package app.amber.feature.tools
 
+import android.content.Context
 import app.amber.ai.core.Tool
 import app.amber.core.ai.tools.LocalTools
 import app.amber.core.ai.tools.createSearchTools
 import app.amber.core.settings.Settings
+import app.amber.core.utils.appLocale
 
 class AgentToolSetFactory(
     private val localTools: LocalTools,
+    private val context: Context,
 ) {
     fun forDeepRead(
         settings: Settings,
         writerTools: List<Tool>,
         descriptionContext: DeepReadToolDescriptionContext? = null,
     ): List<Tool> {
-        val researchRawTools = createSearchTools(settings, includeWebViewFallbackGuidance = false)
+        val researchRawTools = createSearchTools(
+            settings,
+            includeWebViewFallbackGuidance = false,
+            locale = context.appLocale(),
+        )
             .filter { it.name in DEEP_READ_RESEARCH_TOOL_NAMES }
             .map { it.withDeepReadDescriptionContext(descriptionContext) }
         val writerRawTools = writerTools

@@ -58,6 +58,41 @@ sealed interface ChatEventPayload {
             const val TYPE = "StreamCheckpoint"
         }
     }
+
+    /**
+     * Step 5 — durable per-wire-request audit snapshot, committed at the one
+     * place that sees the true wire state: after the final token-budget fit,
+     * before the provider call. Answers "为什么这一次模型看到了这段内容？" from the
+     * persisted event stream alone: the fitted request is never stored whole
+     * (the digest binds it, the capped preview makes the steer/injection
+     * contributions queryable), while the system-block tags name which
+     * injection sources contributed and the tool-catalog digest pins the
+     * exposed tool set. One snapshot per wire call — attempt counts
+     * re-issues (retry / generative-UI repair / vision fallback) within one
+     * generateRound invocation; stepIndex is the kernel loop step (the same
+     * counter the ledger's turnId uses).
+     */
+    @Serializable
+    data class RequestSnapshot(
+        @SerialName("step_index") val stepIndex: Int,
+        @SerialName("attempt") val attempt: Int,
+        @SerialName("kind") val kind: String,
+        @SerialName("model_id") val modelId: String,
+        @SerialName("provider_setting_id") val providerSettingId: String,
+        @SerialName("message_count") val messageCount: Int,
+        @SerialName("messages_digest") val messagesDigest: String,
+        @SerialName("system_block_tags") val systemBlockTags: List<String>,
+        @SerialName("tool_catalog_digest") val toolCatalogDigest: String,
+        @SerialName("exposed_tool_count") val exposedToolCount: Int,
+        @SerialName("estimated_tokens") val estimatedTokens: Int? = null,
+        @SerialName("rendered_preview") val renderedPreview: String,
+        @SerialName("truncated") val truncated: Boolean,
+    ) : ChatEventPayload, AgentEventPayload.Final {
+        companion object {
+            /** Matches the persisted AgentEventRecord.type for this payload. */
+            const val TYPE = "RequestSnapshot"
+        }
+    }
 }
 
 @Serializable

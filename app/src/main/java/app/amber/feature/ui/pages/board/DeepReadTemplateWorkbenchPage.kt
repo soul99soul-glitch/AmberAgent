@@ -35,11 +35,14 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.res.stringResource
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import app.amber.feature.board.DeepReadTemplateIds
+import app.amber.agent.R
 import app.amber.feature.board.hotlist.deepread.DeepReadAgentRunManager
 import app.amber.feature.board.hotlist.deepread.DeepReadOutput
 import app.amber.feature.board.hotlist.deepread.template.DeepReadTemplateAgent
@@ -53,6 +56,7 @@ import app.amber.feature.ui.components.ui.workspaceColors
 import app.amber.feature.ui.context.LocalNavController
 import app.amber.feature.ui.pages.setting.SettingVM
 import app.amber.feature.ui.theme.LocalDarkMode
+import app.amber.core.utils.appLocale
 import org.koin.androidx.compose.koinViewModel
 import org.koin.compose.koinInject
 import java.net.URI
@@ -69,12 +73,20 @@ fun DeepReadTemplateWorkbenchPage(
     val fontRepository: SlidesFontRepository = koinInject()
     val settingsStore: SettingsAggregator = koinInject()
     val navController = LocalNavController.current
+    val appLocale = LocalView.current.context.appLocale()
     val settings by vm.settings.collectAsStateWithLifecycle()
     val board = settings.agentRuntime.todayBoard
     val fontStates by fontRepository.fontsFlow.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
-    val sampleTitle = "具身智能进入家庭前夜"
-    val sampleOutput = remember { DeepReadTemplateRenderer.sampleOutput() }
+    val sampleTitle = stringResource(R.string.deep_read_sample_title)
+    val defaultTemplateName = stringResource(R.string.deep_read_workbench_default_name)
+    val defaultInstruction = stringResource(R.string.deep_read_workbench_default_instruction)
+    val customTemplateName = stringResource(R.string.deep_read_template_custom)
+    val demoFailureMessage = stringResource(R.string.deep_read_demo_failed)
+    val templateFailureMessage = stringResource(R.string.deep_read_template_generation_failed)
+    val templateSaveFailureMessage = stringResource(R.string.deep_read_template_save_failed)
+    val demoTitleFallback = stringResource(R.string.deep_read_demo_title_fallback)
+    val sampleOutput = remember(appLocale) { DeepReadTemplateRenderer.sampleOutput(appLocale) }
     val darkTheme = LocalDarkMode.current
     val fontCss = rememberDeepReadTemplateFontCss(
         mode = board.boardReadingFontMode,
@@ -83,9 +95,9 @@ fun DeepReadTemplateWorkbenchPage(
         fontScale = board.deepReadFontScale,
     )
 
-    var templateName by rememberSaveable { mutableStateOf("News 斜切杂志") }
+    var templateName by rememberSaveable { mutableStateOf(defaultTemplateName) }
     var instruction by rememberSaveable {
-        mutableStateOf("参考高端中文 News 杂志 App：强标题排版、紧凑正文、清楚的时间轴和扩展阅读。")
+        mutableStateOf(defaultInstruction)
     }
     var editorText by rememberSaveable { mutableStateOf("") }
     var sourceExpanded by rememberSaveable { mutableStateOf(false) }
@@ -100,7 +112,7 @@ fun DeepReadTemplateWorkbenchPage(
     var previewOutput by remember { mutableStateOf<DeepReadOutput>(sampleOutput) }
     var validDraft by remember { mutableStateOf<DeepReadTemplatePackage?>(null) }
 
-    val rendered = remember(validDraft, previewTitle, previewOutput, fontCss, darkTheme) {
+    val rendered = remember(validDraft, previewTitle, previewOutput, fontCss, darkTheme, appLocale) {
         runCatching {
             validDraft?.let { draft ->
                 DeepReadTemplateRenderer.renderCustom(
@@ -109,12 +121,14 @@ fun DeepReadTemplateWorkbenchPage(
                     templateHtml = draft.html,
                     fontCss = fontCss,
                     darkTheme = darkTheme,
+                    locale = appLocale,
                 )
             } ?: DeepReadTemplateRenderer.renderEditorialSlant(
                 title = previewTitle,
                 output = previewOutput,
                 fontCss = fontCss,
                 darkTheme = darkTheme,
+                locale = appLocale,
             )
         }.getOrNull()
     }
@@ -145,7 +159,7 @@ fun DeepReadTemplateWorkbenchPage(
     }
 
     fun applyDraft(draft: DeepReadTemplatePackage) {
-        val named = draft.copy(name = templateName.ifBlank { draft.name }.ifBlank { "自定义模板" })
+        val named = draft.copy(name = templateName.ifBlank { draft.name }.ifBlank { customTemplateName })
         validDraft = named
         editorText = named.html
         validationError = null
@@ -161,33 +175,34 @@ fun DeepReadTemplateWorkbenchPage(
         scope.launch {
             try {
                 if (previewUrl != null) {
-                    val title = previewUrl.toTemplateDemoTitle()
+                    val title = previewUrl.toTemplateDemoTitle(demoTitleFallback)
                     previewTitle = title
                     previewOutput = sampleOutput
                     demoPreviewUrl = null
                     val result = deepReadAgent.runPreview(
                         topicTitle = title,
                         seedUrl = previewUrl,
+                        locale = appLocale,
                     )
                     result.onSuccess { output ->
                         previewTitle = output.bestPreviewTitle(previewUrl) ?: title
                         previewOutput = output
                         demoPreviewUrl = previewUrl
                     }.onFailure { error ->
-                        runError = error.message ?: "新闻 Demo 生成失败"
+                        runError = error.message ?: demoFailureMessage
                     }
                 } else {
                     val result = validDraft?.let { draft ->
-                        templateAgent.reviseDraft(draft.copy(name = templateName), text)
-                    } ?: templateAgent.generateDraft(templateName, text)
+                        templateAgent.reviseDraft(draft.copy(name = templateName), text, locale = appLocale)
+                    } ?: templateAgent.generateDraft(templateName, text, locale = appLocale)
                     result.onSuccess(::applyDraft).onFailure { error ->
-                        runError = error.message ?: "模板生成失败"
+                        runError = error.message ?: templateFailureMessage
                     }
                 }
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Throwable) {
-                runError = error.message ?: "模板生成失败"
+                runError = error.message ?: templateFailureMessage
             } finally {
                 busy = false
             }
@@ -199,10 +214,10 @@ fun DeepReadTemplateWorkbenchPage(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("模板工作台") },
+                title = { Text(stringResource(R.string.deep_read_workbench_title)) },
                 navigationIcon = {
                     TextButton(onClick = ::requestExit) {
-                        Text("返回")
+                        Text(stringResource(R.string.back))
                     }
                 },
                 actions = {
@@ -210,7 +225,10 @@ fun DeepReadTemplateWorkbenchPage(
                         enabled = validDraft != null && !busy && !saving && validationError == null,
                         onClick = { showSaveDialog = true },
                     ) {
-                        Text(if (saving) "保存中..." else "保存")
+                        Text(
+                            if (saving) stringResource(R.string.deep_read_workbench_saving)
+                            else stringResource(R.string.common_save)
+                        )
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface),
@@ -248,7 +266,7 @@ fun DeepReadTemplateWorkbenchPage(
                         backgroundColor = MaterialTheme.colorScheme.surface,
                     )
                 } ?: Text(
-                    "模板预览不可用",
+                    stringResource(R.string.deep_read_template_preview_unavailable),
                     modifier = Modifier.align(Alignment.Center),
                     color = MaterialTheme.colorScheme.error,
                 )
@@ -261,7 +279,12 @@ fun DeepReadTemplateWorkbenchPage(
                 onToggle = { sourceExpanded = !sourceExpanded },
                 onTextChange = { html ->
                     editorText = html
-                    val result = DeepReadTemplateDraftGuard.applySourceEdit(validDraft, templateName, html)
+                    val result = DeepReadTemplateDraftGuard.applySourceEdit(
+                        currentDraft = validDraft,
+                        name = templateName,
+                        html = html,
+                        locale = appLocale,
+                    )
                     validationError = result.validationError
                     result.validDraft?.let { validDraft = it }
                 },
@@ -292,7 +315,7 @@ fun DeepReadTemplateWorkbenchPage(
                         throw error
                     } catch (error: Throwable) {
                         saving = false
-                        runError = error.message ?: "模板保存失败"
+                        runError = error.message ?: templateSaveFailureMessage
                     }
                 }
             },
@@ -302,17 +325,17 @@ fun DeepReadTemplateWorkbenchPage(
     if (showExitDialog) {
         AlertDialog(
             onDismissRequest = { showExitDialog = false },
-            title = { Text("放弃未保存模板？") },
-            text = { Text("当前草稿还没有保存，返回后会丢失。") },
+            title = { Text(stringResource(R.string.deep_read_workbench_discard_title)) },
+            text = { Text(stringResource(R.string.deep_read_workbench_discard_message)) },
             confirmButton = {
                 TextButton(onClick = { navController.popBackStack() }) {
-                    Text("放弃")
+                    Text(stringResource(R.string.deep_read_workbench_discard))
                 }
             },
             dismissButton = {
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     TextButton(onClick = { showExitDialog = false }) {
-                        Text("继续编辑")
+                        Text(stringResource(R.string.deep_read_workbench_continue_editing))
                     }
                     TextButton(
                         enabled = validDraft != null && validationError == null && !busy && !saving,
@@ -321,7 +344,7 @@ fun DeepReadTemplateWorkbenchPage(
                             showSaveDialog = true
                         },
                     ) {
-                        Text("保存")
+                        Text(stringResource(R.string.common_save))
                     }
                 }
             },
@@ -363,9 +386,9 @@ private fun TemplateWorkbenchComposer(
                     label = {
                         Text(
                             when {
-                                previewUrl != null -> "新闻地址 Demo 预览"
-                                hasDraft -> "继续修改模板"
-                                else -> "描述你想要的模板"
+                                previewUrl != null -> stringResource(R.string.deep_read_workbench_demo_label)
+                                hasDraft -> stringResource(R.string.deep_read_workbench_edit_label)
+                                else -> stringResource(R.string.deep_read_workbench_describe_label)
                             }
                         )
                     },
@@ -378,10 +401,10 @@ private fun TemplateWorkbenchComposer(
                 ) {
                     Text(
                         when {
-                            busy -> "处理中"
-                            previewUrl != null -> "预览"
-                            hasDraft -> "修改"
-                            else -> "生成"
+                            busy -> stringResource(R.string.deep_read_workbench_processing)
+                            previewUrl != null -> stringResource(R.string.deep_read_workbench_preview)
+                            hasDraft -> stringResource(R.string.deep_read_workbench_modify)
+                            else -> stringResource(R.string.deep_read_workbench_generate)
                         }
                     )
                 }
@@ -402,16 +425,19 @@ private fun SourcePanel(
     Surface(tonalElevation = 1.dp) {
         Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Text("源码", style = MaterialTheme.typography.titleSmall)
+                Text(stringResource(R.string.deep_read_workbench_source), style = MaterialTheme.typography.titleSmall)
                 TextButton(enabled = editorText.isNotBlank(), onClick = onToggle) {
-                    Text(if (expanded) "收起" else "查看/微调")
+                    Text(
+                        if (expanded) stringResource(R.string.deep_read_workbench_collapse)
+                        else stringResource(R.string.deep_read_workbench_view_tune)
+                    )
                 }
             }
             if (expanded) {
                 validationError?.takeIf { it.isNotBlank() }?.let {
                     Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
                 } ?: Text(
-                    "校验通过后才会刷新预览和允许保存。",
+                    stringResource(R.string.deep_read_workbench_validation_hint),
                     style = MaterialTheme.typography.bodySmall,
                     color = workspaceColors().muted,
                 )
@@ -438,23 +464,23 @@ private fun SaveTemplateDialog(
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("保存模板") },
+        title = { Text(stringResource(R.string.deep_read_workbench_save_title)) },
         text = {
             OutlinedTextField(
                 value = name,
                 onValueChange = onNameChange,
-                label = { Text("模板名称") },
+                label = { Text(stringResource(R.string.deep_read_template_name)) },
                 singleLine = true,
             )
         },
         confirmButton = {
             TextButton(enabled = name.trim().isNotEmpty(), onClick = onSave) {
-                Text("保存")
+                Text(stringResource(R.string.common_save))
             }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) {
-                Text("取消")
+                Text(stringResource(R.string.cancel))
             }
         },
     )
@@ -467,14 +493,16 @@ private fun String.extractTemplateDemoUrl(): String? {
     val hasDemoIntent =
         remaining.isBlank() ||
             remaining.contains("预览") ||
+            remaining.contains("preview", ignoreCase = true) ||
             remaining.contains("demo", ignoreCase = true) ||
-            remaining.contains("样稿")
+            remaining.contains("样稿") ||
+            remaining.contains("sample", ignoreCase = true)
     return raw.takeIf { hasDemoIntent && it.isHttpOrHttpsUrl() }
 }
 
-private fun String.toTemplateDemoTitle(): String {
+private fun String.toTemplateDemoTitle(fallback: String = "News link demo"): String {
     val uri = runCatching { URI(this) }.getOrNull()
-    val host = uri?.host?.removePrefix("www.") ?: return "新闻链接 Demo"
+    val host = uri?.host?.removePrefix("www.") ?: return fallback
     val lastPath = uri.rawPath
         ?.split('/')
         ?.lastOrNull { it.isNotBlank() }
@@ -486,7 +514,7 @@ private fun String.toTemplateDemoTitle(): String {
     return listOf(host, lastPath)
         .filter { it.isNotBlank() }
         .joinToString(" · ")
-        .ifBlank { "新闻链接 Demo" }
+        .ifBlank { fallback }
 }
 
 private fun DeepReadOutput.bestPreviewTitle(seedUrl: String): String? =

@@ -223,7 +223,7 @@ internal fun ChainOfThoughtScope.AskUserToolStep(
                                         textStyle = LocalAmberType.current.body,
                                         placeholder = {
                                             Text(
-                                                text = "在此输入回答…",
+                                                text = stringResource(R.string.chat_message_ask_user_input_placeholder),
                                                 style = LocalAmberType.current.body,
                                                 color = fieldTokens.ink4,
                                             )
@@ -319,7 +319,7 @@ internal fun ChainOfThoughtScope.AskUserToolStep(
                                     tint = actionTokens.ink3,
                                 )
                                 Text(
-                                    text = "清空",
+                                    text = stringResource(R.string.clear),
                                     style = LocalAmberType.current.secondary,
                                     color = actionTokens.ink3,
                                 )

@@ -2,6 +2,7 @@ package app.amber.feature.recipe
 
 import app.amber.ai.ui.ToolApprovalState
 import app.amber.ai.ui.UIMessagePart
+import app.amber.core.agent.runtime.AgentEventWriter
 import app.amber.feature.runtime.AgentToolDispatcher
 import app.amber.feature.runtime.CapabilityPermissionState
 import app.amber.feature.runtime.CapabilityPermissionStore
@@ -53,12 +54,26 @@ data class RecipeRunContext(
     val conversationId: String?,
     /** Durable effect ledger; null on the non-durable path. */
     val ledger: ToolEffectLedger?,
+    /**
+     * Run event stream for nested-step tool lifecycle events (Step 3). The
+     * kernel only announces top-level tools, so each nested step's dispatcher
+     * self-prepare also emits its own ToolPrepared — pass the same writer the
+     * enclosing run scope uses. Null keeps nested steps ledger-only.
+     */
+    val events: AgentEventWriter? = null,
     val autoApproveTools: Boolean,
     val autoApproveHighRiskTools: Boolean,
     val autoApprovedToolNames: Set<String>,
     val capabilityPermissions: CapabilityPermissionState?,
     val approvalHistory: CapabilityPermissionStore?,
     val permissionContext: CapabilityPermissionContext? = null,
+    /**
+     * Step 6: the enclosing run's sandbox policy — every nested step passes it
+     * to the dispatcher, so a recipe step can never touch more than the run
+     * itself is allowed to.
+     */
+    val executionPolicy: app.amber.feature.runtime.ExecutionPolicy =
+        app.amber.feature.runtime.ExecutionPolicy.permissive(),
     /** Re-reads the registry at the next model round; defaults to this snapshot. */
     val installedProvider: () -> List<RecipeRecord> = { installed },
 )
@@ -296,7 +311,7 @@ class RecipeRunner(
         val timeoutMs = (step.timeoutSeconds ?: recipe.defaultTimeoutSeconds)?.times(1000)
         val ledgerContext = context.runId?.let { runId ->
             context.ledger?.let { ledger ->
-                ToolLedgerContext(runId = runId, turnId = turnIndex, ledger = ledger)
+                ToolLedgerContext(runId = runId, turnId = turnIndex, ledger = ledger, events = context.events)
             }
         }
         val executed = if (timeoutMs != null) {
@@ -316,6 +331,7 @@ class RecipeRunner(
                     // in the capability approval history.
                     approvalHistory = context.approvalHistory.takeUnless { approvalGranted },
                     permissionContext = context.permissionContext,
+                    executionPolicy = context.executionPolicy,
                 )
             }
         } else {
@@ -330,6 +346,7 @@ class RecipeRunner(
                     capabilityPermissions = context.capabilityPermissions,
                     approvalHistory = context.approvalHistory.takeUnless { approvalGranted },
                     permissionContext = context.permissionContext,
+                    executionPolicy = context.executionPolicy,
                 )
         }
         if (executed == null) {

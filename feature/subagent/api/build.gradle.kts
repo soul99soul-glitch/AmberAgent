@@ -21,5 +21,6 @@ kotlin {
 
 dependencies {
     api(project(":ai"))
+    api(project(":core:agent-runtime"))
     api(libs.kotlinx.serialization.json)
 }

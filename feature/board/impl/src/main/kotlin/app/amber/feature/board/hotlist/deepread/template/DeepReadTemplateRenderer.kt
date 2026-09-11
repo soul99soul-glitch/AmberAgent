@@ -20,6 +20,7 @@ import org.intellij.markdown.parser.MarkdownParser
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
 import org.jsoup.safety.Safelist
+import java.util.Locale
 
 object DeepReadTemplateRenderer {
     private val markdownFlavour by lazy {
@@ -69,37 +70,112 @@ object DeepReadTemplateRenderer {
     fun renderSafeMarkdownHtml(markdown: String): String =
         markdown.markdownBlockHtml()
 
-    fun sampleOutput(): DeepReadOutput = DeepReadOutput(
+    fun sampleOutput(locale: Locale = Locale.CHINESE): DeepReadOutput {
+        val chinese = locale.isChineseLocale()
+        return DeepReadOutput(
         topicType = "event",
         generationComplete = true,
-        summary = "当模型开始理解空间、物体与人的意图，机器人不再只是工具，而可能成为家庭场景里的新成员。这篇样稿用于预览模板版式，不代表真实新闻内容。",
-        keyEntities = listOf("具身智能", "家庭机器人", "大模型"),
+        summary = if (chinese) {
+            "当模型开始理解空间、物体与人的意图，机器人不再只是工具，而可能成为家庭场景里的新成员。这篇样稿用于预览模板版式，不代表真实新闻内容。"
+        } else {
+            "When models learn to understand spaces, objects, and human intent, robots may stop being mere tools and become new members of the home. This sample previews the template layout and does not represent real news."
+        },
+        keyEntities = if (chinese) {
+            listOf("具身智能", "家庭机器人", "大模型")
+        } else {
+            listOf("Embodied AI", "Home robots", "Foundation models")
+        },
         timeline = listOf(
-            TimelineEvent("早期背景", "大模型把语言理解能力带入机器人系统，研究焦点从单一动作控制转向环境理解与任务规划。"),
-            TimelineEvent("关键转折", "多模态模型开始接入视觉、语音和传感器数据，让机器人能在复杂家庭环境中识别对象、理解指令并调整动作。"),
-            TimelineEvent("当前进展", "产业公司尝试把机器人从实验室带到家庭与服务场景，但成本、安全和泛化能力仍是落地门槛。"),
+            TimelineEvent(
+                if (chinese) "早期背景" else "Early background",
+                if (chinese) {
+                    "大模型把语言理解能力带入机器人系统，研究焦点从单一动作控制转向环境理解与任务规划。"
+                } else {
+                    "Foundation models brought language understanding into robotic systems, shifting research from isolated motion control toward environmental understanding and task planning."
+                },
+            ),
+            TimelineEvent(
+                if (chinese) "关键转折" else "Key shift",
+                if (chinese) {
+                    "多模态模型开始接入视觉、语音和传感器数据，让机器人能在复杂家庭环境中识别对象、理解指令并调整动作。"
+                } else {
+                    "Multimodal models began connecting vision, speech, and sensor data, helping robots identify objects, understand instructions, and adjust actions in complex homes."
+                },
+            ),
+            TimelineEvent(
+                if (chinese) "当前进展" else "Current progress",
+                if (chinese) {
+                    "产业公司尝试把机器人从实验室带到家庭与服务场景，但成本、安全和泛化能力仍是落地门槛。"
+                } else {
+                    "Companies are taking robots from laboratories into homes and service settings, but cost, safety, and generalization remain barriers to deployment."
+                },
+            ),
         ),
         corePoints = listOf(
-            CorePoint("真正的变化不是机器人学会行走，而是它开始理解人的日常。", "家庭场景高度不确定，模型需要把环境、任务和人的意图放在同一个上下文里判断。"),
-            CorePoint("评价标准正在从单点能力转向长期协作。", "一次成功演示不能证明可用性，稳定、可解释和安全的连续行为更重要。"),
+            CorePoint(
+                if (chinese) "真正的变化不是机器人学会行走，而是它开始理解人的日常。" else "The real change is not that robots can walk, but that they are beginning to understand everyday human life.",
+                if (chinese) {
+                    "家庭场景高度不确定，模型需要把环境、任务和人的意图放在同一个上下文里判断。"
+                } else {
+                    "Home environments are highly uncertain, so models must reason about surroundings, tasks, and human intent in one context."
+                },
+            ),
+            CorePoint(
+                if (chinese) "评价标准正在从单点能力转向长期协作。" else "The standard is shifting from isolated capabilities to long-term collaboration.",
+                if (chinese) {
+                    "一次成功演示不能证明可用性，稳定、可解释和安全的连续行为更重要。"
+                } else {
+                    "A successful demo does not prove usability; stable, explainable, and safe behavior over time matters more."
+                },
+            ),
         ),
         analysis = DeepAnalysis(
-            coreDispute = "核心分歧在于：具身智能到底已经进入产品化拐点，还是仍停留在高成本演示阶段。",
+            coreDispute = if (chinese) {
+                "核心分歧在于：具身智能到底已经进入产品化拐点，还是仍停留在高成本演示阶段。"
+            } else {
+                "The central dispute is whether embodied AI has reached a productization inflection point or remains a costly demonstration."
+            },
             perspectives = listOf(
-                Perspective("技术公司强调模型能力带来的泛化提升。", "模型厂商"),
-                Perspective("硬件团队更关注可靠性、成本和安全冗余。", "机器人厂商"),
-                Perspective("普通用户真正需要的是少打扰、能交付结果的家庭助手。", "消费者"),
+                Perspective(
+                    if (chinese) "技术公司强调模型能力带来的泛化提升。" else "Technology companies emphasize the generalization gains delivered by stronger models.",
+                    if (chinese) "模型厂商" else "Model companies",
+                ),
+                Perspective(
+                    if (chinese) "硬件团队更关注可靠性、成本和安全冗余。" else "Hardware teams focus more on reliability, cost, and safety redundancy.",
+                    if (chinese) "机器人厂商" else "Robot makers",
+                ),
+                Perspective(
+                    if (chinese) "普通用户真正需要的是少打扰、能交付结果的家庭助手。" else "Users want a home assistant that causes little disruption and reliably delivers results.",
+                    if (chinese) "消费者" else "Consumers",
+                ),
             ),
-            implications = "如果具身智能继续进步，家庭设备可能从被动执行命令转向主动理解场景；但在此之前，产品仍需要把边界讲清楚。"
+            implications = if (chinese) {
+                "如果具身智能继续进步，家庭设备可能从被动执行命令转向主动理解场景；但在此之前，产品仍需要把边界讲清楚。"
+            } else {
+                "If embodied AI keeps improving, home devices may move from passively following commands to actively understanding context; products still need clear boundaries first."
+            },
         ),
         extendedReading = listOf(
-            ReadingLink("具身智能为什么重新成为焦点", "https://example.com/embodied-ai", "Amber Sample"),
-            ReadingLink("家庭机器人落地的三道门槛", "https://example.com/home-robot", "Amber Sample"),
+            ReadingLink(
+                if (chinese) "具身智能为什么重新成为焦点" else "Why embodied AI is back in focus",
+                "https://example.com/embodied-ai",
+                "Amber Sample",
+            ),
+            ReadingLink(
+                if (chinese) "家庭机器人落地的三道门槛" else "Three barriers to deploying home robots",
+                "https://example.com/home-robot",
+                "Amber Sample",
+            ),
         ),
         references = listOf(
-            ReadingLink("样稿来源：具身智能专题", "https://example.com/source", "Amber Sample"),
+            ReadingLink(
+                if (chinese) "样稿来源：具身智能专题" else "Sample source: embodied AI",
+                "https://example.com/source",
+                "Amber Sample",
+            ),
         ),
-    )
+        )
+    }
 
     fun renderCustom(
         title: String,
@@ -107,6 +183,7 @@ object DeepReadTemplateRenderer {
         templateHtml: String,
         fontCss: String = DEFAULT_FONT_CSS,
         darkTheme: Boolean = false,
+        locale: Locale = Locale.CHINESE,
     ): DeepReadRenderedTemplate {
         DeepReadTemplateRepository.validateCustomTemplate(templateHtml)
         val safeImages = output.safeImageUrls()
@@ -120,12 +197,12 @@ object DeepReadTemplateRenderer {
             "source_label" to output.sourceLabel().escapeHtml(),
             "hero_image_url" to hero.escapeHtml(),
             "hero_caption" to output.displayHeroCaption(hero).orEmpty().escapeHtml(),
-            "narrative_html" to output.narrativeHtml(safeImages),
-            "timeline_html" to output.timelineHtml(safeImages),
-            "core_points_html" to output.corePointsHtml(safeImages),
-            "diagram_html" to output.diagramHtml(),
-            "analysis_html" to output.analysisHtml(),
-            "extended_reading_html" to output.extendedReadingHtml(),
+            "narrative_html" to output.narrativeHtml(safeImages, locale),
+            "timeline_html" to output.timelineHtml(safeImages, locale),
+            "core_points_html" to output.corePointsHtml(safeImages, locale),
+            "diagram_html" to output.diagramHtml(locale),
+            "analysis_html" to output.analysisHtml(locale),
+            "extended_reading_html" to output.extendedReadingHtml(locale),
             "font_css" to fontCss + "\n" + runtimeCss,
         )
         val html = placeholders.entries.fold(templateHtml) { current, (key, value) ->
@@ -143,6 +220,7 @@ object DeepReadTemplateRenderer {
         output: DeepReadOutput,
         fontCss: String = DEFAULT_FONT_CSS,
         darkTheme: Boolean = false,
+        locale: Locale = Locale.CHINESE,
     ): DeepReadRenderedTemplate {
         val safeImages = output.safeImageUrls()
         val hero = output.safeHeroUrl(safeImages)
@@ -156,23 +234,23 @@ object DeepReadTemplateRenderer {
             if (hero != null) {
                 appendLine("<figure class=\"hero\"><img src=\"${hero.escapeHtml()}\"/><div class=\"hero-cut\"><div><span class=\"hero-type\">${output.topicType.uppercase().escapeHtml()}</span><span class=\"hero-source\">${output.sourceLabel().escapeHtml()}</span></div><figcaption>${output.displayHeroCaption(hero).orEmpty().escapeHtml()}</figcaption></div></figure>")
             }
-            appendLine("<section class=\"headline\">${if (hero == null) "<p class=\"kicker\">${output.topicType.uppercase().escapeHtml()} · DEEP READ</p>" else ""}<h1>${title.escapeHtml()}</h1>${output.summaryHtml()}</section>")
-            output.timelineHtml(safeImages).takeIf { it.isNotBlank() }?.let {
-                appendLine("<section><p class=\"section\">时间轴</p>")
+            appendLine("<section class=\"headline\">${if (hero == null) "<p class=\"kicker\">${output.topicType.uppercase().escapeHtml()} · DEEP READ</p>" else ""}<h1>${title.escapeHtml()}</h1>${output.summaryHtml(locale)}</section>")
+            output.timelineHtml(safeImages, locale).takeIf { it.isNotBlank() }?.let {
+                appendLine("<section><p class=\"section\">${locale.sectionLabel("timeline")}</p>")
                 appendLine(it)
                 appendLine("</section>")
             }
-            output.corePointsHtml(safeImages).takeIf { it.isNotBlank() }?.let {
-                appendLine("<section><p class=\"section\">关键脉络</p>")
+            output.corePointsHtml(safeImages, locale).takeIf { it.isNotBlank() }?.let {
+                appendLine("<section><p class=\"section\">${locale.sectionLabel("core_points")}</p>")
                 appendLine(it)
                 appendLine("</section>")
             }
-            output.diagramHtml().takeIf { it.isNotBlank() }?.let { appendLine(it) }
-            appendLine("<section><p class=\"section\">深度分析</p>")
-            appendLine(output.analysisHtml())
+            output.diagramHtml(locale).takeIf { it.isNotBlank() }?.let { appendLine(it) }
+            appendLine("<section><p class=\"section\">${locale.sectionLabel("analysis")}</p>")
+            appendLine(output.analysisHtml(locale))
             appendLine("</section>")
-            appendLine("<section><p class=\"section\">扩展阅读</p>")
-            appendLine(output.extendedReadingHtml())
+            appendLine("<section><p class=\"section\">${locale.sectionLabel("extended_reading")}</p>")
+            appendLine(output.extendedReadingHtml(locale))
             appendLine("</section>")
             appendLine("</article></body></html>")
         }
@@ -203,12 +281,14 @@ object DeepReadTemplateRenderer {
         return if (count > 0) "$count SOURCES" else "DEEP READ"
     }
 
-    private fun DeepReadOutput.summaryHtml(): String {
+    private fun DeepReadOutput.summaryHtml(locale: Locale): String {
+        val chinese = locale.isChineseLocale()
         if (statusOf(DeepReadGenerationStage.OVERVIEW) == DeepReadSectionStatus.FAILED) {
             return sectionStateHtml(
                 stage = DeepReadGenerationStage.OVERVIEW,
-                runningText = "正在写入概览、关键实体和真实来源图片",
-                pendingText = "概览会先出现，随后补齐叙事、分析和扩展阅读",
+                runningText = if (chinese) "正在写入概览、关键实体和真实来源图片" else "Writing the overview, key entities, and verified source images",
+                pendingText = if (chinese) "概览会先出现，随后补齐叙事、分析和扩展阅读" else "The overview comes first, followed by narrative, analysis, and extended reading",
+                locale = locale,
             )
         }
         val summaryText = summary.trim()
@@ -217,42 +297,47 @@ object DeepReadTemplateRenderer {
         }
         return sectionStateHtml(
             stage = DeepReadGenerationStage.OVERVIEW,
-            runningText = "正在写入概览、关键实体和真实来源图片",
-            pendingText = "概览会先出现，随后补齐叙事、分析和扩展阅读",
+            runningText = if (chinese) "正在写入概览、关键实体和真实来源图片" else "Writing the overview, key entities, and verified source images",
+            pendingText = if (chinese) "概览会先出现，随后补齐叙事、分析和扩展阅读" else "The overview comes first, followed by narrative, analysis, and extended reading",
+            locale = locale,
         )
     }
 
-    private fun DeepReadOutput.narrativeHtml(safeImages: Set<String>): String {
+    private fun DeepReadOutput.narrativeHtml(safeImages: Set<String>, locale: Locale): String {
+        val chinese = locale.isChineseLocale()
         if (statusOf(DeepReadGenerationStage.NARRATIVE) != DeepReadSectionStatus.READY) {
             return sectionStateHtml(
                 stage = DeepReadGenerationStage.NARRATIVE,
-                runningText = "正在组织时间轴、关键脉络和中文叙事",
-                pendingText = "等待概览完成后补写事件脉络",
+                runningText = if (chinese) "正在组织时间轴、关键脉络和中文叙事" else "Organizing the timeline, key points, and narrative",
+                pendingText = if (chinese) "等待概览完成后补写事件脉络" else "The narrative will be added after the overview is ready",
+                locale = locale,
             )
         }
-        val timeline = timelineHtml(safeImages)
-        val points = corePointsHtml(safeImages)
+        val timeline = timelineHtml(safeImages, locale)
+        val points = corePointsHtml(safeImages, locale)
         if (timeline.isBlank() && points.isBlank()) return ""
         return buildString {
             if (timeline.isNotBlank()) {
-                append("<div class=\"narrative-part\"><p class=\"section\">时间轴</p>")
+                append("<div class=\"narrative-part\"><p class=\"section\">${locale.sectionLabel("timeline")}</p>")
                 append(timeline)
                 append("</div>")
             }
             if (points.isNotBlank()) {
-                append("<div class=\"narrative-part\"><p class=\"section\">关键脉络</p>")
+                append("<div class=\"narrative-part\"><p class=\"section\">${locale.sectionLabel("core_points")}</p>")
                 append(points)
                 append("</div>")
             }
         }
     }
 
-    private fun DeepReadOutput.timelineHtml(safeImages: Set<String>): String {
+    private fun DeepReadOutput.timelineHtml(safeImages: Set<String>, locale: Locale): String {
+        val chinese = locale.isChineseLocale()
         if (statusOf(DeepReadGenerationStage.NARRATIVE) == DeepReadSectionStatus.FAILED) {
             return sectionStateHtml(
                 stage = DeepReadGenerationStage.NARRATIVE,
-                runningText = "正在组织时间轴叙事或故事性脉络",
-                pendingText = "等待概览完成后补写事件脉络",
+                runningText = if (chinese) "正在组织时间轴叙事或故事性脉络" else "Organizing the timeline and narrative arc",
+                pendingText = if (chinese) "等待概览完成后补写事件脉络" else "The timeline will be added after the overview is ready",
+                locale = locale,
             )
         }
         val events = timeline.orEmpty()
@@ -260,8 +345,9 @@ object DeepReadTemplateRenderer {
             if (statusOf(DeepReadGenerationStage.NARRATIVE) == DeepReadSectionStatus.READY) return ""
             return sectionStateHtml(
                 stage = DeepReadGenerationStage.NARRATIVE,
-                runningText = "正在组织时间轴叙事或故事性脉络",
-                pendingText = "等待概览完成后补写事件脉络",
+                runningText = if (chinese) "正在组织时间轴叙事或故事性脉络" else "Organizing the timeline and narrative arc",
+                pendingText = if (chinese) "等待概览完成后补写事件脉络" else "The timeline will be added after the overview is ready",
+                locale = locale,
             )
         }
         return events.joinToString("\n") { event ->
@@ -283,12 +369,14 @@ object DeepReadTemplateRenderer {
         }
     }
 
-    private fun DeepReadOutput.corePointsHtml(safeImages: Set<String>): String {
+    private fun DeepReadOutput.corePointsHtml(safeImages: Set<String>, locale: Locale): String {
+        val chinese = locale.isChineseLocale()
         if (statusOf(DeepReadGenerationStage.NARRATIVE) == DeepReadSectionStatus.FAILED) {
             return sectionStateHtml(
                 stage = DeepReadGenerationStage.NARRATIVE,
-                runningText = "正在把来源消化成中文关键脉络",
-                pendingText = "稍后会写入综合判断，而不是来源清单",
+                runningText = if (chinese) "正在把来源消化成中文关键脉络" else "Turning the sources into synthesized key points",
+                pendingText = if (chinese) "稍后会写入综合判断，而不是来源清单" else "Synthesized judgments will follow instead of a source list",
+                locale = locale,
             )
         }
         val points = corePoints.orEmpty()
@@ -296,8 +384,9 @@ object DeepReadTemplateRenderer {
             if (statusOf(DeepReadGenerationStage.NARRATIVE) == DeepReadSectionStatus.READY) return ""
             return sectionStateHtml(
                 stage = DeepReadGenerationStage.NARRATIVE,
-                runningText = "正在把来源消化成中文关键脉络",
-                pendingText = "稍后会写入综合判断，而不是来源清单",
+                runningText = if (chinese) "正在把来源消化成中文关键脉络" else "Turning the sources into synthesized key points",
+                pendingText = if (chinese) "稍后会写入综合判断，而不是来源清单" else "Synthesized judgments will follow instead of a source list",
+                locale = locale,
             )
         }
         return points.joinToString("\n") { point ->
@@ -323,23 +412,16 @@ object DeepReadTemplateRenderer {
         }
     }
 
-    private fun DeepReadOutput.diagramHtml(): String =
-        diagram?.takeIf { it.nodes.size >= 2 }?.renderDiagramHtml().orEmpty()
+    private fun DeepReadOutput.diagramHtml(locale: Locale): String =
+        diagram?.takeIf { it.nodes.size >= 2 }?.renderDiagramHtml(locale).orEmpty()
 
-    private fun DeepReadDiagram.renderDiagramHtml(): String {
+    private fun DeepReadDiagram.renderDiagramHtml(locale: Locale): String {
         val visibleNodes = nodes.take(6)
         val nodeLabels = visibleNodes.associate { it.id to it.label }
         val visibleEdges = edges
             .filter { it.from in nodeLabels && it.to in nodeLabels }
             .take(6)
-        val typeLabel = when (type) {
-            "causal_chain" -> "因果链"
-            "process_flow" -> "流程图"
-            "stakeholder_map" -> "关系图"
-            "system_structure" -> "结构图"
-            "comparison_matrix" -> "对比图"
-            else -> "图解"
-        }
+        val typeLabel = locale.diagramLabel(type)
         val body = when (type) {
             "causal_chain", "process_flow" -> renderDiagramSteps(visibleNodes)
             else -> renderDiagramCards(visibleNodes)
@@ -350,7 +432,7 @@ object DeepReadTemplateRenderer {
               <h2>${title.markdownInlineHtml()}</h2>
               <div class="diagram-frame">
                 $body
-                ${renderDiagramRelations(visibleEdges, nodeLabels)}
+                ${renderDiagramRelations(visibleEdges, nodeLabels, locale)}
               </div>
               ${caption?.takeIf { it.isNotBlank() }?.let { "<p class=\"diagram-caption\">${it.escapeHtml()}</p>" }.orEmpty()}
             </section>
@@ -385,23 +467,28 @@ object DeepReadTemplateRenderer {
     private fun renderDiagramRelations(
         edges: List<app.amber.feature.board.hotlist.deepread.DeepReadDiagramEdge>,
         nodeLabels: Map<String, String>,
+        locale: Locale,
     ): String {
         if (edges.isEmpty()) return ""
         return edges.joinToString(prefix = "<ul class=\"diagram-relations\">", postfix = "</ul>", separator = "\n") { edge ->
             val from = nodeLabels[edge.from] ?: edge.from
             val to = nodeLabels[edge.to] ?: edge.to
-            val label = edge.label?.takeIf { it.isNotBlank() }?.let { "：${it.escapeHtml()}" }.orEmpty()
+            val label = edge.label?.takeIf { it.isNotBlank() }?.let {
+                if (locale.isChineseLocale()) ":${it.escapeHtml()}" else ": ${it.escapeHtml()}"
+            }.orEmpty()
             "<li><span>${from.escapeHtml()}</span><b>→</b><span>${to.escapeHtml()}</span>$label</li>"
         }
     }
 
-    private fun DeepReadOutput.analysisHtml(): String = buildString {
+    private fun DeepReadOutput.analysisHtml(locale: Locale): String = buildString {
+        val chinese = locale.isChineseLocale()
         if (statusOf(DeepReadGenerationStage.ANALYSIS) == DeepReadSectionStatus.FAILED) {
             append(
                 sectionStateHtml(
                     stage = DeepReadGenerationStage.ANALYSIS,
-                    runningText = "正在继续写核心分歧、各方立场和影响判断",
-                    pendingText = "等脉络完成后开始深度分析",
+                    runningText = if (chinese) "正在继续写核心分歧、各方立场和影响判断" else "Writing the central dispute, viewpoints, and implications",
+                    pendingText = if (chinese) "等脉络完成后开始深度分析" else "Deep analysis starts after the narrative is ready",
+                    locale = locale,
                 )
             )
             return@buildString
@@ -413,8 +500,9 @@ object DeepReadTemplateRenderer {
             append(
                 sectionStateHtml(
                     stage = DeepReadGenerationStage.ANALYSIS,
-                    runningText = "正在继续写核心分歧、各方立场和影响判断",
-                    pendingText = "等脉络完成后开始深度分析",
+                    runningText = if (chinese) "正在继续写核心分歧、各方立场和影响判断" else "Writing the central dispute, viewpoints, and implications",
+                    pendingText = if (chinese) "等脉络完成后开始深度分析" else "Deep analysis starts after the narrative is ready",
+                    locale = locale,
                 )
             )
             return@buildString
@@ -438,19 +526,22 @@ object DeepReadTemplateRenderer {
         }
     }
 
-    private fun DeepReadOutput.extendedReadingHtml(): String {
+    private fun DeepReadOutput.extendedReadingHtml(locale: Locale): String {
+        val chinese = locale.isChineseLocale()
         if (statusOf(DeepReadGenerationStage.EXTENDED_READING) == DeepReadSectionStatus.FAILED) {
             return sectionStateHtml(
                 stage = DeepReadGenerationStage.EXTENDED_READING,
-                runningText = "正在整理可点击的来源与延伸阅读",
-                pendingText = "最后会把引用和相关阅读写入缓存",
+                runningText = if (chinese) "正在整理可点击的来源与延伸阅读" else "Organizing clickable sources and further reading",
+                pendingText = if (chinese) "最后会把引用和相关阅读写入缓存" else "Citations and further reading will be saved last",
+                locale = locale,
             )
         }
         if (extendedReading.isEmpty()) {
             return sectionStateHtml(
                 stage = DeepReadGenerationStage.EXTENDED_READING,
-                runningText = "正在整理可点击的来源与延伸阅读",
-                pendingText = "最后会把引用和相关阅读写入缓存",
+                runningText = if (chinese) "正在整理可点击的来源与延伸阅读" else "Organizing clickable sources and further reading",
+                pendingText = if (chinese) "最后会把引用和相关阅读写入缓存" else "Citations and further reading will be saved last",
+                locale = locale,
             )
         }
         return extendedReading.take(10).joinToString("\n") { link ->
@@ -462,11 +553,19 @@ object DeepReadTemplateRenderer {
         stage: DeepReadGenerationStage,
         runningText: String,
         pendingText: String,
+        locale: Locale,
     ): String {
         val status = statusOf(stage)
+        val chinese = locale.isChineseLocale()
         val label = when (status) {
             DeepReadSectionStatus.RUNNING -> runningText
-            DeepReadSectionStatus.FAILED -> "${stage.label}生成失败：${errorOf(stage).orEmpty().ifBlank { "请稍后重试" }}"
+            DeepReadSectionStatus.FAILED -> {
+                val failure = errorOf(stage).orEmpty().ifBlank {
+                    if (chinese) "请稍后重试" else "Please try again later"
+                }
+                if (chinese) "${stage.label}生成失败：$failure"
+                else "${locale.stageLabel(stage)} failed: $failure"
+            }
             DeepReadSectionStatus.READY -> ""
             DeepReadSectionStatus.PENDING -> pendingText
         }
@@ -483,6 +582,57 @@ object DeepReadTemplateRenderer {
               <div class="skeleton-line short"></div>
             </div>
         """.trimIndent()
+    }
+
+    private fun Locale.isChineseLocale(): Boolean = language.equals("zh", ignoreCase = true)
+
+    private fun Locale.sectionLabel(key: String): String = if (isChineseLocale()) {
+        when (key) {
+            "timeline" -> "时间轴"
+            "core_points" -> "关键脉络"
+            "analysis" -> "深度分析"
+            "extended_reading" -> "扩展阅读"
+            else -> key
+        }
+    } else {
+        when (key) {
+            "timeline" -> "Timeline"
+            "core_points" -> "Key points"
+            "analysis" -> "Analysis"
+            "extended_reading" -> "Extended reading"
+            else -> key
+        }
+    }
+
+    private fun Locale.diagramLabel(type: String): String = if (isChineseLocale()) {
+        when (type) {
+            "causal_chain" -> "因果链"
+            "process_flow" -> "流程图"
+            "stakeholder_map" -> "关系图"
+            "system_structure" -> "结构图"
+            "comparison_matrix" -> "对比图"
+            else -> "图解"
+        }
+    } else {
+        when (type) {
+            "causal_chain" -> "Causal chain"
+            "process_flow" -> "Process flow"
+            "stakeholder_map" -> "Stakeholder map"
+            "system_structure" -> "System structure"
+            "comparison_matrix" -> "Comparison"
+            else -> "Diagram"
+        }
+    }
+
+    private fun Locale.stageLabel(stage: DeepReadGenerationStage): String = if (isChineseLocale()) {
+        stage.label
+    } else {
+        when (stage) {
+            DeepReadGenerationStage.OVERVIEW -> "Overview"
+            DeepReadGenerationStage.NARRATIVE -> "Narrative"
+            DeepReadGenerationStage.ANALYSIS -> "Analysis"
+            DeepReadGenerationStage.EXTENDED_READING -> "Extended reading"
+        }
     }
 
     private fun String.escapeHtml(): String =

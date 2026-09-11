@@ -24,12 +24,16 @@ import app.amber.ai.provider.providers.GoogleProvider
 import app.amber.ai.provider.providers.OpenAIProvider
 import app.amber.common.http.AcceptLanguageBuilder
 import app.amber.agent.BuildConfig
+import app.amber.agent.R
 import app.amber.core.ai.AIRequestInterceptor
 import app.amber.core.ai.RequestLoggingInterceptor
-import app.amber.core.ai.ChatRunCoordinator
-import app.amber.core.ai.Generator
+import app.amber.core.ai.ChatGenerationRoundEngine
+import app.amber.core.ai.DefaultRunKernel
+import app.amber.core.ai.GenerationRoundEngine
+import app.amber.core.ai.RunKernel
 import app.amber.core.ai.tools.LocalTools
 import app.amber.core.ai.transformers.TemplateTransformer
+import app.amber.core.localization.OAuthDisplayLocalizer
 import app.amber.feature.miniapp.MiniAppAiBridge
 import app.amber.feature.miniapp.MiniAppSearchBridge
 import app.amber.core.settings.prefs.AgentPrefs
@@ -473,6 +477,7 @@ val dataSourceModule = module {
             messageNodeDao = get(),
             conversationDao = get(),
             restoreWriteGate = get(),
+            copy = OAuthDisplayLocalizer.artifact(get()),
         )
     }
 
@@ -547,7 +552,8 @@ val dataSourceModule = module {
     // P1-02/P1-03: cold-start recovery — reconciles ledger effects and keeps
     // WAITING_USER runs resumable after process death. P6-01: also resolves
     // runs with a stored server-side OpenAI Response (status query + missing
-    // event fetch + terminal settle) when the capability is on.
+    // event fetch + terminal settle) when the capability is on. Step 3-4:
+    // every run_terminal settle is mirrored into the protocol run row.
     single {
         RunRecoveryService(
             ledger = get(),
@@ -558,6 +564,7 @@ val dataSourceModule = module {
             capabilityFlags = get(),
             resumeStore = get(),
             restoreWriteGate = get(),
+            agentEventStore = get(),
         )
     }
 
@@ -565,9 +572,17 @@ val dataSourceModule = module {
         MessageFtsManager(get())
     }
 
-    single { McpManager(settingsStore = get(), appScope = get(), filesManager = get(), appEventBus = get()) }
+    single {
+        McpManager(
+            context = get(),
+            settingsStore = get(),
+            appScope = get(),
+            filesManager = get(),
+            appEventBus = get(),
+        )
+    }
 
-    single { PermissionDecisionResolver() }
+    single { PermissionDecisionResolver(appContext = get<Context>()) }
 
     single {
         AgentToolDispatcher(
@@ -578,22 +593,28 @@ val dataSourceModule = module {
     }
 
     single {
-        ChatRunCoordinator(
+        ChatGenerationRoundEngine(
             context = get(),
             providerCatalog = get(),
             json = get(),
-            memoryRepo = get(),
             memoryRecallStore = get(),
             conversationRepo = get(),
             aiLoggingManager = get(),
             conversationContextEngine = get(),
+        )
+    }
+    single {
+        DefaultRunKernel(
+            context = get(),
             toolDispatcher = get(),
+            roundEngine = get(),
             toolEffectLedger = get(),
             capabilityFlags = get(),
             capabilityPermissionStore = get(),
         )
     }
-    single<Generator> { get<ChatRunCoordinator>() }
+    single<GenerationRoundEngine> { get<ChatGenerationRoundEngine>() }
+    single<RunKernel> { get<DefaultRunKernel>() }
 
     single<OkHttpClient> {
         val acceptLang = AcceptLanguageBuilder.fromAndroid(get())
@@ -651,7 +672,13 @@ val dataSourceModule = module {
     }
 
     single { OpenAIProvider(client = get(), context = get()) }
-    single { GoogleProvider(client = get(), context = get()) }
+    single {
+        GoogleProvider(
+            client = get(),
+            context = get(),
+            oauthCopy = OAuthDisplayLocalizer.googleGeminiOAuth(get()),
+        )
+    }
     single { ClaudeProvider(client = get(), context = get()) }
     single { GrokAuthStore(context = get()) }
     single { GrokOAuthClient(httpClient = get<OkHttpClient>(), authStore = get()) }
@@ -684,7 +711,13 @@ val dataSourceModule = module {
 
     single { OpenAICodexAuthStore(context = get()) }
     single { GoogleGeminiAuthStore(context = get()) }
-    single { GoogleGeminiOAuthClient(httpClient = get(), authStore = get()) }
+    single {
+        GoogleGeminiOAuthClient(
+            httpClient = get(),
+            authStore = get(),
+            copy = OAuthDisplayLocalizer.googleGeminiOAuth(get()),
+        )
+    }
     single { AntigravityAuthStore(context = get()) }
     single { AntigravityOAuthClient(httpClient = get(), authStore = get()) }
 
@@ -746,7 +779,13 @@ val dataSourceModule = module {
 
     single { GoogleOAuthConfigGate(context = get()) }
 
-    single { GoogleDriveAppDataClient(httpClient = createGoogleDriveHttpClient(get()), json = get()) }
+    single {
+        GoogleDriveAppDataClient(
+            httpClient = createGoogleDriveHttpClient(get()),
+            json = get(),
+            authorizationExpiredMessage = get<Context>().getString(R.string.backup_google_authorization_expired),
+        )
+    }
 
     single {
         GoogleDriveSyncRepository(
@@ -759,15 +798,16 @@ val dataSourceModule = module {
     // P8-08 首页「继续」聚合：各域来源 + 聚合器。
     single<ContinueCandidateSource>(named("continue.image_generation")) {
         ImageGenerationContinueSource(
+            context = get(),
             runTerminalStore = get(),
             toolEffectLedger = get(),
             conversationDao = get(),
             toolEffectDao = get(),
         )
     }
-    single<ContinueCandidateSource>(named("continue.council")) { CouncilContinueSource(conversationDao = get()) }
-    single<ContinueCandidateSource>(named("continue.deep_read")) { DeepReadContinueSource(hotListDao = get()) }
-    single<ContinueCandidateSource>(named("continue.mini_app_draft")) { MiniAppDraftContinueSource(draftDao = get()) }
+    single<ContinueCandidateSource>(named("continue.council")) { CouncilContinueSource(context = get(), conversationDao = get()) }
+    single<ContinueCandidateSource>(named("continue.deep_read")) { DeepReadContinueSource(hotListDao = get(), context = get()) }
+    single<ContinueCandidateSource>(named("continue.mini_app_draft")) { MiniAppDraftContinueSource(context = get(), draftDao = get()) }
     single<ContinueCandidateSource>(named("continue.mini_app_runner")) { MiniAppRunnerContinueSource(miniAppDao = get()) }
     single<ContinueCandidateSource>(named("continue.novel_workspace")) {
         NovelWorkspaceContinueSource(repository = get())

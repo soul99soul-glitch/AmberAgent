@@ -92,6 +92,7 @@ val repositoryModule = module {
 
     single {
         MiniAppRepository(
+            context = get(),
             database = get(),
             dao = get(),
             grantDao = get(),

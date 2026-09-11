@@ -43,13 +43,13 @@ data class SynaraConnection(
 
     fun healthUrl(): String = httpBaseUrl().trimEnd('/') + "/health"
 
-    fun validationError(): String? {
+    fun validationError(): SynaraValidationError? {
         val h = host.trim()
-        if (h.isEmpty()) return "请填写 Mac 的局域网 IP"
-        if (port !in 1..65535) return "端口无效"
-        if (token.isBlank()) return "请填写 Auth Token（桌面进程 SYNARA_AUTH_TOKEN）"
+        if (h.isEmpty()) return SynaraValidationError.MISSING_HOST
+        if (port !in 1..65535) return SynaraValidationError.INVALID_PORT
+        if (token.isBlank()) return SynaraValidationError.MISSING_TOKEN
         if (!useHttps && !isAllowedCleartextHost(h)) {
-            return "HTTP 仅允许私网地址（10/172.16-31/192.168/localhost）或请改用 HTTPS"
+            return SynaraValidationError.CLEARTEXT_HOST_NOT_ALLOWED
         }
         return null
     }
@@ -82,6 +82,13 @@ data class SynaraConnection(
             )
         }
     }
+}
+
+enum class SynaraValidationError {
+    MISSING_HOST,
+    INVALID_PORT,
+    MISSING_TOKEN,
+    CLEARTEXT_HOST_NOT_ALLOWED,
 }
 
 internal fun isAllowedCleartextHost(host: String): Boolean {

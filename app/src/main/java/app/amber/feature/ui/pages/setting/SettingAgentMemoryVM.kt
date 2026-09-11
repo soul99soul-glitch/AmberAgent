@@ -1,5 +1,6 @@
 package app.amber.feature.ui.pages.setting
 
+import android.app.Application
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
@@ -11,6 +12,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.coroutines.cancellation.CancellationException
+import app.amber.agent.R
 import app.amber.core.settings.AgentRuntimeSetting
 import app.amber.core.settings.Settings
 import app.amber.core.settings.prefs.SettingsAggregator
@@ -80,6 +82,7 @@ internal sealed interface MemoryMutationState {
 }
 
 class SettingAgentMemoryVM(
+    private val context: Application,
     private val settingsStore: SettingsAggregator,
     private val memoryRepository: MemoryRepository,
     private val memoryDreamPlanner: MemoryDreamPlanner,
@@ -286,9 +289,9 @@ class SettingAgentMemoryVM(
                 )
             }
             _operationMessage.value = if (candidates.isEmpty()) {
-                "没有低置信候选需要忽略"
+                context.getString(R.string.memory_ignore_low_confidence_none)
             } else {
-                "已忽略 ${candidates.size} 条低置信候选"
+                context.getString(R.string.memory_ignored_low_confidence, candidates.size)
             }
         }
     }
@@ -296,7 +299,7 @@ class SettingAgentMemoryVM(
     fun triggerDreamNow() {
         viewModelScope.launch {
             memoryDreamScheduler.runOnce()
-            _operationMessage.value = "已触发一次 Daydream 后台整理（结果通过通知和上方「待审核」区域反馈）"
+            _operationMessage.value = context.getString(R.string.memory_daydream_triggered)
         }
     }
 
@@ -315,15 +318,18 @@ class SettingAgentMemoryVM(
             }.onSuccess { (plan, replacedPending) ->
                 _operationMessage.value = if (plan.hasChanges) {
                     if (replacedPending) {
-                        "已生成 Dream 整理建议，上一份待审核建议已作废"
+                        context.getString(R.string.memory_dream_plan_replaced)
                     } else {
-                        "已生成 Dream 整理建议"
+                        context.getString(R.string.memory_dream_plan_generated)
                     }
                 } else {
-                    "没有发现需要整理的记忆"
+                    context.getString(R.string.memory_no_maintenance_needed)
                 }
             }.onFailure { error ->
-                _operationMessage.value = "Dream 整理失败：${error.message ?: error::class.java.simpleName}"
+                _operationMessage.value = context.getString(
+                    R.string.memory_dream_plan_failed,
+                    error.message ?: error::class.java.simpleName,
+                )
             }
             _memoryTaskRunning.value = false
         }
@@ -345,12 +351,15 @@ class SettingAgentMemoryVM(
                 }
             }.onSuccess { appliedPlan ->
                 _operationMessage.value = if (appliedPlan.hasChanges) {
-                    "已应用 Dream 整理建议"
+                    context.getString(R.string.memory_dream_plan_applied)
                 } else {
-                    "没有可安全应用的 Dream 建议"
+                    context.getString(R.string.memory_no_safe_dream_plan)
                 }
             }.onFailure { error ->
-                _operationMessage.value = "应用 Dream 建议失败：${error.message ?: error::class.java.simpleName}"
+                _operationMessage.value = context.getString(
+                    R.string.memory_dream_apply_failed,
+                    error.message ?: error::class.java.simpleName,
+                )
             }
             _memoryTaskRunning.value = false
         }
@@ -371,9 +380,16 @@ class SettingAgentMemoryVM(
                     memoryImportExportManager.exportTo(directory)
                 }
             }.onSuccess { result ->
-                _operationMessage.value = "已导出 ${result.memoryCount} 条记忆到 ${result.root.absolutePath}"
+                _operationMessage.value = context.getString(
+                    R.string.memory_exported,
+                    result.memoryCount,
+                    result.root.absolutePath,
+                )
             }.onFailure { error ->
-                _operationMessage.value = "导出失败：${error.message ?: error::class.java.simpleName}"
+                _operationMessage.value = context.getString(
+                    R.string.memory_export_failed,
+                    error.message ?: error::class.java.simpleName,
+                )
             }
             _memoryTaskRunning.value = false
         }
@@ -387,9 +403,15 @@ class SettingAgentMemoryVM(
                     memoryImportExportManager.importFrom(root)
                 }
             }.onSuccess { result ->
-                _operationMessage.value = "已导入 ${result.importedCount} 条记忆"
+                _operationMessage.value = context.getString(
+                    R.string.memory_imported,
+                    result.importedCount,
+                )
             }.onFailure { error ->
-                _operationMessage.value = "导入失败：${error.message ?: error::class.java.simpleName}"
+                _operationMessage.value = context.getString(
+                    R.string.memory_import_failed,
+                    error.message ?: error::class.java.simpleName,
+                )
             }
             _memoryTaskRunning.value = false
         }

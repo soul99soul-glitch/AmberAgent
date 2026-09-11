@@ -1,8 +1,5 @@
 package app.amber.feature.ui.pages.novel
 
-import androidx.compose.ui.res.stringResource
-import app.amber.agent.R
-
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -10,6 +7,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -73,6 +71,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -81,10 +80,15 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.amber.ai.core.MessageRole
 import app.amber.ai.provider.ModelType
+import app.amber.agent.R
 import app.amber.feature.ui.components.ai.TopModelMenu
 import app.amber.feature.ui.context.LocalSettings
 import app.amber.feature.novel.workspace.NovelWorkspaceCollectTarget
+import app.amber.feature.novel.workspace.NovelWorkspaceGhostwriteCoordinator
 import app.amber.feature.novel.workspace.NovelWorkspaceWriteProposal
+import app.amber.feature.novelworkspace.NovelWorkspaceBranches
+import app.amber.feature.novelworkspace.NovelWorkspaceCatalog
+import app.amber.feature.novelworkspace.NovelWorkspaceGhostwriteStage
 import app.amber.feature.ui.components.ds.AmberCard
 import app.amber.feature.ui.components.nav.BackButton
 import app.amber.feature.ui.components.ui.workspaceColors
@@ -110,6 +114,7 @@ import com.composables.icons.lucide.Notebook
 import com.composables.icons.lucide.CirclePlay
 import com.composables.icons.lucide.PenLine
 import com.composables.icons.lucide.CheckCheck
+import com.composables.icons.lucide.GitBranch
 import org.koin.androidx.compose.koinViewModel
 import org.koin.core.parameter.parametersOf
 
@@ -134,11 +139,27 @@ fun NovelMarkdownWorkspacePage(
     val appSettings = LocalSettings.current
     var tab by remember { mutableStateOf(0) }
     var showGhostwrite by remember(projectId, branchSlug, jobId) { mutableStateOf(false) }
+    // 批量润色：入口在正文 tab 顶部动作区；进度呈现复用代笔批次的 job 状态槽。
+    var showPolish by remember { mutableStateOf(false) }
+    // 分支 sheet：分支列表 / 新建 / 切换（TopBar 书名旁的分支 chip 打开）。
+    var showBranchSheet by remember { mutableStateOf(false) }
     LaunchedEffect(jobId, state.ghostwriteJob?.jobId) {
-        if (jobId != null && state.ghostwriteJob?.jobId == jobId) showGhostwrite = true
+        if (jobId != null && state.ghostwriteJob?.jobId == jobId) {
+            if (state.ghostwriteJob?.mode == app.amber.feature.novelworkspace.NovelWorkspaceGhostwriteMode.Polish) {
+                showPolish = true
+            } else {
+                showGhostwrite = true
+            }
+        }
     }
     // Graphite TopModelMenu：与标准 chat 同款——顶栏下方卷帘下拉（替代 ModelSelector 弹层）。
     var modelMenuOpen by remember { mutableStateOf(false) }
+    // 审稿模型菜单：复用同一个 TopModelMenu 组件，两个菜单互斥展开。
+    var reviewMenuOpen by remember { mutableStateOf(false) }
+    @OptIn(kotlin.uuid.ExperimentalUuidApi::class)
+    val reviewOverrideUuid = state.reviewModelId?.let {
+        runCatching { kotlin.uuid.Uuid.parse(it) }.getOrNull()
+    }
 
     // Keep the durable batch and workspace projection live on either tab, even when
     // the sheet is closed. A terminal refresh naturally stops this effect.
@@ -159,100 +180,246 @@ fun NovelMarkdownWorkspacePage(
         topBar = {
             TopAppBar(
                 title = {
-                    // Chat-header pattern: bold book name on line 1, tiny model-id trigger
-                    // on line 2 — opens the same Graphite TopModelMenu curtain as the chat.
+                    // Chat-header pattern: book/branch first, then full-width writing and
+                    // review model triggers. Separate rows preserve 48dp targets on narrow phones.
                     val tokens = LocalAmberTokens.current
                     @OptIn(kotlin.uuid.ExperimentalUuidApi::class)
                     val currentModelUuid = state.writingModelId?.let {
                         runCatching { kotlin.uuid.Uuid.parse(it) }.getOrNull()
                     }
-                    Column(
-                        modifier = Modifier.heightIn(min = 48.dp)
-                            .clip(RoundedCornerShape(8.dp))
-                            .clickable(enabled = state.exists && !state.loading) { modelMenuOpen = !modelMenuOpen },
-                        verticalArrangement = Arrangement.Center,
-                    ) {
-                        Text(
-                            state.title.ifEmpty { "小说工作区" },
-                            style = type.sessionTitle,
-                            color = tokens.ink,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.padding(start = 4.dp),
-                        )
-                        val chevronRotation by animateFloatAsState(
-                            targetValue = if (modelMenuOpen) 180f else 0f,
-                            animationSpec = tween(durationMillis = 280),
-                            label = "novelModelMenuChevron",
-                        )
+                    Column {
+                        // 书名 + 分支 chip：chip 显示当前分支（主线显示主名），点击出分支 sheet。
                         Row(
-                            modifier = Modifier
-                                .padding(start = 4.dp, top = 6.dp, end = 4.dp, bottom = 6.dp),
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            modifier = Modifier.padding(start = 4.dp),
                         ) {
-                            val resolvedName = currentModelUuid
+                            Text(
+                                if (state.title.isEmpty()) {
+                                    stringResource(R.string.novel_workspace_title)
+                                } else {
+                                    state.title
+                                },
+                                style = type.sessionTitle,
+                                color = tokens.ink,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f, fill = false),
+                            )
+                            Spacer(Modifier.size(8.dp))
+                            val currentBranch = state.branches.firstOrNull { it.isCurrent }
+                            val branchLabel = when {
+                                currentBranch != null && currentBranch.isMain -> currentBranch.title
+                                currentBranch != null -> currentBranch.slug
+                                else -> state.branchSlug.orEmpty()
+                            }
+                            Row(
+                                modifier = Modifier
+                                    .widthIn(max = 140.dp)
+                                    .heightIn(min = 48.dp)
+                                    .clip(RoundedCornerShape(999.dp))
+                                    .background(workspace.paper)
+                                    .border(1.dp, workspace.hairline, RoundedCornerShape(999.dp))
+                                    .clickable { showBranchSheet = true }
+                                    .padding(horizontal = 8.dp, vertical = 3.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            ) {
+                                Icon(
+                                    imageVector = Lucide.GitBranch,
+                                    contentDescription = stringResource(R.string.novel_switch_branch),
+                                    tint = tokens.ink3,
+                                    modifier = Modifier.size(11.dp),
+                                )
+                                Text(
+                                    branchLabel,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    style = type.meta.copy(
+                                        fontSize = 10.5.sp,
+                                        fontWeight = FontWeight.Medium,
+                                    ),
+                                    color = tokens.ink2,
+                                )
+                            }
+                        }
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(min = 48.dp),
+                        ) {
+                            val chevronRotation by animateFloatAsState(
+                                targetValue = if (modelMenuOpen) 180f else 0f,
+                                animationSpec = tween(durationMillis = 280),
+                                label = "novelModelMenuChevron",
+                            )
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .heightIn(min = 48.dp)
+                                    .clip(CircleShape)
+                                    .clickable {
+                                        modelMenuOpen = !modelMenuOpen
+                                        reviewMenuOpen = false
+                                    }
+                                    .padding(start = 4.dp, top = 6.dp, end = 4.dp, bottom = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            ) {
+                                val resolvedName = currentModelUuid
+                                    ?.let { id ->
+                                        appSettings.providers.asSequence()
+                                            .flatMap { it.models }
+                                            .firstOrNull { it.id == id }?.modelId
+                                    }
+                                    ?: stringResource(R.string.novel_follow_global)
+                                Text(
+                                    resolvedName,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    style = type.meta.copy(
+                                        fontSize = 10.5.sp,
+                                        fontWeight = FontWeight.Medium,
+                                    ),
+                                    color = lerp(tokens.ink3, tokens.ink2, 0.5f),
+                                    modifier = Modifier.weight(1f),
+                                )
+                                Icon(
+                                    imageVector = Lucide.ArrowDown,
+                                    contentDescription = stringResource(R.string.novel_select_model),
+                                    tint = tokens.ink3,
+                                    modifier = Modifier
+                                        .size(13.dp)
+                                        .rotate(chevronRotation),
+                                )
+                            }
+                            // 审稿模型触发行：与写作模型分行，未选择时「跟随写作」。
+                            // （审稿轮解析顺序：审稿覆盖 → 写作覆盖 → 全局聊天模型）。
+                            val reviewChevronRotation by animateFloatAsState(
+                                targetValue = if (reviewMenuOpen) 180f else 0f,
+                                animationSpec = tween(durationMillis = 280),
+                                label = "novelReviewModelMenuChevron",
+                            )
+                            val reviewResolvedName = reviewOverrideUuid
                                 ?.let { id ->
                                     appSettings.providers.asSequence()
                                         .flatMap { it.models }
                                         .firstOrNull { it.id == id }?.modelId
                                 }
-                                ?: "跟随全局"
-                            Text(
-                                resolvedName,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                style = type.meta.copy(
-                                    fontSize = 10.5.sp,
-                                    fontWeight = FontWeight.Medium,
-                                ),
-                                color = lerp(tokens.ink3, tokens.ink2, 0.5f),
-                                modifier = Modifier.weight(1f, fill = false),
-                            )
-                            Icon(
-                                imageVector = Lucide.ArrowDown,
-                                contentDescription = "选择模型",
-                                tint = tokens.ink3,
+                                ?: stringResource(R.string.novel_follow_writing)
+                            Row(
                                 modifier = Modifier
-                                    .size(13.dp)
-                                    .rotate(chevronRotation),
-                            )
+                                    .fillMaxWidth()
+                                    .heightIn(min = 48.dp)
+                                    .clip(CircleShape)
+                                    .clickable {
+                                        reviewMenuOpen = !reviewMenuOpen
+                                        modelMenuOpen = false
+                                    }
+                                    .padding(start = 4.dp, top = 2.dp, end = 4.dp, bottom = 2.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            ) {
+                                Text(
+                                    stringResource(R.string.novel_review_model),
+                                    maxLines = 1,
+                                    style = type.meta.copy(
+                                        fontSize = 10.5.sp,
+                                        fontWeight = FontWeight.Medium,
+                                    ),
+                                    color = tokens.ink3,
+                                )
+                                Text(
+                                    reviewResolvedName,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    style = type.meta.copy(
+                                        fontSize = 10.5.sp,
+                                        fontWeight = FontWeight.Medium,
+                                    ),
+                                    color = lerp(tokens.ink3, tokens.ink2, 0.5f),
+                                    modifier = Modifier.weight(1f),
+                                )
+                                if (state.reviewModelId != null) {
+                                    IconButton(
+                                        onClick = { viewModel.setReviewModel(null) },
+                                        modifier = Modifier.size(48.dp),
+                                    ) {
+                                        Icon(
+                                            imageVector = Lucide.X,
+                                            contentDescription = stringResource(R.string.novel_clear_review_model),
+                                            tint = tokens.ink4,
+                                            modifier = Modifier.size(12.dp),
+                                        )
+                                    }
+                                }
+                                Icon(
+                                    imageVector = Lucide.ArrowDown,
+                                    contentDescription = stringResource(R.string.novel_select_review_model),
+                                    tint = tokens.ink3,
+                                    modifier = Modifier
+                                        .size(13.dp)
+                                        .rotate(reviewChevronRotation),
+                                )
+                            }
                         }
+                        // 产品说明：代笔每章均联合审核；未指定审稿模型时跟随写作模型。
+                        Text(
+                            stringResource(R.string.novel_auto_review_note),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            style = type.meta.copy(fontSize = 9.sp),
+                            color = tokens.ink4,
+                            modifier = Modifier.padding(start = 4.dp),
+                        )
                     }
                 },
                 navigationIcon = { BackButton() },
                 actions = {
-                    if (state.exists && !state.loading) {
-                        if (state.writingModelId != null) {
-                            IconButton(
-                                onClick = { viewModel.setWritingModel(null) },
-                                modifier = Modifier.size(48.dp),
-                            ) {
-                                Icon(
-                                    imageVector = Lucide.X,
-                                    contentDescription = "改回跟随全局",
-                                    tint = LocalAmberTokens.current.ink3,
-                                    modifier = Modifier.size(18.dp),
-                                )
-                            }
-                        }
-                        // 代笔入口：accentSoft 底 + accent 字的入口胶囊（accent=进入选择，非装饰）。
-                        val entryAccent = app.amber.feature.ui.pages.chat.LocalChatTheme.current
-                        Box(
-                            modifier = Modifier
-                                .heightIn(min = 48.dp)
-                                .clip(RoundedCornerShape(999.dp))
-                                .background(entryAccent.accentSoft)
-                                .clickable { showGhostwrite = true }
-                                .padding(horizontal = 16.dp, vertical = 10.dp),
-                            contentAlignment = Alignment.Center,
+                    if (state.writingModelId != null) {
+                        IconButton(
+                            onClick = { viewModel.setWritingModel(null) },
+                            modifier = Modifier.size(48.dp),
                         ) {
-                            Text(
-                                "代笔",
-                                style = type.meta.copy(fontWeight = FontWeight.SemiBold),
-                                color = entryAccent.accent,
+                            Icon(
+                                imageVector = Lucide.X,
+                                contentDescription = stringResource(R.string.novel_reset_to_global),
+                                tint = LocalAmberTokens.current.ink3,
+                                modifier = Modifier.size(18.dp),
                             )
                         }
+                    }
+                    // 代笔入口：accentSoft 底 + accent 字的入口胶囊（accent=进入选择，非装饰）。
+                    val entryAccent = app.amber.feature.ui.pages.chat.LocalChatTheme.current
+                    Box(
+                        modifier = Modifier
+                            .heightIn(min = 48.dp)
+                            .clip(RoundedCornerShape(999.dp))
+                            .background(entryAccent.accentSoft)
+                            .clickable {
+                                if (state.ghostwriteJob?.mode ==
+                                    app.amber.feature.novelworkspace.NovelWorkspaceGhostwriteMode.Polish
+                                ) {
+                                    showPolish = true
+                                } else {
+                                    showGhostwrite = true
+                                }
+                            }
+                            .padding(horizontal = 16.dp, vertical = 10.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            stringResource(
+                                if (state.ghostwriteJob?.mode ==
+                                    app.amber.feature.novelworkspace.NovelWorkspaceGhostwriteMode.Polish
+                                ) {
+                                    R.string.novel_polish
+                                } else {
+                                    R.string.novel_ghostwrite
+                                },
+                            ),
+                            style = type.meta.copy(fontWeight = FontWeight.SemiBold),
+                            color = entryAccent.accent,
+                        )
                     }
                 },
                 // AMOLED 下 topBarColors 的 #161512 会在纯黑页面上拼出一条横带；
@@ -277,7 +444,7 @@ fun NovelMarkdownWorkspacePage(
                     contentAlignment = Alignment.Center,
                 ) {
                     Text(
-                        state.errorMessage ?: "项目不存在或已被删除。",
+                        state.errorMessage ?: stringResource(R.string.novel_project_missing),
                         style = type.secondary,
                         color = workspace.muted,
                         textAlign = TextAlign.Center,
@@ -304,7 +471,11 @@ fun NovelMarkdownWorkspacePage(
                             .background(workspace.paper)
                             .border(1.dp, workspace.hairline, RoundedCornerShape(10.dp)),
                     ) {
-                        listOf(0 to "创作", 1 to "正文").forEach { (index, label) ->
+                        listOf(
+                            0 to stringResource(R.string.novel_tab_creation),
+                            1 to stringResource(R.string.novel_tab_manuscript),
+                            2 to stringResource(R.string.novel_tab_settings),
+                        ).forEach { (index, label) ->
                             val selected = tab == index
                             Box(
                                 Modifier
@@ -324,10 +495,39 @@ fun NovelMarkdownWorkspacePage(
                             }
                         }
                     }
-                    if (tab == 0) {
-                        MarkdownWorkspaceChat(viewModel, state, onOpenGhostwrite = { showGhostwrite = true })
-                    } else {
-                        MarkdownWorkspaceManuscript(viewModel, state)
+                    if (tab != 0) {
+                        state.errorMessage?.let { message ->
+                            Text(
+                                message,
+                                style = type.meta,
+                                color = workspace.red,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { viewModel.clearError() }
+                                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                            )
+                        }
+                    }
+                    when (tab) {
+                        0 -> MarkdownWorkspaceChat(
+                            viewModel,
+                            state,
+                            onOpenGhostwrite = {
+                                if (state.ghostwriteJob?.mode ==
+                                    app.amber.feature.novelworkspace.NovelWorkspaceGhostwriteMode.Polish
+                                ) {
+                                    showPolish = true
+                                } else {
+                                    showGhostwrite = true
+                                }
+                            },
+                        )
+                        1 -> MarkdownWorkspaceManuscript(
+                            viewModel,
+                            state,
+                            onOpenPolish = { showPolish = true },
+                        )
+                        else -> MarkdownWorkspaceCatalog(viewModel, state)
                     }
                 }
             }
@@ -361,6 +561,24 @@ fun NovelMarkdownWorkspacePage(
                 onClose = { modelMenuOpen = false },
                 modifier = Modifier.padding(top = padding.calculateTopPadding()),
             )
+            // 审稿模型菜单：同一组件复用；选中即持久化为项目审稿覆盖（setReviewModel）。
+            @OptIn(kotlin.uuid.ExperimentalUuidApi::class)
+            val reviewResolvedId: kotlin.uuid.Uuid? = reviewOverrideUuid ?: resolvedModelId
+            TopModelMenu(
+                open = reviewMenuOpen,
+                providers = menuProviders,
+                modelType = ModelType.CHAT,
+                currentProviderId = menuProviders.firstOrNull { p ->
+                    p.models.any { it.id == reviewResolvedId }
+                }?.id,
+                currentModelId = reviewResolvedId,
+                onSelect = { model ->
+                    viewModel.setReviewModel(model.id.toString())
+                    reviewMenuOpen = false
+                },
+                onClose = { reviewMenuOpen = false },
+                modifier = Modifier.padding(top = padding.calculateTopPadding()),
+            )
         }
     }
 
@@ -384,9 +602,42 @@ fun NovelMarkdownWorkspacePage(
             readUpcomingArc = { viewModel.readUpcomingArc() },
             saveUpcomingArc = { viewModel.saveUpcomingArc(it) },
             readWritingPreference = { viewModel.readWritingPreference() },
-            saveWritingPreference = { viewModel.saveWritingPreference(it) },
+            saveWritingPreference = { body, onSaved ->
+                viewModel.saveWritingPreference(body, onSaved)
+            },
             briefPreview = { viewModel.briefPreview() },
             onDismiss = { showGhostwrite = false },
+        )
+    }
+
+    if (showBranchSheet) {
+        BranchSheet(
+            branches = state.branches,
+            branchLocked = state.ghostwriteJob?.status == "running" || state.ghostwriteJob?.status == "paused",
+            busy = state.busy,
+            errorMessage = state.errorMessage,
+            onSwitch = {
+                showBranchSheet = false
+                viewModel.switchBranch(it)
+            },
+            onCreate = { viewModel.createBranch(it) },
+            onDismiss = { showBranchSheet = false },
+        )
+    }
+
+    if (showPolish) {
+        PolishBatchSheet(
+            job = state.ghostwriteJob,
+            busy = state.busy,
+            latestOrdinal = state.chapters.maxOfOrNull { it.ordinal } ?: 0,
+            errorMessage = state.errorMessage,
+            onStart = { from, to -> viewModel.startPolish(from, to) },
+            onPause = { viewModel.pauseGhostwriteBatch() },
+            onResume = { viewModel.resumeGhostwriteBatch() },
+            onRetryFailed = { viewModel.retryFailedGhostwriteBatch() },
+            onCancel = { viewModel.cancelGhostwriteBatch() },
+            onDismissFailure = { viewModel.dismissGhostwriteFailure() },
+            onDismiss = { showPolish = false },
         )
     }
 
@@ -394,7 +645,13 @@ fun NovelMarkdownWorkspacePage(
         AlertDialog(
             onDismissRequest = { viewModel.dismissConsistencyReport() },
             containerColor = workspace.paper,
-            title = { Text("一致性检查结果", fontWeight = FontWeight.SemiBold, color = workspace.ink) },
+            title = {
+                Text(
+                    stringResource(R.string.novel_consistency_report_title),
+                    fontWeight = FontWeight.SemiBold,
+                    color = workspace.ink,
+                )
+            },
             text = {
                 Column(Modifier.verticalScroll(rememberScrollState())) {
                     Text(report, style = type.secondary, color = workspace.ink)
@@ -402,7 +659,7 @@ fun NovelMarkdownWorkspacePage(
             },
             confirmButton = {
                 TextButton(onClick = { viewModel.dismissConsistencyReport() }) {
-                    Text("知道了", color = workspace.ink)
+                    Text(stringResource(R.string.novel_dismiss), color = workspace.ink)
                 }
             },
         )
@@ -423,11 +680,11 @@ private fun MarkdownGhostwriteSheet(
     onInjectionChange: (app.amber.feature.novelworkspace.NovelWorkspaceInjectionFlags) -> Unit,
     onGeneratePlan: () -> Unit,
     readChapterPlan: () -> String,
-    saveChapterPlan: (String) -> Unit,
+    saveChapterPlan: (String) -> Boolean,
     readUpcomingArc: () -> String,
-    saveUpcomingArc: (String) -> Unit,
+    saveUpcomingArc: (String) -> Boolean,
     readWritingPreference: () -> String,
-    saveWritingPreference: (String) -> Unit,
+    saveWritingPreference: (String, () -> Unit) -> Unit,
     briefPreview: () -> String,
     onDismiss: () -> Unit,
     errorMessage: String? = null,
@@ -439,7 +696,14 @@ private fun MarkdownGhostwriteSheet(
     val type = LocalAmberType.current
     val tokens = LocalAmberTokens.current
     val chatTheme = app.amber.feature.ui.pages.chat.LocalChatTheme.current
-    val branchOwned = job?.status == "running" || job?.status == "paused"
+    val branchOwned = job?.status == "running" ||
+        job?.status == "paused" ||
+        job?.status == "failed"
+    val ghostwriteLabel = stringResource(R.string.novel_ghostwrite)
+    val polishLabel = stringResource(R.string.novel_polish)
+    val chapterPlanInitial = remember(planAutoTick) { readChapterPlan() }
+    var chapterPlanText by remember(planAutoTick) { mutableStateOf(chapterPlanInitial) }
+    var chapterPlanDirty by remember(planAutoTick) { mutableStateOf(false) }
 
     ModalBottomSheet(onDismissRequest = onDismiss, containerColor = workspace.canvas) {
         Column(
@@ -464,13 +728,13 @@ private fun MarkdownGhostwriteSheet(
                     color = chatTheme.accent,
                 )
                 Text(
-                    "代笔",
+                    ghostwriteLabel,
                     style = type.sessionTitle.copy(fontWeight = FontWeight.Bold),
                     color = workspace.ink,
                 )
                 Spacer(Modifier.weight(1f))
                 Text(
-                    "GHOSTWRITE",
+                    stringResource(R.string.novel_ghostwrite_badge),
                     style = type.meta.copy(
                         fontSize = 10.5.sp,
                         fontWeight = FontWeight.Bold,
@@ -485,10 +749,14 @@ private fun MarkdownGhostwriteSheet(
             }
 
             // ── batch status / control ─────────────────────────────────────
-            PanelSection(title = "批量进度") {
+            PanelSection(title = stringResource(R.string.novel_batch_progress)) {
                 if (job == null) {
                     var target by remember { mutableStateOf(5) }
-                    Text("选择要连写的章数，逐章生成并自动收录。", style = type.meta, color = workspace.muted)
+                    Text(
+                        stringResource(R.string.novel_ghostwrite_target_desc),
+                        style = type.meta,
+                        color = workspace.muted,
+                    )
                     Row(
                         Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically,
@@ -496,42 +764,82 @@ private fun MarkdownGhostwriteSheet(
                     ) {
                         PanelRoundIcon(
                             icon = Lucide.Minus,
-                            contentDescription = "减一章",
+                            contentDescription = stringResource(R.string.novel_decrease_chapter),
                             enabled = target > 1,
                             onClick = { if (target > 1) target -= 1 },
                         )
                         Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
                             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                 Text(
-                                    "$target",
+                                    stringResource(R.string.novel_number, target),
                                     style = type.screenTitle.copy(
                                         fontWeight = FontWeight.Bold,
                                         fontFamily = app.amber.feature.ui.theme.AmberMono,
                                     ),
                                     color = workspace.ink,
                                 )
-                                Text("章", style = type.meta, color = workspace.muted)
+                                Text(
+                                    stringResource(R.string.novel_chapter_unit),
+                                    style = type.meta,
+                                    color = workspace.muted,
+                                )
                             }
                         }
                         PanelRoundIcon(
                             icon = Lucide.Plus,
-                            contentDescription = "加一章",
-                            enabled = target < 99,
-                            onClick = { if (target < 99) target += 1 },
+                            contentDescription = stringResource(R.string.novel_increase_chapter),
+                            enabled = target < NovelWorkspaceGhostwriteCoordinator.MAX_GHOSTWRITE_CHAPTERS,
+                            onClick = {
+                                if (target < NovelWorkspaceGhostwriteCoordinator.MAX_GHOSTWRITE_CHAPTERS) {
+                                    target += 1
+                                }
+                            },
                         )
                     }
-                    PanelCtaButton(text = "开始代笔", enabled = !busy, onClick = { onStart(target) })
+                    PanelCtaButton(
+                        text = stringResource(R.string.novel_start_ghostwrite),
+                        enabled = !busy,
+                        onClick = {
+                            if (!chapterPlanDirty || saveChapterPlan(chapterPlanText)) {
+                                onStart(target)
+                            }
+                        },
+                    )
                 } else if (job.status == "failed") {
+                    val failedLabel = if (
+                        job.mode == app.amber.feature.novelworkspace.NovelWorkspaceGhostwriteMode.Polish
+                    ) {
+                        polishLabel
+                    } else {
+                        ghostwriteLabel
+                    }
                     Text(
-                        "批次失败 · 已写 ${job.written} / ${job.target} 章",
+                        stringResource(
+                            R.string.novel_batch_failed,
+                            failedLabel,
+                            job.written,
+                            job.target,
+                        ),
                         style = type.body.copy(fontWeight = FontWeight.SemiBold),
                         color = workspace.red,
                     )
-                    Text(job.reason ?: "未知原因", style = type.meta, color = workspace.red)
+                    Text(
+                        ghostwriteStageLabel(job),
+                        style = type.meta,
+                        color = workspace.red,
+                    )
+                    Text(
+                        job.reason ?: stringResource(R.string.novel_unknown_reason),
+                        style = type.meta,
+                        color = workspace.red,
+                    )
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        PanelPill(text = "知道了", onClick = onDismissFailure)
                         PanelPill(
-                            text = "继续剩余",
+                            text = stringResource(R.string.novel_dismiss),
+                            onClick = onDismissFailure,
+                        )
+                        PanelPill(
+                            text = stringResource(R.string.novel_continue_remaining),
                             tone = PanelTone.Accent,
                             enabled = !busy,
                             onClick = onRetryFailed,
@@ -548,7 +856,10 @@ private fun MarkdownGhostwriteSheet(
                     )
                 } else {
                     val paused = job.status == "paused"
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
                         // Graphite: signal green = liveness (running); paused stays quiet.
                         Box(
                             Modifier
@@ -570,16 +881,34 @@ private fun MarkdownGhostwriteSheet(
                                     )
                                 }
                                 Text(
-                                    if (paused) "已暂停" else "进行中",
+                                    if (paused) {
+                                        stringResource(R.string.novel_paused)
+                                    } else {
+                                        stringResource(R.string.novel_in_progress)
+                                    },
                                     style = type.tinyTag,
                                     color = if (paused) workspace.muted else workspace.green,
                                 )
                             }
                         }
-                        Spacer(Modifier.weight(1f))
+                        Text(
+                            ghostwriteStageLabel(job),
+                            style = type.meta.copy(fontWeight = FontWeight.SemiBold),
+                            color = workspace.ink,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f),
+                        )
                         Row(verticalAlignment = Alignment.Bottom) {
+                            val runningLabel = if (
+                                job.mode == app.amber.feature.novelworkspace.NovelWorkspaceGhostwriteMode.Polish
+                            ) {
+                                polishLabel
+                            } else {
+                                ghostwriteLabel
+                            }
                             Text(
-                                "${job.written}",
+                                stringResource(R.string.novel_number, job.written),
                                 style = type.screenTitle.copy(
                                     fontWeight = FontWeight.Bold,
                                     fontFamily = app.amber.feature.ui.theme.AmberMono,
@@ -587,7 +916,7 @@ private fun MarkdownGhostwriteSheet(
                                 color = workspace.ink,
                             )
                             Text(
-                                " / ${job.target} 章",
+                                stringResource(R.string.novel_batch_progress_detail, job.target, runningLabel),
                                 style = type.secondary,
                                 color = workspace.muted,
                                 modifier = Modifier.padding(bottom = 6.dp),
@@ -609,55 +938,85 @@ private fun MarkdownGhostwriteSheet(
                         )
                     }
                     Text(
-                        "已收录章节会保留；暂停后可继续剩余章节。",
+                        stringResource(R.string.novel_ghostwrite_progress_note),
                         style = type.meta,
                         color = workspace.muted,
                     )
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         PanelPill(
-                            text = if (paused) "继续" else "暂停",
+                            text = if (paused) {
+                                stringResource(R.string.novel_continue)
+                            } else {
+                                stringResource(R.string.novel_pause)
+                            },
                             onClick = if (paused) onResume else onPause,
                         )
-                        PanelPill(text = "取消批次", tone = PanelTone.Danger, onClick = onCancel)
+                        PanelPill(
+                            text = stringResource(R.string.novel_cancel_batch),
+                            tone = PanelTone.Danger,
+                            onClick = onCancel,
+                        )
                     }
                 }
             }
 
             // ── editable control files (one frame: the card; editor is flat) ──
             PanelSection(
-                title = "本章计划",
+                title = stringResource(R.string.novel_chapter_plan),
                 action = {
                     PanelPill(
-                        text = if (busy) "生成中…" else "一键生成",
+                        text = if (busy) {
+                            stringResource(R.string.novel_generating)
+                        } else {
+                            stringResource(R.string.novel_generate_once)
+                        },
                         tone = PanelTone.Accent,
                         enabled = !busy && !branchOwned,
                         onClick = onGeneratePlan,
                     )
                 },
             ) {
-                Text("代笔写下一章前会读取它：目标、冲突、必须发生的事。", style = type.meta, color = workspace.muted)
+                Text(
+                    stringResource(R.string.novel_chapter_plan_desc),
+                    style = type.meta,
+                    color = workspace.muted,
+                )
                 PanelEditor(
-                    placeholder = "例如：赵大夜探军营，与旧部相认；不可暴露身份。结尾留：密信被截。",
-                    initial = remember(planAutoTick) { readChapterPlan() },
+                    placeholder = stringResource(R.string.novel_chapter_plan_placeholder),
+                    initial = chapterPlanInitial,
                     enabled = !busy && !branchOwned,
-                    onSave = saveChapterPlan,
+                    onTextChange = { chapterPlanText = it },
+                    onDirtyChange = { chapterPlanDirty = it },
+                    onSave = { body, onSaved ->
+                        if (saveChapterPlan(body)) onSaved()
+                    },
                 )
             }
 
-            PanelSection(title = "往后几章方向") {
-                Text("未来几章的走向要点，供模型照应，避免跑偏。", style = type.meta, color = workspace.muted)
+            PanelSection(title = stringResource(R.string.novel_future_arc)) {
+                Text(
+                    stringResource(R.string.novel_future_arc_desc),
+                    style = type.meta,
+                    color = workspace.muted,
+                )
                 PanelEditor(
-                    placeholder = "例如：\n- 兵变前夜的双线布局\n- 黄龙旗来历揭晓",
+                    placeholder = stringResource(R.string.novel_future_arc_placeholder),
                     initial = remember(planAutoTick) { readUpcomingArc() },
                     enabled = !busy && !branchOwned,
-                    onSave = saveUpcomingArc,
+                    onSave = { body, onSaved ->
+                        if (saveUpcomingArc(body)) onSaved()
+                    },
                 )
             }
 
-            PanelSection(title = "写作偏好") {
-                Text("文风、节奏、禁忌等长期要求（存于 setting/writing）。", style = type.meta, color = workspace.muted)
+            PanelSection(title = stringResource(R.string.novel_writing_preferences)) {
+                Text(
+                    stringResource(R.string.novel_writing_preferences_desc),
+                    style = type.meta,
+                    color = workspace.muted,
+                )
                 PanelEditor(
-                    placeholder = "例如：文风冷峻克制；单章 2000-3000 字；避免说教。",
+                    placeholder = stringResource(R.string.novel_writing_preferences_placeholder),
                     initial = remember { readWritingPreference() },
                     enabled = !busy && !branchOwned,
                     onSave = saveWritingPreference,
@@ -665,12 +1024,28 @@ private fun MarkdownGhostwriteSheet(
             }
 
             // ── injection selection (hairline rows, no nested fills) ────────
-            PanelSection(title = "上下文注入") {
+            PanelSection(title = stringResource(R.string.novel_context_injection)) {
                 val rows = listOf(
-                    Triple("剧情状态", "plot/current.md 当前局面", injection.plot),
-                    Triple("未回收伏笔", "埋下未收的伏笔节点", injection.foreshadowing),
-                    Triple("本章相关节点", "计划中实体的人物卡与关系", injection.neighborhood),
-                    Triple("已确认决定", "不可违背的既定事实", injection.decisions),
+                    Triple(
+                        stringResource(R.string.novel_injection_plot_title),
+                        stringResource(R.string.novel_injection_plot_desc),
+                        injection.plot,
+                    ),
+                    Triple(
+                        stringResource(R.string.novel_injection_foreshadowing_title),
+                        stringResource(R.string.novel_injection_foreshadowing_desc),
+                        injection.foreshadowing,
+                    ),
+                    Triple(
+                        stringResource(R.string.novel_injection_neighborhood_title),
+                        stringResource(R.string.novel_injection_neighborhood_desc),
+                        injection.neighborhood,
+                    ),
+                    Triple(
+                        stringResource(R.string.novel_injection_decisions_title),
+                        stringResource(R.string.novel_injection_decisions_desc),
+                        injection.decisions,
+                    ),
                 )
                 rows.forEachIndexed { index, (label, desc, checked) ->
                     if (index > 0) {
@@ -725,10 +1100,14 @@ private fun MarkdownGhostwriteSheet(
             }
 
             // ── injected-brief preview (flat text, no inner box) ────────────
-            PanelSection(title = "注入简报预览") {
+            PanelSection(title = stringResource(R.string.novel_injected_brief_title)) {
                 val brief = remember(injection, planAutoTick) { briefPreview() }
                 Text(
-                    brief.ifBlank { "（暂无可注入的约束：书写定后这里会显示每轮注入的剧情状态、伏笔与节点）" },
+                    if (brief.isBlank()) {
+                        stringResource(R.string.novel_injected_brief_empty)
+                    } else {
+                        brief
+                    },
                     style = type.meta,
                     color = workspace.muted,
                     modifier = Modifier
@@ -741,7 +1120,336 @@ private fun MarkdownGhostwriteSheet(
     }
 }
 
+/**
+ * 批量润色 sheet：范围选择（默认第 1 章～最新章）与批次进度（进度条 + 暂停/继续/重试/
+ * 取消），骨架与 MarkdownGhostwriteSheet 的批量进度区一致，文案区分润色/代笔。
+ * 批次状态复用 state.ghostwriteJob 槽（分支同时只允许一个批次，代笔占用时此处只读提示）。
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun PolishBatchSheet(
+    job: NovelMarkdownGhostwriteUi?,
+    busy: Boolean,
+    latestOrdinal: Int,
+    onStart: (fromOrdinal: Int, toOrdinal: Int) -> Unit,
+    onPause: () -> Unit,
+    onResume: () -> Unit,
+    onRetryFailed: () -> Unit,
+    onCancel: () -> Unit,
+    onDismissFailure: () -> Unit,
+    onDismiss: () -> Unit,
+    errorMessage: String? = null,
+) {
+    val workspace = workspaceColors()
+    val type = LocalAmberType.current
+    val tokens = LocalAmberTokens.current
+    val chatTheme = app.amber.feature.ui.pages.chat.LocalChatTheme.current
+    val polish = job?.mode == app.amber.feature.novelworkspace.NovelWorkspaceGhostwriteMode.Polish
+
+    ModalBottomSheet(onDismissRequest = onDismiss, containerColor = workspace.canvas) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .navigationBarsPadding()
+                .padding(horizontal = 16.dp)
+                .padding(bottom = 28.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Row(
+                verticalAlignment = Alignment.Bottom,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(
+                    "//",
+                    style = type.meta.copy(fontSize = 17.sp, fontWeight = FontWeight.Bold),
+                    color = chatTheme.accent,
+                )
+                Text(
+                    stringResource(R.string.novel_batch_polish),
+                    style = type.sessionTitle.copy(fontWeight = FontWeight.Bold),
+                    color = workspace.ink,
+                )
+                Spacer(Modifier.weight(1f))
+                Text(
+                    stringResource(R.string.novel_polish_badge),
+                    style = type.meta.copy(
+                        fontSize = 10.5.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 1.2.sp,
+                        fontFamily = app.amber.feature.ui.theme.AmberMono,
+                    ),
+                    color = tokens.ink4,
+                )
+            }
+            if (errorMessage != null) {
+                Text(errorMessage, style = type.meta, color = workspace.red)
+            }
+
+            PanelSection(title = stringResource(R.string.novel_polish_progress)) {
+                when {
+                    // 代笔批次占用：只读提示，不能从这里开新批次（两者互斥）。
+                    job != null && !polish -> {
+                        Text(
+                            stringResource(R.string.novel_polish_blocked_by_ghostwrite),
+                            style = type.meta,
+                            color = workspace.muted,
+                        )
+                    }
+                    job != null && job.status == "failed" -> {
+                        Text(
+                            stringResource(
+                                R.string.novel_polish_batch_failed,
+                                job.written,
+                                job.target,
+                            ),
+                            style = type.body.copy(fontWeight = FontWeight.SemiBold),
+                            color = workspace.red,
+                        )
+                        Text(
+                            ghostwriteStageLabel(job),
+                            style = type.meta,
+                            color = workspace.red,
+                        )
+                        Text(
+                            job.reason ?: stringResource(R.string.novel_unknown_reason),
+                            style = type.meta,
+                            color = workspace.red,
+                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            PanelPill(
+                                text = stringResource(R.string.novel_dismiss),
+                                onClick = onDismissFailure,
+                            )
+                            PanelPill(
+                                text = stringResource(R.string.novel_continue_remaining),
+                                tone = PanelTone.Accent,
+                                enabled = !busy,
+                                onClick = onRetryFailed,
+                            )
+                        }
+                    }
+                    job != null -> {
+                        val paused = job.status == "paused"
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            Box(
+                                Modifier
+                                    .clip(RoundedCornerShape(999.dp))
+                                    .background(if (paused) workspace.row else workspace.greenContainer)
+                                    .padding(horizontal = 10.dp, vertical = 4.dp),
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(5.dp),
+                                ) {
+                                    if (!paused) {
+                                        Box(
+                                            Modifier
+                                                .size(5.dp)
+                                                .clip(CircleShape)
+                                                .background(workspace.green),
+                                        )
+                                    }
+                                    Text(
+                                        if (paused) {
+                                            stringResource(R.string.novel_paused)
+                                        } else {
+                                            stringResource(R.string.novel_in_progress)
+                                        },
+                                        style = type.tinyTag,
+                                        color = if (paused) workspace.muted else workspace.green,
+                                    )
+                                }
+                            }
+                            Text(
+                                ghostwriteStageLabel(job),
+                                style = type.meta.copy(fontWeight = FontWeight.SemiBold),
+                                color = workspace.ink,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f),
+                            )
+                            Row(verticalAlignment = Alignment.Bottom) {
+                                Text(
+                                    stringResource(R.string.novel_number, job.written),
+                                    style = type.screenTitle.copy(
+                                        fontWeight = FontWeight.Bold,
+                                        fontFamily = app.amber.feature.ui.theme.AmberMono,
+                                    ),
+                                    color = workspace.ink,
+                                )
+                                Text(
+                                    stringResource(R.string.novel_chapter_progress, job.target),
+                                    style = type.secondary,
+                                    color = workspace.muted,
+                                    modifier = Modifier.padding(bottom = 6.dp),
+                                )
+                            }
+                        }
+                        Box(
+                            Modifier
+                                .fillMaxWidth()
+                                .height(6.dp)
+                                .clip(RoundedCornerShape(3.dp))
+                                .background(workspace.hairline),
+                        ) {
+                            Box(
+                                Modifier
+                                    .fillMaxWidth(if (job.target == 0) 0f else job.written.toFloat() / job.target)
+                                    .fillMaxHeight()
+                                    .background(chatTheme.accent),
+                            )
+                        }
+                        Text(
+                            stringResource(R.string.novel_polish_progress_note),
+                            style = type.meta,
+                            color = workspace.muted,
+                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            PanelPill(
+                                text = if (paused) {
+                                    stringResource(R.string.novel_continue)
+                                } else {
+                                    stringResource(R.string.novel_pause)
+                                },
+                                onClick = if (paused) onResume else onPause,
+                            )
+                            PanelPill(
+                                text = stringResource(R.string.novel_cancel_batch),
+                                tone = PanelTone.Danger,
+                                onClick = onCancel,
+                            )
+                        }
+                    }
+                    else -> {
+                        if (latestOrdinal <= 0) {
+                            Text(
+                                stringResource(R.string.novel_no_chapters_to_polish),
+                                style = type.meta,
+                                color = workspace.muted,
+                            )
+                        } else {
+                            var fromOrdinal by remember { mutableStateOf(1) }
+                            var toOrdinal by remember(latestOrdinal) { mutableStateOf(latestOrdinal) }
+                            Text(
+                                stringResource(R.string.novel_polish_range_desc),
+                                style = type.meta,
+                                color = workspace.muted,
+                            )
+                            RangeStepperRow(
+                                label = stringResource(R.string.novel_start_chapter),
+                                value = fromOrdinal,
+                                bounds = 1..toOrdinal,
+                                onChange = { fromOrdinal = it },
+                            )
+                            RangeStepperRow(
+                                label = stringResource(R.string.novel_end_chapter),
+                                value = toOrdinal,
+                                bounds = fromOrdinal..latestOrdinal,
+                                onChange = { toOrdinal = it },
+                            )
+                            PanelCtaButton(
+                                text = stringResource(R.string.novel_start_polish),
+                                enabled = !busy && fromOrdinal <= toOrdinal,
+                                onClick = { onStart(fromOrdinal, toOrdinal) },
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** 起/止章 stepper row（与代笔的章数步进同款几何）。 */
+@Composable
+private fun RangeStepperRow(
+    label: String,
+    value: Int,
+    bounds: IntRange,
+    onChange: (Int) -> Unit,
+) {
+    val workspace = workspaceColors()
+    val type = LocalAmberType.current
+    Row(
+        Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(18.dp),
+    ) {
+        PanelRoundIcon(
+            icon = Lucide.Minus,
+            contentDescription = stringResource(R.string.novel_decrease_chapter_named, label),
+            enabled = value > bounds.first,
+            onClick = { if (value > bounds.first) onChange(value - 1) },
+        )
+        Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(
+                    label,
+                    style = type.meta,
+                    color = workspace.muted,
+                )
+                Text(
+                    stringResource(R.string.novel_chapter_number, value),
+                    style = type.body.copy(
+                        fontWeight = FontWeight.SemiBold,
+                        fontFamily = app.amber.feature.ui.theme.AmberMono,
+                    ),
+                    color = workspace.ink,
+                )
+            }
+        }
+        PanelRoundIcon(
+            icon = Lucide.Plus,
+            contentDescription = stringResource(R.string.novel_increase_chapter_named, label),
+            enabled = value < bounds.last,
+            onClick = { if (value < bounds.last) onChange(value + 1) },
+        )
+    }
+}
+
 private enum class PanelTone { Normal, Accent, Danger, Saved }
+
+/**
+ * Project the durable batch stage into the short status line shared by the sheet and
+ * the chat banner. Polish has no candidate-bound joint-review stage, so it always uses
+ * the explicit polish label even if an older job record carries a generic stage.
+ */
+@Composable
+private fun ghostwriteStageLabel(job: NovelMarkdownGhostwriteUi): String {
+    val stage = if (job.mode == app.amber.feature.novelworkspace.NovelWorkspaceGhostwriteMode.Polish) {
+        stringResource(R.string.novel_batch_stage_polish)
+    } else {
+        when (job.stage) {
+            NovelWorkspaceGhostwriteStage.Idle,
+            NovelWorkspaceGhostwriteStage.Writing ->
+                stringResource(R.string.novel_batch_stage_writing)
+            NovelWorkspaceGhostwriteStage.Reviewing ->
+                stringResource(R.string.novel_batch_stage_reviewing)
+            NovelWorkspaceGhostwriteStage.Rewriting ->
+                stringResource(
+                    R.string.novel_batch_stage_rewriting,
+                    (job.rewriteAttempt + 1).coerceIn(1, 2),
+                )
+            NovelWorkspaceGhostwriteStage.Committing ->
+                stringResource(R.string.novel_batch_stage_committing)
+            NovelWorkspaceGhostwriteStage.Planning ->
+                stringResource(R.string.novel_batch_stage_planning)
+        }
+    }
+    val ordinal = job.currentChapterOrdinal.takeIf { it > 0 } ?: if (
+        job.mode == app.amber.feature.novelworkspace.NovelWorkspaceGhostwriteMode.Polish
+    ) {
+        (job.startOrdinal + job.written).coerceAtLeast(1)
+    } else {
+        (job.written + 1).coerceAtLeast(1)
+    }
+    return stringResource(R.string.novel_batch_stage, ordinal, stage)
+}
 
 /**
  * Graphite section: ONE frame (card) + mono `//` eyebrow title. Everything inside
@@ -845,7 +1553,7 @@ private fun PanelCtaButton(text: String, enabled: Boolean, onClick: () -> Unit) 
     }
 }
 
-/** Flat round stepper with a 48dp touch target. */
+/** Flat round stepper chip with a 48dp touch target. */
 @Composable
 private fun PanelRoundIcon(
     icon: ImageVector,
@@ -873,13 +1581,21 @@ private fun PanelEditor(
     placeholder: String,
     initial: String,
     enabled: Boolean,
-    onSave: (String) -> Unit,
+    onSave: (String, () -> Unit) -> Unit,
+    onTextChange: (String) -> Unit = {},
+    onDirtyChange: (Boolean) -> Unit = {},
 ) {
     val workspace = workspaceColors()
     val type = LocalAmberType.current
     var text by remember(initial) { mutableStateOf(initial) }
     var savedTick by remember(initial) { mutableStateOf(false) }
     val dirty = text != initial
+    LaunchedEffect(dirty) { onDirtyChange(dirty) }
+    fun save(value: String) {
+        onSave(value) {
+            if (text == value) savedTick = true
+        }
+    }
     Box(
         Modifier
             .fillMaxWidth()
@@ -893,6 +1609,7 @@ private fun PanelEditor(
             enabled = enabled,
             onValueChange = {
                 text = it
+                onTextChange(it)
                 savedTick = false
             },
             textStyle = type.body.copy(color = workspace.ink),
@@ -906,22 +1623,25 @@ private fun PanelEditor(
     ) {
         if (text.isNotEmpty()) {
             PanelPill(
-                text = "清除",
+                text = stringResource(R.string.clear),
                 enabled = enabled,
                 onClick = {
                     text = ""
-                    onSave("")
-                    savedTick = true
+                    onTextChange("")
+                    save("")
                 },
             )
         }
         PanelPill(
-            text = if (savedTick) "已保存 ✓" else "保存",
+            text = if (savedTick) {
+                stringResource(R.string.novel_saved)
+            } else {
+                stringResource(R.string.chat_page_save)
+            },
             tone = if (savedTick) PanelTone.Saved else PanelTone.Accent,
             enabled = enabled && dirty,
             onClick = {
-                onSave(text)
-                savedTick = true
+                save(text)
             },
         )
     }
@@ -935,6 +1655,8 @@ private fun MarkdownWorkspaceChat(
 ) {
     val workspace = workspaceColors()
     val type = LocalAmberType.current
+    val ghostwriteLabel = stringResource(R.string.novel_ghostwrite)
+    val polishLabel = stringResource(R.string.novel_polish)
     var draft by remember { mutableStateOf("") }
 
     Column(Modifier.fillMaxSize()) {
@@ -942,11 +1664,13 @@ private fun MarkdownWorkspaceChat(
         // user cannot tell whether anything is happening when this OEM blocks the
         // foreground-service notification).
         val activeJob = state.ghostwriteJob
-        val branchOwned = activeJob?.status == "running" || activeJob?.status == "paused"
-        if (activeJob != null && branchOwned) {
+        val batchActive = activeJob?.status == "running" || activeJob?.status == "paused"
+        val branchOwned = batchActive || activeJob?.status == "failed"
+        if (activeJob != null && batchActive) {
             Row(
                 Modifier
                     .fillMaxWidth()
+                    .heightIn(min = 48.dp)
                     .clickable(onClick = onOpenGhostwrite)
                     .background(workspace.paper)
                     .border(1.dp, workspace.hairline, RoundedCornerShape(0.dp))
@@ -961,16 +1685,46 @@ private fun MarkdownWorkspaceChat(
                         color = workspace.blue,
                     )
                 }
-                Text(
-                    if (activeJob.status == "running") {
-                        "代笔进行中 ${activeJob.written} / ${activeJob.target} 章"
-                    } else {
-                        "代笔已暂停 ${activeJob.written} / ${activeJob.target} 章"
-                    },
-                    style = type.meta,
-                    color = workspace.ink,
-                    modifier = Modifier.weight(1f),
-                )
+                val batchLabel = if (
+                    activeJob.mode == app.amber.feature.novelworkspace.NovelWorkspaceGhostwriteMode.Polish
+                ) {
+                    polishLabel
+                } else {
+                    ghostwriteLabel
+                }
+                Column(
+                    Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    Text(
+                        ghostwriteStageLabel(activeJob),
+                        style = type.meta.copy(fontWeight = FontWeight.SemiBold),
+                        color = workspace.ink,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        if (activeJob.status == "running") {
+                            stringResource(
+                                R.string.novel_batch_running,
+                                batchLabel,
+                                activeJob.written,
+                                activeJob.target,
+                            )
+                        } else {
+                            stringResource(
+                                R.string.novel_batch_paused,
+                                batchLabel,
+                                activeJob.written,
+                                activeJob.target,
+                            )
+                        },
+                        style = type.tinyTag,
+                        color = workspace.muted,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
                 Box(
                     Modifier
                         .fillMaxWidth(0.28f)
@@ -1001,7 +1755,7 @@ private fun MarkdownWorkspaceChat(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 Text(
-                    "⚠️ 剧情落后于正文。同步后批准剧情修改，即可继续写作。",
+                    stringResource(R.string.novel_plot_stale_warning),
                     style = type.meta,
                     color = workspace.red,
                     modifier = Modifier.weight(1f),
@@ -1013,7 +1767,7 @@ private fun MarkdownWorkspaceChat(
                         viewModel.send("根据最新正文同步 plot/current.md")
                     },
                 ) {
-                    Text("同步剧情", color = workspace.red)
+                    Text(stringResource(R.string.novel_sync_plot), color = workspace.red)
                 }
             }
         }
@@ -1026,7 +1780,7 @@ private fun MarkdownWorkspaceChat(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    "⛔ 中间章被修改：第 $fromOrdinal 章起可能已对不上，处理前暂停推进。",
+                    stringResource(R.string.novel_unresolved_chapter_warning, fromOrdinal),
                     style = type.meta,
                     color = workspace.red,
                     modifier = Modifier.weight(1f),
@@ -1035,13 +1789,13 @@ private fun MarkdownWorkspaceChat(
                     onClick = { viewModel.rewriteLaterChapters() },
                     enabled = !state.busy,
                 ) {
-                    Text("重写后章", color = workspace.ink)
+                    Text(stringResource(R.string.novel_rewrite_later_chapters), color = workspace.ink)
                 }
                 TextButton(
                     onClick = { viewModel.resolveUnresolved() },
                     enabled = !state.busy,
                 ) {
-                    Text("确认无碍", color = workspace.muted)
+                    Text(stringResource(R.string.novel_mark_resolved), color = workspace.muted)
                 }
             }
         }
@@ -1082,7 +1836,7 @@ private fun MarkdownWorkspaceChat(
                             color = workspace.muted,
                         )
                         Text(
-                            state.toolActivity ?: "正在思考…",
+                            state.toolActivity ?: stringResource(R.string.novel_thinking),
                             style = type.meta,
                             color = workspace.muted,
                         )
@@ -1093,7 +1847,7 @@ private fun MarkdownWorkspaceChat(
                 item(key = "proposal-${proposal.id}") {
                     MarkdownProposalCard(
                         proposal = proposal,
-                        busy = state.busy,
+                        busy = state.busy || branchOwned,
                         onApprove = { viewModel.approve(proposal.id) },
                         onReject = { viewModel.reject(proposal.id) },
                     )
@@ -1102,7 +1856,7 @@ private fun MarkdownWorkspaceChat(
             if (state.drafts.isNotEmpty()) {
                 item(key = "drafts-header") {
                     Text(
-                        "未收录草稿 · ${state.drafts.size}",
+                        stringResource(R.string.novel_drafts_count, state.drafts.size),
                         style = type.meta,
                         color = workspace.muted,
                     )
@@ -1111,7 +1865,7 @@ private fun MarkdownWorkspaceChat(
                     MarkdownDraftCard(
                         draft = draft,
                         hasChapters = state.chapters.isNotEmpty(),
-                        busy = state.busy,
+                        busy = state.busy || branchOwned,
                         onCollectNew = { viewModel.collectDraft(draft.path, NovelWorkspaceCollectTarget.NewChapter) },
                         onCollectAppend = {
                             state.chapters.lastOrNull()?.let { last ->
@@ -1133,13 +1887,46 @@ private fun MarkdownWorkspaceChat(
             if (state.messages.isEmpty() && !state.busy) {
                 item {
                     Text(
-                        "和写作助手讨论剧情与设定。它用五个文件工具读这本书；" +
-                            "改正文或剧情会出审批卡，你确认后才写入。",
+                        stringResource(R.string.novel_chat_empty),
                         style = type.secondary,
                         color = workspace.muted,
                     )
                 }
             }
+        }
+
+        // 快捷动作：提案角色 —— 对话框收集角色名与一句话设想，交给模型把人物卡
+        // 写入 setting/characters/（自由写路径，直存无需审批）。
+        var showCharacterProposal by remember { mutableStateOf(false) }
+        val branchLocked = state.ghostwriteJob?.status == "running" ||
+            state.ghostwriteJob?.status == "paused" ||
+            state.ghostwriteJob?.status == "failed"
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .padding(start = 16.dp, end = 16.dp, bottom = 2.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            TextButton(
+                enabled = !state.busy && !branchLocked,
+                onClick = { showCharacterProposal = true },
+            ) {
+                Text(
+                    stringResource(R.string.novel_propose_character),
+                    color = workspace.ink,
+                    style = type.meta,
+                )
+            }
+        }
+        if (showCharacterProposal) {
+            CharacterProposalDialog(
+                busy = state.busy || branchLocked,
+                onSubmit = { name, sketch ->
+                    showCharacterProposal = false
+                    viewModel.proposeCharacter(name, sketch)
+                },
+                onDismiss = { showCharacterProposal = false },
+            )
         }
 
         // Composer mirrors the standard chat tray (Graphite §6.2): circular mode chip ·
@@ -1187,7 +1974,7 @@ private fun MarkdownWorkspaceChat(
                         } else {
                             Lucide.BotMessageSquare
                         },
-                        contentDescription = "模式",
+                        contentDescription = stringResource(R.string.novel_composer_mode),
                         tint = if (state.composerMode == NovelMarkdownComposerMode.WriteProse) {
                             accent
                         } else {
@@ -1198,8 +1985,8 @@ private fun MarkdownWorkspaceChat(
                 }
                 DropdownMenu(expanded = modeMenu, onDismissRequest = { modeMenu = false }) {
                     listOf(
-                        NovelMarkdownComposerMode.Discuss to "讨论",
-                        NovelMarkdownComposerMode.WriteProse to "写正文",
+                        NovelMarkdownComposerMode.Discuss to stringResource(R.string.novel_mode_discuss),
+                        NovelMarkdownComposerMode.WriteProse to stringResource(R.string.novel_mode_write_prose),
                     ).forEach { (mode, label) ->
                         // Graphite: color is the only selection signal — no check marks.
                         val selected = state.composerMode == mode
@@ -1262,7 +2049,11 @@ private fun MarkdownWorkspaceChat(
             ) {
                 Icon(
                     imageVector = if (state.busy) Lucide.X else Lucide.ArrowUp,
-                    contentDescription = if (state.busy) "停止" else "发送",
+                    contentDescription = if (state.busy) {
+                        stringResource(R.string.stop)
+                    } else {
+                        stringResource(R.string.send)
+                    },
                     // 与 ChatInput 一致：accent 实心圆上的字形固定浅色（sage-green
                     // 这类浅 accent 的 onAccent 是近黑，箭头会一黑一白不一致）。
                     tint = if (state.busy || hasDraft) Color.White else tokens.ink3,
@@ -1272,6 +2063,74 @@ private fun MarkdownWorkspaceChat(
         }
         }
     }
+}
+
+/** 提案角色对话框：角色名 + 一句话设想，提交后走 proposeCharacter 轮。 */
+@Composable
+private fun CharacterProposalDialog(
+    busy: Boolean,
+    onSubmit: (name: String, sketch: String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val workspace = workspaceColors()
+    val type = LocalAmberType.current
+    var name by remember { mutableStateOf("") }
+    var sketch by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = workspace.paper,
+        title = {
+            Text(
+                stringResource(R.string.novel_propose_character),
+                fontWeight = FontWeight.SemiBold,
+                color = workspace.ink,
+            )
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    enabled = !busy,
+                    singleLine = true,
+                    placeholder = {
+                        Text(
+                            stringResource(R.string.novel_character_name),
+                            style = type.meta,
+                            color = workspace.muted,
+                        )
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedTextField(
+                    value = sketch,
+                    onValueChange = { sketch = it },
+                    enabled = !busy,
+                    placeholder = {
+                        Text(
+                            stringResource(R.string.novel_character_idea_hint),
+                            style = type.meta,
+                            color = workspace.muted,
+                        )
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                enabled = !busy && name.isNotBlank(),
+                onClick = { onSubmit(name, sketch) },
+            ) {
+                Text(stringResource(R.string.novel_generate_proposal), color = workspace.ink)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.cancel), color = workspace.muted)
+            }
+        },
+    )
 }
 
 @Composable
@@ -1352,11 +2211,11 @@ private fun MarkdownDraftCard(
             )
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 TextButton(onClick = onCollectNew, enabled = !busy) {
-                    Text("收录为新章", color = workspace.ink)
+                    Text(stringResource(R.string.novel_collect_as_new_chapter), color = workspace.ink)
                 }
                 if (hasChapters) {
                     TextButton(onClick = onCollectAppend, enabled = !busy) {
-                        Text("追加到末章", color = workspace.muted)
+                        Text(stringResource(R.string.novel_append_to_last_chapter), color = workspace.muted)
                     }
                 }
             }
@@ -1383,7 +2242,7 @@ private fun MarkdownProposalCard(
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Text(
-                "写入正文提案",
+                stringResource(R.string.novel_write_proposal_title),
                 style = type.body.copy(fontWeight = FontWeight.SemiBold),
                 color = workspace.ink,
             )
@@ -1404,8 +2263,12 @@ private fun MarkdownProposalCard(
                 )
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                TextButton(onClick = onReject, enabled = !busy) { Text("拒绝", color = workspace.muted) }
-                TextButton(onClick = onApprove, enabled = !busy) { Text("确认写入", color = workspace.ink) }
+                TextButton(onClick = onReject, enabled = !busy) {
+                    Text(stringResource(R.string.novel_reject), color = workspace.muted)
+                }
+                TextButton(onClick = onApprove, enabled = !busy) {
+                    Text(stringResource(R.string.novel_confirm_write), color = workspace.ink)
+                }
             }
         }
     }
@@ -1416,6 +2279,7 @@ private fun MarkdownChapterEditor(
     chapter: NovelMarkdownChapterUi,
     initialBody: String,
     busy: Boolean,
+    writeLocked: Boolean,
     onSave: (title: String, body: String) -> Unit,
     onCancel: () -> Unit,
 ) {
@@ -1429,18 +2293,42 @@ private fun MarkdownChapterEditor(
             Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            TextButton(onClick = onCancel, enabled = !busy) {
-                Text("取消", color = workspace.muted)
+            TextButton(
+                onClick = onCancel,
+                enabled = !busy,
+                modifier = Modifier.weight(1f),
+            ) {
+                Text(
+                    stringResource(R.string.cancel),
+                    color = workspace.muted,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
             }
-            Spacer(Modifier.weight(1f))
             Text(
-                "编辑章节",
+                stringResource(R.string.novel_edit_chapter),
                 style = type.body.copy(fontWeight = FontWeight.SemiBold),
                 color = workspace.ink,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.weight(2f),
             )
-            Spacer(Modifier.weight(1f))
-            TextButton(onClick = { onSave(title, body) }, enabled = !busy) {
-                Text(if (busy) "保存中…" else "保存", color = workspace.ink)
+            TextButton(
+                onClick = { onSave(title, body) },
+                enabled = !busy && !writeLocked,
+                modifier = Modifier.weight(1f),
+            ) {
+                Text(
+                    if (busy) {
+                        stringResource(R.string.novel_saving)
+                    } else {
+                        stringResource(R.string.chat_page_save)
+                    },
+                    color = workspace.ink,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
             }
         }
         Column(
@@ -1455,7 +2343,7 @@ private fun MarkdownChapterEditor(
             BasicTextField(
                 value = title,
                 onValueChange = { title = it },
-                enabled = !busy,
+                enabled = !busy && !writeLocked,
                 singleLine = true,
                 textStyle = type.body.copy(color = workspace.ink, fontWeight = FontWeight.SemiBold),
                 cursorBrush = SolidColor(workspace.ink),
@@ -1469,11 +2357,12 @@ private fun MarkdownChapterEditor(
             BasicTextField(
                 value = body,
                 onValueChange = { body = it },
-                enabled = !busy,
+                enabled = !busy && !writeLocked,
                 textStyle = type.body.copy(color = workspace.ink),
                 cursorBrush = SolidColor(workspace.ink),
                 modifier = Modifier
                     .fillMaxWidth()
+                    .heightIn(min = 240.dp)
                     .clip(RoundedCornerShape(12.dp))
                     .background(workspace.paper)
                     .border(1.dp, workspace.hairline, RoundedCornerShape(12.dp))
@@ -1488,13 +2377,28 @@ private fun MarkdownChapterEditor(
 private fun MarkdownWorkspaceManuscript(
     viewModel: NovelMarkdownWorkspaceViewModel,
     state: NovelMarkdownWorkspaceUiState,
+    onOpenPolish: () -> Unit,
 ) {
     val workspace = workspaceColors()
     val type = LocalAmberType.current
     var openChapter by remember { mutableStateOf<NovelMarkdownChapterUi?>(null) }
     var editingChapter by remember { mutableStateOf(false) }
     var contentTick by remember { mutableStateOf(0) }
-    val branchLocked = state.ghostwriteJob?.status == "running" || state.ghostwriteJob?.status == "paused"
+    // 重写本章的在途标记：仅在按钮点击时置位，busy 释放后复位（页面态，不进 VM）。
+    var rewritingOrdinal by remember { mutableStateOf<Int?>(null) }
+    // 切分支后重置明细视图：openChapter 是无 key remember 的内存态，switchBranch 的
+    // reload 不触及——不清会把上一分支的章节继续显示/编辑在当前分支下，保存即跨分支
+    // 写入（runtime 侧另有分支前缀防御，这里是 UI 层的第一道）。
+    LaunchedEffect(state.branchSlug) {
+        openChapter = null
+        editingChapter = false
+        rewritingOrdinal = null
+        contentTick++
+    }
+    LaunchedEffect(state.busy) { if (!state.busy) rewritingOrdinal = null }
+    val branchLocked = state.ghostwriteJob?.status == "running" ||
+        state.ghostwriteJob?.status == "paused" ||
+        state.ghostwriteJob?.status == "failed"
 
     val chapter = openChapter
     if (chapter != null) {
@@ -1503,7 +2407,8 @@ private fun MarkdownWorkspaceManuscript(
             MarkdownChapterEditor(
                 chapter = chapter,
                 initialBody = body,
-                busy = state.busy || branchLocked,
+                busy = state.busy,
+                writeLocked = branchLocked,
                 onSave = { title, text ->
                     viewModel.saveChapterEdit(chapter.path, title, text) {
                         contentTick++
@@ -1520,7 +2425,7 @@ private fun MarkdownWorkspaceManuscript(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     TextButton(onClick = { openChapter = null }) {
-                        Text("返回目录", color = workspace.ink)
+                        Text(stringResource(R.string.novel_return_to_directory), color = workspace.ink)
                     }
                     Spacer(Modifier.weight(1f))
                     Text(
@@ -1532,7 +2437,7 @@ private fun MarkdownWorkspaceManuscript(
                     )
                     Spacer(Modifier.weight(1f))
                     TextButton(onClick = { editingChapter = true }, enabled = !branchLocked) {
-                        Text("编辑", color = workspace.ink)
+                        Text(stringResource(R.string.edit), color = workspace.ink)
                     }
                 }
                 Column(
@@ -1542,7 +2447,15 @@ private fun MarkdownWorkspaceManuscript(
                         .navigationBarsPadding()
                         .padding(horizontal = 20.dp, vertical = 12.dp),
                 ) {
-                    Text(body.ifBlank { "（空章节）" }, style = type.body, color = workspace.ink)
+                    Text(
+                        if (body.isBlank()) {
+                            stringResource(R.string.novel_empty_chapter)
+                        } else {
+                            body
+                        },
+                        style = type.body,
+                        color = workspace.ink,
+                    )
                     Spacer(Modifier.size(48.dp))
                 }
             }
@@ -1553,7 +2466,7 @@ private fun MarkdownWorkspaceManuscript(
     if (state.chapters.isEmpty()) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Text(
-                "正文还没有章节。在创作里让助手写草稿，收录后会出现在这里。",
+                stringResource(R.string.novel_no_chapters),
                 style = type.secondary,
                 color = workspace.muted,
             )
@@ -1562,21 +2475,51 @@ private fun MarkdownWorkspaceManuscript(
     }
 
     Column(Modifier.fillMaxSize()) {
-        Row(
+        FlowRow(
             Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
             horizontalArrangement = Arrangement.End,
-            verticalAlignment = Alignment.CenterVertically,
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+            itemVerticalAlignment = Alignment.CenterVertically,
         ) {
-            if (branchLocked) {
-                Text("当前分支由代笔批次占用", color = workspace.muted, style = type.meta)
-                Spacer(Modifier.weight(1f))
+            val activeJob = state.ghostwriteJob
+            val batchOwnsBranch = activeJob?.status == "running" ||
+                activeJob?.status == "paused" || activeJob?.status == "failed"
+            val polishOwned = activeJob != null && batchOwnsBranch && activeJob.mode ==
+                app.amber.feature.novelworkspace.NovelWorkspaceGhostwriteMode.Polish
+            val writeOwned = batchOwnsBranch && !polishOwned
+            if (writeOwned) {
+                Text(
+                    stringResource(R.string.novel_batch_in_use),
+                    color = workspace.muted,
+                    style = type.meta,
+                )
+            }
+            // 批量润色入口：range 对话框 + 进度都进同一张 sheet；润色批次进行中时按钮
+            // 变为查看进度入口（代笔占用时禁用，两者互斥）。
+            TextButton(
+                onClick = onOpenPolish,
+                enabled = !state.busy && !writeOwned,
+            ) {
+                Text(
+                    if (polishOwned) {
+                        stringResource(R.string.novel_polish_in_progress)
+                    } else {
+                        stringResource(R.string.novel_batch_polish)
+                    },
+                    color = workspace.muted,
+                    style = type.meta,
+                )
             }
             if (state.canUndo) {
                 TextButton(
                     onClick = { viewModel.undoLast() },
                     enabled = !state.busy && !branchLocked,
                 ) {
-                    Text("撤销最近一笔", color = workspace.muted, style = type.meta)
+                    Text(
+                        stringResource(R.string.novel_undo_last),
+                        color = workspace.muted,
+                        style = type.meta,
+                    )
                 }
             }
             TextButton(
@@ -1584,7 +2527,11 @@ private fun MarkdownWorkspaceManuscript(
                 enabled = !state.busy && !state.consistencyChecking,
             ) {
                 Text(
-                    if (state.consistencyChecking) "检查中…" else "一致性检查",
+                    if (state.consistencyChecking) {
+                        stringResource(R.string.novel_consistency_checking)
+                    } else {
+                        stringResource(R.string.novel_consistency_check)
+                    },
                     color = workspace.muted,
                     style = type.meta,
                 )
@@ -1605,20 +2552,578 @@ private fun MarkdownWorkspaceManuscript(
             ) {
                 Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                     Text(
-                        "第 ${chapterItem.ordinal} 章 · ${chapterItem.title}",
+                        stringResource(
+                            R.string.novel_chapter_heading,
+                            chapterItem.ordinal,
+                            chapterItem.title,
+                        ),
                         style = type.body.copy(fontWeight = FontWeight.SemiBold),
                         color = workspace.ink,
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
                     )
                     Text(
-                        "约 ${chapterItem.charCount} 字",
+                        stringResource(R.string.novel_character_count, chapterItem.charCount),
                         style = type.meta,
                         color = workspace.muted,
                     )
+                    // 重写本章：整章替换稿走正文审批门（提案卡确认后生效）；
+                    // 中间章未决状态照常允许重写，未决门既有语义自会处理。
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End,
+                    ) {
+                        TextButton(
+                            onClick = {
+                                if (viewModel.rewriteChapter(chapterItem.ordinal)) {
+                                    rewritingOrdinal = chapterItem.ordinal
+                                }
+                            },
+                            enabled = !state.busy && !branchLocked,
+                        ) {
+                            Text(
+                                if (rewritingOrdinal == chapterItem.ordinal) {
+                                    stringResource(R.string.novel_rewriting_chapter)
+                                } else {
+                                    stringResource(R.string.novel_rewrite_chapter)
+                                },
+                                color = workspace.muted,
+                                style = type.meta,
+                            )
+                        }
+                    }
                 }
             }
         }
     }
     }
 }
+
+/**
+ * 分支 sheet：分支列表（当前标出）、「新建分支」（从当前分支分叉）、点选切换。
+ * 有活跃批次（running/paused）时切换项禁用并在顶部说明——批次按 job 绑定的分支写盘，
+ * 切走后进度/审批/撤销会全部错位。
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun BranchSheet(
+    branches: List<NovelWorkspaceBranches.NovelWorkspaceBranchInfo>,
+    branchLocked: Boolean,
+    busy: Boolean,
+    errorMessage: String?,
+    onSwitch: (String) -> Unit,
+    onCreate: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val workspace = workspaceColors()
+    val type = LocalAmberType.current
+    val chatTheme = app.amber.feature.ui.pages.chat.LocalChatTheme.current
+    var showCreate by remember { mutableStateOf(false) }
+
+    ModalBottomSheet(onDismissRequest = onDismiss, containerColor = workspace.canvas) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .navigationBarsPadding()
+                .padding(horizontal = 16.dp)
+                .padding(bottom = 28.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Row(
+                verticalAlignment = Alignment.Bottom,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(
+                    "//",
+                    style = type.meta.copy(fontSize = 17.sp, fontWeight = FontWeight.Bold),
+                    color = chatTheme.accent,
+                )
+                Text(
+                    stringResource(R.string.novel_branches_title),
+                    style = type.sessionTitle.copy(fontWeight = FontWeight.Bold),
+                    color = workspace.ink,
+                )
+                Spacer(Modifier.weight(1f))
+                Text(
+                    stringResource(R.string.novel_branches_badge),
+                    style = type.meta.copy(
+                        fontSize = 10.5.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 1.2.sp,
+                        fontFamily = app.amber.feature.ui.theme.AmberMono,
+                    ),
+                    color = LocalAmberTokens.current.ink4,
+                )
+            }
+            if (branchLocked) {
+                Text(
+                    stringResource(R.string.novel_branch_locked),
+                    style = type.meta,
+                    color = workspace.red,
+                )
+            }
+            if (errorMessage != null) {
+                Text(errorMessage, style = type.meta, color = workspace.red)
+            }
+            branches.forEach { branch ->
+                val current = branch.isCurrent
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(if (current) workspace.row else Color.Transparent)
+                        .border(1.dp, workspace.hairline, RoundedCornerShape(12.dp))
+                        .clickable(enabled = !current && !branchLocked && !busy) {
+                            onSwitch(branch.slug)
+                        }
+                        .padding(horizontal = 14.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Icon(
+                        imageVector = Lucide.GitBranch,
+                        contentDescription = null,
+                        tint = if (current) chatTheme.accent else LocalAmberTokens.current.ink3,
+                        modifier = Modifier.size(15.dp),
+                    )
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            if (branch.isMain) branch.title else branch.slug,
+                            style = type.body.copy(fontWeight = if (current) FontWeight.SemiBold else FontWeight.Normal),
+                            color = workspace.ink,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        if (!branch.isMain && branch.slug != branch.title) {
+                            Text(branch.slug, style = type.tinyTag, color = workspace.faint, maxLines = 1)
+                        }
+                    }
+                    if (current) {
+                        Text(
+                            stringResource(R.string.novel_current),
+                            style = type.tinyTag,
+                            color = chatTheme.accent,
+                        )
+                    }
+                }
+            }
+            // 新建分支同样受批次锁约束：createBranch 复制文件、落 fork commit 与批次
+            // Worker 的写盘/提交存在竞态，存储层对任何活跃批次（任何分支）都会拒绝，
+            // 这里直接禁用入口而不是等报错。
+            PanelCtaButton(
+                text = stringResource(R.string.novel_new_branch),
+                enabled = !busy && !branchLocked,
+                onClick = { showCreate = true },
+            )
+            Text(
+                stringResource(R.string.novel_branch_description),
+                style = type.meta,
+                color = workspace.muted,
+            )
+        }
+    }
+
+    if (showCreate) {
+        NewBranchDialog(
+            busy = busy,
+            onSubmit = { name ->
+                onCreate(name)
+                showCreate = false
+            },
+            onDismiss = { showCreate = false },
+        )
+    }
+}
+
+/** 新建分支对话框：分支名（从当前分支分叉）。 */
+@Composable
+private fun NewBranchDialog(
+    busy: Boolean,
+    onSubmit: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val workspace = workspaceColors()
+    val type = LocalAmberType.current
+    var name by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = workspace.paper,
+        title = {
+            Text(
+                stringResource(R.string.novel_new_branch),
+                fontWeight = FontWeight.SemiBold,
+                color = workspace.ink,
+            )
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    stringResource(R.string.novel_new_branch_description),
+                    style = type.meta,
+                    color = workspace.muted,
+                )
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    enabled = !busy,
+                    singleLine = true,
+                    placeholder = {
+                        Text(
+                            stringResource(R.string.novel_branch_name_placeholder),
+                            style = type.meta,
+                            color = workspace.muted,
+                        )
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                enabled = !busy && name.isNotBlank(),
+                onClick = { onSubmit(name) },
+            ) {
+                Text(stringResource(R.string.novel_create), color = workspace.ink)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.cancel), color = workspace.muted)
+            }
+        },
+    )
+}
+
+/**
+ * 设定 tab：设定文件区（setting/ 按目录分组，显示最近提交时间）、伏笔区（未回收/已回收，
+ * 点击进入该文件编辑）、决定区（只读）。数据来自 [NovelWorkspaceCatalog]（feature 层
+ * 纯函数），每次 commit 与切分支后由 VM 刷新。
+ */
+@Composable
+private fun MarkdownWorkspaceCatalog(
+    viewModel: NovelMarkdownWorkspaceViewModel,
+    state: NovelMarkdownWorkspaceUiState,
+) {
+    val workspace = workspaceColors()
+    val type = LocalAmberType.current
+    val branchLocked = state.ghostwriteJob?.status == "running" ||
+        state.ghostwriteJob?.status == "paused" ||
+        state.ghostwriteJob?.status == "failed"
+    var openPath by remember { mutableStateOf<String?>(null) }
+    var openTitle by remember { mutableStateOf("") }
+    var contentTick by remember { mutableStateOf(0) }
+    // 切分支后重置设定明细视图（同正文 tab：无 key remember 的内存态属于上一分支）。
+    LaunchedEffect(state.branchSlug) {
+        openPath = null
+        openTitle = ""
+        contentTick++
+    }
+
+    val path = openPath
+    if (path != null) {
+        val body = remember(path, contentTick) { viewModel.readFileBody(path).orEmpty() }
+        WorkspaceFileEditor(
+            title = openTitle,
+            initialBody = body,
+            busy = state.busy,
+            writeLocked = branchLocked,
+            onSave = { text ->
+                viewModel.saveFileEdit(path, text) {
+                    contentTick++
+                    openPath = null
+                }
+            },
+            onCancel = { openPath = null },
+        )
+        return
+    }
+
+    val catalog = state.catalog
+    if (catalog == null ||
+        (catalog.settingGroups.isEmpty() && catalog.foreshadowing.isEmpty() && catalog.decisions.isEmpty())
+    ) {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Text(
+                stringResource(R.string.novel_no_setting_files),
+                style = type.secondary,
+                color = workspace.muted,
+                textAlign = TextAlign.Center,
+            )
+        }
+        return
+    }
+
+    LazyColumn(
+        Modifier.fillMaxSize().navigationBarsPadding(),
+        contentPadding = PaddingValues(16.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        if (catalog.settingGroups.isNotEmpty()) {
+            item(key = "setting-header") {
+                CatalogSectionHeader(stringResource(R.string.novel_setting_files))
+            }
+            catalog.settingGroups.forEach { group ->
+                item(key = "setting-${group.directory}") {
+                    PanelSection(
+                        title = if (group.directory == NovelWorkspaceCatalog.ROOT_GROUP) {
+                            stringResource(R.string.novel_catalog_root_directory)
+                        } else {
+                            group.directory
+                        },
+                    ) {
+                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            group.entries.forEach { entry ->
+                                Row(
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .clickable {
+                                            openTitle = entry.title
+                                            openPath = entry.path
+                                        }
+                                        .padding(horizontal = 4.dp, vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                ) {
+                                    Column(Modifier.weight(1f)) {
+                                        Text(
+                                            entry.title,
+                                            style = type.body,
+                                            color = workspace.ink,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                        Text(
+                                            entry.path,
+                                            style = type.tinyTag,
+                                            color = workspace.faint,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                    }
+                                    Text(
+                                        entry.updatedAt?.let { formatCatalogTime(it) }
+                                            ?: stringResource(R.string.novel_uncommitted),
+                                        style = type.tinyTag,
+                                        color = workspace.faint,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if (catalog.foreshadowing.isNotEmpty()) {
+            item(key = "foreshadowing-header") {
+                CatalogSectionHeader(stringResource(R.string.novel_foreshadowing))
+            }
+            val open = catalog.foreshadowing.filter { !it.resolved }
+            val resolved = catalog.foreshadowing.filter { it.resolved }
+            if (open.isNotEmpty()) {
+                item(key = "foreshadowing-open") {
+                    PanelSection(
+                        title = stringResource(R.string.novel_open_foreshadowing, open.size),
+                    ) {
+                        ForeshadowingRows(open, workspace, type) { entry ->
+                            openTitle = entry.title
+                            openPath = entry.path
+                        }
+                    }
+                }
+            }
+            if (resolved.isNotEmpty()) {
+                item(key = "foreshadowing-resolved") {
+                    PanelSection(
+                        title = stringResource(R.string.novel_resolved_foreshadowing, resolved.size),
+                    ) {
+                        ForeshadowingRows(resolved, workspace, type) { entry ->
+                            openTitle = entry.title
+                            openPath = entry.path
+                        }
+                    }
+                }
+            }
+        }
+        if (catalog.decisions.isNotEmpty()) {
+            item(key = "decision-header") {
+                CatalogSectionHeader(stringResource(R.string.novel_confirmed_decisions))
+            }
+            item(key = "decision-list") {
+                PanelSection(title = stringResource(R.string.novel_decision_records)) {
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        catalog.decisions.forEach { decision ->
+                            Column(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 4.dp, vertical = 6.dp),
+                            ) {
+                                Text(
+                                    decision.title,
+                                    style = type.body,
+                                    color = workspace.ink,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                                Text(
+                                    decision.path,
+                                    style = type.tinyTag,
+                                    color = workspace.faint,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CatalogSectionHeader(text: String) {
+    val type = LocalAmberType.current
+    val workspace = workspaceColors()
+    Text(
+        text,
+        style = type.meta.copy(fontWeight = FontWeight.SemiBold),
+        color = workspace.muted,
+        modifier = Modifier.padding(start = 4.dp),
+    )
+}
+
+@Composable
+private fun ForeshadowingRows(
+    entries: List<NovelWorkspaceCatalog.NovelWorkspaceForeshadowingEntry>,
+    workspace: app.amber.feature.ui.components.ui.WorkspaceColors,
+    type: app.amber.feature.ui.theme.AmberTextStyles,
+    onOpen: (NovelWorkspaceCatalog.NovelWorkspaceForeshadowingEntry) -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        entries.forEach { entry ->
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(8.dp))
+                    .clickable { onOpen(entry) }
+                    .padding(horizontal = 4.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        entry.title,
+                        style = type.body,
+                        color = workspace.ink,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        entry.path,
+                        style = type.tinyTag,
+                        color = workspace.faint,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * 设定/伏笔文件编辑器：正文编辑（front matter 由宿主保留），保存走宿主手改 +
+ * 「手改」commit + undo 记录，与章节编辑器同一套保存/撤销约定。
+ */
+@Composable
+private fun WorkspaceFileEditor(
+    title: String,
+    initialBody: String,
+    busy: Boolean,
+    writeLocked: Boolean,
+    onSave: (String) -> Unit,
+    onCancel: () -> Unit,
+) {
+    val workspace = workspaceColors()
+    val type = LocalAmberType.current
+    var body by remember(title, initialBody) { mutableStateOf(initialBody) }
+
+    Column(Modifier.fillMaxSize()) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            TextButton(
+                onClick = onCancel,
+                enabled = !busy,
+                modifier = Modifier.weight(1f),
+            ) {
+                Text(
+                    stringResource(R.string.cancel),
+                    color = workspace.muted,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            Text(
+                title,
+                style = type.body.copy(fontWeight = FontWeight.SemiBold),
+                color = workspace.ink,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.weight(2f),
+            )
+            TextButton(
+                onClick = { onSave(body) },
+                enabled = !busy && !writeLocked,
+                modifier = Modifier.weight(1f),
+            ) {
+                Text(
+                    if (busy) {
+                        stringResource(R.string.novel_saving)
+                    } else {
+                        stringResource(R.string.chat_page_save)
+                    },
+                    color = workspace.ink,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+        Column(
+            Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .imePadding()
+                .navigationBarsPadding()
+                .padding(horizontal = 20.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            BasicTextField(
+                value = body,
+                onValueChange = { body = it },
+                enabled = !busy && !writeLocked,
+                textStyle = type.body.copy(color = workspace.ink),
+                cursorBrush = SolidColor(workspace.ink),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 240.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(workspace.paper)
+                    .border(1.dp, workspace.hairline, RoundedCornerShape(12.dp))
+                    .padding(horizontal = 14.dp, vertical = 10.dp),
+            )
+            Spacer(Modifier.size(48.dp))
+        }
+    }
+}
+
+/** 设定文件区的更新时间列（ledger 最近 commit 时间，本地时区）。 */
+private fun formatCatalogTime(instant: java.time.Instant): String =
+    java.time.format.DateTimeFormatter.ofPattern("MM-dd HH:mm")
+        .withZone(java.time.ZoneId.systemDefault())
+        .format(instant)

@@ -8,7 +8,9 @@ import androidx.core.app.NotificationCompat
 import app.amber.agent.DEEP_READ_NOTIFICATION_CHANNEL_ID
 import app.amber.agent.R
 import app.amber.agent.RouteActivity
+import app.amber.core.utils.appLocale
 import app.amber.core.utils.sendNotification
+import java.util.Locale
 
 class DeepReadNotifier(
     private val context: Context,
@@ -17,12 +19,22 @@ class DeepReadNotifier(
         topicId: String,
         title: String,
         sourceUrl: String?,
-        progress: DeepReadProgressSnapshot = null.deepReadProgressSnapshot(running = true),
+        locale: Locale = context.appLocale(),
+        progress: DeepReadProgressSnapshot = null.deepReadProgressSnapshot(
+            running = true,
+            locale = locale,
+        ),
     ): Notification =
         NotificationCompat.Builder(context, DEEP_READ_NOTIFICATION_CHANNEL_ID)
             .setSmallIcon(R.drawable.amberagent_live_status_icon)
-            .setContentTitle("深度阅读正在生成 · ${progress.percent}%")
-            .setContentText("${progress.label} · ${title.take(96)}")
+            .setContentTitle(context.getString(R.string.deep_read_notification_running_title, progress.percent))
+            .setContentText(
+                context.getString(
+                    R.string.deep_read_notification_running_content,
+                    progress.label,
+                    title.take(96),
+                )
+            )
             .setContentIntent(buildOpenPendingIntent(topicId, title, sourceUrl, fromHistory = false))
             .setOngoing(true)
             .setOnlyAlertOnce(true)
@@ -41,8 +53,12 @@ class DeepReadNotifier(
             channelId = DEEP_READ_NOTIFICATION_CHANNEL_ID,
             notificationId = notificationId(topicId),
         ) {
-            this.title = "深度阅读正在生成 · ${progress.percent}%"
-            content = "${progress.label} · ${title.take(96)}"
+            this.title = context.getString(R.string.deep_read_notification_running_title, progress.percent)
+            content = context.getString(
+                R.string.deep_read_notification_running_content,
+                progress.label,
+                title.take(96),
+            )
             smallIcon = R.drawable.amberagent_live_status_icon
             ongoing = true
             onlyAlertOnce = true
@@ -64,7 +80,10 @@ class DeepReadNotifier(
             channelId = DEEP_READ_NOTIFICATION_CHANNEL_ID,
             notificationId = notificationId(topicId),
         ) {
-            this.title = if (complete) "深度阅读已生成" else "深度阅读已部分生成"
+            this.title = context.getString(
+                if (complete) R.string.deep_read_notification_completed_title
+                else R.string.deep_read_notification_partial_title,
+            )
             content = title.take(120)
             smallIcon = R.drawable.amberagent_live_status_icon
             autoCancel = true
@@ -86,7 +105,7 @@ class DeepReadNotifier(
             channelId = DEEP_READ_NOTIFICATION_CHANNEL_ID,
             notificationId = notificationId(topicId),
         ) {
-            this.title = "深度阅读生成失败"
+            this.title = context.getString(R.string.deep_read_notification_failed_title)
             content = reason.ifBlank { title }.take(160)
             smallIcon = R.drawable.amberagent_live_status_icon
             autoCancel = true

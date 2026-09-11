@@ -11,6 +11,7 @@ import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import java.net.URI
+import java.util.Locale
 
 private const val STAGE_EVIDENCE_MIN = 4
 private const val STAGE_EVIDENCE_MAX = 6
@@ -43,7 +44,9 @@ class DeepReadResearchHarness {
     fun fallbackPlan(
         topicTitle: String,
         pack: DeepReadEvidencePack,
+        locale: Locale = Locale.CHINESE,
     ): DeepReadArticlePlan {
+        val chinese = locale.isChineseLocale()
         val stageSourceIds = DeepReadGenerationStage.entries.associate { stage ->
             stage.stageKey() to pack.stageCards[stage].orEmpty().map { it.sourceId }
         }
@@ -58,25 +61,29 @@ class DeepReadResearchHarness {
             .distinct()
             .take(6)
         return DeepReadArticlePlan(
-            overviewAngle = "从已核查来源解释「$topicTitle」发生了什么、为什么值得读，以及哪些结论仍需保守表达。",
+            overviewAngle = if (chinese) {
+                "从已核查来源解释「$topicTitle」发生了什么、为什么值得读，以及哪些结论仍需保守表达。"
+            } else {
+                "Explain what happened with \"$topicTitle\", why it matters, and which conclusions require caution, using only verified sources."
+            },
             narrativeSlots = listOf(
-                "背景和直接触发因素",
-                "关键进展或时间线",
-                "当前状态与后续观察点",
+                if (chinese) "背景和直接触发因素" else "Background and immediate trigger",
+                if (chinese) "关键进展或时间线" else "Key developments or timeline",
+                if (chinese) "当前状态与后续观察点" else "Current state and what to watch next",
             ),
             analysisQuestions = listOf(
-                "核心矛盾是什么，各方到底在争什么？",
-                "这件事会影响哪些用户、公司、行业或公共议题？",
-                "有哪些反方证据、不确定点或互相矛盾的说法需要降格表达？",
+                if (chinese) "核心矛盾是什么，各方到底在争什么？" else "What is the central dispute, and what exactly are the parties contesting?",
+                if (chinese) "这件事会影响哪些用户、公司、行业或公共议题？" else "Which users, companies, industries, or public issues could be affected?",
+                if (chinese) "有哪些反方证据、不确定点或互相矛盾的说法需要降格表达？" else "Which counter-evidence, uncertainties, or conflicting claims require cautious wording?",
             ),
             stakeholders = stakeholders.ifEmpty { pack.cards.mapNotNull { it.source.source }.distinct().take(6) },
             riskOrUncertainty = listOf(
-                "来源之间未互相印证的事实不得写成定论。",
-                "没有来源支撑的价格、时间、人物表态、因果关系需要跳过或标注为不确定。",
+                if (chinese) "来源之间未互相印证的事实不得写成定论。" else "Do not present facts that sources do not corroborate as settled conclusions.",
+                if (chinese) "没有来源支撑的价格、时间、人物表态、因果关系需要跳过或标注为不确定。" else "Skip or label as uncertain any price, date, quote, or causal claim without source support.",
             ),
             requiredSourceIds = requiredSourceIds,
             stageSourceIds = stageSourceIds,
-            coverageChecks = DeepReadCoverageItem.entries.map { it.label },
+            coverageChecks = DeepReadCoverageItem.entries.map { it.localizedLabel(locale) },
         )
     }
 
@@ -84,30 +91,38 @@ class DeepReadResearchHarness {
         topicTitle: String,
         pack: DeepReadEvidencePack,
         playbookMarkdown: String,
+        locale: Locale = Locale.CHINESE,
     ): String = buildString {
-        appendLine("你是 AmberAgent DeepRead 的结构规划器。")
-        appendLine("只输出合法 JSON，不要 Markdown、不要代码围栏、不要解释。")
-        appendLine("话题：$topicTitle")
+        val chinese = locale.isChineseLocale()
+        appendLine(if (chinese) "你是 AmberAgent DeepRead 的结构规划器。" else "You are AmberAgent Deep Read's article-structure planner.")
+        appendLine(if (chinese) "只输出合法 JSON，不要 Markdown、不要代码围栏、不要解释。" else "Output valid JSON only; no Markdown, code fences, or explanation.")
+        appendLine(if (chinese) "话题：$topicTitle" else "Topic: $topicTitle")
         appendLine()
-        appendLine("## 本地 Deep Read Playbook（只读摘录）")
+        appendLine(
+            if (chinese) {
+                "## 本地 Deep Read Playbook（只读摘录）"
+            } else {
+                "## Local Deep Read Playbook (read-only excerpt)"
+            }
+        )
         appendLine(playbookMarkdown.take(4_000))
         appendLine()
-        appendLine("## 可用证据")
+        appendLine(if (chinese) "## 可用证据" else "## Available evidence")
         pack.cards.take(15).forEach { card ->
             appendLine("- ${card.sourceId} | ${card.topicTags.joinToString { it.key }} | ${card.title}")
             appendLine("  url: ${card.source.url}")
             appendLine("  claim_summary: ${card.claimSummary.take(PLANNING_EXCERPT_LIMIT)}")
         }
         appendLine()
-        appendLine("## 输出 JSON Schema")
+        appendLine(if (chinese) "## 输出 JSON Schema" else "## Output JSON schema")
         appendLine(
             """
             {
-              "overview_angle": "一两句话说明文章角度",
-              "narrative_slots": ["必须覆盖的叙事槽位"],
-              "analysis_questions": ["必须回答的分析问题"],
-              "stakeholders": ["相关方"],
-              "risk_or_uncertainty": ["风险、不确定点或反方证据"],
+              "overview_angle": "one or two sentences describing the article angle",
+              "narrative_slots": ["narrative slots that must be covered"],
+              "analysis_questions": ["analysis questions that must be answered"],
+              "stakeholders": ["relevant parties"],
+              "risk_or_uncertainty": ["risks, uncertainties, or counter-evidence"],
               "required_source_ids": ["s1"],
               "stage_source_ids": {
                 "overview": ["s1","s2","s3","s4"],
@@ -115,16 +130,16 @@ class DeepReadResearchHarness {
                 "analysis": ["s4","s8","s9","s10"],
                 "extended_reading": ["s1","s5","s9","s11"]
               },
-              "coverage_checks": ["背景","时间线/核心点","利益相关方","争议","影响","反方证据","来源链接"]
+              "coverage_checks": ["background","timeline/core points","stakeholders","controversy","impact","counter-evidence","source links"]
             }
             """.trimIndent()
         )
         appendLine()
-        appendLine("要求：")
-        appendLine("- required_source_ids 尽量覆盖 10-15 条来源；来源不足时覆盖所有可用来源。")
-        appendLine("- 每个 stage_source_ids 只放 4-6 条最相关来源。")
-        appendLine("- analysis_questions 必须覆盖核心矛盾、影响链条、反方证据或不确定点。")
-        appendLine("- 不要创造不存在的 source_id。")
+        appendLine(if (chinese) "要求：" else "Requirements:")
+        appendLine(if (chinese) "- required_source_ids 尽量覆盖 10-15 条来源；来源不足时覆盖所有可用来源。" else "- Cover 10-15 sources in required_source_ids when possible; use every available source when fewer exist.")
+        appendLine(if (chinese) "- 每个 stage_source_ids 只放 4-6 条最相关来源。" else "- Put only the 4-6 most relevant sources in each stage_source_ids entry.")
+        appendLine(if (chinese) "- analysis_questions 必须覆盖核心矛盾、影响链条、反方证据或不确定点。" else "- analysis_questions must cover the central dispute, impact chain, counter-evidence, or uncertainty.")
+        appendLine(if (chinese) "- 不要创造不存在的 source_id。" else "- Do not invent source_id values.")
     }
 
     fun parsePlan(raw: String): DeepReadArticlePlan? {
@@ -140,8 +155,9 @@ class DeepReadResearchHarness {
         parsed: DeepReadArticlePlan?,
         topicTitle: String,
         pack: DeepReadEvidencePack,
+        locale: Locale = Locale.CHINESE,
     ): DeepReadArticlePlan {
-        val fallback = fallbackPlan(topicTitle, pack)
+        val fallback = fallbackPlan(topicTitle, pack, locale)
         val plan = parsed ?: fallback
         val allIds = pack.cards.map { it.sourceId }.toSet()
         val normalizedStageSources = DeepReadGenerationStage.entries.associate { stage ->
@@ -512,15 +528,16 @@ data class DeepReadCoverageReport(
     val needsSupplement: Boolean =
         missingItems.isNotEmpty() || missingRequiredSourceIds.isNotEmpty()
 
-    fun promptSummary(): String = buildString {
+    fun promptSummary(locale: Locale = Locale.CHINESE): String = buildString {
+        val chinese = locale.isChineseLocale()
         if (missingItems.isNotEmpty()) {
-            append("缺少：")
-            append(missingItems.joinToString("、") { it.label })
+            append(if (chinese) "缺少：" else "Missing: ")
+            append(missingItems.joinToString(if (chinese) "、" else ", ") { it.localizedLabel(locale) })
         }
         if (missingRequiredSourceIds.isNotEmpty()) {
-            if (isNotEmpty()) append("；")
-            append("未使用来源：")
-            append(missingRequiredSourceIds.take(8).joinToString("、"))
+            if (isNotEmpty()) append(if (chinese) "；" else "; ")
+            append(if (chinese) "未使用来源：" else "Unused sources: ")
+            append(missingRequiredSourceIds.take(8).joinToString(if (chinese) "、" else ", "))
         }
     }
 }
@@ -536,6 +553,18 @@ enum class DeepReadCoverageItem(
     IMPACT("影响", DeepReadGenerationStage.ANALYSIS),
     COUNTER_EVIDENCE("反方证据", DeepReadGenerationStage.ANALYSIS),
     SOURCE_LINKS("来源链接", DeepReadGenerationStage.EXTENDED_READING),
+}
+
+private fun Locale.isChineseLocale(): Boolean = language.equals("zh", ignoreCase = true)
+
+private fun DeepReadCoverageItem.localizedLabel(locale: Locale): String = when (this) {
+    DeepReadCoverageItem.BACKGROUND -> if (locale.isChineseLocale()) "背景" else "background"
+    DeepReadCoverageItem.TIMELINE_OR_CORE -> if (locale.isChineseLocale()) "时间线/核心点" else "timeline/core points"
+    DeepReadCoverageItem.STAKEHOLDERS -> if (locale.isChineseLocale()) "利益相关方" else "stakeholders"
+    DeepReadCoverageItem.CONTROVERSY -> if (locale.isChineseLocale()) "争议" else "controversy"
+    DeepReadCoverageItem.IMPACT -> if (locale.isChineseLocale()) "影响" else "impact"
+    DeepReadCoverageItem.COUNTER_EVIDENCE -> if (locale.isChineseLocale()) "反方证据" else "counter-evidence"
+    DeepReadCoverageItem.SOURCE_LINKS -> if (locale.isChineseLocale()) "来源链接" else "source links"
 }
 
 fun DeepReadGenerationStage.stageKey(): String = when (this) {

@@ -96,7 +96,7 @@ class GenerativeWidgetParserTest {
         assertEquals(2, segments.size)
         assertEquals("Intro", (segments[0] as GenerativeWidgetSegment.Text).content)
         val failure = (segments[1] as GenerativeWidgetSegment.Text).content
-        assertTrue(failure.contains("可视化预览没有生成完整"))
+        assertTrue(failure.contains("The visual preview was incomplete"))
         assertFalse(failure.contains("widget_code"))
         assertFalse(failure.contains("<section"))
     }
@@ -115,7 +115,7 @@ class GenerativeWidgetParserTest {
         assertEquals(2, segments.size)
         assertEquals("Intro", (segments[0] as GenerativeWidgetSegment.Text).content)
         val failure = (segments[1] as GenerativeWidgetSegment.Text).content
-        assertTrue(failure.contains("可视化预览没有生成完整"))
+        assertTrue(failure.contains("The visual preview was incomplete"))
         assertFalse(failure.contains("widget_code"))
         assertFalse(failure.contains("<section"))
     }

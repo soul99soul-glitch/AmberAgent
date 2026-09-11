@@ -1,5 +1,6 @@
 package app.amber.feature.ui.pages.chat
 
+import android.content.Context
 import android.net.Uri
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
@@ -119,6 +120,7 @@ import app.amber.core.context.ConversationCompact
 import app.amber.core.model.Conversation
 import app.amber.core.service.ChatError
 import app.amber.core.service.PendingUserMessage
+import app.amber.core.service.PendingUserMessageDisplayCopy
 import app.amber.core.service.PendingUserMessageMode
 import app.amber.core.service.previewText
 import app.amber.feature.ui.components.ai.ChatInput
@@ -188,6 +190,7 @@ fun ChatPage(
         }
     )
     val toaster = LocalToaster.current
+    val savedToWorkspaceText = stringResource(R.string.chat_page_saved_to_workspace)
     val filesManager: FilesManager = koinInject()
     val eventBus: AppEventBus = koinInject()
     val navController = LocalNavController.current
@@ -459,7 +462,7 @@ fun ChatPage(
             onDismiss = { messageToSave = null },
             onSaved = {
                 messageToSave = null
-                toaster.show("已保存到 Workspace", type = ToastType.Success)
+                toaster.show(savedToWorkspaceText, type = ToastType.Success)
             },
         )
     }
@@ -504,6 +507,8 @@ private fun ChatPageContent(
     val chatProvidersForMenu = setting.providers.filter { provider ->
         provider.enabled && provider.models.any { it.type == ModelType.CHAT }
     }
+    val resourceContext = context
+    val localeTag = resourceContext.resources.configuration.locales.toLanguageTags()
     var previewMode by rememberSaveable { mutableStateOf(false) }
     var sandboxOverlayOpen by rememberSaveable { mutableStateOf(false) }
     var queuePanelOpen by rememberSaveable { mutableStateOf(false) }
@@ -518,10 +523,16 @@ private fun ChatPageContent(
         it.conversationId == conversation.id.toString()
     }
     val conversationIdText = conversation.id.toString()
-    val messageSandboxActivities = remember(conversation.messageNodes, loadingJob, processingStatus) {
+    val messageSandboxActivities = remember(
+        conversation.messageNodes,
+        loadingJob,
+        processingStatus,
+        localeTag,
+    ) {
         conversation.deriveSandboxActivities(
             loading = loadingJob != null,
             processingStatus = processingStatus,
+            context = resourceContext,
         )
     }
     val scopedLiveSandboxActivity = liveSandboxActivity?.takeIf { live ->
@@ -534,7 +545,7 @@ private fun ChatPageContent(
     )
     val sandboxTimeline = when (setting.agentRuntime.operationPreviewMode) {
         AgentOperationPreviewMode.ALWAYS -> rawSandboxTimeline.ifEmpty {
-            listOf(conversation.idleSandboxActivity())
+            listOf(conversation.idleSandboxActivity(resourceContext))
         }
         AgentOperationPreviewMode.AUTO -> rawSandboxTimeline.filter { it.isActiveOperation() }
         AgentOperationPreviewMode.HIDDEN -> emptyList()
@@ -1012,7 +1023,11 @@ private fun ChatPageContent(
                     contentAlignment = Alignment.Center,
                 ) {
                     val nick = setting.displaySetting.userNickname.trim()
-                    val heroText = if (nick.isNotEmpty()) "Hi $nick，\n今天想聊点什么？" else "今天想聊点什么？"
+                    val heroText = if (nick.isNotEmpty()) {
+                        stringResource(R.string.chat_page_hero_greeting_with_name, nick)
+                    } else {
+                        stringResource(R.string.chat_page_hero_greeting)
+                    }
                     val chatTheme = LocalChatTheme.current
                     val amberTokens = LocalAmberTokens.current
                     val amberType = LocalAmberType.current
@@ -1142,7 +1157,7 @@ private fun UserMessageEditConfirmBar(
     ) {
         if (!generating) {
             Text(
-                text = "编辑消息",
+                text = stringResource(R.string.edit),
                 style = MaterialTheme.typography.labelMedium,
                 color = workspace.muted,
             )
@@ -1150,7 +1165,7 @@ private fun UserMessageEditConfirmBar(
         }
         if (generating) {
             Text(
-                text = "生成中，不可编辑",
+                text = stringResource(R.string.chat_page_edit_generating),
                 style = MaterialTheme.typography.labelSmall,
                 color = workspace.muted,
                 maxLines = 1,
@@ -1159,13 +1174,13 @@ private fun UserMessageEditConfirmBar(
             )
         }
         TextButton(onClick = onCancelEdit) {
-            Text("取消", maxLines = 1)
+            Text(stringResource(R.string.chat_page_cancel), maxLines = 1)
         }
         TextButton(onClick = onSaveOnly, enabled = !generating) {
-            Text("仅保存", maxLines = 1)
+            Text(stringResource(R.string.chat_page_save_only), maxLines = 1)
         }
         Button(onClick = onSaveAndRegenerate, enabled = !generating) {
-            Text("保存并重生成", maxLines = 1)
+            Text(stringResource(R.string.chat_page_save_and_regenerate), maxLines = 1)
         }
     }
 }
@@ -1184,12 +1199,12 @@ private fun PendingUserMessageQueueDialog(
     AlertDialog(
         onDismissRequest = onDismiss,
         title = {
-            Text("排队消息")
+            Text(stringResource(R.string.chat_page_queue_title))
         },
         text = {
             if (messages.isEmpty()) {
                 Text(
-                    text = "当前没有排队消息。",
+                    text = stringResource(R.string.chat_page_queue_empty),
                     style = MaterialTheme.typography.bodyMedium,
                     color = workspace.muted,
                 )
@@ -1219,10 +1234,10 @@ private fun PendingUserMessageQueueDialog(
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 if (messages.isNotEmpty()) {
                     TextButton(onClick = onMoveToInput) {
-                        Text("移回输入框")
+                        Text(stringResource(R.string.chat_page_queue_move_to_input))
                     }
                     TextButton(onClick = onResumeQueue) {
-                        Text("继续队列")
+                        Text(stringResource(R.string.chat_page_queue_resume))
                     }
                 }
             }
@@ -1230,11 +1245,11 @@ private fun PendingUserMessageQueueDialog(
         dismissButton = {
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 TextButton(onClick = onDismiss) {
-                    Text("关闭")
+                    Text(stringResource(R.string.chat_page_close))
                 }
                 if (messages.isNotEmpty()) {
                     TextButton(onClick = onClear) {
-                        Text("清空")
+                        Text(stringResource(R.string.clear))
                     }
                 }
             }
@@ -1251,11 +1266,12 @@ private fun PendingUserMessageQueueRow(
     onMoveUp: () -> Unit,
     onMoveDown: () -> Unit,
 ) {
+    val context = LocalContext.current
     val workspace = workspaceColors()
     val modeLabel = when (message.mode) {
-        PendingUserMessageMode.FOLLOWUP -> "排队下一轮"
-        PendingUserMessageMode.STEER -> "等待插话点"
-        PendingUserMessageMode.COLLECT -> "收集多条"
+        PendingUserMessageMode.FOLLOWUP -> stringResource(R.string.chat_page_queue_mode_followup)
+        PendingUserMessageMode.STEER -> stringResource(R.string.chat_page_queue_mode_steer)
+        PendingUserMessageMode.COLLECT -> stringResource(R.string.chat_page_queue_mode_collect)
     }
     Surface(
         modifier = Modifier.fillMaxWidth(),
@@ -1284,21 +1300,24 @@ private fun PendingUserMessageQueueRow(
                         onClick = onMoveUp,
                         enabled = index > 0,
                     ) {
-                        Text("上移")
+                        Text(stringResource(R.string.chat_page_queue_move_up))
                     }
                     TextButton(
                         onClick = onMoveDown,
                         enabled = index < total - 1,
                     ) {
-                        Text("下移")
+                        Text(stringResource(R.string.chat_page_queue_move_down))
                     }
                     TextButton(onClick = onCancel) {
-                        Text("取消")
+                        Text(stringResource(R.string.chat_page_cancel))
                     }
                 }
             }
             Text(
-                text = message.previewText(maxChars = 280),
+                text = message.previewText(
+                    maxChars = 280,
+                    copy = PendingUserMessageDisplayCopy.from(context),
+                ),
                 style = MaterialTheme.typography.bodyMedium,
                 color = workspace.ink,
                 maxLines = 4,
@@ -1336,6 +1355,7 @@ private fun mergeSandboxTimeline(
 private fun Conversation.deriveSandboxActivities(
     loading: Boolean,
     processingStatus: String?,
+    context: Context,
 ): List<SandboxActivityUiState> {
     val sandboxTools = sandboxActivityTools().takeLast(MAX_SANDBOX_TIMELINE_ITEMS)
     if (sandboxTools.isEmpty()) {
@@ -1363,7 +1383,7 @@ private fun Conversation.deriveSandboxActivities(
         SandboxActivityUiState(
             toolCallId = tool.toolCallId,
             toolName = tool.toolName,
-            title = tool.sandboxTitle(input),
+            title = tool.sandboxTitle(context, input),
             status = status,
             conversationId = id.toString(),
             inputPreview = tool.inputPreview(input),
@@ -1380,14 +1400,14 @@ private fun Conversation.deriveSandboxActivities(
     }
 }
 
-private fun Conversation.idleSandboxActivity(): SandboxActivityUiState =
+private fun Conversation.idleSandboxActivity(context: Context): SandboxActivityUiState =
     SandboxActivityUiState(
         toolCallId = "agent-idle-$id",
         toolName = "agent_idle",
-        title = "Agent 操作预览",
+        title = context.getString(R.string.chat_page_agent_operation_preview),
         status = ToolActivityStatus.RUNNING,
         conversationId = id.toString(),
-        inputPreview = "等待下一次工具调用",
+        inputPreview = context.getString(R.string.chat_page_waiting_for_tool_call),
         runtime = "standby",
         stepIndex = null,
         stepTotal = null,
@@ -1475,48 +1495,103 @@ private fun UIMessagePart.Tool.activityStatus(
     }
 }
 
-private fun UIMessagePart.Tool.sandboxTitle(input: kotlinx.serialization.json.JsonElement = inputAsJson()): String {
+private fun UIMessagePart.Tool.sandboxTitle(
+    context: Context,
+    input: kotlinx.serialization.json.JsonElement = inputAsJson(),
+): String {
     return when (toolName) {
-        "search_web" -> "网页搜索 ${input.getFirstStringContent("query", "q", "keyword", "keywords").orEmpty().compactSandboxText(20)}"
-        "scrape_web" -> "打开网页 ${input.getFirstStringContent("url", "link", "uri").orEmpty().compactSandboxText(24)}"
-        "webview_search_open" -> "打开搜索页 ${input.getStringContent("query").orEmpty().compactSandboxText(20)}"
-        "webview_open" -> "打开网页 ${input.getStringContent("url").orEmpty().compactSandboxText(24)}"
-        "webview_wait_for_load" -> "等待网页加载"
-        "webview_read" -> "读取网页内容"
-        "icloud_status" -> "检查 iCloud 挂载"
-        "icloud_list" -> "列出 iCloud ${input.getStringContent("path").orEmpty().compactSandboxText(18)}"
-        "icloud_read" -> "读取 iCloud ${input.getStringContent("path").orEmpty().compactSandboxText(20)}"
-        "icloud_write" -> "写入 iCloud ${input.getStringContent("path").orEmpty().compactSandboxText(20)}"
-        "icloud_search" -> "搜索 iCloud ${input.getStringContent("query").orEmpty().compactSandboxText(20)}"
-        "file_list" -> "列出 workspace ${input.getStringContent("path").orEmpty().compactSandboxText(18)}"
-        "file_read" -> "读取文件 ${input.getStringContent("path").orEmpty().compactSandboxText(20)}"
-        "file_write" -> "写入文件 ${input.getStringContent("path").orEmpty().compactSandboxText(20)}"
-        "file_edit" -> "编辑文件 ${input.getStringContent("path").orEmpty().compactSandboxText(20)}"
-        "file_search" -> "搜索文件 ${input.getStringContent("query").orEmpty().compactSandboxText(20)}"
-        "file_move" -> "移动文件 ${input.getStringContent("from").orEmpty().compactSandboxText(16)}"
-        "terminal_execute" -> "执行 Alpine 命令"
-        "terminal_install_packages" -> "安装终端软件包"
-        "terminal_workspace_flush" -> "同步终端 workspace"
-        "terminal_job_start" -> "启动后台终端任务"
-        "terminal_job_read" -> "读取后台终端任务"
-        "terminal_job_wait" -> "等待后台终端任务"
-        "terminal_job_stop" -> "停止后台终端任务"
-        "terminal_session_start" -> "启动终端会话"
-        "terminal_session_exec" -> "终端会话执行"
-        "terminal_session_read" -> "读取终端输出"
-        "terminal_session_stop" -> "停止终端会话"
-        "screen_click" -> "点击屏幕"
-        "screen_long_click" -> "长按屏幕"
-        "screen_swipe" -> "滑动屏幕"
-        "screen_input_text" -> "输入文字"
-        "screen_back" -> "返回"
-        "screen_home" -> "回到桌面"
-        "screen_open_app" -> "打开应用 ${input.getStringContent("package").orEmpty().compactSandboxText(18)}"
-        "screen_read_ui" -> "读取当前 UI"
-        "screen_screenshot" -> "获取屏幕截图"
-        "vlm_task" -> "执行 VLM 手机任务"
+        "search_web" -> context.getString(
+            R.string.chat_page_tool_search_web,
+            input.getFirstStringContent("query", "q", "keyword", "keywords")
+                .orEmpty()
+                .compactSandboxText(20),
+        )
+        "scrape_web" -> context.getString(
+            R.string.chat_page_tool_open_web,
+            input.getFirstStringContent("url", "link", "uri")
+                .orEmpty()
+                .compactSandboxText(24),
+        )
+        "webview_search_open" -> context.getString(
+            R.string.chat_page_tool_open_search_page,
+            input.getStringContent("query").orEmpty().compactSandboxText(20),
+        )
+        "webview_open" -> context.getString(
+            R.string.chat_page_tool_open_web,
+            input.getStringContent("url").orEmpty().compactSandboxText(24),
+        )
+        "webview_wait_for_load" -> context.getString(R.string.chat_page_tool_wait_web_load)
+        "webview_read" -> context.getString(R.string.chat_page_tool_read_web)
+        "icloud_status" -> context.getString(R.string.chat_page_tool_check_icloud_mount)
+        "icloud_list" -> context.getString(
+            R.string.chat_page_tool_list_icloud,
+            input.getStringContent("path").orEmpty().compactSandboxText(18),
+        )
+        "icloud_read" -> context.getString(
+            R.string.chat_page_tool_read_icloud,
+            input.getStringContent("path").orEmpty().compactSandboxText(20),
+        )
+        "icloud_write" -> context.getString(
+            R.string.chat_page_tool_write_icloud,
+            input.getStringContent("path").orEmpty().compactSandboxText(20),
+        )
+        "icloud_search" -> context.getString(
+            R.string.chat_page_tool_search_icloud,
+            input.getStringContent("query").orEmpty().compactSandboxText(20),
+        )
+        "file_list" -> context.getString(
+            R.string.chat_page_tool_list_workspace,
+            input.getStringContent("path").orEmpty().compactSandboxText(18),
+        )
+        "file_read" -> context.getString(
+            R.string.chat_page_tool_read_file,
+            input.getStringContent("path").orEmpty().compactSandboxText(20),
+        )
+        "file_write" -> context.getString(
+            R.string.chat_page_tool_write_file,
+            input.getStringContent("path").orEmpty().compactSandboxText(20),
+        )
+        "file_edit" -> context.getString(
+            R.string.chat_page_tool_edit_file,
+            input.getStringContent("path").orEmpty().compactSandboxText(20),
+        )
+        "file_search" -> context.getString(
+            R.string.chat_page_tool_search_file,
+            input.getStringContent("query").orEmpty().compactSandboxText(20),
+        )
+        "file_move" -> context.getString(
+            R.string.chat_page_tool_move_file,
+            input.getStringContent("from").orEmpty().compactSandboxText(16),
+        )
+        "terminal_execute" -> context.getString(R.string.chat_page_tool_execute_alpine_command)
+        "terminal_install_packages" -> context.getString(R.string.chat_page_tool_install_terminal_packages)
+        "terminal_workspace_flush" -> context.getString(R.string.chat_page_tool_sync_terminal_workspace)
+        "terminal_job_start" -> context.getString(R.string.chat_page_tool_start_terminal_job)
+        "terminal_job_read" -> context.getString(R.string.chat_page_tool_read_terminal_job)
+        "terminal_job_wait" -> context.getString(R.string.chat_page_tool_wait_terminal_job)
+        "terminal_job_stop" -> context.getString(R.string.chat_page_tool_stop_terminal_job)
+        "terminal_session_start" -> context.getString(R.string.chat_page_tool_start_terminal_session)
+        "terminal_session_exec" -> context.getString(R.string.chat_page_tool_execute_terminal_session)
+        "terminal_session_read" -> context.getString(R.string.chat_page_tool_read_terminal_output)
+        "terminal_session_stop" -> context.getString(R.string.chat_page_tool_stop_terminal_session)
+        "screen_click" -> context.getString(R.string.chat_page_tool_screen_click)
+        "screen_long_click" -> context.getString(R.string.chat_page_tool_screen_long_click)
+        "screen_swipe" -> context.getString(R.string.chat_page_tool_screen_swipe)
+        "screen_input_text" -> context.getString(R.string.chat_page_tool_screen_input_text)
+        "screen_back" -> context.getString(R.string.chat_page_tool_screen_back)
+        "screen_home" -> context.getString(R.string.chat_page_tool_screen_home)
+        "screen_open_app" -> context.getString(
+            R.string.chat_page_tool_open_app,
+            input.getStringContent("package").orEmpty().compactSandboxText(18),
+        )
+        "screen_read_ui" -> context.getString(R.string.chat_page_tool_read_current_ui)
+        "screen_screenshot" -> context.getString(R.string.chat_page_tool_screenshot)
+        "vlm_task" -> context.getString(R.string.chat_page_tool_vlm_task)
         else -> if (toolName.startsWith("mcp__")) {
-            "调用 MCP ${McpToolNamespace.displayName(toolName).compactSandboxText(24)}"
+            context.getString(
+                R.string.chat_page_tool_call_mcp,
+                McpToolNamespace.displayName(toolName).compactSandboxText(24),
+            )
         } else {
             toolName
         }
@@ -1579,7 +1654,7 @@ private fun JsonObject.indicatesFailure(): Boolean {
     return !error.isNullOrBlank() ||
         (exitCode != null && exitCode != 0) ||
         failed ||
-        status in setOf("failed", "error", "denied", "timed_out", "interrupted")
+        status in setOf("failed", "error", "denied", "timed_out", "interrupted", "policy_denied")
 }
 
 private fun UIMessagePart.Tool.outputTail(outputJson: JsonObject): String {
@@ -1650,6 +1725,7 @@ private fun TopBar(
     modelMenuOpen: Boolean,
     onToggleModelMenu: () -> Unit,
 ) {
+    val newSessionLabel = stringResource(R.string.chat_page_new_session)
     // V3 phone-screen.jsx header 没有 surface —— 直接坐在 bloom 之上
     // 之前用 workspace.paper@96% (legacy 硬编码白底) 把 halo 顶层盖住，所以 Paper
     // 主题下用户反馈"顶栏没变暖纸色"——其实是被白 Surface 罩住了
@@ -1698,7 +1774,7 @@ private fun TopBar(
                 ) {
                     val amberTokens = LocalAmberTokens.current
                     val amberType = LocalAmberType.current
-                    val sessionTitle = conversation.title.ifBlank { "新会话" }
+                    val sessionTitle = conversation.title.ifBlank { newSessionLabel }
                     Text(
                         text = sessionTitle,
                         style = amberType.sessionTitle,
@@ -1912,12 +1988,16 @@ private fun OutcomeUnknownCard(
             )
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = "工具结果未知",
+                    text = stringResource(R.string.chat_page_tool_result_unknown),
                     style = MaterialTheme.typography.labelMedium,
                     color = workspace.ink,
                 )
                 Text(
-                    text = "${prompt.toolName} (#${prompt.effectId.take(8)}) 可能在中断前已执行，结果未知。请确认是否重试。",
+                    text = stringResource(
+                        R.string.chat_page_tool_result_unknown_detail,
+                        prompt.toolName,
+                        prompt.effectId.take(8),
+                    ),
                     style = MaterialTheme.typography.labelSmall,
                     color = workspace.muted,
                     maxLines = 2,
@@ -1931,7 +2011,7 @@ private fun OutcomeUnknownCard(
                 iconSize = 14.dp,
                 tone = WorkspaceTone.Danger,
                 icon = Lucide.X,
-                contentDescription = "放弃",
+                contentDescription = stringResource(R.string.chat_page_abandon),
             )
             WorkspaceIconButton(
                 onClick = onRetry,
@@ -1940,7 +2020,7 @@ private fun OutcomeUnknownCard(
                 iconSize = 14.dp,
                 tone = WorkspaceTone.Success,
                 icon = Lucide.RefreshCw,
-                contentDescription = "确认重试",
+                contentDescription = stringResource(R.string.chat_page_confirm_retry),
             )
         }
     }

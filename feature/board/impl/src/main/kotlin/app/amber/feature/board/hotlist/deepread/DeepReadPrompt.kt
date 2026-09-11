@@ -1,5 +1,7 @@
 package app.amber.feature.board.hotlist.deepread
 
+import java.util.Locale
+
 object DeepReadPrompt {
     fun buildStage(
         topicTitle: String,
@@ -7,10 +9,18 @@ object DeepReadPrompt {
         stage: DeepReadGenerationStage,
         previousJson: String? = null,
         compact: Boolean = false,
+        locale: Locale = Locale.getDefault(),
     ): String = buildString {
-        appendLine("你是 AmberAgent 的深度阅读编辑。请分阶段生成高端 News 杂志 App 的结构化深读稿。")
-        appendLine("话题：$topicTitle")
-        appendLine("当前阶段：${stage.label}")
+        val chinese = locale.isChineseLocale()
+        appendLine(
+            if (chinese) {
+                "你是 AmberAgent 的深度阅读编辑。请分阶段生成高端 News 杂志 App 的结构化深读稿。"
+            } else {
+                "You are AmberAgent's Deep Read editor. Generate a structured, magazine-quality news brief in stages."
+            }
+        )
+        appendLine(if (chinese) "话题：$topicTitle" else "Topic: $topicTitle")
+        appendLine(if (chinese) "当前阶段：${stage.localizedLabel(locale)}" else "Current stage: ${stage.localizedLabel(locale)}")
         appendLine()
         appendLine("## 阶段要求")
         when (stage) {
@@ -35,7 +45,10 @@ object DeepReadPrompt {
             }
         }
         appendLine("- 输出合法 JSON 对象，不要代码围栏、不要解释。")
-        appendLine("- 用户可见文本必须是简体中文；url 原样保留。")
+        appendLine(
+            if (chinese) "- 用户可见文本必须是中文；url 原样保留。"
+            else "- All user-visible text must be in English; preserve URLs exactly."
+        )
         appendLine("- 用户可见引号一律使用直角引号：双引号用「」，单引号或嵌套引号用『』。不要使用弯引号或英文直引号。")
         appendLine("- hero_image_url、image_assets、timeline.image_url、core_points.image_url 只能使用来源 images 中出现过的 URL。")
         appendLine("- 正文不能写「来源不足」「链接见扩展阅读」来冒充分析；如果某事实来源未覆盖，就保守跳过。")
@@ -54,13 +67,27 @@ object DeepReadPrompt {
         )
     }
 
-    fun build(topicTitle: String, sources: List<DeepReadSource>): String = buildString {
-        appendLine("你是 AmberAgent 的深度阅读编辑，目标是生成高端 News 杂志 App 风格的结构化深读稿。")
-        appendLine("话题：$topicTitle")
+    fun build(
+        topicTitle: String,
+        sources: List<DeepReadSource>,
+        locale: Locale = Locale.getDefault(),
+    ): String = buildString {
+        val chinese = locale.isChineseLocale()
+        appendLine(
+            if (chinese) {
+                "你是 AmberAgent 的深度阅读编辑，目标是生成高端 News 杂志 App 风格的结构化深读稿。"
+            } else {
+                "You are AmberAgent's Deep Read editor. Generate a structured, magazine-quality news brief."
+            }
+        )
+        appendLine(if (chinese) "话题：$topicTitle" else "Topic: $topicTitle")
         appendLine()
         appendLine("## 任务")
         appendLine("- 判断 topic_type：event / opinion / product / person。")
-        appendLine("- 基于给定来源写简体中文深读，不要编造来源之外的事实。")
+        appendLine(
+            if (chinese) "- 基于给定来源写中文深读，不要编造来源之外的事实。"
+            else "- Write the brief in English from the supplied sources; do not invent facts beyond them."
+        )
         appendLine("- 你的首要目标是补齐读者不知道的来龙去脉：起因、背景、关键转折、核心矛盾、当前进展、后续影响。")
         appendLine("- 信息量必须达到深度阅读标准：不能只说「多个来源关注」「仍需更多材料」「链接见扩展阅读」；如果只能写这些，说明生成不合格。")
         appendLine("- 对产品/模型发布类话题，必须尽量覆盖：发布场景、官方定位、可用入口、价格/成本、性能或跑分、与前代/竞品差异、外界评价和争议。")
@@ -73,9 +100,18 @@ object DeepReadPrompt {
         appendLine("- 不要按来源逐条复述；先读懂多个来源，再合并同类信息，输出读者真正需要的中文解释。")
         appendLine("- references 和 extended_reading 才能承载来源列表；正文区域只承载消化后的内容。")
         appendLine("- summary、timeline、core_points、analysis 中每个关键 claim 在句末用 `[来源名](真实URL)` 标注来源，URL 必须来自给定来源。把链接作为句末附加标记，不要写成句子必要成分（如「定价4999元[报道](url)」，不要写「详见[此报道](url)了解」）。没有可靠来源支撑的 claim 不要挂链接。")
-        appendLine("- summary、timeline、core_points、analysis、extended_reading.title、hero_caption、references.title 全部必须是中文；原始英文页面只保留在 url。")
+        appendLine(
+            if (chinese) {
+                "- summary、timeline、core_points、analysis、extended_reading.title、hero_caption、references.title 全部必须是中文；原始英文页面只保留在 url。"
+            } else {
+                "- summary, timeline, core_points, analysis, extended_reading.title, hero_caption, and references.title must all be English; keep original pages only in url."
+            }
+        )
         appendLine("- 用户可见引号一律使用直角引号：双引号用「」，单引号或嵌套引号用『』。不要使用弯引号“ ”‘ ’或英文直引号。")
-        appendLine("- 如果来源是英文，请先理解后转写成中文，不要直接裸露英文段落。")
+        appendLine(
+            if (chinese) "- 如果来源是英文，请先理解后转写成中文，不要直接裸露英文段落。"
+            else "- Understand non-English sources before rewriting them in English; do not expose raw paragraphs."
+        )
         appendLine("- 输出合法 JSON 对象，不要代码围栏、不要前后解释。")
         appendLine("- 不要输出 null；没有内容时用空字符串或空数组。")
         appendLine("- 如果不是事件型但存在明显演化过程，也可以给 timeline；如果没有可靠引用，quotes 用空数组。")
@@ -88,26 +124,54 @@ object DeepReadPrompt {
         appendSources(sources)
     }
 
-    fun repairChinese(topicTitle: String, outputJson: String): String = buildString {
-        appendLine("你是 AmberAgent 的中文深度阅读修稿编辑。")
-        appendLine("话题：$topicTitle")
+    fun repairChinese(
+        topicTitle: String,
+        outputJson: String,
+        locale: Locale = Locale.getDefault(),
+    ): String = buildString {
+        val chinese = locale.isChineseLocale()
+        appendLine(
+            if (chinese) "你是 AmberAgent 的中文深度阅读修稿编辑。"
+            else "You are AmberAgent's Deep Read copy editor."
+        )
+        appendLine(if (chinese) "话题：$topicTitle" else "Topic: $topicTitle")
         appendLine()
-        appendLine("请把下面 JSON 中所有用户可见文本改写为自然、简洁的简体中文。")
+        appendLine(
+            if (chinese) "请把下面 JSON 中所有用户可见文本改写为自然、简洁的中文。"
+            else "Rewrite all user-visible text in the JSON below as natural, concise English."
+        )
         appendLine("- 保持 JSON schema、数组结构、url、hero_image_url、image_url 不变。")
-        appendLine("- extended_reading.title 和 references.title 也要中文化；原英文标题不要直接输出。")
-        appendLine("- image_assets.caption、timeline.image_caption、core_points.image_caption 也要中文化。")
+        appendLine(
+            if (chinese) "- extended_reading.title 和 references.title 也要中文化；原英文标题不要直接输出。"
+            else "- Rewrite extended_reading.title and references.title too; do not output the original English title directly."
+        )
+        appendLine(
+            if (chinese) "- image_assets.caption、timeline.image_caption、core_points.image_caption 也要中文化。"
+            else "- Rewrite image_assets.caption, timeline.image_caption, and core_points.image_caption too."
+        )
         appendLine("- 不要加入来源外的新事实。")
         appendLine("- 仅输出合法 JSON，不要解释、不要代码围栏。")
         appendLine()
         appendLine(outputJson)
     }
 
-    fun repairJson(topicTitle: String, rawOutput: String): String = buildString {
-        appendLine("你是 AmberAgent 的深度阅读 JSON 修复器。")
-        appendLine("话题：$topicTitle")
+    fun repairJson(
+        topicTitle: String,
+        rawOutput: String,
+        locale: Locale = Locale.getDefault(),
+    ): String = buildString {
+        val chinese = locale.isChineseLocale()
+        appendLine(if (chinese) "你是 AmberAgent 的深度阅读 JSON 修复器。" else "You repair Deep Read JSON output.")
+        appendLine(if (chinese) "话题：$topicTitle" else "Topic: $topicTitle")
         appendLine()
         appendLine("下面是一次深度阅读生成的原始输出，可能被截断、包含代码围栏、尾逗号或前后解释。")
-        appendLine("请尽最大可能修复为一个完整、合法、可解析的 JSON 对象，并保持原有事实与中文正文。")
+        appendLine(
+            if (chinese) {
+                "请尽最大可能修复为一个完整、合法、可解析的 JSON 对象，并保持原有事实与中文正文。"
+            } else {
+                "Repair it into a complete, valid, parseable JSON object while preserving the original facts and prose language."
+            }
+        )
         appendLine("- 只输出 JSON，不要代码围栏、不要解释。")
         appendLine("- 不要新增来源外事实。")
         appendLine("- 如果某个数组最后一项被截断，删除该残缺项，而不是编造补齐。")
@@ -225,6 +289,15 @@ enum class DeepReadGenerationStage(val label: String) {
     NARRATIVE("时间轴叙事"),
     ANALYSIS("深度分析"),
     EXTENDED_READING("扩展阅读"),
+}
+
+private fun Locale.isChineseLocale(): Boolean = language.equals("zh", ignoreCase = true)
+
+private fun DeepReadGenerationStage.localizedLabel(locale: Locale): String = when (this) {
+    DeepReadGenerationStage.OVERVIEW -> if (locale.isChineseLocale()) "概览" else "Overview"
+    DeepReadGenerationStage.NARRATIVE -> if (locale.isChineseLocale()) "时间轴叙事" else "Narrative"
+    DeepReadGenerationStage.ANALYSIS -> if (locale.isChineseLocale()) "深度分析" else "Analysis"
+    DeepReadGenerationStage.EXTENDED_READING -> if (locale.isChineseLocale()) "扩展阅读" else "Extended reading"
 }
 
 private fun DeepReadGenerationStage.sourceLimit(): Int = when (this) {

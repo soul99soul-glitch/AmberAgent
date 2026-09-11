@@ -30,6 +30,7 @@ object NovelWorkspaceLedger {
     object Message {
         const val INITIAL = "初始"
         const val COLLECTION = "收录"
+        const val GHOSTWRITE_REVIEWED = "代笔审核收录"
         const val PLOT_POINTER = "剧情指针"
         const val DISCUSSION_ARCHIVE = "讨论归档"
         const val IDENTITY_CLARIFICATION = "人物说明"
@@ -38,6 +39,8 @@ object NovelWorkspaceLedger {
         const val GENERIC = "提交"
         /** Author manual edit (host-local label; the ledger never crosses platforms). */
         const val MANUAL_EDIT = "手改"
+        /** Host-side branch fork commit (createBranch: 分支副本随 fork commit 落盘). */
+        const val FORK = "分支"
     }
 
     private val json = Json {
@@ -160,18 +163,93 @@ object NovelWorkspaceLedger {
      * Cross-platform standard D-C (freshness): plot is stale when the manuscript moved
      * ahead of it — the newest commit that CHANGED chapters/ is newer than the newest
      * commit that CHANGED plot/. Derived from commit history, no extra state to sync.
+     *
+     * 语义契约不变：staleness 恒等于「本分支正文领先于本分支剧情」。这里修正的是多分支
+     * 下的跨分支快照污染：commit 的 files 是全书快照，分叉后主线提交相对其 parent（分叉
+     * 前的树，不含新分支目录）的 diff 会包含其他分支目录的全部文件，旧的全链扫描让主线
+     * 任意一笔提交同时刷新所有分支的 chapters/plot 位置，把分支真实落后掩盖成「不落后」。
+     * 现在只沿 [branchSlug] 自己的 ancestry（从该分支 head 沿 parent 链回溯，见
+     * [NovelWorkspaceLedgerStore.ancestry]）推导最近变更；单分支书 ancestry = 全链，
+     * 结果与旧实现逐位一致。iOS 侧 `NovelWorkspaceLedger` 的同语义 staleness 推导若存在
+     * 等价实现，需对齐为同样的分支 ancestry 口径（跨端契约）。
      */
-    fun isPlotStale(store: NovelWorkspaceLedgerStore, branchSlug: String): Boolean {
+    fun isPlotStale(
+        store: NovelWorkspaceStore,
+        ledger: NovelWorkspaceLedgerStore,
+        branchSlug: String,
+    ): Boolean {
+        val (lastChapterChange, lastPlotChange) = lastBranchChanges(store, ledger, branchSlug)
+        return lastChapterChange >= 0 && lastChapterChange > lastPlotChange
+    }
+
+    /**
+     * (最近一次改动 chapters/ 的 ancestry 位置, 最近一次改动 plot/ 的 ancestry 位置)，
+     * 位置沿 oldest-first 链计数，与旧全链 index 同为时间单调代理。
+     *
+     * head 解析：分支 id 可解析（branch.md 且 id 在 heads 里）时用分支自己的 head；
+     * 否则回退全局 head——这是单分支书的历史 wire 形态（commits.json 只有 head、
+     * heads 为空，见 ConsistencyTest 夹具与 iOS encodeIfPresent 约定），此时全局 head
+     * 就是该分支 head，ancestry = 全链，行为与旧实现逐位一致。多分支书上 branch.md
+     * 齐备，不会走到该回退。
+     */
+    private fun lastBranchChanges(
+        store: NovelWorkspaceStore,
+        ledger: NovelWorkspaceLedgerStore,
+        branchSlug: String,
+    ): Pair<Int, Int> {
         val chapterPrefix = NovelWorkspacePaths.branchPrefix(branchSlug) + "/chapters/"
         val plotPrefix = NovelWorkspacePaths.branchPrefix(branchSlug) + "/plot/"
+        val branchId = branchId(store, ledger, branchSlug)
+        val headCommitId = branchId?.let { ledger.heads[it] } ?: ledger.head
+        val chain = ledger.ancestry(headCommitId)
         var lastChapterChange = -1
         var lastPlotChange = -1
-        store.commits.forEachIndexed { index, commit ->
-            val changed = changedPaths(commit, store.commits)
+        chain.forEachIndexed { index, commit ->
+            val changed = changedPaths(commit, ledger.commits)
             if (changed.any { it.startsWith(chapterPrefix) }) lastChapterChange = index
             if (changed.any { it.startsWith(plotPrefix) }) lastPlotChange = index
         }
-        return lastChapterChange >= 0 && lastChapterChange > lastPlotChange
+        return lastChapterChange to lastPlotChange
+    }
+
+    /**
+     * 悬挂润色 commit 自愈判定：最近一条改动本分支 chapters/ 的 commit 是「润色」，
+     * 且其后没有配对的「剧情指针」commit（即 staleness 的形状恰好是「润色已落地、
+     * 指针未落地」——润色与指针两笔提交之间进程死亡留下的唯一可自愈形态）。返回该
+     * 润色 commit 改动的章节序号；其余 staleness 形状（手改、收录等真实剧情缺口）
+     * 返回 null —— 那些需要真正的剧情同步，不能靠补指针蒙混。
+     *
+     * 与 [isPlotStale] 同一枚镜头：staleness 形状沿本分支 ancestry 推导（理由见其
+     * KDoc 的跨分支快照污染分析），保证「判定 stale 的路径」与「寻找悬挂润色的路径」
+     * 永远一致——否则 self-heal 会去修一个本分支 ancestry 上不存在的 staleness 形状。
+     */
+    fun danglingPolishChapterOrdinal(
+        store: NovelWorkspaceStore,
+        ledger: NovelWorkspaceLedgerStore,
+        branchSlug: String,
+    ): Int? {
+        val chapterPrefix = NovelWorkspacePaths.branchPrefix(branchSlug) + "/chapters/"
+        val plotPrefix = NovelWorkspacePaths.branchPrefix(branchSlug) + "/plot/"
+        val branchId = branchId(store, ledger, branchSlug)
+        val headCommitId = branchId?.let { ledger.heads[it] } ?: ledger.head
+        val chain = ledger.ancestry(headCommitId)
+        var lastChapterChange = -1
+        var lastPlotChange = -1
+        chain.forEachIndexed { index, commit ->
+            val changed = changedPaths(commit, ledger.commits)
+            if (changed.any { it.startsWith(chapterPrefix) }) lastChapterChange = index
+            if (changed.any { it.startsWith(plotPrefix) }) lastPlotChange = index
+        }
+        // Not stale (plot is fresh or matches) → nothing dangling to heal.
+        if (lastChapterChange < 0 || lastChapterChange <= lastPlotChange) return null
+        val newest = chain[lastChapterChange]
+        if (newest.message != Message.POLISH) return null
+        return changedPaths(newest, ledger.commits)
+            .mapNotNull { path ->
+                path.takeIf { it.startsWith(chapterPrefix) }
+                    ?.let(NovelWorkspacePaths::chapterOrdinalFromPath)
+            }
+            .maxOrNull()
     }
 
     /**

@@ -73,7 +73,6 @@ import app.amber.agent.BuildConfig
 import app.amber.agent.R
 import app.amber.agent.RouteActivity
 import app.amber.core.ai.GenerationChunk
-import app.amber.core.ai.Generator
 import app.amber.core.ai.mcp.McpManager
 import app.amber.core.ai.mcp.createMcpTools
 import app.amber.core.ai.tools.LocalTools
@@ -122,6 +121,7 @@ import app.amber.feature.tools.ToolRegistry
 import app.amber.feature.tools.capabilityForTool
 import app.amber.feature.tools.createToolSearchTool
 import app.amber.feature.subagent.SubAgentManager
+import app.amber.feature.ui.subagent.AppSubAgentDisplayLocalizer
 import app.amber.feature.workspace.WorkspaceManager
 import app.amber.core.automation.ScreenCaptureManager
 import app.amber.core.context.ActiveCompactBoundary
@@ -150,6 +150,7 @@ import app.amber.core.repository.ConversationRepository
 import app.amber.core.repository.MemoryRepository
 import app.amber.core.utils.applyPlaceholders
 import app.amber.core.utils.ChatSendTransitionTracker
+import app.amber.core.utils.appLocale
 import app.amber.core.utils.sendNotification
 import app.amber.feature.runtime.NotificationApprovalCheck
 import app.amber.feature.runtime.NotificationApprovalTokenRegistry
@@ -281,7 +282,6 @@ class ChatService(
     private val settingsStore: SettingsAggregator,
     private val conversationRepo: ConversationRepository,
     private val memoryRepository: MemoryRepository,
-    private val generator: Generator,
     private val templateTransformer: TemplateTransformer,
     private val providerCatalog: ProviderCatalog,
     private val googleProvider: GoogleProvider,
@@ -491,6 +491,13 @@ class ChatService(
                 // durable writer section. Their callbacks keep their old
                 // coroutine epoch and are dropped at the gate.
                 sessions.values.forEach { it.getJob()?.cancel() }
+                activeKernelRuns.value.values.forEach { agentRunner?.cancel(it) }
+                sessions.keys.forEach { conversationId ->
+                    stopGenerationKeepAlive(conversationId)
+                    cancelLiveUpdateNotification(conversationId)
+                }
+                trustedRunToolNames.clear()
+                screenCaptureManager.releaseSession()
                 // Invalidate queued async snapshots too; a worker already in
                 // the channel must not replay the pre-restore pending queue.
                 pendingMessagePersistRevisions.values.forEach { it.incrementAndGet() }
@@ -821,15 +828,15 @@ class ChatService(
                 )
             }
         }
-        launchPendingMessageLoopIfNeeded(conversationId, session)
+        launchPendingDispatchIfNeeded(conversationId, session)
     }
 
-    private fun launchPendingMessageLoopIfNeeded(
+    private fun launchPendingDispatchIfNeeded(
         conversationId: Uuid,
         session: ConversationSession,
     ) {
         if (!session.isGenerating && session.pendingUserMessages.value.isNotEmpty()) {
-            launchPendingMessageLoop(conversationId)
+            launchViaKernel(conversationId)
         }
     }
 
@@ -942,9 +949,9 @@ class ChatService(
             val accepted = session.enqueuePendingUserMessage(pendingMessage)
             if (!accepted) {
                 addError(
-                    IllegalStateException("消息队列已满，请先等待或取消一些排队消息。"),
+                    IllegalStateException(context.getString(R.string.chat_page_queue_full_error)),
                     conversationId = conversationId,
-                    title = "消息未加入队列"
+                    title = context.getString(R.string.chat_page_queue_message_not_added)
                 )
                 return false
             } else {
@@ -959,15 +966,9 @@ class ChatService(
             return true
         }
 
-        if (useKernelPath && agentRunner != null) {
-            launchViaKernel(conversationId, pendingMessage)
-        } else {
-            launchPendingMessageLoop(conversationId, pendingMessage)
-        }
+        launchViaKernel(conversationId, pendingMessage)
         return true
     }
-
-    var useKernelPath = false
 
     private val activeKernelRuns =
         MutableStateFlow<Map<Uuid, app.amber.core.agent.runtime.AgentRunId>>(emptyMap())
@@ -981,74 +982,42 @@ class ChatService(
     /** Exposes the AgentRunner for UI ViewModels to call observe() directly. */
     fun kernelRunner(): app.amber.core.agent.runtime.AgentRunner? = agentRunner
 
-    private fun launchViaKernel(conversationId: Uuid, message: PendingUserMessage) {
-        val runner = agentRunner ?: return launchPendingMessageLoop(conversationId, message)
-        val session = getOrCreateSession(conversationId)
-        val job = appScope.launch(restoreWriteContext()) {
-            try {
-                val dispatchMessage = session.preparePendingMessageForDispatch(conversationId, message)
-                recordPendingMessageEvent(
-                    conversationId = conversationId,
-                    event = "dequeue",
-                    messageId = dispatchMessage.id,
-                    detail = dispatchMessage.mode.name.lowercase(),
-                )
-                if (resolveIdleToolBlockerBeforeDispatch(conversationId, dispatchMessage)) {
-                    _generationDoneFlow.emit(conversationId)
-                    return@launch
-                }
-
-                val userNode = appendUserMessage(conversationId, dispatchMessage)
-                if (!dispatchMessage.answer) {
-                    // 仅追加、未触发生成：不能 emit generationDoneFlow。
-                    return@launch
-                }
-
-                val input = app.amber.feature.chat.api.ChatTurnInput(
-                    conversationId = app.amber.core.agent.runtime.ConversationId(conversationId.toString()),
-                    messageNodeId = app.amber.core.agent.runtime.MessageNodeId(userNode.id.toString()),
-                    assistantId = app.amber.core.agent.runtime.AssistantId("default"),
-                    userMessageText = dispatchMessage.previewText(maxChars = 4000),
-                )
-                val handle = runner.launch(
-                    app.amber.feature.chat.api.ChatTurnDescriptor.ID,
-                    input,
-                ).getOrElse { e ->
-                    addError(e, conversationId, title = "Kernel dispatch failed")
-                    handleMessageComplete(conversationId)
-                    return@launch
-                }
-                activeKernelRuns.update { it + (conversationId to handle.runId) }
-                runner.observe(handle.runId).first { snapshot ->
-                    snapshot.status !in setOf(
-                        app.amber.core.agent.runtime.AgentRunStatus.RUNNING,
-                        app.amber.core.agent.runtime.AgentRunStatus.AWAITING_PERMISSION,
-                    )
-                }
-                _generationDoneFlow.emit(conversationId)
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                addError(e, conversationId, title = "Kernel dispatch failed")
-            } finally {
-                activeKernelRuns.update { it - conversationId }
-            }
-        }
-        session.setJob(job)
-    }
-
-    private fun launchPendingMessageLoop(
+    /**
+     * Kernel dispatch loop for a conversation: drains the pending queue one
+     * turn at a time (mirroring the legacy loop's structure), each turn
+     * executed by the AgentRunner. [resumeWithoutNewMessage] starts the
+     * drain with a turn over the current conversation (tool approval /
+     * regenerate / outcome retry / edit-regenerate) instead of a newly
+     * appended user message; [messageRange] restricts that resume turn to a
+     * conversation window (variant regenerate).
+     */
+    /**
+     * External entry into the kernel dispatcher: launches the queue-draining
+     * dispatch loop as the conversation's session job. Callers that already
+     * run INSIDE the session job (approval / regenerate / in-loop resume)
+     * must use [runKernelDispatchLoop] inline instead — this guard would
+     * deterministically swallow them, since the caller's own job is what
+     * makes [ConversationSession.isGenerating] true.
+     */
+    private fun launchViaKernel(
         conversationId: Uuid,
         firstMessage: PendingUserMessage? = null,
+        resumeWithoutNewMessage: Boolean = false,
+        messageRange: ClosedRange<Int>? = null,
+        expectedRestoreEpoch: Long? = restoreWriteGate?.currentEpoch(),
     ) {
+        val runner = agentRunner ?: return
         val session = getOrCreateSession(conversationId)
         if (session.isGenerating) {
+            // Same guard as the legacy loop: a running turn absorbs new
+            // messages into the queue; external resume requests during an
+            // active turn are dropped (the active turn owns the conversation).
             firstMessage?.let { message ->
                 if (!session.enqueuePendingUserMessage(message)) {
                     addError(
-                        IllegalStateException("消息队列已满，请先等待或取消一些排队消息。"),
+                        IllegalStateException(context.getString(R.string.chat_page_queue_full_error)),
                         conversationId = conversationId,
-                        title = "消息未加入队列"
+                        title = context.getString(R.string.chat_page_queue_message_not_added)
                     )
                 } else {
                     persistPendingMessagesDurably(conversationId, session.pendingUserMessages.value)
@@ -1062,12 +1031,67 @@ class ChatService(
             }
             return
         }
+        val job = appScope.launch(restoreWriteContext(expectedRestoreEpoch)) {
+            runKernelDispatchLoop(
+                conversationId = conversationId,
+                session = session,
+                runner = runner,
+                firstMessage = firstMessage,
+                resumeFirst = resumeWithoutNewMessage,
+                messageRange = messageRange,
+            )
+        }
+        session.setJob(job)
+    }
 
-        val job = appScope.launch(restoreWriteContext()) {
-            var nextMessage = firstMessage ?: session.dequeueNextPendingUserMessageDurably(conversationId)
-            while (nextMessage != null) {
-                try {
-                    val dispatchMessage = session.preparePendingMessageForDispatch(conversationId, nextMessage)
+    /**
+     * The kernel dispatch loop: drains the pending queue one turn at a time
+     * (mirroring the retired legacy loop's structure), each turn executed by
+     * the AgentRunner. [resumeFirst] starts the drain with a turn over the
+     * current conversation (tool approval / regenerate / outcome retry /
+     * edit-regenerate) instead of a newly appended user message;
+     * [messageRange] restricts that resume turn to a conversation window
+     * (variant regenerate).
+     *
+     * Suspending and job-agnostic: safe to run inline on an existing session
+     * job or under the [launchViaKernel] wrapper.
+     */
+    private suspend fun runKernelDispatchLoop(
+        conversationId: Uuid,
+        session: ConversationSession,
+        runner: app.amber.core.agent.runtime.AgentRunner,
+        firstMessage: PendingUserMessage? = null,
+        resumeFirst: Boolean = false,
+        messageRange: ClosedRange<Int>? = null,
+    ) {
+        var pendingResume = resumeFirst
+        var pendingRange = messageRange
+        var nextMessage = if (resumeFirst) {
+            null
+        } else {
+            firstMessage ?: session.dequeueNextPendingUserMessageDurably(conversationId)
+        }
+        while (pendingResume || nextMessage != null) {
+            try {
+                if (pendingResume) {
+                    pendingResume = false
+                    val range = pendingRange
+                    pendingRange = null
+                    val lastNode = getConversationFlow(conversationId).value
+                        .messageNodes.lastOrNull()
+                    if (lastNode != null) {
+                        dispatchKernelTurn(
+                            conversationId = conversationId,
+                            runner = runner,
+                            messageNodeId = lastNode.id,
+                            userMessageText = "",
+                            messageRange = range,
+                        )
+                    }
+                    _generationDoneFlow.emit(conversationId)
+                } else {
+                    val dispatchMessage =
+                        session.preparePendingMessageForDispatch(conversationId, nextMessage!!)
                     recordPendingMessageEvent(
                         conversationId = conversationId,
                         event = "dequeue",
@@ -1080,29 +1104,567 @@ class ChatService(
                         if (conversation.hasPendingOrUnexecutedTools()) {
                             break
                         }
-                        nextMessage = session.dequeueNextPendingUserMessageDurably(conversationId)
+                        nextMessage =
+                            session.dequeueNextPendingUserMessageDurably(conversationId)
                         continue
                     }
-                    appendUserMessage(conversationId, dispatchMessage)
+                    val userNode = appendUserMessage(conversationId, dispatchMessage)
                     if (dispatchMessage.answer) {
-                        handleMessageComplete(conversationId)
+                        dispatchKernelTurn(
+                            conversationId = conversationId,
+                            runner = runner,
+                            messageNodeId = userNode.id,
+                            userMessageText = dispatchMessage.previewText(
+                                maxChars = 4000,
+                                copy = PendingUserMessageDisplayCopy.from(context),
+                            ),
+                        )
+                        _generationDoneFlow.emit(conversationId)
                     }
-                    _generationDoneFlow.emit(conversationId)
-                } catch (e: CancellationException) {
-                    throw e
-                } catch (e: Exception) {
-                    e.printStackTrace()
-                    addError(e, conversationId, title = context.getString(R.string.error_title_send_message))
+                    // 仅追加、未触发生成：不能 emit generationDoneFlow。
                 }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                e.printStackTrace()
+                addError(
+                    e,
+                    conversationId,
+                    title = context.getString(R.string.error_title_send_message),
+                )
+            }
 
-                val conversation = getConversationFlow(conversationId).value
-                if (conversation.hasPendingOrUnexecutedTools()) {
-                    break
-                }
-                nextMessage = session.dequeueNextPendingUserMessageDurably(conversationId)
+            val conversation = getConversationFlow(conversationId).value
+            if (conversation.hasPendingOrUnexecutedTools()) {
+                break
+            }
+            nextMessage = session.dequeueNextPendingUserMessageDurably(conversationId)
+        }
+    }
+
+    /**
+     * One kernel-dispatched generation turn: pre-flight (sanitize, reset
+     * suggestions, tool-availability warning), runner launch, then wait for
+     * the run's terminal state. Resume turns pass the persisted paused runId
+     * so the ledger / terminal store / event log continue the same run.
+     */
+    private suspend fun dispatchKernelTurn(
+        conversationId: Uuid,
+        runner: app.amber.core.agent.runtime.AgentRunner,
+        messageNodeId: Uuid,
+        userMessageText: String,
+        messageRange: ClosedRange<Int>? = null,
+    ) {
+        val settings = settingsStore.settingsFlow.first()
+        // Legacy parity: a turn with no chat model configured ends silently.
+        val model = settings.getCurrentChatModel() ?: return
+
+        val input = app.amber.feature.chat.api.ChatTurnInput(
+            conversationId = app.amber.core.agent.runtime.ConversationId(conversationId.toString()),
+            messageNodeId = app.amber.core.agent.runtime.MessageNodeId(messageNodeId.toString()),
+            assistantId = app.amber.core.agent.runtime.AssistantId("default"),
+            userMessageText = userMessageText,
+            messageRangeStart = messageRange?.start,
+            messageRangeEndExclusive = messageRange?.let { it.endInclusive + 1 },
+        )
+        // P1-03 parity with the legacy loop: a paused run (approval /
+        // resumable) is resumed under the SAME runId so the ledger,
+        // terminal store and event log all continue the same run.
+        val resumeRunId = if (useDurableRuntime()) {
+            runTerminalStore?.activeForConversation(conversationId.toString())
+                ?.let { app.amber.core.agent.runtime.AgentRunId(it.runId) }
+        } else {
+            null
+        }
+        val resumeCursor = resumeRunId?.let { responsesResumeStore?.load(it.value) }
+        if (resumeCursor != null && resumeCursor.providerId != model.findProvider(settings.providers)?.id?.toString()) {
+            addError(
+                IllegalStateException("请切回原 Provider 后继续恢复，或选择重新生成。"),
+                conversationId,
+                title = context.getString(R.string.error_title_regenerate_message),
+            )
+            return
+        }
+        prepareKernelGenerationTurn(conversationId, settings, model)
+        // Validate the caller's epoch and capture the runner's launch epoch
+        // in one short gate section; a restore cannot slip between them.
+        val handle = withConversationWrite {
+            runner.launch(
+                app.amber.feature.chat.api.ChatTurnDescriptor.ID,
+                input,
+                requestedRunId = resumeRunId,
+            )
+        }.getOrElse { e ->
+            addError(e, conversationId, title = "Kernel dispatch failed")
+            return
+        }
+        activeKernelRuns.update { it + (conversationId to handle.runId) }
+        try {
+            runner.observe(handle.runId).first { snapshot ->
+                // Keep waiting through live states; a terminal outcome OR a
+                // persisted pause (approval / server-cancel pending) ends
+                // this turn's wait — the paused run resumes via its own
+                // entry points under the same runId.
+                snapshot.status.isTerminal || snapshot.status.isPause
+            }
+        } catch (cancelled: CancellationException) {
+            runner.cancel(handle.runId)
+            throw cancelled
+        } finally {
+            activeKernelRuns.update { it - conversationId }
+        }
+    }
+
+    /**
+     * Per-turn pre-flight shared by all kernel dispatches (the retired
+     * legacy loop's prologue parity): load the full conversation,
+     * reset suggestions, warn when tools are unavailable for the model, and
+     * sanitize invalid messages before the session resolves its inputs.
+     */
+    private suspend fun prepareKernelGenerationTurn(
+        conversationId: Uuid,
+        settings: Settings,
+        model: app.amber.ai.provider.Model,
+    ) {
+        val initialConversation = loadFullConversationForGeneration(conversationId)
+        // reset suggestions
+        updateConversation(
+            conversationId,
+            getConversationFlow(conversationId).value.copy(chatSuggestions = emptyList()),
+            checkDeletedFiles = false,
+        )
+        // memory tool
+        if (!model.abilities.contains(ModelAbility.TOOL)) {
+            if (settings.enableWebSearch || mcpManager.getAllAvailableTools().isNotEmpty()) {
+                addError(
+                    IllegalStateException(context.getString(R.string.tools_warning)),
+                    conversationId,
+                    title = context.getString(R.string.error_title_tool_unavailable)
+                )
             }
         }
-        session.setJob(job)
+        // check invalid messages
+        val conversation = sanitizeInvalidMessages(initialConversation)
+        if (conversation != initialConversation) {
+            withConversationWrite { conversationRepo.updateConversation(conversation) }
+            replaceSessionWithFullConversation(conversationId, conversation)
+        }
+    }
+
+    /**
+     * Continue/resume generation on the current conversation state —
+     * outcome retry/abandon, edit-and-regenerate, notification approval.
+     * External entry (launches a new session job); the kernel dispatcher
+     * owns the queued-message drain after the turn.
+     *
+     * Callers already running inside the session job MUST use
+     * [continueGenerationInline] — the launcher's isGenerating guard would
+     * swallow the request (the caller's own job is the active one).
+     */
+    private suspend fun continueGeneration(conversationId: Uuid, messageRange: ClosedRange<Int>? = null) {
+        launchViaKernel(
+            conversationId,
+            resumeWithoutNewMessage = true,
+            messageRange = messageRange,
+            expectedRestoreEpoch = captureRestoreEpoch(),
+        )
+    }
+
+    /**
+     * Resume generation from within an existing session-job context (in-app
+     * tool approval, regenerate, in-loop blocker resume): runs the resume
+     * turn plus the queued-message drain inline on the caller's job —
+     * the retired legacy loop's inline handleMessageComplete parity.
+     */
+    private suspend fun continueGenerationInline(
+        conversationId: Uuid,
+        messageRange: ClosedRange<Int>? = null,
+    ) {
+        val runner = agentRunner ?: return
+        runKernelDispatchLoop(
+            conversationId = conversationId,
+            session = getOrCreateSession(conversationId),
+            runner = runner,
+            resumeFirst = true,
+            messageRange = messageRange,
+        )
+    }
+
+    /**
+     * Steer drain shared by the legacy loop and the kernel-dispatched turn:
+     * dequeue queued STEER messages, persist the shrinkage and record the
+     * consumption event.
+     */
+    internal suspend fun consumeSteerMessagesForRun(conversationId: Uuid): List<UIMessage> {
+        val session = getOrCreateSession(conversationId)
+        val consumed = session.dequeueSteerPendingUserMessages()
+        if (consumed.isNotEmpty()) {
+            persistCurrentPendingMessagesDurably(conversationId, session)
+            recordPendingMessageEvent(
+                conversationId = conversationId,
+                event = "steer_consumed",
+                count = consumed.size,
+            )
+        }
+        return consumed.map { queued ->
+            UIMessage(
+                role = MessageRole.USER,
+                parts = queued.parts,
+            )
+        }
+    }
+
+    /**
+     * Turn hooks for a kernel-dispatched chat turn (P0 kernel convergence).
+     * Always present on the chat path: the lifecycle orchestration (live
+     * status notification, foreground keep-alive, generation task, title /
+     * suggestion / memory side-effects, error surfacing) mirrors the legacy
+     * loop regardless of the durable-runtime flags; the durable writes
+     * (terminal store, event-store CAS, ledger reconcile, cascade cancel)
+     * self-gate on [ChatRunHooks.durable].
+     *
+     * The bundle is resolved once per turn, before the runner arms the run,
+     * so [RunTerminalStore.activeForConversation] still reflects the
+     * pre-begin state for the resume gates below.
+     */
+    internal suspend fun chatRunHooks(
+        conversationId: Uuid,
+    ): app.amber.feature.chat.impl.ChatRunHooks {
+        val generationRestoreEpoch = captureRestoreEpoch()
+        val durable = useDurableRuntime()
+        val existingRun = if (durable) {
+            runTerminalStore?.activeForConversation(conversationId.toString())
+        } else {
+            null
+        }
+        val turnSettings = settingsStore.settingsFlow.first()
+        val senderName = turnSettings.getCurrentChatModel()?.displayName
+            ?: context.getString(R.string.app_name)
+        // This turn's generation-task id, captured between start and finish.
+        var generationTaskId: String? = null
+        var reportedTerminal: app.amber.core.ai.GenerationTerminal? = null
+        var responseRequest: app.amber.ai.provider.ResponsesResumeRequest? = null
+        return app.amber.feature.chat.impl.ChatRunHooks(
+            durable = durable,
+            processingStatus = getOrCreateSession(conversationId).processingStatus,
+            autoApprovedToolNames = trustedRunToolNames[conversationId].orEmpty(),
+            consumeSteerMessages = { consumeSteerMessagesForRun(conversationId) },
+            onRunStarted = { runId ->
+                if (durable) {
+                    runTerminalStore!!.begin(runId, conversationId.toString(), AMBER_AGENT_ID.toString())
+                    // P1-05: the hook runs inside the runner's handler
+                    // coroutine — its Job owns the provider transport
+                    // collected downstream, so it is the cancellation owner
+                    // for (assistantId, conversationId, runId).
+                    kotlinx.coroutines.currentCoroutineContext()[kotlinx.coroutines.Job]?.let { job ->
+                        runCatching {
+                            runOwnershipRegistry?.register(
+                                assistantId = AMBER_AGENT_ID.toString(),
+                                conversationId = conversationId.toString(),
+                                runId = runId,
+                                job = job,
+                            )
+                        }
+                    }
+                }
+                updateAgentLiveStatus(
+                    conversationId = conversationId,
+                    messages = getConversationFlow(conversationId).value.currentMessages,
+                    senderName = senderName,
+                    settings = turnSettings,
+                    runId = runId.takeIf { durable },
+                )
+                startGenerationKeepAlive(conversationId, senderName, turnSettings)
+                generationTaskId = startGenerationTask(
+                    conversationId = conversationId,
+                    runId = runId,
+                    senderName = senderName,
+                    modelName = senderName,
+                    settings = turnSettings,
+                )
+            },
+            onTerminal = { _, terminal ->
+                // Final content must reach durable storage before either run
+                // owner publishes completion, a limit, or an approval pause.
+                reportedTerminal = terminal
+            },
+            onStreamingMessages = { runId, messages ->
+                updateAgentLiveStatus(
+                    conversationId = conversationId,
+                    messages = messages,
+                    senderName = senderName,
+                    settings = turnSettings,
+                    runId = runId.takeIf { durable },
+                )
+                // M1: the executed tool results are durable in the
+                // conversation now — the ledger replay payload is no longer
+                // read, so drop it (bounded retention).
+                if (checkpointConversation(conversationId, getConversationFlow(conversationId).value)) {
+                    clearPersistedToolPayloads(durable, messages)
+                }
+            },
+            onRunFinished = { runId, cause ->
+                finalizeChatGeneration {
+                    runCatching { runOwnershipRegistry?.unregister(runId) }
+                    if (restoreWriteGate?.isWriteAllowed(generationRestoreEpoch) == false) {
+                        generationTaskId?.let {
+                            finishGenerationTask(it, CancellationException("Generation interrupted by restore"), runId)
+                        }
+                        localTools.endWebMountRun(
+                            runId = runId,
+                            conversationId = conversationId.toString(),
+                            reason = "generation superseded by restore",
+                        )
+                        return@finalizeChatGeneration
+                    }
+                    val currentConversation = getConversationFlow(conversationId).value
+                    val updatedConversation = currentConversation.copy(
+                        messageNodes = currentConversation.messageNodes.map { node ->
+                            node.copy(messages = node.messages.map { it.finishReasoning() })
+                        },
+                        updateAt = Instant.now(),
+                    )
+                    updateConversation(conversationId, updatedConversation, checkDeletedFiles = false)
+                    val conversationCheckpointed = checkpointConversation(
+                        conversationId, updatedConversation, force = true,
+                    )
+                    if (restoreWriteGate?.isWriteAllowed(generationRestoreEpoch) == false) {
+                        generationTaskId?.let {
+                            finishGenerationTask(it, CancellationException("Generation interrupted by restore"), runId)
+                        }
+                        localTools.endWebMountRun(
+                            runId = runId,
+                            conversationId = conversationId.toString(),
+                            reason = "generation superseded by restore",
+                        )
+                        return@finalizeChatGeneration
+                    }
+                    var terminalPublish: RunTerminalState? = null
+                    var terminalOwnerSucceeded = !durable
+                    if (durable) {
+                        val (state, reason) = terminalForFlowEnd(cause, reportedTerminal)
+                        val serverCancelPending = pendingServerCancelFailures.remove(runId)
+                        val target = when {
+                            serverCancelPending -> RunTerminalState.WAITING_EXTERNAL
+                            !conversationCheckpointed && cause == null -> RunTerminalState.RESUMABLE
+                            else -> state
+                        }
+                        val targetReason = when {
+                            serverCancelPending -> PauseReason.USER_STOP
+                            target == RunTerminalState.RESUMABLE -> null
+                            else -> reason
+                        }
+                        terminalOwnerSucceeded = runCatching {
+                            if (target.isTerminal) {
+                                runTerminalStore!!.finish(runId, target, targetReason)
+                            } else {
+                                runTerminalStore!!.pause(runId, target, targetReason)
+                            }
+                            val persisted = runTerminalStore.get(runId)
+                            terminalPublish = persisted?.state
+                            // Keep the kernel's CAS state in agreement with the
+                            // durable owner, including deferred checkpoints.
+                            val persistedState = persisted?.state?.let {
+                                app.amber.core.agent.runtime.RunStatus.valueOf(it.name)
+                            }
+                            val kernelTransition = if (persistedState != null) {
+                                agentEventStore?.transitionRun(
+                                    app.amber.core.agent.runtime.AgentRunId(runId),
+                                    app.amber.core.agent.runtime.RunStatus.LIVE_STATES,
+                                    persistedState,
+                                )
+                            } else {
+                                null
+                            }
+                            val kernelOwnerSucceeded = agentEventStore == null ||
+                                kernelTransition is app.amber.core.agent.runtime.RunTransitionResult.Applied ||
+                                (kernelTransition is app.amber.core.agent.runtime.RunTransitionResult.Rejected &&
+                                    kernelTransition.current == persistedState)
+                            persisted?.state == target && kernelOwnerSucceeded
+                        }.onFailure { error ->
+                            Log.w(TAG, "terminal owner persist failed for $conversationId", error)
+                        }.getOrDefault(false)
+                        if (terminalOwnerSucceeded && conversationCheckpointed &&
+                            !serverCancelPending &&
+                            terminalPublish in setOf(RunTerminalState.COMPLETED, RunTerminalState.STEP_LIMIT)
+                        ) {
+                            responseRequest?.let { request ->
+                                runCatching { request.store.clear(request.runId) }
+                                    .onFailure { Log.w(TAG, "stored response cursor clear failed for $conversationId", it) }
+                            }
+                        }
+                        if (state == RunTerminalState.CANCELLED || state == RunTerminalState.FAILED || serverCancelPending) {
+                            runCatching { runRecovery!!.reconcileStartedEffects(runId) }
+                            runCatching { refreshOutcomeUnknown() }
+                        }
+                        if (state == RunTerminalState.CANCELLED) {
+                            runCatching { subAgentManager.cancelByRootRun(runId, conversationId.toString()) }
+                        }
+                    }
+                    if (terminalOwnerSucceeded && terminalPublish != RunTerminalState.WAITING_USER) {
+                        localTools.endWebMountRun(
+                            runId = runId,
+                            conversationId = conversationId.toString(),
+                            reason = if (cause == null) "generation finished" else "generation failed",
+                            preservePendingHandoff = terminalPublish == RunTerminalState.COMPLETED,
+                        )
+                    }
+
+                    // P8-11: a paused approval run keeps the live notification
+                    // (approve/deny/reply/stop actions); terminal outcomes
+                    // dismiss it, failures replace it with the failure card.
+                    val waitingForApproval = terminalPublish == RunTerminalState.WAITING_USER &&
+                        getConversationFlow(conversationId).value.currentMessages.any { message ->
+                            message.parts.any { it is UIMessagePart.Tool && it.isPending }
+                        }
+                    when {
+                        waitingForApproval -> updateAgentLiveStatus(
+                            conversationId = conversationId,
+                            messages = getConversationFlow(conversationId).value.currentMessages,
+                            senderName = senderName,
+                            settings = turnSettings,
+                            runId = runId.takeIf { durable },
+                        )
+
+                        cause == null -> cancelLiveUpdateNotification(conversationId)
+
+                        cause is CancellationException ||
+                            !turnSettings.agentRuntime.enableLiveStatusNotification ->
+                            cancelLiveUpdateNotification(conversationId)
+
+                        else -> liveStatusNotifier.notifyFailure(
+                            conversationId = conversationId,
+                            senderName = senderName,
+                            error = cause,
+                            launchIntent = getPendingIntent(context, conversationId, runId.takeIf { durable }),
+                        )
+                    }
+
+                    // Keep-alive follows the persisted terminal state: pauses
+                    // keep it (the user can resume from the notification);
+                    // terminal states stop it unless a queued continuation
+                    // starts the next turn right away.
+                    val shouldStopKeepAlive = if (durable) {
+                        runCatching { runTerminalStore?.get(runId)?.state?.isTerminal == true }
+                            .getOrDefault(true)
+                    } else {
+                        true
+                    }
+                    if (shouldStopKeepAlive && !hasQueuedContinuation(conversationId)) {
+                        stopGenerationKeepAlive(conversationId)
+                    }
+
+                    generationCheckpointAt.remove(conversationId)
+                    generationTaskId?.let { finishGenerationTask(it, cause, runId) }
+                    cleanupRunResourcesIfDone(conversationId, updatedConversation)
+
+                    check(terminalOwnerSucceeded) {
+                        "Chat terminal state was not durably committed for $conversationId"
+                    }
+
+                    if (cause == null) {
+                        // Completion notification only when the run truly
+                        // completed (STEP_LIMIT / WAITING_USER are never
+                        // "done"); non-durable turns have no persisted state
+                        // and complete with the flow.
+                        val completed = if (durable) {
+                            terminalPublish == RunTerminalState.COMPLETED && terminalOwnerSucceeded
+                        } else {
+                            true
+                        }
+                        if (
+                            completed &&
+                            !isForeground.value &&
+                            turnSettings.displaySetting.enableNotificationOnMessageGeneration
+                        ) {
+                            sendGenerationDoneNotification(conversationId, senderName, runId.takeIf { durable })
+                        }
+                        // Success side-effects (legacy onSuccess parity):
+                        // window persistence, title, suggestions, memory.
+                        val finalConversation = getConversationFlow(conversationId).value
+                        persistConversationWindow(conversationId, finalConversation, indexFts = true)
+                        cleanupRunResourcesIfDone(conversationId, finalConversation)
+                        launchWithConversationReference(conversationId, generationRestoreEpoch) {
+                            generateTitle(conversationId, finalConversation)
+                        }
+                        launchWithConversationReference(conversationId, generationRestoreEpoch) {
+                            generateSuggestion(conversationId, finalConversation)
+                        }
+                        if (!finalConversation.hasPendingOrUnexecutedTools()) {
+                            appScope.launch(Dispatchers.IO + restoreWriteContext(generationRestoreEpoch)) {
+                                memoryExtractor.extractAfterConversation(
+                                    loadFullConversationForGeneration(conversationId)
+                                )
+                            }
+                        }
+                    } else {
+                        trustedRunToolNames.remove(conversationId)
+                        screenCaptureManager.releaseSession()
+                        surfaceGenerationFailure(conversationId, cause)
+                    }
+                }
+            },
+            responsesResumeFor = resume@{ runId ->
+                if (!durable) return@resume null
+                val currentSettings = settingsStore.settingsFlow.first()
+                val currentModel = currentSettings.getCurrentChatModel()
+                val resumeProvider =
+                    currentModel?.findProvider(currentSettings.providers) as? ProviderSetting.OpenAI
+                val currentConversation = getConversationFlow(conversationId).value
+                if (
+                    resumeProvider != null &&
+                    resumeProvider.enableResponsesResume &&
+                    resumeProvider.supportsResponsesResume() &&
+                    capabilityFlags?.isEnabled(Capability.OpenAIResponsesResume) == true &&
+                    responsesResumeStore != null &&
+                    (
+                        // continuation: same runId, re-attach to the stored response
+                        (existingRun != null &&
+                            existingRun.runId == runId &&
+                            existingRun.state in RESPONSES_RESUME_STATES &&
+                            currentConversation.currentMessages.lastOrNull()?.role == MessageRole.ASSISTANT) ||
+                            // fresh generation: new runId, write-ahead cursor
+                            existingRun == null
+                        )
+                ) {
+                    app.amber.ai.provider.ResponsesResumeRequest(
+                        runId = runId,
+                        store = responsesResumeStore,
+                        resumeFrom = existingRun?.takeIf { it.state in RESPONSES_RESUME_STATES }
+                            ?.let { responsesResumeStore.load(it.runId) },
+                    ).also { responseRequest = it }
+                } else {
+                    null
+                }
+            },
+        )
+    }
+
+    /**
+     * Surface a generation failure with a targeted title + actionable hint
+     * (compaction / context-size get dedicated titles) instead of the
+     * generic generation error. Cancellation is filtered inside [addError].
+     */
+    private fun surfaceGenerationFailure(conversationId: Uuid, cause: Throwable) {
+        if (cause is CancellationException) return
+        val (errorTitle, surfacedError) = when (cause) {
+            is app.amber.core.context.ContextCompactionFailedException -> {
+                val hint = context.getString(
+                    R.string.error_auto_compact_failed_hint,
+                    cause.phase,
+                    cause.compactionReason,
+                )
+                context.getString(R.string.error_title_compress_conversation) to RuntimeException(hint, cause)
+            }
+
+            // P1-04: the final token fit could not satisfy the hard budget
+            // even after trimming — the request was never sent.
+            is app.amber.core.context.ContextTooLargeException ->
+                context.getString(R.string.chat_page_compress_recent_content_too_large) to cause
+
+            else -> context.getString(R.string.error_title_generation) to cause
+        }
+        addError(surfacedError, conversationId, title = errorTitle)
     }
 
     private suspend fun resolveIdleToolBlockerBeforeDispatch(
@@ -1115,7 +1677,10 @@ class ChatService(
         val blockingTools = lastMessage.getTools().filter { !it.isExecuted }
         if (blockingTools.isEmpty()) return false
 
-        val userAnswer = message.previewText(maxChars = 4_000)
+        val userAnswer = message.previewText(
+            maxChars = 4_000,
+            copy = PendingUserMessageDisplayCopy.from(context),
+        )
         val explicitApproval = message.isToolApprovalContinuation()
         val hasAskUserAnswer = userAnswer.isNotBlank() &&
             blockingTools.any { it.isPending && it.toolName == ASK_USER_TOOL_NAME }
@@ -1181,7 +1746,10 @@ class ChatService(
         )
 
         if (shouldResume) {
-            handleMessageComplete(conversationId)
+            // In-loop resume: run the turn inline on the dispatcher job —
+            // the external launcher would be swallowed by its own
+            // isGenerating guard here.
+            continueGenerationInline(conversationId)
             return true
         }
         return false
@@ -1189,7 +1757,10 @@ class ChatService(
 
     private fun PendingUserMessage.isToolApprovalContinuation(): Boolean {
         if (parts.any { it !is UIMessagePart.Text }) return false
-        val raw = previewText(maxChars = 80).trim().lowercase(Locale.ROOT)
+        val raw = previewText(
+            maxChars = 80,
+            copy = PendingUserMessageDisplayCopy.from(context),
+        ).trim().lowercase(Locale.ROOT)
         if (raw.isBlank()) return false
         val compact = raw.replace(Regex("""[\s\p{Punct}，。！？、；：「」『』（）【】《》]+"""), "")
         return compact in TOOL_APPROVAL_CONTINUATION_WORDS ||
@@ -1250,31 +1821,6 @@ class ChatService(
         updateConversation(conversationId, newConversation)
         persistConversationWindow(conversationId, newConversation, indexFts = true)
         return userNode
-    }
-
-    private suspend fun drainPendingUserMessagesInline(conversationId: Uuid) {
-        val session = getOrCreateSession(conversationId)
-        var nextMessage = session.dequeueNextPendingUserMessageDurably(conversationId)
-        while (nextMessage != null) {
-            val dispatchMessage = session.preparePendingMessageForDispatch(conversationId, nextMessage)
-            recordPendingMessageEvent(
-                conversationId = conversationId,
-                event = "dequeue",
-                messageId = dispatchMessage.id,
-                detail = dispatchMessage.mode.name.lowercase(),
-            )
-            appendUserMessage(conversationId, dispatchMessage)
-            if (dispatchMessage.answer) {
-                handleMessageComplete(conversationId)
-                _generationDoneFlow.emit(conversationId)
-            }
-
-            val conversation = getConversationFlow(conversationId).value
-            if (conversation.hasPendingOrUnexecutedTools()) {
-                break
-            }
-            nextMessage = session.dequeueNextPendingUserMessageDurably(conversationId)
-        }
     }
 
     private fun persistPendingMessagesDurably(
@@ -1363,7 +1909,10 @@ class ChatService(
                 if (collected.isNotEmpty()) {
                     persistCurrentPendingMessagesNow(conversationId, this)
                 }
-                buildCollectedPendingUserMessage(listOf(message) + collected)
+                buildCollectedPendingUserMessage(
+                    messages = listOf(message) + collected,
+                    copy = PendingUserMessageDisplayCopy.from(context),
+                )
             }
 
             message.mode == PendingUserMessageMode.STEER -> message.asFollowup()
@@ -1422,7 +1971,7 @@ class ChatService(
                             conversationId,
                             conversation.copy(messageNodes = conversation.messageNodes.take(nodeIndex)),
                         )
-                        handleMessageComplete(conversationId)
+                        continueGenerationInline(conversationId)
                     }
 
                     regenerateAssistantMsg -> {
@@ -1438,7 +1987,7 @@ class ChatService(
                             return@launch
                         }
                         contextEngine.invalidateCompacts(conversationId, "message_regenerated")
-                        handleMessageComplete(conversationId, messageRange = 0..<nodeIndex)
+                        continueGenerationInline(conversationId, messageRange = 0..<nodeIndex)
                     }
 
                     else -> saveConversation(conversationId, conversation)
@@ -1582,12 +2131,12 @@ class ChatService(
         // Check if there are still pending tools
         val hasPendingTools = updatedNodes.any { node -> node.currentMessage.getTools().any { it.isPending } }
 
-        // Only continue generation when all pending tools are handled
+        // Only continue generation when all pending tools are handled; the
+        // resume runs inline on the caller's job (the in-app path wraps this
+        // in session.setJob, so the external launcher's guard would swallow
+        // it) and drains the queued messages after the turn.
         if (!hasPendingTools) {
-            handleMessageComplete(conversationId)
-            if (!getConversationFlow(conversationId).value.hasPendingOrUnexecutedTools()) {
-                drainPendingUserMessagesInline(conversationId)
-            }
+            continueGenerationInline(conversationId)
         }
 
         _generationDoneFlow.emit(conversationId)
@@ -1633,10 +2182,7 @@ class ChatService(
                 val hasPendingTools = updatedNodes.any { node -> node.currentMessage.getTools().any { it.isPending } }
 
                 if (!hasPendingTools) {
-                    handleMessageComplete(conversationId)
-                    if (!getConversationFlow(conversationId).value.hasPendingOrUnexecutedTools()) {
-                        drainPendingUserMessagesInline(conversationId)
-                    }
+                    continueGenerationInline(conversationId)
                 }
 
                 _generationDoneFlow.emit(conversationId)
@@ -1812,603 +2358,10 @@ class ChatService(
         refreshOutcomeUnknown()
         // Resume the same conversation: retry re-executes the tool; abandon
         // lets the model see the structured rejection and continue.
-            handleMessageComplete(conversationId)
+            continueGeneration(conversationId)
         }
     }
 
-    // ---- 处理消息补全 ----
-
-    private suspend fun handleMessageComplete(
-        conversationId: Uuid,
-        messageRange: ClosedRange<Int>? = null
-    ) {
-        val generationRestoreEpoch = expectedRestoreEpoch()
-        val settings = settingsStore.settingsFlow.first()
-        val model = settings.getCurrentChatModel() ?: return
-
-        val senderName = model.displayName
-        // Hoisted above runCatching so onFailure can still finalize the run
-        // when generateText throws before the flow's onCompletion exists.
-        var streamRecorder: app.amber.feature.chat.impl.ChatStreamCheckpointRecorder? = null
-        var completionOwnerCommitted = false
-        val durablePath = useDurableRuntime()
-        // P1-03: WAITING_USER runs survive restart — resume the same runId
-        // instead of minting a new one, so approval continues the same run.
-        val existingRun = if (durablePath) {
-            runTerminalStore!!.activeForConversation(conversationId.toString())
-        } else {
-            null
-        }
-        val resumeCursor = existingRun?.takeIf { it.state in RESPONSES_RESUME_STATES }
-            ?.let { responsesResumeStore?.load(it.runId) }
-        if (resumeCursor != null && resumeCursor.providerId != model.findProvider(settings.providers)?.id?.toString()) {
-            addError(
-                IllegalStateException("请切回原 Provider 后继续恢复，或选择重新生成。"),
-                conversationId,
-                title = context.getString(R.string.error_title_regenerate_message),
-            )
-            return // keep the paused run and cursor; do not begin/fail a different provider's run
-        }
-        val runId = if (durablePath) {
-            val id = existingRun?.let { app.amber.core.agent.runtime.AgentRunId(it.runId) }
-                ?: app.amber.core.agent.runtime.AgentRunId.new()
-            runTerminalStore!!.begin(id.value, conversationId.toString(), AMBER_AGENT_ID.toString())
-            id
-        } else {
-            null
-        }
-        var reportedTerminal: app.amber.core.ai.GenerationTerminal? = null
-        runCatching {
-            val initialConversation = loadFullConversationForGeneration(conversationId)
-
-            // reset suggestions
-            updateConversation(
-                conversationId,
-                getConversationFlow(conversationId).value.copy(chatSuggestions = emptyList()),
-                checkDeletedFiles = false,
-            )
-
-            // memory tool
-            if (!model.abilities.contains(ModelAbility.TOOL)) {
-                if (settings.enableWebSearch || mcpManager.getAllAvailableTools().isNotEmpty()) {
-                    addError(
-                        IllegalStateException(context.getString(R.string.tools_warning)),
-                        conversationId,
-                        title = context.getString(R.string.error_title_tool_unavailable)
-                    )
-                }
-            }
-
-            // check invalid messages
-            val conversation = sanitizeInvalidMessages(initialConversation)
-            if (conversation != initialConversation) {
-                withConversationWrite {
-                    conversationRepo.updateConversation(conversation)
-                }
-                replaceSessionWithFullConversation(conversationId, conversation)
-            }
-
-            // start generating
-            val session = getOrCreateSession(conversationId)
-            // P1-05: register the run's generation job as the owner of
-            // (assistantId, conversationId, runId). Cancelling the job also
-            // cancels the provider transport collected inside it.
-            if (durablePath && runId != null) {
-                session.getJob()?.let { job ->
-                    runOwnershipRegistry?.register(
-                        assistantId = AMBER_AGENT_ID.toString(),
-                        conversationId = conversationId.toString(),
-                        runId = runId.value,
-                        job = job,
-                    )
-                }
-            }
-            updateAgentLiveStatus(
-                conversationId = conversationId,
-                messages = conversation.currentMessages,
-                senderName = senderName,
-                settings = settings,
-                runId = runId?.value,
-            )
-            startGenerationKeepAlive(conversationId, senderName, settings)
-            val generationTaskId = startGenerationTask(
-                conversationId = conversationId,
-                senderName = senderName,
-                modelName = model.displayName,
-                settings = settings,
-            )
-            // P4-01: per-round recipe execution context — the installed recipe
-            // snapshot plus the same permission/ledger knobs the round uses.
-            // Built once per round; mid-round imports do not change it.
-            val recipeContext = if (
-                toolDispatcher != null &&
-                recipeRegistry != null &&
-                capabilityFlags?.isEnabled(app.amber.core.settings.Capability.RecipeRuntime) == true
-            ) {
-                val recipeCapabilityState = if (
-                    capabilityFlags.isEnabled(app.amber.core.settings.Capability.CapabilityPermissions) == true &&
-                    capabilityPermissionStore != null
-                ) {
-                    capabilityPermissionStore.state()
-                } else {
-                    null
-                }
-                app.amber.feature.recipe.RecipeRunContext(
-                    installed = recipeRegistry.installed(),
-                    dispatcher = toolDispatcher,
-                    runId = runId?.value,
-                    conversationId = conversationId?.toString(),
-                    ledger = if (durablePath) toolEffectLedger else null,
-                    autoApproveTools = settings.agentRuntime.autoApproveAllToolCalls ||
-                        conversation.autoApproveToolCalls,
-                    autoApproveHighRiskTools = settings.agentRuntime.autoApproveHighRiskToolCalls,
-                    autoApprovedToolNames = trustedRunToolNames[conversationId].orEmpty(),
-                    capabilityPermissions = recipeCapabilityState,
-                    approvalHistory = capabilityPermissionStore?.takeIf { recipeCapabilityState != null },
-                    permissionContext = app.amber.feature.runtime.CapabilityPermissionContext(
-                        assistantId = AMBER_AGENT_ID.toString(),
-                        conversationId = conversationId.toString(),
-                        sessionId = runId?.value,
-                    ),
-                    installedProvider = { recipeRegistry.installedSnapshot() },
-                )
-            } else {
-                null
-            }
-            val runTools = createRunTools(
-                settings,
-                conversationId,
-                runId?.value,
-                casAuditEnabled = capabilityFlags?.isEnabled(
-                    app.amber.core.settings.Capability.CapabilityPermissions
-                ) == true,
-                recipeContext = recipeContext,
-                threadGraphEnabled = capabilityFlags?.isEnabled(
-                    app.amber.core.settings.Capability.ThreadGraphV2
-                ) == true,
-                jsCellEnabled = capabilityFlags?.isEnabled(
-                    app.amber.core.settings.Capability.JSCellRuntime
-                ) == true,
-            )
-            // Stream checkpoints (coalesced to 1s / 512 chars) record run +
-            // tool state in the runtime event store so a process death
-            // mid-stream is recoverable by ChatEventProjector.replayUnfinished.
-            // The 10s conversation snapshot below still owns the content.
-            streamRecorder = agentEventStore?.let { store ->
-                app.amber.feature.chat.impl.ChatStreamCheckpointRecorder(
-                    eventStore = store,
-                    conversationId = conversationId.toString(),
-                    runId = runId ?: app.amber.core.agent.runtime.AgentRunId.new(),
-                    json = json,
-                )
-            }
-            streamRecorder?.onRunStarted()
-            // P6-01: resume a stored server-side response instead of POSTing a
-            // new one. Two entry points:
-            //  - RESUMABLE / WAITING_EXTERNAL runs re-attach to the SAME
-            //    stored response (same runId — the server still has the input
-            //    and the persisted cursor);
-            //  - fresh generations also opt in (store=true + write-ahead
-            //    cursor on the new runId) so a disconnect / process death
-            //    mid-stream can re-attach — the activation path that makes
-            //    the cursor exist in the first place.
-            // Every gate must pass: durable runtime, the capability flag, the
-            // user switch (enableResponsesResume) and the strict provider
-            // match (official endpoint + API key + Responses API).
-            val resumeProvider = model.findProvider(settings.providers) as? ProviderSetting.OpenAI
-            val responsesResume = if (
-                durablePath &&
-                runId != null &&
-                resumeProvider != null &&
-                resumeProvider.enableResponsesResume &&
-                resumeProvider.supportsResponsesResume() &&
-                capabilityFlags?.isEnabled(app.amber.core.settings.Capability.OpenAIResponsesResume) == true &&
-                responsesResumeStore != null &&
-                (
-                    // continuation: same runId, re-attach to the stored response
-                    (existingRun != null &&
-                        existingRun.runId == runId.value &&
-                        existingRun.state in RESPONSES_RESUME_STATES &&
-                        conversation.currentMessages.lastOrNull()?.role == MessageRole.ASSISTANT) ||
-                        // fresh generation: new runId, write-ahead cursor
-                        existingRun == null
-                )
-            ) {
-                app.amber.ai.provider.ResponsesResumeRequest(
-                    runId = runId.value,
-                    store = responsesResumeStore,
-                    resumeFrom = resumeCursor,
-                )
-            } else {
-                null
-            }
-            generator.generateText(
-                settings = settings,
-                model = model,
-                processingStatus = session.processingStatus,
-                messages = conversation.currentMessages.let {
-                    if (messageRange != null) {
-                        val end = (messageRange.endInclusive + 1).coerceAtMost(it.size)
-                        val start = messageRange.start.coerceAtMost(end)
-                        it.subList(start, end)
-                    } else {
-                        it
-                    }
-                },
-                memories = if (settings.agentRuntime.enableCoreMemory) {
-                    memoryRepository.getGlobalMemories()
-                } else {
-                    emptyList()
-                },
-                inputTransformers = buildList {
-                    addAll(inputTransformers)
-                    add(templateTransformer)
-                },
-                outputTransformers = outputTransformers,
-                autoApproveTools = settings.agentRuntime.autoApproveAllToolCalls ||
-                    conversation.autoApproveToolCalls,
-                autoApproveHighRiskTools = settings.agentRuntime.autoApproveHighRiskToolCalls,
-                autoApprovedToolNames = trustedRunToolNames[conversationId].orEmpty(),
-                maxSteps = settings.agentRuntime.maxToolLoopSteps.coerceIn(
-                    MIN_AGENT_TOOL_LOOP_STEPS,
-                    MAX_AGENT_TOOL_LOOP_STEPS,
-                ),
-                tools = runTools,
-                conversation = conversation,
-                consumeSteerMessages = {
-                    val session = getOrCreateSession(conversationId)
-                    val consumed = session.dequeueSteerPendingUserMessages()
-                    if (consumed.isNotEmpty()) {
-                        persistCurrentPendingMessagesDurably(conversationId, session)
-                        recordPendingMessageEvent(
-                            conversationId = conversationId,
-                            event = "steer_consumed",
-                            count = consumed.size,
-                        )
-                    }
-                    consumed
-                        .map { queued ->
-                            UIMessage(
-                                role = MessageRole.USER,
-                                parts = queued.parts,
-                            )
-                        }
-                },
-                runId = runId?.value,
-                onTerminal = if (durablePath) {
-                    { terminal ->
-                        reportedTerminal = terminal
-                        runCatching {
-                            when (terminal) {
-                                app.amber.core.ai.GenerationTerminal.WaitingUser -> {
-                                    // WAITING_USER is a pause — the foreground
-                                    // service stays alive and the runId is
-                                    // kept for resume after approval.
-                                    runTerminalStore!!.pause(
-                                        runId!!.value,
-                                        RunTerminalState.WAITING_USER,
-                                        PauseReason.TOOL_APPROVAL,
-                                    )
-                                    refreshOutcomeUnknown()
-                                }
-
-                                app.amber.core.ai.GenerationTerminal.StepLimit -> {
-                                    // STEP_LIMIT is terminal and never maps to COMPLETED.
-                                    // Publish it after the final conversation checkpoint in
-                                    // onCompletion, so a process death cannot leave a terminal
-                                    // run with its final messages only in memory.
-                                    refreshOutcomeUnknown()
-                                }
-                            }
-                        }.onFailure { error ->
-                            Log.w(TAG, "onTerminal persist failed for $conversationId", error)
-                        }
-                    }
-                } else {
-                    null
-                },
-                responsesResume = responsesResume,
-            ).onCompletion { cause ->
-                finalizeChatGeneration {
-                    streamRecorder?.onRunFinished(cause)
-                    // P1-05: the run's handles are done — release ownership. A
-                    // stale notification carrying this runId will no longer cancel
-                    // anything (a newer run registers under its own runId).
-                    if (runId != null) {
-                        runOwnershipRegistry?.unregister(runId.value)
-                    }
-                    // P8-11: a flow that paused for user input (WAITING_USER) keeps
-                    // the live notification with approve/deny/reply/stop actions —
-                    // driven by the persisted pause state (P1-03), so the user can
-                    // decide from the notification. Terminal outcomes dismiss it.
-                    val waitingForApproval = getConversationFlow(conversationId).value.currentMessages
-                        .any { message ->
-                            message.parts.any { it is UIMessagePart.Tool && it.isPending }
-                        }
-                    if (waitingForApproval && reportedTerminal is app.amber.core.ai.GenerationTerminal.WaitingUser) {
-                        updateAgentLiveStatus(
-                            conversationId = conversationId,
-                            messages = getConversationFlow(conversationId).value.currentMessages,
-                            senderName = senderName,
-                            settings = settings,
-                            runId = runId?.value,
-                        )
-                    } else {
-                        cancelLiveUpdateNotification(conversationId)
-                    }
-                    // Persist the final in-memory conversation before publishing
-                    // any terminal run state. The response cursor is cleared only
-                    // after that checkpoint and the terminal owner both succeed.
-                    val updatedConversation = getConversationFlow(conversationId).value.copy(
-                        messageNodes = getConversationFlow(conversationId).value.messageNodes.map { node ->
-                            node.copy(messages = node.messages.map { it.finishReasoning() })
-                        },
-                        updateAt = Instant.now()
-                    )
-                    updateConversation(conversationId, updatedConversation, checkDeletedFiles = false)
-                    val conversationCheckpointed = checkpointConversation(
-                        conversationId,
-                        updatedConversation,
-                        force = true,
-                    )
-                    generationCheckpointAt.remove(conversationId)
-                    // P1-03: foreground-service lifecycle follows the persisted
-                    // terminal state, not the coroutine's exit. WAITING_USER is a
-                    // pause — the keep-alive stays until the user decides.
-                    var terminalOwnerSucceeded = !durablePath || runId == null
-                    val terminalPublish = if (durablePath && runId != null) {
-                        val (state, reason) = terminalForFlowEnd(cause, reportedTerminal)
-                        // P6-01: when the user stopped but the server cancel could
-                        // not be confirmed, the run outcome is undecidable — keep
-                        // WAITING_EXTERNAL (never pretend CANCELLED) and leave the
-                        // resume cursor so recovery can settle it server-side.
-                        val serverCancelPending = pendingServerCancelFailures.remove(runId.value) == true
-                        terminalOwnerSucceeded = if (
-                            state != RunTerminalState.COMPLETED &&
-                                state != RunTerminalState.STEP_LIMIT ||
-                                conversationCheckpointed
-                        ) {
-                            runCatching {
-                                when {
-                                    serverCancelPending -> {
-                                        runTerminalStore!!.pause(
-                                            runId.value,
-                                            RunTerminalState.WAITING_EXTERNAL,
-                                            PauseReason.USER_STOP,
-                                        )
-                                    }
-
-                                    state == RunTerminalState.WAITING_USER -> {
-                                        runTerminalStore!!.pause(runId.value, state, reason)
-                                    }
-
-                                    else -> {
-                                        runTerminalStore!!.finish(runId.value, state, reason)
-                                    }
-                                }
-                                true
-                            }.onFailure { error ->
-                                Log.w(TAG, "terminal owner persist failed for $conversationId", error)
-                            }.getOrDefault(false)
-                        } else {
-                            Log.w(TAG, "terminal owner deferred because conversation checkpoint failed for $conversationId")
-                            false
-                        }
-                        if (
-                            terminalOwnerSucceeded &&
-                            conversationCheckpointed &&
-                            !serverCancelPending &&
-                            responsesResume != null &&
-                            (state == RunTerminalState.COMPLETED || state == RunTerminalState.STEP_LIMIT)
-                        ) {
-                            runCatching { responsesResume.store.clear(responsesResume.runId) }
-                                .onFailure { error ->
-                                    Log.w(TAG, "stored response cursor clear failed for $conversationId", error)
-                                }
-                        }
-                        if (state == RunTerminalState.CANCELLED || state == RunTerminalState.FAILED || serverCancelPending) {
-                            // A stop/failure may leave a STARTED non-idempotent
-                            // effect behind — reconcile it so the user decides.
-                            runCatching { runRecovery!!.reconcileStartedEffects(runId.value) }
-                            runCatching { refreshOutcomeUnknown() }
-                        }
-                        // P4-02: cascade cancellation — a cancelled parent run also
-                        // cancels its child threads (replaces the pre-Phase-4
-                        // detach policy; gated by the thread_graph_v2 flag inside).
-                        if (state == RunTerminalState.CANCELLED) {
-                            runCatching {
-                                subAgentManager.cancelByRootRun(runId.value, conversationId.toString())
-                            }
-                        }
-                        if (serverCancelPending) RunTerminalState.WAITING_EXTERNAL else state
-                    } else {
-                        null
-                    }
-                    completionOwnerCommitted = terminalOwnerSucceeded
-                    // Keep a resumable WAITING_USER run bound to its identity, but
-                    // close the WebMount run namespace for every terminal outcome.
-                    if (
-                        runId != null &&
-                        terminalPublish != RunTerminalState.WAITING_USER &&
-                        terminalOwnerSucceeded
-                    ) {
-                        localTools.endWebMountRun(
-                            runId = runId.value,
-                            conversationId = conversationId.toString(),
-                            reason = "generation finished",
-                            preservePendingHandoff = terminalPublish == RunTerminalState.COMPLETED,
-                        )
-                    }
-                    val keepAlive = if (terminalPublish == null) {
-                        true // legacy path: keep-alive follows queued continuations below
-                    } else {
-                        // durable path: keep-alive follows the persisted state
-                        runCatching { runTerminalStore?.get(runId!!.value)?.state?.isTerminal != true }
-                            .getOrDefault(true)
-                    }
-                    if (keepAlive && !hasQueuedContinuation(conversationId)) {
-                        stopGenerationKeepAlive(conversationId)
-                    }
-                    finishGenerationTask(generationTaskId, cause)
-                    cleanupRunResourcesIfDone(conversationId, updatedConversation)
-
-                    // Show notification only when the run truly completed
-                    // (STEP_LIMIT / WAITING_USER are never "done").
-                    val completed = (terminalPublish == RunTerminalState.COMPLETED && terminalOwnerSucceeded) ||
-                        (terminalPublish == null && cause == null)
-                    if (
-                        completed &&
-                        !isForeground.value &&
-                        settings.displaySetting.enableNotificationOnMessageGeneration
-                    ) {
-                        sendGenerationDoneNotification(conversationId, senderName, runId?.value)
-                    }
-                }
-            }.collect { chunk ->
-                when (chunk) {
-                    is GenerationChunk.Messages -> {
-                        val patchMessages = chunk.update.streamingTailMessageId?.let { tailId ->
-                            chunk.messages.filter { message -> message.id == tailId }
-                        } ?: chunk.messages
-                        val sourceStartIndex = messageRange?.let { range ->
-                            if (chunk.update.isStreamingTail) {
-                                chunk.messages.indexOfFirst { message ->
-                                    message.id == chunk.update.streamingTailMessageId
-                                }.takeIf { it >= 0 }?.let { tailOffset -> range.start + tailOffset }
-                            } else {
-                                range.start
-                            }
-                        }
-                        val updatedConversation = getConversationFlow(conversationId).value
-                            .mergeGeneratedMessagesIntoWindow(
-                                generatedMessages = patchMessages,
-                                sourceStartIndex = sourceStartIndex,
-                            )
-                        updateConversation(conversationId, updatedConversation, checkDeletedFiles = false)
-                        checkpointConversation(conversationId, updatedConversation)
-                        // M1: the executed tool results are durable in the
-                        // conversation now — the ledger replay payload is no
-                        // longer read, so drop it (bounded retention).
-                        clearPersistedToolPayloads(durablePath, patchMessages)
-                        streamRecorder?.onChunk(
-                            messages = chunk.messages,
-                            streamingTailMessageId = chunk.update.streamingTailMessageId,
-                        )
-
-                        updateAgentLiveStatus(
-                            conversationId = conversationId,
-                            messages = chunk.messages,
-                            senderName = senderName,
-                            settings = settings,
-                            runId = runId?.value,
-                        )
-                    }
-                }
-            }
-        }.onFailure {
-            finalizeChatGeneration {
-                // No-op when onCompletion already finalized; covers failures
-                // thrown before the generation flow was even constructed.
-                streamRecorder?.onRunFinished(it)
-                trustedRunToolNames.remove(conversationId)
-                val failureState = if (durablePath && runId != null) {
-                    if (it is CancellationException) RunTerminalState.CANCELLED else RunTerminalState.FAILED
-                } else {
-                    null
-                }
-                if (!hasQueuedContinuation(conversationId)) {
-                    stopGenerationKeepAlive(conversationId)
-                }
-                val latestConversation = getConversationFlow(conversationId).value
-                val conversationCheckpointed = checkpointConversation(
-                    conversationId,
-                    latestConversation,
-                    force = true,
-                )
-                if (failureState != null && runId != null && !completionOwnerCommitted) {
-                    runCatching {
-                        runTerminalStore!!.finish(
-                            runId.value,
-                            failureState,
-                            if (it is CancellationException) PauseReason.USER_STOP else null,
-                        )
-                        runRecovery!!.reconcileStartedEffects(runId.value)
-                        refreshOutcomeUnknown()
-                    }.onFailure { error ->
-                        Log.w(TAG, "failure terminal owner persist failed for $conversationId", error)
-                    }
-                    localTools.endWebMountRun(
-                        runId = runId.value,
-                        conversationId = conversationId.toString(),
-                        reason = if (it is CancellationException) "generation cancelled" else "generation failed",
-                    )
-                    // P4-02: cascade cancellation (thread_graph_v2 gated inside).
-                    if (failureState == RunTerminalState.CANCELLED) {
-                        runCatching {
-                            subAgentManager.cancelByRootRun(runId.value, conversationId.toString())
-                        }
-                    }
-                }
-                generationCheckpointAt.remove(conversationId)
-                screenCaptureManager.releaseSession()
-                if (it is CancellationException || !settings.agentRuntime.enableLiveStatusNotification) {
-                    cancelLiveUpdateNotification(conversationId)
-                } else {
-                    liveStatusNotifier.notifyFailure(
-                        conversationId = conversationId,
-                        senderName = senderName,
-                        error = it,
-                        launchIntent = getPendingIntent(context, conversationId, runId?.value),
-                    )
-                }
-
-                it.printStackTrace()
-                // Surface compaction failures with a targeted title + actionable hint instead
-                // of the generic "message generation failed" toast. Previously this was the
-                // root cause of the silent-stall bug: GLM 5.1 at near-context-limit triggered
-                // forceRatio compact → fell back to the same slow model → compact timed out →
-                // exception got wrapped as a generic generation error → 5-second ErrorCard →
-                // user never saw it. Now it points users at the 压缩模型 setting where the
-                // real fix lives.
-                val (errorTitle, surfacedError) = when (it) {
-                    is app.amber.core.context.ContextCompactionFailedException -> {
-                        val hint = context.getString(
-                            R.string.error_auto_compact_failed_hint,
-                            it.phase,
-                            it.compactionReason,
-                        )
-                        context.getString(R.string.error_title_compress_conversation) to RuntimeException(hint, it)
-                    }
-                    // P1-04: the final token fit could not satisfy the hard budget
-                    // even after trimming — the request was never sent. Surface a
-                    // clear title; the exception message carries the token math.
-                    is app.amber.core.context.ContextTooLargeException -> "上下文超出模型上限" to it
-                    else -> context.getString(R.string.error_title_generation) to it
-                }
-                addError(surfacedError, conversationId, title = errorTitle)
-                Logging.log(TAG, "handleMessageComplete: $it")
-                Logging.log(TAG, it.stackTraceToString())
-            }
-        }.onSuccess {
-            val finalConversation = getConversationFlow(conversationId).value
-            persistConversationWindow(conversationId, finalConversation, indexFts = true)
-            cleanupRunResourcesIfDone(conversationId, finalConversation)
-
-            launchWithConversationReference(conversationId, generationRestoreEpoch) {
-                generateTitle(conversationId, finalConversation)
-            }
-            launchWithConversationReference(conversationId, generationRestoreEpoch) {
-                generateSuggestion(conversationId, finalConversation)
-            }
-            if (!finalConversation.hasPendingOrUnexecutedTools()) {
-                appScope.launch(Dispatchers.IO + restoreWriteContext(generationRestoreEpoch)) {
-                    memoryExtractor.extractAfterConversation(
-                        loadFullConversationForGeneration(conversationId)
-                    )
-                }
-            }
-        }
-    }
 
     /**
      * M1: after executed tool results are durably persisted into the
@@ -2423,7 +2376,11 @@ class ChatService(
             for (part in message.parts) {
                 if (part !is UIMessagePart.Tool || !part.isExecuted) continue
                 runCatching {
-                    ledger.getByToolCallId(part.toolCallId)?.let { effect ->
+                    // A callId can have several ledger rows (retries, older
+                    // attempts); sweep them all — markResultPersisted only
+                    // touches FINISHED/FAILED rows with a payload, so this
+                    // can never corrupt a live PREPARED/STARTED effect.
+                    ledger.listByToolCallId(part.toolCallId).forEach { effect ->
                         ledger.markResultPersisted(effect.effectId)
                     }
                 }.onFailure { error ->
@@ -2452,13 +2409,6 @@ class ChatService(
         "screen_open_app",
         "screen_screenshot",
     )
-
-    // ---- 检查无效消息 ----
-
-    private fun checkInvalidMessages(conversationId: Uuid) {
-        val conversation = getConversationFlow(conversationId).value
-        updateConversation(conversationId, sanitizeInvalidMessages(conversation))
-    }
 
     private suspend fun loadFullConversationForGeneration(conversationId: Uuid): Conversation {
         val windowConversation = getConversationFlow(conversationId).value
@@ -2626,6 +2576,7 @@ class ChatService(
 
     private suspend fun startGenerationTask(
         conversationId: Uuid,
+        runId: String,
         senderName: String,
         modelName: String,
         settings: Settings,
@@ -2639,6 +2590,7 @@ class ChatService(
                     type = "generation",
                     title = context.getString(R.string.generation_task_title),
                     spec = buildJsonObject {
+                        put("run_id", runId)
                         put("sender", senderName)
                         put("model", modelName)
                         put("auto_retry", settings.agentRuntime.generationRetry.enabled)
@@ -2669,20 +2621,27 @@ class ChatService(
         return taskId
     }
 
-    private suspend fun finishGenerationTask(taskId: String, cause: Throwable?) {
+    private suspend fun finishGenerationTask(taskId: String, cause: Throwable?, runId: String) {
+        val expectedSpec = agentTaskScheduler.read(taskId)?.spec
+            ?.takeIf { it["run_id"]?.jsonPrimitive?.contentOrNull == runId }
+            ?: return
         runCatching {
             when {
-                cause == null -> agentTaskScheduler.complete(taskId, summary = "Generation completed.")
+                cause == null -> agentTaskScheduler.complete(
+                    taskId, summary = "Generation completed.", expectedSpec = expectedSpec,
+                )
                 cause is CancellationException -> agentTaskScheduler.fail(
                     taskId = taskId,
-                    message = "Generation cancelled by user.",
+                    message = "Generation cancelled.",
                     code = "cancelled",
+                    expectedSpec = expectedSpec,
                 )
 
                 else -> agentTaskScheduler.fail(
                     taskId = taskId,
                     message = cause.message ?: cause::class.java.simpleName,
                     code = "generation_failed",
+                    expectedSpec = expectedSpec,
                 )
             }
         }.onFailure { error ->
@@ -2778,9 +2737,9 @@ class ChatService(
     }
 
     /** Serialize the actual repository write and reject an old generation epoch. */
-    private suspend fun withConversationWrite(block: suspend () -> Unit) {
+    private suspend fun <T> withConversationWrite(block: suspend () -> T): T {
         val gate = restoreWriteGate
-        if (gate == null) {
+        return if (gate == null) {
             block()
         } else {
             gate.withCurrentWriterOrCancel(block)
@@ -3033,7 +2992,10 @@ class ChatService(
 
             val session = getOrCreateSession(conversationId)
             // P8-01: 生成中编辑冲突——明确提示并拒绝，不打断当前生成，也不做任何写操作。
-            val conflictReason = blockedReason(session.isGenerating, "请先停止生成再编辑消息")
+            val conflictReason = blockedReason(
+                session.isGenerating,
+                context.getString(R.string.chat_page_edit_generating),
+            )
             if (conflictReason != null) {
                 addError(
                     IllegalStateException(conflictReason),
@@ -3051,24 +3013,10 @@ class ChatService(
             saveConversation(conversationId, updatedConversation)
 
             // P8-01: 「保存并重新生成」——从新选中的 user variant 生成 assistant 分支。
-            // 生成绑定新 variant：handleMessageComplete 使用 conversation.currentMessages，
-            // 其 selectIndex 已指向新 variant。以会话 Job 运行，Stop 可取消、可防重复。
+            // 生成绑定新 variant：kernel dispatcher 使用 conversation.currentMessages，
+            // 其 selectIndex 已指向新 variant。dispatcher 以会话 Job 运行，Stop 可取消、可防重复。
             if (regenerate) {
-                val job = appScope.launch(restoreWriteContext()) {
-                    try {
-                        handleMessageComplete(conversationId)
-                        _generationDoneFlow.emit(conversationId)
-                    } catch (e: CancellationException) {
-                        throw e
-                    } catch (e: Exception) {
-                        addError(
-                            e,
-                            conversationId,
-                            title = context.getString(R.string.error_title_regenerate_message),
-                        )
-                    }
-                }
-                session.setJob(job)
+                continueGeneration(conversationId)
             }
         }
     }
@@ -3123,7 +3071,7 @@ class ChatService(
             // Minor-1: 生成中切换 user variant 与生成写竞争（saveConversation 可能
             // 覆盖流式写入的下游分支）。与 editMessage 的权威守卫一致：明确提示并
             // 拒绝，不打断当前生成，也不做任何写操作。
-            val conflictReason = blockedReason(session.isGenerating, "请先停止生成再切换消息分支")
+            val conflictReason = blockedReason(session.isGenerating, context.getString(R.string.chat_page_edit_generating))
             if (conflictReason != null) {
                 addError(
                     IllegalStateException(conflictReason),
@@ -3217,12 +3165,112 @@ class ChatService(
     internal fun createDebugRunTools(settings: Settings): List<Tool> =
         createRunTools(settings, null, casAuditEnabled = false)
 
+    /**
+     * P4-01: per-round recipe execution context — the installed recipe
+     * snapshot plus the same permission/ledger knobs the round uses. Shared
+     * by the legacy loop and the kernel chat-turn session so both paths
+     * expose the identical recipe tool surface.
+     */
+    private suspend fun buildRecipeRunContext(
+        conversationId: Uuid,
+        runId: String?,
+        settings: Settings,
+        conversation: Conversation,
+        durablePath: Boolean,
+        events: app.amber.core.agent.runtime.AgentEventWriter? = null,
+        executionPolicy: app.amber.feature.runtime.ExecutionPolicy =
+            app.amber.feature.runtime.ExecutionPolicy.permissive(),
+    ): app.amber.feature.recipe.RecipeRunContext? {
+        if (toolDispatcher == null || recipeRegistry == null) return null
+        if (capabilityFlags?.isEnabled(app.amber.core.settings.Capability.RecipeRuntime) != true) {
+            return null
+        }
+        val recipeCapabilityState = if (
+            capabilityFlags.isEnabled(app.amber.core.settings.Capability.CapabilityPermissions) == true &&
+            capabilityPermissionStore != null
+        ) {
+            capabilityPermissionStore.state()
+        } else {
+            null
+        }
+        return app.amber.feature.recipe.RecipeRunContext(
+            installed = recipeRegistry.installed(),
+            dispatcher = toolDispatcher,
+            runId = runId,
+            conversationId = conversationId.toString(),
+            ledger = if (durablePath) toolEffectLedger else null,
+            events = events.takeIf { durablePath },
+            autoApproveTools = settings.agentRuntime.autoApproveAllToolCalls ||
+                conversation.autoApproveToolCalls,
+            autoApproveHighRiskTools = settings.agentRuntime.autoApproveHighRiskToolCalls,
+            autoApprovedToolNames = trustedRunToolNames[conversationId].orEmpty(),
+            capabilityPermissions = recipeCapabilityState,
+            approvalHistory = capabilityPermissionStore?.takeIf { recipeCapabilityState != null },
+            permissionContext = app.amber.feature.runtime.CapabilityPermissionContext(
+                assistantId = AMBER_AGENT_ID.toString(),
+                conversationId = conversationId.toString(),
+                sessionId = runId,
+            ),
+            executionPolicy = executionPolicy,
+            installedProvider = { recipeRegistry.installedSnapshot() },
+        )
+    }
+
+    /**
+     * Kernel-path tool surface for a chat turn — the same gates the legacy
+     * loop applies (capability audit, recipe runtime, thread graph, JS
+     * cell), keyed by the kernel runId.
+     */
+    internal suspend fun createKernelRunTools(
+        settings: Settings,
+        conversationId: Uuid,
+        runId: String?,
+        conversation: Conversation,
+        durablePath: Boolean,
+        events: app.amber.core.agent.runtime.AgentEventWriter? = null,
+        executionPolicy: app.amber.feature.runtime.ExecutionPolicy =
+            app.amber.feature.runtime.ExecutionPolicy.permissive(),
+    ): List<Tool> = createRunTools(
+        settings,
+        conversationId,
+        runId,
+        casAuditEnabled = capabilityFlags?.isEnabled(
+            app.amber.core.settings.Capability.CapabilityPermissions
+        ) == true,
+        recipeContext = buildRecipeRunContext(
+            conversationId = conversationId,
+            runId = runId,
+            settings = settings,
+            conversation = conversation,
+            durablePath = durablePath,
+            events = events,
+            executionPolicy = executionPolicy,
+        ),
+        // P1-7: the same run policy the recipe context carries is handed to
+        // the subagent tools, so children start under the parent's sandbox.
+        executionPolicy = executionPolicy,
+        threadGraphEnabled = capabilityFlags?.isEnabled(
+            app.amber.core.settings.Capability.ThreadGraphV2
+        ) == true,
+        jsCellEnabled = capabilityFlags?.isEnabled(
+            app.amber.core.settings.Capability.JSCellRuntime
+        ) == true,
+    )
+
+    /** Full (window-merged) conversation for a generation turn. */
+    internal suspend fun conversationForGeneration(conversationId: Uuid): Conversation =
+        loadFullConversationForGeneration(conversationId)
+
     private fun createRunTools(
         settings: Settings,
         conversationId: Uuid?,
         runId: String? = null,
         casAuditEnabled: Boolean = false,
         recipeContext: app.amber.feature.recipe.RecipeRunContext? = null,
+        // P1-7: the parent run's sandbox policy — handed to SubAgentTools so
+        // the children a (possibly narrowed) run starts stay under its sandbox.
+        executionPolicy: app.amber.feature.runtime.ExecutionPolicy =
+            app.amber.feature.runtime.ExecutionPolicy.permissive(),
         // P4-02: thread_graph_v2 gate, computed at the (suspend) call site.
         threadGraphEnabled: Boolean = false,
         // P4-03: js_cell_runtime gate, computed at the (suspend) call site.
@@ -3266,6 +3314,7 @@ class ChatService(
                     createSearchTools(
                         settings = settings,
                         includeWebViewFallbackGuidance = includeWebViewFallbackGuidance,
+                        locale = context.appLocale(),
                     )
                 )
             }
@@ -3290,7 +3339,7 @@ class ChatService(
                     call = { ref, input ->
                         val toolCallId = activityStore.startTool(
                             toolName = "mcp__${ref.serverName}__${ref.toolName}",
-                            title = "调用 MCP 工具",
+                            title = context.getString(R.string.tool_activity_mcp_call),
                             inputPreview = input.toString(),
                             runtime = "MCP",
                         )
@@ -3349,6 +3398,7 @@ class ChatService(
                 subAgentManager = subAgentManager,
                 parentConversationId = conversationId,
                 parentRunId = runId,
+                parentPolicy = executionPolicy,
                 parentToolsProvider = { baseTools },
                 // A subagent receives the same logical catalog, but WebMount tools must bind
                 // their lease to the internally assigned child generation scope. Rebuild only
@@ -3373,6 +3423,7 @@ class ChatService(
                 // P4-02: thread_graph_v2 gate — off keeps the legacy tool set
                 // (no subagent_followup / send_message / interrupt).
                 threadGraphEnabled = threadGraphEnabled,
+                displayLocalizer = AppSubAgentDisplayLocalizer(context),
             ).tools()
         } else {
             profiledRawTools
@@ -3574,6 +3625,7 @@ class ChatService(
                 ledger?.recordApproval(entry)
             },
             runIdProvider = { runId },
+            locale = context.appLocale(),
         )
     }
 
@@ -3697,6 +3749,8 @@ class ChatService(
     // explicitly via resumePendingQueue() or edits the queued content in the
     // composer via takePendingMessageForInput().
     suspend fun stopGeneration(conversationId: Uuid, runId: String? = null) {
+        val activeRun = activeKernelRuns.value[conversationId]
+        if (runId != null && activeRun != null && activeRun.value != runId) return
         // P6-01: when the run has a stored server-side response, cancel it
         // server-side FIRST and await a decidable outcome — before cancelling
         // the local job, so onCompletion sees the decision. A cancel that
@@ -3734,6 +3788,15 @@ class ChatService(
                 false
             }
         }
+        // Kernel-dispatched runs are owned by the AgentRunner, not the
+        // session job or the ownership registry — cancel through the runner;
+        // its CancellationException path settles the durable records.
+        val cancelledKernelRun = activeKernelRuns.value[conversationId]
+            ?.takeIf { runId == null || it.value == runId }
+            ?.let { kernelRunId ->
+            agentRunner?.cancel(kernelRunId)
+            true
+        } ?: false
         // WAITING_USER has no active generation Job by design: onCompletion
         // releases the in-memory owner while the persisted terminal keeps the
         // approval resumable. Notification Stop therefore falls back to the
@@ -3745,7 +3808,7 @@ class ChatService(
                 runId = runId,
                 conversationId = conversationId.toString(),
             ) == true
-        val cancelled = cancelledByOwner || cancelledPersistedWaitingRun
+        val cancelled = cancelledByOwner || cancelledPersistedWaitingRun || cancelledKernelRun
         if (!cancelled) {
             if (serverCancelUnconfirmed) {
                 // Nothing local to cancel — the flag has no consumer; drop it.
@@ -3758,6 +3821,23 @@ class ChatService(
             // There is no flow completion left to stop the foreground
             // keep-alive after a persisted WAITING_USER pause is cancelled.
             stopGenerationKeepAlive(conversationId)
+            // No flow completion will settle the event-store row either —
+            // move it to CANCELLED here or it stays a live WAITING_USER row
+            // forever (replayUnfinished deliberately skips pause states).
+            runCatching {
+                agentEventStore?.transitionRun(
+                    app.amber.core.agent.runtime.AgentRunId(runId!!),
+                    app.amber.core.agent.runtime.RunStatus.PAUSE_STATES,
+                    app.amber.core.agent.runtime.RunStatus.CANCELLED,
+                    reason = "user_stop",
+                )
+            }
+            // A composite tool can park with its outer effect still STARTED
+            // (nested approval checkpoint). Cold-start recovery skips terminal
+            // rows, so classify the effect here or a non-idempotent tool's
+            // unknown outcome is never surfaced (Step 3-5).
+            runCatching { runRecovery?.reconcileStartedEffects(runId!!) }
+            runCatching { refreshOutcomeUnknown() }
         }
         cancelLiveUpdateNotification(conversationId)
         trustedRunToolNames.remove(conversationId)
@@ -3797,7 +3877,7 @@ class ChatService(
     fun resumePendingQueue(conversationId: Uuid) {
         val session = getOrCreateSession(conversationId)
         if (session.pendingUserMessages.value.isEmpty()) return
-        launchPendingMessageLoop(conversationId)
+        launchViaKernel(conversationId)
     }
 
     /**
@@ -3840,7 +3920,10 @@ class ChatService(
                                             put("mode", message.mode.name.lowercase())
                                             put("answer", message.answer)
                                             put("created_at_ms", message.createdAtMs)
-                                            put("preview", message.previewText())
+                                            put(
+                                                "preview",
+                                                message.previewText(copy = PendingUserMessageDisplayCopy.from(context)),
+                                            )
                                         }
                                     )
                                 }

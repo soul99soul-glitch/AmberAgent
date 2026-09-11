@@ -20,8 +20,10 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import app.amber.ai.provider.ProviderCatalog
 import app.amber.agent.AppScope
+import app.amber.agent.R
 import app.amber.core.automation.AmberAccessibilityService
 import app.amber.core.settings.prefs.SettingsAggregator
+import app.amber.core.utils.appLocale
 import app.amber.feature.live.bubble.LiveBubbleContent
 import app.amber.feature.live.bubble.LiveBubbleWindow
 import app.amber.feature.ui.theme.AmberAgentTheme
@@ -32,10 +34,12 @@ class LiveModeManager(
     private val providerCatalog: ProviderCatalog,
     private val appScope: AppScope,
 ) {
-    private val _state = MutableStateFlow(LiveModeUiState())
+    private val _state = MutableStateFlow(
+        LiveModeUiState(statusText = context.getString(R.string.live_empty_not_started)),
+    )
     val state: StateFlow<LiveModeUiState> = _state.asStateFlow()
 
-    private val analyzer = LiveAnalyzer(providerCatalog)
+    private val analyzer = LiveAnalyzer(providerCatalog, context)
     private val screenshotter = LiveScreenshotter(context)
     private val bubble = LiveBubbleWindow()
 
@@ -62,7 +66,10 @@ class LiveModeManager(
             backoffMs = MODEL_BUSY_BACKOFF_MS,
         )
         screenDirty = true
-        _state.value = LiveModeUiState(active = true, statusText = "伴随已开启，正在检查权限")
+        _state.value = LiveModeUiState(
+            active = true,
+            statusText = context.getString(R.string.live_master_enabled),
+        )
         eventJob = appScope.launch {
             AmberAccessibilityService.screenEvents.collect { event ->
                 if (event.packageName != context.packageName) screenDirty = true
@@ -76,7 +83,7 @@ class LiveModeManager(
             it.copy(
                 paused = true,
                 analyzing = false,
-                statusText = "伴随已暂停",
+                statusText = context.getString(R.string.live_master_paused),
             )
         }
         analysisJob?.cancel()
@@ -91,7 +98,7 @@ class LiveModeManager(
             it.copy(
                 active = true,
                 paused = false,
-                statusText = "正在伴随",
+                statusText = context.getString(R.string.live_master_reading),
             )
         }
     }
@@ -108,17 +115,19 @@ class LiveModeManager(
         pendingSnapshot = null
         screenDirty = true
         focusInstruction = ""
-        _state.value = LiveModeUiState()
+        _state.value = LiveModeUiState(
+            statusText = context.getString(R.string.live_empty_not_started),
+        )
     }
 
     fun refreshNow() {
         if (_state.value.paused) {
-            _state.update { it.copy(statusText = "已暂停") }
+            _state.update { it.copy(statusText = context.getString(R.string.live_master_paused)) }
             return
         }
         val snapshot = pendingSnapshot
         if (snapshot == null) {
-            _state.update { it.copy(statusText = "还没有读到可分析的屏幕") }
+            _state.update { it.copy(statusText = context.getString(R.string.live_result_screen_unclear)) }
         } else {
             analyzeSnapshot(snapshot, force = true)
         }
@@ -146,26 +155,31 @@ class LiveModeManager(
         val current = state.value
         val card = current.card ?: return null
         return buildString {
-            appendLine("请基于这段 Live 伴随观察继续帮我分析。")
+            appendLine(context.getString(R.string.live_companion_title))
             appendLine()
-            appendLine("当前应用：${current.currentAppLabel.ifBlank { current.currentPackage }}")
+            appendLine("${context.getString(R.string.live_current_app)}: ${current.currentAppLabel.ifBlank { current.currentPackage }}")
             if (current.currentTitle.isNotBlank()) {
-                appendLine("当前页面：${current.currentTitle}")
+                appendLine("${context.getString(R.string.live_result_what_is_visible)}: ${current.currentTitle}")
             }
             if (current.currentFocus.isNotBlank()) {
-                appendLine("我的关注点：${current.currentFocus}")
+                appendLine("${context.getString(R.string.live_result_basis)}: ${current.currentFocus}")
             }
             if (current.completedAction.isNotBlank()) {
-                appendLine("本次结果类型：${current.completedAction}")
+                appendLine(
+                    context.getString(
+                        R.string.live_result_title_custom,
+                        localizedActionLabel(current.completedAction),
+                    ),
+                )
             }
             appendLine()
-            appendLine("正在看什么：${card.watching}")
+            appendLine("${context.getString(R.string.live_result_what_is_visible)}: ${card.watching}")
             if (card.keyPoints.isNotEmpty()) {
-                appendLine("我觉得重点是：")
+                appendLine("${context.getString(R.string.live_result_key_points)}:")
                 card.keyPoints.forEach { appendLine("- $it") }
             }
             if (card.suggestions.isNotEmpty()) {
-                appendLine("可以怎么做：")
+                appendLine("${context.getString(R.string.live_result_what_to_do)}:")
                 card.suggestions.forEach { appendLine("- $it") }
             }
         }.trim()
@@ -182,7 +196,7 @@ class LiveModeManager(
                         active = false,
                         paused = false,
                         analyzing = false,
-                        statusText = "Live 模式已关闭",
+                        statusText = context.getString(R.string.live_master_not_enabled),
                         nextAnalysisAfterMillis = 0L,
                     )
                 }
@@ -200,7 +214,7 @@ class LiveModeManager(
                         noModelConfigured = true,
                         needsAccessibility = false,
                         analyzing = false,
-                        statusText = "请先配置聊天模型",
+                        statusText = context.getString(R.string.live_model_required_title),
                         nextAnalysisAfterMillis = 0L,
                     )
                 }
@@ -216,9 +230,9 @@ class LiveModeManager(
                         noModelConfigured = false,
                         analyzing = false,
                         statusText = if (serviceEnabled) {
-                            "等待无障碍服务连接"
+                            context.getString(R.string.live_master_reading)
                         } else {
-                            "请开启 AmberAgent 无障碍服务"
+                            context.getString(R.string.live_accessibility_required_title)
                         },
                         nextAnalysisAfterMillis = 0L,
                     )
@@ -245,7 +259,8 @@ class LiveModeManager(
                     _state.update {
                         it.copy(
                             needsAccessibility = false, noModelConfigured = false,
-                            analyzing = false, statusText = "未识别到另一侧内容",
+                            analyzing = false,
+                            statusText = context.getString(R.string.live_result_screen_unclear),
                         )
                     }
                     delay(tickInterval)
@@ -261,7 +276,7 @@ class LiveModeManager(
                             currentAppLabel = snapshot.appLabel,
                             currentTitle = snapshot.title,
                             lastSnapshotHash = snapshot.stableHash,
-                            statusText = "正在伴随 ${snapshot.appLabel.ifBlank { snapshot.packageName }}",
+                            statusText = readingStatus(snapshot.appLabel.ifBlank { snapshot.packageName }),
                         )
                     }
                 }
@@ -275,7 +290,7 @@ class LiveModeManager(
                 if (silent) {
                     _state.update {
                         if (it.analyzing || it.card != null) it
-                        else it.copy(statusText = "在 ${snapshot.appLabel.ifBlank { snapshot.packageName }} 待命，点击分析或下达指令")
+                        else it.copy(statusText = readingStatus(snapshot.appLabel.ifBlank { snapshot.packageName }))
                     }
                 } else if (engine.decide(System.currentTimeMillis()) == LiveEngine.Decision.Analyze) {
                     analyzeSnapshot(snapshot, force = false)
@@ -295,7 +310,7 @@ class LiveModeManager(
                 if (d.reason == "backoff") {
                     _state.update {
                         it.copy(
-                            statusText = "模型服务繁忙，稍后自动重试",
+                            statusText = context.getString(R.string.live_master_model_busy),
                             nextAnalysisAfterMillis = engine.backoffUntilMillis(),
                         )
                     }
@@ -307,7 +322,12 @@ class LiveModeManager(
         }
         val model = analyzer.resolveModel(settings)
         if (model == null) {
-            _state.update { it.copy(noModelConfigured = true, statusText = "请先配置聊天模型") }
+            _state.update {
+                it.copy(
+                    noModelConfigured = true,
+                    statusText = context.getString(R.string.live_model_required_title),
+                )
+            }
             return
         }
 
@@ -350,6 +370,7 @@ class LiveModeManager(
                     actionLabel = actionLabel,
                     mode = liveSetting.analysisMode,
                     screenshotUri = screenshotUri,
+                    locale = context.appLocale(),
                 )
                 withContext(Dispatchers.Main.immediate) {
                     if (generation == analysisGeneration.get()) {
@@ -376,7 +397,11 @@ class LiveModeManager(
             } catch (error: Throwable) {
                 Log.e(TAG, "Live analysis failed", error)
                 withContext(Dispatchers.Main.immediate) {
-                    val failure = LiveFailure.from(error)
+                    val failure = LiveFailure.from(
+                        context = context,
+                        error = error,
+                        actionLabel = localizedActionLabel(actionLabel),
+                    )
                     if (failure.retryable) engine.onRetryableFailure(System.currentTimeMillis())
                     _state.update {
                         it.copy(
@@ -406,10 +431,27 @@ class LiveModeManager(
     }
 
     private fun ongoingStatus(actionLabel: String): String =
-        if (actionLabel == DEFAULT_ACTION_LABEL) "正在分析屏幕" else "正在$actionLabel"
+        context.getString(R.string.live_action_running, localizedActionLabel(actionLabel))
 
     private fun doneStatus(actionLabel: String): String =
-        if (actionLabel == DEFAULT_ACTION_LABEL) "正在伴随，已更新" else "${actionLabel}结果已更新"
+        context.getString(R.string.live_action_received, localizedActionLabel(actionLabel))
+
+    private fun readingStatus(appLabel: String): String =
+        context.getString(
+            R.string.live_master_target_mode,
+            appLabel,
+            context.getString(R.string.live_master_reading),
+        )
+
+    private fun localizedActionLabel(actionLabel: String): String = when (actionLabel) {
+        "屏幕分析" -> context.getString(R.string.live_action_screen_analysis)
+        "找重点" -> context.getString(R.string.live_action_find_focus)
+        "总结" -> context.getString(R.string.live_action_summarize)
+        "找下一步" -> context.getString(R.string.live_action_find_next_step)
+        "查风险" -> context.getString(R.string.live_action_check_risks)
+        "写回复" -> context.getString(R.string.live_action_write_reply)
+        else -> actionLabel
+    }
 
     private fun isAmberAccessibilityServiceEnabled(): Boolean {
         val manager = context.getSystemService(AccessibilityManager::class.java) ?: return false
@@ -424,27 +466,30 @@ class LiveModeManager(
         val retryable: Boolean,
     ) {
         companion object {
-            fun from(error: Throwable): LiveFailure {
+            fun from(context: Context, error: Throwable, actionLabel: String): LiveFailure {
                 val raw = (error.message ?: error.toString()).trim()
                 val lower = raw.lowercase()
+                val retryHint = context.getString(R.string.live_action_retry_hint, actionLabel)
                 return when {
                     "503" in raw ||
                         "service_unavailable" in lower ||
                         "too busy" in lower -> LiveFailure(
-                            statusText = "模型服务繁忙",
-                            message = "模型服务返回 503，当前太忙。伴随仍在读取屏幕，但会暂停自动分析约 30 秒；你也可以稍后再试或切换模型服务。",
+                            statusText = context.getString(R.string.live_master_model_busy),
+                            message = retryHint,
                             retryable = true,
                         )
 
                     "timeout" in lower || "timed out" in lower -> LiveFailure(
-                        statusText = "模型响应超时",
-                        message = "模型请求超时。伴随仍在读取屏幕，稍后会自动重试；如果频繁出现，可以换一个更稳定的模型。",
+                        statusText = context.getString(R.string.live_master_model_busy),
+                        message = retryHint,
                         retryable = true,
                     )
 
                     else -> LiveFailure(
-                        statusText = "分析失败",
-                        message = raw.ifBlank { "模型分析失败，请稍后再试。" }.take(220),
+                        statusText = context.getString(R.string.live_master_analysis_failed),
+                        message = raw.ifBlank {
+                            context.getString(R.string.live_master_analysis_failed)
+                        }.take(220),
                         retryable = false,
                     )
                 }

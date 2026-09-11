@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="{{AMBER_HTML_MARKDOWN_LANG}}">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Markdown Preview</title>
+    <title>{{AMBER_HTML_MARKDOWN_TITLE}}</title>
 
     <!-- KaTeX for LaTeX math rendering -->
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.css">
@@ -302,7 +302,7 @@
         renderMarkdown();
     </script>
     <script nomodule>
-        alert('您的系统WebView不支持 ES Modules，请升级WebView或者系统!');
+        alert({{AMBER_HTML_MARKDOWN_MODULES_UNSUPPORTED_JS}});
     </script>
 </body>
 </html>

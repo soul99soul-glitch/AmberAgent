@@ -86,6 +86,7 @@ import com.composables.icons.lucide.RefreshCw
 import app.amber.agent.R
 import app.amber.core.ai.vision.ImageAttachmentStatus
 import app.amber.core.ai.vision.ImageAttachmentStatusKind
+import app.amber.core.ai.vision.ImageAttachmentStrings
 import app.amber.core.ai.vision.ImageAttachmentValidator
 import app.amber.core.settings.findProvider
 import app.amber.core.settings.getCurrentChatModel
@@ -124,6 +125,8 @@ internal fun MediaFileInputRow(
     val filesManager: FilesManager = koinInject()
     val settings = LocalSettings.current
     val toaster = LocalToaster.current
+    val context = LocalContext.current
+    val attachmentStrings = remember(context) { ImageAttachmentStrings.from(context) }
     val managedFiles by filesManager.observe().collectAsState(initial = emptyList())
     val displayNameByRelativePath = remember(managedFiles) {
         managedFiles.associate { it.relativePath to it.displayName }
@@ -180,6 +183,7 @@ internal fun MediaFileInputRow(
                                 displayNameByRelativePath = displayNameByRelativePath,
                                 displayNameByFileName = displayNameByFileName,
                                 toaster = toaster,
+                                attachmentStrings = attachmentStrings,
                                 onRemove = { removeImport(import) },
                             )
                         }
@@ -196,6 +200,7 @@ internal fun MediaFileInputRow(
                     displayNameByRelativePath = displayNameByRelativePath,
                     displayNameByFileName = displayNameByFileName,
                     toaster = toaster,
+                    attachmentStrings = attachmentStrings,
                     onRemove = { removePart(part, part.attachmentUrl()) },
                 )
             }
@@ -211,6 +216,7 @@ private fun AttachmentPartChip(
     displayNameByRelativePath: Map<String, String>,
     displayNameByFileName: Map<String, String>,
     toaster: ToasterState,
+    attachmentStrings: ImageAttachmentStrings,
     onRemove: () -> Unit,
 ) {
     val importedStatus = imported?.let { import ->
@@ -241,14 +247,14 @@ private fun AttachmentPartChip(
     when (part) {
         is UIMessagePart.Image -> {
             val status by produceState(
-                ImageAttachmentValidator.checking(),
+                ImageAttachmentValidator.checking(attachmentStrings),
                 part.url,
                 settings.chatModelId,
                 settings.ocrModelId,
                 settings.providers,
             ) {
                 value = withContext(Dispatchers.IO) {
-                    ImageAttachmentValidator.inspectImage(part, settings)
+                    ImageAttachmentValidator.inspectImage(part, settings, attachmentStrings)
                 }
             }
             AttachmentChip(

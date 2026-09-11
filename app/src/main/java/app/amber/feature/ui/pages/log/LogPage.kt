@@ -52,9 +52,9 @@ import app.amber.feature.ui.components.ui.JsonTree
 import app.amber.feature.ui.theme.CustomColors
 import app.amber.feature.ui.theme.JetbrainsMono
 import app.amber.core.utils.JsonInstantPretty
+import app.amber.core.utils.appLocale
 import java.text.SimpleDateFormat
 import java.util.Date
-import java.util.Locale
 
 @Composable
 fun LogPage() {
@@ -181,7 +181,10 @@ private fun NetworkLoggingToggle() {
 
 @Composable
 private fun RequestLogCard(log: LogEntry.RequestLog, onClick: () -> Unit) {
-    val dateFormat = remember { SimpleDateFormat("HH:mm:ss", Locale.getDefault()) }
+    val appLocale = LocalContext.current.appLocale()
+    val dateFormat = remember(appLocale.toLanguageTag()) {
+        SimpleDateFormat("HH:mm:ss", appLocale)
+    }
 
     Card(
         modifier = Modifier
@@ -253,7 +256,10 @@ private fun RequestLogCard(log: LogEntry.RequestLog, onClick: () -> Unit) {
 
 @Composable
 private fun RequestLogDetail(log: LogEntry.RequestLog) {
-    val dateFormat = remember { SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.getDefault()) }
+    val appLocale = LocalContext.current.appLocale()
+    val dateFormat = remember(appLocale.toLanguageTag()) {
+        SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", appLocale)
+    }
 
     SelectionContainer {
         LazyColumn(
@@ -398,7 +404,10 @@ private fun HeaderItem(key: String, value: String) {
 
 @Composable
 private fun TextLogCard(log: LogEntry.TextLog) {
-    val dateFormat = remember { SimpleDateFormat("HH:mm:ss", Locale.getDefault()) }
+    val appLocale = LocalContext.current.appLocale()
+    val dateFormat = remember(appLocale.toLanguageTag()) {
+        SimpleDateFormat("HH:mm:ss", appLocale)
+    }
 
     Card(
         modifier = Modifier.fillMaxWidth(),

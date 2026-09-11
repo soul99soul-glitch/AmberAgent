@@ -233,7 +233,7 @@ class CouncilRoomExecutor(
         val effectiveSystemPrompt = if (extraSystemPrompt.isBlank()) {
             hostSystemPrompt
         } else {
-            "$hostSystemPrompt\n\n—— 主持人补充设定 ——\n${extraSystemPrompt.trim()}"
+            "$hostSystemPrompt\n\nHost supplement:\n${extraSystemPrompt.trim()}"
         }
 
         // Seed the streaming synthesis row up-front so the timeline shows the
@@ -288,7 +288,7 @@ class CouncilRoomExecutor(
                     )
                 }
             } ?: ModelCouncilTextResult(
-                text = "（综合超时）",
+                text = "Synthesis timed out.",
                 warnings = listOf("Host synthesis timed out after ${room.seatTimeoutMs}ms."),
             )
         }
@@ -306,7 +306,7 @@ class CouncilRoomExecutor(
                 sink.completeSynthesis(
                     conversationId = room.conversationId,
                     synthesisMessageId = synthesisMessageId,
-                    synthesis = "综合失败：${error.message ?: error::class.java.simpleName}",
+                    synthesis = "Synthesis failed: ${error.message ?: error::class.java.simpleName}",
                     warnings = listOf("Synthesis failed: ${error.message}"),
                 )
             },
@@ -353,7 +353,7 @@ class CouncilRoomExecutor(
         val effectiveSystemPrompt = if (extraSystemPrompt.isBlank()) {
             systemPrompt
         } else {
-            "$systemPrompt\n\n—— 主持人补充设定 ——\n${extraSystemPrompt.trim()}"
+            "$systemPrompt\n\nHost supplement:\n${extraSystemPrompt.trim()}"
         }
         val result = runCatching {
             withTimeoutOrNull(room.seatTimeoutMs.coerceAtLeast(1_000L)) {
@@ -377,7 +377,7 @@ class CouncilRoomExecutor(
                     status = CouncilMessageStatus.TIMED_OUT,
                     text = "",
                     warnings = emptyList(),
-                    error = "主持发言超时。",
+                    error = "Host turn timed out.",
                     authorId = host.id,
                     authorStatus = CouncilParticipantStatus.IDLE,
                 )

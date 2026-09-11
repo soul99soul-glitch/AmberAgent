@@ -3,6 +3,8 @@ package app.amber.feature.task
 import android.content.ContextWrapper
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -170,6 +172,37 @@ class AgentTaskStoreTest {
         val persisted = readSnapshot(root, failed.taskId)
         assertNull(persisted.error)
         assertNull(persisted.lastErrorCode)
+    }
+
+    @Test
+    fun `scheduler terminal update ignores stale task spec`() = runBlocking {
+        val root = tempFolder.newFolder("files")
+        val oldSpec = buildJsonObject { put("run_id", "old-run") }
+        val currentSpec = buildJsonObject { put("run_id", "current-run") }
+        val running = snapshot(
+            status = AgentTaskStatus.RUNNING,
+            queueState = AgentTaskQueueState.ACTIVE,
+            recoveryState = AgentTaskRecoveryState.ACTIVE,
+            retryPolicy = AgentTaskRetryPolicy(),
+        ).copy(spec = currentSpec)
+        val store = store(root)
+        store.register(running)
+        val scheduler = AgentTaskScheduler(store)
+
+        assertNull(scheduler.complete(running.taskId, expectedSpec = oldSpec))
+        assertNull(scheduler.fail(running.taskId, message = "stale", expectedSpec = oldSpec))
+        assertEquals(AgentTaskStatus.RUNNING, store.read(running.taskId)?.status)
+
+        val failed = scheduler.fail(
+            running.taskId,
+            message = "current failure",
+            expectedSpec = currentSpec,
+        )!!
+        assertEquals(AgentTaskStatus.FAILED, failed.status)
+
+        store.upsert(running)
+        val completed = scheduler.complete(running.taskId, expectedSpec = currentSpec)!!
+        assertEquals(AgentTaskStatus.COMPLETED, completed.status)
     }
 
     private fun store(root: File): AgentTaskStore = AgentTaskStore(TestContext(root), json)

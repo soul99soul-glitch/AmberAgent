@@ -50,6 +50,7 @@ val boardModule = module {
     single {
         AgentToolSetFactory(
             localTools = get(),
+            context = get(),
         )
     }
 
@@ -95,8 +96,9 @@ val boardModule = module {
 
     single {
         DeepReadAgentRunManager(
+            appContext = get(),
             settingsStore = get(),
-            generator = get(),
+            kernel = get(),
             hotListRepository = get(),
             artifactRepository = get(),
             toolSetFactory = get(),

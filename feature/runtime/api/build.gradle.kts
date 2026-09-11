@@ -21,5 +21,13 @@ kotlin {
 
 dependencies {
     api(project(":ai"))
+    // Step 6: ExecutionPolicy's allowedSystemCapabilities uses the Capability
+    // enum (feature/tools/api); no reverse dependency exists (feature/tools/api
+    // does not depend on feature/runtime/api), so this stays acyclic.
+    api(project(":feature:tools:api"))
+    // P1-6: ExecutionPaths (shared gate/narrow canonicalization) anchors
+    // workspace-relative paths with WorkspacePaths; feature/workspace is a
+    // leaf module, so this stays acyclic.
+    api(project(":feature:workspace"))
     api(libs.kotlinx.serialization.json)
 }

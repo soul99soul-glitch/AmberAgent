@@ -269,7 +269,7 @@ fun ChatMessageActionsSheet(
                     if (onSaveToWorkspace != null) {
                         MessageActionRow(
                             icon = Lucide.Archive,
-                            text = "保存到 Workspace",
+                            text = stringResource(R.string.workspace_save_to_title),
                             workspace = workspace,
                             onClick = {
                                 onDismissRequest()

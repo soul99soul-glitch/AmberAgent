@@ -2,6 +2,7 @@ package app.amber.core.ai.transformers
 
 import app.amber.ai.ui.UIMessage
 import app.amber.ai.ui.UIMessagePart
+import app.amber.core.utils.appLocale
 import app.amber.core.utils.toLocalDate
 import app.amber.core.utils.toLocalTime
 import java.time.Instant
@@ -13,6 +14,7 @@ class TemplateTransformer : InputMessageTransformer {
     ): List<UIMessage> {
         val template = ctx.settings.messageTemplate
         val now = Instant.now()
+        val locale = ctx.context.appLocale()
         return messages.map { message ->
             message.copy(
                 parts = message.parts.map { part ->
@@ -22,8 +24,8 @@ class TemplateTransformer : InputMessageTransformer {
                                 template,
                                 "message" to part.text,
                                 "role" to message.role.name.lowercase(),
-                                "time" to now.toLocalTime().toString(),
-                                "date" to now.toLocalDate().toString(),
+                                "time" to now.toLocalTime(locale).toString(),
+                                "date" to now.toLocalDate(locale).toString(),
                             ),
                         )
                         else -> part

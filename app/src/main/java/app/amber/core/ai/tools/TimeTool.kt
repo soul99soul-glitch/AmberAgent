@@ -18,7 +18,7 @@ import java.util.Locale
  * files. No state, no deps; the resulting Tool object can be cached behind
  * a `lazy { createTimeTool() }` if the caller wants.
  */
-fun createTimeTool(): Tool = Tool(
+fun createTimeTool(locale: Locale = Locale.getDefault()): Tool = Tool(
     name = "get_time_info",
     description = """
         Get the current local date and time info from the device.
@@ -36,7 +36,7 @@ fun createTimeTool(): Tool = Tool(
             put("year", date.year)
             put("month", date.monthValue)
             put("day", date.dayOfMonth)
-            put("weekday", weekday.getDisplayName(TextStyle.FULL, Locale.getDefault()))
+            put("weekday", weekday.getDisplayName(TextStyle.FULL, locale))
             put("weekday_en", weekday.getDisplayName(TextStyle.FULL, Locale.ENGLISH))
             put("weekday_index", weekday.value)
             put("date", date.toString())

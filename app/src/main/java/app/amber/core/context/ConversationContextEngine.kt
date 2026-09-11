@@ -1,5 +1,6 @@
 package app.amber.core.context
 
+import android.content.Context
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -32,7 +33,7 @@ import app.amber.core.settings.toCompactPolicy
 import app.amber.core.model.Conversation
 import app.amber.core.model.MessageNode
 import app.amber.core.utils.applyPlaceholders
-import java.util.Locale
+import app.amber.core.utils.appLocaleDisplayName
 import kotlin.uuid.Uuid
 
 private const val TAG = "ConversationContextEngine"
@@ -76,6 +77,7 @@ class ConversationContextEngine(
     private val appScope: AppScope,
     private val capabilitySnapshotBuilder: AgentCapabilitySnapshotBuilder,
     private val promptConfigRepository: AgentPromptConfigRepository,
+    private val context: Context,
 ) {
     private val compactMutex = Mutex()
 
@@ -768,7 +770,7 @@ class ConversationContextEngine(
             "additional_context" to listOf(structuredInstructions, additionalPrompt)
                 .filter { it.isNotBlank() }
                 .joinToString("\n\n"),
-            "locale" to Locale.getDefault().displayName,
+            "locale" to context.appLocaleDisplayName(),
         )
     }
 

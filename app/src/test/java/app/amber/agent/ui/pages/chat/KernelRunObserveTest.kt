@@ -5,7 +5,7 @@ import app.amber.core.agent.runtime.AgentInput
 import app.amber.core.agent.runtime.AgentRunHandle
 import app.amber.core.agent.runtime.AgentRunId
 import app.amber.core.agent.runtime.AgentRunSnapshot
-import app.amber.core.agent.runtime.AgentRunStatus
+import app.amber.core.agent.runtime.RunStatus
 import app.amber.core.agent.runtime.AgentRunner
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -38,7 +38,7 @@ class KernelRunObserveTest {
     private class FakeRunner : AgentRunner {
         private val snapshots = ConcurrentHashMap<AgentRunId, MutableStateFlow<AgentRunSnapshot>>()
 
-        fun publish(runId: AgentRunId, status: AgentRunStatus) {
+        fun publish(runId: AgentRunId, status: RunStatus) {
             snapshots.getOrPut(runId) {
                 MutableStateFlow(
                     AgentRunSnapshot(
@@ -56,12 +56,15 @@ class KernelRunObserveTest {
                 descriptorId = AgentDescriptorId("chat_turn"),
                 status = status,
                 startedAt = 0,
-                finishedAt = if (status != AgentRunStatus.RUNNING) 1L else null,
+                finishedAt = if (status != RunStatus.RUNNING) 1L else null,
             )
         }
 
-        override fun <I : AgentInput> launch(descriptorId: AgentDescriptorId, input: I): Result<AgentRunHandle> =
-            Result.failure(NotImplementedError())
+        override fun <I : AgentInput> launch(
+            descriptorId: AgentDescriptorId,
+            input: I,
+            requestedRunId: AgentRunId?,
+        ): Result<AgentRunHandle> = Result.failure(NotImplementedError())
 
         override fun observe(runId: AgentRunId): StateFlow<AgentRunSnapshot> =
             snapshots.getOrPut(runId) {
@@ -70,7 +73,7 @@ class KernelRunObserveTest {
                         runId = runId,
                         parentRunId = null,
                         descriptorId = AgentDescriptorId("chat_turn"),
-                        status = AgentRunStatus.RUNNING,
+                        status = RunStatus.RUNNING,
                         startedAt = 0,
                         finishedAt = null,
                     )
@@ -110,15 +113,15 @@ class KernelRunObserveTest {
             .stateIn(backgroundScope, SharingStarted.Eagerly, null)
 
         val runId = AgentRunId("test-run-1")
-        runner.publish(runId, AgentRunStatus.RUNNING)
+        runner.publish(runId, RunStatus.RUNNING)
         activeRunId.value = runId
 
         runCurrent()
-        assertEquals(AgentRunStatus.RUNNING, statusFlow.value)
+        assertEquals(RunStatus.RUNNING, statusFlow.value)
 
-        runner.publish(runId, AgentRunStatus.COMPLETED)
+        runner.publish(runId, RunStatus.COMPLETED)
         runCurrent()
-        assertEquals(AgentRunStatus.COMPLETED, statusFlow.value)
+        assertEquals(RunStatus.COMPLETED, statusFlow.value)
     }
 
     @Test
@@ -135,21 +138,21 @@ class KernelRunObserveTest {
 
         val run1 = AgentRunId("run-1")
         val run2 = AgentRunId("run-2")
-        runner.publish(run1, AgentRunStatus.RUNNING)
-        runner.publish(run2, AgentRunStatus.FAILED)
+        runner.publish(run1, RunStatus.RUNNING)
+        runner.publish(run2, RunStatus.FAILED)
 
         activeRunId.value = run1
         runCurrent()
-        assertEquals(AgentRunStatus.RUNNING, statusFlow.value)
+        assertEquals(RunStatus.RUNNING, statusFlow.value)
 
         activeRunId.value = run2
         runCurrent()
-        assertEquals(AgentRunStatus.FAILED, statusFlow.value)
+        assertEquals(RunStatus.FAILED, statusFlow.value)
 
         // Updates to old run shouldn't affect current view
-        runner.publish(run1, AgentRunStatus.CANCELLED)
+        runner.publish(run1, RunStatus.CANCELLED)
         runCurrent()
-        assertEquals(AgentRunStatus.FAILED, statusFlow.value)
+        assertEquals(RunStatus.FAILED, statusFlow.value)
     }
 
     @Test
@@ -165,10 +168,10 @@ class KernelRunObserveTest {
             .stateIn(backgroundScope, SharingStarted.Eagerly, null)
 
         val runId = AgentRunId("temp-run")
-        runner.publish(runId, AgentRunStatus.COMPLETED)
+        runner.publish(runId, RunStatus.COMPLETED)
         activeRunId.value = runId
         runCurrent()
-        assertEquals(AgentRunStatus.COMPLETED, statusFlow.value)
+        assertEquals(RunStatus.COMPLETED, statusFlow.value)
 
         activeRunId.value = null
         runCurrent()

@@ -1,5 +1,6 @@
 package app.amber.feature.ui.pages.extensions
 
+import android.content.Context
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -36,6 +37,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
@@ -78,6 +80,7 @@ fun SkillDetailPage(skillName: String) {
     val mcpImportPreview by vm.mcpImportPreview.collectAsStateWithLifecycle()
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     val toaster = LocalToaster.current
+    val context = LocalContext.current
 
     var editingFile by remember { mutableStateOf<SkillFile?>(null) }
     var showAddDialog by rememberSaveable { mutableStateOf(false) }
@@ -150,8 +153,8 @@ fun SkillDetailPage(skillName: String) {
 
     ConfirmDialog(
         show = mcpImportPreview != null,
-        title = "确认导入 MCP",
-        confirmText = "确认导入",
+        title = stringResource(R.string.setting_skill_detail_import_mcp_title),
+        confirmText = stringResource(R.string.setting_skill_detail_import_mcp_confirm),
         dismissText = stringResource(R.string.cancel),
         onConfirm = {
             vm.confirmMcpConfig { message -> toaster.show(message) }
@@ -159,7 +162,7 @@ fun SkillDetailPage(skillName: String) {
         onDismiss = vm::clearMcpImportPreview,
     ) {
         mcpImportPreview?.let { preview ->
-            Text(preview.toRedactedSummary())
+            Text(preview.toRedactedSummary(context))
         }
     }
 
@@ -230,7 +233,7 @@ private fun SkillMcpConfigCard(
                 )
             } else {
                 WorkspaceStatusPill(
-                    text = "不可用",
+                    text = stringResource(R.string.error_title_tool_unavailable),
                     tone = WorkspaceTone.Neutral,
                 )
             }
@@ -266,12 +269,12 @@ private fun SkillFilesPanel(
                     verticalArrangement = Arrangement.spacedBy(2.dp),
                 ) {
                     Text(
-                        text = "文件",
+                        text = stringResource(R.string.setting_skill_detail_files_title),
                         style = MaterialTheme.typography.titleSmall,
                         color = colors.ink,
                     )
                     Text(
-                        text = "$fileCount 个文件",
+                        text = stringResource(R.string.setting_skill_detail_file_count, fileCount),
                         style = MaterialTheme.typography.bodySmall,
                         color = colors.muted,
                     )
@@ -292,7 +295,7 @@ private fun SkillFilesPanel(
                     contentAlignment = Alignment.Center,
                 ) {
                     Text(
-                        text = "暂无文件",
+                        text = stringResource(R.string.setting_files_page_no_files),
                         style = MaterialTheme.typography.bodyMedium,
                         color = colors.muted,
                     )
@@ -499,18 +502,22 @@ private fun List<SkillFileNode>.countFiles(): Int = sumOf { node ->
     }
 }
 
-private fun McpImportPreview.toRedactedSummary(): String = buildString {
-    append("风险：").append(risk)
-    append("\n服务器：").append(serverCount)
-    append("\n摘要 digest：").append(digest)
+private fun McpImportPreview.toRedactedSummary(context: Context): String = buildString {
+    append(context.getString(R.string.setting_skill_detail_import_risk, risk))
+    append("\n").append(context.getString(R.string.setting_skill_detail_import_server_count, serverCount))
+    append("\n").append(context.getString(R.string.setting_skill_detail_import_digest, digest))
     servers.forEach { server ->
         append("\n\n").append(server.serverName)
         append("\ntransport：").append(server.transport.name.lowercase())
         append("\norigin：").append(server.origin)
         append("\nrisk：").append(server.risk)
         append("\nheader names：")
-        append(server.headerNames.ifEmpty { listOf("（无）") }.joinToString("、"))
-        server.note?.let { append("\n备注：").append(it) }
+        append(
+            server.headerNames
+                .ifEmpty { listOf(context.getString(R.string.setting_skill_detail_import_no_headers)) }
+                .joinToString("、")
+        )
+        server.note?.let { append("\n").append(context.getString(R.string.setting_skill_detail_import_note, it)) }
     }
 }
 

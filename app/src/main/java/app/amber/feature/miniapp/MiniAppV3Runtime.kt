@@ -21,6 +21,7 @@ import kotlinx.serialization.json.floatOrNull
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
+import app.amber.agent.R
 import app.amber.ai.provider.ProviderCatalog
 import app.amber.ai.provider.TextGenerationParams
 import app.amber.ai.ui.UIMessage
@@ -45,8 +46,12 @@ class AndroidMiniAppUserConfirmation(
             val dialog = AlertDialog.Builder(context)
                 .setTitle(title)
                 .setMessage(message)
-                .setPositiveButton("允许") { _, _ -> continuation.resume(true) }
-                .setNegativeButton("拒绝") { _, _ -> continuation.resume(false) }
+                .setPositiveButton(context.getString(R.string.miniapp_permission_allow)) { _, _ ->
+                    continuation.resume(true)
+                }
+                .setNegativeButton(context.getString(R.string.miniapp_permission_deny)) { _, _ ->
+                    continuation.resume(false)
+                }
                 .setOnCancelListener { continuation.resume(false) }
                 .create()
             continuation.invokeOnCancellation { dialog.dismiss() }

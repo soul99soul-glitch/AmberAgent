@@ -1,5 +1,6 @@
 package app.amber.feature.ui.pages.extensions
 
+import android.app.Application
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
@@ -7,6 +8,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import app.amber.agent.R
 import app.amber.core.ai.mcp.McpImportApplyResult
 import app.amber.core.ai.mcp.McpImportPreparation
 import app.amber.core.ai.mcp.McpImportPreview
@@ -41,6 +43,7 @@ data class SkillMcpConfigState(
 )
 
 class SkillDetailVM(
+    private val context: Application,
     private val skillManager: SkillManager,
     private val settingsStore: SettingsAggregator,
     private val capabilityPermissionStore: CapabilityPermissionStore,
@@ -85,12 +88,21 @@ class SkillDetailVM(
         return runCatching {
             val configs = parseMcpServersFromJson(mcpFile.readText())
             if (configs.isEmpty()) {
-                SkillMcpConfigState(serverCount = 0, error = "mcp.json 中没有有效的 MCP 服务器配置")
+                SkillMcpConfigState(
+                    serverCount = 0,
+                    error = context.getString(R.string.skill_detail_page_mcp_config_empty),
+                )
             } else {
                 SkillMcpConfigState(serverCount = configs.size)
             }
         }.getOrElse { error ->
-            SkillMcpConfigState(serverCount = 0, error = "mcp.json 解析失败：${error.message ?: error.javaClass.simpleName}")
+            SkillMcpConfigState(
+                serverCount = 0,
+                error = context.getString(
+                    R.string.skill_detail_page_mcp_config_parse_failed,
+                    error.message ?: error.javaClass.simpleName,
+                ),
+            )
         }
     }
 
@@ -115,13 +127,22 @@ class SkillDetailVM(
             if (relativePath == "SKILL.md") {
                 val name = SkillFrontmatterParser.parse(content)["name"]
                 if (name != skillName) {
-                    withContext(Dispatchers.Main) { onResult("不允许修改技能名称（name 字段必须为 \"$skillName\"）") }
+                    withContext(Dispatchers.Main) {
+                        onResult(
+                            context.getString(
+                                R.string.skill_detail_page_name_immutable,
+                                skillName,
+                            )
+                        )
+                    }
                     return@launch
                 }
             }
             val success = skillManager.saveSkillFile(skillName, relativePath, content)
             loadFiles()
-            withContext(Dispatchers.Main) { onResult(if (success) null else "保存失败") }
+            withContext(Dispatchers.Main) {
+                onResult(if (success) null else context.getString(R.string.skill_detail_page_save_failed))
+            }
         }
     }
 
@@ -139,7 +160,9 @@ class SkillDetailVM(
             val skillDir = skillManager.getSkillDir(skillName)
             val mcpFile = skillDir?.resolve(MCP_CONFIG_FILE)
             if (mcpFile == null || !mcpFile.exists()) {
-                withContext(Dispatchers.Main) { onResult("这个 Skill 没有 mcp.json") }
+                withContext(Dispatchers.Main) {
+                    onResult(context.getString(R.string.skill_detail_page_mcp_config_missing))
+                }
                 return@launch
             }
 
@@ -147,7 +170,12 @@ class SkillDetailVM(
                 mcpFile.readText()
             } catch (error: Exception) {
                 withContext(Dispatchers.Main) {
-                    onResult("无法读取 mcp.json：${error.message ?: error.javaClass.simpleName}")
+                    onResult(
+                        context.getString(
+                            R.string.skill_detail_page_mcp_config_read_failed,
+                            error.message ?: error.javaClass.simpleName,
+                        )
+                    )
                 }
                 return@launch
             }
@@ -174,7 +202,9 @@ class SkillDetailVM(
         viewModelScope.launch(Dispatchers.IO) {
             val pending = pendingMcpImport
             if (pending == null) {
-                withContext(Dispatchers.Main) { onResult("请先预览并确认 MCP 导入内容") }
+                withContext(Dispatchers.Main) {
+                    onResult(context.getString(R.string.skill_detail_page_mcp_import_preview_required))
+                }
                 return@launch
             }
 
@@ -183,7 +213,12 @@ class SkillDetailVM(
             } catch (error: Exception) {
                 clearMcpImportPreview()
                 withContext(Dispatchers.Main) {
-                    onResult("无法读取 mcp.json：${error.message ?: error.javaClass.simpleName}")
+                    onResult(
+                        context.getString(
+                            R.string.skill_detail_page_mcp_config_read_failed,
+                            error.message ?: error.javaClass.simpleName,
+                        )
+                    )
                 }
                 return@launch
             }
@@ -202,7 +237,7 @@ class SkillDetailVM(
             if (ready.preview.digest != pending.digest) {
                 clearMcpImportPreview()
                 withContext(Dispatchers.Main) {
-                    onResult("mcp.json 在预览后发生变化，请重新预览并确认")
+                    onResult(context.getString(R.string.skill_detail_page_mcp_import_changed))
                 }
                 return@launch
             }
@@ -216,7 +251,10 @@ class SkillDetailVM(
             withContext(Dispatchers.Main) {
                 onResult(
                     when (result) {
-                        is McpImportApplyResult.Applied -> "已导入 ${result.serverCount} 个 MCP 服务器"
+                        is McpImportApplyResult.Applied -> context.getString(
+                            R.string.skill_detail_page_mcp_imported,
+                            result.serverCount,
+                        )
                         is McpImportApplyResult.Stale -> result.reason
                         is McpImportApplyResult.Rejected -> result.errors.joinToString("\n")
                     }

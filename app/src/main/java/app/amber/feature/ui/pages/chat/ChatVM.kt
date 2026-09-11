@@ -147,7 +147,7 @@ class ChatVM(
      * Latest snapshot from runner.observe(activeKernelRunId). Null status when
      * no kernel run is active. Surface only reacts when kernel path is in use.
      */
-    val kernelRunStatus: StateFlow<app.amber.core.agent.runtime.AgentRunStatus?> =
+    val kernelRunStatus: StateFlow<app.amber.core.agent.runtime.RunStatus?> =
         activeKernelRunId
             .flatMapLatest { runId ->
                 if (runId == null) {

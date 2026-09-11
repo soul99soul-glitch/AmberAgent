@@ -1,0 +1,4 @@
+# amber-replay-golden schema=v1 scenario=s01_plain_text
+run_started
+assistant_message
+run_terminal status=completed

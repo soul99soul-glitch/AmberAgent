@@ -47,6 +47,7 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
@@ -63,6 +64,7 @@ import com.composables.icons.lucide.Lucide
 import com.composables.icons.lucide.Maximize
 import app.amber.agent.R
 import app.amber.feature.subagent.SubAgentMode
+import app.amber.feature.ui.subagent.AppSubAgentDisplayLocalizer
 import app.amber.core.settings.defaultReasoningLevelForModel
 import app.amber.core.settings.getAmberQuickMessages
 import app.amber.core.settings.getCurrentChatModel
@@ -75,8 +77,8 @@ import app.amber.feature.ui.components.ui.workspaceColors
 import app.amber.feature.ui.context.LocalSettings
 import app.amber.feature.ui.hooks.ChatInputAttachmentKind
 import app.amber.feature.ui.hooks.ChatInputState
+import app.amber.core.utils.appLocale
 import org.koin.compose.koinInject
-import java.util.Locale
 
 /**
  * Composer text-input row + slash-command panel + @role mention panel,
@@ -123,11 +125,24 @@ internal fun TextInputRow(
     onImportTextFile: ((String) -> Unit)? = null,
 ) {
     val settings = LocalSettings.current
+    val context = LocalContext.current
+    val appLocale = context.appLocale()
+    val localeTag = context.resources.configuration.locales.toLanguageTags()
+    val displayLocalizer = remember(localeTag) { AppSubAgentDisplayLocalizer(context) }
     val filesManager: FilesManager = koinInject()
     val skillManager: SkillManager = koinInject()
     val webMountManager: WebMountManager = koinInject()
     val webMountEnabled by webMountManager.globalEnabledFlow.collectAsStateWithLifecycle()
     val workspace = workspaceColors()
+    val slashCommandLabels = SlashCommandLabels(
+        clearDescription = stringResource(R.string.chat_input_slash_clear_description),
+        compactDescription = stringResource(R.string.chat_input_slash_compact_description),
+        deepReadDescription = stringResource(R.string.chat_input_slash_deep_read_description),
+        subAgentDescription = stringResource(R.string.chat_input_slash_subagent_description),
+        usageDescription = stringResource(R.string.chat_input_slash_usage_description),
+        skillFallbackDescription = stringResource(R.string.chat_input_skill_description_fallback),
+    )
+    val councilMentionDescription = stringResource(R.string.chat_input_mention_council_description)
     val quickMessages = remember(settings.quickMessages, webMountEnabled) {
         settings.getAmberQuickMessages().filterNot { quickMessage ->
             !webMountEnabled && quickMessage.title.equals("webmount", ignoreCase = true)
@@ -137,6 +152,7 @@ internal fun TextInputRow(
         initialValue = emptyList<SkillMetadata>(),
         key1 = settings.enabledSkills,
         key2 = skillManager,
+        key3 = localeTag,
     ) {
         value = if (settings.enabledSkills.isEmpty()) {
             emptyList()
@@ -144,7 +160,7 @@ internal fun TextInputRow(
             withContext(Dispatchers.IO) {
                 skillManager.listSkills()
                     .filter { skill -> skill.name in settings.enabledSkills }
-                    .sortedBy { skill -> skill.name.lowercase(Locale.getDefault()) }
+                    .sortedBy { skill -> skill.name.lowercase(appLocale) }
             }
         }
     }
@@ -167,6 +183,7 @@ internal fun TextInputRow(
         val allSlashCommands = remember(
             quickMessages,
             enabledSkills,
+            slashCommandLabels,
             settings.agentRuntime.subAgent.enabled,
             settings.agentRuntime.subAgent.mode,
             settings.agentRuntime.modelCouncil.enabled,
@@ -176,6 +193,7 @@ internal fun TextInputRow(
                 enabledSkills = enabledSkills,
                 subAgentEnabled = settings.agentRuntime.subAgent.enabled,
                 subAgentMode = settings.agentRuntime.subAgent.mode,
+                labels = slashCommandLabels,
             )
         }
         val slashCommands = remember(allSlashCommands, slashQuery) {
@@ -364,6 +382,8 @@ internal fun TextInputRow(
                 settings.agentRuntime.subAgent.mode,
                 settings.agentRuntime.subAgent.customDefinitions,
                 settings.agentRuntime.modelCouncil.enabled,
+                councilMentionDescription,
+                localeTag,
                 activeMention.query,
             ) {
                 filterMentionRoleItems(
@@ -372,6 +392,8 @@ internal fun TextInputRow(
                         modelCouncilEnabled = settings.agentRuntime.modelCouncil.enabled,
                         subAgentMode = settings.agentRuntime.subAgent.mode,
                         customSubAgents = settings.agentRuntime.subAgent.customDefinitions,
+                        councilDescription = councilMentionDescription,
+                        displayLocalizer = displayLocalizer,
                     ),
                     query = activeMention.query,
                 )
@@ -713,6 +735,7 @@ private fun QuickMessageButton(
 ) {
     var expanded by remember { mutableStateOf(false) }
     val quickMessagesLabel = stringResource(R.string.quick_messages_page_title)
+    val unnamedQuickMessage = stringResource(R.string.extension_content_unnamed)
     IconButton(
         modifier = Modifier.semantics(mergeDescendants = true) {
             contentDescription = quickMessagesLabel
@@ -758,9 +781,7 @@ private fun QuickMessageButton(
                             verticalArrangement = Arrangement.spacedBy(2.dp),
                         ) {
                             Text(
-                                text = quickMessage.title.ifBlank {
-                                    stringResource(R.string.extension_content_unnamed)
-                                },
+                                text = quickMessage.title.ifBlank { unnamedQuickMessage },
                                 style = MaterialTheme.typography.titleSmall,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
@@ -828,17 +849,27 @@ private data class SlashCommandItem(
     val accent: Boolean = false,
 )
 
+private data class SlashCommandLabels(
+    val clearDescription: String,
+    val compactDescription: String,
+    val deepReadDescription: String,
+    val subAgentDescription: String,
+    val usageDescription: String,
+    val skillFallbackDescription: String,
+)
+
 private fun buildSlashCommandItems(
     quickMessages: List<QuickMessage>,
     enabledSkills: List<SkillMetadata>,
     subAgentEnabled: Boolean,
     subAgentMode: SubAgentMode,
+    labels: SlashCommandLabels,
 ): List<SlashCommandItem> = buildList {
     add(
         SlashCommandItem(
             id = "core.clear",
             title = "clear",
-            description = "清空当前输入框",
+            description = labels.clearDescription,
             action = SlashCommandAction.ClearInput,
         )
     )
@@ -846,7 +877,7 @@ private fun buildSlashCommandItems(
         SlashCommandItem(
             id = "core.compact",
             title = "compact",
-            description = "立即压缩当前对话上下文",
+            description = labels.compactDescription,
             action = SlashCommandAction.CompactContext,
         )
     )
@@ -854,7 +885,7 @@ private fun buildSlashCommandItems(
         SlashCommandItem(
             id = "core.deepread",
             title = "deepread",
-            description = "全屏打开深度阅读面板",
+            description = labels.deepReadDescription,
             action = SlashCommandAction.InsertText("/deepread "),
             accent = true,
         )
@@ -864,7 +895,7 @@ private fun buildSlashCommandItems(
             SlashCommandItem(
                 id = "core.subagent",
                 title = "subagent",
-                description = "引导 Agent 按任务需要灵活使用 SubAgent",
+                description = labels.subAgentDescription,
                 action = SlashCommandAction.InsertText(
                     if (subAgentMode == SubAgentMode.SMART_DYNAMIC) {
                         "请根据这个任务的复杂度，判断是否需要用 custom_subagent 临时创建 SubAgent，不要使用 subagent_id；" +
@@ -882,7 +913,7 @@ private fun buildSlashCommandItems(
         SlashCommandItem(
             id = "core.usage",
             title = "usage",
-            description = "查看 5h / weekly / cache 用量",
+            description = labels.usageDescription,
             action = SlashCommandAction.OpenUsage,
             minQueryChars = 1,
             accent = true,
@@ -906,7 +937,7 @@ private fun buildSlashCommandItems(
             SlashCommandItem(
                 id = "skill.${skill.name}",
                 title = skill.name,
-                description = skill.description.ifBlank { "调用这个 Skill 处理当前任务" },
+                description = skill.description.ifBlank { labels.skillFallbackDescription },
                 action = SlashCommandAction.InsertText(skill.toSlashCommandPrompt()),
                 marker = "S",
                 minQueryChars = DYNAMIC_SLASH_COMMAND_MIN_QUERY_CHARS,

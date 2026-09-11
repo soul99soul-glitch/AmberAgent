@@ -27,6 +27,7 @@ import app.amber.feature.runtime.ApprovalHistoryEntry
 import app.amber.feature.runtime.CasAudit
 import app.amber.feature.runtime.ContentDigest
 import java.time.LocalDate
+import java.util.Locale
 
 data class MemoryToolWriteRequest(
     val scope: MemoryScope,
@@ -75,6 +76,7 @@ fun buildMemoryTools(
     onDeleteCas: suspend (id: Int, expectedRevision: Long?) -> MemoryCasDeleteResult,
     onAudit: suspend (ApprovalHistoryEntry) -> Unit = {},
     runIdProvider: () -> String? = { null },
+    locale: Locale = Locale.getDefault(),
 ): List<Tool> = listOf(
     Tool(
         name = "memory_list",
@@ -268,7 +270,7 @@ fun buildMemoryTools(
             Do not store sensitive information (e.g., ethnicity, religion, sexual orientation, political views, sex life, criminal records).
             You may store: preferred name, preferences, plans, work-related notes, chat style preferences, first chat time, etc.
             Do not show memory content directly in the conversation unless the user explicitly asks.
-            Today is ${LocalDate.now().toLocalString(true)}.
+            Today is ${LocalDate.now().toLocalString(true, locale)}.
             Similar memories should be merged; prefer updating existing records.
 
             Examples:

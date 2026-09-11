@@ -1,5 +1,8 @@
 package app.amber.feature.miniapp
 
+import android.content.Context
+import app.amber.agent.R
+
 /**
  * P3-05: basic HTML/JS/CSS structure checks for the source editor, layered on
  * top of the existing [MiniAppHtmlValidator] security rules. Deliberately
@@ -10,13 +13,14 @@ object MiniAppSourceChecks {
     data class Issue(val message: String)
 
     /** Run the existing security validator plus the structural checks. */
-    fun issues(html: String): List<Issue> {
+    fun issues(html: String, context: Context? = null): List<Issue> {
+        val copy = IssueCopy(context)
         val issues = mutableListOf<Issue>()
         runCatching { MiniAppHtmlValidator.validate(html) }
-            .onFailure { error -> issues.add(Issue(error.message ?: "HTML 校验失败")) }
-        tagPairingIssue(html)?.let { issues.add(it) }
-        scriptBraceIssue(html)?.let { issues.add(it) }
-        styleBraceIssue(html)?.let { issues.add(it) }
+            .onFailure { error -> issues.add(Issue(error.message ?: copy.htmlValidationFailed)) }
+        tagPairingIssue(html, copy)?.let { issues.add(it) }
+        scriptBraceIssue(html, copy)?.let { issues.add(it) }
+        styleBraceIssue(html, copy)?.let { issues.add(it) }
         return issues
     }
 
@@ -32,7 +36,10 @@ object MiniAppSourceChecks {
      * JS/CSS strings) and self-closing/void tags are ignored; the stack only
      * tracks real open/close pairs.
      */
-    fun tagPairingIssue(html: String): Issue? {
+    fun tagPairingIssue(html: String, context: Context? = null): Issue? =
+        tagPairingIssue(html, IssueCopy(context))
+
+    private fun tagPairingIssue(html: String, copy: IssueCopy): Issue? {
         val clean = html
             .replace(Regex("(?s)<!--.*?-->"), "")
             .replace(Regex("""(?is)<\s*script\b[^>]*>.*?<\s*/\s*script\s*>"""), "")
@@ -46,31 +53,37 @@ object MiniAppSourceChecks {
             if (closing) {
                 val expected = stack.removeLastOrNull()
                 if (expected == null) {
-                    return Issue("多余的闭合标签 </$name>")
+                    return Issue(copy.unexpectedClosingTag(name))
                 }
                 if (expected != name) {
-                    return Issue("标签不配对：</$name> 期望 </$expected>")
+                    return Issue(copy.mismatchedTag(name, expected))
                 }
             } else if (!selfClosing && name !in VOID_TAGS) {
                 stack.addLast(name)
             }
         }
         val unclosed = stack.lastOrNull()
-        return unclosed?.let { Issue("未闭合的标签 <$it>") }
+        return unclosed?.let { Issue(copy.unclosedTag(it)) }
     }
 
     /** Unbalanced braces/parens inside <script> blocks (obvious JS errors). */
-    fun scriptBraceIssue(html: String): Issue? {
+    fun scriptBraceIssue(html: String, context: Context? = null): Issue? =
+        scriptBraceIssue(html, IssueCopy(context))
+
+    private fun scriptBraceIssue(html: String, copy: IssueCopy): Issue? {
         for (block in extractBlocks(html, "script")) {
-            braceIssue(block)?.let { return Issue("script 中的括号不配对：${it.message}") }
+            braceIssue(block, copy)?.let { return Issue(copy.scriptBrackets(it.message)) }
         }
         return null
     }
 
     /** Unbalanced braces inside <style> blocks (obvious CSS errors). */
-    fun styleBraceIssue(html: String): Issue? {
+    fun styleBraceIssue(html: String, context: Context? = null): Issue? =
+        styleBraceIssue(html, IssueCopy(context))
+
+    private fun styleBraceIssue(html: String, copy: IssueCopy): Issue? {
         for (block in extractBlocks(html, "style")) {
-            braceIssue(block)?.let { return Issue("style 中的花括号不配对：${it.message}") }
+            braceIssue(block, copy)?.let { return Issue(copy.styleBraces(it.message)) }
         }
         return null
     }
@@ -84,7 +97,7 @@ object MiniAppSourceChecks {
      * Brace/paren balance over [code], skipping quoted strings, line comments
      * and block comments. Reports the first unbalanced closing bracket.
      */
-    private fun braceIssue(code: String): Issue? {
+    private fun braceIssue(code: String, copy: IssueCopy): Issue? {
         val stack = ArrayDeque<Char>()
         var i = 0
         val pairs = mapOf(')' to '(', ']' to '[', '}' to '{')
@@ -117,11 +130,11 @@ object MiniAppSourceChecks {
                     val actual = stack.removeLastOrNull()
                     if (actual != expected) {
                         val kind = when (c) {
-                            ')' -> "括号 )"
-                            ']' -> "方括号 ]"
-                            else -> "花括号 }"
+                            ')' -> copy.parenthesisKind
+                            ']' -> copy.squareBracketKind
+                            else -> copy.braceKind
                         }
-                        return Issue("$kind 不配对")
+                        return Issue(copy.unbalanced(kind))
                     }
                 }
 
@@ -132,12 +145,59 @@ object MiniAppSourceChecks {
         val unclosed = stack.lastOrNull()
         return unclosed?.let {
             val kind = when (it) {
-                '(' -> "括号 ("
-                '[' -> "方括号 ["
-                else -> "花括号 {"
+                '(' -> copy.parenthesisKind
+                '[' -> copy.squareBracketKind
+                else -> copy.braceKind
             }
-            Issue("未闭合的$kind")
+            Issue(copy.unclosed(kind))
         }
+    }
+
+    private class IssueCopy(private val context: Context?) {
+        val htmlValidationFailed: String = context?.getString(R.string.miniapp_source_check_html_failed)
+            ?: "HTML validation failed"
+        val parenthesisKind: String = context?.getString(R.string.miniapp_source_check_parenthesis)
+            ?: "parenthesis ("
+        val squareBracketKind: String = context?.getString(R.string.miniapp_source_check_square_bracket)
+            ?: "square bracket ["
+        val braceKind: String = context?.getString(R.string.miniapp_source_check_brace)
+            ?: "brace {"
+
+        fun unexpectedClosingTag(name: String): String = context?.getString(
+            R.string.miniapp_source_check_unexpected_closing_tag,
+            name,
+        ) ?: "Unexpected closing tag </$name>"
+
+        fun mismatchedTag(name: String, expected: String): String = context?.getString(
+            R.string.miniapp_source_check_mismatched_tag,
+            name,
+            expected,
+        ) ?: "Mismatched tag: </$name>; expected </$expected>"
+
+        fun unclosedTag(name: String): String = context?.getString(
+            R.string.miniapp_source_check_unclosed_tag,
+            name,
+        ) ?: "Unclosed tag <$name>"
+
+        fun scriptBrackets(message: String): String = context?.getString(
+            R.string.miniapp_source_check_script_brackets,
+            message,
+        ) ?: "Unbalanced brackets in script: $message"
+
+        fun styleBraces(message: String): String = context?.getString(
+            R.string.miniapp_source_check_style_braces,
+            message,
+        ) ?: "Unbalanced braces in style: $message"
+
+        fun unbalanced(kind: String): String = context?.getString(
+            R.string.miniapp_source_check_unbalanced,
+            kind,
+        ) ?: "Unbalanced bracket: $kind"
+
+        fun unclosed(kind: String): String = context?.getString(
+            R.string.miniapp_source_check_unclosed,
+            kind,
+        ) ?: "Unclosed $kind"
     }
 
     private val VOID_TAGS = setOf(

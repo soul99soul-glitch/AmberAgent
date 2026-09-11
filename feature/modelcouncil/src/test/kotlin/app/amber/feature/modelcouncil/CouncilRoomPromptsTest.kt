@@ -99,10 +99,10 @@ class CouncilRoomPromptsTest {
         val prompt = CouncilRoomPrompts.hostSystemPrompt(room)
         assertTrue("objective missing", prompt.contains(room.objective))
         assertTrue("context missing", prompt.contains(room.context))
-        assertTrue("mode missing", prompt.contains("发散（Explore）"))
-        assertTrue("Alpha missing", prompt.contains("Alpha（支持者）"))
-        assertTrue("Beta missing", prompt.contains("Beta（反对者）"))
-        assertTrue("host duty missing", prompt.contains("促动者"))
+        assertTrue("mode missing", prompt.contains("Mode: Explore"))
+        assertTrue("Alpha missing", prompt.contains("Alpha (支持者)"))
+        assertTrue("Beta missing", prompt.contains("Beta (反对者)"))
+        assertTrue("host duty missing", prompt.contains("Facilitator"))
     }
 
     @Test
@@ -111,8 +111,8 @@ class CouncilRoomPromptsTest {
         val prompt = CouncilRoomPrompts.guestSystemPrompt(room, guestAlpha)
         assertTrue("guest name missing", prompt.contains("Alpha"))
         assertTrue("role missing", prompt.contains("支持者"))
-        assertTrue("debate guidance missing", prompt.contains("对抗优先"))
-        assertTrue("boundary missing", prompt.contains("你没有工具"))
+        assertTrue("debate guidance missing", prompt.contains("constructive opposition"))
+        assertTrue("boundary missing", prompt.contains("You have no tools"))
     }
 
     @Test
@@ -122,7 +122,7 @@ class CouncilRoomPromptsTest {
         assertTrue("objective missing", prompt.contains(room.objective))
         assertTrue("context missing", prompt.contains(room.context))
         assertTrue("breadth instruction missing", prompt.contains("idea"))
-        assertTrue("no-ref instruction missing", prompt.contains("不要引用或反驳"))
+        assertTrue("no-ref instruction missing", prompt.contains("Do not cite or rebut"))
     }
 
     @Test
@@ -138,7 +138,7 @@ class CouncilRoomPromptsTest {
         val prompt = CouncilRoomPrompts.exploreResponse(room, guestAlpha, listOf(prior))
         assertTrue("prior text missing", prompt.contains(prior.text))
         assertTrue("prior author missing", prompt.contains("Beta"))
-        assertTrue("continue instruction missing", prompt.contains("延续某个信号"))
+        assertTrue("continue instruction missing", prompt.contains("Continue and expand an existing"))
     }
 
     @Test
@@ -147,7 +147,7 @@ class CouncilRoomPromptsTest {
         val prompt = CouncilRoomPrompts.debateOpening(room, guestAlpha)
         assertTrue("claim missing", prompt.contains("claim"))
         assertTrue("evidence missing", prompt.contains("evidence"))
-        assertTrue("round-1 independent stance missing", prompt.contains("独立表态"))
+        assertTrue("round-1 independent stance missing", prompt.contains("state your position independently"))
     }
 
     @Test
@@ -162,7 +162,7 @@ class CouncilRoomPromptsTest {
         )
         val room = baseRoom(mode = CouncilRoomMode.DEBATE, messages = listOf(prior))
         val prompt = CouncilRoomPrompts.debateResponse(room, guestAlpha, listOf(prior), prior)
-        assertTrue("reference author missing", prompt.contains("Beta 的发言"))
+        assertTrue("reference author missing", prompt.contains("Beta's contribution"))
         assertTrue("claim/counterpoint cue missing", prompt.contains("claim/counterpoint/risk/evidence"))
     }
 
@@ -170,8 +170,8 @@ class CouncilRoomPromptsTest {
     fun `debateResponse without reference asks to revise position`() {
         val room = baseRoom(mode = CouncilRoomMode.DEBATE)
         val prompt = CouncilRoomPrompts.debateResponse(room, guestAlpha, emptyList(), null)
-        assertTrue("revise/defend instruction missing", prompt.contains("修订或捍卫"))
-        assertFalse("should not name a reference author", prompt.contains("针对"))
+        assertTrue("revise/defend instruction missing", prompt.contains("Revise or defend"))
+        assertFalse("should not name a reference author", prompt.contains("Respond to"))
     }
 
     @Test
@@ -187,7 +187,7 @@ class CouncilRoomPromptsTest {
         val room = baseRoom(mode = CouncilRoomMode.DEBATE, messages = listOf(ownPrior))
         val prompt = CouncilRoomPrompts.debateFinalPosition(room, guestAlpha, listOf(ownPrior))
         assertTrue("own prior text missing", prompt.contains(ownPrior.text))
-        assertTrue("final position cue missing", prompt.contains("最终立场"))
+        assertTrue("final position cue missing", prompt.contains("final position"))
     }
 
     @Test
@@ -221,8 +221,8 @@ class CouncilRoomPromptsTest {
         assertTrue("guest message missing", prompt.contains(guestMsg.text))
         assertFalse("host message should be excluded", prompt.contains(hostMsg.text))
         assertFalse("user message should be excluded", prompt.contains(userMsg.text))
-        assertTrue("consensus section missing", prompt.contains("共识"))
-        assertTrue("final recommendation missing", prompt.contains("最终建议"))
+        assertTrue("consensus section missing", prompt.contains("consensus"))
+        assertTrue("final recommendation missing", prompt.contains("final recommendation"))
     }
 
     @Test
@@ -285,7 +285,7 @@ class CouncilRoomPromptsTest {
         val prompt = CouncilRoomPrompts.followUpPrompt(room, guestAlpha, seed)
         assertTrue("seed author missing", prompt.contains("Beta"))
         assertTrue("seed text missing", prompt.contains(seed.text))
-        assertTrue("reply instruction missing", prompt.contains("补充、支持或反驳"))
+        assertTrue("reply instruction missing", prompt.contains("add to, support, or challenge"))
     }
 
     @Test
@@ -300,8 +300,8 @@ class CouncilRoomPromptsTest {
             continuesFromMessageId = "m0",
         )
         val block = msg.summaryBlock()
-        assertTrue("reply ref missing", block.contains("回复 #m1"))
-        assertTrue("continues ref missing", block.contains("延续 #m0"))
+        assertTrue("reply ref missing", block.contains("reply #m1"))
+        assertTrue("continues ref missing", block.contains("continues #m0"))
         assertTrue("author missing", block.contains("Alpha"))
         assertTrue("body missing", block.contains(msg.text))
     }
@@ -317,8 +317,8 @@ class CouncilRoomPromptsTest {
         )
         val block = msg.summaryBlock()
         assertTrue("body missing", block.contains(msg.text))
-        assertFalse("should not contain empty ref placeholders", block.contains("回复"))
-        assertFalse("should not contain empty ref placeholders", block.contains("延续"))
+        assertFalse("should not contain empty ref placeholders", block.contains("reply"))
+        assertFalse("should not contain empty ref placeholders", block.contains("continues"))
     }
 
     @Test

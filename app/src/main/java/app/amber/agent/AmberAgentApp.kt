@@ -65,6 +65,7 @@ const val SCREEN_CAPTURE_NOTIFICATION_CHANNEL_ID = "screen_capture"
 const val MEMORY_NOTIFICATION_CHANNEL_ID = "memory_tasks"
 const val BOARD_NOTIFICATION_CHANNEL_ID = "today_board"
 const val DEEP_READ_NOTIFICATION_CHANNEL_ID = "deep_read"
+const val NOVEL_GHOSTWRITE_FAILURE_NOTIFICATION_CHANNEL_ID = "novel_ghostwrite_failure"
 
 class AmberAgentApp : Application() {
     override fun onCreate() {
@@ -413,7 +414,7 @@ class AmberAgentApp : Application() {
 
         val boardChannel = NotificationChannelCompat
             .Builder(BOARD_NOTIFICATION_CHANNEL_ID, NotificationManagerCompat.IMPORTANCE_LOW)
-            .setName("今日看板")
+            .setName(getString(R.string.notification_channel_today_board))
             .setVibrationEnabled(false)
             .setShowBadge(false)
             .build()
@@ -421,11 +422,22 @@ class AmberAgentApp : Application() {
 
         val deepReadChannel = NotificationChannelCompat
             .Builder(DEEP_READ_NOTIFICATION_CHANNEL_ID, NotificationManagerCompat.IMPORTANCE_DEFAULT)
-            .setName("深度阅读")
+            .setName(getString(R.string.notification_channel_deep_read))
             .setVibrationEnabled(false)
             .setShowBadge(false)
             .build()
         notificationManager.createNotificationChannel(deepReadChannel)
+
+        // Terminal ghostwrite-batch failure; same terminal-result convention as chat_completed.
+        val novelGhostwriteFailureChannel = NotificationChannelCompat
+            .Builder(
+                NOVEL_GHOSTWRITE_FAILURE_NOTIFICATION_CHANNEL_ID,
+                NotificationManagerCompat.IMPORTANCE_HIGH
+            )
+            .setName(getString(R.string.notification_channel_novel_ghostwrite_failure))
+            .setVibrationEnabled(true)
+            .build()
+        notificationManager.createNotificationChannel(novelGhostwriteFailureChannel)
     }
 
     override fun onTerminate() {

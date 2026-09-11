@@ -16,8 +16,8 @@ import app.amber.core.repository.ConversationRepository
 import app.amber.core.sync.core.SyncRestoreWriteEpoch
 import app.amber.core.sync.core.SyncRestoreWriteGate
 import app.amber.core.utils.applyPlaceholders
+import app.amber.core.utils.appLocaleDisplayName
 import java.time.Instant
-import java.util.Locale
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.withContext
 import kotlin.uuid.Uuid
@@ -54,7 +54,7 @@ class AiAuxiliaryGenerator(
                 messages = listOf(
                     UIMessage.user(
                         prompt = settings.titlePrompt.applyPlaceholders(
-                            "locale" to Locale.getDefault().displayName,
+                            "locale" to context.appLocaleDisplayName(),
                             "content" to conversation.currentMessages
                                 .takeLast(4).joinToString("\n\n") { it.summaryAsText() },
                         ),
@@ -113,7 +113,7 @@ class AiAuxiliaryGenerator(
                 messages = listOf(
                     UIMessage.user(
                         settings.suggestionPrompt.applyPlaceholders(
-                            "locale" to Locale.getDefault().displayName,
+                            "locale" to context.appLocaleDisplayName(),
                             "content" to conversation.currentMessages
                                 .takeLast(8).joinToString("\n\n") { it.summaryAsText() },
                         ),

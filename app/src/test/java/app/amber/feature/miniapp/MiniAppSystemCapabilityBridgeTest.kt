@@ -126,6 +126,7 @@ class MiniAppSystemCapabilityBridgeTest {
             .allowMainThreadQueries()
             .build()
         repository = MiniAppRepository(
+            context = context,
             database = db,
             dao = db.miniAppDao(),
             grantDao = db.miniAppGrantDao(),

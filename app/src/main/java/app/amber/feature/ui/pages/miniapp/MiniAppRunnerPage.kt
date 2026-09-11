@@ -39,6 +39,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
@@ -53,6 +54,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.Json
+import app.amber.agent.R
 import app.amber.agent.Screen
 import app.amber.core.settings.CapabilityFlags
 import app.amber.feature.miniapp.AndroidMiniAppUserConfirmation
@@ -117,7 +119,7 @@ fun MiniAppRunnerPage(
             }
 
             MiniAppRunnerState.Missing -> MiniAppRunnerError(
-                message = "小应用不存在",
+                message = stringResource(R.string.miniapp_not_found),
                 modifier = Modifier.fillMaxSize(),
             )
 
@@ -219,7 +221,7 @@ private fun MiniAppRunnerError(
             Text(message)
             onRetry?.let {
                 TextButton(onClick = it) {
-                    Text("重试")
+                    Text(stringResource(R.string.miniapp_retry))
                 }
             }
         }
@@ -267,6 +269,7 @@ private fun MiniAppWebView(
     chatService: ChatService = koinInject(),
 ) {
     val context = LocalContext.current
+    val loadFailedMessage = stringResource(R.string.miniapp_load_failed)
     val navController = LocalNavController.current
     val scope = rememberCoroutineScope()
     val appSettings by settingsStore.settingsFlow.collectAsStateWithLifecycle()
@@ -275,15 +278,15 @@ private fun MiniAppWebView(
     val sessionToken = remember(app.id) { Uuid.random().toString() }
     val storage = remember { MiniAppStorage(context.applicationContext) }
     val httpClient = remember { MiniAppHttpClient() }
-    val imageProxy = remember(httpClient) { MiniAppImageProxy(httpClient) }
+    val imageProxy = remember(context, httpClient) { MiniAppImageProxy(context, httpClient) }
     val permissions = remember(app.id, app.permissionsJson) {
         runCatching { json.decodeFromString<List<String>>(app.permissionsJson) }.getOrDefault(emptyList()).toSet()
     }
     val bridgeScript = remember {
         context.assets.open("miniapp/miniapp_bridge.js").bufferedReader().use { it.readText() }
     }
-    val shellHtml = remember(app.id, app.htmlContent, bridgeScript, sessionToken) {
-        MiniAppShell.inject(app.htmlContent, bridgeScript, sessionToken)
+    val shellHtml = remember(context, app.id, app.htmlContent, bridgeScript, sessionToken) {
+        MiniAppShell.inject(context, app.htmlContent, bridgeScript, sessionToken)
     }
     val sendGate = remember(capabilityFlags, capabilityPermissionStore, appSettings) {
         CapabilityMiniAppSendGate(
@@ -414,7 +417,7 @@ private fun MiniAppWebView(
                             } else {
                                 null
                             }
-                            onError(message?.takeIf { it.isNotBlank() } ?: "小应用加载失败")
+                            onError(message?.takeIf { it.isNotBlank() } ?: loadFailedMessage)
                         }
                     }
                 }

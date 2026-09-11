@@ -26,6 +26,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -34,6 +35,7 @@ import com.composables.icons.lucide.Lucide
 import com.composables.icons.lucide.ArrowLeft
 import com.composables.icons.lucide.ArrowRight
 import com.composables.icons.lucide.Check
+import app.amber.agent.R
 import app.amber.feature.ui.pages.chat.LocalChatTheme
 
 /**
@@ -150,9 +152,14 @@ private fun FakeBrowser() {
             horizontalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             Text("AI", fontSize = 5.5.sp, color = theme.inkFaint)
-            Text("全部", fontSize = 5.5.sp, color = theme.accent, fontWeight = FontWeight.Bold)
-            Text("图片", fontSize = 5.5.sp, color = theme.inkFaint)
-            Text("购物", fontSize = 5.5.sp, color = theme.inkFaint)
+            Text(
+                stringResource(R.string.chat_message_tool_preview_all),
+                fontSize = 5.5.sp,
+                color = theme.accent,
+                fontWeight = FontWeight.Bold,
+            )
+            Text(stringResource(R.string.chat_message_tool_preview_images), fontSize = 5.5.sp, color = theme.inkFaint)
+            Text(stringResource(R.string.chat_message_tool_preview_shopping), fontSize = 5.5.sp, color = theme.inkFaint)
         }
         // 4) 结果块 1 — 标题 2dp 宽 45% accent 0.85, 摘要 1.5dp 宽 90%/80% dim
         Column(
@@ -279,7 +286,7 @@ private fun ResultPill(
         ) {
             Icon(
                 imageVector = Lucide.ArrowLeft,
-                contentDescription = "prev",
+                contentDescription = stringResource(R.string.chat_message_tool_preview_previous),
                 modifier = Modifier
                     .size(9.dp)
                     .then(if (onPrev != null) Modifier.clickable { onPrev() } else Modifier),
@@ -293,7 +300,7 @@ private fun ResultPill(
             )
             Icon(
                 imageVector = Lucide.ArrowRight,
-                contentDescription = "next",
+                contentDescription = stringResource(R.string.chat_message_tool_preview_next),
                 modifier = Modifier
                     .size(9.dp)
                     .then(if (onNext != null) Modifier.clickable { onNext() } else Modifier),

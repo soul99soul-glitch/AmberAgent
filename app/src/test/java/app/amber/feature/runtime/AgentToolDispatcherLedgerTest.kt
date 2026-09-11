@@ -4,6 +4,9 @@ import app.amber.ai.core.Tool
 import app.amber.ai.ui.ToolApprovalState
 import app.amber.ai.ui.UIMessagePart
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
+import app.amber.core.agent.runtime.AgentEventPayload
+import app.amber.core.agent.runtime.AgentEventWriter
+import app.amber.core.agent.runtime.ToolLifecycleEvent
 import app.amber.core.ai.GenerationRetrySetting
 import app.amber.feature.tools.effectClass
 import java.io.File
@@ -297,5 +300,168 @@ class AgentToolDispatcherLedgerTest : DurableRuntimeTestBase() {
         assertNotNull(result)
         val effect = ledger.getByToolCallId("call_1")!!
         assertEquals(app.amber.feature.tools.ToolEffectClass.IDEMPOTENT_WRITE, effect.effectClass)
+    }
+
+    // ── Step 3: tool lifecycle protocol events, aligned with the ledger ──
+
+    private class RecordingEventWriter : AgentEventWriter {
+        val committed = mutableListOf<AgentEventPayload.Final>()
+        override fun emit(transient: AgentEventPayload.Transient) {}
+        override suspend fun commit(final: AgentEventPayload.Final) {
+            committed += final
+        }
+        override suspend fun flush() {}
+        override suspend fun commitError(throwable: Throwable, recoverable: Boolean) {}
+    }
+
+    private fun RecordingEventWriter.lifecycleEvents(): List<ToolLifecycleEvent> =
+        committed.filterIsInstance<ToolLifecycleEvent>()
+
+    @Test
+    fun successfulExecutionEmitsTheFullLifecycleAlignedWithTheLedger() = runBlocking {
+        val events = RecordingEventWriter()
+        dispatcher.execute(
+            tool = toolCall(),
+            toolDef = toolDef("post_message") { listOf(UIMessagePart.Text("""{"status":"ok"}""")) },
+            autoApproveTools = false,
+            ledgerContext = context().copy(events = events),
+        )
+
+        val effect = ledger.getByToolCallId("call_1")!!
+        val emitted = events.lifecycleEvents()
+        // No kernel write-ahead here: the dispatcher self-prepares and must
+        // emit the Prepared itself (nested recipe steps rely on this).
+        assertEquals(
+            listOf("Prepared", "Started", "Finished"),
+            emitted.map { it::class.simpleName },
+        )
+        val prepared = emitted[0] as ToolLifecycleEvent.Prepared
+        assertEquals(effect.effectId, prepared.effectId)
+        assertEquals("call_1", prepared.toolCallId)
+        assertEquals("post_message", prepared.toolName)
+        assertEquals(effect.argsDigest, prepared.argsDigest)
+        val started = emitted[1] as ToolLifecycleEvent.Started
+        assertEquals(effect.effectId, started.effectId)
+        assertEquals("call_1", started.toolCallId)
+        assertEquals("post_message", started.toolName)
+        assertEquals(effect.approvalDigest, started.approvalDigest)
+        val finished = emitted[2] as ToolLifecycleEvent.Finished
+        assertEquals(effect.effectId, finished.effectId)
+        assertEquals(ToolLifecycleEvent.Finished.Status.FINISHED, finished.status)
+        assertNull(finished.errorCategory)
+    }
+
+    @Test
+    fun kernelWriteAheadEffectDoesNotGetADuplicatePrepared() = runBlocking {
+        // The kernel prepares (and announces) the effect before dispatch;
+        // the dispatcher's idempotent re-prepare must not emit a second one.
+        ledger.prepare(
+            runId = "run_1",
+            turnId = 0,
+            toolCallId = "call_1",
+            toolName = "post_message",
+            input = """{"text":"hello"}""",
+            effectClass = app.amber.feature.tools.ToolEffectClass.NON_IDEMPOTENT_WRITE,
+        )
+        val events = RecordingEventWriter()
+        dispatcher.execute(
+            tool = toolCall(),
+            toolDef = toolDef("post_message") { listOf(UIMessagePart.Text("""{"status":"ok"}""")) },
+            autoApproveTools = false,
+            ledgerContext = context().copy(events = events),
+        )
+
+        val emitted = events.lifecycleEvents()
+        assertEquals(listOf("Started", "Finished"), emitted.map { it::class.simpleName })
+    }
+
+    @Test
+    fun failedExecutionEmitsFinishedFailedWithTheLedgerCategory() = runBlocking {
+        val events = RecordingEventWriter()
+        dispatcher.execute(
+            tool = toolCall(),
+            toolDef = toolDef("post_message") { error("boom") },
+            autoApproveTools = false,
+            ledgerContext = context().copy(events = events),
+        )
+
+        val effect = ledger.getByToolCallId("call_1")!!
+        val emitted = events.lifecycleEvents()
+        assertEquals(listOf("Prepared", "Started", "Finished"), emitted.map { it::class.simpleName })
+        val finished = emitted[2] as ToolLifecycleEvent.Finished
+        assertEquals(effect.effectId, finished.effectId)
+        assertEquals(ToolLifecycleEvent.Finished.Status.FAILED, finished.status)
+        assertEquals(effect.errorCategory, finished.errorCategory)
+    }
+
+    @Test
+    fun userDenialEmitsFinishedDeniedWithoutStarted() = runBlocking {
+        ledger.prepare(
+            runId = "run_1",
+            turnId = 0,
+            toolCallId = "call_1",
+            toolName = "post_message",
+            input = """{"text":"hello"}""",
+            effectClass = app.amber.feature.tools.ToolEffectClass.NON_IDEMPOTENT_WRITE,
+        )
+        val events = RecordingEventWriter()
+        dispatcher.execute(
+            tool = toolCall(approvalState = ToolApprovalState.Denied("用户拒绝")),
+            toolDef = toolDef("post_message") { listOf(UIMessagePart.Text("must not run")) },
+            autoApproveTools = false,
+            ledgerContext = context().copy(events = events),
+        )
+
+        val effect = ledger.getByToolCallId("call_1")!!
+        val emitted = events.lifecycleEvents()
+        assertEquals(listOf("Finished"), emitted.map { it::class.simpleName })
+        val finished = emitted.single() as ToolLifecycleEvent.Finished
+        assertEquals(effect.effectId, finished.effectId)
+        assertEquals(ToolLifecycleEvent.Finished.Status.DENIED, finished.status)
+        assertEquals("approval_denied", finished.errorCategory)
+    }
+
+    @Test
+    fun answeredApprovalEmitsFinishedWithoutStarted() = runBlocking {
+        ledger.prepare(
+            runId = "run_1",
+            turnId = 0,
+            toolCallId = "call_1",
+            toolName = "post_message",
+            input = """{"text":"hello"}""",
+            effectClass = app.amber.feature.tools.ToolEffectClass.NON_IDEMPOTENT_WRITE,
+        )
+        val events = RecordingEventWriter()
+        dispatcher.execute(
+            tool = toolCall(approvalState = ToolApprovalState.Answered("用户的回答")),
+            toolDef = toolDef("post_message") { listOf(UIMessagePart.Text("must not run")) },
+            autoApproveTools = false,
+            ledgerContext = context().copy(events = events),
+        )
+
+        val effect = ledger.getByToolCallId("call_1")!!
+        val emitted = events.lifecycleEvents()
+        assertEquals(listOf("Finished"), emitted.map { it::class.simpleName })
+        val finished = emitted.single() as ToolLifecycleEvent.Finished
+        assertEquals(effect.effectId, finished.effectId)
+        assertEquals(ToolLifecycleEvent.Finished.Status.FINISHED, finished.status)
+    }
+
+    @Test
+    fun cancellationEmitsNothingAfterStarted() = runBlocking {
+        val events = RecordingEventWriter()
+        runCatching {
+            dispatcher.execute(
+                tool = toolCall(),
+                toolDef = toolDef("post_message") { throw CancellationException("stopped") },
+                autoApproveTools = false,
+                ledgerContext = context().copy(events = events),
+            )
+        }
+
+        // The effect stays STARTED and recovery classifies it — a Finished
+        // event here would lie about an outcome nobody knows.
+        val emitted = events.lifecycleEvents()
+        assertEquals(listOf("Prepared", "Started"), emitted.map { it::class.simpleName })
     }
 }

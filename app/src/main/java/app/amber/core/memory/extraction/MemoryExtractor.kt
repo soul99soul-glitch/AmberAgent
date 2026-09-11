@@ -1,5 +1,6 @@
 package app.amber.core.memory.extraction
 
+import android.content.Context
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
@@ -28,7 +29,7 @@ import app.amber.core.memory.time.MemoryTimeAnchorParser
 import app.amber.core.model.Conversation
 import app.amber.core.sync.core.SyncRestoreWriteEpoch
 import app.amber.core.sync.core.SyncRestoreWriteGate
-import java.util.Locale
+import app.amber.core.utils.appLocaleDisplayName
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.coroutines.CoroutineContext
 import kotlin.coroutines.EmptyCoroutineContext
@@ -42,6 +43,7 @@ class MemoryExtractor(
     private val json: Json,
     private val memoryRepository: MemoryRepository,
     private val eventLogger: MemoryEventLogger,
+    private val context: Context,
     private val candidateFilter: MemoryCandidateFilter = MemoryCandidateFilter(),
     private val restoreWriteGate: SyncRestoreWriteGate? = null,
 ) {
@@ -125,7 +127,7 @@ class MemoryExtractor(
                 val prompt = MemoryExtractionPrompt.build(
                     messages = sourceMessages,
                     sourceMessageIds = sourceIds,
-                    locale = Locale.getDefault().displayName,
+                    locale = context.appLocaleDisplayName(),
                 )
                 val response = providerCatalog.text(provider).complete(
                     providerSetting = provider,

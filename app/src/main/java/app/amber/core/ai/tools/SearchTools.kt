@@ -19,10 +19,12 @@ import app.amber.search.ScrapedResult
 import app.amber.search.SearchService
 import app.amber.search.SearchServiceOptions
 import java.time.LocalDate
+import java.util.Locale
 
 fun createSearchTools(
     settings: Settings,
     includeWebViewFallbackGuidance: Boolean = true,
+    locale: Locale = Locale.getDefault(),
 ): Set<Tool> {
     return buildSet {
         val enabledServices = SearchAggregator.enabledServices(settings)
@@ -55,7 +57,7 @@ fun createSearchTools(
                     Do not pass `services` by default. Only pass it when the user explicitly requests a source or after search_sources_status returns a matching id/name/accepted_selectors value.
                     If snippets are not enough, call scrape_web on the most relevant source pages before answering.
                     $webViewFallbackGuidance
-                    Today is ${LocalDate.now().toLocalString(true)}.
+                    Today is ${LocalDate.now().toLocalString(true, locale)}.
 
                     Response format:
                     - items[].id (short id), title, url, text, source_service, source_services, duplicate_count
@@ -87,6 +89,7 @@ fun createSearchTools(
                         settings = settings,
                         params = it.jsonObject,
                         includeWebViewFallback = includeWebViewFallbackGuidance,
+                        locale = locale,
                     )
                     listOf(UIMessagePart.Text(results.toString()))
                 }
@@ -127,6 +130,7 @@ fun createSearchTools(
                                 settings = settings,
                                 params = it.jsonObject,
                                 includeWebViewFallback = includeWebViewFallbackGuidance,
+                                locale = locale,
                             ).toString()
                         )
                     )

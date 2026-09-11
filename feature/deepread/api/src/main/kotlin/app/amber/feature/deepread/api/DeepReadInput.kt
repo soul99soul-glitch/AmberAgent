@@ -11,4 +11,6 @@ data class DeepReadInput(
     @SerialName("topic_title") val title: String,
     val stages: List<String> = emptyList(),
     val force: Boolean = false,
+    @SerialName("defer_missing_stages") val deferMissingStages: Boolean = true,
+    @SerialName("propagate_failures_with_partial") val propagateFailuresWithPartial: Boolean = false,
 ) : AgentInput

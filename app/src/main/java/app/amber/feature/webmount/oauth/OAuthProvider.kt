@@ -1,8 +1,30 @@
 package app.amber.feature.webmount.oauth
 
+import android.content.Context
 import io.ktor.client.HttpClient
 import app.amber.common.oauth.LoopbackOAuthCallbackServer
 import app.amber.feature.webmount.core.WebMountOAuthToken
+
+/** Localized error copy for provider token exchanges. */
+data class OAuthProviderErrorCopy(
+    val tokenEndpointFailed: (statusCode: Int, body: String) -> String,
+    val oauthError: (code: Int, message: String) -> String,
+    val missingAccessToken: (body: String) -> String,
+) {
+    companion object {
+        val ENGLISH = OAuthProviderErrorCopy(
+            tokenEndpointFailed = { statusCode, body ->
+                "Token endpoint returned $statusCode: $body"
+            },
+            oauthError = { code, message ->
+                "OAuth provider returned error code=$code message=$message"
+            },
+            missingAccessToken = { body ->
+                "Response did not contain access_token: $body"
+            },
+        )
+    }
+}
 
 /**
  * One OAuth provider plugged into [WebMountOAuthClient]. Each implementor
@@ -54,6 +76,7 @@ interface OAuthProvider {
         code: String,
         codeVerifier: String,
         http: HttpClient,
+        errorCopy: OAuthProviderErrorCopy = OAuthProviderErrorCopy.ENGLISH,
     ): WebMountOAuthToken
 
     /** Refresh an expired access token via the existing refresh_token. */
@@ -61,8 +84,12 @@ interface OAuthProvider {
         credentials: OAuthAppCredentials,
         refreshToken: String,
         http: HttpClient,
+        errorCopy: OAuthProviderErrorCopy = OAuthProviderErrorCopy.ENGLISH,
     ): WebMountOAuthToken
 
     /** Help-text shown next to the "Connect" button — what the user needs to do first. */
     fun setupHint(): String = "Register an OAuth app on the provider's open platform, set the redirect URI to $defaultRedirectUri, then paste the app_id and (if confidential) app_secret in the fields above."
+
+    /** Localized setup help for the settings UI. */
+    fun setupHint(context: Context): String = setupHint()
 }

@@ -5,9 +5,9 @@ import app.amber.core.agent.runtime.AgentEventPayload
 import app.amber.core.agent.runtime.AgentEventWriter
 import app.amber.core.agent.runtime.AgentRunId
 import app.amber.feature.chat.api.ChatEventPayload
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
-import java.util.concurrent.atomic.AtomicLong
 import kotlin.uuid.Uuid
 
 private const val TAG = "ProjectingEventWriter"
@@ -16,9 +16,15 @@ class ProjectingEventWriter(
     private val runId: AgentRunId,
     private val conversationId: Uuid,
     private val projector: ChatEventProjector,
+    /**
+     * Persistence path for non-chat Final events (Step 3): the tool lifecycle
+     * events the kernel/dispatcher emit are protocol-level, not chat-domain —
+     * they persist through this delegate (a PersistingEventWriter) instead of
+     * the chat projector. Null keeps the legacy log-and-drop behavior.
+     */
+    private val fallback: AgentEventWriter? = null,
 ) : AgentEventWriter {
 
-    private val seq = AtomicLong(0L)
     private val _transientFlow = MutableSharedFlow<AgentEventPayload.Transient>(
         replay = 0,
         extraBufferCapacity = 64,
@@ -30,31 +36,36 @@ class ProjectingEventWriter(
     }
 
     override suspend fun commit(final: AgentEventPayload.Final) {
-        val seqNum = seq.incrementAndGet()
-        // The writer owns event ids, so it stamps the checkpoint's
-        // last-covered-event pointer (the most recent prior committed event).
-        val resolved = if (
-            final is ChatEventPayload.StreamCheckpoint &&
-            final.lastEventId.isEmpty() &&
-            seqNum > 1
-        ) {
-            final.copy(lastEventId = "${runId.value}_${seqNum - 1}")
-        } else {
-            final
-        }
-        when (resolved) {
+        // The projector owns event ids and the store owns seq allocation —
+        // a writer-side counter would collide with persisted rows after a
+        // process restart under the same runId (idempotent-append IGNORE).
+        when (final) {
             is ChatEventPayload -> {
                 try {
-                    projector.commitEvent(runId, resolved, seqNum)
-                    if (resolved is ChatEventPayload.AssistantMessageFinalized) {
-                        projector.projectFinalized(conversationId, resolved)
+                    projector.commitEvent(runId, final)
+                    if (final is ChatEventPayload.AssistantMessageFinalized) {
+                        projector.projectFinalized(conversationId, final)
                     }
+                } catch (e: CancellationException) {
+                    throw e
                 } catch (e: Exception) {
-                    Log.w(TAG, "Failed to commit event $resolved", e)
+                    // Identity only, one line: `final` can carry up to an 8KB
+                    // conversation preview (RequestSnapshot) — interpolating
+                    // the payload would leak it into logcat.
+                    val identity = when (final) {
+                        is ChatEventPayload.RequestSnapshot ->
+                            "RequestSnapshot(stepIndex=${final.stepIndex}, attempt=${final.attempt}, kind=${final.kind})"
+                        else -> final::class.simpleName ?: "unknown"
+                    }
+                    Log.w(TAG, "Failed to commit event $identity", e)
                 }
             }
             else -> {
-                Log.d(TAG, "Skipping non-chat Final event: $resolved")
+                if (fallback != null) {
+                    fallback.commit(final)
+                } else {
+                    Log.d(TAG, "Skipping non-chat Final event: $final")
+                }
             }
         }
     }

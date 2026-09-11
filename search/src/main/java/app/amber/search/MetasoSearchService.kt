@@ -1,7 +1,9 @@
 package app.amber.search
 
+import app.amber.search.R
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.withLink
@@ -28,7 +30,7 @@ object MetasoSearchService : SearchService<SearchServiceOptions.MetasoOptions> {
     @Composable
     override fun Description() {
         Text(buildAnnotatedString {
-            append("秘塔搜索: ")
+            append(stringResource(R.string.metaso_description_prefix))
             withLink(LinkAnnotation.Url("https://metaso.cn/")) {
                 append("https://metaso.cn/")
             }

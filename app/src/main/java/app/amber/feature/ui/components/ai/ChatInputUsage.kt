@@ -36,9 +36,12 @@ import app.amber.core.context.CompactLifecycleStatus
 import app.amber.core.context.ContextFootprintEstimator
 import app.amber.core.context.ConversationCompact
 import app.amber.core.model.Conversation
+import app.amber.core.usage.ProviderUsageErrorCode
+import app.amber.core.usage.ProviderUsageException
 import app.amber.core.usage.ProviderUsageMetric
 import app.amber.core.usage.ProviderUsageStatus
 import app.amber.feature.ui.components.ui.workspaceColors
+import app.amber.core.utils.appLocale
 import app.amber.core.utils.formatNumber
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -166,11 +169,12 @@ internal data class ComposerUsageMetric(
 )
 
 internal fun OpenAICodexUsageStatus.toComposerUsageStatus(context: Context): ComposerUsageStatus {
+    val appLocale = context.appLocale()
     return ComposerUsageStatus(
         title = context.getString(R.string.chat_input_usage_sheet_title),
         planType = planType,
-        fiveHourQuota = fiveHour?.toComposerUsageMetric(context),
-        weeklyQuota = weekly?.toComposerUsageMetric(context),
+        fiveHourQuota = fiveHour?.toComposerUsageMetric(context, appLocale),
+        weeklyQuota = weekly?.toComposerUsageMetric(context, appLocale),
     )
 }
 
@@ -184,6 +188,87 @@ internal fun ProviderUsageStatus.toComposerUsageStatus(): ComposerUsageStatus {
     )
 }
 
+internal fun Throwable.toComposerUsageErrorMessage(context: Context): String {
+    val usageError = this as? ProviderUsageException
+        ?: return message ?: toString()
+    return when (usageError.code) {
+        ProviderUsageErrorCode.UNSUPPORTED_ENDPOINT ->
+            context.getString(R.string.chat_input_usage_provider_endpoint_unavailable)
+
+        ProviderUsageErrorCode.KIMI_API_KEY_CODING_PLAN_UNSUPPORTED ->
+            context.getString(R.string.chat_input_usage_kimi_api_key_coding_plan_unsupported)
+
+        ProviderUsageErrorCode.KIMI_LOGIN_REQUIRED ->
+            context.getString(R.string.chat_input_usage_kimi_login_required)
+
+        ProviderUsageErrorCode.KIMI_REQUEST_FAILED -> context.getString(
+            R.string.chat_input_usage_kimi_request_failed,
+            usageError.providerLabel.orEmpty(),
+            usageError.httpCode ?: 0,
+            usageError.serverMessage.orEmpty(),
+        )
+
+        ProviderUsageErrorCode.KIMI_USAGE_MISSING -> context.getString(
+            R.string.chat_input_usage_kimi_usage_missing,
+            usageError.providerLabel.orEmpty(),
+            usageError.protocolField.orEmpty(),
+        )
+
+        ProviderUsageErrorCode.MOONSHOT_BALANCE_REQUEST_FAILED -> context.getString(
+            R.string.chat_input_usage_moonshot_balance_request_failed,
+            usageError.providerLabel.orEmpty(),
+            usageError.httpCode ?: 0,
+            usageError.serverMessage.orEmpty(),
+        )
+
+        ProviderUsageErrorCode.MINIMAX_REQUEST_FAILED -> context.getString(
+            R.string.chat_input_usage_minimax_request_failed,
+            usageError.providerLabel.orEmpty(),
+            usageError.httpCode ?: 0,
+            usageError.serverMessage.orEmpty(),
+        )
+
+        ProviderUsageErrorCode.MINIMAX_LOGIN_REQUIRED -> context.getString(
+            R.string.chat_input_usage_minimax_login_required,
+            usageError.providerLabel.orEmpty(),
+            usageError.loginBaseUrl.orEmpty(),
+        )
+
+        ProviderUsageErrorCode.ZHIPU_REQUEST_FAILED -> context.getString(
+            R.string.chat_input_usage_zhipu_request_failed,
+            usageError.providerLabel.orEmpty(),
+            usageError.httpCode ?: 0,
+            usageError.serverMessage.orEmpty(),
+        )
+
+        ProviderUsageErrorCode.ZHIPU_DATA_MISSING -> context.getString(
+            R.string.chat_input_usage_zhipu_data_missing,
+            usageError.providerLabel.orEmpty(),
+            usageError.protocolField.orEmpty(),
+        )
+
+        ProviderUsageErrorCode.MIMO_LOGIN_REQUIRED -> context.getString(
+            R.string.chat_input_usage_mimo_login_required,
+            usageError.providerLabel.orEmpty(),
+            usageError.loginBaseUrl.orEmpty(),
+        )
+
+        ProviderUsageErrorCode.MIMO_REQUEST_FAILED -> context.getString(
+            R.string.chat_input_usage_mimo_request_failed,
+            usageError.providerLabel.orEmpty(),
+            usageError.httpCode ?: 0,
+            usageError.serverMessage.orEmpty(),
+        )
+
+        ProviderUsageErrorCode.GENERIC_BALANCE_REQUEST_FAILED -> context.getString(
+            R.string.chat_input_usage_generic_balance_request_failed,
+            usageError.providerLabel.orEmpty(),
+            usageError.httpCode ?: 0,
+            usageError.serverMessage.orEmpty(),
+        )
+    }
+}
+
 private fun ProviderUsageMetric.toComposerUsageMetric(): ComposerUsageMetric {
     return ComposerUsageMetric(
         percent = percent,
@@ -191,10 +276,13 @@ private fun ProviderUsageMetric.toComposerUsageMetric(): ComposerUsageMetric {
     )
 }
 
-private fun OpenAICodexUsageWindow.toComposerUsageMetric(context: Context): ComposerUsageMetric {
+private fun OpenAICodexUsageWindow.toComposerUsageMetric(
+    context: Context,
+    locale: Locale,
+): ComposerUsageMetric {
     return ComposerUsageMetric(
         percent = usedPercent.toInt(),
-        detail = resetsAtEpochSeconds?.formatUsageResetDetail(context),
+        detail = resetsAtEpochSeconds?.formatUsageResetDetail(context, locale),
     )
 }
 
@@ -303,11 +391,11 @@ private fun UsageMetricRow(
     }
 }
 
-private fun Long.formatUsageResetDetail(context: Context): String {
+private fun Long.formatUsageResetDetail(context: Context, locale: Locale): String {
     val resetMillis = if (this < 10_000_000_000L) this * 1000L else this
     val remainingMillis = (resetMillis - System.currentTimeMillis()).coerceAtLeast(0L)
     val totalMinutes = remainingMillis / 60_000L
-    val timeText = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(resetMillis))
+    val timeText = SimpleDateFormat("HH:mm", locale).format(Date(resetMillis))
     val relative = when {
         totalMinutes >= 24 * 60 -> "${totalMinutes / (24 * 60)}d"
         totalMinutes >= 60 -> "${totalMinutes / 60}h ${totalMinutes % 60}m"
@@ -323,7 +411,7 @@ internal fun ProviderSetting?.providerRoutingKey(): String {
         is ProviderSetting.Claude -> "claude"
         is ProviderSetting.Google -> "gemini"
         is ProviderSetting.OpenAI -> {
-            val endpoint = "${baseUrl} ${name}".lowercase()
+            val endpoint = "${baseUrl} ${name}".lowercase(Locale.ROOT)
             when {
                 "deepseek" in endpoint -> "deepseek"
                 "moonshot" in endpoint || "kimi" in endpoint -> "kimi"

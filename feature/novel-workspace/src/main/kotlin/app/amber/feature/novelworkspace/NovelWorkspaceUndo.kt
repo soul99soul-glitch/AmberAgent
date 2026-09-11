@@ -18,6 +18,13 @@ data class NovelWorkspaceUndoRecord(
     val files: Map<String, String?>,
     /** Restore the exact branch gate state that existed before this commit. */
     val unresolvedBefore: NovelWorkspaceUnresolvedFile? = null,
+    /**
+     * 提交所在分支（branch slug），多分支接入后写入。undo.json 是书级单条：切分支后
+     * 若旧记录继续生效，会把上一分支的文件内容恢复进当前分支工作树。读取方对分支
+     * 不匹配的记录一律视为无 undo；历史记录该字段为 null——在引入分支绑定前运行时
+     * 只会往 manifest.mainBranch 提交，故 null 按主线解释（保住既有书的单级撤销）。
+     */
+    val branchSlug: String? = null,
 )
 
 object NovelWorkspaceUndo {

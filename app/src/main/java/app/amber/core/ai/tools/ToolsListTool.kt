@@ -1,5 +1,6 @@
 package app.amber.core.ai.tools
 
+import android.content.Context
 import kotlinx.serialization.json.add
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
@@ -10,6 +11,7 @@ import kotlinx.serialization.json.put
 import app.amber.ai.core.InputSchema
 import app.amber.ai.core.Tool
 import app.amber.ai.ui.UIMessagePart
+import app.amber.core.localization.PermissionDisplayLocalizer
 import app.amber.feature.system.AgentPermissionBroker
 import app.amber.feature.tools.ToolExposureState
 import app.amber.feature.tools.ToolRegistry
@@ -28,6 +30,7 @@ import app.amber.feature.tools.ToolRegistry
 fun createToolsListTool(
     registry: ToolRegistry,
     permissionBroker: AgentPermissionBroker,
+    displayContext: Context,
 ): Tool = Tool(
     name = "tools_list",
     description = "Debug/catalog view of AmberAgent's full tool catalog. In lazy mode, hidden tools listed here are not callable until exposed by tool_search.",
@@ -113,7 +116,10 @@ fun createToolsListTool(
                                         add(
                                             buildJsonObject {
                                                 put("capability_id", capability.id)
-                                                put("title", capability.title)
+                                                put(
+                                                    "title",
+                                                    PermissionDisplayLocalizer.title(displayContext, capability),
+                                                )
                                                 put("status", permissionBroker.getStatus(capability).name.lowercase())
                                             }
                                         )

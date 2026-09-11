@@ -26,12 +26,14 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import app.amber.ai.ui.UIMessage
 import app.amber.agent.data.workspace.Artifact
 import app.amber.agent.data.workspace.ArtifactRepository
 import app.amber.agent.data.workspace.ArtifactSourceKind
+import app.amber.agent.R
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
@@ -60,6 +62,7 @@ fun SaveMessageToWorkspaceDialog(
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var duplicate by remember { mutableStateOf<Artifact?>(null) }
     var pendingWorkspaceId by remember { mutableStateOf<String?>(null) }
+    val saveFailedMessage = stringResource(R.string.workspace_save_failed)
 
     LaunchedEffect(Unit) {
         workspaceIds = repository.workspaceIds()
@@ -88,7 +91,7 @@ fun SaveMessageToWorkspaceDialog(
                 throw error
             } catch (error: Throwable) {
                 errorMessage = error.message?.trim()?.takeIf { it.isNotBlank() }?.take(160)
-                    ?: "保存失败，请稍后重试"
+                    ?: saveFailedMessage
             } finally {
                 saving = false
             }
@@ -118,7 +121,7 @@ fun SaveMessageToWorkspaceDialog(
                 throw error
             } catch (error: Throwable) {
                 errorMessage = error.message?.trim()?.takeIf { it.isNotBlank() }?.take(160)
-                    ?: "保存失败，请稍后重试"
+                    ?: saveFailedMessage
             } finally {
                 saving = false
             }
@@ -127,7 +130,7 @@ fun SaveMessageToWorkspaceDialog(
 
     AlertDialog(
         onDismissRequest = { if (!saving) onDismiss() },
-        title = { Text("保存到 Workspace") },
+        title = { Text(stringResource(R.string.workspace_save_to_title)) },
         text = {
             Column(
                 modifier = Modifier
@@ -136,7 +139,8 @@ fun SaveMessageToWorkspaceDialog(
                 verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
                 Text(
-                    text = message.toText().lineSequence().firstOrNull { it.isNotBlank() }?.take(80) ?: "消息",
+                    text = message.toText().lineSequence().firstOrNull { it.isNotBlank() }?.take(80)
+                        ?: stringResource(R.string.workspace_message),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 2,
@@ -144,7 +148,7 @@ fun SaveMessageToWorkspaceDialog(
                 )
                 HorizontalDivider(modifier = Modifier.padding(vertical = 6.dp))
                 Text(
-                    text = "保存位置",
+                    text = stringResource(R.string.workspace_save_location),
                     style = MaterialTheme.typography.labelLarge,
                 )
                 workspaceIds.forEach { id ->
@@ -159,13 +163,13 @@ fun SaveMessageToWorkspaceDialog(
                 }
                 if (workspaceIds.isEmpty()) {
                     Text(
-                        text = "（还没有 Workspace，先新建一个）",
+                        text = stringResource(R.string.workspace_no_workspaces),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
                 WorkspaceOptionRow(
-                    label = "新建 Workspace",
+                    label = stringResource(R.string.workspace_create_new),
                     selected = creatingNew,
                     onClick = { creatingNew = true },
                 )
@@ -174,7 +178,7 @@ fun SaveMessageToWorkspaceDialog(
                         value = newWorkspaceName,
                         onValueChange = { newWorkspaceName = it },
                         modifier = Modifier.fillMaxWidth(),
-                        placeholder = { Text("Workspace 名称") },
+                        placeholder = { Text(stringResource(R.string.workspace_name_placeholder)) },
                         singleLine = true,
                     )
                 }
@@ -190,7 +194,7 @@ fun SaveMessageToWorkspaceDialog(
                         checked = includeReasoning,
                         onCheckedChange = { includeReasoning = it },
                     )
-                    Text("包含推理过程（reasoning）")
+                    Text(stringResource(R.string.workspace_include_reasoning))
                 }
                 errorMessage?.let { message ->
                     Text(
@@ -205,24 +209,27 @@ fun SaveMessageToWorkspaceDialog(
             TextButton(
                 enabled = canSave,
                 onClick = { startSave() },
-            ) { Text("保存") }
+            ) { Text(stringResource(R.string.common_save)) }
         },
         dismissButton = {
             TextButton(
                 enabled = !saving,
                 onClick = onDismiss,
-            ) { Text("取消") }
+            ) { Text(stringResource(R.string.cancel)) }
         },
     )
 
     duplicate?.let { existing ->
         AlertDialog(
             onDismissRequest = { duplicate = null },
-            title = { Text("已保存过") },
+            title = { Text(stringResource(R.string.workspace_already_saved_title)) },
             text = {
                 Text(
-                    "这条消息已保存为「${existing.title}」（${formatTime(existing.updatedAtMs)}）。" +
-                        "更新它、创建副本，还是取消？"
+                    stringResource(
+                        R.string.workspace_duplicate_message,
+                        existing.title,
+                        formatTime(existing.updatedAtMs),
+                    )
                 )
             },
             confirmButton = {
@@ -232,18 +239,18 @@ fun SaveMessageToWorkspaceDialog(
                         duplicate = null
                         performSave(wsId, existing.artifactId)
                     }
-                ) { Text("更新") }
+                ) { Text(stringResource(R.string.workspace_update)) }
             },
             dismissButton = {
                 Row {
-                    TextButton(onClick = { duplicate = null }) { Text("取消") }
+                    TextButton(onClick = { duplicate = null }) { Text(stringResource(R.string.cancel)) }
                     TextButton(
                         onClick = {
                             val wsId = pendingWorkspaceId ?: existing.workspaceId
                             duplicate = null
                             performSave(wsId, null)
                         }
-                    ) { Text("创建副本") }
+                    ) { Text(stringResource(R.string.workspace_create_copy)) }
                 }
             },
         )
@@ -269,5 +276,10 @@ private fun WorkspaceOptionRow(label: String, selected: Boolean, onClick: () -> 
     }
 }
 
+@Composable
 private fun workspaceLabel(workspaceId: String): String =
-    if (workspaceId == ArtifactRepository.DEFAULT_WORKSPACE_ID) "默认 Workspace" else workspaceId
+    if (workspaceId == ArtifactRepository.DEFAULT_WORKSPACE_ID) {
+        stringResource(R.string.workspace_default)
+    } else {
+        workspaceId
+    }

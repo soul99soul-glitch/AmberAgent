@@ -1,5 +1,7 @@
 package app.amber.feature.home
 
+import android.content.Context
+import app.amber.agent.R
 import app.amber.agent.data.db.dao.HotListDAO
 import app.amber.core.utils.JsonInstant
 import app.amber.feature.board.hotlist.DeepReadCachePolicy
@@ -21,6 +23,7 @@ import java.time.Instant
  */
 class DeepReadContinueSource(
     private val hotListDao: HotListDAO,
+    private val context: Context,
     private val now: () -> Instant = Instant::now,
 ) : ContinueCandidateSource {
 
@@ -41,6 +44,11 @@ class DeepReadContinueSource(
                 if (readyCount == 0 && output.generationPhase == DeepReadGenerationPhase.IDLE) {
                     return@mapNotNull null
                 }
+                val progress = context.getString(
+                    R.string.deep_read_notification_running_content,
+                    context.getString(R.string.session_home_feature_deep_read),
+                    "$readyCount/${DeepReadGenerationStageAll.size}",
+                )
                 ContinueCandidate(
                     sourceKind = ContinueSourceKind.DEEP_READ,
                     sourceId = entity.topicId,
@@ -50,7 +58,7 @@ class DeepReadContinueSource(
                         sourceUrl = entity.sourceUrl,
                     ),
                     title = entity.title,
-                    summary = "深度阅读 · 已完成 $readyCount/${DeepReadGenerationStageAll.size} 部分",
+                    summary = progress,
                     lastUpdatedAt = Instant.ofEpochMilli(entity.updatedAt),
                     status = ContinueStatus.FAILED_RESUMABLE,
                 )

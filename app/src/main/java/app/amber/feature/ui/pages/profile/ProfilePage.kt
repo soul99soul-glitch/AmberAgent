@@ -35,7 +35,9 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -47,6 +49,8 @@ import app.amber.feature.ui.theme.JetBrainsMonoFamily
 import app.amber.feature.ui.theme.LocalAmberTokens
 import app.amber.feature.ui.pages.stats.StatsVM
 import app.amber.feature.ui.pages.sessionhome.SessionHomeVM
+import app.amber.core.utils.appLocale
+import app.amber.agent.R
 import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.temporal.TemporalAdjusters
@@ -64,15 +68,17 @@ fun ProfilePage(
     sessionHomeVm: SessionHomeVM = koinViewModel(),
 ) {
     val tokens = LocalAmberTokens.current
+    val appLocale = LocalContext.current.appLocale()
     val settings = LocalSettings.current
     val stats by vm.stats.collectAsStateWithLifecycle()
 
-    val nickname = settings.displaySetting.userNickname.ifBlank { "Amber 用户" }
+    val defaultNickname = stringResource(R.string.profile_default_nickname)
+    val nickname = settings.displaySetting.userNickname.ifBlank { defaultNickname }
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("个人资料", fontWeight = FontWeight.Bold) },
+                title = { Text(stringResource(R.string.profile_title), fontWeight = FontWeight.Bold) },
                 navigationIcon = { BackButton() },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = tokens.bg),
             )
@@ -119,7 +125,7 @@ fun ProfilePage(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     Text(
-                        text = "@${nickname.lowercase().replace(" ", "")}",
+                        text = "@${nickname.lowercase(appLocale).replace(" ", "")}",
                         fontSize = 13.sp,
                         color = tokens.ink3,
                     )
@@ -143,7 +149,7 @@ fun ProfilePage(
 
             // 聊天活动热力图
             Text(
-                text = "聊天活动",
+                text = stringResource(R.string.profile_chat_activity),
                 fontSize = 16.sp,
                 fontWeight = FontWeight.SemiBold,
                 color = tokens.ink,
@@ -175,11 +181,11 @@ private fun ProfileStatsCard(stats: app.amber.feature.ui.pages.stats.AppStats) {
     val longest = longestStreak(stats.conversationsPerDay)
 
     val items = listOf(
-        formatCount(totalTokens) to "Token 数",
-        formatInt(stats.totalMessages) to "消息",
-        formatInt(stats.totalConversations) to "会话",
-        "${current} 天" to "连续",
-        "${longest} 天" to "近一年最长",
+        formatCount(totalTokens) to stringResource(R.string.profile_stats_tokens),
+        formatInt(stats.totalMessages) to stringResource(R.string.stats_page_total_messages),
+        formatInt(stats.totalConversations) to stringResource(R.string.stats_page_total_conversations),
+        stringResource(R.string.profile_stats_days, current) to stringResource(R.string.profile_stats_streak),
+        stringResource(R.string.profile_stats_days, longest) to stringResource(R.string.profile_stats_longest_streak),
     )
 
     Row(
@@ -234,6 +240,8 @@ private fun ProfileStatsCard(stats: app.amber.feature.ui.pages.stats.AppStats) {
 @Composable
 private fun ActivityHeatmap(days: Map<LocalDate, Int>) {
     val tokens = LocalAmberTokens.current
+    val appLocale = LocalContext.current.appLocale()
+    val monthLabelTemplate = stringResource(R.string.profile_heatmap_month_label)
 
     val today = LocalDate.now()
     val start = today.with(TemporalAdjusters.previousOrSame(DayOfWeek.SUNDAY)).minusWeeks(52)
@@ -292,7 +300,7 @@ private fun ActivityHeatmap(days: Map<LocalDate, Int>) {
                         if (midDate.monthValue != lastMonth && !midDate.isAfter(today)) {
                             lastMonth = midDate.monthValue
                             canvas.nativeCanvas.drawText(
-                                "${midDate.monthValue}月",
+                                String.format(appLocale, monthLabelTemplate, midDate.monthValue),
                                 w * stepPx,
                                 labelY,
                                 textPaint,
@@ -367,10 +375,12 @@ private fun longestStreak(days: Map<LocalDate, Int>): Int {
     return best
 }
 
+@Composable
 private fun formatInt(n: Int): String = if (n >= 10000) formatCount(n.toLong()) else "$n"
 
+@Composable
 private fun formatCount(n: Long): String = when {
-    n >= 100_000_000 -> "${String.format("%.1f", n / 100_000_000.0)}亿"
-    n >= 10_000 -> "${String.format("%.1f", n / 10_000.0)}万"
+    n >= 100_000_000 -> stringResource(R.string.profile_count_billions, n / 100_000_000.0)
+    n >= 10_000 -> stringResource(R.string.profile_count_ten_thousands, n / 10_000.0)
     else -> "$n"
 }

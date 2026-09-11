@@ -1,5 +1,6 @@
 package app.amber.core.ai.tools
 
+import android.content.Context
 import kotlinx.serialization.json.add
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
@@ -10,6 +11,7 @@ import kotlinx.serialization.json.put
 import app.amber.ai.core.InputSchema
 import app.amber.ai.core.Tool
 import app.amber.ai.ui.UIMessagePart
+import app.amber.core.localization.PermissionDisplayLocalizer
 import app.amber.feature.system.AgentPermissionBroker
 import app.amber.feature.system.AgentPermissionStatus
 
@@ -23,7 +25,10 @@ import app.amber.feature.system.AgentPermissionStatus
  *
  * Extracted from `LocalTools.permissionsStatusTool` in M1.4 demo.
  */
-fun createPermissionsStatusTool(permissionBroker: AgentPermissionBroker): Tool = Tool(
+fun createPermissionsStatusTool(
+    permissionBroker: AgentPermissionBroker,
+    displayContext: Context,
+): Tool = Tool(
     name = "permissions_status",
     description = "List AmberAgent Android permission capability status and how to grant missing permissions.",
     parameters = {
@@ -56,8 +61,14 @@ fun createPermissionsStatusTool(permissionBroker: AgentPermissionBroker): Tool =
                         add(
                             buildJsonObject {
                                 put("capability_id", capability.id)
-                                put("title", capability.title)
-                                put("description", capability.description)
+                                put(
+                                    "title",
+                                    PermissionDisplayLocalizer.title(displayContext, capability),
+                                )
+                                put(
+                                    "description",
+                                    PermissionDisplayLocalizer.description(displayContext, capability),
+                                )
                                 put("risk", capability.risk.name.lowercase())
                                 put("status", permissionBroker.getStatus(capability).name.lowercase())
                                 put("runtime_permissions", buildJsonArray {
@@ -66,7 +77,10 @@ fun createPermissionsStatusTool(permissionBroker: AgentPermissionBroker): Tool =
                                 capability.specialAccess?.let { put("special_access", it.name) }
                                 put("tools", buildJsonArray { capability.toolNames.forEach { tool -> add(tool) } })
                                 if (includeHowToGrant) {
-                                    put("how_to_grant", "Open AmberAgent Settings > Agent 设置 > 系统权限, then grant ${capability.title}. Special access items open Android system settings.")
+                                    put(
+                                        "how_to_grant",
+                                        PermissionDisplayLocalizer.grantGuidance(displayContext, capability),
+                                    )
                                 }
                             }
                         )

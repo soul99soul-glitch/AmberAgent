@@ -99,7 +99,7 @@ class ContinueCandidateRoomSourcesTest {
     fun `interrupted council room is a FAILED_RESUMABLE candidate routed to the room`() = runTest {
         val room = councilRoom(CouncilRoomStatus.INTERRUPTED)
         insertConversation(room.conversationId.toString(), JsonInstant.encodeToString(CouncilRoom.serializer(), room))
-        val source = CouncilContinueSource(conversationDao = db.conversationDao())
+        val source = CouncilContinueSource(context = context, conversationDao = db.conversationDao())
 
         val result = source.observe().first()
 
@@ -117,7 +117,7 @@ class ContinueCandidateRoomSourcesTest {
         val finished = councilRoom(CouncilRoomStatus.FINALIZED)
         insertConversation(idle.conversationId.toString(), JsonInstant.encodeToString(CouncilRoom.serializer(), idle))
         insertConversation(finished.conversationId.toString(), JsonInstant.encodeToString(CouncilRoom.serializer(), finished))
-        val source = CouncilContinueSource(conversationDao = db.conversationDao())
+        val source = CouncilContinueSource(context = context, conversationDao = db.conversationDao())
 
         val result = source.observe().first()
 
@@ -130,7 +130,7 @@ class ContinueCandidateRoomSourcesTest {
         val room = councilRoom(CouncilRoomStatus.INTERRUPTED)
         val conversationId = room.conversationId.toString()
         insertConversation(conversationId, JsonInstant.encodeToString(CouncilRoom.serializer(), room))
-        val source = CouncilContinueSource(conversationDao = db.conversationDao())
+        val source = CouncilContinueSource(context = context, conversationDao = db.conversationDao())
         assertEquals(1, source.observe().first().size)
 
         db.conversationDao().deleteById(conversationId)
@@ -174,7 +174,7 @@ class ContinueCandidateRoomSourcesTest {
     @Test
     fun `incomplete deep read with progress is a FAILED_RESUMABLE candidate`() = runTest {
         insertDeepRead(topicId = "t1", output = partialOutput())
-        val source = DeepReadContinueSource(hotListDao = db.hotListDao()) { now }
+        val source = DeepReadContinueSource(hotListDao = db.hotListDao(), context = context) { now }
 
         val result = source.observe().first()
 
@@ -200,7 +200,7 @@ class ContinueCandidateRoomSourcesTest {
             output = partialOutput(),
             sourceUrl = "https://example.com/article",
         )
-        val candidate = DeepReadContinueSource(db.hotListDao()) { now }
+        val candidate = DeepReadContinueSource(db.hotListDao(), context) { now }
             .observe()
             .first()
             .single()
@@ -224,7 +224,7 @@ class ContinueCandidateRoomSourcesTest {
             pinned = true,
         )
 
-        val candidates = DeepReadContinueSource(hotListDao = db.hotListDao()) { now }
+        val candidates = DeepReadContinueSource(hotListDao = db.hotListDao(), context = context) { now }
             .observe()
             .first()
 
@@ -244,7 +244,7 @@ class ContinueCandidateRoomSourcesTest {
         insertDeepRead(topicId = "done", output = complete)
         insertDeepRead(topicId = "expired", output = partialOutput(), expiresAt = nowMs - 1)
         insertDeepRead(topicId = "deleted", output = partialOutput())
-        val source = DeepReadContinueSource(hotListDao = db.hotListDao()) { now }
+        val source = DeepReadContinueSource(hotListDao = db.hotListDao(), context = context) { now }
 
         assertEquals(1, source.observe().first().size)
 
@@ -267,7 +267,7 @@ class ContinueCandidateRoomSourcesTest {
                 updatedAtMs = nowMs,
             )
         )
-        val source = MiniAppDraftContinueSource(draftDao = db.conversationDraftDao())
+        val source = MiniAppDraftContinueSource(context = context, draftDao = db.conversationDraftDao())
 
         val result = source.observe().first()
 
@@ -291,7 +291,7 @@ class ContinueCandidateRoomSourcesTest {
                 updatedAtMs = nowMs,
             )
         )
-        val source = MiniAppDraftContinueSource(draftDao = db.conversationDraftDao())
+        val source = MiniAppDraftContinueSource(context = context, draftDao = db.conversationDraftDao())
         assertEquals(1, source.observe().first().size)
 
         // 发送后 ChatVM 清空草稿
@@ -320,7 +320,7 @@ class ContinueCandidateRoomSourcesTest {
     fun `recent image query returns conversation and tool anchors without message payload`() = runTest {
         val conversationId = "conversation-image"
         insertConversation(conversationId)
-        db.runTerminalDao().upsert(
+        db.runTerminalDao().insertIgnore(
             RunTerminalEntity(
                 runId = "run-image",
                 conversationId = conversationId,
@@ -420,7 +420,7 @@ class ContinueCandidateRoomSourcesTest {
     fun `dismiss record hides candidate until expiry then restores`() = runTest {
         val store = RoomContinueDismissStore(dao = db.continueCandidateDismissDao())
         store.dismiss(ContinueSourceKind.COUNCIL, "room-1", until = now.plusSeconds(60))
-        val source = CouncilContinueSource(conversationDao = db.conversationDao())
+        val source = CouncilContinueSource(context = context, conversationDao = db.conversationDao())
 
         // 模拟已存在的房间（直接插入持久化）
         val room = councilRoom(CouncilRoomStatus.INTERRUPTED).copy(conversationId = Uuid.random())

@@ -11,6 +11,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import app.amber.agent.R
 
 /**
  * 创建并记住权限状态
@@ -52,7 +53,9 @@ fun rememberPermissionState(
 ): PermissionState {
     val context = LocalContext.current
     val activity = context as? ComponentActivity
-        ?: throw IllegalStateException("rememberPermissionState 必须在 ComponentActivity 中使用")
+        ?: throw IllegalStateException(
+            context.getString(R.string.permission_state_requires_component_activity)
+        )
 
     // 创建权限状态对象
     val permissionState = remember(permissions) {

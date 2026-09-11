@@ -1,7 +1,8 @@
-<?xml version="1.0" encoding="utf-8"?>
+<?xml version='1.0' encoding='UTF-8'?>
 <resources>
   <string name="bing_desc">Note that Bing search is crawler-based, which may be unstable and is not recommended.</string>
   <string name="click_to_get_api_key">Click to get API Key</string>
   <string name="searxng_desc_1">settings.yml needs to enable json format support:</string>
   <string name="searxng_desc_2">search:\n  formats:\n    - html\n    - json</string>
+  <string name="metaso_description_prefix">Metaso Search:</string>
 </resources>

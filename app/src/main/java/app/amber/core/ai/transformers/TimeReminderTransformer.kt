@@ -4,6 +4,7 @@ import kotlin.time.Instant
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toInstant
 import app.amber.ai.ui.UIMessage
+import app.amber.core.utils.appLocale
 import app.amber.core.utils.toLocalDateTime
 import java.time.ZoneId
 import java.time.format.TextStyle
@@ -23,11 +24,14 @@ object TimeReminderTransformer : InputMessageTransformer {
         messages: List<UIMessage>,
     ): List<UIMessage> {
         if (!ctx.settings.agentRuntime.enableTimeReminder) return messages
-        return applyTimeReminder(messages)
+        return applyTimeReminder(messages, ctx.context.appLocale())
     }
 }
 
-internal fun applyTimeReminder(messages: List<UIMessage>): List<UIMessage> {
+internal fun applyTimeReminder(
+    messages: List<UIMessage>,
+    locale: Locale = Locale.getDefault(),
+): List<UIMessage> {
     val result = mutableListOf<UIMessage>()
     val tz = TimeZone.currentSystemDefault()
 
@@ -40,7 +44,7 @@ internal fun applyTimeReminder(messages: List<UIMessage>): List<UIMessage> {
             val gapSeconds = (currInstant - prevInstant).inWholeSeconds
 
             if (gapSeconds > TIME_GAP_THRESHOLD_SECONDS) {
-                result.add(buildTimeReminderMessage(gapSeconds, currInstant))
+                result.add(buildTimeReminderMessage(gapSeconds, currInstant, locale))
             }
         }
         result.add(current)
@@ -49,11 +53,11 @@ internal fun applyTimeReminder(messages: List<UIMessage>): List<UIMessage> {
     return result
 }
 
-private fun buildTimeReminderMessage(gapSeconds: Long, instant: Instant): UIMessage {
+private fun buildTimeReminderMessage(gapSeconds: Long, instant: Instant, locale: Locale): UIMessage {
     val javaInstant = instant.toJavaInstant()
     val dayOfWeek = javaInstant.atZone(ZoneId.systemDefault()).dayOfWeek
-        .getDisplayName(TextStyle.FULL, Locale.getDefault())
-    val timeStr = javaInstant.toLocalDateTime()
+        .getDisplayName(TextStyle.FULL, locale)
+    val timeStr = javaInstant.toLocalDateTime(locale)
     val gapText = formatGap(gapSeconds)
     val content = "<time_reminder>Current time: $dayOfWeek, $timeStr ($gapText since last message)</time_reminder>"
     return UIMessage.user(content)

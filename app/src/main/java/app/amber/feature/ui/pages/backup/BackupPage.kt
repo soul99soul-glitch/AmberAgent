@@ -1,6 +1,7 @@
 package app.amber.feature.ui.pages.backup
 
 import app.amber.feature.ui.pages.backup.components.BackupDialog
+import app.amber.agent.R
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.IntentSenderRequest
@@ -58,6 +59,7 @@ import androidx.compose.foundation.selection.selectable
 import androidx.compose.material3.Checkbox
 import androidx.compose.ui.Alignment
 import app.amber.core.sync.core.CURRENT_ARCHIVE_VERSION
+import app.amber.core.sync.provider.CURRENT_SNAPSHOT_SCHEMA_VERSION
 import app.amber.core.sync.core.NO_PASSPHRASE_FALLBACK
 import app.amber.core.sync.core.SYNC_ARCHIVE_MIME
 import app.amber.core.sync.core.SyncEncryptionMode
@@ -70,7 +72,6 @@ import app.amber.core.sync.provider.SyncSnapshot
 import app.amber.core.sync.provider.UploadConflictPolicy
 import app.amber.core.sync.provider.checkSnapshotCompatibility
 import app.amber.core.settings.WebDavConfig
-import app.amber.agent.R
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -84,6 +85,7 @@ import app.amber.feature.ui.components.ui.workspaceColors
 import app.amber.feature.ui.theme.LocalAmberTokens
 import app.amber.feature.ui.theme.LocalAmberType
 import app.amber.core.utils.UiState
+import app.amber.core.utils.appLocale
 import org.koin.androidx.compose.koinViewModel
 
 private enum class GoogleSyncAction {
@@ -91,29 +93,37 @@ private enum class GoogleSyncAction {
     Download,
 }
 
-private val BackupStatusDateFormat = object : ThreadLocal<SimpleDateFormat>() {
-    override fun initialValue() = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault())
-}
+private fun formatBackupDate(timestampMs: Long, locale: Locale): String =
+    SimpleDateFormat("yyyy-MM-dd HH:mm", locale).format(Date(timestampMs))
 
 /**
  * Render the "上次备份" supporting line for the backup-status card item.
  * Falls back to "暂无备份" when none of upload / download / local-export has
  * happened yet (i.e. `lastBackupVersionName` is still its default blank).
  */
-private fun formatBackupStatus(syncSettings: SyncSettings): String {
-    if (syncSettings.lastBackupVersionName.isBlank()) return "暂无成功备份"
+@Composable
+private fun formatBackupStatus(syncSettings: SyncSettings, locale: Locale): String {
+    if (syncSettings.lastBackupVersionName.isBlank()) {
+        return stringResource(R.string.backup_status_none)
+    }
     val latestAt = maxOf(
         syncSettings.lastUploadAt,
         syncSettings.lastDownloadAt,
         syncSettings.lastLocalExportAt,
     )
     val parts = mutableListOf<String>()
-    if (latestAt > 0L) parts += BackupStatusDateFormat.get()!!.format(Date(latestAt))
+    if (latestAt > 0L) parts += formatBackupDate(latestAt, locale)
     parts += syncSettings.lastBackupVersionName
     if (syncSettings.lastBackupDeviceLabel.isNotBlank()) {
         parts += syncSettings.lastBackupDeviceLabel
     }
-    return "最近成功：" + parts.joinToString(separator = " · ")
+    return stringResource(R.string.backup_status_recent, parts.joinToString(separator = " · "))
+}
+
+@Composable
+private fun BackupMessage?.resolveBackupMessage(): String? {
+    val message = this ?: return null
+    return stringResource(message.resourceId, *message.formatArgs.toTypedArray())
 }
 
 internal data class WebDavDraft(
@@ -139,20 +149,27 @@ private fun BackupStatusContent(
     syncSettings: SyncSettings,
     activity: BackupActivity?,
 ) {
+    val appLocale = LocalContext.current.appLocale()
     if (activity == null) {
         // Graphite §3: backup status is timestamp + version + device — machine facts → MONO (meta), muted ink.
         Text(
-            formatBackupStatus(syncSettings),
+            formatBackupStatus(syncSettings, appLocale),
             style = LocalAmberType.current.meta,
             color = LocalAmberTokens.current.ink3,
         )
         return
     }
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Text(activity.title, style = LocalAmberType.current.body)
-        if (activity.detail.isNotBlank()) {
+        Text(stringResource(activity.titleRes), style = LocalAmberType.current.body)
+        val detailRes = activity.detailRes
+        val detail = if (detailRes != null) {
+            stringResource(detailRes)
+        } else {
+            activity.detail
+        }
+        if (detail.isNotBlank()) {
             Text(
-                activity.detail,
+                detail,
                 style = LocalAmberType.current.secondary,
                 color = LocalAmberTokens.current.ink3,
             )
@@ -181,6 +198,7 @@ fun BackupPage(vm: BackupVM = koinViewModel()) {
     val backupActivity by vm.backupActivity.collectAsState()
     val pendingGoogleAuthorization by vm.pendingGoogleAuthorization.collectAsState()
     val pendingCloudRestore by vm.pendingCloudRestore.collectAsState()
+    val cloudConflict by vm.cloudConflict.collectAsState()
     val cloudSnapshots by vm.cloudSnapshots.collectAsState()
     val cloudSnapshotPickerVisible by vm.cloudSnapshotPickerVisible.collectAsState()
     val context = LocalContext.current
@@ -195,6 +213,10 @@ fun BackupPage(vm: BackupVM = koinViewModel()) {
     val pendingUploadConflict by vm.pendingUploadConflict.collectAsState()
     val pendingExportDialog by vm.pendingExportDialog.collectAsState()
     val verifiedRestore by vm.pendingVerifiedRestore.collectAsState()
+    val googleMessageText = googleMessage.resolveBackupMessage()
+    val localMessageText = localMessage.resolveBackupMessage()
+    val webDavMessageText = webDavMessage.resolveBackupMessage()
+    val folderMessageText = folderMessage.resolveBackupMessage()
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     var pendingGoogleAction by remember { mutableStateOf<GoogleSyncAction?>(null) }
     // Restore scope is always EVERYTHING; within it the user opts in to
@@ -356,7 +378,7 @@ fun BackupPage(vm: BackupVM = koinViewModel()) {
     Scaffold(
         topBar = {
             WorkspaceTopBar(
-                title = "同步与备份",
+                title = stringResource(R.string.backup_page_title),
                 navigationIcon = { BackButton() },
                 scrollBehavior = scrollBehavior,
             )
@@ -381,27 +403,38 @@ fun BackupPage(vm: BackupVM = koinViewModel()) {
                         null
                     },
                     leadingContent = { Icon(Lucide.DatabaseZap, contentDescription = null) },
-                    headlineContent = { Text("Google 账号") },
+                    headlineContent = { Text(stringResource(R.string.backup_google_account)) },
                     supportingContent = {
-                        Text(
-                            when {
-                                !googleAvailable -> vm.googleConfigStatus.reason
-                                googleMessage.isNotBlank() -> googleMessage
-                                googleSession != null -> "已连接：${googleSession?.label.orEmpty()}"
-                                hasGoogleConnection -> "上次连接：${settings.syncSettings.googleAccountEmail}"
-                                settings.syncSettings.googleAccountEmail.isNotBlank() ->
-                                    "上次连接：${settings.syncSettings.googleAccountEmail}"
-                                vm.googleConfigStatus.reason.isNotBlank() -> vm.googleConfigStatus.reason
-                                else -> "登录后即可上传和下载同步快照"
-                            }
-                        )
+                        val supportingText = when {
+                            !googleAvailable -> stringResource(
+                                R.string.backup_google_oauth_missing_client,
+                                context.packageName,
+                            )
+                            googleMessageText != null -> googleMessageText
+                            googleSession != null -> stringResource(
+                                R.string.backup_google_connected,
+                                googleSession?.label.orEmpty(),
+                            )
+                            hasGoogleConnection -> stringResource(
+                                R.string.backup_google_last_connected,
+                                settings.syncSettings.googleAccountEmail,
+                            )
+                            settings.syncSettings.googleAccountEmail.isNotBlank() -> stringResource(
+                                R.string.backup_google_last_connected,
+                                settings.syncSettings.googleAccountEmail,
+                            )
+                            !vm.googleConfigStatus.credentialManagerAvailable ->
+                                stringResource(R.string.backup_google_credential_manager_unavailable)
+                            else -> stringResource(R.string.backup_google_login_hint)
+                        }
+                        Text(supportingText)
                     },
                     trailingContent = {
                         Text(
                             when {
-                                !googleAvailable -> "不可用"
-                                hasGoogleConnection -> "已连接"
-                                else -> "连接"
+                                !googleAvailable -> stringResource(R.string.backup_unavailable)
+                                hasGoogleConnection -> stringResource(R.string.backup_connected)
+                                else -> stringResource(R.string.backup_connect)
                             },
                             color = if (googleAvailable && hasGoogleConnection) {
                                 MaterialTheme.colorScheme.primary
@@ -413,7 +446,7 @@ fun BackupPage(vm: BackupVM = koinViewModel()) {
                 )
                 item(
                     leadingContent = { Icon(Lucide.Cloud, contentDescription = null) },
-                    headlineContent = { Text("备份状态") },
+                    headlineContent = { Text(stringResource(R.string.backup_status_title)) },
                     supportingContent = {
                         BackupStatusContent(
                             syncSettings = settings.syncSettings,
@@ -453,9 +486,15 @@ fun BackupPage(vm: BackupVM = koinViewModel()) {
                         null
                     },
                     leadingContent = { Icon(Lucide.Upload, contentDescription = null) },
-                    headlineContent = { Text("上传") },
+                    headlineContent = { Text(stringResource(R.string.backup_upload)) },
                     supportingContent = {
-                        Text(if (googleAvailable) "把当前数据保存到 Google Drive" else "Google Drive 尚未配置")
+                        Text(
+                            if (googleAvailable) {
+                                stringResource(R.string.backup_google_upload_desc)
+                            } else {
+                                stringResource(R.string.backup_google_not_configured)
+                            }
+                        )
                     }
                 )
                 item(
@@ -472,9 +511,15 @@ fun BackupPage(vm: BackupVM = koinViewModel()) {
                         null
                     },
                     leadingContent = { Icon(Lucide.CloudDownload, contentDescription = null) },
-                    headlineContent = { Text("下载") },
+                    headlineContent = { Text(stringResource(R.string.backup_download)) },
                     supportingContent = {
-                        Text(if (googleAvailable) "从 Google Drive 恢复到这台设备" else "Google Drive 尚未配置")
+                        Text(
+                            if (googleAvailable) {
+                                stringResource(R.string.backup_google_download_desc)
+                            } else {
+                                stringResource(R.string.backup_google_not_configured)
+                            }
+                        )
                     }
                 )
             }
@@ -483,7 +528,7 @@ fun BackupPage(vm: BackupVM = koinViewModel()) {
                 CardGroup(title = { SectionLabel("WebDAV") }) {
                     item(
                         leadingContent = { Icon(Lucide.DatabaseZap, contentDescription = null) },
-                        headlineContent = { Text("服务器配置") },
+                        headlineContent = { Text(stringResource(R.string.backup_server_config)) },
                         supportingContent = {
                             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                 OutlinedTextField(
@@ -492,7 +537,7 @@ fun BackupPage(vm: BackupVM = koinViewModel()) {
                                         webDavUrl = it
                                         webDavUrlDirty = true
                                     },
-                                    label = { Text("服务器地址") },
+                                    label = { Text(stringResource(R.string.backup_server_address)) },
                                     singleLine = true,
                                     modifier = Modifier.fillMaxWidth(),
                                 )
@@ -502,7 +547,7 @@ fun BackupPage(vm: BackupVM = koinViewModel()) {
                                         webDavUsername = it
                                         webDavUsernameDirty = true
                                     },
-                                    label = { Text("用户名") },
+                                    label = { Text(stringResource(R.string.backup_username)) },
                                     singleLine = true,
                                     modifier = Modifier.fillMaxWidth(),
                                 )
@@ -512,7 +557,7 @@ fun BackupPage(vm: BackupVM = koinViewModel()) {
                                         webDavPassword = it
                                         webDavPasswordDirty = true
                                     },
-                                    label = { Text("密码") },
+                                    label = { Text(stringResource(R.string.backup_password)) },
                                     singleLine = true,
                                     visualTransformation = PasswordVisualTransformation(),
                                     modifier = Modifier.fillMaxWidth(),
@@ -523,7 +568,7 @@ fun BackupPage(vm: BackupVM = koinViewModel()) {
                                         webDavPath = it
                                         webDavPathDirty = true
                                     },
-                                    label = { Text("备份目录") },
+                                    label = { Text(stringResource(R.string.backup_directory)) },
                                     singleLine = true,
                                     modifier = Modifier.fillMaxWidth(),
                                 )
@@ -536,14 +581,14 @@ fun BackupPage(vm: BackupVM = koinViewModel()) {
                                             webDavPasswordDirty = false
                                             webDavPathDirty = false
                                         },
-                                    ) { Text("保存配置") }
+                                    ) { Text(stringResource(R.string.backup_save_config)) }
                                     TextButton(onClick = { vm.refreshWebDavSnapshots() }) {
-                                        Text("读取快照")
+                                        Text(stringResource(R.string.backup_read_snapshots))
                                     }
                                 }
-                                if (webDavMessage.isNotBlank()) {
+                                if (webDavMessageText != null) {
                                     Text(
-                                        webDavMessage,
+                                        webDavMessageText,
                                         style = LocalAmberType.current.secondary,
                                         color = LocalAmberTokens.current.ink3,
                                     )
@@ -554,12 +599,12 @@ fun BackupPage(vm: BackupVM = koinViewModel()) {
                     item(
                         onClick = { vm.requestExport(ExportSource.WebDav) },
                         leadingContent = { Icon(Lucide.Upload, contentDescription = null) },
-                        headlineContent = { Text("上传") },
-                        supportingContent = { Text("把当前数据作为新快照保存到 WebDAV") },
+                        headlineContent = { Text(stringResource(R.string.backup_upload)) },
+                        supportingContent = { Text(stringResource(R.string.backup_webdav_upload_desc)) },
                     )
                 }
                 if (webDavSnapshots.isNotEmpty()) {
-                    CardGroup(title = { SectionLabel("WebDAV 快照") }) {
+                    CardGroup(title = { SectionLabel(stringResource(R.string.backup_webdav_snapshots)) }) {
                         webDavSnapshots.forEachIndexed { index, snapshot ->
                             rawItem {
                                 ProviderSnapshotRow(
@@ -573,35 +618,41 @@ fun BackupPage(vm: BackupVM = koinViewModel()) {
                     }
                 }
 
-                CardGroup(title = { SectionLabel("本地文件夹") }) {
+                CardGroup(title = { SectionLabel(stringResource(R.string.backup_local_folder)) }) {
                     item(
                         onClick = { folderPickerLauncher.launch(null) },
                         leadingContent = { Icon(Lucide.FolderOpen, contentDescription = null) },
-                        headlineContent = { Text(if (folderInfo != null) "更换文件夹" else "选择文件夹") },
+                        headlineContent = {
+                            Text(
+                                if (folderInfo != null) {
+                                    stringResource(R.string.backup_change_folder)
+                                } else {
+                                    stringResource(R.string.backup_choose_folder)
+                                }
+                            )
+                        },
                         supportingContent = {
                             Text(
-                                folderMessage.ifBlank {
-                                    folderInfo?.displayName?.takeIf { it.isNotBlank() }
-                                        ?: "选择后授权保留，可直接读写文件夹里的快照"
-                                }
+                                folderMessageText ?: folderInfo?.displayName?.takeIf { it.isNotBlank() }
+                                    ?: stringResource(R.string.backup_folder_permission_hint)
                             )
                         },
                     )
                     item(
                         onClick = { vm.refreshLocalFolderSnapshots() },
                         leadingContent = { Icon(Lucide.DatabaseZap, contentDescription = null) },
-                        headlineContent = { Text("读取快照") },
-                        supportingContent = { Text("列出所选文件夹里的同步快照") },
+                        headlineContent = { Text(stringResource(R.string.backup_read_snapshots)) },
+                        supportingContent = { Text(stringResource(R.string.backup_folder_list_desc)) },
                     )
                     item(
                         onClick = { vm.requestExport(ExportSource.LocalFolder) },
                         leadingContent = { Icon(Lucide.Upload, contentDescription = null) },
-                        headlineContent = { Text("上传") },
-                        supportingContent = { Text("把当前数据作为新快照保存到文件夹") },
+                        headlineContent = { Text(stringResource(R.string.backup_upload)) },
+                        supportingContent = { Text(stringResource(R.string.backup_folder_upload_desc)) },
                     )
                 }
                 if (localFolderSnapshots.isNotEmpty()) {
-                    CardGroup(title = { SectionLabel("文件夹快照") }) {
+                    CardGroup(title = { SectionLabel(stringResource(R.string.backup_folder_snapshots)) }) {
                         localFolderSnapshots.forEachIndexed { index, snapshot ->
                             rawItem {
                                 ProviderSnapshotRow(
@@ -616,18 +667,16 @@ fun BackupPage(vm: BackupVM = koinViewModel()) {
                 }
             }
 
-            CardGroup(title = { SectionLabel("本地备份") }) {
+            CardGroup(title = { SectionLabel(stringResource(R.string.backup_local_backup)) }) {
                 item(
                     onClick = {
                         createDocumentLauncher.launch(LocalBackupRepository.suggestedFileName())
                     },
                     leadingContent = { Icon(Lucide.Upload, contentDescription = null) },
-                    headlineContent = { Text("导出") },
+                    headlineContent = { Text(stringResource(R.string.backup_export)) },
                     supportingContent = {
                         Text(
-                            localMessage.ifBlank {
-                                "把当前数据保存成本地文件"
-                            }
+                            localMessageText ?: stringResource(R.string.backup_local_export_desc)
                         )
                     }
                 )
@@ -637,9 +686,9 @@ fun BackupPage(vm: BackupVM = koinViewModel()) {
                         openDocumentLauncher.launch(arrayOf(SYNC_ARCHIVE_MIME, "application/zip", "*/*"))
                     },
                     leadingContent = { Icon(Lucide.FileInput, contentDescription = null) },
-                    headlineContent = { Text("导入") },
+                    headlineContent = { Text(stringResource(R.string.backup_import)) },
                     supportingContent = {
-                        Text("从本地备份文件恢复到这台设备")
+                        Text(stringResource(R.string.backup_local_import_desc))
                     }
                 )
             }
@@ -746,12 +795,20 @@ fun BackupPage(vm: BackupVM = koinViewModel()) {
     pendingDeleteConfirm?.let { snapshot ->
         AlertDialog(
             onDismissRequest = { vm.dismissPendingDelete() },
-            title = { Text("删除远端快照") },
+            title = { Text(stringResource(R.string.backup_delete_remote_snapshot)) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
-                        "将删除 ${snapshot.name}（${snapshot.manifest.deviceLabel.ifBlank { "未知设备" }}，" +
-                            "${snapshot.manifest.appVersionName.ifBlank { "未知版本" }}）。此操作不可撤销。",
+                        stringResource(
+                            R.string.backup_delete_remote_snapshot_message,
+                            snapshot.name,
+                            snapshot.manifest.deviceLabel.ifBlank {
+                                stringResource(R.string.backup_unknown_device)
+                            },
+                            snapshot.manifest.appVersionName.ifBlank {
+                                stringResource(R.string.backup_unknown_version)
+                            },
+                        ),
                         style = LocalAmberType.current.secondary,
                         color = LocalAmberTokens.current.ink3,
                     )
@@ -759,12 +816,12 @@ fun BackupPage(vm: BackupVM = koinViewModel()) {
             },
             confirmButton = {
                 Button(onClick = { vm.confirmPendingDelete() }) {
-                    Text("确认删除")
+                    Text(stringResource(R.string.confirm_delete))
                 }
             },
             dismissButton = {
                 TextButton(onClick = { vm.dismissPendingDelete() }) {
-                    Text("取消")
+                    Text(stringResource(R.string.cancel))
                 }
             },
         )
@@ -773,12 +830,14 @@ fun BackupPage(vm: BackupVM = koinViewModel()) {
     pendingUploadConflict?.let { choice ->
         AlertDialog(
             onDismissRequest = { vm.dismissUploadConflict() },
-            title = { Text("上传冲突") },
+            title = { Text(stringResource(R.string.backup_upload_conflict)) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
-                        "远端已有这台设备的快照（${choice.snapshot.manifest.createdAt}）。" +
-                            "覆盖会删除旧快照，创建副本会保留全部。",
+                        stringResource(
+                            R.string.backup_upload_conflict_message,
+                            choice.snapshot.manifest.createdAt,
+                        ),
                         style = LocalAmberType.current.secondary,
                         color = LocalAmberTokens.current.ink3,
                     )
@@ -786,12 +845,12 @@ fun BackupPage(vm: BackupVM = koinViewModel()) {
             },
             confirmButton = {
                 Button(onClick = { vm.resolveUploadConflict(UploadConflictPolicy.OVERWRITE) }) {
-                    Text("覆盖旧快照")
+                    Text(stringResource(R.string.backup_overwrite_old_snapshot))
                 }
             },
             dismissButton = {
                 TextButton(onClick = { vm.resolveUploadConflict(UploadConflictPolicy.CREATE_COPY) }) {
-                    Text("创建副本")
+                    Text(stringResource(R.string.backup_create_copy))
                 }
             },
         )
@@ -804,6 +863,53 @@ fun BackupPage(vm: BackupVM = koinViewModel()) {
         BackupDialog()
     }
 
+    cloudConflict?.let { conflict ->
+        AlertDialog(
+            onDismissRequest = { vm.dismissCloudConflict() },
+            title = { Text(stringResource(R.string.backup_cloud_snapshot_conflict)) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        stringResource(R.string.backup_cloud_revision_conflict),
+                        style = LocalAmberType.current.secondary,
+                        color = LocalAmberTokens.current.ink3,
+                    )
+                    // Graphite §3: remote modified time + local revision are machine facts → MONO (meta).
+                    Text(
+                        stringResource(
+                            R.string.backup_remote_modified_time,
+                            conflict.remoteFile.modifiedTime ?: stringResource(R.string.backup_unknown_time),
+                        ),
+                        style = LocalAmberType.current.meta,
+                        color = LocalAmberTokens.current.ink,
+                    )
+                    Text(
+                        stringResource(
+                            R.string.backup_local_revision,
+                            conflict.localRevision.ifBlank { stringResource(R.string.backup_no_revision) },
+                        ),
+                        style = LocalAmberType.current.meta,
+                        color = LocalAmberTokens.current.ink,
+                    )
+                    Text(
+                        stringResource(R.string.backup_cloud_overwrite_warning),
+                        style = LocalAmberType.current.secondary,
+                        color = LocalAmberTokens.current.ink3,
+                    )
+                }
+            },
+            confirmButton = {
+                Button(onClick = { vm.confirmOverwriteCloud() }) {
+                    Text(stringResource(R.string.backup_overwrite_cloud))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { vm.dismissCloudConflict() }) {
+                    Text(stringResource(R.string.cancel))
+                }
+            },
+        )
+    }
 }
 
 @Composable
@@ -813,9 +919,10 @@ private fun CloudSnapshotPickerDialog(
     onSelect: (GoogleDriveFile) -> Unit,
     onDelete: (GoogleDriveFile) -> Unit,
 ) {
+    val appLocale = LocalContext.current.appLocale()
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("选择云端快照") },
+        title = { Text(stringResource(R.string.backup_choose_cloud_snapshot)) },
         text = {
             Column(
                 modifier = Modifier.verticalScroll(rememberScrollState()),
@@ -838,12 +945,12 @@ private fun CloudSnapshotPickerDialog(
                             // Graphite §3: snapshot title (timestamp · version) and detail
                             // (device · size · archive format) are machine facts → MONO (meta).
                             Text(
-                                formatCloudSnapshotTitle(snapshot),
+                                formatCloudSnapshotTitle(snapshot, appLocale),
                                 style = LocalAmberType.current.meta,
                                 color = LocalAmberTokens.current.ink,
                             )
                             Text(
-                                formatCloudSnapshotDetail(snapshot, unsupported),
+                                formatCloudSnapshotDetail(snapshot, unsupported, appLocale),
                                 style = LocalAmberType.current.meta,
                                 color = LocalAmberTokens.current.ink3,
                             )
@@ -851,15 +958,19 @@ private fun CloudSnapshotPickerDialog(
                         TextButton(onClick = { onDelete(snapshot) }) {
                             Icon(
                                 Lucide.Trash,
-                                contentDescription = "删除",
+                                contentDescription = stringResource(R.string.delete),
                                 modifier = Modifier.size(16.dp),
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                             Spacer(Modifier.size(4.dp))
-                            Text("删除", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(stringResource(R.string.delete), color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                         Text(
-                            if (unsupported) "不支持" else "选择",
+                            if (unsupported) {
+                                stringResource(R.string.backup_unsupported)
+                            } else {
+                                stringResource(R.string.backup_select)
+                            },
                             color = if (unsupported) {
                                 MaterialTheme.colorScheme.onSurfaceVariant
                             } else {
@@ -876,40 +987,46 @@ private fun CloudSnapshotPickerDialog(
         confirmButton = {},
         dismissButton = {
             TextButton(onClick = onDismiss) {
-                Text("取消")
+                Text(stringResource(R.string.cancel))
             }
         },
     )
 }
 
-private fun formatCloudSnapshotTitle(snapshot: GoogleDriveFile): String {
+@Composable
+private fun formatCloudSnapshotTitle(snapshot: GoogleDriveFile, locale: Locale): String {
     val createdAt = snapshot.backupCreatedAt?.let {
-        BackupStatusDateFormat.get()!!.format(Date(it))
-    } ?: snapshot.modifiedTime?.take(16)?.replace('T', ' ') ?: "未知时间"
-    val version = snapshot.backupVersionName.ifBlank { "未知版本" }
+        formatBackupDate(it, locale)
+    } ?: snapshot.modifiedTime?.take(16)?.replace('T', ' ') ?: stringResource(R.string.backup_unknown_time)
+    val version = snapshot.backupVersionName.ifBlank { stringResource(R.string.backup_unknown_version) }
     return "$createdAt · $version"
 }
 
-private fun formatCloudSnapshotDetail(snapshot: GoogleDriveFile, unsupported: Boolean): String {
+@Composable
+private fun formatCloudSnapshotDetail(
+    snapshot: GoogleDriveFile,
+    unsupported: Boolean,
+    locale: Locale,
+): String {
     val parts = mutableListOf<String>()
     if (snapshot.backupDeviceLabel.isNotBlank()) parts += snapshot.backupDeviceLabel
-    formatDriveSize(snapshot.size)?.let { parts += it }
+    formatDriveSize(snapshot.size, locale)?.let { parts += it }
     snapshot.archiveVersion?.let { archiveVersion ->
         parts += if (unsupported) {
-            "备份格式 v$archiveVersion 不兼容"
+            stringResource(R.string.backup_archive_incompatible, archiveVersion)
         } else {
-            "备份格式 v$archiveVersion"
+            stringResource(R.string.backup_archive_format, archiveVersion)
         }
     }
     if (parts.isEmpty()) parts += snapshot.name
     return parts.joinToString(separator = " · ")
 }
 
-private fun formatDriveSize(size: String?): String? {
+private fun formatDriveSize(size: String?, locale: Locale): String? {
     val bytes = size?.toLongOrNull() ?: return null
     val mib = bytes / (1024.0 * 1024.0)
     return if (mib >= 1.0) {
-        String.format(Locale.getDefault(), "%.1f MB", mib)
+        String.format(locale, "%.1f MB", mib)
     } else {
         "${bytes / 1024} KB"
     }
@@ -928,13 +1045,14 @@ private fun ImportPreviewDialog(
     onDismiss: () -> Unit,
     onRestore: () -> Unit,
 ) {
+    val appLocale = LocalContext.current.appLocale()
     AlertDialog(
         modifier = Modifier.imePadding(),
         properties = DialogProperties(decorFitsSystemWindows = false),
         onDismissRequest = {
             if (!restoring) onDismiss()
         },
-        title = { Text("确认覆盖") },
+        title = { Text(stringResource(R.string.backup_confirm_overwrite)) },
         text = {
             Column(
                 modifier = Modifier
@@ -950,26 +1068,34 @@ private fun ImportPreviewDialog(
                     )
                     BackupStatusContent(
                         syncSettings = SyncSettings(),
-                        activity = restoreActivity ?: BackupActivity(title = "正在恢复备份"),
+                        activity = restoreActivity ?: BackupActivity(
+                            titleRes = R.string.backup_activity_restoring_backup,
+                        ),
                     )
                     Hairline()
                 }
                 // Graphite §3: backup createdAt + version strings are machine facts → MONO (meta).
                 Text(
-                    "创建时间：${preview.createdAt}",
+                    stringResource(R.string.backup_created_at, preview.createdAt),
                     style = LocalAmberType.current.meta,
                     color = LocalAmberTokens.current.ink,
                 )
                 Text(
-                    "版本：${preview.manifest.appVersionName} / ${preview.manifest.appVersionCode}",
+                    stringResource(
+                        R.string.backup_version,
+                        preview.manifest.appVersionName,
+                        preview.manifest.appVersionCode,
+                    ),
                     style = LocalAmberType.current.meta,
                     color = LocalAmberTokens.current.ink,
                 )
                 if (preview.legacyFormat) {
                     // P7-02 迁移引导：旧格式只读恢复，恢复后建议重存为新格式。
                     Text(
-                        "该备份为旧格式（v${preview.manifest.archiveVersion}），已兼容恢复。" +
-                            "恢复后建议重新导出，以使用新的加密格式。",
+                        stringResource(
+                            R.string.backup_legacy_restore_notice,
+                            preview.manifest.archiveVersion,
+                        ),
                         style = LocalAmberType.current.secondary,
                         color = MaterialTheme.colorScheme.error,
                     )
@@ -977,15 +1103,26 @@ private fun ImportPreviewDialog(
                 payloadPreview?.let { payload ->
                     Hairline()
                     Text(
-                        "备份内容：会话 ${payload.conversationCount} · 消息 ${payload.messageNodeCount}" +
-                            " · 附件 ${payload.attachmentCount} · 文件 ${payload.fileCount}" +
-                            if (payload.estimatedBytes > 0L) " · 约 ${formatBytes(payload.estimatedBytes)}" else "",
+                        stringResource(
+                            R.string.backup_contents_summary,
+                            payload.conversationCount,
+                            payload.messageNodeCount,
+                            payload.attachmentCount,
+                            payload.fileCount,
+                        ) + if (payload.estimatedBytes > 0L) {
+                                stringResource(
+                                    R.string.backup_approximate_size,
+                                    formatBytes(payload.estimatedBytes, appLocale),
+                                )
+                        } else {
+                            ""
+                        },
                         style = LocalAmberType.current.meta,
                         color = LocalAmberTokens.current.ink,
                     )
                     if (payload.includesSecrets) {
                         Text(
-                            "该备份包含 OAuth 登录令牌（FULL 模式）。",
+                            stringResource(R.string.backup_contains_oauth_tokens),
                             style = LocalAmberType.current.secondary,
                             color = LocalAmberTokens.current.ink3,
                         )
@@ -993,21 +1130,21 @@ private fun ImportPreviewDialog(
                 }
                 Hairline()
                 Text(
-                    "覆盖会替换 Provider 配置、助手、记忆、文件等本机数据。下面两项默认不恢复——勾选才会把备份里的对应内容也覆盖到本机。",
+                    stringResource(R.string.backup_restore_scope_warning),
                     style = LocalAmberType.current.secondary,
                     color = LocalAmberTokens.current.ink3,
                 )
                 IncludeToggleRow(
                     checked = restoreConversations,
-                    title = "恢复对话",
-                    description = "勾选后，备份里的对话历史会覆盖本机现有对话。不勾选则保留本机对话。",
+                    title = stringResource(R.string.backup_restore_conversations),
+                    description = stringResource(R.string.backup_restore_conversations_desc),
                     enabled = !restoring,
                     onCheckedChange = onRestoreConversationsChange,
                 )
                 IncludeToggleRow(
                     checked = restoreGenMedia,
-                    title = "恢复生成的图片",
-                    description = "勾选后，备份里的生成图（对话内联图 + 独立画廊）会覆盖本机。不勾选则保留本机的图。",
+                    title = stringResource(R.string.backup_restore_generated_images),
+                    description = stringResource(R.string.backup_restore_generated_images_desc),
                     enabled = !restoring,
                     onCheckedChange = onRestoreGenMediaChange,
                 )
@@ -1025,7 +1162,13 @@ private fun ImportPreviewDialog(
                     )
                     Spacer(Modifier.size(8.dp))
                 }
-                Text(if (restoring) "恢复中" else "覆盖")
+                Text(
+                    if (restoring) {
+                        stringResource(R.string.backup_restoring)
+                    } else {
+                        stringResource(R.string.backup_overwrite)
+                    }
+                )
             }
         },
         dismissButton = {
@@ -1033,7 +1176,7 @@ private fun ImportPreviewDialog(
                 onClick = onDismiss,
                 enabled = !restoring,
             ) {
-                Text("取消")
+                Text(stringResource(R.string.cancel))
             }
         }
     )
@@ -1045,6 +1188,7 @@ private fun ProviderSnapshotRow(
     onRestore: () -> Unit,
     onDelete: () -> Unit,
 ) {
+    val appLocale = LocalContext.current.appLocale()
     val compatibility = checkSnapshotCompatibility(snapshot.manifest)
     val unsupported = compatibility !is app.amber.core.sync.provider.SnapshotCompatibility.Compatible
     Row(
@@ -1059,12 +1203,12 @@ private fun ProviderSnapshotRow(
             // Graphite §3: snapshot title (timestamp · version) and detail
             // (device · size · domains) are machine facts → MONO (meta).
             Text(
-                formatProviderSnapshotTitle(snapshot),
+                formatProviderSnapshotTitle(snapshot, appLocale),
                 style = LocalAmberType.current.meta,
                 color = LocalAmberTokens.current.ink,
             )
             Text(
-                formatProviderSnapshotDetail(snapshot, unsupported, compatibility),
+                formatProviderSnapshotDetail(snapshot, unsupported, appLocale),
                 style = LocalAmberType.current.meta,
                 color = LocalAmberTokens.current.ink3,
             )
@@ -1072,15 +1216,19 @@ private fun ProviderSnapshotRow(
         TextButton(onClick = onDelete) {
             Icon(
                 Lucide.Trash,
-                contentDescription = "删除",
+                contentDescription = stringResource(R.string.delete),
                 modifier = Modifier.size(16.dp),
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Spacer(Modifier.size(4.dp))
-            Text("删除", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(stringResource(R.string.delete), color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         Text(
-            if (unsupported) "不兼容" else "恢复",
+            if (unsupported) {
+                stringResource(R.string.backup_incompatible)
+            } else {
+                stringResource(R.string.backup_restore)
+            },
             color = if (unsupported) {
                 MaterialTheme.colorScheme.onSurfaceVariant
             } else {
@@ -1090,33 +1238,55 @@ private fun ProviderSnapshotRow(
     }
 }
 
-private fun formatProviderSnapshotTitle(snapshot: SyncSnapshot): String {
+@Composable
+private fun formatProviderSnapshotTitle(snapshot: SyncSnapshot, locale: Locale): String {
     val createdAt = snapshot.manifest.createdAt.let {
-        if (it > 0L) BackupStatusDateFormat.get()!!.format(Date(it)) else "未知时间"
+        if (it > 0L) {
+            formatBackupDate(it, locale)
+        } else {
+            stringResource(R.string.backup_unknown_time)
+        }
     }
-    val version = snapshot.manifest.appVersionName.ifBlank { "未知版本" }
+    val version = snapshot.manifest.appVersionName.ifBlank {
+        stringResource(R.string.backup_unknown_version)
+    }
     return "$createdAt · $version"
 }
 
+@Composable
 private fun formatProviderSnapshotDetail(
     snapshot: SyncSnapshot,
     unsupported: Boolean,
-    compatibility: app.amber.core.sync.provider.SnapshotCompatibility,
+    locale: Locale,
 ): String {
     val parts = mutableListOf<String>()
     if (snapshot.manifest.deviceLabel.isNotBlank()) parts += snapshot.manifest.deviceLabel
     if (snapshot.sizeBytes > 0L) {
         parts += if (snapshot.sizeBytes >= 1024 * 1024) {
-            String.format(Locale.getDefault(), "%.1f MB", snapshot.sizeBytes / (1024.0 * 1024.0))
+            String.format(locale, "%.1f MB", snapshot.sizeBytes / (1024.0 * 1024.0))
         } else {
             "${snapshot.sizeBytes / 1024} KB"
         }
     }
     parts += if (unsupported) {
-        "格式不兼容：${(compatibility as? app.amber.core.sync.provider.SnapshotCompatibility.Incompatible)?.reason.orEmpty()}"
+        stringResource(
+            R.string.backup_format_incompatible,
+            if (snapshot.manifest.schemaVersion > CURRENT_SNAPSHOT_SCHEMA_VERSION) {
+                "schema v${snapshot.manifest.schemaVersion}"
+            } else {
+                stringResource(R.string.backup_archive_incompatible, snapshot.manifest.archiveVersion)
+            },
+        )
     } else {
-        "加密:${if (snapshot.manifest.encrypted) "是" else "否"} " +
-            "领域:${snapshot.manifest.includedDomains.joinToString("/").ifBlank { "无" }}"
+        stringResource(
+            R.string.backup_encryption_domains,
+            stringResource(
+                if (snapshot.manifest.encrypted) R.string.backup_yes else R.string.backup_no,
+            ),
+            snapshot.manifest.includedDomains.joinToString("/").ifBlank {
+                stringResource(R.string.backup_none)
+            },
+        )
     }
     return parts.joinToString(separator = " · ")
 }
@@ -1178,7 +1348,7 @@ private fun RestorePassphraseDialog(
         modifier = Modifier.imePadding(),
         properties = DialogProperties(decorFitsSystemWindows = false),
         onDismissRequest = { if (!verifying) onDismiss() },
-        title = { Text("恢复备份") },
+        title = { Text(stringResource(R.string.backup_restore_backup)) },
         text = {
             Column(
                 modifier = Modifier
@@ -1194,18 +1364,25 @@ private fun RestorePassphraseDialog(
                     )
                 }
                 Text(
-                    "创建时间：${preview.createdAt}",
+                    stringResource(R.string.backup_created_at, preview.createdAt),
                     style = LocalAmberType.current.meta,
                     color = LocalAmberTokens.current.ink,
                 )
                 Text(
-                    "版本：${preview.manifest.appVersionName} / ${preview.manifest.appVersionCode}",
+                    stringResource(
+                        R.string.backup_version,
+                        preview.manifest.appVersionName,
+                        preview.manifest.appVersionCode,
+                    ),
                     style = LocalAmberType.current.meta,
                     color = LocalAmberTokens.current.ink,
                 )
                 if (preview.legacyFormat) {
                     Text(
-                        "该备份为旧格式（v${preview.manifest.archiveVersion}），可兼容恢复。",
+                        stringResource(
+                            R.string.backup_legacy_restore_compatible,
+                            preview.manifest.archiveVersion,
+                        ),
                         style = LocalAmberType.current.secondary,
                         color = LocalAmberTokens.current.ink3,
                     )
@@ -1214,7 +1391,7 @@ private fun RestorePassphraseDialog(
                     OutlinedTextField(
                         value = passphrase,
                         onValueChange = { passphrase = it },
-                        label = { Text("备份口令") },
+                        label = { Text(stringResource(R.string.backup_passphrase)) },
                         singleLine = true,
                         visualTransformation = PasswordVisualTransformation(),
                         modifier = Modifier.fillMaxWidth(),
@@ -1222,14 +1399,14 @@ private fun RestorePassphraseDialog(
                     OutlinedTextField(
                         value = confirm,
                         onValueChange = { confirm = it },
-                        label = { Text("确认口令") },
+                        label = { Text(stringResource(R.string.backup_confirm_passphrase)) },
                         singleLine = true,
                         visualTransformation = PasswordVisualTransformation(),
                         modifier = Modifier.fillMaxWidth(),
                     )
                     if (mismatch) {
                         Text(
-                            "两次输入的口令不一致",
+                            stringResource(R.string.backup_passphrase_mismatch),
                             style = LocalAmberType.current.secondary,
                             color = MaterialTheme.colorScheme.error,
                         )
@@ -1237,9 +1414,9 @@ private fun RestorePassphraseDialog(
                 } else {
                     Text(
                         if (preview.manifest.encryptionMode == SyncEncryptionMode.DEVICE_BOUND) {
-                            "该备份使用设备绑定加密，可直接在本设备恢复（无需口令）。"
+                            stringResource(R.string.backup_device_bound_restore_hint)
                         } else {
-                            "该备份未设置口令（历史格式），可直接恢复。"
+                            stringResource(R.string.backup_legacy_no_passphrase_hint)
                         },
                         style = LocalAmberType.current.secondary,
                         color = LocalAmberTokens.current.ink3,
@@ -1248,7 +1425,10 @@ private fun RestorePassphraseDialog(
                 if (verifying) {
                     BackupStatusContent(
                         syncSettings = SyncSettings(),
-                        activity = BackupActivity(title = "正在验证备份", detail = "正在校验口令与加密头"),
+                        activity = BackupActivity(
+                            titleRes = R.string.backup_activity_verifying_backup,
+                            detailRes = R.string.backup_activity_verifying_encryption_header,
+                        ),
                     )
                 }
             }
@@ -1258,12 +1438,18 @@ private fun RestorePassphraseDialog(
                 onClick = { onVerify(passphrase) },
                 enabled = !verifying && (!needsPassphrase || (passphrase.isNotBlank() && !mismatch)),
             ) {
-                Text(if (verifying) "验证中" else "验证并预览")
+                Text(
+                    if (verifying) {
+                        stringResource(R.string.backup_verifying)
+                    } else {
+                        stringResource(R.string.backup_verify_and_preview)
+                    }
+                )
             }
         },
         dismissButton = {
             TextButton(onClick = onDismiss, enabled = !verifying) {
-                Text("取消")
+                Text(stringResource(R.string.cancel))
             }
         },
     )
@@ -1283,16 +1469,19 @@ private fun ExportEncryptionDialog(
     var passphrase by remember { mutableStateOf("") }
     var confirm by remember { mutableStateOf("") }
     val error = when {
-        mode == SyncEncryptionMode.PASSPHRASE && passphrase.isBlank() -> "请输入自定义备份口令"
-        mode == SyncEncryptionMode.PASSPHRASE && passphrase != confirm -> "两次输入的口令不一致"
-        passphrase == NO_PASSPHRASE_FALLBACK -> "这个口令是内部保留值，请换一个口令"
+        mode == SyncEncryptionMode.PASSPHRASE && passphrase.isBlank() ->
+            stringResource(R.string.backup_passphrase_required)
+        mode == SyncEncryptionMode.PASSPHRASE && passphrase != confirm ->
+            stringResource(R.string.backup_passphrase_mismatch)
+        passphrase == NO_PASSPHRASE_FALLBACK ->
+            stringResource(R.string.backup_reserved_passphrase)
         else -> null
     }
     AlertDialog(
         modifier = Modifier.imePadding(),
         properties = DialogProperties(decorFitsSystemWindows = false),
         onDismissRequest = onDismiss,
-        title = { Text("加密备份") },
+        title = { Text(stringResource(R.string.backup_encrypted_backup)) },
         text = {
             Column(
                 modifier = Modifier
@@ -1315,13 +1504,16 @@ private fun ExportEncryptionDialog(
                         selected = mode == SyncEncryptionMode.PASSPHRASE,
                         onClick = null,
                     )
-                    Text("自定义口令加密（推荐）", style = LocalAmberType.current.body)
+                    Text(
+                        stringResource(R.string.backup_custom_passphrase_recommended),
+                        style = LocalAmberType.current.body,
+                    )
                 }
                 if (mode == SyncEncryptionMode.PASSPHRASE) {
                     OutlinedTextField(
                         value = passphrase,
                         onValueChange = { passphrase = it },
-                        label = { Text("备份口令") },
+                        label = { Text(stringResource(R.string.backup_passphrase)) },
                         singleLine = true,
                         visualTransformation = PasswordVisualTransformation(),
                         modifier = Modifier.fillMaxWidth(),
@@ -1329,13 +1521,13 @@ private fun ExportEncryptionDialog(
                     OutlinedTextField(
                         value = confirm,
                         onValueChange = { confirm = it },
-                        label = { Text("确认口令") },
+                        label = { Text(stringResource(R.string.backup_confirm_passphrase)) },
                         singleLine = true,
                         visualTransformation = PasswordVisualTransformation(),
                         modifier = Modifier.fillMaxWidth(),
                     )
                     Text(
-                        "口令强度：${passphraseStrength(passphrase)}",
+                        stringResource(R.string.backup_passphrase_strength, passphraseStrength(passphrase)),
                         style = LocalAmberType.current.secondary,
                         color = LocalAmberTokens.current.ink3,
                     )
@@ -1355,11 +1547,11 @@ private fun ExportEncryptionDialog(
                         selected = mode == SyncEncryptionMode.DEVICE_BOUND,
                         onClick = null,
                     )
-                    Text("本设备绑定加密", style = LocalAmberType.current.body)
+                    Text(stringResource(R.string.backup_device_bound_encryption), style = LocalAmberType.current.body)
                 }
                 if (mode == SyncEncryptionMode.DEVICE_BOUND) {
                     Text(
-                        "使用本机密钥加密，无需口令，但只能在这台设备上恢复。",
+                        stringResource(R.string.backup_device_bound_encryption_desc),
                         style = LocalAmberType.current.secondary,
                         color = LocalAmberTokens.current.ink3,
                     )
@@ -1378,19 +1570,20 @@ private fun ExportEncryptionDialog(
                 onClick = { onConfirm(passphrase, mode) },
                 enabled = error == null,
             ) {
-                Text("开始导出")
+                Text(stringResource(R.string.backup_start_export))
             }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) {
-                Text("取消")
+                Text(stringResource(R.string.cancel))
             }
         },
     )
 }
 
+@Composable
 private fun passphraseStrength(passphrase: String): String {
-    if (passphrase.length < 8) return "弱"
+    if (passphrase.length < 8) return stringResource(R.string.backup_strength_weak)
     val classes = listOf(
         Regex("[a-z]"),
         Regex("[A-Z]"),
@@ -1398,15 +1591,15 @@ private fun passphraseStrength(passphrase: String): String {
         Regex("[^A-Za-z0-9]"),
     ).count { it.containsMatchIn(passphrase) }
     return when {
-        passphrase.length >= 12 && classes >= 3 -> "强"
-        classes >= 2 -> "中"
-        else -> "弱"
+        passphrase.length >= 12 && classes >= 3 -> stringResource(R.string.backup_strength_strong)
+        classes >= 2 -> stringResource(R.string.backup_strength_medium)
+        else -> stringResource(R.string.backup_strength_weak)
     }
 }
 
-private fun formatBytes(bytes: Long): String = when {
+private fun formatBytes(bytes: Long, locale: Locale): String = when {
     bytes < 1024 -> "${bytes}B"
-    bytes < 1024 * 1024 -> String.format(Locale.getDefault(), "%.1fKB", bytes / 1024.0)
-    bytes < 1024L * 1024 * 1024 -> String.format(Locale.getDefault(), "%.1fMB", bytes / (1024.0 * 1024.0))
-    else -> String.format(Locale.getDefault(), "%.1fGB", bytes / (1024.0 * 1024.0 * 1024.0))
+    bytes < 1024 * 1024 -> String.format(locale, "%.1fKB", bytes / 1024.0)
+    bytes < 1024L * 1024 * 1024 -> String.format(locale, "%.1fMB", bytes / (1024.0 * 1024.0))
+    else -> String.format(locale, "%.1fGB", bytes / (1024.0 * 1024.0 * 1024.0))
 }

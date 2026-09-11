@@ -10,7 +10,13 @@ import app.amber.core.settings.Settings
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.RuntimeEnvironment
+import org.robolectric.annotation.Config
 
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [34], application = android.app.Application::class)
 class TransformerSettingsSnapshotTest {
     @Test
     fun placeholderReadsTheTransformerSettingsSnapshot() {
@@ -31,7 +37,7 @@ class TransformerSettingsSnapshotTest {
     fun templateReadsTheTransformerSettingsSnapshot() = runBlocking {
         val output = TemplateTransformer().transform(
             ctx = TransformerContext(
-                context = ContextWrapper(null),
+                context = RuntimeEnvironment.getApplication(),
                 model = Model(modelId = "test"),
                 settings = Settings(messageTemplate = "[{{message}}]"),
             ),

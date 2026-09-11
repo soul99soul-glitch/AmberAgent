@@ -30,13 +30,9 @@ data class GenerativeWidgetAction(
     val id: String,
     val label: String,
     val instruction: String,
+    private val promptCopy: GenerativeWidgetCopy = GenerativeWidgetCopy.DEFAULT,
 ) {
-    fun toUserPrompt(widgetTitle: String?): String = buildString {
-        append("请基于上一张生成式 UI")
-        widgetTitle?.takeIf { it.isNotBlank() }?.let { append("「").append(it).append("」") }
-        append("继续处理：")
-        append(instruction)
-    }
+    fun toUserPrompt(widgetTitle: String?): String = promptCopy.actionPrompt(widgetTitle, instruction)
 }
 
 object GenerativeWidgetParser {
@@ -56,9 +52,6 @@ object GenerativeWidgetParser {
         "todo",
     )
     private val json = Json { ignoreUnknownKeys = true }
-    private const val INCOMPLETE_FULL_HTML_MESSAGE =
-        "可视化预览没有生成完整，已隐藏未完成的 HTML 内容。请重新生成或缩短内容。"
-
     private val partialFenceEndRegex = Regex("""(?m)^[ \t]*`{3}[ \t]*(?:show-widget|widget|generative-ui)[^\r\n]*$""")
 
     // Finds the LAST partial fence — if the model emits two ```show-widget markers
@@ -75,15 +68,24 @@ object GenerativeWidgetParser {
 
     fun containsWidgetFence(content: String): Boolean = markerRegex.containsMatchIn(content)
 
-    fun containsFullHtmlDeckPayload(content: String): Boolean =
-        parseStandaloneFullHtmlWidget(content) != null
+    fun containsFullHtmlDeckPayload(
+        content: String,
+        copy: GenerativeWidgetCopy = GenerativeWidgetCopy.DEFAULT,
+    ): Boolean = parseStandaloneFullHtmlWidget(content, copy) != null
 
-    fun hasRenderableWidget(content: String): Boolean =
-        parse(content, streaming = false).any { it is GenerativeWidgetSegment.Widget }
+    fun hasRenderableWidget(
+        content: String,
+        copy: GenerativeWidgetCopy = GenerativeWidgetCopy.DEFAULT,
+    ): Boolean = parse(content, streaming = false, copy = copy)
+        .any { it is GenerativeWidgetSegment.Widget }
 
-    fun widgetQualityIssue(content: String, requirement: GenerativeUiWidgetRequirement): String? {
+    fun widgetQualityIssue(
+        content: String,
+        requirement: GenerativeUiWidgetRequirement,
+        copy: GenerativeWidgetCopy = GenerativeWidgetCopy.DEFAULT,
+    ): String? {
         if (!requirement.required) return null
-        val widgets = parse(content, streaming = false)
+        val widgets = parse(content, streaming = false, copy = copy)
             .filterIsInstance<GenerativeWidgetSegment.Widget>()
         if (widgets.isEmpty()) return "missing required show-widget"
         val issues = widgets.mapNotNull { widgetQualityIssue(it, requirement) }
@@ -91,7 +93,11 @@ object GenerativeWidgetParser {
         return issues.lastOrNull() ?: "missing required show-widget"
     }
 
-    fun parse(content: String, streaming: Boolean): List<GenerativeWidgetSegment> {
+    fun parse(
+        content: String,
+        streaming: Boolean,
+        copy: GenerativeWidgetCopy = GenerativeWidgetCopy.DEFAULT,
+    ): List<GenerativeWidgetSegment> {
         val segments = mutableListOf<GenerativeWidgetSegment>()
         var cursor = 0
         var foundWidgetMarker = false
@@ -109,7 +115,7 @@ object GenerativeWidgetParser {
                     return segments
                 }
                 val widgetFragment = content.substring(marker.range.first)
-                if (!appendIncompleteFullHtmlMessage(segments, widgetFragment)) {
+                if (!appendIncompleteFullHtmlMessage(segments, widgetFragment, copy)) {
                     appendTextSegment(segments, widgetFragment)
                 }
                 return segments
@@ -118,7 +124,7 @@ object GenerativeWidgetParser {
             val jsonEnd = findJsonEnd(content, jsonStart)
             if (jsonEnd >= 0) {
                 val jsonText = content.substring(jsonStart, jsonEnd + 1)
-                val widget = parseWidgetJson(jsonText)
+                val widget = parseWidgetJson(jsonText, copy)
                 if (widget != null) {
                     segments += widget.copy(complete = true)
                     cursor = skipTrailingFence(content, jsonEnd + 1)
@@ -129,7 +135,7 @@ object GenerativeWidgetParser {
                         segments += GenerativeWidgetSegment.Loading
                         return segments
                     }
-                    if (!appendIncompleteFullHtmlMessage(segments, widgetFragment)) {
+                    if (!appendIncompleteFullHtmlMessage(segments, widgetFragment, copy)) {
                         appendTextSegment(segments, widgetFragment)
                     }
                     cursor = fallbackEnd
@@ -138,7 +144,7 @@ object GenerativeWidgetParser {
             }
 
             if (streaming) {
-                val partial = parsePartialWidget(content.substring(jsonStart))
+                val partial = parsePartialWidget(content.substring(jsonStart), copy)
                 if (partial != null) {
                     segments += partial
                 } else {
@@ -148,7 +154,7 @@ object GenerativeWidgetParser {
             }
 
             val widgetFragment = content.substring(marker.range.first)
-            if (!appendIncompleteFullHtmlMessage(segments, widgetFragment)) {
+            if (!appendIncompleteFullHtmlMessage(segments, widgetFragment, copy)) {
                 appendTextSegment(segments, widgetFragment)
             }
             return segments
@@ -162,16 +168,17 @@ object GenerativeWidgetParser {
         }
         appendTextSegment(segments, trailing)
         if (foundWidgetMarker) return segments
-        parseStandaloneFullHtmlWidget(content)?.let { return listOf(it) }
+        parseStandaloneFullHtmlWidget(content, copy)?.let { return listOf(it) }
         return listOf(GenerativeWidgetSegment.Text(content))
     }
 
     private fun appendIncompleteFullHtmlMessage(
         segments: MutableList<GenerativeWidgetSegment>,
         widgetFragment: String,
+        copy: GenerativeWidgetCopy,
     ): Boolean {
         if (!looksLikeFullHtmlWidgetFragment(widgetFragment)) return false
-        appendTextSegment(segments, INCOMPLETE_FULL_HTML_MESSAGE)
+        appendTextSegment(segments, copy.incompleteFullHtmlMessage)
         return true
     }
 
@@ -201,10 +208,13 @@ object GenerativeWidgetParser {
         }
     }
 
-    private fun parseWidgetJson(jsonText: String): GenerativeWidgetSegment.Widget? {
+    private fun parseWidgetJson(
+        jsonText: String,
+        copy: GenerativeWidgetCopy,
+    ): GenerativeWidgetSegment.Widget? {
         val parsed = runCatching { json.parseToJsonElement(jsonText).jsonObject }.getOrNull()
         val renderer = normalizeRenderer(parsed?.stringOrNull("renderer"))
-        recoverFullHtmlWidget(parsed, jsonText)?.let { return it }
+        recoverFullHtmlWidget(parsed, jsonText, copy)?.let { return it }
         // If renderer field is present but unrecognized (e.g. model emits "svg" / "structure" /
         // "flowchart"), fall back to rendering widget_code as plain html instead of rejecting the
         // whole widget. The sanitizer still strips unsafe content; rejecting outright leaves the
@@ -216,7 +226,7 @@ object GenerativeWidgetParser {
         } else {
             parsed["spec"] ?: if (renderer == "slides") parsed["slides"] ?: parsed["pages"] else null
         }
-        val renderedCode = GenerativeWidgetRenderer.render(renderer, specElement)
+        val renderedCode = GenerativeWidgetRenderer.render(renderer, specElement, copy)
         val rawWidgetCode = parsed?.stringOrNull("widget_code")
             ?: extractJsonStringValue(jsonText, "widget_code", allowUnclosed = false)
         val title = parsed?.stringOrNull("title")
@@ -238,12 +248,15 @@ object GenerativeWidgetParser {
             widgetCode = renderableCode,
             complete = true,
             renderer = renderer ?: "html",
-            actions = parseActions(parsed),
+            actions = parseActions(parsed, copy),
             specJson = specJson,
         )
     }
 
-    private fun parsePartialWidget(jsonText: String): GenerativeWidgetSegment.Widget? {
+    private fun parsePartialWidget(
+        jsonText: String,
+        copy: GenerativeWidgetCopy,
+    ): GenerativeWidgetSegment.Widget? {
         // If widget_code is present (SVG/HTML widgets), use it for streaming preview
         val code = extractJsonStringValue(jsonText, "widget_code", allowUnclosed = true)
             ?.takeIf { it.isNotBlank() }
@@ -268,21 +281,25 @@ object GenerativeWidgetParser {
                 val partialSlides = extractPartialSlides(jsonText)
                 if (partialSlides.isNotEmpty()) {
                     val count = partialSlides.size
-                    val countLabel = if (count >= 24) "24+ 页" else "$count 页"
+                    val countLabel = copy.slidesCount(count)
                     val slidePreview = buildString {
                         appendLine("<svg width=\"100%\" viewBox=\"0 0 680 ${80 + count * 30}\" xmlns=\"http://www.w3.org/2000/svg\">")
                         appendLine("<rect width=\"100%\" height=\"100%\" fill=\"#f0fdf4\" rx=\"10\" stroke=\"#bbf7d0\"/>")
-                        appendLine("<text x=\"340\" y=\"36\" text-anchor=\"middle\" font-size=\"15\" fill=\"#166534\">生成幻灯片: $countLabel</text>")
+                        appendLine(
+                            "<text x=\"340\" y=\"36\" text-anchor=\"middle\" font-size=\"15\" fill=\"#166534\">${escapeXml(copy.slidesGenerated(countLabel))}</text>"
+                        )
                         partialSlides.take(5).forEachIndexed { i, slide ->
                             val slideTitle = (slide as? kotlinx.serialization.json.JsonObject)
                                 ?.get("title")
                                 ?.let { (it as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull }
-                                ?: "第${i+1}页"
-                            val escaped = slideTitle.replace("&", "&amp;").replace("<", "&lt;")
+                                ?: copy.slideNumber(i + 1)
+                            val escaped = escapeXml(slideTitle)
                             appendLine("<text x=\"48\" y=\"${72 + i * 24}\" font-size=\"13\" fill=\"#065f46\">${i+1}. $escaped</text>")
                         }
                         if (count > 5) {
-                            appendLine("<text x=\"340\" y=\"${72 + 5 * 24 + 12}\" text-anchor=\"middle\" font-size=\"12\" fill=\"#86efac\">还有 ${count - 5} 页...</text>")
+                            appendLine(
+                                "<text x=\"340\" y=\"${72 + 5 * 24 + 12}\" text-anchor=\"middle\" font-size=\"12\" fill=\"#86efac\">${escapeXml(copy.moreSlides(count - 5))}</text>"
+                            )
                         }
                         appendLine("</svg>")
                     }
@@ -295,11 +312,11 @@ object GenerativeWidgetParser {
                 }
             }
             val label = when (renderer) {
-                "slides", GuizangHtmlDeckValidator.RENDERER -> "演示"
-                else -> "图表"
+                "slides", GuizangHtmlDeckValidator.RENDERER -> copy.presentationLabel
+                else -> copy.chartLabel
             }
-            val titleText = title ?: "正在生成"
-            val placeholder = """<svg width="100%" viewBox="0 0 680 100" xmlns="http://www.w3.org/2000/svg"><rect width="100%" height="100%" fill="#f0f9ff" rx="10" stroke="#bae6fd"/><text x="340" y="42" text-anchor="middle" font-size="15" fill="#0369a1">生成$label...</text><text x="340" y="68" text-anchor="middle" font-size="13" fill="#7dd3fc">$titleText</text></svg>"""
+            val titleText = title ?: copy.generating
+            val placeholder = """<svg width="100%" viewBox="0 0 680 100" xmlns="http://www.w3.org/2000/svg"><rect width="100%" height="100%" fill="#f0f9ff" rx="10" stroke="#bae6fd"/><text x="340" y="42" text-anchor="middle" font-size="15" fill="#0369a1">${escapeXml(copy.rendererGenerating(label))}</text><text x="340" y="68" text-anchor="middle" font-size="13" fill="#7dd3fc">${escapeXml(titleText)}</text></svg>"""
             return GenerativeWidgetSegment.Widget(
                 title = title,
                 widgetCode = placeholder,
@@ -319,13 +336,16 @@ object GenerativeWidgetParser {
         }
     }
 
-    private fun parseStandaloneFullHtmlWidget(content: String): GenerativeWidgetSegment.Widget? {
+    private fun parseStandaloneFullHtmlWidget(
+        content: String,
+        copy: GenerativeWidgetCopy,
+    ): GenerativeWidgetSegment.Widget? {
         val body = content.trim().singleFenceBodyOrSelf()
         if (body.isBlank()) return null
         if (body.startsWith("{")) {
             val jsonEnd = findJsonEnd(body, 0)
             if (jsonEnd >= 0) {
-                parseWidgetJson(body.substring(0, jsonEnd + 1))?.let { widget ->
+                parseWidgetJson(body.substring(0, jsonEnd + 1), copy)?.let { widget ->
                     if (widget.renderer == GuizangHtmlDeckValidator.RENDERER) return widget
                 }
             }
@@ -341,6 +361,7 @@ object GenerativeWidgetParser {
                     html = html,
                     coverHtml = null,
                     complete = true,
+                    copy = copy,
                 )
             }
     }
@@ -348,6 +369,7 @@ object GenerativeWidgetParser {
     private fun recoverFullHtmlWidget(
         parsed: JsonObject?,
         jsonText: String,
+        copy: GenerativeWidgetCopy,
     ): GenerativeWidgetSegment.Widget? {
         if (parsed == null) return null
         val title = parsed.stringOrNull("title")
@@ -365,6 +387,7 @@ object GenerativeWidgetParser {
             html = html,
             coverHtml = cover,
             complete = true,
+            copy = copy,
         )
     }
 
@@ -392,6 +415,7 @@ object GenerativeWidgetParser {
         html: String,
         coverHtml: String?,
         complete: Boolean,
+        copy: GenerativeWidgetCopy,
     ): GenerativeWidgetSegment.Widget {
         val normalizedTitle = normalizeWidgetTitle(title)
         val specObject = buildJsonObject {
@@ -403,13 +427,17 @@ object GenerativeWidgetParser {
             put("allowRemoteImages", parsed.booleanOrDefaultFromSpec("allowRemoteImages", true))
             put("allowRemoteFonts", parsed.booleanOrDefaultFromSpec("allowRemoteFonts", true))
         }
-        val preview = coverHtml ?: GenerativeWidgetRenderer.render(GuizangHtmlDeckValidator.RENDERER, specObject).orEmpty()
+        val preview = coverHtml ?: GenerativeWidgetRenderer.render(
+            GuizangHtmlDeckValidator.RENDERER,
+            specObject,
+            copy,
+        ).orEmpty()
         return GenerativeWidgetSegment.Widget(
             title = normalizedTitle,
             widgetCode = preview,
             complete = complete,
             renderer = GuizangHtmlDeckValidator.RENDERER,
-            actions = parseActions(parsed),
+            actions = parseActions(parsed, copy),
             specJson = specObject.toString(),
         )
     }
@@ -651,14 +679,17 @@ object GenerativeWidgetParser {
         return if (allowUnclosed) output.toString() else null
     }
 
-    private fun parseActions(parsed: JsonObject?): List<GenerativeWidgetAction> =
+    private fun parseActions(
+        parsed: JsonObject?,
+        copy: GenerativeWidgetCopy,
+    ): List<GenerativeWidgetAction> =
         parsed?.get("actions")
             ?.let { runCatching { it.jsonArray }.getOrNull() }
-            ?.mapNotNull(::parseAction)
+            ?.mapNotNull { parseAction(it, copy) }
             ?.take(MAX_ACTIONS)
             .orEmpty()
 
-    private fun parseAction(element: JsonElement): GenerativeWidgetAction? {
+    private fun parseAction(element: JsonElement, copy: GenerativeWidgetCopy): GenerativeWidgetAction? {
         val obj = runCatching { element.jsonObject }.getOrNull() ?: return null
         val label = obj.stringOrNull("label")
             ?.compactSpaces()
@@ -679,6 +710,7 @@ object GenerativeWidgetParser {
             id = id,
             label = label,
             instruction = instruction,
+            promptCopy = copy,
         )
     }
 
@@ -699,6 +731,12 @@ object GenerativeWidgetParser {
     }
 
     private fun String.compactSpaces(): String = trim().replace(Regex("""\s+"""), " ")
+
+    private fun escapeXml(value: String): String =
+        value
+            .replace("&", "&amp;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;")
 
     private fun JsonObject.stringOrNull(key: String): String? =
         runCatching { this[key]?.jsonPrimitive?.contentOrNull }.getOrNull()

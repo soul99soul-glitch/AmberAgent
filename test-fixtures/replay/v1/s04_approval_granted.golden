@@ -1,0 +1,9 @@
+# amber-replay-golden schema=v1 scenario=s04_approval_granted
+run_started
+tool_prepared tool=golden_post_effect
+run_paused state=waiting_user
+run_resumed
+tool_started tool=golden_post_effect
+tool_finished tool=golden_post_effect status=finished
+assistant_message
+run_terminal status=completed

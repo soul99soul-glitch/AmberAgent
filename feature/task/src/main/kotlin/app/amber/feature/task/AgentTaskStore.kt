@@ -9,6 +9,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
@@ -84,8 +85,10 @@ class AgentTaskStore(
         retryPolicy: AgentTaskRetryPolicy? = null,
         outputRef: AgentTaskOutputRef? = null,
         lastHeartbeatMs: Long? = null,
+        expectedSpec: JsonObject? = null,
     ): AgentTaskSnapshot? = mutex.withLock {
         val current = tasks[taskId] ?: return@withLock null
+        if (expectedSpec != null && expectedSpec != current.spec) return@withLock null
         val next = current.copy(
             status = status ?: current.status,
             queueState = queueState ?: status?.toQueueState(current.type) ?: current.queueState,

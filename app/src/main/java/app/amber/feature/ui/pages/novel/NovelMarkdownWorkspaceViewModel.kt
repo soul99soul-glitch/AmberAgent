@@ -1,31 +1,41 @@
 package app.amber.feature.ui.pages.novel
 
+import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import app.amber.agent.R
 import app.amber.ai.core.MessageRole
-import app.amber.core.ai.Generator
+import app.amber.core.ai.RunKernel
 import app.amber.core.settings.findModelById
 import app.amber.core.settings.getCurrentChatModel
 import app.amber.core.settings.prefs.SettingsAggregator
+import app.amber.core.utils.appLocale
 import app.amber.feature.novelworkspace.NovelWorkspaceProjectSettingsStore
 import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.Uuid
+import app.amber.feature.novel.workspace.NovelTurnLauncher
 import app.amber.feature.novel.workspace.NovelWorkspaceCollectTarget
 import app.amber.feature.novel.workspace.NovelWorkspacePrompts
 import app.amber.feature.novel.workspace.NovelWorkspaceRuntime
 import app.amber.feature.novel.workspace.NovelWorkspaceGhostwriteController
+import app.amber.feature.novel.workspace.NovelWorkspaceGhostwriteCoordinator
 import app.amber.feature.novel.workspace.NovelWorkspaceWriteProposal
+import app.amber.feature.novelworkspace.NovelWorkspaceBranches
+import app.amber.feature.novelworkspace.NovelWorkspaceCatalog
 import app.amber.feature.novelworkspace.NovelWorkspaceGhostwriteJob
 import app.amber.feature.novelworkspace.NovelWorkspaceGhostwriteJobs
 import app.amber.feature.novelworkspace.NovelWorkspaceFocus
+import app.amber.feature.novelworkspace.NovelWorkspaceGhostwriteMode
+import app.amber.feature.novelworkspace.NovelWorkspaceGhostwriteStage
 import app.amber.feature.novelworkspace.NovelWorkspaceLedger
-import app.amber.feature.novelworkspace.NovelWorkspaceManifest
+import app.amber.feature.novelworkspace.NovelWorkspaceLedgerStore
 import app.amber.feature.novelworkspace.NovelWorkspaceMarkdown
 import app.amber.feature.novelworkspace.NovelWorkspacePaths
 import app.amber.feature.novelworkspace.NovelWorkspaceProjectRepository
 import app.amber.feature.novelworkspace.NovelWorkspaceProjectTitle
 import app.amber.feature.novelworkspace.NovelWorkspaceSessionMessage
 import app.amber.feature.novelworkspace.NovelWorkspaceSessions
+import app.amber.feature.novelworkspace.NovelWorkspaceSlug
 import app.amber.feature.novelworkspace.NovelWorkspaceStore
 import app.amber.feature.novelworkspace.NovelWorkspaceUnresolvedStore
 import java.io.File
@@ -66,9 +76,15 @@ data class NovelMarkdownWorkspaceUiState(
     val loading: Boolean = true,
     val exists: Boolean = false,
     val title: String = "",
+    /** 活跃分支 slug（.amber/branch.json 标记，缺失回退 manifest.mainBranch）。 */
+    val branchSlug: String? = null,
+    /** 分支列表（ledger heads + branches/ 目录，标当前），分支 sheet 数据源。 */
+    val branches: List<NovelWorkspaceBranches.NovelWorkspaceBranchInfo> = emptyList(),
     val messages: List<NovelMarkdownMessageUi> = emptyList(),
     val chapters: List<NovelMarkdownChapterUi> = emptyList(),
     val drafts: List<NovelMarkdownDraftUi> = emptyList(),
+    /** 设定 tab：设定文件分组 + 伏笔 + 决定（每次 commit 后与切分支后刷新）。 */
+    val catalog: NovelWorkspaceCatalog.NovelWorkspaceCatalogData? = null,
     val streamingText: String = "",
     val reasoningText: String = "",
     val toolActivity: String? = null,
@@ -82,6 +98,8 @@ data class NovelMarkdownWorkspaceUiState(
     val unreadableJobFiles: List<String> = emptyList(),
     /** Per-project writing model override (null = follow global chat model). */
     val writingModelId: String? = null,
+    /** Per-project review model override (null = follow the writing model). */
+    val reviewModelId: String? = null,
     /** Composer intent: 讨论 plans/world; 写正文 produces a collectable draft. */
     val composerMode: NovelMarkdownComposerMode = NovelMarkdownComposerMode.Discuss,
     /** Consistency review running / last report. */
@@ -102,11 +120,22 @@ enum class NovelMarkdownComposerMode { Discuss, WriteProse }
 data class NovelMarkdownGhostwriteUi(
     val jobId: String,
     val executionId: String,
+    val branchSlug: String,
     val target: Int,
     val written: Int,
+    /** First chapter ordinal owned by this batch (used by polish ranges). */
+    val startOrdinal: Int,
     val status: String,
+    /** Durable stage for the current chapter (writing/reviewing/rewriting/committing/planning). */
+    val stage: NovelWorkspaceGhostwriteStage = NovelWorkspaceGhostwriteStage.Idle,
+    /** 1-based chapter ordinal currently owned by the batch. */
+    val currentChapterOrdinal: Int = 0,
+    /** Targeted rewrite attempt for the current candidate (0..2). */
+    val rewriteAttempt: Int = 0,
     /** Terminal-failure reason surfaced when status == failed. */
     val reason: String? = null,
+    /** Batch kind: 代笔 writes new chapters, 润色 re-proses an existing range. */
+    val mode: NovelWorkspaceGhostwriteMode = NovelWorkspaceGhostwriteMode.Write,
 )
 
 private data class NovelGhostwriteRefresh(
@@ -114,6 +143,7 @@ private data class NovelGhostwriteRefresh(
     val unreadableJobFiles: List<String>,
     val chapters: List<NovelMarkdownChapterUi>,
     val drafts: List<NovelMarkdownDraftUi>,
+    val catalog: NovelWorkspaceCatalog.NovelWorkspaceCatalogData?,
     val plotStale: Boolean,
     val unresolvedFromOrdinal: Int?,
     val canUndo: Boolean,
@@ -124,12 +154,14 @@ class NovelMarkdownWorkspaceViewModel(
     private val repository: NovelWorkspaceProjectRepository,
     private val settingsAggregator: SettingsAggregator,
     private val ghostwriteController: NovelWorkspaceGhostwriteController,
-    generator: Generator,
+    private val turnLauncher: NovelTurnLauncher,
+    kernel: RunKernel,
+    private val context: Context,
     private val requestedFocus: NovelWorkspaceFocus = NovelWorkspaceFocus(),
 ) : ViewModel() {
 
     val projectId: String = projectId
-    private val runtime = NovelWorkspaceRuntime(generator)
+    private val runtime = NovelWorkspaceRuntime(kernel)
     private val _state = MutableStateFlow(NovelMarkdownWorkspaceUiState())
     val state: StateFlow<NovelMarkdownWorkspaceUiState> = _state.asStateFlow()
 
@@ -137,6 +169,10 @@ class NovelMarkdownWorkspaceViewModel(
     private var branchId: String? = null
     private var branchSlug: String? = null
     private var focusedJobId: String? = requestedFocus.jobId
+    /** Deep-link identity is applied once; subsequent reloads follow the user's branch choice. */
+    private var pendingFocus: NovelWorkspaceFocus? = requestedFocus.takeIf {
+        it.branchSlug != null || it.jobId != null
+    }
 
     /** In-flight chat turn; cancellable so the composer's stop button can end it. */
     private var turnJob: kotlinx.coroutines.Job? = null
@@ -154,42 +190,56 @@ class NovelMarkdownWorkspaceViewModel(
 
     fun reload() {
         viewModelScope.launch {
-            runCatching {
-                if (!repository.exists(projectId)) {
-                    _state.value = _state.value.copy(loading = false, exists = false)
-                    return@launch
-                }
-                val directory = repository.projectDirectory(projectId)
-                val store = NovelWorkspaceStore(directory)
-                val focus = requestedFocus.resolve(store)
-                val ledger = NovelWorkspaceLedger.load(directory)
-                projectDirectory = directory
-                branchId = focus.branchId
-                branchSlug = focus.branchSlug
-                _state.value = _state.value.copy(
-                    loading = false,
-                    exists = true,
-                    title = NovelWorkspaceProjectTitle.read(store),
-                    messages = loadMessages(directory),
-                    chapters = loadChapters(store),
-                    proposals = proposalsForThisProject(),
-                    drafts = loadDrafts(store),
-                    plotStale = NovelWorkspaceLedger.isPlotStale(ledger, focus.branchSlug),
-                    unresolvedFromOrdinal = NovelWorkspaceUnresolvedStore
-                        .entryFor(directory, focus.branchSlug)?.fromOrdinal,
-                    writingModelId = NovelWorkspaceProjectSettingsStore.load(directory).writingModelId,
-                    injection = NovelWorkspaceProjectSettingsStore.load(directory).injection
-                        ?: app.amber.feature.novelworkspace.NovelWorkspaceInjectionFlags(),
-                    canUndo = runtime.canUndo(directory),
-                )
-            }.onFailure { error ->
-                _state.value = _state.value.copy(
-                    loading = false,
-                    errorMessage = error.message ?: "无法打开工作区项目",
-                )
-            }
-            refreshGhostwrite()
+            reloadState()
         }
+    }
+
+    private fun reloadState() {
+        runCatching {
+            if (!repository.exists(projectId)) {
+                _state.value = _state.value.copy(loading = false, exists = false)
+                return@runCatching
+            }
+            val directory = repository.projectDirectory(projectId)
+            val store = NovelWorkspaceStore(directory)
+            val ledger = NovelWorkspaceLedger.load(directory)
+            projectDirectory = directory
+            // Notification/deep-link focus is view-only: resolve it against durable state
+            // without changing the app's active branch or resuming a Worker implicitly.
+            val focusRequest = pendingFocus
+            pendingFocus = null
+            val focus = focusRequest?.resolve(store)
+            // 活跃分支：.amber/branch.json 标记优先，缺失回退 manifest.mainBranch。
+            val slug = focus?.branchSlug ?: NovelWorkspaceBranches.activeSlug(directory)
+            branchId = focus?.branchId ?: NovelWorkspaceLedger.branchId(store, ledger, slug)
+            branchSlug = slug
+            _state.value = _state.value.copy(
+                loading = false,
+                exists = true,
+                title = NovelWorkspaceProjectTitle.read(store),
+                branchSlug = slug,
+                branches = NovelWorkspaceBranches.list(directory, slug),
+                messages = loadMessages(directory),
+                chapters = loadChapters(store),
+                catalog = loadCatalog(directory, ledger, slug),
+                proposals = proposalsForThisProject(),
+                drafts = loadDrafts(store),
+                plotStale = NovelWorkspaceLedger.isPlotStale(store, ledger, slug),
+                unresolvedFromOrdinal = NovelWorkspaceUnresolvedStore
+                    .entryFor(directory, slug)?.fromOrdinal,
+                writingModelId = NovelWorkspaceProjectSettingsStore.load(directory).writingModelId,
+                reviewModelId = NovelWorkspaceProjectSettingsStore.load(directory).reviewModelId,
+                injection = NovelWorkspaceProjectSettingsStore.load(directory).injection
+                    ?: app.amber.feature.novelworkspace.NovelWorkspaceInjectionFlags(),
+                canUndo = runtime.canUndo(directory, slug),
+            )
+        }.onFailure { error ->
+            _state.value = _state.value.copy(
+                loading = false,
+                errorMessage = error.message ?: text(R.string.error_title_operation),
+            )
+        }
+        refreshGhostwrite()
     }
 
     fun send(text: String): Boolean {
@@ -199,27 +249,37 @@ class NovelMarkdownWorkspaceViewModel(
         val branch = branchId
         val slug = branchSlug
         if (directory == null || branch == null || slug == null) {
-            _state.value = _state.value.copy(errorMessage = "工作区尚未加载完成")
+            _state.value = _state.value.copy(errorMessage = text(R.string.novel_loading))
             return false
         }
         if (hasActiveGhostwrite()) {
-            _state.value = _state.value.copy(errorMessage = "当前分支仍被代笔批次占用，请先让批次完成或取消后再继续")
+            _state.value = _state.value.copy(errorMessage = text(R.string.novel_batch_in_use))
             return false
         }
         if (_state.value.composerMode == NovelMarkdownComposerMode.WriteProse) {
             if (_state.value.plotStale) {
-                _state.value = _state.value.copy(errorMessage = "剧情落后于正文。请切到“讨论”，发送“根据最新正文同步 plot/current.md”，并批准剧情修改")
+                _state.value = _state.value.copy(
+                    errorMessage = text(
+                        R.string.novel_ghostwrite_error_stale_plot,
+                        text(R.string.novel_ghostwrite_task_write),
+                    ),
+                )
                 return false
             }
             if (_state.value.unresolvedFromOrdinal != null) {
-                _state.value = _state.value.copy(errorMessage = "存在未解决的中间章修改，请先处理后再写新正文")
+                _state.value = _state.value.copy(
+                    errorMessage = text(
+                        R.string.novel_ghostwrite_error_unresolved_edits,
+                        text(R.string.novel_ghostwrite_task_write),
+                    ),
+                )
                 return false
             }
         }
         val settings = settingsAggregator.settingsFlow.value
         val model = resolveWritingModel(settings)
         if (model == null) {
-            _state.value = _state.value.copy(errorMessage = "尚未配置聊天模型")
+            _state.value = _state.value.copy(errorMessage = text(R.string.novel_ghostwrite_error_model_missing))
             return false
         }
         // A blank book (no chapters, no setting cards) treats the message as the quickstart
@@ -251,26 +311,36 @@ class NovelMarkdownWorkspaceViewModel(
             android.util.Log.i("NovelWorkspace", "send: turn starting (blank=$isBlankBook)")
             var finalText = ""
             try {
-                runtime.runTurn(
+                turnLauncher.launch(
                 NovelWorkspaceRuntime.TurnRequest(
                     projectDirectory = directory,
                     branchId = branch,
                     branchSlug = slug,
                     userText = trimmed,
                     systemPrompt = when {
-                        isBlankBook -> NovelWorkspacePrompts.quickStart(genre = "", coreIdea = trimmed)
+                        isBlankBook -> NovelWorkspacePrompts.quickStart(
+                            genre = "",
+                            coreIdea = trimmed,
+                            locale = context.appLocale(),
+                        )
                         _state.value.composerMode == NovelMarkdownComposerMode.WriteProse ->
-                            NovelWorkspacePrompts.proseDraft(NovelWorkspacePrompts.ProseGranularity.CONTINUATION)
-                        else -> NovelWorkspacePrompts.discussion()
+                            NovelWorkspacePrompts.proseDraft(
+                                NovelWorkspacePrompts.ProseGranularity.CONTINUATION,
+                                locale = context.appLocale(),
+                            )
+                        else -> NovelWorkspacePrompts.discussion(locale = context.appLocale())
                     },
                     settings = settings,
                     model = model,
+                    fallbackErrorMessage = text(R.string.error_title_operation),
+                    locale = context.appLocale(),
                     // Quickstart writes several setting files in one turn; 16 steps
                     // starved it into a read-only loop on device.
                     maxSteps = if (isBlankBook) 32 else 16,
                     injection = _state.value.injection,
                 ),
-            ).collect { event ->
+                runtime,
+            ).events.collect { event ->
                 when (event) {
                     is NovelWorkspaceRuntime.TurnEvent.Delta -> {
                         finalText += event.text
@@ -308,7 +378,7 @@ class NovelMarkdownWorkspaceViewModel(
                             reasoningText = "",
                             toolActivity = null,
                             errorMessage = if (producedNothing) {
-                                "快速开始这轮没有写出任何设定文件。请更明确地下指令重试，例如：主角叫什么、题材背景，并要求它写入设定文件。"
+                                text(R.string.novel_no_setting_files)
                             } else {
                                 null
                             },
@@ -317,12 +387,14 @@ class NovelMarkdownWorkspaceViewModel(
                             drafts = loadDrafts(store),
                             proposals = proposalsForThisProject(),
                             plotStale = NovelWorkspaceLedger.isPlotStale(
+                                store,
                                 NovelWorkspaceLedger.load(directory),
                                 slug,
                             ),
                             unresolvedFromOrdinal = NovelWorkspaceUnresolvedStore
                                 .entryFor(directory, slug)?.fromOrdinal,
-                            canUndo = runtime.canUndo(directory),
+                            catalog = loadCatalog(directory, slug),
+                            canUndo = runtime.canUndo(directory, slug),
                         )
                     }
                     is NovelWorkspaceRuntime.TurnEvent.Failed -> {
@@ -362,12 +434,12 @@ class NovelMarkdownWorkspaceViewModel(
         val slug = branchSlug ?: return
         if (_state.value.busy) return
         if (hasActiveGhostwrite()) {
-            _state.value = _state.value.copy(errorMessage = "当前分支仍被代笔批次占用，请先让批次完成或取消后再重写正文")
+            _state.value = _state.value.copy(errorMessage = text(R.string.novel_batch_in_use))
             return
         }
         val settings = settingsAggregator.settingsFlow.value
         val model = resolveWritingModel(settings) ?: run {
-            _state.value = _state.value.copy(errorMessage = "尚未配置聊天模型")
+            _state.value = _state.value.copy(errorMessage = text(R.string.novel_ghostwrite_error_model_missing))
             return
         }
         _state.value = _state.value.copy(
@@ -377,20 +449,30 @@ class NovelMarkdownWorkspaceViewModel(
             reasoningText = "",
             toolActivity = null,
         )
+        turnJob?.cancel()
         turnJob = viewModelScope.launch {
             var finalText = ""
             try {
-                runtime.runTurn(
+                turnLauncher.launch(
                     NovelWorkspaceRuntime.TurnRequest(
                         projectDirectory = directory,
                         branchId = branch,
                         branchSlug = slug,
-                        userText = "请重写第 $fromOrdinal 章起的受影响章节，使其与前文一致。",
-                        systemPrompt = NovelWorkspacePrompts.rewriteLaterChapters(fromOrdinal),
+                        userText = localizedPromptText(
+                            chinese = "请重写第 $fromOrdinal 章起的受影响章节，使其与前文一致。",
+                            english = "Rewrite the affected chapters from chapter $fromOrdinal so they remain consistent with the preceding story.",
+                        ),
+                        systemPrompt = NovelWorkspacePrompts.rewriteLaterChapters(
+                            fromOrdinal,
+                            locale = context.appLocale(),
+                        ),
                         settings = settings,
                         model = model,
+                        fallbackErrorMessage = text(R.string.error_title_operation),
+                        locale = context.appLocale(),
                     ),
-                ).collect { event ->
+                    runtime,
+                ).events.collect { event ->
                     when (event) {
                         is NovelWorkspaceRuntime.TurnEvent.Delta -> {
                             finalText += event.text
@@ -406,6 +488,8 @@ class NovelMarkdownWorkspaceViewModel(
                         }
                         is NovelWorkspaceRuntime.TurnEvent.Completed -> {
                             val store = NovelWorkspaceStore(directory)
+                            // Completed 刷新集与 send() 对齐（J1）：重写轮落盘的提案批准前后，
+                            // 剧情/设定/undo 状态都要回到磁盘真相。
                             _state.value = _state.value.copy(
                                 busy = false,
                                 streamingText = "",
@@ -415,9 +499,283 @@ class NovelMarkdownWorkspaceViewModel(
                                 drafts = loadDrafts(store),
                                 proposals = proposalsForThisProject(),
                                 plotStale = NovelWorkspaceLedger.isPlotStale(
+                                    store,
                                     NovelWorkspaceLedger.load(directory),
                                     slug,
                                 ),
+                                unresolvedFromOrdinal = NovelWorkspaceUnresolvedStore
+                                    .entryFor(directory, slug)?.fromOrdinal,
+                                catalog = loadCatalog(directory, slug),
+                                canUndo = runtime.canUndo(directory, slug),
+                            )
+                        }
+                        is NovelWorkspaceRuntime.TurnEvent.Failed -> {
+                            _state.value = _state.value.copy(
+                                busy = false,
+                                streamingText = "",
+                                toolActivity = null,
+                                errorMessage = event.message,
+                                proposals = proposalsForThisProject(),
+                            )
+                        }
+                    }
+                }
+            } finally {
+                if (_state.value.busy) {
+                    _state.value = _state.value.copy(
+                        busy = false,
+                        streamingText = "",
+                        reasoningText = "",
+                        toolActivity = null,
+                    )
+                }
+            }
+        }
+    }
+
+    /**
+     * 重写本章（Regenerate）：让模型产出整章替换稿。chapters/ 是受保护路径，模型的写入
+     * 经 novel_workspace_write 缓冲为提案，走现有审批卡（MarkdownProposalCard）确认/拒绝，
+     * 不新建审批机制；该章若处于中间章未决（unresolved）状态照常允许重写，未决门既有
+     * 语义自会处理，这里不特判。
+     */
+    fun rewriteChapter(ordinal: Int): Boolean {
+        val directory = projectDirectory ?: return false
+        val branch = branchId ?: return false
+        val slug = branchSlug ?: return false
+        if (_state.value.busy) return false
+        if (hasActiveGhostwrite()) {
+            _state.value = _state.value.copy(errorMessage = text(R.string.novel_batch_in_use))
+            return false
+        }
+        val chapter = _state.value.chapters.firstOrNull { it.ordinal == ordinal } ?: return false
+        val settings = settingsAggregator.settingsFlow.value
+        val model = resolveWritingModel(settings) ?: run {
+            _state.value = _state.value.copy(errorMessage = text(R.string.novel_ghostwrite_error_model_missing))
+            return false
+        }
+        val store = NovelWorkspaceStore(directory)
+        val currentBody = store.read(chapter.path)
+            ?.let { NovelWorkspaceMarkdown.parseFile(it).body }
+            .orEmpty()
+        _state.value = _state.value.copy(
+            busy = true,
+            errorMessage = null,
+            streamingText = "",
+            reasoningText = "",
+            toolActivity = null,
+        )
+        turnJob?.cancel()
+        turnJob = viewModelScope.launch {
+            var finalText = ""
+            try {
+                turnLauncher.launch(
+                    NovelWorkspaceRuntime.TurnRequest(
+                        projectDirectory = directory,
+                        branchId = branch,
+                        branchSlug = slug,
+                        userText = localizedPromptText(
+                            chinese = "请重写第 $ordinal 章「${chapter.title}」，把整章替换稿写回 ${chapter.path}。",
+                            english = "Rewrite chapter $ordinal (\"${chapter.title}\") as a complete replacement and write it back to ${chapter.path}.",
+                        ),
+                        systemPrompt = NovelWorkspacePrompts.regenerateChapter(
+                            chapterOrdinal = ordinal,
+                            chapterTitle = chapter.title,
+                            chapterPath = chapter.path,
+                            chapterBody = currentBody,
+                            plan = pathRead(planPath()),
+                            writingPreference = readWritingPreference(),
+                            locale = context.appLocale(),
+                        ),
+                        settings = settings,
+                        model = model,
+                        fallbackErrorMessage = text(R.string.error_title_operation),
+                        locale = context.appLocale(),
+                        injection = _state.value.injection,
+                    ),
+                    runtime,
+                ).events.collect { event ->
+                    when (event) {
+                        is NovelWorkspaceRuntime.TurnEvent.Delta -> {
+                            finalText += event.text
+                            _state.value = _state.value.copy(streamingText = finalText)
+                        }
+                        is NovelWorkspaceRuntime.TurnEvent.ReasoningDelta -> {
+                            _state.value = _state.value.copy(
+                                reasoningText = _state.value.reasoningText + event.text,
+                            )
+                        }
+                        is NovelWorkspaceRuntime.TurnEvent.ToolActivity -> {
+                            _state.value = _state.value.copy(toolActivity = toolLabel(event.toolName))
+                        }
+                        is NovelWorkspaceRuntime.TurnEvent.Completed -> {
+                            val refreshed = NovelWorkspaceStore(directory)
+                            // Completed 刷新集与 send() 对齐（J1）。
+                            _state.value = _state.value.copy(
+                                busy = false,
+                                streamingText = "",
+                                reasoningText = "",
+                                toolActivity = null,
+                                chapters = loadChapters(refreshed),
+                                drafts = loadDrafts(refreshed),
+                                proposals = proposalsForThisProject(),
+                                plotStale = NovelWorkspaceLedger.isPlotStale(
+                                    refreshed,
+                                    NovelWorkspaceLedger.load(directory),
+                                    slug,
+                                ),
+                                unresolvedFromOrdinal = NovelWorkspaceUnresolvedStore
+                                    .entryFor(directory, slug)?.fromOrdinal,
+                                catalog = loadCatalog(directory, slug),
+                                canUndo = runtime.canUndo(directory, slug),
+                            )
+                        }
+                        is NovelWorkspaceRuntime.TurnEvent.Failed -> {
+                            _state.value = _state.value.copy(
+                                busy = false,
+                                streamingText = "",
+                                toolActivity = null,
+                                errorMessage = event.message,
+                                proposals = proposalsForThisProject(),
+                            )
+                        }
+                    }
+                }
+            } finally {
+                // Stop/cancel mid-turn: reset the busy chrome like send() does.
+                if (_state.value.busy) {
+                    _state.value = _state.value.copy(
+                        busy = false,
+                        streamingText = "",
+                        reasoningText = "",
+                        toolActivity = null,
+                    )
+                }
+            }
+        }
+        return true
+    }
+
+    /**
+     * 创作快捷动作：角色提案。人物卡写入 setting/characters/（自由写路径，novel_workspace_write
+     * 直存、无需审批）；目标文件名由宿主按现有 slug 规则净化并对既有卡片去重。
+     */
+    fun proposeCharacter(name: String, sketch: String) {
+        val trimmedName = name.trim()
+        val trimmedSketch = sketch.trim()
+        if (trimmedName.isEmpty()) return
+        val directory = projectDirectory ?: return
+        val branch = branchId ?: return
+        val slug = branchSlug ?: return
+        if (_state.value.busy) return
+        if (hasActiveGhostwrite()) {
+            _state.value = _state.value.copy(errorMessage = text(R.string.novel_batch_in_use))
+            return
+        }
+        val settings = settingsAggregator.settingsFlow.value
+        val model = resolveWritingModel(settings) ?: run {
+            _state.value = _state.value.copy(errorMessage = text(R.string.novel_ghostwrite_error_model_missing))
+            return
+        }
+        val store = NovelWorkspaceStore(directory)
+        val charactersDir = NovelWorkspacePaths.SETTING_DIR + "/characters"
+        val existing = runCatching { store.list(charactersDir) }.getOrDefault(emptyList())
+        val leaf = NovelWorkspaceSlug.reservedPath(
+            preferred = NovelWorkspaceSlug.slug(trimmedName).ifEmpty { "character" } + ".md",
+            used = existing.map { it.substringAfterLast('/') }.toMutableSet(),
+            fallback = "character",
+        )
+        val targetPath = "$charactersDir/$leaf"
+        appendSessionMessage(directory, branch, NovelWorkspaceSessionMessage(
+            id = UUID.randomUUID().toString().uppercase(),
+            role = "user",
+            kind = "userInput",
+            content = localizedPromptText(
+                chinese = "提案角色「$trimmedName」：$trimmedSketch",
+                english = "Propose character \"$trimmedName\": $trimmedSketch",
+            ),
+            createdAt = Instant.now(),
+        ))
+        _state.value = _state.value.copy(
+            busy = true,
+            errorMessage = null,
+            streamingText = "",
+            reasoningText = "",
+            toolActivity = null,
+            messages = loadMessages(directory),
+        )
+        turnJob?.cancel()
+        turnJob = viewModelScope.launch {
+            var finalText = ""
+            try {
+                turnLauncher.launch(
+                    NovelWorkspaceRuntime.TurnRequest(
+                        projectDirectory = directory,
+                        branchId = branch,
+                        branchSlug = slug,
+                        userText = localizedPromptText(
+                            chinese = "请提案新角色「$trimmedName」：$trimmedSketch",
+                            english = "Propose a new character \"$trimmedName\": $trimmedSketch",
+                        ),
+                        systemPrompt = NovelWorkspacePrompts.characterProposal(
+                            characterName = trimmedName,
+                            sketch = trimmedSketch,
+                            existingCharacters = existing,
+                            targetPath = targetPath,
+                            locale = context.appLocale(),
+                        ),
+                        settings = settings,
+                        model = model,
+                        fallbackErrorMessage = text(R.string.error_title_operation),
+                        locale = context.appLocale(),
+                        injection = _state.value.injection,
+                    ),
+                    runtime,
+                ).events.collect { event ->
+                    when (event) {
+                        is NovelWorkspaceRuntime.TurnEvent.Delta -> {
+                            finalText += event.text
+                            _state.value = _state.value.copy(streamingText = finalText)
+                        }
+                        is NovelWorkspaceRuntime.TurnEvent.ReasoningDelta -> {
+                            _state.value = _state.value.copy(
+                                reasoningText = _state.value.reasoningText + event.text,
+                            )
+                        }
+                        is NovelWorkspaceRuntime.TurnEvent.ToolActivity -> {
+                            _state.value = _state.value.copy(toolActivity = toolLabel(event.toolName))
+                        }
+                        is NovelWorkspaceRuntime.TurnEvent.Completed -> {
+                            if (event.finalText.isNotBlank()) {
+                                appendSessionMessage(directory, branch, NovelWorkspaceSessionMessage(
+                                    id = UUID.randomUUID().toString().uppercase(),
+                                    role = "assistant",
+                                    kind = "discussion",
+                                    content = event.finalText,
+                                    createdAt = Instant.now(),
+                                ))
+                            }
+                            // Completed 刷新集与 send() 对齐（J1）：角色卡是自由写路径、
+                            // 本轮直存落盘，设定 tab/undo/剧情门必须立即反映，否则新角色
+                            // 卡要等重进页面才可见。
+                            _state.value = _state.value.copy(
+                                busy = false,
+                                streamingText = "",
+                                reasoningText = "",
+                                toolActivity = null,
+                                messages = loadMessages(directory),
+                                chapters = loadChapters(store),
+                                drafts = loadDrafts(store),
+                                proposals = proposalsForThisProject(),
+                                plotStale = NovelWorkspaceLedger.isPlotStale(
+                                    store,
+                                    NovelWorkspaceLedger.load(directory),
+                                    slug,
+                                ),
+                                unresolvedFromOrdinal = NovelWorkspaceUnresolvedStore
+                                    .entryFor(directory, slug)?.fromOrdinal,
+                                catalog = loadCatalog(directory, slug),
+                                canUndo = runtime.canUndo(directory, slug),
                             )
                         }
                         is NovelWorkspaceRuntime.TurnEvent.Failed -> {
@@ -434,11 +792,18 @@ class NovelMarkdownWorkspaceViewModel(
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Exception) {
-                _state.value = _state.value.copy(errorMessage = error.message ?: "重写失败，请重试")
-            } finally {
                 _state.value = _state.value.copy(
-                    busy = false, streamingText = "", reasoningText = "", toolActivity = null,
+                    errorMessage = localizedRuntimeError(error, R.string.error_title_operation),
                 )
+            } finally {
+                if (_state.value.busy) {
+                    _state.value = _state.value.copy(
+                        busy = false,
+                        streamingText = "",
+                        reasoningText = "",
+                        toolActivity = null,
+                    )
+                }
             }
         }
     }
@@ -446,7 +811,7 @@ class NovelMarkdownWorkspaceViewModel(
     fun approve(proposalId: String) {
         if (_state.value.busy) return
         if (hasActiveGhostwrite()) {
-            _state.value = _state.value.copy(errorMessage = "当前分支仍被代笔批次占用，请先让批次完成或取消后再批准正文修改")
+            _state.value = _state.value.copy(errorMessage = text(R.string.novel_batch_in_use))
             return
         }
         viewModelScope.launch {
@@ -460,17 +825,24 @@ class NovelMarkdownWorkspaceViewModel(
                     drafts = loadDrafts(store),
                     proposals = proposalsForThisProject(),
                     plotStale = if (slug != null) {
-                        NovelWorkspaceLedger.isPlotStale(NovelWorkspaceLedger.load(directory), slug)
+                        NovelWorkspaceLedger.isPlotStale(
+                            store,
+                            NovelWorkspaceLedger.load(directory),
+                            slug,
+                        )
                     } else {
                         false
                     },
                     unresolvedFromOrdinal = slug?.let {
                         NovelWorkspaceUnresolvedStore.entryFor(directory, it)?.fromOrdinal
                     },
-                    canUndo = runtime.canUndo(directory),
+                    catalog = slug?.let { loadCatalog(directory, it) },
+                    canUndo = slug?.let { runtime.canUndo(directory, it) } ?: false,
                 )
             }.onFailure { error ->
-                _state.value = _state.value.copy(errorMessage = error.message ?: "批准失败")
+                _state.value = _state.value.copy(
+                    errorMessage = localizedRuntimeError(error, R.string.error_title_operation),
+                )
             }
         }
     }
@@ -485,14 +857,14 @@ class NovelMarkdownWorkspaceViewModel(
         val directory = projectDirectory ?: return
         val slug = branchSlug ?: return
         if (hasActiveGhostwrite()) {
-            _state.value = _state.value.copy(errorMessage = "代笔批次进行中，不能确认中间章状态")
+            _state.value = _state.value.copy(errorMessage = text(R.string.novel_batch_in_use))
             return
         }
         runCatching {
             NovelWorkspaceUnresolvedStore.clear(directory, slug)
             _state.value = _state.value.copy(unresolvedFromOrdinal = null)
         }.onFailure { error ->
-            _state.value = _state.value.copy(errorMessage = error.message ?: "无法解除未决状态")
+            _state.value = _state.value.copy(errorMessage = error.message ?: text(R.string.error_title_operation))
         }
     }
 
@@ -503,7 +875,7 @@ class NovelMarkdownWorkspaceViewModel(
         val slug = branchSlug ?: return
         if (_state.value.busy) return
         if (hasActiveGhostwrite()) {
-            _state.value = _state.value.copy(errorMessage = "当前分支仍被代笔批次占用，请先让批次完成或取消后再编辑正文")
+            _state.value = _state.value.copy(errorMessage = text(R.string.novel_batch_in_use))
             return
         }
         viewModelScope.launch {
@@ -520,55 +892,64 @@ class NovelMarkdownWorkspaceViewModel(
                 val store = NovelWorkspaceStore(directory)
                 _state.value = _state.value.copy(
                     chapters = loadChapters(store),
-                    plotStale = NovelWorkspaceLedger.isPlotStale(NovelWorkspaceLedger.load(directory), slug),
+                    catalog = loadCatalog(directory, slug),
+                    plotStale = NovelWorkspaceLedger.isPlotStale(
+                        store,
+                        NovelWorkspaceLedger.load(directory),
+                        slug,
+                    ),
                     unresolvedFromOrdinal = NovelWorkspaceUnresolvedStore.entryFor(directory, slug)?.fromOrdinal,
-                    canUndo = runtime.canUndo(directory),
+                    canUndo = runtime.canUndo(directory, slug),
                 )
                 onSaved()
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Exception) {
-                _state.value = _state.value.copy(errorMessage = error.message ?: "保存失败")
+                _state.value = _state.value.copy(
+                    errorMessage = localizedRuntimeError(error, R.string.workspace_save_failed),
+                )
             } finally {
                 _state.value = _state.value.copy(busy = false)
             }
         }
     }
 
-    /** 撤销最近一笔 canon commit (single level). */
+    /** 撤销最近一笔 canon commit (single level, branch-bound). */
     fun undoLast() {
         val directory = projectDirectory ?: return
+        val slug = branchSlug ?: return
         if (_state.value.busy) return
         if (hasActiveGhostwrite()) {
-            _state.value = _state.value.copy(errorMessage = "当前分支仍被代笔批次占用，请先让批次完成或取消后再撤销")
+            _state.value = _state.value.copy(errorMessage = text(R.string.novel_batch_in_use))
             return
         }
         viewModelScope.launch {
-            val undone = withContext(Dispatchers.IO) { runtime.undoLast(directory) }
+            val undone = withContext(Dispatchers.IO) { runtime.undoLast(directory, slug) }
             if (!undone) {
-                _state.value = _state.value.copy(errorMessage = "没有可撤销的最近操作")
+                _state.value = _state.value.copy(errorMessage = text(R.string.novel_unknown_reason))
                 return@launch
             }
-            val slug = branchSlug
             val store = NovelWorkspaceStore(directory)
             _state.value = _state.value.copy(
                 chapters = loadChapters(store),
                 drafts = loadDrafts(store),
+                catalog = loadCatalog(directory, slug),
                 proposals = proposalsForThisProject(),
-                plotStale = if (slug != null) {
-                    NovelWorkspaceLedger.isPlotStale(NovelWorkspaceLedger.load(directory), slug)
-                } else {
-                    false
-                },
-                unresolvedFromOrdinal = slug?.let {
-                    NovelWorkspaceUnresolvedStore.entryFor(directory, it)?.fromOrdinal
-                },
-                canUndo = runtime.canUndo(directory),
+                plotStale = NovelWorkspaceLedger.isPlotStale(
+                    store,
+                    NovelWorkspaceLedger.load(directory),
+                    slug,
+                ),
+                unresolvedFromOrdinal = NovelWorkspaceUnresolvedStore.entryFor(directory, slug)?.fromOrdinal,
+                canUndo = runtime.canUndo(directory, slug),
             )
         }
     }
 
-    fun readChapter(path: String): String? {
+    fun readChapter(path: String): String? = readFileBody(path)
+
+    /** Body of any book file (setting cards, foreshadowing nodes) for the 设定 tab editor. */
+    fun readFileBody(path: String): String? {
         val directory = projectDirectory ?: return null
         return runCatching {
             val store = NovelWorkspaceStore(directory)
@@ -576,6 +957,162 @@ class NovelMarkdownWorkspaceViewModel(
             NovelWorkspaceMarkdown.parseFile(content).body
         }.getOrNull()
     }
+
+    // ── 多分支：新建 / 切换（branch sheet）────────────────────────────
+
+    /** 从当前活跃分支分叉出新分支；成功后刷新分支列表（不切换）。 */
+    fun createBranch(name: String) {
+        val directory = projectDirectory ?: return
+        val current = branchSlug ?: return
+        if (_state.value.busy) return
+        viewModelScope.launch {
+            _state.value = _state.value.copy(busy = true, errorMessage = null)
+            try {
+                withContext(Dispatchers.IO) {
+                    NovelWorkspaceBranches.createBranch(
+                        directory,
+                        current,
+                        name,
+                        locale = context.appLocale(),
+                    )
+                }
+                val slug = NovelWorkspaceBranches.activeSlug(directory)
+                _state.value = _state.value.copy(
+                    errorMessage = null,
+                    branches = NovelWorkspaceBranches.list(directory, slug),
+                )
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                _state.value = _state.value.copy(errorMessage = error.message ?: text(R.string.error_title_operation))
+            } finally {
+                _state.value = _state.value.copy(busy = false)
+            }
+        }
+    }
+
+    /**
+     * 切换活跃分支：批次进行中被存储层拒绝；成功后清空本项目在途提案/草稿卡（内存态
+     * 属于切换前的分支视图）并整页重载（章节/剧情门/undo/会话/注入简报/设定 tab）。
+     */
+    fun switchBranch(slug: String) {
+        val directory = projectDirectory ?: return
+        if (_state.value.busy) {
+            _state.value = _state.value.copy(errorMessage = text(R.string.novel_in_progress))
+            return
+        }
+        viewModelScope.launch {
+            _state.value = _state.value.copy(busy = true, errorMessage = null)
+            try {
+                withContext(Dispatchers.IO) {
+                    NovelWorkspaceBranches.switchBranch(
+                        directory,
+                        slug,
+                        locale = context.appLocale(),
+                    )
+                }
+                // A notification focus belongs to the branch/job the page initially opened;
+                // after an explicit switch, neither that job nor its branch should win the
+                // next refresh.
+                focusedJobId = null
+                // 提案/草稿卡是上一分支视图的内存态：随切换整体清空，防止跨分支批准。
+                runtime.pendingProposals.value
+                    .filter { it.projectDirectory == directory }
+                    .forEach { runtime.reject(it.id) }
+                _state.value = _state.value.copy(
+                    streamingText = "",
+                    reasoningText = "",
+                    toolActivity = null,
+                    consistencyReport = null,
+                )
+                reloadState()
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                _state.value = _state.value.copy(
+                    errorMessage = error.message ?: text(R.string.error_title_operation),
+                )
+            } finally {
+                _state.value = _state.value.copy(busy = false)
+            }
+        }
+    }
+
+    // ── 设定 tab：保存（走既有直写+commit+undo 惯例）─────────────────
+
+    /** 保存设定卡/伏笔节点的正文修改：宿主手改 + 「手改」commit + undo 记录。 */
+    fun saveFileEdit(path: String, body: String, onSaved: () -> Unit) {
+        commitFileEdit(path, body, onSaved)
+    }
+
+    /**
+     * 写作偏好 = setting/writing 卡（首个文件；首次保存创建）。与设定 tab 的
+     * saveFileEdit 走同一提交口径（手改 commit + undo 记录，J7）：面板行为不变
+     * （保存即落盘），但与双入口另一侧一样可撤销、进账本。批次进行中面板本就
+     * 禁用（branchOwned），runtime 的 owner gate 是第二道。
+     */
+    fun saveWritingPreference(body: String, onSaved: () -> Unit) {
+        val directory = projectDirectory ?: return
+        val store = NovelWorkspaceStore(directory)
+        val target = store.list(NovelWorkspacePaths.SETTING_DIR + "/writing").firstOrNull()
+            ?: NovelWorkspacePaths.SETTING_DIR + "/writing/写作要求.md"
+        commitFileEdit(target, body, onSaved)
+    }
+
+    /** saveFileEdit / saveWritingPreference 共享的宿主手改提交路径（含刷新与 undo）。 */
+    private fun commitFileEdit(path: String, body: String, onSaved: () -> Unit) {
+        val directory = projectDirectory ?: return
+        val branch = branchId ?: return
+        val slug = branchSlug ?: return
+        if (_state.value.busy) return
+        if (hasActiveGhostwrite()) {
+            _state.value = _state.value.copy(errorMessage = text(R.string.novel_batch_in_use))
+            return
+        }
+        viewModelScope.launch {
+            _state.value = _state.value.copy(busy = true, errorMessage = null)
+            try {
+                runtime.saveFileEdit(
+                    projectDirectory = directory,
+                    branchId = branch,
+                    branchSlug = slug,
+                    path = path,
+                    body = body,
+                )
+                val store = NovelWorkspaceStore(directory)
+                _state.value = _state.value.copy(
+                    catalog = loadCatalog(directory, slug),
+                    plotStale = NovelWorkspaceLedger.isPlotStale(
+                        store,
+                        NovelWorkspaceLedger.load(directory),
+                        slug,
+                    ),
+                    unresolvedFromOrdinal = NovelWorkspaceUnresolvedStore.entryFor(directory, slug)?.fromOrdinal,
+                    canUndo = runtime.canUndo(directory, slug),
+                )
+                onSaved()
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                _state.value = _state.value.copy(
+                    errorMessage = localizedRuntimeError(error, R.string.workspace_save_failed),
+                )
+            } finally {
+                _state.value = _state.value.copy(busy = false)
+            }
+        }
+    }
+
+    private fun loadCatalog(directory: File, slug: String): NovelWorkspaceCatalog.NovelWorkspaceCatalogData =
+        loadCatalog(directory, NovelWorkspaceLedger.load(directory), slug)
+
+    private fun loadCatalog(
+        directory: File,
+        ledger: NovelWorkspaceLedgerStore,
+        slug: String,
+    ): NovelWorkspaceCatalog.NovelWorkspaceCatalogData = runCatching {
+        NovelWorkspaceCatalog.load(NovelWorkspaceStore(directory), ledger, slug)
+    }.getOrDefault(NovelWorkspaceCatalog.NovelWorkspaceCatalogData(emptyList(), emptyList(), emptyList()))
 
     fun clearError() {
         _state.value = _state.value.copy(errorMessage = null)
@@ -592,7 +1129,8 @@ class NovelMarkdownWorkspaceViewModel(
 
     private fun hasActiveGhostwrite(): Boolean {
         if (_state.value.ghostwriteJob?.status == NovelWorkspaceGhostwriteJob.STATUS_RUNNING ||
-            _state.value.ghostwriteJob?.status == NovelWorkspaceGhostwriteJob.STATUS_PAUSED
+            _state.value.ghostwriteJob?.status == NovelWorkspaceGhostwriteJob.STATUS_PAUSED ||
+            _state.value.ghostwriteJob?.status == NovelWorkspaceGhostwriteJob.STATUS_FAILED
         ) return true
         val directory = projectDirectory ?: return false
         val slug = branchSlug ?: return false
@@ -651,17 +1189,27 @@ class NovelMarkdownWorkspaceViewModel(
         val slug = branchSlug ?: return
         if (_state.value.busy) return
         if (hasActiveGhostwrite()) {
-            _state.value = _state.value.copy(errorMessage = "当前分支仍被代笔批次占用，请先让批次完成或取消后再收录正文")
+            _state.value = _state.value.copy(errorMessage = text(R.string.novel_batch_in_use))
             return
         }
         if (target !is NovelWorkspaceCollectTarget.ReplaceChapter) {
             val currentLedger = NovelWorkspaceLedger.load(directory)
-            if (NovelWorkspaceLedger.isPlotStale(currentLedger, slug)) {
-                _state.value = _state.value.copy(errorMessage = "剧情落后于正文。请切到“讨论”，发送“根据最新正文同步 plot/current.md”，并批准剧情修改后再收录")
+            if (NovelWorkspaceLedger.isPlotStale(NovelWorkspaceStore(directory), currentLedger, slug)) {
+                _state.value = _state.value.copy(
+                    errorMessage = text(
+                        R.string.novel_ghostwrite_error_stale_plot,
+                        text(R.string.novel_ghostwrite_task_write),
+                    ),
+                )
                 return
             }
             if (NovelWorkspaceUnresolvedStore.entryFor(directory, slug) != null) {
-                _state.value = _state.value.copy(errorMessage = "存在未解决的中间章修改，请先处理后再收录新正文")
+                _state.value = _state.value.copy(
+                    errorMessage = text(
+                        R.string.novel_ghostwrite_error_unresolved_edits,
+                        text(R.string.novel_ghostwrite_task_write),
+                    ),
+                )
                 return
             }
         }
@@ -680,14 +1228,21 @@ class NovelMarkdownWorkspaceViewModel(
                 _state.value = _state.value.copy(
                     chapters = loadChapters(store),
                     drafts = loadDrafts(store),
-                    plotStale = NovelWorkspaceLedger.isPlotStale(NovelWorkspaceLedger.load(directory), slug),
+                    catalog = loadCatalog(directory, slug),
+                    plotStale = NovelWorkspaceLedger.isPlotStale(
+                        store,
+                        NovelWorkspaceLedger.load(directory),
+                        slug,
+                    ),
                     unresolvedFromOrdinal = NovelWorkspaceUnresolvedStore.entryFor(directory, slug)?.fromOrdinal,
-                    canUndo = runtime.canUndo(directory),
+                    canUndo = runtime.canUndo(directory, slug),
                 )
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Exception) {
-                _state.value = _state.value.copy(errorMessage = error.message ?: "收录失败")
+                _state.value = _state.value.copy(
+                    errorMessage = localizedRuntimeError(error, R.string.error_title_operation),
+                )
             } finally {
                 _state.value = _state.value.copy(busy = false)
             }
@@ -704,7 +1259,16 @@ class NovelMarkdownWorkspaceViewModel(
         ghostwriteRefreshJob = viewModelScope.launch {
             try {
                 val refresh = withContext(Dispatchers.IO) {
-                    ghostwriteController.reconcile(directory)
+                    // Reconcile the durable job and WorkManager identity before projecting
+                    // it. A WorkManager cancellation racing the UI is handled by the job CAS.
+                    try {
+                        ghostwriteController.reconcile(directory)
+                    } catch (error: CancellationException) {
+                        throw error
+                    } catch (_: Exception) {
+                        // A cold UI may be projected before WorkManager is initialized;
+                        // durable job files remain authoritative for this refresh.
+                    }
                     val store = NovelWorkspaceStore(directory)
                     val ledger = NovelWorkspaceLedger.load(directory)
                     val snapshot = NovelWorkspaceGhostwriteJobs.snapshot(directory)
@@ -712,18 +1276,23 @@ class NovelMarkdownWorkspaceViewModel(
                         snapshot.jobs.firstOrNull { it.id == focusedJobId && it.branchSlug == slug }
                     } else {
                         snapshot.jobs.firstOrNull { !it.isTerminal && it.branchSlug == slug }
-                            ?: snapshot.jobs.filter { it.status == NovelWorkspaceGhostwriteJob.STATUS_FAILED && it.branchSlug == slug }
-                                .maxByOrNull { it.updatedAt }
+                            ?: NovelWorkspaceGhostwriteJobs.latestFailed(directory, slug)
                     }
                     val job = selectedJob
                         ?.let { job ->
                             NovelMarkdownGhostwriteUi(
                                 jobId = job.id,
                                 executionId = job.executionKey,
+                                branchSlug = job.branchSlug,
                                 target = job.targetChapterCount,
                                 written = NovelWorkspaceGhostwriteJobs.progress(job, store),
+                                startOrdinal = job.startOrdinal,
                                 status = job.status,
-                                reason = job.reason,
+                                stage = job.stage,
+                                currentChapterOrdinal = job.currentChapterOrdinal,
+                                rewriteAttempt = job.rewriteAttempt,
+                                reason = localizedJobReason(job.reason),
+                                mode = job.mode,
                             )
                         }
                     NovelGhostwriteRefresh(
@@ -731,9 +1300,10 @@ class NovelMarkdownWorkspaceViewModel(
                         unreadableJobFiles = snapshot.unreadableFiles,
                         chapters = loadChapters(store),
                         drafts = loadDrafts(store),
-                        plotStale = NovelWorkspaceLedger.isPlotStale(ledger, slug),
+                        catalog = loadCatalog(directory, ledger, slug),
+                        plotStale = NovelWorkspaceLedger.isPlotStale(store, ledger, slug),
                         unresolvedFromOrdinal = NovelWorkspaceUnresolvedStore.entryFor(directory, slug)?.fromOrdinal,
-                        canUndo = runtime.canUndo(directory),
+                        canUndo = runtime.canUndo(directory, slug),
                     )
                 }
                 _state.value = _state.value.copy(
@@ -741,6 +1311,7 @@ class NovelMarkdownWorkspaceViewModel(
                     unreadableJobFiles = refresh.unreadableJobFiles,
                     chapters = refresh.chapters,
                     drafts = refresh.drafts,
+                    catalog = refresh.catalog,
                     plotStale = refresh.plotStale,
                     unresolvedFromOrdinal = refresh.unresolvedFromOrdinal,
                     canUndo = refresh.canUndo,
@@ -748,52 +1319,26 @@ class NovelMarkdownWorkspaceViewModel(
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Exception) {
-                _state.value = _state.value.copy(errorMessage = error.message ?: "无法读取代笔任务，请重试")
+                _state.value = _state.value.copy(errorMessage = localizedRuntimeError(error, R.string.error_title_operation))
             }
         }
     }
 
     fun startGhostwriteBatch(targetChapterCount: Int) {
+        val directory = projectDirectory ?: return
+        val slug = branchSlug ?: return
+        if (targetChapterCount !in 1..NovelWorkspaceGhostwriteCoordinator.MAX_GHOSTWRITE_CHAPTERS) {
+            _state.value = _state.value.copy(errorMessage = text(R.string.error_title_operation))
+            return
+        }
+        checkBatchStartReady(polish = false)?.let { blocked ->
+            _state.value = _state.value.copy(errorMessage = blocked)
+            return
+        }
         viewModelScope.launch {
-            val directory = projectDirectory ?: return@launch
-            val slug = branchSlug ?: return@launch
-            if (targetChapterCount <= 0) {
-                _state.value = _state.value.copy(errorMessage = "章数需大于 0")
-                return@launch
+            runCatching {
+                ghostwriteController.startBatch(directory, projectId, slug, targetChapterCount)
             }
-            val settings = settingsAggregator.settingsFlow.value
-            if (settings.init) {
-                _state.value = _state.value.copy(errorMessage = "模型设置仍在加载，请稍后重试")
-                return@launch
-            }
-            if (resolveWritingModel(settings) == null) {
-                _state.value = _state.value.copy(errorMessage = "尚未配置聊天模型，请关闭代笔面板并在顶部选择模型")
-                return@launch
-            }
-            // Only an active (running/paused) batch blocks a new one; a visible failed
-            // job is a read-only leftover and is dismissed by starting fresh.
-            if (_state.value.ghostwriteJob?.status == NovelWorkspaceGhostwriteJob.STATUS_RUNNING ||
-                _state.value.ghostwriteJob?.status == NovelWorkspaceGhostwriteJob.STATUS_PAUSED
-            ) {
-                _state.value = _state.value.copy(errorMessage = "已有代笔批次，请先继续完成或取消后再开新批次")
-                return@launch
-            }
-            // D-D: never start a batch while a middle-chapter edit is unresolved.
-            if (NovelWorkspaceUnresolvedStore.entryFor(directory, slug) != null) {
-                _state.value = _state.value.copy(
-                    errorMessage = "存在未解决的中间章修改，请先处理（确认无碍/重写后章）再代笔",
-                )
-                return@launch
-            }
-            val ledger = NovelWorkspaceLedger.load(directory)
-            if (NovelWorkspaceLedger.isPlotStale(ledger, slug)) {
-                _state.value = _state.value.copy(
-                    plotStale = true,
-                    errorMessage = "剧情落后于正文。请切到“讨论”，发送“根据最新正文同步 plot/current.md”，并批准剧情修改后再代笔",
-                )
-                return@launch
-            }
-            runCatching { ghostwriteController.startBatch(directory, projectId, slug, targetChapterCount) }
                 .onSuccess { job ->
                     focusedJobId = job.id
                     _state.value = _state.value.copy(
@@ -801,18 +1346,114 @@ class NovelMarkdownWorkspaceViewModel(
                         ghostwriteJob = NovelMarkdownGhostwriteUi(
                             jobId = job.id,
                             executionId = job.executionKey,
+                            branchSlug = job.branchSlug,
                             target = job.targetChapterCount,
                             written = 0,
+                            startOrdinal = job.startOrdinal,
                             status = job.status,
+                            stage = job.stage,
+                            currentChapterOrdinal = job.currentChapterOrdinal,
+                            rewriteAttempt = job.rewriteAttempt,
+                            mode = job.mode,
                         ),
                     )
                 }
                 .onFailure {
                     if (it is CancellationException) throw it
-                    _state.value = _state.value.copy(errorMessage = it.message ?: "代笔启动失败")
+                    _state.value = _state.value.copy(errorMessage = it.message ?: text(R.string.error_title_operation))
                     refreshGhostwrite()
                 }
         }
+    }
+
+    /**
+     * Batch polish for the inclusive ordinal range [fromOrdinal, toOrdinal]. Both batch kinds
+     * share the durable branch claim and pause/resume/CAS semantics.
+     */
+    fun startPolish(fromOrdinal: Int, toOrdinal: Int) {
+        val directory = projectDirectory ?: return
+        val slug = branchSlug ?: return
+        if (fromOrdinal <= 0 || toOrdinal < fromOrdinal) {
+            _state.value = _state.value.copy(errorMessage = text(R.string.error_title_operation))
+            return
+        }
+        val ordinals = _state.value.chapters.map { it.ordinal }.toSet()
+        val missing = (fromOrdinal..toOrdinal).firstOrNull { it !in ordinals }
+        if (missing != null) {
+            _state.value = _state.value.copy(errorMessage = text(R.string.novel_no_chapters_to_polish))
+            return
+        }
+        checkBatchStartReady(polish = true)?.let { blocked ->
+            _state.value = _state.value.copy(errorMessage = blocked)
+            return
+        }
+        viewModelScope.launch {
+            runCatching {
+                ghostwriteController.startPolishBatch(directory, projectId, slug, fromOrdinal, toOrdinal)
+            }
+                .onSuccess { job ->
+                    focusedJobId = job.id
+                    _state.value = _state.value.copy(
+                        errorMessage = null,
+                        ghostwriteJob = NovelMarkdownGhostwriteUi(
+                            jobId = job.id,
+                            executionId = job.executionKey,
+                            branchSlug = job.branchSlug,
+                            target = job.targetChapterCount,
+                            written = 0,
+                            startOrdinal = job.startOrdinal,
+                            status = job.status,
+                            stage = job.stage,
+                            currentChapterOrdinal = job.currentChapterOrdinal,
+                            rewriteAttempt = job.rewriteAttempt,
+                            mode = job.mode,
+                        ),
+                    )
+                }
+                .onFailure {
+                    if (it is CancellationException) throw it
+                    _state.value = _state.value.copy(errorMessage = it.message ?: text(R.string.error_title_operation))
+                    refreshGhostwrite()
+                }
+        }
+    }
+
+    /** Shared pre-flight gates for both batch kinds. */
+    private fun checkBatchStartReady(polish: Boolean): String? {
+        val directory = projectDirectory
+        val slug = branchSlug
+        if (directory == null || slug == null) return text(R.string.novel_loading)
+        val settings = settingsAggregator.settingsFlow.value
+        if (settings.init) return text(R.string.novel_loading)
+        if (resolveWritingModel(settings) == null) {
+            return text(R.string.novel_ghostwrite_error_model_missing)
+        }
+        // A failed job remains bound to its frozen plan until explicitly dismissed or retried.
+        if (_state.value.ghostwriteJob?.status == NovelWorkspaceGhostwriteJob.STATUS_RUNNING ||
+            _state.value.ghostwriteJob?.status == NovelWorkspaceGhostwriteJob.STATUS_PAUSED ||
+            _state.value.ghostwriteJob?.status == NovelWorkspaceGhostwriteJob.STATUS_FAILED
+        ) {
+            return text(R.string.novel_branch_locked)
+        }
+        if (NovelWorkspaceUnresolvedStore.entryFor(directory, slug) != null) {
+            return text(
+                R.string.novel_ghostwrite_error_unresolved_edits,
+                text(if (polish) R.string.novel_ghostwrite_task_polish else R.string.novel_ghostwrite_task_write),
+            )
+        }
+        if (NovelWorkspaceLedger.isPlotStale(
+                NovelWorkspaceStore(directory),
+                NovelWorkspaceLedger.load(directory),
+                slug,
+            )
+        ) {
+            _state.value = _state.value.copy(plotStale = true)
+            return text(
+                R.string.novel_ghostwrite_error_stale_plot,
+                text(if (polish) R.string.novel_ghostwrite_task_polish else R.string.novel_ghostwrite_task_write),
+            )
+        }
+        return null
     }
 
     fun pauseGhostwriteBatch() {
@@ -829,11 +1470,22 @@ class NovelMarkdownWorkspaceViewModel(
     }
 
     fun resumeGhostwriteBatch() {
+        val directory = projectDirectory ?: return
+        val current = _state.value.ghostwriteJob ?: return
+        val slug = branchSlug ?: return
+        if (current.branchSlug != slug) {
+            _state.value = _state.value.copy(errorMessage = text(R.string.error_title_operation))
+            return
+        }
         viewModelScope.launch {
-            val directory = projectDirectory ?: return@launch
-            val current = _state.value.ghostwriteJob ?: return@launch
             runCatching {
-                ghostwriteController.resume(directory, projectId, current.jobId, current.executionId)
+                ghostwriteController.resume(
+                    directory,
+                    projectId,
+                    current.jobId,
+                    current.executionId,
+                    expectedBranchSlug = slug,
+                )
             }.onSuccess { resumed ->
                 if (resumed != null) {
                     _state.value = _state.value.copy(
@@ -846,20 +1498,31 @@ class NovelMarkdownWorkspaceViewModel(
                     )
                 }
             }.onFailure {
-                    if (it is CancellationException) throw it
-                    _state.value = _state.value.copy(errorMessage = it.message)
-                }
+                if (it is CancellationException) throw it
+                _state.value = _state.value.copy(errorMessage = it.message ?: text(R.string.error_title_operation))
+            }
             refreshGhostwrite()
         }
     }
 
     fun retryFailedGhostwriteBatch() {
+        val directory = projectDirectory ?: return
+        val current = _state.value.ghostwriteJob ?: return
+        val slug = branchSlug ?: return
+        if (current.status != NovelWorkspaceGhostwriteJob.STATUS_FAILED) return
+        if (current.branchSlug != slug) {
+            _state.value = _state.value.copy(errorMessage = text(R.string.error_title_operation))
+            return
+        }
         viewModelScope.launch {
-            val directory = projectDirectory ?: return@launch
-            val current = _state.value.ghostwriteJob ?: return@launch
-            if (current.status != NovelWorkspaceGhostwriteJob.STATUS_FAILED) return@launch
             runCatching {
-                ghostwriteController.retryFailed(directory, projectId, current.jobId, current.executionId)
+                ghostwriteController.retryFailed(
+                    directory,
+                    projectId,
+                    current.jobId,
+                    current.executionId,
+                    expectedBranchSlug = slug,
+                )
             }.onSuccess { resumed ->
                 _state.value = _state.value.copy(
                     errorMessage = null,
@@ -870,10 +1533,10 @@ class NovelMarkdownWorkspaceViewModel(
                     ),
                 )
             }.onFailure {
-                    if (it is CancellationException) throw it
-                _state.value = _state.value.copy(errorMessage = it.message ?: "代笔继续失败")
-                refreshGhostwrite()
+                if (it is CancellationException) throw it
+                _state.value = _state.value.copy(errorMessage = it.message ?: text(R.string.error_title_operation))
             }
+            refreshGhostwrite()
         }
     }
 
@@ -909,13 +1572,12 @@ class NovelMarkdownWorkspaceViewModel(
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Exception) {
-                _state.value = _state.value.copy(errorMessage = error.message ?: "无法移除失败记录，请重试")
+                _state.value = _state.value.copy(
+                    errorMessage = localizedRuntimeError(error, R.string.error_title_operation),
+                )
             }
         }
     }
-
-    /** Per-project writing model wins over the global chat model; invalid ids fall through. */
-    @OptIn(ExperimentalUuidApi::class)
     private fun resolveWritingModel(settings: app.amber.core.settings.Settings): app.amber.ai.provider.Model? {
         val override = projectDirectory?.let { NovelWorkspaceProjectSettingsStore.load(it).writingModelId }
         if (override != null) {
@@ -939,7 +1601,8 @@ class NovelMarkdownWorkspaceViewModel(
     }
 
     /** Layer-3 consistency review: read the newest chapter against the constraint brief.
-     *  Manual, on-demand (no auto-run) — keeps token cost in the author's hands. */
+     *  This is an author-triggered, read-only review; each batch chapter already has its
+     *  own candidate-bound joint review before atomic collection. */
     fun runConsistencyCheck() {
         val directory = projectDirectory ?: return
         val branch = branchId ?: return
@@ -948,58 +1611,81 @@ class NovelMarkdownWorkspaceViewModel(
         val settings = settingsAggregator.settingsFlow.value
         val model = resolveReviewModel(settings)
         if (model == null) {
-            _state.value = _state.value.copy(errorMessage = "尚未配置审稿模型")
+            _state.value = _state.value.copy(errorMessage = text(R.string.novel_ghostwrite_error_model_missing))
             return
         }
         _state.value = _state.value.copy(
             consistencyChecking = true,
             consistencyReport = null,
             errorMessage = null,
-            // Consistency check is a read-only turn, but it still drives the agent loop;
-            // hold busy so a second turn can't interleave and cross-talk _state.
             busy = true,
+            streamingText = "",
+            reasoningText = "",
+            toolActivity = null,
         )
+        turnJob?.cancel()
         turnJob = viewModelScope.launch {
             var report = ""
             var completed = false
             try {
-                runtime.runTurn(
+                turnLauncher.launch(
                     NovelWorkspaceRuntime.TurnRequest(
                         projectDirectory = directory,
                         branchId = branch,
                         branchSlug = slug,
-                        userText = "请对最新一章做一致性检查。",
-                        systemPrompt = NovelWorkspacePrompts.consistencyReview(),
+                        userText = localizedPromptText(
+                            chinese = "请对最新一章做一致性检查。",
+                            english = "Review the latest chapter for consistency.",
+                        ),
+                        systemPrompt = NovelWorkspacePrompts.consistencyReview(
+                            locale = context.appLocale(),
+                        ),
                         settings = settings,
                         model = model,
+                        fallbackErrorMessage = text(R.string.error_title_operation),
+                        locale = context.appLocale(),
                         injection = _state.value.injection,
                     ),
-                ).collect { event ->
+                    runtime,
+                ).events.collect { event ->
                     when (event) {
                         is NovelWorkspaceRuntime.TurnEvent.Delta -> report += event.text
+                        is NovelWorkspaceRuntime.TurnEvent.ReasoningDelta -> {
+                            _state.value = _state.value.copy(
+                                reasoningText = _state.value.reasoningText + event.text,
+                            )
+                        }
+                        is NovelWorkspaceRuntime.TurnEvent.ToolActivity -> {
+                            _state.value = _state.value.copy(toolActivity = toolLabel(event.toolName))
+                        }
                         is NovelWorkspaceRuntime.TurnEvent.Completed -> {
                             completed = true
                             if (event.finalText.isNotBlank()) report = event.finalText
                         }
-                        is NovelWorkspaceRuntime.TurnEvent.Failed ->
+                        is NovelWorkspaceRuntime.TurnEvent.Failed -> {
                             _state.value = _state.value.copy(errorMessage = event.message)
-                        else -> Unit
+                        }
                     }
                 }
                 _state.value = _state.value.copy(
                     consistencyChecking = false,
                     consistencyReport = if (completed) report.ifBlank { null } else null,
                     busy = false,
-                    canUndo = runtime.canUndo(directory),
+                    canUndo = runtime.canUndo(directory, slug),
                 )
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Exception) {
-                _state.value = _state.value.copy(errorMessage = error.message ?: "一致性检查失败，请重试")
+                _state.value = _state.value.copy(
+                    errorMessage = localizedRuntimeError(error, R.string.error_title_operation),
+                )
             } finally {
                 _state.value = _state.value.copy(
-                    busy = false, consistencyChecking = false,
-                    streamingText = "", reasoningText = "", toolActivity = null,
+                    busy = false,
+                    consistencyChecking = false,
+                    streamingText = "",
+                    reasoningText = "",
+                    toolActivity = null,
                 )
             }
         }
@@ -1019,7 +1705,20 @@ class NovelMarkdownWorkspaceViewModel(
                 directory,
             )
             _state.value = _state.value.copy(writingModelId = modelId)
-        }.onFailure { _state.value = _state.value.copy(errorMessage = it.message ?: "保存模型设置失败") }
+        }.onFailure { _state.value = _state.value.copy(errorMessage = it.message ?: text(R.string.workspace_save_failed)) }
+    }
+
+    /** Set or clear the per-project review model override (null = follow the writing model). */
+    fun setReviewModel(modelId: String?) {
+        val directory = projectDirectory ?: return
+        runCatching {
+            val current = NovelWorkspaceProjectSettingsStore.load(directory)
+            NovelWorkspaceProjectSettingsStore.save(
+                current.copy(reviewModelId = modelId),
+                directory,
+            )
+            _state.value = _state.value.copy(reviewModelId = modelId)
+        }.onFailure { _state.value = _state.value.copy(errorMessage = it.message ?: text(R.string.workspace_save_failed)) }
     }
 
     fun currentWritingModelId(): String? =
@@ -1036,7 +1735,15 @@ class NovelMarkdownWorkspaceViewModel(
     fun readChapterPlan(): String =
         pathRead(planPath()) ?: ""
 
-    fun saveChapterPlan(body: String) = pathWrite(planPath(), body)
+    fun saveChapterPlan(body: String): Boolean {
+        projectDirectory ?: return false
+        branchSlug ?: return false
+        if (hasActiveGhostwrite()) {
+            _state.value = _state.value.copy(errorMessage = text(R.string.novel_batch_in_use))
+            return false
+        }
+        return pathWrite(planPath(), body)
+    }
 
     fun readUpcomingArc(): String = pathRead(upcomingPath()) ?: ""
 
@@ -1050,12 +1757,8 @@ class NovelMarkdownWorkspaceViewModel(
         return pathRead(first) ?: ""
     }
 
-    fun saveWritingPreference(body: String) {
-        val directory = projectDirectory ?: return
-        val store = NovelWorkspaceStore(directory)
-        val existing = store.list(NovelWorkspacePaths.SETTING_DIR + "/writing").firstOrNull()
-        pathWrite(existing ?: NovelWorkspacePaths.SETTING_DIR + "/writing/写作要求.md", body)
-    }
+    // saveWritingPreference 已上移至设定 tab 的 saveFileEdit 旁：两入口共用 commitFileEdit
+    // （手改 commit + undo，J7 口径统一）。
 
     /** What the host will inject as constraints next turn (ghostwrite panel preview). */
     fun briefPreview(): String {
@@ -1065,6 +1768,7 @@ class NovelMarkdownWorkspaceViewModel(
             app.amber.feature.novelworkspace.NovelWorkspaceContextAssembler.assemble(
                 NovelWorkspaceStore(directory), slug,
                 flags = _state.value.injection,
+                locale = context.appLocale(),
             )
         }.getOrDefault("")
     }
@@ -1077,13 +1781,15 @@ class NovelMarkdownWorkspaceViewModel(
         }.getOrNull()
     }
 
-    private fun pathWrite(path: String?, body: String) {
-        val directory = projectDirectory ?: return
-        if (path == null) return
-        runCatching {
+    private fun pathWrite(path: String?, body: String): Boolean {
+        val directory = projectDirectory ?: return false
+        if (path == null) return false
+        return runCatching {
             NovelWorkspaceStore(directory).write(path, body)
-        }.onFailure {
-            _state.value = _state.value.copy(errorMessage = it.message ?: "保存失败")
+            true
+        }.getOrElse {
+            _state.value = _state.value.copy(errorMessage = it.message ?: text(R.string.workspace_save_failed))
+            false
         }
     }
 
@@ -1097,7 +1803,7 @@ class NovelMarkdownWorkspaceViewModel(
                 directory,
             )
             _state.value = _state.value.copy(injection = flags)
-        }.onFailure { _state.value = _state.value.copy(errorMessage = it.message ?: "保存注入设置失败") }
+        }.onFailure { _state.value = _state.value.copy(errorMessage = it.message ?: text(R.string.workspace_save_failed)) }
     }
 
     /** Ghostwrite panel: model drafts the next chapter's plan into plan/this-chapter.md. */
@@ -1107,12 +1813,12 @@ class NovelMarkdownWorkspaceViewModel(
         val slug = branchSlug ?: return
         if (_state.value.busy) return
         if (hasActiveGhostwrite()) {
-            _state.value = _state.value.copy(errorMessage = "当前分支仍被代笔批次占用，请先让批次完成或取消后再生成计划")
+            _state.value = _state.value.copy(errorMessage = text(R.string.novel_batch_in_use))
             return
         }
         val settings = settingsAggregator.settingsFlow.value
         val model = resolveWritingModel(settings) ?: run {
-            _state.value = _state.value.copy(errorMessage = "尚未配置聊天模型")
+            _state.value = _state.value.copy(errorMessage = text(R.string.novel_ghostwrite_error_model_missing))
             return
         }
         val expectedPlanPath = NovelWorkspacePaths.branchPrefix(slug) + "/plan/this-chapter.md"
@@ -1122,18 +1828,24 @@ class NovelMarkdownWorkspaceViewModel(
         turnJob?.cancel()
         turnJob = viewModelScope.launch {
             try {
-                runtime.runTurn(
+                turnLauncher.launch(
                     NovelWorkspaceRuntime.TurnRequest(
                         projectDirectory = directory,
                         branchId = branch,
                         branchSlug = slug,
-                        userText = "请根据前文拟定下一章计划并写入计划文件。",
-                        systemPrompt = NovelWorkspacePrompts.planDraft(),
+                        userText = localizedPromptText(
+                            chinese = "请根据前文拟定下一章计划并写入计划文件。",
+                            english = "Draft the next chapter plan from the preceding story and write it to the plan file.",
+                        ),
+                        systemPrompt = NovelWorkspacePrompts.planDraft(locale = context.appLocale()),
                         settings = settings,
                         model = model,
+                        fallbackErrorMessage = text(R.string.error_title_operation),
+                        locale = context.appLocale(),
                         injection = _state.value.injection,
                     ),
-                ).collect { event ->
+                    runtime,
+                ).events.collect { event ->
                     when (event) {
                         is NovelWorkspaceRuntime.TurnEvent.Completed -> {
                             val producedPlan = withContext(Dispatchers.IO) {
@@ -1152,7 +1864,7 @@ class NovelMarkdownWorkspaceViewModel(
                                 errorMessage = if (producedPlan) {
                                     null
                                 } else {
-                                    "本轮没有写入下一章计划。请重试；若持续失败，请换用支持工具调用的模型。"
+                                    text(R.string.error_title_operation)
                                 },
                                 // Reload only when the expected branch file was durably committed.
                                 planAutoTick = if (producedPlan) {
@@ -1190,12 +1902,38 @@ class NovelMarkdownWorkspaceViewModel(
         )
     }
 
-    private fun toolLabel(toolName: String): String = when (toolName) {
-        "novel_workspace_list" -> "正在查看目录…"
-        "novel_workspace_read" -> "正在读取文件…"
-        "novel_workspace_grep" -> "正在搜索前文…"
-        "novel_workspace_status" -> "正在检查工作区状态…"
-        "novel_workspace_write" -> "正在写入…"
-        else -> "正在调用工具…"
+    private fun toolLabel(toolName: String): String = context.getString(R.string.novel_thinking)
+
+    private fun localizedPromptText(chinese: String, english: String): String =
+        if (context.appLocale().language.equals("zh", ignoreCase = true)) chinese else english
+
+    /** Translate only the fixed owner guard; preserve dynamic exception details verbatim. */
+    private fun localizedRuntimeError(error: Throwable, fallbackResId: Int): String =
+        if (error.message == OWNER_GUARD_ERROR) {
+            text(R.string.novel_batch_in_use)
+        } else {
+            error.message ?: text(fallbackResId)
+        }
+
+    private fun localizedJobReason(reason: String?): String? {
+        if (reason == null || context.appLocale().language.equals("zh", ignoreCase = true)) {
+            return reason
+        }
+        val prefix = NovelWorkspaceGhostwriteCoordinator.REASON_POLISH_POINTER_COMMIT_FAILED
+        if (!reason.startsWith(prefix)) return reason
+        val detail = reason.removePrefix(prefix).removePrefix("：").trim()
+        return if (detail.isEmpty()) {
+            text(R.string.error_title_operation)
+        } else {
+            "${text(R.string.error_title_operation)}: $detail"
+        }
+    }
+
+    private fun text(@androidx.annotation.StringRes id: Int, vararg args: Any): String =
+        context.getString(id, *args)
+
+    private companion object {
+        private const val OWNER_GUARD_ERROR =
+            "当前分支仍被代笔批次占用，请先让批次完成或取消后再修改正文"
     }
 }

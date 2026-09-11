@@ -35,6 +35,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
@@ -49,6 +50,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import com.composables.icons.lucide.Lucide
 import com.composables.icons.lucide.Download
+import app.amber.agent.R
 import app.amber.core.files.FilesManager
 import app.amber.feature.ui.context.LocalToaster
 import org.koin.compose.koinInject
@@ -78,6 +80,8 @@ fun ImagePreviewDialog(
     val filesManager: FilesManager = koinInject()
     val state = rememberZoomablePagerState { images.size }
     val toaster = LocalToaster.current
+    val savingMessage = stringResource(R.string.generated_image_saving)
+    val savedMessage = stringResource(R.string.generated_image_saved)
     val lifecycleOwner = LocalLifecycleOwner.current
     val density = LocalDensity.current
     val scope = rememberCoroutineScope()
@@ -258,10 +262,10 @@ fun ImagePreviewDialog(
                             onClick = {
                                 lifecycleOwner.lifecycleScope.launch {
                                     runCatching {
-                                        toaster.show("正在保存")
+                                        toaster.show(savingMessage)
                                         val imgUrl = images[state.currentPage]
                                         filesManager.saveMessageImage(context, imgUrl)
-                                        toaster.show(message = "已保存图片", type = ToastType.Success)
+                                        toaster.show(message = savedMessage, type = ToastType.Success)
                                     }.onFailure {
                                         it.printStackTrace()
                                         toaster.show(

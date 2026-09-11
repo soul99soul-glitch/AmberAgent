@@ -354,8 +354,8 @@ fun SettingPage(vm: SettingVM = koinViewModel()) {
                     item(
                         onClick = { navController.navigate(Screen.Backup) },
                         leadingContent = { SettingLeadingIcon(Lucide.DatabaseZap) },
-                        supportingContent = { SettingSupporting(stringResource(R.string.setting_page_sync_backup_desc)) },
-                        headlineContent = { Text(stringResource(R.string.setting_page_sync_backup)) },
+                        supportingContent = { SettingSupporting(stringResource(R.string.setting_page_backup_desc)) },
+                        headlineContent = { Text(stringResource(R.string.setting_page_backup)) },
                         trailingContent = { SettingChevron() },
                     )
                     item(
@@ -385,6 +385,14 @@ fun SettingPage(vm: SettingVM = koinViewModel()) {
                             }
                         },
                         headlineContent = { Text(stringResource(R.string.setting_page_chat_storage)) },
+                        trailingContent = { SettingChevron() },
+                    )
+                    item(
+                        // P7-03：存储占用与按时间清理会话。
+                        onClick = { navController.navigate(Screen.SettingStorage) },
+                        leadingContent = { SettingLeadingIcon(Lucide.ChartNoAxesColumnIncreasing) },
+                        supportingContent = { SettingSupporting(stringResource(R.string.setting_page_storage_cleanup_desc)) },
+                        headlineContent = { Text(stringResource(R.string.setting_page_storage_cleanup)) },
                         trailingContent = { SettingChevron() },
                     )
                 }

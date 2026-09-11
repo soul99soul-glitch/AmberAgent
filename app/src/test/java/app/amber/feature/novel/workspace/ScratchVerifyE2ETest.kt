@@ -6,7 +6,8 @@ import app.amber.ai.provider.Model
 import app.amber.ai.ui.UIMessage
 import app.amber.ai.ui.UIMessagePart
 import app.amber.core.ai.GenerationChunk
-import app.amber.core.ai.Generator
+import app.amber.core.ai.GenerationRunSession
+import app.amber.core.ai.RunKernel
 import app.amber.core.ai.transformers.InputMessageTransformer
 import app.amber.core.ai.transformers.OutputMessageTransformer
 import app.amber.core.settings.Settings
@@ -79,33 +80,14 @@ class ScratchVerifyE2ETest {
         return dir
     }
 
-    private class LoopingFakeGenerator(
+    private class LoopingFakeKernel(
         private val toolCalls: List<Pair<String, JsonElement>>,
         private val finalText: String,
-    ) : Generator {
-        override fun generateText(
-            settings: Settings,
-            model: Model,
-            messages: List<UIMessage>,
-            inputTransformers: List<InputMessageTransformer>,
-            outputTransformers: List<OutputMessageTransformer>,
-            memories: List<app.amber.core.model.AssistantMemory>?,
-            tools: List<Tool>,
-            maxSteps: Int,
-            processingStatus: MutableStateFlow<String?>,
-            autoApproveTools: Boolean,
-            autoApproveHighRiskTools: Boolean,
-            autoApprovedToolNames: Set<String>,
-            invocationContext: app.amber.feature.runtime.ToolInvocationContext,
-            conversation: app.amber.core.model.Conversation?,
-            consumeSteerMessages: suspend () -> List<UIMessage>,
-            runId: String?,
-            onTerminal: (suspend (app.amber.core.ai.GenerationTerminal) -> Unit)?,
-            responsesResume: app.amber.ai.provider.ResponsesResumeRequest?,
-        ): Flow<GenerationChunk> = flow {
+    ) : RunKernel {
+        override fun run(session: GenerationRunSession): Flow<GenerationChunk> = flow {
             val executed = mutableListOf<UIMessagePart.Tool>()
             for ((name, input) in toolCalls) {
-                val tool = tools.first { it.name == name }
+                val tool = session.tools.first { it.name == name }
                 val output = tool.execute(input)
                 executed.add(
                     UIMessagePart.Tool(
@@ -120,14 +102,14 @@ class ScratchVerifyE2ETest {
                 role = MessageRole.ASSISTANT,
                 parts = executed + UIMessagePart.Text(finalText),
             )
-            emit(GenerationChunk.Messages(messages + assistant))
+            emit(GenerationChunk.Messages(session.messages + assistant))
         }
     }
 
     @Test
     fun `rewrite approve preserves the original unresolved boundary until author confirms`() = runTest {
         val dir = installProject()
-        val runtime = NovelWorkspaceRuntime(LoopingFakeGenerator(emptyList(), ""))
+        val runtime = NovelWorkspaceRuntime(LoopingFakeKernel(emptyList(), ""))
         val store = NovelWorkspaceStore(dir)
 
         // Add chapters 2 and 3 so chapter 1 is a middle chapter.
@@ -144,7 +126,7 @@ class ScratchVerifyE2ETest {
         // We drive the proposal through a tool-driven turn whose fake generator writes
         // the two rewritten chapters; the gate arithmetic is what we assert below.
         val runtime2 = NovelWorkspaceRuntime(
-            LoopingFakeGenerator(
+            LoopingFakeKernel(
                 toolCalls = listOf(
                     "novel_workspace_write" to buildJsonObject {
                         put("path", "branches/主线/chapters/002-入汴.md")
@@ -187,7 +169,7 @@ class ScratchVerifyE2ETest {
     @Test
     fun `a non-undoable commit hides a stale undo record`() = runTest {
         val dir = installProject()
-        val runtime = NovelWorkspaceRuntime(LoopingFakeGenerator(emptyList(), ""))
+        val runtime = NovelWorkspaceRuntime(LoopingFakeKernel(emptyList(), ""))
         val store = NovelWorkspaceStore(dir)
 
         // Collect a draft -> canon commit with an undo record.
@@ -198,7 +180,7 @@ class ScratchVerifyE2ETest {
         // A subsequent discussion turn that only does a free write (setting/) commits a
         // GENERIC commit WITHOUT an undo record, advancing the head past the undo record.
         val turnRuntime = NovelWorkspaceRuntime(
-            LoopingFakeGenerator(
+            LoopingFakeKernel(
                 toolCalls = listOf(
                     "novel_workspace_write" to buildJsonObject {
                         put("path", "setting/characters/赵大.md")
