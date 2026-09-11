@@ -15,7 +15,6 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import app.amber.core.settings.Capability
 import app.amber.core.settings.CapabilityFlags
-import app.amber.core.settings.Settings
 import app.amber.core.settings.prefs.SettingsAggregator
 import app.amber.agent.R
 import app.amber.core.sync.core.RestoreScope
@@ -63,11 +62,7 @@ class BackupVM(
         private const val TAG = "BackupVM"
     }
 
-    val settings = settingsStore.settingsFlow.stateIn(
-        scope = viewModelScope,
-        started = SharingStarted.Eagerly,
-        initialValue = Settings.dummy()
-    )
+    val settings = settingsStore.settingsFlow
 
     // P7-01：sync_provider_v2 开关 —— off 时现有 Google Drive / 本地导入导出行为完全不变。
     val providerV2Enabled: StateFlow<Boolean> = capabilityFlags.flow

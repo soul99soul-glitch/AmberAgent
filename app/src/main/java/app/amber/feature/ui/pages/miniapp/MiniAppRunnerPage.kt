@@ -1,5 +1,6 @@
 package app.amber.feature.ui.pages.miniapp
 
+import com.composables.icons.lucide.CodeXml
 import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.Context
@@ -16,10 +17,14 @@ import android.webkit.WebViewClient
 import android.widget.Toast
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -30,6 +35,7 @@ import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -37,6 +43,7 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
@@ -69,6 +76,11 @@ import app.amber.feature.runtime.CapabilityPermissionStore
 import app.amber.core.settings.prefs.SettingsAggregator
 import app.amber.agent.data.db.entity.MiniAppEntity
 import app.amber.feature.ui.context.LocalNavController
+import app.amber.feature.ui.components.ui.WorkspaceLeadingIcon
+import app.amber.feature.ui.components.ui.WorkspaceTone
+import app.amber.feature.ui.components.ui.workspaceBorder
+import app.amber.feature.ui.components.ui.workspaceColors
+import app.amber.feature.ui.theme.LocalAmberTokens
 import app.amber.core.utils.writeClipboardText
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import org.koin.compose.koinInject
@@ -203,15 +215,39 @@ private fun MiniAppRunnerError(
     modifier: Modifier = Modifier,
     onRetry: (() -> Unit)? = null,
 ) {
+    val workspace = workspaceColors()
     Box(
-        modifier = modifier,
+        modifier = modifier.padding(16.dp),
         contentAlignment = Alignment.Center,
     ) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(message)
-            onRetry?.let {
-                TextButton(onClick = it) {
-                    Text(stringResource(R.string.miniapp_retry))
+        Surface(
+            modifier = Modifier.fillMaxSize(),
+            shape = RoundedCornerShape(14.dp),
+            color = workspace.paper,
+            contentColor = workspace.ink,
+            border = workspaceBorder(),
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center,
+            ) {
+                WorkspaceLeadingIcon(
+                    icon = com.composables.icons.lucide.Lucide.CodeXml,
+                    tone = WorkspaceTone.Danger,
+                )
+                Text(
+                    text = message,
+                    modifier = Modifier.padding(top = 12.dp),
+                    color = workspace.ink,
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                onRetry?.let {
+                    TextButton(onClick = it) {
+                        Text(stringResource(R.string.miniapp_retry))
+                    }
                 }
             }
         }
@@ -272,7 +308,16 @@ private fun MiniAppWebView(
     val background = MaterialTheme.colorScheme.background
     val foreground = MaterialTheme.colorScheme.onBackground
     val primary = MaterialTheme.colorScheme.primary
-    val isDark = androidx.compose.foundation.isSystemInDarkTheme()
+    // Mini-apps follow Amber's resolved theme, which may intentionally differ from system night mode.
+    // Keep the provider stateful so a later host.getTheme call sees a theme changed while the page is open.
+    val currentTheme = rememberUpdatedState(
+        MiniAppTheme(
+            dark = LocalAmberTokens.current.isDark,
+            background = "#${background.toArgb().toUInt().toString(16).takeLast(6)}",
+            foreground = "#${foreground.toArgb().toUInt().toString(16).takeLast(6)}",
+            primary = "#${primary.toArgb().toUInt().toString(16).takeLast(6)}",
+        )
+    )
     var webViewRef by remember(app.id) { mutableStateOf<WebView?>(null) }
     var bridgeRef by remember(app.id) { mutableStateOf<MiniAppBridge?>(null) }
 
@@ -372,12 +417,7 @@ private fun MiniAppWebView(
                             navController.navigate(Screen.MiniAppRunner(targetAppId))
                         },
                         themeProvider = {
-                            MiniAppTheme(
-                                dark = isDark,
-                                background = "#${background.toArgb().toUInt().toString(16).takeLast(6)}",
-                                foreground = "#${foreground.toArgb().toUInt().toString(16).takeLast(6)}",
-                                primary = "#${primary.toArgb().toUInt().toString(16).takeLast(6)}",
-                            )
+                            currentTheme.value
                         },
                         conversationWriter = conversationWriter,
                         workspaceWriter = workspaceWriter,

@@ -46,4 +46,16 @@
 
 ## Phase 4
 
-实施中：看板/阅读、小说、议会/Live、扩展/小应用、备份/日志等剩余路由。已有共享主题覆盖不等于逐页视觉验收，继续按ROUTES和参考图补查。
+已完成：看板/阅读、小说、议会/Live、扩展/小应用、辅助设置、备份/日志/历史等页面的主题、分组、边距及真实状态修正。
+
+- OfficePro 去除没有消费方的全局通知开关，保留真正落库的逐文档通知；固定90分钟轮询如实只读显示。BackupVM 直接暴露真实 settingsFlow，保留页面本地草稿；快照组不再为分隔线创建空白列表行。History失败复位留在row scope，删除/Undo仍归页面owner。Log等待首个真实值后才启用开关。
+- 四组独立 review 分别覆盖 Board/辅助设置、Novel/Council/Live、Libraries/MiniApp、Backup/History/OfficePro/Log；没有剩余调用链阻断。F17补查发现缓存日期无生产可见消费者，撤销该缺陷，不添加午夜定时器。
+- NovelWorkspaceBranchFlow 7、BackupVMRestoreCleanup 2通过，assembleDebug成功。模拟器发现Novel标签栏heightIn+fillMaxHeight吞掉正文，随后改为48dp确定高度、正文weight和单行顶栏；模型选择区移到内容顶部。复核括号/层级后Novel 7与assemble再次通过（18s），独立review放行。
+- 实际操作：创建Novel项目并返回列表确认持久化；打开创作/正文、弹出键盘；议会创建进入空会话并弹出键盘；MiniApp列表、Runner主题API与返回；Board关闭态/设置；Backup缺Google配置提示。截图见phase4-novel-workspace-final、novel-keyboard-final、novel-manuscript、council-keyboard、miniapps、miniapp-theme、board-settings、backup。早期novel-workspace截图保留为发现证据，非最终效果。
+- MiniApp使用仅属于新模拟器的本地HTML夹具，只声明theme权限。初次夹具漏声明theme，被现有Sandbox正确拒绝；补声明后系统浅色/App Sage深色返回dark:true、background:#131711，确认F14修复。未改权限协议或允许网络/账户操作。
+- 首次WebView冷初始化触发一次ANR（Chromium BrowserStartupController/WebView构造、约9.5s），恢复后冷启动再次打开与主题读取成功，无第二条ANR。保留环境性能观察，不据此增设未经证明的启动框架或声称真机性能验收。
+- 离线构建并核对全部8个Rust JNI库进入APK：highlight_parser、html_diff_normalizer、markdown_parser、markdown_preprocess、office_parsers、reader_extractor、regex_transformer、sync_crypto。APK不再仅依赖缺省跳过原生构建。真实网络、备份恢复、Live权限/浮窗和付费生成仍不冒充已验收。
+
+## Phase 5
+
+进行中：最终跨页主题/窄屏复核、现有回归、独立总检与交付材料。

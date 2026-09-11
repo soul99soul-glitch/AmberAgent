@@ -80,7 +80,6 @@ fun SettingExperimentalOfficeProPage(
     val officeSavedToast = stringResource(R.string.setting_officepro_saved)
     val officeDetectNoneToast = stringResource(R.string.setting_officepro_detect_none)
     val officeCheckFailedToast = stringResource(R.string.setting_officepro_check_failed)
-    var docRadarNotify by remember { mutableStateOf(true) }
     var subscriptions by remember { mutableStateOf<List<DocSubscriptionEntity>>(emptyList()) }
     var showWatchDialog by remember { mutableStateOf(false) }
     var checkBusy by remember { mutableStateOf(false) }
@@ -96,7 +95,7 @@ fun SettingExperimentalOfficeProPage(
     ) { innerPadding ->
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
-            contentPadding = innerPadding + PaddingValues(horizontal = 12.dp, vertical = 10.dp),
+            contentPadding = innerPadding + PaddingValues(horizontal = 16.dp, vertical = 10.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             item {
@@ -313,12 +312,6 @@ fun SettingExperimentalOfficeProPage(
                         label = stringResource(R.string.setting_officepro_check_interval_label),
                         value = stringResource(R.string.setting_officepro_interval_value),
                     )
-                    OfficeProSwitchRow(
-                        text = stringResource(R.string.setting_officepro_change_notification),
-                        checked = docRadarNotify,
-                        enabled = officeState.enabled,
-                        onCheckedChange = { docRadarNotify = it },
-                    )
                 }
             }
         }
@@ -326,7 +319,7 @@ fun SettingExperimentalOfficeProPage(
     if (showWatchDialog) {
         WatchDocDialog(
             onDismiss = { showWatchDialog = false },
-            onSave = { title, url, threshold, interval, notify ->
+            onSave = { title, url, threshold, notify ->
                 scope.launch {
                     val error = docRadar.subscribe(
                         url = url,
@@ -577,13 +570,12 @@ private fun OfficeProjectEditorDialog(
 @Composable
 private fun WatchDocDialog(
     onDismiss: () -> Unit,
-    onSave: (title: String, url: String, threshold: Int, interval: Int, notify: Boolean) -> Unit,
+    onSave: (title: String, url: String, threshold: Int, notify: Boolean) -> Unit,
     onToast: (String) -> Unit,
 ) {
     var titleInput by remember { mutableStateOf("") }
     var urlInput by remember { mutableStateOf("") }
     var thresholdInput by remember { mutableStateOf("500") }
-    var intervalInput by remember { mutableStateOf("90") }
     var notifyEnabled by remember { mutableStateOf(true) }
     val docRequiredFieldsToast = stringResource(R.string.setting_officepro_doc_required_fields)
     val workspace = workspaceColors()
@@ -631,23 +623,20 @@ private fun WatchDocDialog(
                     label = { Text(stringResource(R.string.setting_officepro_doc_title)) },
                     singleLine = true,
                 )
-                Row(
+                Column(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     OutlinedTextField(
                         value = thresholdInput,
                         onValueChange = { thresholdInput = it },
-                        modifier = Modifier.weight(1f),
+                        modifier = Modifier.fillMaxWidth(),
                         label = { Text(stringResource(R.string.setting_officepro_change_threshold_chars)) },
                         singleLine = true,
                     )
-                    OutlinedTextField(
-                        value = intervalInput,
-                        onValueChange = { intervalInput = it },
-                        modifier = Modifier.weight(1f),
-                        label = { Text(stringResource(R.string.setting_officepro_check_interval_minutes)) },
-                        singleLine = true,
+                    ExperimentStatusRow(
+                        label = stringResource(R.string.setting_officepro_check_interval_label),
+                        value = stringResource(R.string.setting_officepro_interval_value),
                     )
                 }
                 OfficeProSwitchRow(
@@ -665,11 +654,10 @@ private fun WatchDocDialog(
                             val url = urlInput.trim()
                             val title = titleInput.trim()
                             val threshold = thresholdInput.trim().toIntOrNull() ?: 500
-                            val interval = intervalInput.trim().toIntOrNull() ?: 90
                             if (url.isBlank() || title.isBlank()) {
                                 onToast(docRequiredFieldsToast)
                             } else {
-                                onSave(title, url, threshold, interval, notifyEnabled)
+                                onSave(title, url, threshold, notifyEnabled)
                             }
                         },
                     )

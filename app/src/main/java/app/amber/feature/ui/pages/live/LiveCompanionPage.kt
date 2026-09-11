@@ -1,5 +1,6 @@
 package app.amber.feature.ui.pages.live
 
+import androidx.compose.foundation.layout.width
 import android.content.Intent
 import android.provider.Settings as AndroidSettings
 import android.widget.Toast
@@ -15,6 +16,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -115,7 +117,7 @@ fun LiveCompanionPage(vm: LiveCompanionVM = koinViewModel()) {
                 .padding(paddingValues)
                 .background(tokens.bg)
                 .verticalScroll(scrollState)
-                .padding(horizontal = 16.dp, vertical = 14.dp),
+                .padding(horizontal = 16.dp, vertical = 16.dp),
             verticalArrangement = Arrangement.spacedBy(20.dp),
         ) {
             // ── 主开关卡 ──
@@ -226,7 +228,7 @@ private fun LiveHeader(live: Boolean, onBack: () -> Unit, onSettings: () -> Unit
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Box(
-                modifier = Modifier.size(40.dp).pressable(onClick = onBack),
+                modifier = Modifier.size(48.dp).pressable(onClick = onBack),
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(
@@ -247,7 +249,7 @@ private fun LiveHeader(live: Boolean, onBack: () -> Unit, onSettings: () -> Unit
                 Text(stringResource(R.string.live_companion_title), style = type.screenTitle, color = t.ink)
             }
             Box(
-                modifier = Modifier.size(40.dp).pressable(onClick = onSettings),
+                modifier = Modifier.size(48.dp).pressable(onClick = onSettings),
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(
@@ -278,7 +280,7 @@ private fun MasterCard(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(14.dp),
+                .padding(16.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
@@ -366,7 +368,7 @@ private fun ConfigCard(
     val type = LocalAmberType.current
     AmberCard {
         Column(
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 13.dp),
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
             verticalArrangement = Arrangement.spacedBy(11.dp),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -408,7 +410,7 @@ private fun ConfigCard(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 14.dp, vertical = 8.dp),
+                .padding(horizontal = 16.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
@@ -459,7 +461,7 @@ private fun LiveResultCard(
     val actionLabel = actionKey.localizedActionLabel()
     AmberCard {
         Column(
-            modifier = Modifier.padding(14.dp),
+            modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             // source pill + timestamp
@@ -711,7 +713,7 @@ private fun ActionProgressCard(state: LiveModeUiState) {
             .fillMaxWidth()
             .clip(RoundedCornerShape(14.dp))
             .background(t.surface2)
-            .padding(14.dp),
+            .padding(16.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
@@ -773,7 +775,7 @@ private fun ErrorNote(title: String, error: String, retrying: Boolean) {
             .fillMaxWidth()
             .clip(RoundedCornerShape(14.dp))
             .background(t.surface2)
-            .padding(horizontal = 14.dp, vertical = 12.dp),
+            .padding(horizontal = 16.dp, vertical = 14.dp),
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         Text(text = title, style = type.body.copy(fontWeight = FontWeight.Medium), color = t.ink)
@@ -803,7 +805,7 @@ private fun ToggleRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 14.dp, vertical = 13.dp),
+            .padding(horizontal = 16.dp, vertical = 13.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
@@ -824,20 +826,27 @@ private fun AmberToggle(checked: Boolean, onCheckedChange: (Boolean) -> Unit, en
     val knobOffset by animateDpAsState(if (checked) trackW - knob - 3.dp else 3.dp, label = "toggleKnob")
     Box(
         modifier = Modifier
-            .size(trackW, trackH)
-            .clip(RoundedCornerShape(999.dp))
-            .background(track)
+            .size(48.dp)
             .pressable(onClick = { if (enabled) onCheckedChange(!checked) }, enabled = enabled),
-        contentAlignment = Alignment.CenterStart,
+        contentAlignment = Alignment.Center,
     ) {
         Box(
             modifier = Modifier
-                .offset(x = knobOffset)
-                .size(knob)
-                .clip(CircleShape)
-                // white knob is a design-system constant (§6.2 "white knob"), not a theme token.
-                .background(Color(0xFFFFFFFF)),
-        )
+                .width(trackW)
+                .height(trackH)
+                .clip(RoundedCornerShape(999.dp))
+                .background(track),
+            contentAlignment = Alignment.CenterStart,
+        ) {
+            Box(
+                modifier = Modifier
+                    .offset(x = knobOffset)
+                    .size(knob)
+                    .clip(CircleShape)
+                    // white knob is a design-system constant (§6.2 "white knob"), not a theme token.
+                    .background(Color(0xFFFFFFFF)),
+            )
+        }
     }
 }
 
@@ -883,6 +892,7 @@ private fun PillButton(text: String, accent: Boolean, onClick: () -> Unit, modif
     val type = LocalAmberType.current
     Box(
         modifier = modifier
+            .heightIn(min = 48.dp)
             .clip(RoundedCornerShape(999.dp))
             .background(if (accent) t.accent else t.surface2)
             .pressable(onClick = onClick)

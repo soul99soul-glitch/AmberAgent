@@ -107,6 +107,8 @@ import app.amber.feature.ui.components.message.normalizeSearchSourceHost
 import app.amber.core.settings.prefs.SettingsAggregator
 import app.amber.core.font.SlidesFontRepository
 import app.amber.feature.ui.components.richtext.MarkdownNew
+import app.amber.feature.ui.theme.LocalAmberTokens
+import app.amber.feature.ui.theme.LocalAmberType
 import app.amber.feature.ui.theme.LocalDarkMode
 import app.amber.core.utils.appLocale
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -503,7 +505,7 @@ private fun RunningStageNotice(
         Text(
             "${progress.label} ${progress.percent}%",
             modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
-            style = MaterialTheme.typography.labelMedium,
+            style = LocalAmberType.current.meta,
             color = MaterialTheme.colorScheme.onSurface,
         )
     }
@@ -1070,7 +1072,7 @@ private fun HeroSkeleton(
     ) {
         Text(
             "DEEP READ",
-            style = MaterialTheme.typography.labelSmall.copy(
+            style = LocalAmberType.current.eyebrow.copy(
                 letterSpacing = 3.2.sp,
                 fontWeight = FontWeight.Light,
                 color = palette.accent,
@@ -1122,7 +1124,7 @@ private fun SectionSkeleton(
         }
         Text(
             stringResource(R.string.deep_read_writing, label),
-            style = MaterialTheme.typography.labelSmall,
+            style = LocalAmberType.current.meta,
             color = palette.muted,
         )
     }
@@ -1330,7 +1332,7 @@ private fun TextOnlyHero(
         ) {
             Text(
                 "DEEP READ",
-                style = MaterialTheme.typography.labelSmall.copy(
+                style = LocalAmberType.current.eyebrow.copy(
                     letterSpacing = 3.2.sp,
                     fontWeight = FontWeight.Light,
                     color = palette.accent,
@@ -1338,7 +1340,7 @@ private fun TextOnlyHero(
             )
             Text(
                 if (sourceCount > 0) "$sourceCount SOURCES" else "CHINESE REWRITE",
-                style = MaterialTheme.typography.labelSmall.copy(
+                style = LocalAmberType.current.eyebrow.copy(
                     letterSpacing = 2.6.sp,
                     fontWeight = FontWeight.Light,
                     color = palette.muted,
@@ -1375,7 +1377,7 @@ private fun HeroTextBlock(
         if (showKicker) {
             Text(
                 output.topicType.uppercase(),
-                style = MaterialTheme.typography.labelSmall.copy(
+                style = LocalAmberType.current.eyebrow.copy(
                     letterSpacing = 3.sp,
                     fontWeight = FontWeight.Light,
                     color = palette.muted,
@@ -1424,7 +1426,7 @@ private fun SlantedHeroMeta(
     ) {
         Text(
             type.uppercase(),
-            style = MaterialTheme.typography.labelSmall.copy(
+            style = LocalAmberType.current.eyebrow.copy(
                 letterSpacing = 3.2.sp,
                 fontWeight = FontWeight.Light,
                 color = palette.accent,
@@ -1433,7 +1435,7 @@ private fun SlantedHeroMeta(
         )
         Text(
             sourceLabel,
-            style = MaterialTheme.typography.labelSmall.copy(
+            style = LocalAmberType.current.eyebrow.copy(
                 letterSpacing = 2.4.sp,
                 fontWeight = FontWeight.Light,
                 color = palette.muted,
@@ -1471,7 +1473,7 @@ private fun TimelineSection(
             Row(horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.Top) {
                 TimelineMarker(highlight = event.isHighlight, palette = palette)
                 Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                    Text(event.date, style = MaterialTheme.typography.labelMedium, color = palette.muted)
+                    Text(event.date, style = LocalAmberType.current.meta, color = palette.muted)
                     DeepReadMarkdownText(
                         text = event.event,
                         style = MaterialTheme.typography.bodyLarge.copy(lineHeight = 25.sp, color = palette.ink)
@@ -1530,7 +1532,7 @@ private fun CorePointsSection(
             Row(horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.Top) {
                 Text(
                     "%02d".format(index + 1),
-                    style = MaterialTheme.typography.labelMedium.copy(letterSpacing = 2.sp),
+                    style = LocalAmberType.current.meta.copy(letterSpacing = 2.sp),
                     color = palette.accent,
                 )
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -1594,7 +1596,7 @@ private fun DiagramSection(
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.Top) {
                     Text(
                         "%02d".format(index + 1),
-                        style = MaterialTheme.typography.labelMedium.copy(letterSpacing = 1.6.sp),
+                        style = LocalAmberType.current.meta.copy(letterSpacing = 1.6.sp),
                         color = palette.accent,
                     )
                     Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
@@ -1635,7 +1637,7 @@ private fun DiagramSection(
                         Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                             Text(
                                 "$from -> $to",
-                                style = MaterialTheme.typography.labelMedium.withReadingFont(fontFamily),
+                                style = LocalAmberType.current.meta,
                                 color = palette.ink,
                             )
                             edge.label?.takeIf { it.isNotBlank() }?.let {
@@ -1789,7 +1791,7 @@ private fun ReadingSection(links: List<ReadingLink>, palette: MagazinePalette, f
             ) {
                 Text(
                     "%02d".format(index + 1),
-                    style = MaterialTheme.typography.labelSmall.copy(
+                    style = LocalAmberType.current.meta.copy(
                         letterSpacing = 1.5.sp,
                         color = palette.accent,
                     ),
@@ -1807,7 +1809,7 @@ private fun ReadingSection(links: List<ReadingLink>, palette: MagazinePalette, f
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
                     )
-                    Text(link.source ?: link.url, style = MaterialTheme.typography.labelSmall, color = palette.muted)
+                    Text(link.source ?: link.url, style = LocalAmberType.current.meta, color = palette.muted)
                 }
             }
             if (index != visibleLinks.lastIndex) {
@@ -1838,7 +1840,7 @@ private fun EntityPill(text: String, palette: MagazinePalette) {
 private fun SectionKicker(text: String, palette: MagazinePalette) {
     Text(
         text.uppercase(),
-        style = MaterialTheme.typography.labelMedium.copy(
+        style = LocalAmberType.current.eyebrow.copy(
             letterSpacing = 3.5.sp,
             fontWeight = FontWeight.Light,
             color = palette.muted,
@@ -1983,26 +1985,15 @@ private fun TextStyle.withReadingFont(fontFamily: FontFamily?): TextStyle =
 
 @Composable
 private fun magazinePalette(): MagazinePalette {
-    val dark = LocalDarkMode.current
-    return if (dark) {
-        MagazinePalette(
-            background = Color(0xFF0B0A09),
-            surface = Color(0xFF181410),
-            ink = Color(0xFFF1ECE3),
-            muted = Color(0xFFA89D90),
-            line = Color(0xFF3A332B),
-            accent = Color(0xFFD18752),
-        )
-    } else {
-        MagazinePalette(
-            background = Color(0xFFFAFAF8),
-            surface = Color(0xFFF0F0EC),
-            ink = Color(0xFF1A1A1A),
-            muted = Color(0xFF6B7280),
-            line = Color(0xFFD1D5DB),
-            accent = Color(0xFFEF4444),
-        )
-    }
+    val tokens = LocalAmberTokens.current
+    return MagazinePalette(
+        background = tokens.bg,
+        surface = tokens.surface2,
+        ink = tokens.ink,
+        muted = tokens.ink3,
+        line = tokens.line,
+        accent = tokens.accent,
+    )
 }
 
 private data class MagazinePalette(

@@ -1,5 +1,7 @@
 package app.amber.feature.ui.pages.extensions
 
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Surface
 import com.composables.icons.lucide.Lucide
 import com.composables.icons.lucide.Book
 import com.composables.icons.lucide.ArrowDown
@@ -39,8 +41,6 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.FloatingToolbarDefaults.ScreenOffset
 import androidx.compose.material3.FloatingToolbarDefaults.floatingToolbarVerticalNestedScroll
@@ -94,11 +94,13 @@ import app.amber.feature.ui.components.ui.FormItem
 import app.amber.feature.ui.components.ui.Select
 import app.amber.feature.ui.components.ui.Tag
 import app.amber.feature.ui.components.ui.TagType
+import app.amber.feature.ui.components.ui.WorkspaceLeadingIcon
+import app.amber.feature.ui.components.ui.WorkspaceTone
 import app.amber.feature.ui.components.ui.WorkspaceTopBar
+import app.amber.feature.ui.components.ui.workspaceBorder
 import app.amber.feature.ui.components.ui.workspaceColors
 import app.amber.feature.ui.context.LocalToaster
 import app.amber.feature.ui.hooks.useEditState
-import app.amber.feature.ui.theme.CustomColors
 import app.amber.core.utils.plus
 import org.koin.androidx.compose.koinViewModel
 import sh.calvin.reorderable.ReorderableItem
@@ -295,6 +297,7 @@ private fun ModeInjectionTab(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun ModeInjectionCard(
     injection: PromptInjection.ModeInjection,
@@ -306,6 +309,7 @@ private fun ModeInjectionCard(
     val scope = rememberCoroutineScope()
     var showExportDialog by remember { mutableStateOf(false) }
     val exporter = rememberExporter(injection, ModeInjectionSerializer)
+    val workspace = workspaceColors()
 
     SwipeToDismissBox(
         state = swipeState,
@@ -333,10 +337,11 @@ private fun ModeInjectionCard(
         enableDismissFromStartToEnd = false,
         modifier = modifier
     ) {
-        Card(
-            colors = CardDefaults.cardColors(
-                containerColor = CustomColors.listItemColors.containerColor
-            )
+        Surface(
+            shape = RoundedCornerShape(14.dp),
+            color = workspace.paper,
+            contentColor = workspace.ink,
+            border = workspaceBorder(),
         ) {
             Row(
                 modifier = Modifier
@@ -345,6 +350,10 @@ private fun ModeInjectionCard(
                 horizontalArrangement = Arrangement.spacedBy(16.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
+                WorkspaceLeadingIcon(
+                    icon = Lucide.WandSparkles,
+                    tone = WorkspaceTone.Accent,
+                )
                 Column(
                     modifier = Modifier.weight(1f),
                     verticalArrangement = Arrangement.spacedBy(4.dp)
@@ -355,8 +364,9 @@ private fun ModeInjectionCard(
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
                     ) {
                         Tag(type = TagType.INFO) {
                             Text(getPositionLabel(injection.position))
@@ -694,6 +704,7 @@ private fun LorebookTab(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun LorebookCard(
     book: Lorebook,
@@ -705,6 +716,7 @@ private fun LorebookCard(
     val scope = rememberCoroutineScope()
     var showExportDialog by remember { mutableStateOf(false) }
     val exporter = rememberExporter(book, LorebookSerializer)
+    val workspace = workspaceColors()
 
     SwipeToDismissBox(
         state = swipeState,
@@ -732,10 +744,11 @@ private fun LorebookCard(
         enableDismissFromStartToEnd = false,
         modifier = modifier
     ) {
-        Card(
-            colors = CardDefaults.cardColors(
-                containerColor = CustomColors.listItemColors.containerColor
-            )
+        Surface(
+            shape = RoundedCornerShape(14.dp),
+            color = workspace.paper,
+            contentColor = workspace.ink,
+            border = workspaceBorder(),
         ) {
             Row(
                 modifier = Modifier
@@ -744,6 +757,10 @@ private fun LorebookCard(
                 horizontalArrangement = Arrangement.spacedBy(16.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
+                WorkspaceLeadingIcon(
+                    icon = Lucide.Book,
+                    tone = WorkspaceTone.Neutral,
+                )
                 Column(
                     modifier = Modifier.weight(1f),
                     verticalArrangement = Arrangement.spacedBy(4.dp)
@@ -763,8 +780,9 @@ private fun LorebookCard(
                             overflow = TextOverflow.Ellipsis
                         )
                     }
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
                     ) {
                         Tag(type = TagType.INFO) {
                             Text(
@@ -935,7 +953,14 @@ private fun RegexInjectionEntryCard(
     onEdit: () -> Unit,
     onDelete: () -> Unit
 ) {
-    Card(modifier = Modifier.fillMaxWidth()) {
+    val workspace = workspaceColors()
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(14.dp),
+        color = workspace.paper,
+        contentColor = workspace.ink,
+        border = workspaceBorder(),
+    ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()

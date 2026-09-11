@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
@@ -266,7 +267,11 @@ private fun CleanupCard(
             )
         }
         rawItem {
-            Button(onClick = onPreview, enabled = !cleaning) {
+            Button(
+                onClick = onPreview,
+                enabled = !cleaning,
+                modifier = Modifier.heightIn(min = 48.dp),
+            ) {
                 if (cleaning) {
                     CircularProgressIndicator(
                         modifier = Modifier.height(16.dp),
@@ -341,7 +346,11 @@ private fun CleanupDryRunDialog(
             }
         },
         confirmButton = {
-            Button(onClick = onConfirm, enabled = !cleaning && plan.targets.isNotEmpty()) {
+            Button(
+                onClick = onConfirm,
+                enabled = !cleaning && plan.targets.isNotEmpty(),
+                modifier = Modifier.heightIn(min = 48.dp),
+            ) {
                 Text(
                     stringResource(
                         if (cleaning) {
@@ -387,7 +396,7 @@ private fun CleanupResultDialog(
             )
         },
         confirmButton = {
-            Button(onClick = onDismiss) {
+            Button(onClick = onDismiss, modifier = Modifier.heightIn(min = 48.dp)) {
                 Text(stringResource(R.string.setting_storage_done))
             }
         },

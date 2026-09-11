@@ -80,7 +80,7 @@ fun DeepReadHistoryPage(
 
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
-            contentPadding = innerPadding + PaddingValues(horizontal = 20.dp, vertical = 8.dp),
+            contentPadding = innerPadding + PaddingValues(horizontal = 16.dp, vertical = 8.dp),
         ) {
             itemsIndexed(history, key = { _, item -> item.topicId }) { index, item ->
                 DeepReadHistoryRow(

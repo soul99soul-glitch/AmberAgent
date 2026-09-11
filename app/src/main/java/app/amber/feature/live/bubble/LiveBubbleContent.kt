@@ -18,11 +18,14 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -43,7 +46,6 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import app.amber.feature.live.LiveFillResult
 import app.amber.feature.live.LiveModeUiState
 import app.amber.agent.R
@@ -66,6 +68,7 @@ fun LiveBubbleContent(
     onSizeChanged: () -> Unit,
 ) {
     val tokens = LocalAmberTokens.current
+    val type = LocalAmberType.current
     val context = LocalContext.current
     val fillDraftFilledMessage = stringResource(R.string.live_fill_result_filled)
     val fillDraftCopiedMessage = stringResource(R.string.live_fill_result_copied_short)
@@ -163,6 +166,16 @@ fun LiveBubbleContent(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .heightIn(min = 48.dp)
+                    .pointerInput(Unit) {
+                        detectDragGestures(
+                            onDrag = { change, delta ->
+                                change.consume()
+                                onDrag(delta.x, delta.y)
+                            },
+                            onDragEnd = { onDragEnd() },
+                        )
+                    }
                     .combinedClickable(
                         onClick = {
                             expanded = false
@@ -181,7 +194,7 @@ fun LiveBubbleContent(
                 )
                 Text(
                     text = state.statusText.ifBlank { defaultStatusText },
-                    style = LocalAmberType.current.meta,
+                    style = type.meta,
                     color = tokens.ink3,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -189,42 +202,57 @@ fun LiveBubbleContent(
                 )
                 Text(
                     text = stringResource(R.string.live_bubble_collapse),
-                    style = LocalAmberType.current.meta,
+                    style = type.meta,
                     color = tokens.ink4,
                 )
             }
 
-            if (card == null) {
-                Text(
-                    text = stringResource(R.string.live_bubble_no_result),
-                    style = LocalAmberType.current.secondary,
-                    color = tokens.ink3,
-                )
-            } else {
-                Text(
-                    text = card.watching.ifBlank { uncertainResultText },
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = tokens.ink,
-                )
-                card.keyPoints.take(3).forEach { point ->
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Text(text = "·", color = tokens.ink3, fontSize = 13.sp)
-                        Text(text = point, fontSize = 13.sp, color = tokens.ink2)
-                    }
-                }
-                val draft = card.suggestions.firstOrNull()?.takeIf { it.isNotBlank() }
-                if (draft != null && state.completedAction == "写回复") {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 280.dp)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                if (card == null) {
                     Text(
-                        text = draft,
-                        fontSize = 13.sp,
-                        color = tokens.ink,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(tokens.surface2)
-                            .padding(8.dp),
+                        text = stringResource(R.string.live_bubble_no_result),
+                        style = type.secondary,
+                        color = tokens.ink3,
                     )
+                } else {
+                    Text(
+                        text = card.watching.ifBlank { uncertainResultText },
+                        style = type.body.copy(fontWeight = FontWeight.SemiBold),
+                        color = tokens.ink,
+                    )
+                    card.keyPoints.take(3).forEach { point ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            Text(text = "·", style = type.secondary, color = tokens.ink3)
+                            Text(
+                                text = point,
+                                style = type.secondary,
+                                color = tokens.ink2,
+                                modifier = Modifier.weight(1f),
+                            )
+                        }
+                    }
+                    val draft = card.suggestions.firstOrNull()?.takeIf { it.isNotBlank() }
+                    if (draft != null && state.completedAction == "写回复") {
+                        Text(
+                            text = draft,
+                            style = type.secondary,
+                            color = tokens.ink,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(tokens.surface2)
+                                .padding(8.dp),
+                        )
+                    }
                 }
             }
 
@@ -240,12 +268,12 @@ fun LiveBubbleContent(
                         }
                         Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
                     }) {
-                        Text(stringResource(R.string.live_fill_action), fontSize = 13.sp, color = tokens.accent)
+                        Text(stringResource(R.string.live_fill_action), style = type.secondary, color = tokens.accent)
                     }
                 }
                 Spacer(modifier = Modifier.width(4.dp))
                 TextButton(onClick = onRefresh) {
-                    Text(stringResource(R.string.live_analyze_now), fontSize = 13.sp, color = tokens.accent)
+                    Text(stringResource(R.string.live_analyze_now), style = type.secondary, color = tokens.accent)
                 }
             }
         }

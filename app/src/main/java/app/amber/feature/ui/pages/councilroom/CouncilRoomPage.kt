@@ -399,7 +399,10 @@ private fun CouncilRoomSubtitle(room: CouncilRoom) {
     val workspace = workspaceColors()
     val memberCount = room.participants.count { it.status != CouncilParticipantStatus.DISMISSED }
     val round = room.round.coerceAtLeast(1)
-    Row(verticalAlignment = Alignment.CenterVertically) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
         Text(
             text = room.mode.label(),
             color = chatTheme.accent,
@@ -413,6 +416,7 @@ private fun CouncilRoomSubtitle(room: CouncilRoom) {
             style = MaterialTheme.typography.labelMedium,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f, fill = false),
         )
     }
 }

@@ -82,6 +82,8 @@ import app.amber.feature.webmount.usersites.UserSiteRegistry
 import app.amber.feature.webmount.usersites.userSiteId
 import app.amber.feature.ui.components.ui.workspaceColors
 import app.amber.feature.ui.context.LocalToaster
+import app.amber.feature.ui.theme.LocalAmberTokens
+import app.amber.feature.ui.theme.LocalAmberType
 import app.amber.core.utils.plus
 import org.koin.compose.koinInject
 
@@ -162,7 +164,7 @@ fun SettingExperimentalWebMountPage(
     ) { innerPadding ->
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
-            contentPadding = innerPadding + PaddingValues(horizontal = 12.dp, vertical = 10.dp),
+            contentPadding = innerPadding + PaddingValues(horizontal = 16.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             item {
@@ -207,12 +209,12 @@ fun SettingExperimentalWebMountPage(
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
                                 stringResource(R.string.setting_webmount_eval_label),
-                                style = MaterialTheme.typography.bodyLarge,
+                                style = LocalAmberType.current.body,
                             )
                             Text(
                                 stringResource(R.string.setting_webmount_eval_desc),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                style = LocalAmberType.current.secondary,
+                                color = LocalAmberTokens.current.ink2,
                             )
                         }
                         Switch(
@@ -645,14 +647,14 @@ private fun UserSiteCard(
             ) {
                 Text(
                     text = site.displayName,
-                    style = MaterialTheme.typography.bodyLarge,
+                    style = LocalAmberType.current.body,
                     color = workspace.ink,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
                 Text(
                     text = site.homepageUrl,
-                    style = MaterialTheme.typography.bodySmall,
+                    style = LocalAmberType.current.meta,
                     color = workspace.faint,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -755,15 +757,15 @@ private fun SiteStatusPill(
         stationState?.status == WebMountStatus.DEGRADED ->
             workspace.muted to R.string.setting_webmount_pill_rate_limited
         authKind == AuthKind.ANONYMOUS ->
-            workspace.blue to R.string.setting_webmount_pill_public
+            LocalAmberTokens.current.accent to R.string.setting_webmount_pill_public
         authKind == AuthKind.OAUTH && hasToken && !tokenExpired ->
-            workspace.blue to R.string.setting_webmount_pill_connected
+            LocalAmberTokens.current.accent to R.string.setting_webmount_pill_connected
         authKind == AuthKind.OAUTH && hasCredentials ->
             workspace.muted to R.string.setting_webmount_pill_ready
         authKind == AuthKind.OAUTH ->
             workspace.faint to R.string.setting_webmount_pill_needs_setup
         loggedIn == true ->
-            workspace.blue to R.string.setting_webmount_pill_signed_in
+            LocalAmberTokens.current.accent to R.string.setting_webmount_pill_signed_in
         loggedIn == false ->
             workspace.muted to R.string.setting_webmount_pill_signed_out
         else ->
@@ -777,7 +779,7 @@ private fun SiteStatusPill(
     ) {
         Text(
             text = stringResource(labelRes),
-            style = MaterialTheme.typography.labelSmall,
+            style = LocalAmberType.current.tinyTag,
             maxLines = 1,
             modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
         )
@@ -888,7 +890,7 @@ private fun WebMountLoginDialog(
                     ) {
                         Text(
                             text = stringResource(R.string.setting_webmount_login_dialog_title, target.displayName),
-                            style = MaterialTheme.typography.titleMedium,
+                            style = LocalAmberType.current.screenTitle,
                             modifier = Modifier.weight(1f),
                         )
                         if (onClearSession != null) {
@@ -927,14 +929,14 @@ private fun WebMountLoginDialog(
                     }
                     Text(
                         text = loginStatusLabel(loginStatus, verifying),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = LocalAmberType.current.secondary,
+                        color = LocalAmberTokens.current.ink2,
                         modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp),
                     )
                     webState.blockedNavigation?.let { blocked ->
                         Text(
                             text = stringResource(R.string.setting_webmount_app_open_blocked, blocked.take(80)),
-                            style = MaterialTheme.typography.labelSmall,
+                            style = LocalAmberType.current.tinyTag,
                             color = MaterialTheme.colorScheme.tertiary,
                             maxLines = 2,
                             overflow = TextOverflow.Ellipsis,
@@ -951,7 +953,7 @@ private fun WebMountLoginDialog(
                         ) {
                             Text(
                                 text = stringResource(R.string.setting_webmount_login_page_crashed),
-                                style = MaterialTheme.typography.bodySmall,
+                                style = LocalAmberType.current.secondary,
                                 modifier = Modifier.weight(1f),
                             )
                             TextButton(onClick = controller::reload) {
@@ -1003,7 +1005,7 @@ private fun WebMountLoginNavigationBar(
         TextButton(enabled = !verifying, onClick = onReload) { Text("↻") }
         Text(
             text = state.currentUrl,
-            style = MaterialTheme.typography.labelSmall,
+            style = LocalAmberType.current.meta,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f),
@@ -1143,8 +1145,8 @@ private fun OAuthEditDialog(
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
                     providerHint,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = LocalAmberType.current.secondary,
+                    color = LocalAmberTokens.current.ink2,
                 )
                 OutlinedTextField(
                     value = appId,
@@ -1203,8 +1205,8 @@ private fun AddCustomSiteDialog(
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
                     stringResource(R.string.setting_webmount_custom_dialog_helper),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = LocalAmberType.current.secondary,
+                    color = LocalAmberTokens.current.ink2,
                 )
                 OutlinedTextField(
                     value = nameInput,
@@ -1235,12 +1237,12 @@ private fun AddCustomSiteDialog(
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
                             stringResource(R.string.setting_webmount_custom_needs_login_label),
-                            style = MaterialTheme.typography.bodyLarge,
+                            style = LocalAmberType.current.body,
                         )
                         Text(
                             stringResource(R.string.setting_webmount_custom_needs_login_desc),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = LocalAmberType.current.secondary,
+                            color = LocalAmberTokens.current.ink2,
                         )
                     }
                     Switch(
@@ -1258,7 +1260,7 @@ private fun AddCustomSiteDialog(
                     supportingText = {
                         Text(
                             stringResource(R.string.setting_webmount_custom_cookie_supporting),
-                            style = MaterialTheme.typography.bodySmall,
+                            style = LocalAmberType.current.secondary,
                         )
                     },
                     modifier = Modifier.fillMaxWidth(),

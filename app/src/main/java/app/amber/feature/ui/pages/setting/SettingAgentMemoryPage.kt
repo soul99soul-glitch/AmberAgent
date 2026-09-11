@@ -15,12 +15,9 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularWavyProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import app.amber.feature.ui.components.ui.Switch
 import androidx.compose.material3.Text
@@ -713,16 +710,13 @@ private fun AgentSoulCard(
         value
     }
 
-    // V3: 强制跟 chatTheme.surface (即使 dynamicColor 开了 Material You, 这里也跟主题色, 不出现浅蓝底)
-    val agentMemorySoulTheme = app.amber.feature.ui.pages.chat.LocalChatTheme.current
-    Card(
+    AmberCard(
         modifier = Modifier
             .fillMaxWidth()
             .clickable {
                 draft = value
                 showEditor = true
             },
-        colors = CardDefaults.cardColors(containerColor = agentMemorySoulTheme.surface),
     ) {
         Column(
             modifier = Modifier
@@ -764,7 +758,7 @@ private fun AgentSoulCard(
             Text(
                 text = stringResource(R.string.setting_agent_memory_soul_edit_hint),
                 style = LocalAmberType.current.secondary,
-                color = MaterialTheme.colorScheme.primary,
+                color = LocalAmberTokens.current.accent,
             )
         }
     }
@@ -842,7 +836,6 @@ private fun MemorySummarySection(
 
     SectionLabel(
         text = stringResource(R.string.memory_summary_title),
-        modifier = Modifier.padding(horizontal = 8.dp),
     )
     AmberCard(
         modifier = Modifier.fillMaxWidth(),
@@ -954,14 +947,12 @@ private fun MemoryCandidatesSection(
 ) {
     SectionLabel(
         text = stringResource(R.string.memory_candidate_review_title),
-        modifier = Modifier.padding(horizontal = 8.dp),
     )
     if (candidates.isEmpty()) {
         Text(
             text = stringResource(R.string.memory_candidate_empty),
             style = LocalAmberType.current.secondary,
             color = workspaceColors().muted,
-            modifier = Modifier.padding(horizontal = 8.dp),
         )
         return
     }
@@ -969,8 +960,7 @@ private fun MemoryCandidatesSection(
     if (lowConfidenceCount > 0) {
         Row(
             modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 8.dp),
+                .fillMaxWidth(),
             horizontalArrangement = Arrangement.End,
         ) {
             TextButton(onClick = onIgnoreLowConfidence) {
@@ -1176,7 +1166,6 @@ private fun MemoryEventsSection(
     if (showTitle) {
         SectionLabel(
             text = stringResource(R.string.memory_event_log_title),
-            modifier = Modifier.padding(horizontal = 8.dp),
         )
     }
     if (events.isEmpty()) {
@@ -1184,7 +1173,6 @@ private fun MemoryEventsSection(
             text = stringResource(R.string.memory_event_log_empty),
             style = LocalAmberType.current.secondary,
             color = workspaceColors().muted,
-            modifier = Modifier.padding(horizontal = 8.dp),
         )
         return
     }
@@ -1271,7 +1259,6 @@ private fun MemoryRecordsSection(
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 8.dp),
     ) {
         SectionLabel(
             text = title,
@@ -1284,7 +1271,7 @@ private fun MemoryRecordsSection(
                 onClick = { onInfoClick(infoTitle, infoText) },
                 modifier = Modifier
                     .align(Alignment.CenterEnd)
-                    .size(40.dp),
+                    .size(48.dp),
             ) {
                 Box(
                     modifier = Modifier
@@ -1318,7 +1305,6 @@ private fun MemoryRecordsSection(
             text = emptyText,
             style = LocalAmberType.current.secondary,
             color = workspaceColors().muted,
-            modifier = Modifier.padding(horizontal = 8.dp),
         )
     }
 

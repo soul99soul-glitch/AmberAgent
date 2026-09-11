@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
@@ -17,6 +18,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -35,6 +37,7 @@ import app.amber.agent.Screen
 import app.amber.core.utils.plus
 import app.amber.feature.ui.components.nav.BackButton
 import app.amber.feature.ui.components.ui.WorkspaceTopBar
+import app.amber.feature.ui.components.ui.workspaceBorder
 import app.amber.feature.ui.components.ui.workspaceColors
 import app.amber.feature.ui.context.LocalNavController
 import app.amber.feature.ui.context.LocalToaster
@@ -135,52 +138,64 @@ fun ZCodePage(
                 .padding(innerPadding + PaddingValues(horizontal = 16.dp, vertical = 12.dp)),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Text(
-                text = stringResource(R.string.zcode_page_title),
-                style = MaterialTheme.typography.titleMedium,
-                color = workspace.ink,
-            )
-            Text(
-                text = stringResource(R.string.zcode_page_description),
-                style = MaterialTheme.typography.bodyMedium,
-                color = workspace.muted,
-            )
-
-            OutlinedTextField(
-                value = draft,
-                onValueChange = {
-                    draft = it
-                    error = null
-                },
+            Surface(
                 modifier = Modifier.fillMaxWidth(),
-                label = { Text(stringResource(R.string.zcode_url_label)) },
-                placeholder = { Text("https://…") },
-                singleLine = true,
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
-                trailingIcon = {
-                    IconButton(onClick = { scanQrCodeLauncher.launch(null) }) {
-                        Icon(
-                            imageVector = Lucide.ScanQrCode,
-                            contentDescription = stringResource(R.string.zcode_scan_qr),
+                shape = RoundedCornerShape(14.dp),
+                color = workspace.paper,
+                border = workspaceBorder(),
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Text(
+                        text = stringResource(R.string.zcode_page_title),
+                        style = MaterialTheme.typography.titleMedium,
+                        color = workspace.ink,
+                    )
+                    Text(
+                        text = stringResource(R.string.zcode_page_description),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = workspace.muted,
+                    )
+
+                    OutlinedTextField(
+                        value = draft,
+                        onValueChange = {
+                            draft = it
+                            error = null
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text(stringResource(R.string.zcode_url_label)) },
+                        placeholder = { Text("https://…") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+                        trailingIcon = {
+                            IconButton(onClick = { scanQrCodeLauncher.launch(null) }) {
+                                Icon(
+                                    imageVector = Lucide.ScanQrCode,
+                                    contentDescription = stringResource(R.string.zcode_scan_qr),
+                                )
+                            }
+                        },
+                    )
+
+                    error?.let {
+                        Text(
+                            text = stringResource(it.resourceId, *it.formatArgs.toTypedArray()),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.error,
                         )
                     }
-                },
-            )
 
-            error?.let {
-                Text(
-                    text = stringResource(it.resourceId, *it.formatArgs.toTypedArray()),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.error,
-                )
-            }
-
-            Button(
-                onClick = { openZCodeUrl(draft) },
-                enabled = draft.isNotBlank(),
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Text(stringResource(R.string.zcode_open))
+                    Button(
+                        onClick = { openZCodeUrl(draft) },
+                        enabled = draft.isNotBlank(),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(stringResource(R.string.zcode_open))
+                    }
+                }
             }
         }
     }

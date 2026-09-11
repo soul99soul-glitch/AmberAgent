@@ -42,6 +42,8 @@ import app.amber.feature.icloud.ICloudDriveManager
 import app.amber.feature.ui.components.webview.WebView
 import app.amber.feature.ui.components.webview.rememberWebViewState
 import app.amber.feature.ui.context.LocalToaster
+import app.amber.feature.ui.theme.LocalAmberTokens
+import app.amber.feature.ui.theme.LocalAmberType
 import app.amber.core.utils.plus
 import org.koin.compose.koinInject
 
@@ -66,7 +68,7 @@ fun SettingExperimentalICloudPage(
     ) { innerPadding ->
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
-            contentPadding = innerPadding + PaddingValues(horizontal = 12.dp, vertical = 10.dp),
+            contentPadding = innerPadding + PaddingValues(horizontal = 16.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             item {
@@ -92,6 +94,7 @@ fun SettingExperimentalICloudPage(
                         modifier = Modifier.fillMaxWidth(),
                         enabled = iCloudState.enabled,
                         singleLine = true,
+                        textStyle = LocalAmberType.current.meta,
                         label = { Text(stringResource(R.string.setting_icloud_vault_path)) },
                         supportingText = { Text(stringResource(R.string.setting_icloud_vault_path_desc)) },
                     )
@@ -232,6 +235,8 @@ private fun ICloudLoginDialog(
                     .fillMaxWidth()
                     .fillMaxHeight(0.9f),
                 shape = MaterialTheme.shapes.extraLarge,
+                color = LocalAmberTokens.current.surface,
+                contentColor = LocalAmberTokens.current.ink,
                 tonalElevation = 6.dp,
                 shadowElevation = 12.dp,
             ) {
@@ -244,7 +249,7 @@ private fun ICloudLoginDialog(
                     ) {
                         Text(
                             text = stringResource(R.string.setting_icloud_login),
-                            style = MaterialTheme.typography.titleMedium,
+                            style = LocalAmberType.current.screenTitle,
                             modifier = Modifier.weight(1f),
                         )
                         IconButton(onClick = onDismiss) {

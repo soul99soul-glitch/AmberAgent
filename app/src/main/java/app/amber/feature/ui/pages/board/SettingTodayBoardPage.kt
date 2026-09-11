@@ -25,6 +25,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -43,6 +44,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.coroutines.launch
@@ -101,6 +105,7 @@ fun SettingTodayBoardPage(
     val json: Json = koinInject()
     val context = LocalContext.current
     val navController = LocalNavController.current
+    val lifecycleOwner = LocalLifecycleOwner.current
     val scope = rememberCoroutineScope()
     val settings by vm.settings.collectAsStateWithLifecycle()
     val focusRules by boardRepository.observeFocusRules().collectAsStateWithLifecycle(initialValue = emptyList())
@@ -108,6 +113,7 @@ fun SettingTodayBoardPage(
     val customDeepReadTemplates by deepReadTemplateRepository.observeTemplates().collectAsStateWithLifecycle()
     val invalidDeepReadTemplateCount by deepReadTemplateRepository.observeInvalidTemplateCount().collectAsStateWithLifecycle()
     val fontStates by fontRepository.fontsFlow.collectAsStateWithLifecycle()
+    var permissionRefreshKey by remember { mutableIntStateOf(0) }
     val board = settings.agentRuntime.todayBoard
     var sourceWeights by remember { mutableStateOf<Map<String, Int>>(emptyMap()) }
     var weightReloadKey by remember { mutableIntStateOf(0) }
@@ -127,6 +133,14 @@ fun SettingTodayBoardPage(
 
     LaunchedEffect(Unit) {
         deepReadTemplateRepository.reload()
+    }
+
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) permissionRefreshKey++
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
     fun update(block: (TodayBoardSetting) -> TodayBoardSetting) {
@@ -237,7 +251,7 @@ fun SettingTodayBoardPage(
     ) { innerPadding ->
         LazyColumn(
             Modifier.fillMaxSize(),
-            contentPadding = innerPadding + PaddingValues(horizontal = 12.dp, vertical = 10.dp),
+            contentPadding = innerPadding + PaddingValues(horizontal = 16.dp, vertical = 10.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             when (pane) {
@@ -377,7 +391,7 @@ fun SettingTodayBoardPage(
                 TodayBoardSettingsPane.REVIEW -> {
                     item {
                         ExperimentSectionCard(title = stringResource(R.string.board_signal_sources)) {
-                            val notifPermissionOk = remember {
+                            val notifPermissionOk = remember(permissionRefreshKey) {
                                 runCatching {
                                     android.provider.Settings.Secure.getString(
                                         context.contentResolver,
@@ -385,7 +399,7 @@ fun SettingTodayBoardPage(
                                     )?.contains(context.packageName) == true
                                 }.getOrDefault(false)
                             }
-                            val calendarPermissionOk = remember {
+                            val calendarPermissionOk = remember(permissionRefreshKey) {
                                 ContextCompat.checkSelfPermission(context, Manifest.permission.READ_CALENDAR) ==
                                     PackageManager.PERMISSION_GRANTED
                             }

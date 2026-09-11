@@ -22,7 +22,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -35,6 +34,8 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import com.composables.icons.lucide.EllipsisVertical
 import app.amber.feature.ui.components.nav.BackButton
+import app.amber.feature.ui.components.ui.WorkspaceTopBar
+import app.amber.feature.ui.components.ui.workspaceColors
 import app.amber.feature.ui.components.webview.WebView
 import app.amber.feature.ui.components.webview.rememberWebViewState
 import app.amber.feature.ui.theme.JetbrainsMono
@@ -65,6 +66,7 @@ fun WebViewPage(url: String, content: String) {
     var showDropdown by remember { mutableStateOf(false) }
     var showConsoleSheet by remember { mutableStateOf(false) }
     val sheetState = rememberModalBottomSheetState()
+    val workspace = workspaceColors()
 
     BackHandler(state.canGoBack) {
         state.goBack()
@@ -72,15 +74,8 @@ fun WebViewPage(url: String, content: String) {
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = {
-                    Text(
-                        text = state.pageTitle?.takeIf { it.isNotEmpty() } ?: state.currentUrl
-                        ?: "",
-                        maxLines = 1,
-                        style = MaterialTheme.typography.titleSmall
-                    )
-                },
+            WorkspaceTopBar(
+                title = state.pageTitle?.takeIf { it.isNotEmpty() } ?: state.currentUrl.orEmpty(),
                 navigationIcon = {
                     BackButton()
                 },
@@ -130,7 +125,8 @@ fun WebViewPage(url: String, content: String) {
                     }
                 }
             )
-        }
+        },
+        containerColor = workspace.canvas,
     ) {
         WebView(
             state = state,
@@ -143,17 +139,18 @@ fun WebViewPage(url: String, content: String) {
     if (showConsoleSheet) {
         ModalBottomSheet(
             onDismissRequest = { showConsoleSheet = false },
-            sheetState = sheetState
+            sheetState = sheetState,
         ) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(16.dp)
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
             ) {
                 Text(
                     text = "Console Logs",
                     style = MaterialTheme.typography.headlineSmall,
-                    modifier = Modifier.padding(bottom = 16.dp)
+                    color = workspace.ink,
+                    modifier = Modifier.padding(bottom = 12.dp),
                 )
 
                 SelectionContainer {
@@ -166,11 +163,11 @@ fun WebViewPage(url: String, content: String) {
                                 fontFamily = JetbrainsMono,
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(vertical = 4.dp),
+                                    .padding(vertical = 6.dp),
                                 color = when (message.messageLevel().name) {
                                     "ERROR" -> MaterialTheme.colorScheme.error
-                                    "WARNING" -> MaterialTheme.colorScheme.secondary
-                                    else -> MaterialTheme.colorScheme.onSurface
+                                    "WARNING" -> workspace.amber
+                                    else -> workspace.ink
                                 }
                             )
                         }
@@ -181,8 +178,8 @@ fun WebViewPage(url: String, content: String) {
                     Text(
                         text = "No console messages",
                         style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(16.dp)
+                        color = workspace.muted,
+                        modifier = Modifier.padding(vertical = 16.dp),
                     )
                 }
             }

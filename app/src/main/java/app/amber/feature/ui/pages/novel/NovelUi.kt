@@ -284,7 +284,7 @@ fun NovelQuietButton(
     ) {
         Text(
             text = text,
-            style = type.meta.copy(fontWeight = FontWeight.SemiBold),
+            style = type.secondary.copy(fontWeight = FontWeight.SemiBold),
             color = fg,
             maxLines = 2,
             textAlign = TextAlign.Center,
@@ -364,7 +364,7 @@ fun NovelGhostButton(
     ) {
         Text(
             text = text,
-            style = type.meta.copy(fontWeight = FontWeight.SemiBold),
+            style = type.secondary.copy(fontWeight = FontWeight.SemiBold),
             color = fg,
             maxLines = 2,
             textAlign = TextAlign.Center,
@@ -412,7 +412,7 @@ fun NovelPrimaryButton(
             Text(
                 text = text,
                 color = fg,
-                style = type.meta.copy(fontWeight = FontWeight.SemiBold),
+                style = type.body.copy(fontWeight = FontWeight.SemiBold),
                 maxLines = 2,
                 textAlign = TextAlign.Center,
             )
@@ -451,7 +451,7 @@ fun NovelPrimaryButton(
 fun NovelIconCircle(
     icon: ImageVector,
     modifier: Modifier = Modifier,
-    accent: Boolean = true,
+    accent: Boolean = false,
 ) {
     val tokens = LocalAmberTokens.current
     val workspace = workspaceColors()

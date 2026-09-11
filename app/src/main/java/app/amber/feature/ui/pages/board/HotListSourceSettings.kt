@@ -25,6 +25,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import app.amber.agent.R
 import app.amber.feature.board.hotlist.HotListProviderIds
@@ -58,7 +59,13 @@ fun HotListSourceSettings(
     }
     Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-            Text(stringResource(R.string.board_sources_title), style = MaterialTheme.typography.titleSmall)
+            Text(
+                stringResource(R.string.board_sources_title),
+                modifier = Modifier.weight(1f),
+                style = MaterialTheme.typography.titleSmall,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 TextButton(onClick = { showNewsNowDialog = true }) {
                     Text("+ NewsNow")
@@ -69,7 +76,10 @@ fun HotListSourceSettings(
             }
         }
         HOT_LIST_SOURCE_OPTIONS.chunked(2).forEach { row ->
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
                 row.forEach { source ->
                     Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
                         Switch(checked = source.id in enabledBuiltIns, onCheckedChange = { onToggleBuiltIn(source.id) })
@@ -94,12 +104,18 @@ fun HotListSourceSettings(
                 ) {
                     Switch(checked = source.enabled, onCheckedChange = { onToggleCustom(source) })
                     Column(Modifier.weight(1f)) {
-                        Text(source.displayName, style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            source.displayName,
+                            style = MaterialTheme.typography.bodyMedium,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                        )
                         Text(
                             "${source.sourceType.uppercase()} · ${source.url}",
                             style = MaterialTheme.typography.labelSmall,
                             color = workspaceColors().muted,
                             maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
                         )
                     }
                     TextButton(onClick = { onDeleteCustom(source) }) {

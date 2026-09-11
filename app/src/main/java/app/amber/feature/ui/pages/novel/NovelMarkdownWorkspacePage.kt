@@ -133,6 +133,7 @@ fun NovelMarkdownWorkspacePage(
     val state by viewModel.state.collectAsStateWithLifecycle()
     val workspace = workspaceColors()
     val type = LocalAmberType.current
+    val tokens = LocalAmberTokens.current
     val appSettings = LocalSettings.current
     var tab by remember { mutableStateOf(0) }
     var showGhostwrite by remember { mutableStateOf(false) }
@@ -168,73 +169,140 @@ fun NovelMarkdownWorkspacePage(
         topBar = {
             TopAppBar(
                 title = {
-                    // Chat-header pattern: book/branch first, then full-width writing and
-                    // review model triggers. Separate rows preserve 48dp targets on narrow phones.
-                    val tokens = LocalAmberTokens.current
+                    // Keep the app bar title compact so navigation and the batch action stay
+                    // vertically centered. Model controls live below the bar in the page body.
+                    val currentBranch = state.branches.firstOrNull { it.isCurrent }
+                    val branchLabel = when {
+                        currentBranch != null && currentBranch.isMain -> currentBranch.title
+                        currentBranch != null -> currentBranch.slug
+                        else -> state.branchSlug.orEmpty()
+                    }
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(start = 4.dp),
+                    ) {
+                        Text(
+                            if (state.title.isEmpty()) {
+                                stringResource(R.string.novel_workspace_title)
+                            } else {
+                                state.title
+                            },
+                            style = type.sessionTitle,
+                            color = tokens.ink,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f),
+                        )
+                        Spacer(Modifier.size(8.dp))
+                        Row(
+                            modifier = Modifier
+                                .widthIn(max = 120.dp)
+                                .heightIn(min = 48.dp)
+                                .clip(RoundedCornerShape(999.dp))
+                                .background(workspace.paper)
+                                .border(1.dp, workspace.hairline, RoundedCornerShape(999.dp))
+                                .clickable { showBranchSheet = true }
+                                .padding(horizontal = 8.dp, vertical = 3.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
+                            Icon(
+                                imageVector = Lucide.GitBranch,
+                                contentDescription = stringResource(R.string.novel_switch_branch),
+                                tint = tokens.ink3,
+                                modifier = Modifier.size(11.dp),
+                            )
+                            Text(
+                                branchLabel,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                style = type.meta.copy(
+                                    fontSize = 10.5.sp,
+                                    fontWeight = FontWeight.Medium,
+                                ),
+                                color = tokens.ink2,
+                            )
+                        }
+                    }
+                },
+                navigationIcon = { BackButton() },
+                actions = {
+                    // 代笔入口：accentSoft 底 + accent 字的入口胶囊（accent=进入选择，非装饰）。
+                    val entryAccent = app.amber.feature.ui.pages.chat.LocalChatTheme.current
+                    Box(
+                        modifier = Modifier
+                            .heightIn(min = 48.dp)
+                            .clip(RoundedCornerShape(999.dp))
+                            .background(entryAccent.accentSoft)
+                            .clickable {
+                                if (state.ghostwriteJob?.mode ==
+                                    app.amber.feature.novelworkspace.NovelWorkspaceGhostwriteMode.Polish
+                                ) {
+                                    showPolish = true
+                                } else {
+                                    showGhostwrite = true
+                                }
+                            }
+                            .padding(horizontal = 16.dp, vertical = 10.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            stringResource(
+                                if (state.ghostwriteJob?.mode ==
+                                    app.amber.feature.novelworkspace.NovelWorkspaceGhostwriteMode.Polish
+                                ) {
+                                    R.string.novel_polish
+                                } else {
+                                    R.string.novel_ghostwrite
+                                },
+                            ),
+                            style = type.body.copy(fontWeight = FontWeight.SemiBold),
+                            color = entryAccent.accent,
+                        )
+                    }
+                },
+                // AMOLED 下 topBarColors 的 #161512 会在纯黑页面上拼出一条横带；
+                // 统一用页面 canvas 做容器色。
+                colors = CustomColors.topBarColors.copy(containerColor = workspace.canvas),
+            )
+        },
+    ) { padding ->
+        Box(Modifier.fillMaxSize()) {
+            when {
+                state.loading -> {
+                Box(
+                    Modifier.fillMaxSize().padding(padding),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    CircularProgressIndicator(color = workspace.ink)
+                }
+            }
+            !state.exists -> {
+                Box(
+                    Modifier.fillMaxSize().padding(padding),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        stringResource(R.string.novel_project_missing),
+                        style = type.secondary,
+                        color = workspace.muted,
+                        textAlign = TextAlign.Center,
+                    )
+                }
+            }
+            else -> {
+                Column(Modifier.fillMaxSize().padding(padding)) {
                     @OptIn(kotlin.uuid.ExperimentalUuidApi::class)
                     val currentModelUuid = state.writingModelId?.let {
                         runCatching { kotlin.uuid.Uuid.parse(it) }.getOrNull()
                     }
-                    Column {
-                        // 书名 + 分支 chip：chip 显示当前分支（主线显示主名），点击出分支 sheet。
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.padding(start = 4.dp),
-                        ) {
-                            Text(
-                                if (state.title.isEmpty()) {
-                                    stringResource(R.string.novel_workspace_title)
-                                } else {
-                                    state.title
-                                },
-                                style = type.sessionTitle,
-                                color = tokens.ink,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.weight(1f, fill = false),
-                            )
-                            Spacer(Modifier.size(8.dp))
-                            val currentBranch = state.branches.firstOrNull { it.isCurrent }
-                            val branchLabel = when {
-                                currentBranch != null && currentBranch.isMain -> currentBranch.title
-                                currentBranch != null -> currentBranch.slug
-                                else -> state.branchSlug.orEmpty()
-                            }
-                            Row(
-                                modifier = Modifier
-                                    .widthIn(max = 140.dp)
-                                    .heightIn(min = 48.dp)
-                                    .clip(RoundedCornerShape(999.dp))
-                                    .background(workspace.paper)
-                                    .border(1.dp, workspace.hairline, RoundedCornerShape(999.dp))
-                                    .clickable { showBranchSheet = true }
-                                    .padding(horizontal = 8.dp, vertical = 3.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(4.dp),
-                            ) {
-                                Icon(
-                                    imageVector = Lucide.GitBranch,
-                                    contentDescription = stringResource(R.string.novel_switch_branch),
-                                    tint = tokens.ink3,
-                                    modifier = Modifier.size(11.dp),
-                                )
-                                Text(
-                                    branchLabel,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                    style = type.meta.copy(
-                                        fontSize = 10.5.sp,
-                                        fontWeight = FontWeight.Medium,
-                                    ),
-                                    color = tokens.ink2,
-                                )
-                            }
-                        }
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .heightIn(min = 48.dp),
-                        ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 4.dp),
+                    ) {
                             val chevronRotation by animateFloatAsState(
                                 targetValue = if (modelMenuOpen) 180f else 0f,
                                 animationSpec = tween(durationMillis = 280),
@@ -271,6 +339,19 @@ fun NovelMarkdownWorkspacePage(
                                     color = lerp(tokens.ink3, tokens.ink2, 0.5f),
                                     modifier = Modifier.weight(1f),
                                 )
+                                if (state.writingModelId != null) {
+                                    IconButton(
+                                        onClick = { viewModel.setWritingModel(null) },
+                                        modifier = Modifier.size(48.dp),
+                                    ) {
+                                        Icon(
+                                            imageVector = Lucide.X,
+                                            contentDescription = stringResource(R.string.novel_reset_to_global),
+                                            tint = tokens.ink3,
+                                            modifier = Modifier.size(18.dp),
+                                        )
+                                    }
+                                }
                                 Icon(
                                     imageVector = Lucide.ArrowDown,
                                     contentDescription = stringResource(R.string.novel_select_model),
@@ -336,7 +417,7 @@ fun NovelMarkdownWorkspacePage(
                                             imageVector = Lucide.X,
                                             contentDescription = stringResource(R.string.novel_clear_review_model),
                                             tint = tokens.ink4,
-                                            modifier = Modifier.size(12.dp),
+                                            modifier = Modifier.size(18.dp),
                                         )
                                     }
                                 }
@@ -349,104 +430,22 @@ fun NovelMarkdownWorkspacePage(
                                         .rotate(reviewChevronRotation),
                                 )
                             }
-                        }
                         // 产品说明：代笔每章均联合审核；未指定审稿模型时跟随写作模型。
                         Text(
                             stringResource(R.string.novel_auto_review_note),
-                            maxLines = 1,
+                            maxLines = 2,
                             overflow = TextOverflow.Ellipsis,
-                            style = type.meta.copy(fontSize = 9.sp),
-                            color = tokens.ink4,
+                            style = type.tinyTag,
+                            color = tokens.ink3,
                             modifier = Modifier.padding(start = 4.dp),
                         )
-                    }
-                },
-                navigationIcon = { BackButton() },
-                actions = {
-                    if (state.writingModelId != null) {
-                        IconButton(
-                            onClick = { viewModel.setWritingModel(null) },
-                            modifier = Modifier.size(48.dp),
-                        ) {
-                            Icon(
-                                imageVector = Lucide.X,
-                                contentDescription = stringResource(R.string.novel_reset_to_global),
-                                tint = LocalAmberTokens.current.ink3,
-                                modifier = Modifier.size(18.dp),
-                            )
                         }
-                    }
-                    // 代笔入口：accentSoft 底 + accent 字的入口胶囊（accent=进入选择，非装饰）。
-                    val entryAccent = app.amber.feature.ui.pages.chat.LocalChatTheme.current
-                    Box(
-                        modifier = Modifier
-                            .heightIn(min = 48.dp)
-                            .clip(RoundedCornerShape(999.dp))
-                            .background(entryAccent.accentSoft)
-                            .clickable {
-                                if (state.ghostwriteJob?.mode ==
-                                    app.amber.feature.novelworkspace.NovelWorkspaceGhostwriteMode.Polish
-                                ) {
-                                    showPolish = true
-                                } else {
-                                    showGhostwrite = true
-                                }
-                            }
-                            .padding(horizontal = 16.dp, vertical = 10.dp),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Text(
-                            stringResource(
-                                if (state.ghostwriteJob?.mode ==
-                                    app.amber.feature.novelworkspace.NovelWorkspaceGhostwriteMode.Polish
-                                ) {
-                                    R.string.novel_polish
-                                } else {
-                                    R.string.novel_ghostwrite
-                                },
-                            ),
-                            style = type.meta.copy(fontWeight = FontWeight.SemiBold),
-                            color = entryAccent.accent,
-                        )
-                    }
-                },
-                // AMOLED 下 topBarColors 的 #161512 会在纯黑页面上拼出一条横带；
-                // 统一用页面 canvas 做容器色。
-                colors = CustomColors.topBarColors.copy(containerColor = workspace.canvas),
-            )
-        },
-    ) { padding ->
-        Box(Modifier.fillMaxSize()) {
-            when {
-                state.loading -> {
-                Box(
-                    Modifier.fillMaxSize().padding(padding),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    CircularProgressIndicator(color = workspace.ink)
-                }
-            }
-            !state.exists -> {
-                Box(
-                    Modifier.fillMaxSize().padding(padding),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text(
-                        stringResource(R.string.novel_project_missing),
-                        style = type.secondary,
-                        color = workspace.muted,
-                        textAlign = TextAlign.Center,
-                    )
-                }
-            }
-            else -> {
-                Column(Modifier.fillMaxSize().padding(padding)) {
                     // Compact segmented control — the stock TabRow ate too much height.
                     Row(
                         Modifier
                             .fillMaxWidth()
                             .padding(horizontal = 16.dp, vertical = 6.dp)
-                            .height(40.dp)
+                            .height(48.dp)
                             .clip(RoundedCornerShape(10.dp))
                             .background(workspace.paper)
                             .border(1.dp, workspace.hairline, RoundedCornerShape(10.dp)),
@@ -488,26 +487,32 @@ fun NovelMarkdownWorkspacePage(
                             )
                         }
                     }
-                    when (tab) {
-                        0 -> MarkdownWorkspaceChat(
-                            viewModel,
-                            state,
-                            onOpenGhostwrite = {
-                                if (state.ghostwriteJob?.mode ==
-                                    app.amber.feature.novelworkspace.NovelWorkspaceGhostwriteMode.Polish
-                                ) {
-                                    showPolish = true
-                                } else {
-                                    showGhostwrite = true
-                                }
-                            },
-                        )
-                        1 -> MarkdownWorkspaceManuscript(
-                            viewModel,
-                            state,
-                            onOpenPolish = { showPolish = true },
-                        )
-                        else -> MarkdownWorkspaceCatalog(viewModel, state)
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxWidth(),
+                    ) {
+                        when (tab) {
+                            0 -> MarkdownWorkspaceChat(
+                                viewModel,
+                                state,
+                                onOpenGhostwrite = {
+                                    if (state.ghostwriteJob?.mode ==
+                                        app.amber.feature.novelworkspace.NovelWorkspaceGhostwriteMode.Polish
+                                    ) {
+                                        showPolish = true
+                                    } else {
+                                        showGhostwrite = true
+                                    }
+                                },
+                            )
+                            1 -> MarkdownWorkspaceManuscript(
+                                viewModel,
+                                state,
+                                onOpenPolish = { showPolish = true },
+                            )
+                            else -> MarkdownWorkspaceCatalog(viewModel, state)
+                        }
                     }
                 }
             }
@@ -690,7 +695,6 @@ private fun MarkdownGhostwriteSheet(
             Modifier
                 .fillMaxWidth()
                 .verticalScroll(rememberScrollState())
-                .navigationBarsPadding()
                 .padding(horizontal = 16.dp)
                 .padding(bottom = 28.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -1122,7 +1126,6 @@ private fun PolishBatchSheet(
             Modifier
                 .fillMaxWidth()
                 .verticalScroll(rememberScrollState())
-                .navigationBarsPadding()
                 .padding(horizontal = 16.dp)
                 .padding(bottom = 28.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -1497,7 +1500,11 @@ private fun PanelPill(
             .padding(horizontal = 16.dp, vertical = 9.dp),
         contentAlignment = Alignment.Center,
     ) {
-        Text(text, style = type.meta, color = if (enabled) fg else workspace.faint)
+        Text(
+            text,
+            style = type.secondary.copy(fontWeight = FontWeight.SemiBold),
+            color = if (enabled) fg else workspace.faint,
+        )
     }
 }
 
@@ -2025,9 +2032,7 @@ private fun MarkdownWorkspaceChat(
                     } else {
                         stringResource(R.string.send)
                     },
-                    // 与 ChatInput 一致：accent 实心圆上的字形固定浅色（sage-green
-                    // 这类浅 accent 的 onAccent 是近黑，箭头会一黑一白不一致）。
-                    tint = if (state.busy || hasDraft) Color.White else tokens.ink3,
+                    tint = if (state.busy || hasDraft) onAccent else tokens.ink3,
                     modifier = Modifier.size(22.dp),
                 )
             }
@@ -2596,7 +2601,6 @@ private fun BranchSheet(
             Modifier
                 .fillMaxWidth()
                 .verticalScroll(rememberScrollState())
-                .navigationBarsPadding()
                 .padding(horizontal = 16.dp)
                 .padding(bottom = 28.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),

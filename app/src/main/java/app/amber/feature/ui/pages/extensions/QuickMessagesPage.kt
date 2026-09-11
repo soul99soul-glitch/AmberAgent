@@ -50,6 +50,7 @@ import app.amber.core.model.QuickMessage
 import app.amber.feature.ui.components.nav.BackButton
 import app.amber.feature.ui.components.ui.ConfirmDialog
 import app.amber.feature.ui.components.ui.WorkspaceIconButton
+import app.amber.feature.ui.components.ui.WorkspaceDivider
 import app.amber.feature.ui.components.ui.WorkspaceLeadingIcon
 import app.amber.feature.ui.components.ui.WorkspaceTextButton
 import app.amber.feature.ui.components.ui.WorkspaceTone
@@ -167,34 +168,40 @@ private fun QuickMessagesHeader(
     val workspace = workspaceColors()
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(8.dp),
+        shape = RoundedCornerShape(14.dp),
         color = workspace.paper,
         border = workspaceBorder(),
     ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            WorkspaceLeadingIcon(
-                icon = Lucide.Zap,
-                tone = WorkspaceTone.Accent,
-            )
-            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text(
-                    text = stringResource(R.string.quick_messages_page_title),
-                    style = MaterialTheme.typography.titleSmall,
-                    color = workspace.ink,
+        Column {
+            Row(
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 16.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                WorkspaceLeadingIcon(
+                    icon = Lucide.Zap,
+                    tone = WorkspaceTone.Accent,
                 )
-                Text(
-                    text = stringResource(R.string.quick_messages_page_count, count),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = workspace.muted,
-                )
+                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(
+                        text = stringResource(R.string.quick_messages_page_title),
+                        style = MaterialTheme.typography.titleSmall,
+                        color = workspace.ink,
+                    )
+                    Text(
+                        text = stringResource(R.string.quick_messages_page_count, count),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = workspace.muted,
+                    )
+                }
             }
+            WorkspaceDivider()
             WorkspaceTextButton(
                 text = stringResource(R.string.quick_messages_page_empty_action),
                 onClick = onAdd,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
                 tone = WorkspaceTone.Accent,
             )
         }
@@ -208,7 +215,7 @@ private fun QuickMessagesEmptyState(
     val workspace = workspaceColors()
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(8.dp),
+        shape = RoundedCornerShape(14.dp),
         color = workspace.paper,
         border = workspaceBorder(),
     ) {
@@ -251,14 +258,14 @@ private fun QuickMessageCard(
     Surface(
         onClick = onEdit,
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(8.dp),
+        shape = RoundedCornerShape(14.dp),
         color = workspace.paper,
         border = workspaceBorder(),
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(start = 14.dp, top = 10.dp, bottom = 10.dp, end = 6.dp),
+                .padding(start = 16.dp, top = 12.dp, bottom = 12.dp, end = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -349,7 +356,7 @@ private fun EditQuickMessageDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        shape = RoundedCornerShape(8.dp),
+        shape = RoundedCornerShape(14.dp),
         containerColor = workspace.paper,
         title = {
             Text(

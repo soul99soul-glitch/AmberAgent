@@ -4,7 +4,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Scaffold
@@ -35,7 +34,6 @@ import app.amber.feature.ui.components.ui.WorkspaceTopBar
 import app.amber.feature.ui.components.ui.workspaceColors
 import app.amber.feature.ui.components.ui.Select
 import app.amber.feature.ui.components.ui.Switch
-import app.amber.feature.ui.theme.CustomColors
 import app.amber.core.utils.plus
 import org.koin.androidx.compose.koinViewModel
 
@@ -67,7 +65,6 @@ fun SettingAgentExecutionPage(vm: SettingVM = koinViewModel()) {
         ) {
             item {
                 CardGroup(
-                    modifier = Modifier.padding(horizontal = 8.dp),
                     title = { Text(stringResource(R.string.setting_agent_execution_display_section)) },
                 ) {
                     item(
@@ -154,7 +151,6 @@ fun SettingAgentExecutionPage(vm: SettingVM = koinViewModel()) {
 
             item {
                 CardGroup(
-                    modifier = Modifier.padding(horizontal = 8.dp),
                     title = { Text(stringResource(R.string.setting_agent_execution_live_status_section)) },
                 ) {
                     item(
@@ -200,7 +196,6 @@ fun SettingAgentExecutionPage(vm: SettingVM = koinViewModel()) {
 
             item {
                 CardGroup(
-                    modifier = Modifier.padding(horizontal = 8.dp),
                     title = { Text(stringResource(R.string.setting_agent_execution_live_mode_section)) },
                 ) {
                     item(
@@ -319,7 +314,6 @@ fun SettingAgentExecutionPage(vm: SettingVM = koinViewModel()) {
 
             item {
                 CardGroup(
-                    modifier = Modifier.padding(horizontal = 8.dp),
                     title = { Text(stringResource(R.string.setting_agent_execution_stability_section)) },
                 ) {
                     item(

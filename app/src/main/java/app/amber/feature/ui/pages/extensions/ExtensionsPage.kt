@@ -5,7 +5,6 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.material3.Icon
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
@@ -22,6 +21,8 @@ import com.composables.icons.lucide.Zap
 import app.amber.agent.Screen
 import app.amber.feature.ui.components.nav.BackButton
 import app.amber.feature.ui.components.ui.CardGroup
+import app.amber.feature.ui.components.ui.WorkspaceLeadingIcon
+import app.amber.feature.ui.components.ui.WorkspaceTone
 import app.amber.feature.ui.components.ui.WorkspaceTopBar
 import app.amber.feature.ui.components.ui.workspaceColors
 import app.amber.feature.ui.context.LocalNavController
@@ -45,29 +46,34 @@ fun ExtensionsPage() {
     ) { innerPadding ->
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
-            contentPadding = innerPadding + PaddingValues(8.dp),
+            contentPadding = innerPadding + PaddingValues(horizontal = 16.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             item {
                 CardGroup(
-                    modifier = Modifier.padding(horizontal = 8.dp),
                     title = { Text(stringResource(R.string.extensions_page_section_extensions)) },
                 ) {
                     item(
                         onClick = { navController.navigate(Screen.QuickMessages) },
-                        leadingContent = { Icon(Lucide.Zap, null) },
+                        leadingContent = {
+                            WorkspaceLeadingIcon(Lucide.Zap, tone = WorkspaceTone.Accent)
+                        },
                         headlineContent = { Text(stringResource(R.string.quick_messages_page_title)) },
                         supportingContent = { Text(stringResource(R.string.extensions_page_quick_messages_desc)) },
                     )
                     item(
                         onClick = { navController.navigate(Screen.Favorite) },
-                        leadingContent = { Icon(Lucide.Heart, null) },
+                        leadingContent = {
+                            WorkspaceLeadingIcon(Lucide.Heart)
+                        },
                         headlineContent = { Text(stringResource(R.string.favorite_page_title)) },
                         supportingContent = { Text(stringResource(R.string.setting_page_favorites_desc)) },
                     )
                     item(
                         onClick = { navController.navigate(Screen.Prompts) },
-                        leadingContent = { Icon(Lucide.BookText, null) },
+                        leadingContent = {
+                            WorkspaceLeadingIcon(Lucide.BookText)
+                        },
                         headlineContent = { Text(stringResource(R.string.extensions_page_prompts)) },
                         supportingContent = { Text(stringResource(R.string.extensions_page_prompts_desc)) },
                     )

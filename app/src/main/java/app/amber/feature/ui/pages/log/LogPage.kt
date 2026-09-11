@@ -18,7 +18,8 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Switch
-import androidx.compose.material3.TopAppBar
+import app.amber.feature.ui.components.ui.WorkspaceTopBar
+import app.amber.feature.ui.theme.LocalAmberTokens
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Scaffold
@@ -63,8 +64,8 @@ fun LogPage() {
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = { Text("Logs") },
+            WorkspaceTopBar(
+                title = "Logs",
                 navigationIcon = { BackButton() },
                 actions = {
                     IconButton(
@@ -77,11 +78,10 @@ fun LogPage() {
                     }
                 },
                 scrollBehavior = scrollBehavior,
-                colors = CustomColors.topBarColors,
             )
         },
         modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
-        containerColor = CustomColors.topBarColors.containerColor,
+        containerColor = LocalAmberTokens.current.bg,
     ) { contentPadding ->
         UnifiedLogList(
             logs = logs,
@@ -136,7 +136,7 @@ private fun UnifiedLogList(logs: List<LogEntry>, modifier: Modifier = Modifier) 
 private fun NetworkLoggingToggle() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    var enabled by remember { mutableStateOf(true) }
+    var enabled by remember { mutableStateOf<Boolean?>(null) }
     LaunchedEffect(Unit) {
         context.settingsStore.data.collect { p ->
             enabled = p[PreferencesKeys.REQUEST_LOGGING_ENABLED] ?: true
@@ -165,7 +165,8 @@ private fun NetworkLoggingToggle() {
                 )
             }
             Switch(
-                checked = enabled,
+                checked = enabled == true,
+                enabled = enabled != null,
                 onCheckedChange = { checked ->
                     enabled = checked
                     scope.launch {

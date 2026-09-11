@@ -22,7 +22,7 @@
 | F14 | 真问题：小应用暗色标志取系统而非App主题 | `UI/pages/miniapp/MiniAppRunnerPage.kt:275,376` | Phase4，使用已解析的App主题；系统/App反向模式检查 |
 | F15 | 条件性真问题：WebDAV草稿可能捕获dummy空值 | `UI/pages/backup/BackupVM.kt:66` Eager stateIn初值dummy；BackupPage.kt:324 无key remember | Phase4，读取owner真实初值并保留本地编辑，不能每次设置变化覆盖草稿 |
 | F16 | 假阳性：去设置经proceed间接调用成功 | PermissionRationaleDialog→PermissionManager:29→PermissionState.kt:176 openAppSettings | 不改授权链；死参数不是用户故障 |
-| F17 | 条件性陈旧日期标签风险；非必然 | `UI/pages/chat/ChatDrawerVM.kt:30,91` 分页生成期计算今天；缓存无午夜时钟 | Phase2核实resume/刷新行为；不加每秒全列表刷新 |
+| F17 | 当前生产假阳性：缓存label没有可见消费方 | `UI/pages/chat/ChatDrawerVM.kt:30,91` 确实在分页生成期计算label；但ChatPage已移除旧Drawer，SessionHomePage只给DateHeader生成key而不渲染label | Phase4补查实际消费闭环后撤销该产品缺陷；不引入无用午夜刷新定时器 |
 | F18 | 删除失败恢复缺失成立；归因手工state工厂不准确 | `UI/pages/history/HistoryPage.kt:132,204,214` 删除失败仅snackbar，未reset swipe | Phase4按删除结果复位；只换remember工厂不能修好 |
 
 ## 原 P0 九项
@@ -57,4 +57,3 @@
 - TodayBoard权限说明remember可能在从系统设置返回时陈旧，限文案，不等于权限绕过。
 - Live每项结果上游cleanAnalysisItem限90字符，原文“无限撑高”遗漏约束；小屏/大字体仍需布局验收。
 - SearXNG密码无掩码、混合HTML段距差异：源码成立，分别进入Phase2/3。
-

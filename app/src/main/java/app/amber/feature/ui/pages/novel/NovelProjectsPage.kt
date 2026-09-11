@@ -23,13 +23,12 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
@@ -243,8 +242,10 @@ fun NovelProjectsPage(
                     Column {
                         Text(
                             stringResource(R.string.novel_projects_title),
-                            fontWeight = FontWeight.Bold,
-                            color = workspace.ink,
+                            style = type.screenTitle,
+                            color = tokens.ink,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
                         )
                         Text(
                             stringResource(R.string.novel_projects_subtitle),
@@ -267,15 +268,24 @@ fun NovelProjectsPage(
             )
         },
         floatingActionButton = {
-            FloatingActionButton(
-                onClick = { if (!state.busy) showCreate = true },
-                containerColor = tokens.ink,
-                contentColor = tokens.bg,
-                shape = CircleShape,
-            ) {
-                Icon(
-                    Lucide.Plus,
-                    contentDescription = stringResource(R.string.novel_new_project),
+            if (state.projects.isNotEmpty()) {
+                ExtendedFloatingActionButton(
+                    onClick = { if (!state.busy) showCreate = true },
+                    icon = {
+                        Icon(
+                            Lucide.Plus,
+                            contentDescription = null,
+                        )
+                    },
+                    text = {
+                        Text(
+                            stringResource(R.string.novel_new_project),
+                            style = type.body.copy(fontWeight = FontWeight.SemiBold),
+                        )
+                    },
+                    containerColor = tokens.accent,
+                    contentColor = tokens.accentInk,
+                    shape = androidx.compose.foundation.shape.CircleShape,
                 )
             }
         },
@@ -562,7 +572,7 @@ private fun NovelProjectCard(
                     },
                     style = type.sessionTitle,
                     color = workspace.ink,
-                    maxLines = 1,
+                    maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
                 Text(

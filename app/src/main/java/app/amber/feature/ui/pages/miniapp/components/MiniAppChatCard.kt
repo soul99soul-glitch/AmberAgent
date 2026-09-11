@@ -1,7 +1,6 @@
 package app.amber.feature.ui.pages.miniapp.components
 
 import android.widget.Toast
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -9,13 +8,13 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -45,6 +44,10 @@ import com.composables.icons.lucide.EllipsisVertical
 import app.amber.feature.miniapp.MiniAppRepository
 import app.amber.core.settings.prefs.SettingsAggregator
 import app.amber.agent.data.db.entity.MiniAppEntity
+import app.amber.feature.ui.components.ds.AmberCard
+import app.amber.feature.ui.components.ui.WorkspaceIconButton
+import app.amber.feature.ui.components.ui.workspaceColors
+import app.amber.feature.ui.theme.LocalAmberTokens
 import app.amber.feature.ui.pages.miniapp.MiniAppSourceEditorDialog
 import app.amber.feature.ui.pages.miniapp.MiniAppVersionHistoryDialog
 import app.amber.feature.ui.pages.miniapp.rememberMiniAppHtmlExporter
@@ -82,36 +85,52 @@ fun MiniAppChatCard(
         }
     }
 
-    Surface(
-        modifier = modifier.fillMaxWidth(),
-        shape = MaterialTheme.shapes.small,
-        tonalElevation = 1.dp,
-    ) {
+    val workspace = workspaceColors()
+    val tokens = LocalAmberTokens.current
+    AmberCard(modifier = modifier.fillMaxWidth()) {
         Column(
-            modifier = Modifier.padding(14.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(part.iconEmoji ?: "▣", style = MaterialTheme.typography.titleMedium)
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Surface(
+                    modifier = Modifier.size(32.dp),
+                    shape = RoundedCornerShape(9.dp),
+                    color = tokens.surface2,
+                    contentColor = tokens.ink2,
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Text(part.iconEmoji ?: "▣", style = MaterialTheme.typography.titleSmall)
+                    }
+                }
                 Text(
                     text = part.title,
-                    style = MaterialTheme.typography.titleMedium,
+                    style = MaterialTheme.typography.titleSmall,
+                    color = workspace.ink,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
                 )
             }
             Text(
                 text = part.description,
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = workspace.muted,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                 Button(onClick = onRun) {
                     Text(stringResource(R.string.miniapp_run))
                 }
-                OutlinedButton(
+                TextButton(
                     onClick = {
                         withCurrentApp {
                             modifyTarget = it
@@ -121,17 +140,13 @@ fun MiniAppChatCard(
                 ) {
                     Text(stringResource(R.string.miniapp_modify))
                 }
-                Box(
-                    modifier = Modifier
-                        .size(40.dp)
-                        .clickable { menuExpanded = true },
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(
-                        imageVector = Lucide.EllipsisVertical,
+                Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) {
+                    WorkspaceIconButton(
+                        onClick = { menuExpanded = true },
+                        icon = Lucide.EllipsisVertical,
                         contentDescription = stringResource(R.string.miniapp_more_actions),
-                        modifier = Modifier.size(18.dp),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        showBorder = false,
+                        containerColor = workspace.paper,
                     )
                     DropdownMenu(
                         expanded = menuExpanded,
@@ -215,6 +230,8 @@ fun MiniAppChatCard(
     modifyTarget?.let { target ->
         AlertDialog(
             onDismissRequest = { modifyTarget = null },
+            shape = RoundedCornerShape(14.dp),
+            containerColor = workspace.paper,
             title = { Text(stringResource(R.string.miniapp_modify_title)) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {

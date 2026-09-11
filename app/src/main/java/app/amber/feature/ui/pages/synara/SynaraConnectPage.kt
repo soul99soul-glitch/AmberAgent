@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
@@ -21,6 +22,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -40,6 +42,7 @@ import app.amber.core.utils.openUrl
 import app.amber.core.utils.plus
 import app.amber.feature.ui.components.nav.BackButton
 import app.amber.feature.ui.components.ui.WorkspaceTopBar
+import app.amber.feature.ui.components.ui.workspaceBorder
 import app.amber.feature.ui.components.ui.workspaceColors
 import app.amber.feature.ui.context.LocalNavController
 import io.github.g00fy2.quickie.QRResult
@@ -123,150 +126,173 @@ fun SynaraConnectPage(vm: SynaraVM = koinViewModel()) {
                 .fillMaxSize()
                 .verticalScroll(rememberScrollState())
                 .padding(innerPadding + PaddingValues(horizontal = 16.dp, vertical = 12.dp)),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            Text(
-                text = stringResource(R.string.synara_page_title),
-                style = MaterialTheme.typography.titleMedium,
-                color = workspace.ink,
-            )
-            Text(
-                text = stringResource(R.string.synara_page_description),
-                style = MaterialTheme.typography.bodyMedium,
-                color = workspace.muted,
-            )
-
-            Button(
-                onClick = { scanQrLauncher.launch(null) },
+            Surface(
                 modifier = Modifier.fillMaxWidth(),
-                enabled = !ui.checking,
+                shape = RoundedCornerShape(14.dp),
+                color = workspace.paper,
+                border = workspaceBorder(),
             ) {
-                Icon(
-                    imageVector = Lucide.ScanQrCode,
-                    contentDescription = null,
-                    modifier = Modifier.size(20.dp),
-                )
-                Spacer(Modifier.width(8.dp))
-                Text(
-                    if (ui.checking) {
-                        stringResource(R.string.synara_pairing_verifying)
-                    } else {
-                        stringResource(R.string.synara_pairing_scan)
-                    },
-                )
-            }
-            Text(
-                text = stringResource(R.string.synara_pairing_help),
-                style = MaterialTheme.typography.bodySmall,
-                color = workspace.muted,
-            )
-
-            OutlinedTextField(
-                value = draft.host,
-                onValueChange = { host -> vm.updateDraft { it.copy(host = host) } },
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text(stringResource(R.string.synara_mac_address_label)) },
-                placeholder = { Text(stringResource(R.string.synara_mac_address_hint)) },
-                singleLine = true,
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
-            )
-            OutlinedTextField(
-                value = draft.port.toString(),
-                onValueChange = { text ->
-                    val port = text.filter { it.isDigit() }.toIntOrNull() ?: 0
-                    vm.updateDraft { it.copy(port = port) }
-                },
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text(stringResource(R.string.synara_port_label)) },
-                placeholder = { Text("${SynaraConnection.DEFAULT_PORT}") },
-                singleLine = true,
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-            )
-            OutlinedTextField(
-                value = draft.token,
-                onValueChange = { token -> vm.updateDraft { it.copy(token = token) } },
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text(stringResource(R.string.synara_auth_token_label)) },
-                placeholder = { Text(stringResource(R.string.synara_auth_token_hint)) },
-                singleLine = true,
-                visualTransformation = PasswordVisualTransformation(),
-                supportingText = {
-                    Text(stringResource(R.string.synara_auth_token_supporting))
-                },
-            )
-
-            Text(
-                text = stringResource(
-                    R.string.synara_target,
-                    runCatching { draft.httpBaseUrl() }.getOrDefault("—"),
-                ),
-                style = MaterialTheme.typography.bodySmall,
-                fontFamily = FontFamily.Monospace,
-                color = workspace.muted,
-            )
-
-            ui.lastCheckMessage?.let { message ->
-                Text(
-                    text = stringResource(message.resourceId, *message.formatArgs.toTypedArray()),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = if (ui.lastCheckOk == true) {
-                        MaterialTheme.colorScheme.primary
-                    } else {
-                        MaterialTheme.colorScheme.error
-                    },
-                )
-            }
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                OutlinedButton(
-                    onClick = { vm.testConnection() },
-                    enabled = !ui.checking,
-                    modifier = Modifier.weight(1f),
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
-                    if (ui.checking) {
-                        CircularProgressIndicator(
-                            modifier = Modifier
-                                .padding(end = 8.dp)
-                                .size(16.dp),
-                            strokeWidth = 2.dp,
+                    Text(
+                        text = stringResource(R.string.synara_page_title),
+                        style = MaterialTheme.typography.titleMedium,
+                        color = workspace.ink,
+                    )
+                    Text(
+                        text = stringResource(R.string.synara_page_description),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = workspace.muted,
+                    )
+                    Button(
+                        onClick = { scanQrLauncher.launch(null) },
+                        modifier = Modifier.fillMaxWidth(),
+                        enabled = !ui.checking,
+                    ) {
+                        Icon(
+                            imageVector = Lucide.ScanQrCode,
+                            contentDescription = null,
+                            modifier = Modifier.size(20.dp),
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            if (ui.checking) {
+                                stringResource(R.string.synara_pairing_verifying)
+                            } else {
+                                stringResource(R.string.synara_pairing_scan)
+                            },
                         )
                     }
-                    Text(stringResource(R.string.synara_test_connection))
-                }
-                Button(
-                    onClick = {
-                        val conn = normalizedConnection() ?: return@Button
-                        vm.save {
-                            navController.navigate(
-                                Screen.SynaraWorkspace(
-                                    host = conn.host,
-                                    port = conn.port,
-                                    token = conn.token,
-                                    useHttps = conn.useHttps,
-                                ),
-                            )
-                        }
-                    },
-                    enabled = !ui.checking && draft.isConfigured,
-                    modifier = Modifier.weight(1f),
-                ) {
-                    Text(stringResource(R.string.synara_open_workbench))
+                    Text(
+                        text = stringResource(R.string.synara_pairing_help),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = workspace.muted,
+                    )
                 }
             }
 
-            TextButton(
-                onClick = {
-                    val conn = normalizedConnection() ?: return@TextButton
-                    vm.save()
-                    context.openUrl(conn.workspaceUrl())
-                },
-                enabled = !ui.checking && draft.isConfigured,
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(14.dp),
+                color = workspace.paper,
+                border = workspaceBorder(),
             ) {
-                Text(stringResource(R.string.synara_open_chrome))
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    OutlinedTextField(
+                        value = draft.host,
+                        onValueChange = { host -> vm.updateDraft { it.copy(host = host) } },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text(stringResource(R.string.synara_mac_address_label)) },
+                        placeholder = { Text(stringResource(R.string.synara_mac_address_hint)) },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+                    )
+                    OutlinedTextField(
+                        value = draft.port.toString(),
+                        onValueChange = { text ->
+                            val port = text.filter { it.isDigit() }.toIntOrNull() ?: 0
+                            vm.updateDraft { it.copy(port = port) }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text(stringResource(R.string.synara_port_label)) },
+                        placeholder = { Text("${SynaraConnection.DEFAULT_PORT}") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    )
+                    OutlinedTextField(
+                        value = draft.token,
+                        onValueChange = { token -> vm.updateDraft { it.copy(token = token) } },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text(stringResource(R.string.synara_auth_token_label)) },
+                        placeholder = { Text(stringResource(R.string.synara_auth_token_hint)) },
+                        singleLine = true,
+                        visualTransformation = PasswordVisualTransformation(),
+                        supportingText = {
+                            Text(stringResource(R.string.synara_auth_token_supporting))
+                        },
+                    )
+
+                    Text(
+                        text = stringResource(
+                            R.string.synara_target,
+                            runCatching { draft.httpBaseUrl() }.getOrDefault("—"),
+                        ),
+                        style = MaterialTheme.typography.bodySmall,
+                        fontFamily = FontFamily.Monospace,
+                        color = workspace.muted,
+                    )
+
+                    ui.lastCheckMessage?.let { message ->
+                        Text(
+                            text = stringResource(message.resourceId, *message.formatArgs.toTypedArray()),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = if (ui.lastCheckOk == true) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.error
+                            },
+                        )
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        OutlinedButton(
+                            onClick = { vm.testConnection() },
+                            enabled = !ui.checking,
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            if (ui.checking) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier
+                                        .padding(end = 8.dp)
+                                        .size(16.dp),
+                                    strokeWidth = 2.dp,
+                                )
+                            }
+                            Text(stringResource(R.string.synara_test_connection))
+                        }
+                        Button(
+                            onClick = {
+                                val conn = normalizedConnection() ?: return@Button
+                                vm.save {
+                                    navController.navigate(
+                                        Screen.SynaraWorkspace(
+                                            host = conn.host,
+                                            port = conn.port,
+                                            token = conn.token,
+                                            useHttps = conn.useHttps,
+                                        ),
+                                    )
+                                }
+                            },
+                            enabled = !ui.checking && draft.isConfigured,
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            Text(stringResource(R.string.synara_open_workbench))
+                        }
+                    }
+
+                    TextButton(
+                        onClick = {
+                            val conn = normalizedConnection() ?: return@TextButton
+                            vm.save()
+                            context.openUrl(conn.workspaceUrl())
+                        },
+                        enabled = !ui.checking && draft.isConfigured,
+                    ) {
+                        Text(stringResource(R.string.synara_open_chrome))
+                    }
+                }
             }
 
             Text(
@@ -274,6 +300,7 @@ fun SynaraConnectPage(vm: SynaraVM = koinViewModel()) {
                 style = MaterialTheme.typography.bodySmall,
                 fontFamily = FontFamily.Monospace,
                 color = workspace.muted,
+                modifier = Modifier.padding(horizontal = 2.dp),
             )
         }
     }

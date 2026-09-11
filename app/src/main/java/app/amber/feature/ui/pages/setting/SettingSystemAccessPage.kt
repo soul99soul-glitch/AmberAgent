@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.Button
@@ -56,7 +57,8 @@ import app.amber.feature.ui.components.ui.CardGroup
 import app.amber.feature.ui.components.ui.WorkspaceTopBar
 import app.amber.feature.ui.components.ui.workspaceColors
 import app.amber.feature.ui.components.ui.CardGroupScope
-import app.amber.feature.ui.theme.CustomColors
+import app.amber.feature.ui.theme.LocalAmberTokens
+import app.amber.feature.ui.theme.LocalAmberType
 import app.amber.core.utils.plus
 import org.koin.compose.koinInject
 
@@ -150,12 +152,14 @@ fun SettingSystemAccessPage(
                                                 runtimePermissionLauncher.launch(permissions.toTypedArray())
                                             }
                                         },
+                                        modifier = Modifier.heightIn(min = 48.dp),
                                         contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp),
                                     ) {
                                         Text(stringResource(R.string.setting_system_access_request_core), maxLines = 1)
                                     }
                                     OutlinedButton(
                                         onClick = { refreshToken++ },
+                                        modifier = Modifier.heightIn(min = 48.dp),
                                         contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp),
                                     ) {
                                         Text(stringResource(R.string.setting_system_access_refresh), maxLines = 1)
@@ -237,13 +241,15 @@ fun SettingSystemAccessPage(
                                                 R.string.prompt_page_disabled
                                             },
                                         ),
-                                        color = if (externalAccess.enabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
+                                        style = LocalAmberType.current.tinyTag,
+                                        color = if (externalAccess.enabled) LocalAmberTokens.current.accent else MaterialTheme.colorScheme.outline,
                                     )
                                     Text(
                                         stringResource(
                                             R.string.setting_system_access_root_count,
                                             externalAccess.roots.size,
-                                        )
+                                        ),
+                                        style = LocalAmberType.current.meta,
                                     )
                                 }
                                 OutlinedTextField(
@@ -251,6 +257,7 @@ fun SettingSystemAccessPage(
                                     onValueChange = { externalRootInput = it },
                                     modifier = Modifier.fillMaxWidth(),
                                     singleLine = true,
+                                    textStyle = LocalAmberType.current.meta,
                                     label = { Text(stringResource(R.string.setting_system_access_path_label)) },
                                     supportingText = { Text(stringResource(R.string.setting_system_access_path_hint)) },
                                 )
@@ -277,6 +284,7 @@ fun SettingSystemAccessPage(
                                                 }
                                             }
                                         },
+                                        modifier = Modifier.heightIn(min = 48.dp),
                                         enabled = externalRootInput.isNotBlank(),
                                     ) {
                                         Text(stringResource(R.string.setting_system_access_add_enable), maxLines = 1)
@@ -296,12 +304,17 @@ fun SettingSystemAccessPage(
                                                 }
                                             }
                                         },
+                                        modifier = Modifier.heightIn(min = 48.dp),
                                     ) {
                                         Text(stringResource(R.string.clear), maxLines = 1)
                                     }
                                 }
                                 if (externalAccess.roots.isNotEmpty()) {
-                                    Text(externalAccess.roots.joinToString("\n"))
+                                    Text(
+                                        externalAccess.roots.joinToString("\n"),
+                                        style = LocalAmberType.current.meta,
+                                        color = LocalAmberTokens.current.ink2,
+                                    )
                                 }
                             }
                         },
@@ -348,7 +361,7 @@ private fun CardGroupScope.permissionItem(
                 tint = when (capability.risk) {
                     AgentPermissionRisk.High -> MaterialTheme.colorScheme.error
                     AgentPermissionRisk.Sensitive -> MaterialTheme.colorScheme.tertiary
-                    AgentPermissionRisk.Normal -> MaterialTheme.colorScheme.primary
+                    AgentPermissionRisk.Normal -> LocalAmberTokens.current.accent
                 },
             )
         },
@@ -359,18 +372,20 @@ private fun CardGroupScope.permissionItem(
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
                         text = status.label(),
+                        style = LocalAmberType.current.tinyTag,
                         color = when (status) {
-                            AgentPermissionStatus.Granted -> MaterialTheme.colorScheme.primary
+                            AgentPermissionStatus.Granted -> LocalAmberTokens.current.accent
                             AgentPermissionStatus.Unsupported -> MaterialTheme.colorScheme.outline
                             else -> MaterialTheme.colorScheme.error
                         },
                     )
                     Text(
                         text = capability.risk.label(),
+                        style = LocalAmberType.current.tinyTag,
                         color = when (capability.risk) {
                             AgentPermissionRisk.High -> MaterialTheme.colorScheme.error
                             AgentPermissionRisk.Sensitive -> MaterialTheme.colorScheme.tertiary
-                            AgentPermissionRisk.Normal -> MaterialTheme.colorScheme.outline
+                            AgentPermissionRisk.Normal -> LocalAmberTokens.current.ink3
                         },
                     )
                 }
@@ -380,7 +395,8 @@ private fun CardGroupScope.permissionItem(
                             R.string.setting_system_access_tools,
                             capability.toolNames.joinToString(),
                         ),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = LocalAmberType.current.meta,
+                        color = LocalAmberTokens.current.ink3,
                     )
                 }
             }
@@ -397,15 +413,17 @@ private fun PermissionAction(
     when (status) {
         AgentPermissionStatus.Granted -> Text(
             stringResource(R.string.setting_system_access_status_granted),
-            color = MaterialTheme.colorScheme.primary,
+            style = LocalAmberType.current.tinyTag,
+            color = LocalAmberTokens.current.accent,
         )
         AgentPermissionStatus.Unsupported -> Text(
             stringResource(R.string.setting_system_access_status_unsupported),
+            style = LocalAmberType.current.tinyTag,
             color = MaterialTheme.colorScheme.outline,
         )
         AgentPermissionStatus.Denied,
         AgentPermissionStatus.SpecialNeeded -> {
-            OutlinedButton(onClick = onClick) {
+            OutlinedButton(onClick = onClick, modifier = Modifier.heightIn(min = 48.dp)) {
                 Text(stringResource(R.string.setting_system_access_authorize))
             }
         }

@@ -65,6 +65,7 @@ import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import app.amber.ai.ui.UIMessagePart
 import app.amber.agent.R
@@ -193,7 +194,7 @@ fun CouncilRoomComposer(
                 .imePadding()
                 .navigationBarsPadding()
                 .padding(bottom = 6.dp)
-                .padding(horizontal = 12.dp)
+                .padding(horizontal = 16.dp)
                 .padding(top = 10.dp),
         ) {
             if (showMentionPopup) {
@@ -260,7 +261,7 @@ fun CouncilRoomComposer(
                 )
                 Row(
                     modifier = Modifier
-                        .height(46.dp)
+                        .height(48.dp)
                         .clip(CircleShape)
                         .background(tokens.surface2)
                         .animateContentSize(animationSpec = tween(220, easing = FastOutSlowInEasing)),
@@ -268,7 +269,7 @@ fun CouncilRoomComposer(
                 ) {
                     Box(
                         modifier = Modifier
-                            .size(46.dp)
+                            .size(48.dp)
                             .councilPressBounce(attachInteraction)
                             .clip(CircleShape)
                             .clickable(interactionSource = attachInteraction, indication = null) {
@@ -303,7 +304,7 @@ fun CouncilRoomComposer(
                         ) {
                             Box(
                                 modifier = Modifier
-                                    .size(40.dp)
+                                    .size(48.dp)
                                     .clip(CircleShape)
                                     .clickable {
                                         attachExpanded = false
@@ -320,7 +321,7 @@ fun CouncilRoomComposer(
                             }
                             Box(
                                 modifier = Modifier
-                                    .size(40.dp)
+                                    .size(48.dp)
                                     .clip(CircleShape)
                                     .clickable {
                                         attachExpanded = false
@@ -340,13 +341,13 @@ fun CouncilRoomComposer(
                 }
 
                 // Input pill — surface2, 26dp radius, 1dp hairline; BasicTextField with
-                // 9dp vertical padding keeps the single-line height ≈46dp, level with
+                // 9dp vertical padding keeps the single-line height ≈48dp, level with
                 // the flanking circles (mirrors the main chat composer exactly).
                 val pillShape = RoundedCornerShape(26.dp)
                 Row(
                     modifier = Modifier
                         .weight(1f)
-                        .heightIn(min = 46.dp)
+                        .heightIn(min = 48.dp)
                         .clip(pillShape)
                         .background(tokens.surface2)
                         .border(BorderStroke(1.dp, tokens.line), pillShape)
@@ -377,7 +378,7 @@ fun CouncilRoomComposer(
                     }
                 }
 
-                // Send — flat circle (46dp); accent fill when there's a draft.
+                // Send — flat circle (48dp); accent fill when there's a draft.
                 // While the council is actively producing output AND the draft is
                 // empty, this flips to a red STOP button that cancels the run
                 // (vm.close keeps the partial discussion). A non-empty draft always
@@ -390,19 +391,19 @@ fun CouncilRoomComposer(
                     if (showStop) R.string.stop else R.string.send,
                 )
                 // Mirror the main chat composer's send/stop button exactly: an
-                // accent-filled circle with a white glyph — ArrowUp to send, Cancel01
+                // accent-filled circle with an accent-contrast glyph — ArrowUp to send, Cancel01
                 // (×) to stop; neutral surface only when idle with an empty draft.
                 val sendFill by animateColorAsState(
                     if (!armed && !showStop) tokens.surface2 else tokens.accent,
                     label = "council-send-fill",
                 )
                 val sendIconTint by animateColorAsState(
-                    if (!armed && !showStop) tokens.ink3 else Color.White,
+                    if (!armed && !showStop) tokens.ink3 else tokens.accentInk,
                     label = "council-send-tint",
                 )
                 Box(
                     modifier = Modifier
-                        .size(46.dp)
+                        .size(48.dp)
                         .councilPressBounce(sendInteraction)
                         .clip(CircleShape)
                         .background(sendFill)
@@ -465,7 +466,7 @@ private fun MentionPopup(
     Surface(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 4.dp),
+            .padding(vertical = 4.dp),
         shape = RoundedCornerShape(12.dp),
         color = workspace.paper,
         border = workspaceBorder(),
@@ -482,17 +483,21 @@ private fun MentionPopup(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     SubAgentAvatar(id = p.id, name = p.name, avatarSize = 24.dp)
-                    Column {
+                    Column(modifier = Modifier.weight(1f)) {
                         Text(
                             text = "@${p.name}",
                             style = MaterialTheme.typography.bodySmall,
                             color = workspace.ink,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
                         )
                         if (p.role.isNotBlank()) {
                             Text(
                                 text = p.role,
                                 style = MaterialTheme.typography.labelSmall,
                                 color = workspace.faint,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
                             )
                         }
                     }
@@ -592,6 +597,7 @@ private fun CouncilAttachmentStrip(
                         AttachmentRemoveBadge(
                             onClick = { onRemove(part) },
                             modifier = Modifier.align(Alignment.BottomEnd),
+                            contentAlignment = Alignment.BottomEnd,
                         )
                     }
                 }
@@ -623,6 +629,7 @@ private fun CouncilAttachmentStrip(
                     AttachmentRemoveBadge(
                         onClick = { onRemove(part) },
                         modifier = Modifier.align(Alignment.TopEnd),
+                        contentAlignment = Alignment.TopEnd,
                     )
                 }
 
@@ -633,22 +640,33 @@ private fun CouncilAttachmentStrip(
 }
 
 @Composable
-private fun AttachmentRemoveBadge(onClick: () -> Unit, modifier: Modifier = Modifier) {
+private fun AttachmentRemoveBadge(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    contentAlignment: Alignment = Alignment.Center,
+) {
     val tokens = LocalAmberTokens.current
     Box(
         modifier = modifier
-            .padding(2.dp)
-            .size(18.dp)
+            .size(48.dp)
             .clip(CircleShape)
-            .background(tokens.ink.copy(alpha = 0.55f))
             .clickable(onClick = onClick),
-        contentAlignment = Alignment.Center,
+        contentAlignment = contentAlignment,
     ) {
-        Icon(
-            imageVector = Lucide.X,
-            contentDescription = stringResource(R.string.chat_input_remove_attachment),
-            tint = Color.White,
-            modifier = Modifier.size(12.dp),
-        )
+        Box(
+            modifier = Modifier
+                .padding(2.dp)
+                .size(18.dp)
+                .clip(CircleShape)
+                .background(tokens.ink.copy(alpha = 0.55f)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector = Lucide.X,
+                contentDescription = stringResource(R.string.chat_input_remove_attachment),
+                tint = tokens.surface,
+                modifier = Modifier.size(12.dp),
+            )
+        }
     }
 }

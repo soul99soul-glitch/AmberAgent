@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
@@ -56,6 +57,7 @@ import app.amber.feature.miniapp.MiniAppSandbox
 import app.amber.feature.miniapp.MiniAppShell
 import app.amber.feature.miniapp.MiniAppSourceChecks
 import app.amber.feature.ui.theme.JetbrainsMono
+import app.amber.feature.ui.components.ui.workspaceColors
 import org.koin.compose.koinInject
 import java.io.ByteArrayInputStream
 import kotlin.uuid.Uuid
@@ -82,9 +84,12 @@ fun MiniAppSourceEditorDialog(
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val saveFailedMessage = stringResource(R.string.miniapp_save_failed)
+    val workspace = workspaceColors()
 
     AlertDialog(
         onDismissRequest = onDismiss,
+        shape = RoundedCornerShape(14.dp),
+        containerColor = workspace.paper,
         title = {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(

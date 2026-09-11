@@ -17,7 +17,6 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import app.amber.feature.ui.components.ui.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberCoroutineScope
@@ -34,6 +33,8 @@ import app.amber.agent.Screen
 import app.amber.core.settings.MiniAppSetting
 import app.amber.core.settings.prefs.SettingsAggregator
 import app.amber.feature.ui.components.nav.BackButton
+import app.amber.feature.ui.components.ui.workspaceBorder
+import app.amber.feature.ui.components.ui.WorkspaceTopBar
 import app.amber.feature.ui.components.ui.workspaceColors
 import app.amber.feature.ui.context.LocalNavController
 import org.koin.compose.koinInject
@@ -64,19 +65,16 @@ fun MiniAppSettingsPage(
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = {
-                    Text(
-                        if (group == null) {
-                            stringResource(R.string.miniapp_settings)
-                        } else {
-                            stringResource(group.titleRes)
-                        }
-                    )
+            WorkspaceTopBar(
+                title = if (group == null) {
+                    stringResource(R.string.miniapp_settings)
+                } else {
+                    stringResource(group.titleRes)
                 },
                 navigationIcon = { BackButton() },
             )
         },
+        containerColor = workspaceColors().canvas,
     ) { padding ->
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
@@ -291,8 +289,10 @@ private fun MiniAppGroupCard(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick),
-        shape = RoundedCornerShape(16.dp),
+        shape = RoundedCornerShape(14.dp),
         color = colors.paper,
+        contentColor = colors.ink,
+        border = workspaceBorder(),
         tonalElevation = 0.dp,
         shadowElevation = 0.dp,
     ) {
@@ -341,12 +341,14 @@ private fun MiniAppSwitchRow(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(enabled = enabled) { onCheckedChange(!checked) },
-        shape = RoundedCornerShape(if (prominent) 18.dp else 14.dp),
+        shape = RoundedCornerShape(14.dp),
         color = colors.paper,
+        contentColor = colors.ink,
+        border = workspaceBorder(),
     ) {
         ListItem(
             headlineContent = {
-                Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(title, maxLines = 2, overflow = TextOverflow.Ellipsis)
             },
             supportingContent = {
                 Text(description, maxLines = 2, overflow = TextOverflow.Ellipsis)

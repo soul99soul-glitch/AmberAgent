@@ -2,6 +2,8 @@ package app.amber.feature.ui.pages.extensions
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -222,6 +224,7 @@ fun SkillsPage() {
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun SkillLibraryStatusCard(
     installedCount: Int,
@@ -236,8 +239,7 @@ private fun SkillLibraryStatusCard(
     val colors = workspaceColors()
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        // V3 settings-skills.jsx Skill 库 card 圆角 18dp
-        shape = RoundedCornerShape(18.dp),
+        shape = RoundedCornerShape(14.dp),
         color = colors.paper,
         contentColor = colors.ink,
         border = workspaceBorder(),
@@ -256,7 +258,7 @@ private fun SkillLibraryStatusCard(
                 WorkspaceLeadingIcon(
                     icon = Lucide.Puzzle,
                     tone = WorkspaceTone.Neutral,
-                    size = 34.dp,
+                    size = 32.dp,
                     iconSize = 20.dp,
                 )
                 Column(
@@ -296,9 +298,10 @@ private fun SkillLibraryStatusCard(
                     color = colors.muted,
                 )
             }
-            Row(
+            FlowRow(
+                modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically,
+                verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
                 WorkspaceIconButton(
                     onClick = onAdd,
@@ -339,7 +342,7 @@ private fun SkillIssueCard(issue: SkillScanIssue) {
     val colors = workspaceColors()
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(8.dp),
+        shape = RoundedCornerShape(14.dp),
         color = colors.redContainer.copy(alpha = 0.55f),
         contentColor = colors.ink,
         border = workspaceBorder(),
@@ -387,11 +390,10 @@ private fun SkillCard(
 ) {
     val colors = workspaceColors()
     val chatTheme = app.amber.feature.ui.pages.chat.LocalChatTheme.current
-    // V3 settings-skills.jsx: 单 Skill 卡 18dp 圆角 + surface 底 + hair 边线
     Surface(
         onClick = onClick,
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(18.dp),
+        shape = RoundedCornerShape(14.dp),
         color = chatTheme.surface,
         contentColor = chatTheme.ink,
         border = androidx.compose.foundation.BorderStroke(1.dp, chatTheme.hair),
@@ -403,9 +405,9 @@ private fun SkillCard(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             WorkspaceLeadingIcon(
-                icon = Lucide.Puzzle,
-                tone = WorkspaceTone.Neutral,
-                size = 34.dp,
+                    icon = Lucide.Puzzle,
+                    tone = WorkspaceTone.Neutral,
+                    size = 32.dp,
                 iconSize = 20.dp,
             )
             Column(

@@ -2,6 +2,7 @@ package app.amber.feature.ui.pages.miniapp
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -13,7 +14,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -26,6 +26,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
 import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.CodeXml
 import com.composables.icons.lucide.Settings
 import androidx.compose.ui.res.stringResource
 import app.amber.agent.R
@@ -33,6 +34,9 @@ import app.amber.agent.Screen
 import app.amber.feature.miniapp.MiniAppRepository
 import app.amber.agent.data.db.entity.MiniAppEntity
 import app.amber.feature.ui.components.nav.BackButton
+import app.amber.feature.ui.components.ui.WorkspaceLeadingIcon
+import app.amber.feature.ui.components.ui.WorkspaceTopBar
+import app.amber.feature.ui.components.ui.WorkspaceTone
 import app.amber.feature.ui.components.ui.workspaceColors
 import app.amber.feature.ui.context.LocalNavController
 import app.amber.feature.ui.pages.miniapp.components.MiniAppGridCard
@@ -55,8 +59,8 @@ fun MiniAppListPage(
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = { Text(stringResource(R.string.miniapp_title), fontWeight = androidx.compose.ui.text.font.FontWeight.Bold) },
+            WorkspaceTopBar(
+                title = stringResource(R.string.miniapp_title),
                 navigationIcon = { BackButton() },
                 actions = {
                     IconButton(onClick = { navController.navigate(Screen.MiniAppSettings) }) {
@@ -64,20 +68,30 @@ fun MiniAppListPage(
                     }
                 },
             )
-        }
+        },
+        containerColor = workspaceColors().canvas,
     ) { padding ->
         if (apps.isEmpty()) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(padding),
-                contentAlignment = Alignment.Center
+                contentAlignment = Alignment.Center,
             ) {
-                Text(
-                    text = stringResource(R.string.miniapp_empty),
-                    style = LocalAmberType.current.secondary,
-                    color = workspaceColors().muted,
-                )
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    WorkspaceLeadingIcon(
+                        icon = Lucide.CodeXml,
+                        tone = WorkspaceTone.Neutral,
+                    )
+                    Text(
+                        text = stringResource(R.string.miniapp_empty),
+                        style = LocalAmberType.current.secondary,
+                        color = workspaceColors().muted,
+                    )
+                }
             }
         } else {
             LazyVerticalGrid(

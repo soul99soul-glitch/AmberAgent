@@ -1,5 +1,6 @@
 package app.amber.feature.ui.pages.councilroom
 
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
@@ -92,6 +93,8 @@ import app.amber.feature.ui.components.ui.SubAgentAvatar
 import app.amber.feature.ui.components.ui.workspaceBorder
 import app.amber.feature.ui.components.ui.workspaceColors
 import app.amber.feature.ui.pages.chat.LocalChatTheme
+import app.amber.feature.ui.theme.LocalAmberTokens
+import app.amber.feature.ui.theme.LocalAmberType
 
 /**
  * One entry in the merged timeline (a message or a phase marker), with a stable
@@ -571,7 +574,7 @@ fun CouncilTimelineTab(
                 },
             // Extra bottom headroom so the streaming tail (and a freshly appended
             // line) stays comfortably above the composer instead of hugging the edge.
-            contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 18.dp, bottom = 64.dp),
+            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 64.dp),
             // Per-item spacing (not spacedBy): the chat page uses spacedBy(0) +
             // per-item padding because spacedBy's uniform spacing is managed by
             // the LazyList and, combined with a streaming item whose height
@@ -704,6 +707,8 @@ fun CouncilTimelineTab(
 private fun CouncilSpeakingStrip(participant: CouncilParticipant, onClick: () -> Unit) {
     val chatTheme = LocalChatTheme.current
     val workspace = workspaceColors()
+    val tokens = LocalAmberTokens.current
+    val type = LocalAmberType.current
     Surface(
         modifier = Modifier
             .fillMaxWidth()
@@ -718,7 +723,7 @@ private fun CouncilSpeakingStrip(participant: CouncilParticipant, onClick: () ->
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            CouncilBreathingDot(color = workspace.green)
+            CouncilBreathingDot(color = tokens.signal)
             Text(
                 text = stringResource(
                     R.string.council_room_speaking,
@@ -726,14 +731,19 @@ private fun CouncilSpeakingStrip(participant: CouncilParticipant, onClick: () ->
                 ),
                 style = MaterialTheme.typography.bodySmall,
                 color = workspace.muted,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f, fill = false),
             )
             val modelLabel = participant.modelLabel()
             if (modelLabel.isNotBlank()) {
                 Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) {
                     Text(
                         text = modelLabel,
-                        style = MaterialTheme.typography.labelSmall,
+                        style = type.meta,
                         color = workspace.faint,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                     )
                 }
             }
@@ -1036,6 +1046,7 @@ private fun CouncilBubbleAttachments(attachments: List<UIMessagePart>, modifier:
 @Composable
 private fun AuthorLabel(msg: CouncilMessage, isHost: Boolean, modelLabel: String) {
     val workspace = workspaceColors()
+    val type = LocalAmberType.current
     Column(modifier = Modifier.padding(bottom = 4.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             Text(
@@ -1043,6 +1054,9 @@ private fun AuthorLabel(msg: CouncilMessage, isHost: Boolean, modelLabel: String
                 style = MaterialTheme.typography.labelMedium,
                 fontWeight = FontWeight.SemiBold,
                 color = if (isHost) workspace.amber else workspace.ink,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f, fill = false),
             )
             val displayRole = if (isHost) stringResource(R.string.council_room_host_status) else msg.role
             if (displayRole.isNotBlank() && displayRole != msg.authorName) {
@@ -1052,8 +1066,10 @@ private fun AuthorLabel(msg: CouncilMessage, isHost: Boolean, modelLabel: String
         if (modelLabel.isNotBlank()) {
             Text(
                 text = modelLabel,
-                style = MaterialTheme.typography.labelSmall,
+                style = type.meta,
                 color = workspace.faint,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
         }
     }
@@ -1268,7 +1284,7 @@ private fun CouncilAskUserCard(
                         maxLines = 4,
                     )
                     Surface(
-                        modifier = Modifier.size(46.dp),
+                        modifier = Modifier.size(48.dp),
                         shape = CircleShape,
                         color = if (answer.isNotBlank()) chatTheme.accent else chatTheme.surface,
                         contentColor = if (answer.isNotBlank()) chatTheme.surface else workspace.faint,

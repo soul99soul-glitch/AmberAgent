@@ -8,7 +8,7 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -45,14 +45,14 @@ import com.composables.icons.lucide.Lucide
 import com.composables.icons.lucide.EllipsisVertical
 import app.amber.agent.R
 import app.amber.core.font.FontPackCategory
-import app.amber.core.font.FontPackState
 import app.amber.core.font.SlidesFontRepository
 import app.amber.feature.ui.components.nav.BackButton
 import app.amber.feature.ui.components.ui.CardGroup
 import app.amber.feature.ui.components.ui.WorkspaceTopBar
 import app.amber.feature.ui.components.ui.workspaceColors
 import app.amber.feature.ui.context.LocalToaster
-import app.amber.feature.ui.theme.CustomColors
+import app.amber.feature.ui.theme.LocalAmberTokens
+import app.amber.feature.ui.theme.LocalAmberType
 import app.amber.core.utils.openUrl
 import app.amber.core.utils.plus
 import org.koin.androidx.compose.koinViewModel
@@ -64,7 +64,6 @@ fun SettingSlidesFontPage(
     fontRepository: SlidesFontRepository = koinInject(),
 ) {
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
-    val settings by vm.settings.collectAsStateWithLifecycle()
     val fonts by fontRepository.fontsFlow.collectAsStateWithLifecycle()
     val downloads by fontRepository.downloadsFlow.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
@@ -92,7 +91,6 @@ fun SettingSlidesFontPage(
         ) {
             item {
                 CardGroup(
-                    modifier = Modifier.padding(horizontal = 8.dp),
                     title = { Text(stringResource(R.string.setting_slides_font_downloadable_fonts)) },
                 ) {
                     fonts.forEach { state ->
@@ -103,6 +101,7 @@ fun SettingSlidesFontPage(
                             headlineContent = {
                                 Text(
                                     state.pack.displayName,
+                                    style = LocalAmberType.current.body,
                                     fontWeight = if (state.installed) FontWeight.SemiBold else FontWeight.Normal,
                                 )
                             },
@@ -114,8 +113,8 @@ fun SettingSlidesFontPage(
                                     ) {
                                         Text(
                                             formatBytes(state.pack.fileSizeBytes),
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            style = LocalAmberType.current.meta,
+                                            color = LocalAmberTokens.current.ink3,
                                         )
                                         StyleBadge(state.pack.category.label())
                                     }
@@ -126,8 +125,8 @@ fun SettingSlidesFontPage(
                                         )
                                         Text(
                                             "${(progress.fraction * 100).toInt()}%",
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            style = LocalAmberType.current.meta,
+                                            color = LocalAmberTokens.current.ink3,
                                         )
                                     } else if (!state.installed) {
                                         Button(
@@ -145,19 +144,19 @@ fun SettingSlidesFontPage(
                                                     }
                                                 }
                                             },
-                                            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 4.dp),
-                                            modifier = Modifier.height(32.dp),
+                                            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+                                            modifier = Modifier.heightIn(min = 48.dp),
                                         ) {
                                             Text(
                                                 stringResource(R.string.setting_slides_font_download),
-                                                style = MaterialTheme.typography.labelMedium,
+                                                style = LocalAmberType.current.body,
                                             )
                                         }
                                     } else {
                                         Text(
                                             stringResource(R.string.setting_experimental_installed),
-                                            style = MaterialTheme.typography.labelMedium,
-                                            color = MaterialTheme.colorScheme.primary,
+                                            style = LocalAmberType.current.secondary,
+                                            color = LocalAmberTokens.current.accent,
                                         )
                                     }
                                 }
@@ -166,7 +165,7 @@ fun SettingSlidesFontPage(
                                 Box(contentAlignment = Alignment.CenterEnd) {
                                     IconButton(
                                         onClick = { showMenu = true },
-                                        modifier = Modifier.size(36.dp),
+                                        modifier = Modifier.size(48.dp),
                                     ) {
                                         Icon(
                                             Lucide.EllipsisVertical,
@@ -225,13 +224,13 @@ fun SettingSlidesFontPage(
 private fun StyleBadge(label: String) {
     Surface(
         shape = RoundedCornerShape(4.dp),
-        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
-        contentColor = MaterialTheme.colorScheme.primary,
+        color = LocalAmberTokens.current.accent.copy(alpha = 0.12f),
+        contentColor = LocalAmberTokens.current.accent,
     ) {
         Text(
             text = label,
             modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp),
-            style = MaterialTheme.typography.labelSmall,
+            style = LocalAmberType.current.tinyTag,
             fontWeight = FontWeight.Medium,
         )
     }

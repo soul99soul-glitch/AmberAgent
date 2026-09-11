@@ -23,7 +23,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LocalContentColor
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -62,7 +61,8 @@ import app.amber.agent.R
 import app.amber.core.settings.Settings
 import app.amber.feature.ui.components.ui.AutoAIIcon
 import app.amber.feature.ui.components.ui.Switch
-import app.amber.feature.ui.components.ui.workspaceColors
+import app.amber.feature.ui.theme.LocalAmberTokens
+import app.amber.feature.ui.theme.LocalAmberType
 import app.amber.search.SearchCommonOptions
 import app.amber.search.SearchServiceOptions
 import sh.calvin.reorderable.ReorderableColumn
@@ -83,16 +83,15 @@ private data class SearchV2Colors(
 
 @Composable
 private fun searchV2Colors(): SearchV2Colors {
-    val workspace = workspaceColors()
-    val scheme = MaterialTheme.colorScheme
+    val tokens = LocalAmberTokens.current
     return SearchV2Colors(
-        cardBg = workspace.paper,
-        hair = workspace.hairline,
-        ink = workspace.ink,
-        inkSoft = workspace.muted,
-        inkFaint = workspace.faint,
-        accent = scheme.primary,
-        modelLogoBg = workspace.row,
+        cardBg = tokens.surface,
+        hair = tokens.line,
+        ink = tokens.ink,
+        inkSoft = tokens.ink2,
+        inkFaint = tokens.ink3,
+        accent = tokens.accent,
+        modelLogoBg = tokens.surface2,
     )
 }
 
@@ -104,6 +103,7 @@ internal fun SearchHeroCard(
     onCheckedChange: (Boolean) -> Unit,
 ) {
     val t = searchV2Colors()
+    val type = LocalAmberType.current
     val webSearchLabel = stringResource(R.string.setting_page_search_agent_search)
     Surface(
         shape = SearchCardShape,
@@ -125,15 +125,14 @@ internal fun SearchHeroCard(
                 ) {
                     Text(
                         text = stringResource(R.string.setting_page_search_agent_search),
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.Medium,
+                        style = type.body.copy(fontWeight = FontWeight.Medium),
                         color = t.ink,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
                     Text(
                         text = stringResource(R.string.setting_page_search_agent_search_desc),
-                        fontSize = 12.sp,
+                        style = type.secondary,
                         color = t.inkFaint,
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
@@ -170,11 +169,10 @@ internal fun SearchHeroCard(
                         enabledCount,
                         serviceCount,
                     ),
-                    fontSize = 12.sp,
+                    style = type.meta.copy(fontFeatureSettings = "tnum, zero"),
                     color = t.inkSoft,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
-                    style = MaterialTheme.typography.labelMedium.copy(fontFeatureSettings = "tnum"),
                 )
             }
         }
@@ -202,6 +200,7 @@ internal fun SearchServiceListCard(
     onEditService: (SearchServiceOptions) -> Unit,
 ) {
     val t = searchV2Colors()
+    val type = LocalAmberType.current
     Surface(
         shape = SearchCardShape,
         color = t.cardBg,
@@ -235,7 +234,7 @@ internal fun SearchServiceListCard(
                     text = stringResource(R.string.setting_page_search_no_configured_services),
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
                     color = searchV2Colors().inkFaint,
-                    style = MaterialTheme.typography.bodySmall,
+                    style = type.secondary,
                 )
             } else {
                 ReorderableColumn(
@@ -397,6 +396,7 @@ private fun ServiceRowV2(
     onCheckedChange: (Boolean) -> Unit,
 ) {
     val t = searchV2Colors()
+    val type = LocalAmberType.current
     Column(modifier.fillMaxWidth()) {
         Row(
             modifier = Modifier
@@ -419,8 +419,7 @@ private fun ServiceRowV2(
             ) {
                 Text(
                     text = title,
-                    fontSize = 14.5.sp,
-                    fontWeight = FontWeight.Medium,
+                    style = type.body.copy(fontWeight = FontWeight.Medium),
                     color = t.ink,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -428,7 +427,7 @@ private fun ServiceRowV2(
                 if (description != null) {
                     Text(
                         text = description,
-                        fontSize = 11.5.sp,
+                        style = type.secondary,
                         color = t.inkFaint,
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
@@ -466,6 +465,7 @@ private fun ServiceLogo(
     rank: Int?,
 ) {
     val t = searchV2Colors()
+    val type = LocalAmberType.current
     Box(Modifier.size(36.dp)) {
         CompositionLocalProvider(LocalContentColor provides t.inkSoft) {
             AutoAIIcon(
@@ -489,9 +489,11 @@ private fun ServiceLogo(
                 Box(contentAlignment = Alignment.Center) {
                     Text(
                         text = rank.toString(),
-                        fontSize = 9.sp,
-                        fontWeight = FontWeight.Medium,
-                        style = MaterialTheme.typography.labelSmall.copy(fontFeatureSettings = "tnum"),
+                        style = type.meta.copy(
+                            fontSize = 10.sp,
+                            lineHeight = 12.sp,
+                            fontFeatureSettings = "tnum, zero",
+                        ),
                     )
                 }
             }
@@ -540,6 +542,7 @@ private fun SubGroupLabel(
     trailing: String? = null,
 ) {
     val t = searchV2Colors()
+    val type = LocalAmberType.current
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -548,9 +551,7 @@ private fun SubGroupLabel(
     ) {
         Text(
             text = text.uppercase(),
-            fontSize = 11.sp,
-            letterSpacing = 1.4.sp,
-            fontWeight = FontWeight.Medium,
+            style = type.eyebrow,
             color = t.inkFaint,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
@@ -567,7 +568,7 @@ private fun SubGroupLabel(
             )
             Text(
                 text = trailing,
-                fontSize = 11.sp,
+                style = type.eyebrow,
                 color = t.inkFaint,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -583,6 +584,7 @@ internal fun SearchCommonOptionsCard(
     onUpdate: (SearchCommonOptions) -> Unit,
 ) {
     val t = searchV2Colors()
+    val type = LocalAmberType.current
     Surface(
         shape = SearchCardShape,
         color = t.cardBg,
@@ -604,13 +606,12 @@ internal fun SearchCommonOptionsCard(
                 ) {
                     Text(
                         text = stringResource(R.string.setting_page_search_result_size),
-                        fontSize = 14.5.sp,
-                        fontWeight = FontWeight.Medium,
+                        style = type.body.copy(fontWeight = FontWeight.Medium),
                         color = t.ink,
                     )
                     Text(
                         text = stringResource(R.string.setting_page_search_result_size_desc),
-                        fontSize = 11.5.sp,
+                        style = type.secondary,
                         color = t.inkFaint,
                     )
                 }
@@ -667,6 +668,7 @@ private fun StepperNumberField(
     onValueChange: (Int) -> Unit,
 ) {
     val t = searchV2Colors()
+    val type = LocalAmberType.current
     val focusManager = LocalFocusManager.current
     var focused by remember { mutableStateOf(false) }
     var text by remember { mutableStateOf(value.toString()) }
@@ -692,11 +694,11 @@ private fun StepperNumberField(
         value = text,
         onValueChange = ::updateFromText,
         singleLine = true,
-        textStyle = MaterialTheme.typography.labelMedium.copy(
+        textStyle = type.meta.copy(
             color = t.ink,
             fontSize = 14.sp,
             fontWeight = FontWeight.Medium,
-            fontFeatureSettings = "tnum",
+            fontFeatureSettings = "tnum, zero",
             textAlign = TextAlign.Center,
         ),
         keyboardOptions = KeyboardOptions(
@@ -785,6 +787,7 @@ private fun RecommendationRow(
     detail: String,
 ) {
     val t = searchV2Colors()
+    val type = LocalAmberType.current
     Surface(
         shape = RoundedCornerShape(12.dp),
         color = Color.Transparent,
@@ -800,8 +803,7 @@ private fun RecommendationRow(
         ) {
             Text(
                 text = title,
-                fontSize = 13.sp,
-                fontWeight = FontWeight.Medium,
+                style = type.body.copy(fontWeight = FontWeight.Medium),
                 color = t.accent,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -809,7 +811,7 @@ private fun RecommendationRow(
             Text(
                 text = detail,
                 modifier = Modifier.weight(1f),
-                fontSize = 12.5.sp,
+                style = type.secondary,
                 color = t.inkSoft,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,

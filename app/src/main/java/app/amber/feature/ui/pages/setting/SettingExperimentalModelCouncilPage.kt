@@ -13,7 +13,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import app.amber.feature.ui.components.ui.Switch
@@ -53,7 +52,8 @@ import app.amber.feature.modelcouncil.ModelCouncilSeatRunner
 import app.amber.feature.prompts.AgentPromptConfigRepository
 import app.amber.feature.ui.components.ai.ModelSelector
 import app.amber.feature.ui.components.ui.Select
-import app.amber.feature.ui.components.ui.workspaceColors
+import app.amber.feature.ui.theme.LocalAmberTokens
+import app.amber.feature.ui.theme.LocalAmberType
 import app.amber.core.utils.plus
 import org.koin.androidx.compose.koinViewModel
 import org.koin.compose.koinInject
@@ -156,7 +156,7 @@ fun SettingExperimentalModelCouncilPage(
     ) { innerPadding ->
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
-            contentPadding = innerPadding + PaddingValues(horizontal = 12.dp, vertical = 10.dp),
+            contentPadding = innerPadding + PaddingValues(horizontal = 16.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             item {
@@ -176,8 +176,8 @@ fun SettingExperimentalModelCouncilPage(
                 ExperimentSectionCard(title = stringResource(R.string.setting_model_council_runtime_section)) {
                     Text(
                         text = stringResource(R.string.setting_model_council_runtime_note),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = workspaceColors().muted,
+                        style = LocalAmberType.current.secondary,
+                        color = LocalAmberTokens.current.ink2,
                     )
                     ModelCouncilPropertyRow(label = councilPowerModeLabel) {
                         Select(
@@ -197,13 +197,13 @@ fun SettingExperimentalModelCouncilPage(
                     }
                     Text(
                         text = councilPowerModeDescription,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = workspaceColors().muted,
+                        style = LocalAmberType.current.secondary,
+                        color = LocalAmberTokens.current.ink2,
                     )
                     Text(
                         text = councilHostModelLabel,
-                        style = MaterialTheme.typography.labelMedium,
-                        color = workspaceColors().faint,
+                        style = LocalAmberType.current.tinyTag,
+                        color = LocalAmberTokens.current.ink3,
                     )
                     ModelSelector(
                         modelId = council.hostModelId ?: settings.chatModelId,
@@ -235,8 +235,8 @@ fun SettingExperimentalModelCouncilPage(
                     )
                     Text(
                         text = councilHostNote,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = workspaceColors().muted,
+                        style = LocalAmberType.current.secondary,
+                        color = LocalAmberTokens.current.ink2,
                     )
                 }
             }
@@ -380,7 +380,8 @@ private fun ModelCouncilSeatEditor(
     onDelete: () -> Unit,
 ) {
     val context = LocalContext.current
-    val workspace = workspaceColors()
+    val tokens = LocalAmberTokens.current
+    val type = LocalAmberType.current
     val runnerOptions = listOf(ModelCouncilSeatRunner.PROVIDER_MODEL, ModelCouncilSeatRunner.EXTERNAL_CLI)
     val reasoningOptions = listOf<ReasoningLevel?>(null) + ReasoningLevel.entries
     val runtimeOptions = listOf("", "builtin_alpine", "android_shell", "termux_external")
@@ -421,11 +422,11 @@ private fun ModelCouncilSeatEditor(
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(8.dp),
-        color = workspace.paper,
-        border = BorderStroke(1.dp, workspace.hairline),
+        color = tokens.surface2,
+        border = BorderStroke(1.dp, tokens.line),
     ) {
         Column(
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 12.dp),
+            modifier = Modifier.padding(12.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             Row(
@@ -435,13 +436,13 @@ private fun ModelCouncilSeatEditor(
             ) {
                 Surface(
                     shape = RoundedCornerShape(6.dp),
-                    color = workspace.row,
-                    contentColor = workspace.faint,
-                    border = BorderStroke(1.dp, workspace.hairline),
+                    color = tokens.surface,
+                    contentColor = tokens.ink3,
+                    border = BorderStroke(1.dp, tokens.line),
                 ) {
                     Text(
                         text = "#${index + 1}",
-                        style = MaterialTheme.typography.labelSmall,
+                        style = type.meta,
                         modifier = Modifier.padding(horizontal = 7.dp, vertical = 4.dp),
                     )
                 }
@@ -451,15 +452,15 @@ private fun ModelCouncilSeatEditor(
                 ) {
                     Text(
                         text = seat.name.ifBlank { unnamedSeatLabel },
-                        style = MaterialTheme.typography.titleSmall,
-                        color = workspace.ink,
+                        style = type.body.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold),
+                        color = tokens.ink,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
                     Text(
                         text = if (seat.runnerType == ModelCouncilSeatRunner.EXTERNAL_CLI) externalSeatSummary else modelSeatSummary,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = workspace.muted,
+                        style = type.secondary,
+                        color = tokens.ink2,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
@@ -617,15 +618,15 @@ private fun ModelCouncilPropertyRow(
     label: String,
     content: @Composable () -> Unit,
 ) {
-    val workspace = workspaceColors()
+    val tokens = LocalAmberTokens.current
     Column(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(5.dp),
     ) {
         Text(
             text = label,
-            style = MaterialTheme.typography.labelSmall,
-            color = workspace.faint,
+            style = LocalAmberType.current.tinyTag,
+            color = tokens.ink3,
         )
         content()
     }
@@ -647,8 +648,8 @@ private fun <T> ModelCouncilSelectRow(
         Text(
             text = label,
             modifier = Modifier.weight(1f),
-            style = MaterialTheme.typography.bodyMedium,
-            color = workspaceColors().ink,
+            style = LocalAmberType.current.body,
+            color = LocalAmberTokens.current.ink,
         )
         Select(
             options = options,

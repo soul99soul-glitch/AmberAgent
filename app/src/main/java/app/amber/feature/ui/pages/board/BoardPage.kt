@@ -82,8 +82,6 @@ import app.amber.feature.board.hotlist.presentationTitle
 import app.amber.feature.ui.components.ds.Hairline
 import app.amber.feature.ui.components.ds.SectionLabel
 import app.amber.feature.ui.components.nav.BackButton
-import app.amber.feature.ui.components.ui.workspaceBorder
-import app.amber.feature.ui.components.ui.workspaceColors
 import app.amber.feature.ui.components.ds.LiveDot
 import app.amber.feature.ui.context.LocalNavController
 import app.amber.feature.ui.theme.LocalAmberTokens
@@ -272,7 +270,7 @@ private fun HotListActionSheet(
                 Text(
                     sourceLabels.joinToString(" · "),
                     style = LocalAmberType.current.meta,
-                    color = workspaceColors().muted,
+                    color = LocalAmberTokens.current.ink3,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
@@ -312,7 +310,7 @@ private fun TopicActionRow(
     enabled: Boolean = true,
     onClick: () -> Unit,
 ) {
-    val color = if (enabled) MaterialTheme.colorScheme.onSurface else workspaceColors().muted
+    val color = if (enabled) LocalAmberTokens.current.ink else LocalAmberTokens.current.ink3
     Row(
         Modifier
             .fillMaxWidth()
@@ -369,7 +367,7 @@ private fun HotListTab(
             HotListSkeleton()
         } else {
             LazyColumn(
-                contentPadding = PaddingValues(horizontal = 18.dp, vertical = 0.dp),
+                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 0.dp),
             ) {
                 item {
                     RubricHead(
@@ -642,7 +640,7 @@ private fun SectionTitle(title: String, subtitle: String? = null) {
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
         SectionLabel(title)
         if (!subtitle.isNullOrBlank()) {
-            Text(subtitle, style = LocalAmberType.current.meta, color = workspaceColors().muted)
+            Text(subtitle, style = LocalAmberType.current.meta, color = LocalAmberTokens.current.ink3)
         }
     }
 }

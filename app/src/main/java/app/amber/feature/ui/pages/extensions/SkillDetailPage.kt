@@ -207,7 +207,7 @@ private fun SkillMcpConfigCard(
     val colors = workspaceColors()
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(8.dp),
+        shape = RoundedCornerShape(14.dp),
         color = colors.paper,
         border = workspaceBorder(),
     ) {
@@ -266,7 +266,7 @@ private fun SkillFilesPanel(
     val colors = workspaceColors()
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(8.dp),
+        shape = RoundedCornerShape(14.dp),
         color = colors.paper,
         border = workspaceBorder(),
     ) {
@@ -391,27 +391,34 @@ private fun FileItem(
                     .weight(1f)
                     .padding(end = 4.dp),
             )
-            WorkspaceStatusPill(text = "${skillFile.file.length()} B")
-            WorkspaceIconButton(
-                onClick = onEdit,
-                icon = Lucide.FilePen,
-                contentDescription = stringResource(R.string.edit),
-                size = 30.dp,
-                iconSize = 15.dp,
-                showBorder = false,
-                containerColor = Color.Transparent,
-            )
-            if (skillFile.relativePath != "SKILL.md") {
-                WorkspaceIconButton(
-                    onClick = onDelete,
-                    icon = Lucide.Trash2,
-                    contentDescription = stringResource(R.string.delete),
-                    size = 30.dp,
-                    iconSize = 15.dp,
-                    showBorder = false,
-                    containerColor = Color.Transparent,
-                    tone = WorkspaceTone.Danger,
-                )
+            Column(
+                horizontalAlignment = Alignment.End,
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                WorkspaceStatusPill(text = "${skillFile.file.length()} B")
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    WorkspaceIconButton(
+                        onClick = onEdit,
+                        icon = Lucide.FilePen,
+                        contentDescription = stringResource(R.string.edit),
+                        size = 30.dp,
+                        iconSize = 15.dp,
+                        showBorder = false,
+                        containerColor = Color.Transparent,
+                    )
+                    if (skillFile.relativePath != "SKILL.md") {
+                        WorkspaceIconButton(
+                            onClick = onDelete,
+                            icon = Lucide.Trash2,
+                            contentDescription = stringResource(R.string.delete),
+                            size = 30.dp,
+                            iconSize = 15.dp,
+                            showBorder = false,
+                            containerColor = Color.Transparent,
+                            tone = WorkspaceTone.Danger,
+                        )
+                    }
+                }
             }
         }
     }
@@ -437,7 +444,7 @@ private fun DirItem(
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(6.dp))
                     .clickable { expanded = !expanded }
-                    .padding(start = (14 + depth * 18).dp, end = 14.dp, top = 8.dp, bottom = 8.dp),
+                    .padding(start = (14 + depth * 18).dp, end = 14.dp, top = 12.dp, bottom = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {

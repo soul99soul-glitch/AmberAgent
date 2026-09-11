@@ -33,7 +33,7 @@ import androidx.compose.material3.SwipeToDismissBoxState
 import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
+import app.amber.feature.ui.components.ui.WorkspaceTopBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -58,7 +58,6 @@ import app.amber.feature.ui.components.nav.BackButton
 import app.amber.feature.ui.components.ui.workspaceBorder
 import app.amber.feature.ui.components.ui.workspaceColors
 import app.amber.feature.ui.context.LocalNavController
-import app.amber.feature.ui.theme.CustomColors
 import app.amber.feature.ui.theme.LocalAmberTokens
 import app.amber.feature.ui.theme.LocalAmberType
 import app.amber.core.utils.navigateToChatPage
@@ -80,14 +79,11 @@ fun HistoryPage(vm: HistoryVM = koinViewModel()) {
     Scaffold(
         containerColor = workspace.canvas,
         topBar = {
-            TopAppBar(
-                title = {
-                    Text(stringResource(R.string.history_page_title))
-                },
+            WorkspaceTopBar(
+                title = stringResource(R.string.history_page_title),
                 navigationIcon = {
                     BackButton()
                 },
-                colors = CustomColors.topBarColors,
                 actions = {
                     IconButton(
                         onClick = {
@@ -129,13 +125,16 @@ fun HistoryPage(vm: HistoryVM = koinViewModel()) {
                     onClick = {
                         navigateToChatPage(navController, conversation.id)
                     },
-                    onDelete = {
+                    onDelete = { onFailure ->
                         scope.launch {
-                            // 先获取完整的对话数据（包含 messageNodes），用于撤销恢复
-                            val fullConversation = vm.getFullConversation(conversation.id) ?: conversation
-                            val deletion = vm.deleteConversation(conversation)
+                            var fullConversation = conversation
+                            var deletionStarted = false
                             var restoreRequested = false
                             try {
+                                // Keep deletion/Undo in the page scope even after the row disappears.
+                                fullConversation = vm.getFullConversation(conversation.id) ?: conversation
+                                val deletion = vm.deleteConversation(conversation)
+                                deletionStarted = true
                                 deletion.await()
                                 val result = snackbarHostState.showSnackbar(
                                     message = snackMessageDeleted,
@@ -149,11 +148,12 @@ fun HistoryPage(vm: HistoryVM = koinViewModel()) {
                             } catch (error: CancellationException) {
                                 throw error
                             } catch (error: Exception) {
+                                onFailure()
                                 snackbarHostState.showSnackbar(
                                     error.message ?: context.getString(R.string.error_title_operation)
                                 )
                             } finally {
-                                if (!restoreRequested) vm.purgeDeletedConversation(fullConversation)
+                                if (deletionStarted && !restoreRequested) vm.purgeDeletedConversation(fullConversation)
                             }
                         }
                     },
@@ -196,11 +196,12 @@ fun HistoryPage(vm: HistoryVM = koinViewModel()) {
 private fun SwipeableConversationItem(
     conversation: Conversation,
     modifier: Modifier = Modifier,
-    onDelete: () -> Unit = {},
+    onDelete: (onFailure: () -> Unit) -> Unit = {},
     onTogglePin: () -> Unit = {},
     onClick: () -> Unit = {},
 ) {
     val positionThreshold = SwipeToDismissBoxDefaults.positionalThreshold
+    val scope = rememberCoroutineScope()
     val dismissState = remember {
         SwipeToDismissBoxState(
             initialValue = SwipeToDismissBoxValue.Settled,
@@ -211,7 +212,7 @@ private fun SwipeableConversationItem(
     LaunchedEffect(dismissState.currentValue) {
         when (dismissState.currentValue) {
             SwipeToDismissBoxValue.EndToStart -> {
-                onDelete()
+                onDelete { scope.launch { dismissState.reset() } }
             }
 
             else -> {}
@@ -227,7 +228,7 @@ private fun SwipeableConversationItem(
                     .fillMaxSize()
                     .background(
                         workspace.redContainer,
-                        RoundedCornerShape(8.dp)
+                        RoundedCornerShape(14.dp)
                     )
                     .padding(horizontal = 20.dp),
                 contentAlignment = Alignment.CenterEnd
@@ -263,7 +264,7 @@ private fun ConversationItem(
         onClick = onClick,
         color = workspace.paper,
         border = workspaceBorder(),
-        shape = RoundedCornerShape(8.dp),
+        shape = RoundedCornerShape(14.dp),
         modifier = modifier
     ) {
         ListItem(

@@ -50,7 +50,7 @@ import app.amber.feature.ui.components.ui.CardGroup
 import app.amber.feature.ui.components.ui.WorkspaceTopBar
 import app.amber.feature.ui.components.ui.workspaceColors
 import app.amber.feature.ui.context.LocalNavController
-import app.amber.feature.ui.theme.CustomColors
+import app.amber.feature.ui.theme.LocalAmberType
 import app.amber.core.utils.plus
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import org.koin.androidx.compose.koinViewModel
@@ -81,7 +81,6 @@ fun SettingAgentExtensionsPage() {
         ) {
             item {
                 CardGroup(
-                    modifier = Modifier.padding(horizontal = 8.dp),
                     title = { Text(stringResource(R.string.setting_agent_extensions_page_title)) },
                 ) {
                     item(
@@ -153,7 +152,6 @@ fun SettingAgentRuntimeTasksPage(
         ) {
             item {
                 CardGroup(
-                    modifier = Modifier.padding(horizontal = 8.dp),
                     title = { Text(stringResource(R.string.setting_agent_runtime_tasks_page_title)) },
                 ) {
                     item(
@@ -236,7 +234,7 @@ fun SettingAgentRuntimeTasksPage(
             }
             if (tasks.isEmpty()) {
                 item {
-                    CardGroup(modifier = Modifier.padding(horizontal = 8.dp)) {
+                    CardGroup {
                         item(
                             leadingContent = { Icon(Lucide.AlarmClock, null) },
                             headlineContent = { Text(stringResource(R.string.setting_agent_runtime_tasks_empty_title)) },
@@ -246,7 +244,7 @@ fun SettingAgentRuntimeTasksPage(
                 }
             } else {
                 items(tasks, key = { it.taskId }) { task ->
-                    CardGroup(modifier = Modifier.padding(horizontal = 8.dp)) {
+                    CardGroup {
                         item(
                             leadingContent = { Icon(Lucide.AlarmClock, null) },
                             headlineContent = { Text(task.title) },
@@ -264,6 +262,7 @@ private fun AgentTaskSummary(task: AgentTaskSnapshot) {
     Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
         Text(
             text = "${task.type} · ${task.status.name.lowercase()} · ${task.queueState.name.lowercase()} · ${task.recoveryState.name.lowercase()}",
+            style = LocalAmberType.current.meta,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
@@ -274,6 +273,7 @@ private fun AgentTaskSummary(task: AgentTaskSnapshot) {
                     if (task.retryPolicy.retryable && task.outputRef?.exists == true) append(" · ")
                     if (task.outputRef?.exists == true) append(stringResource(R.string.setting_agent_runtime_tasks_output_readable))
                 },
+                style = LocalAmberType.current.meta,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -281,6 +281,7 @@ private fun AgentTaskSummary(task: AgentTaskSnapshot) {
         task.sourceConversationId?.let {
             Text(
                 text = stringResource(R.string.setting_agent_runtime_tasks_source_value, it),
+                style = LocalAmberType.current.meta,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -288,12 +289,14 @@ private fun AgentTaskSummary(task: AgentTaskSnapshot) {
         task.outputPath?.let {
             Text(
                 text = stringResource(R.string.setting_agent_runtime_tasks_output_value, it),
+                style = LocalAmberType.current.meta,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
         }
         Text(
             text = stringResource(R.string.setting_agent_runtime_tasks_updated_value, formatEpochMillis(task.updatedAtMs)),
+            style = LocalAmberType.current.meta,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
@@ -302,6 +305,7 @@ private fun AgentTaskSummary(task: AgentTaskSnapshot) {
                 R.string.setting_agent_runtime_tasks_cancel_value,
                 if (task.cancelCapability) "yes" else "no",
             ),
+            style = LocalAmberType.current.meta,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
@@ -347,7 +351,6 @@ fun SettingCronTasksPage(
         ) {
             item {
                 CardGroup(
-                    modifier = Modifier.padding(horizontal = 8.dp),
                     title = { Text(stringResource(R.string.setting_cron_tasks_page_title)) },
                 ) {
                     item(
@@ -358,7 +361,7 @@ fun SettingCronTasksPage(
             }
             if (tasks.isEmpty()) {
                 item {
-                    CardGroup(modifier = Modifier.padding(horizontal = 8.dp)) {
+                    CardGroup {
                         item(
                             leadingContent = { Icon(Lucide.AlarmClock, null) },
                             headlineContent = { Text(stringResource(R.string.setting_cron_tasks_empty_title)) },
@@ -368,7 +371,7 @@ fun SettingCronTasksPage(
                 }
             } else {
                 items(tasks, key = { it.id }) { task ->
-                    CardGroup(modifier = Modifier.padding(horizontal = 8.dp)) {
+                    CardGroup {
                         item(
                             onClick = { selectedTask = task },
                             leadingContent = { Icon(Lucide.AlarmClock, null) },
@@ -451,6 +454,7 @@ private fun CronTaskSummary(task: AgentCronTask) {
     Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
         Text(
             text = task.prompt,
+            style = LocalAmberType.current.secondary,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
         )
@@ -460,6 +464,7 @@ private fun CronTaskSummary(task: AgentCronTask) {
                 task.cronExpression,
                 task.timezoneId,
             ),
+            style = LocalAmberType.current.meta,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
@@ -468,6 +473,7 @@ private fun CronTaskSummary(task: AgentCronTask) {
                 R.string.setting_cron_tasks_next_run_value,
                 formatEpochMillis(task.nextRunAtMs),
             ),
+            style = LocalAmberType.current.meta,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
@@ -477,6 +483,7 @@ private fun CronTaskSummary(task: AgentCronTask) {
                 task.lastStatus.name.lowercase(),
                 task.runCount,
             ),
+            style = LocalAmberType.current.meta,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
@@ -499,7 +506,7 @@ private fun CronTaskActions(
     onDelete: () -> Unit,
 ) {
     var expanded by remember { mutableStateOf(false) }
-    Row {
+    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
         Switch(
             checked = task.enabled,
             onCheckedChange = onToggle,
@@ -609,9 +616,10 @@ private fun CronTaskDetailDialog(
 @Composable
 private fun CronDetailLine(label: String, value: String) {
     Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-        Text(label)
+        Text(label, style = LocalAmberType.current.tinyTag)
         Text(
             text = value,
+            style = LocalAmberType.current.secondary,
             maxLines = 6,
             overflow = TextOverflow.Ellipsis,
         )

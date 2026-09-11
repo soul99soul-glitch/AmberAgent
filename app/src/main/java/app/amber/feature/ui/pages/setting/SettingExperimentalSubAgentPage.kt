@@ -13,7 +13,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import app.amber.feature.ui.components.ui.Switch
@@ -56,9 +55,10 @@ import app.amber.core.settings.findModelById
 import app.amber.feature.ui.components.ai.ModelSelector
 import app.amber.feature.ui.components.ui.Select
 import app.amber.feature.ui.components.ui.SubAgentAvatar
-import app.amber.feature.ui.components.ui.workspaceColors
 import app.amber.feature.ui.context.LocalNavController
 import app.amber.feature.ui.subagent.AppSubAgentDisplayLocalizer
+import app.amber.feature.ui.theme.LocalAmberTokens
+import app.amber.feature.ui.theme.LocalAmberType
 import app.amber.core.utils.plus
 import org.koin.androidx.compose.koinViewModel
 import org.koin.compose.koinInject
@@ -119,7 +119,7 @@ fun SettingExperimentalSubAgentPage(
     ) { innerPadding ->
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
-            contentPadding = innerPadding + PaddingValues(horizontal = 12.dp, vertical = 10.dp),
+            contentPadding = innerPadding + PaddingValues(horizontal = 16.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             item {
@@ -172,13 +172,13 @@ fun SettingExperimentalSubAgentPage(
                         ) {
                             Text(
                                 text = stringResource(R.string.setting_subagent_dynamic),
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = workspaceColors().ink,
+                                style = LocalAmberType.current.body,
+                                color = LocalAmberTokens.current.ink,
                             )
                             Text(
                                 text = stringResource(R.string.setting_subagent_dynamic_desc),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = workspaceColors().muted,
+                                style = LocalAmberType.current.secondary,
+                                color = LocalAmberTokens.current.ink2,
                             )
                         }
                         Switch(
@@ -241,8 +241,8 @@ fun SettingExperimentalSubAgentPage(
                     } else {
                         Text(
                             text = stringResource(R.string.setting_subagent_roles_desc),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = workspaceColors().muted,
+                            style = LocalAmberType.current.secondary,
+                            color = LocalAmberTokens.current.ink2,
                         )
                         builtIns.forEach { def ->
                             SubAgentBuiltInRow(
@@ -299,13 +299,13 @@ fun SettingExperimentalSubAgentPage(
                         ) {
                             Text(
                                 text = stringResource(R.string.setting_subagent_council_title),
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = workspaceColors().ink,
+                                style = LocalAmberType.current.body,
+                                color = LocalAmberTokens.current.ink,
                             )
                             Text(
                                 text = stringResource(R.string.setting_subagent_council_desc),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = workspaceColors().muted,
+                                style = LocalAmberType.current.secondary,
+                                color = LocalAmberTokens.current.ink2,
                             )
                         }
                         Switch(
@@ -352,8 +352,8 @@ private fun <T> SubAgentSelectRow(
         Text(
             text = label,
             modifier = Modifier.weight(1f),
-            style = MaterialTheme.typography.bodyMedium,
-            color = workspaceColors().ink,
+            style = LocalAmberType.current.body,
+            color = LocalAmberTokens.current.ink,
         )
         Select(
             options = options,
@@ -378,18 +378,19 @@ private fun SubAgentBuiltInRow(
     onReset: () -> Unit,
     reasoningOptions: List<ReasoningLevel?>,
 ) {
-    val ws = workspaceColors()
+    val tokens = LocalAmberTokens.current
+    val type = LocalAmberType.current
     val effective = def.applyOverride(override)
     val effectiveModel = effective.modelId?.let { providers.findModelById(it) }
     val hasPromptOverride = !override?.systemPrompt.isNullOrBlank()
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(8.dp),
-        color = ws.row,
-        border = BorderStroke(1.dp, ws.hairline),
+        color = tokens.surface2,
+        border = BorderStroke(1.dp, tokens.line),
     ) {
         Column(
-            modifier = Modifier.padding(10.dp),
+            modifier = Modifier.padding(12.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Row(
@@ -410,13 +411,13 @@ private fun SubAgentBuiltInRow(
                 ) {
                     Text(
                         text = display.name,
-                        style = MaterialTheme.typography.labelLarge,
-                        color = ws.ink,
+                        style = type.body.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold),
+                        color = tokens.ink,
                     )
                     Text(
                         text = display.description,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = ws.muted,
+                        style = type.secondary,
+                        color = tokens.ink2,
                         maxLines = if (expanded) Int.MAX_VALUE else 2,
                         overflow = TextOverflow.Ellipsis,
                     )
@@ -432,29 +433,29 @@ private fun SubAgentBuiltInRow(
                         Text(
                             text = stringResource(R.string.setting_subagent_role_summary, modelLabel, reasoningLabel) +
                                 promptSummary,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = ws.faint,
+                            style = type.meta,
+                            color = tokens.ink3,
                         )
                     } else {
                         Text(
                             text = stringResource(R.string.setting_subagent_role_no_model_override),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = ws.faint,
+                            style = type.tinyTag,
+                            color = tokens.ink3,
                         )
                     }
                 }
                 Text(
                     text = if (expanded) "−" else "›",
-                    style = MaterialTheme.typography.titleMedium,
-                    color = ws.muted,
+                    style = type.body,
+                    color = tokens.ink2,
                 )
             }
             if (expanded) {
                 if (def.supportsModelOverride) {
                     Text(
                         text = stringResource(R.string.setting_subagent_role_model),
-                        style = MaterialTheme.typography.labelMedium,
-                        color = ws.faint,
+                        style = type.tinyTag,
+                        color = tokens.ink3,
                     )
                     ModelSelector(
                         modelId = effective.modelId,
@@ -472,8 +473,8 @@ private fun SubAgentBuiltInRow(
                         Text(
                             text = stringResource(R.string.setting_subagent_role_reasoning),
                             modifier = Modifier.weight(1f),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = ws.ink,
+                            style = type.body,
+                            color = tokens.ink,
                         )
                         Select(
                             options = reasoningOptions,
@@ -489,8 +490,8 @@ private fun SubAgentBuiltInRow(
                 }
                 Text(
                     text = stringResource(R.string.setting_subagent_role_prompt_label),
-                    style = MaterialTheme.typography.labelMedium,
-                    color = ws.faint,
+                    style = type.tinyTag,
+                    color = tokens.ink3,
                 )
                 OutlinedTextField(
                     value = override?.systemPrompt ?: def.systemPrompt,
@@ -506,12 +507,12 @@ private fun SubAgentBuiltInRow(
                     modifier = Modifier.fillMaxWidth(),
                     minLines = 5,
                     maxLines = 10,
-                    textStyle = MaterialTheme.typography.bodySmall,
+                    textStyle = type.secondary,
                     placeholder = {
                         Text(
                             text = stringResource(R.string.setting_subagent_role_prompt_placeholder),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = ws.faint,
+                            style = type.secondary,
+                            color = tokens.ink3,
                         )
                     },
                     supportingText = {
@@ -520,20 +521,20 @@ private fun SubAgentBuiltInRow(
                                 R.string.setting_subagent_role_prompt_supporting,
                                 (override?.systemPrompt ?: def.systemPrompt).length.coerceAtMost(8_000),
                             ),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = ws.faint,
+                            style = type.meta,
+                            color = tokens.ink3,
                         )
                     },
                 )
                 Text(
                     text = stringResource(R.string.setting_subagent_role_routing),
-                    style = MaterialTheme.typography.labelMedium,
-                    color = ws.faint,
+                    style = type.tinyTag,
+                    color = tokens.ink3,
                 )
                 Text(
                     text = display.routingHint.ifBlank { display.description },
-                    style = MaterialTheme.typography.bodySmall,
-                    color = ws.muted,
+                    style = type.secondary,
+                    color = tokens.ink2,
                 )
                 ExperimentActionRow {
                     if (hasPromptOverride) {
@@ -561,15 +562,16 @@ private fun SubAgentCustomRow(
     def: SubAgentDefinition,
     onDelete: () -> Unit,
 ) {
-    val ws = workspaceColors()
+    val tokens = LocalAmberTokens.current
+    val type = LocalAmberType.current
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(8.dp),
-        color = ws.row,
-        border = BorderStroke(1.dp, ws.hairline),
+        color = tokens.surface2,
+        border = BorderStroke(1.dp, tokens.line),
     ) {
         Column(
-            modifier = Modifier.padding(10.dp),
+            modifier = Modifier.padding(12.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             Row(
@@ -584,8 +586,8 @@ private fun SubAgentCustomRow(
                 )
                 Text(
                     text = def.name,
-                    style = MaterialTheme.typography.labelLarge,
-                    color = ws.ink,
+                    style = type.body.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold),
+                    color = tokens.ink,
                     modifier = Modifier.weight(1f),
                 )
                 ExperimentActionButton(
@@ -596,8 +598,8 @@ private fun SubAgentCustomRow(
             }
             Text(
                 text = def.description,
-                style = MaterialTheme.typography.bodySmall,
-                color = ws.muted,
+                style = type.secondary,
+                color = tokens.ink2,
             )
         }
     }

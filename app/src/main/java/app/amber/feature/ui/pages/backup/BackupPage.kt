@@ -539,15 +539,17 @@ fun BackupPage(vm: BackupVM = koinViewModel()) {
                 }
                 if (webDavSnapshots.isNotEmpty()) {
                     CardGroup(title = { SectionLabel(stringResource(R.string.backup_webdav_snapshots)) }) {
-                        webDavSnapshots.forEachIndexed { index, snapshot ->
-                            rawItem {
-                                ProviderSnapshotRow(
-                                    snapshot = snapshot,
-                                    onRestore = { vm.downloadWebDavSnapshot(snapshot) },
-                                    onDelete = { vm.requestDelete(snapshot) },
-                                )
+                        rawItem {
+                            Column {
+                                webDavSnapshots.forEachIndexed { index, snapshot ->
+                                    ProviderSnapshotRow(
+                                        snapshot = snapshot,
+                                        onRestore = { vm.downloadWebDavSnapshot(snapshot) },
+                                        onDelete = { vm.requestDelete(snapshot) },
+                                    )
+                                    if (index != webDavSnapshots.lastIndex) Hairline()
+                                }
                             }
-                            if (index != webDavSnapshots.lastIndex) rawItem { Hairline() }
                         }
                     }
                 }
@@ -587,15 +589,17 @@ fun BackupPage(vm: BackupVM = koinViewModel()) {
                 }
                 if (localFolderSnapshots.isNotEmpty()) {
                     CardGroup(title = { SectionLabel(stringResource(R.string.backup_folder_snapshots)) }) {
-                        localFolderSnapshots.forEachIndexed { index, snapshot ->
-                            rawItem {
-                                ProviderSnapshotRow(
-                                    snapshot = snapshot,
-                                    onRestore = { vm.downloadLocalFolderSnapshot(snapshot) },
-                                    onDelete = { vm.requestDelete(snapshot) },
-                                )
+                        rawItem {
+                            Column {
+                                localFolderSnapshots.forEachIndexed { index, snapshot ->
+                                    ProviderSnapshotRow(
+                                        snapshot = snapshot,
+                                        onRestore = { vm.downloadLocalFolderSnapshot(snapshot) },
+                                        onDelete = { vm.requestDelete(snapshot) },
+                                    )
+                                    if (index != localFolderSnapshots.lastIndex) Hairline()
+                                }
                             }
-                            if (index != localFolderSnapshots.lastIndex) rawItem { Hairline() }
                         }
                     }
                 }

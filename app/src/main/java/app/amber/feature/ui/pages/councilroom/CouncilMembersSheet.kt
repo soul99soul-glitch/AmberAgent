@@ -24,6 +24,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import app.amber.agent.R
 import app.amber.feature.modelcouncil.CouncilParticipant
@@ -37,6 +38,7 @@ import app.amber.feature.ui.components.ui.WorkspaceStatusPill
 import app.amber.feature.ui.components.ui.WorkspaceTone
 import app.amber.feature.ui.components.ui.workspaceColors
 import app.amber.feature.ui.pages.chat.LocalChatTheme
+import app.amber.feature.ui.theme.LocalAmberType
 import com.composables.icons.lucide.Lucide
 import com.composables.icons.lucide.RefreshCw
 
@@ -214,6 +216,7 @@ private fun membersSubtitle(room: CouncilRoom): String {
 @Composable
 private fun MemberRow(participant: CouncilParticipant, isHost: Boolean) {
     val workspace = workspaceColors()
+    val type = LocalAmberType.current
     val modelLabel = participant.modelName
         .ifBlank { participant.externalModel }
         .ifBlank { participant.providerName }
@@ -232,6 +235,9 @@ private fun MemberRow(participant: CouncilParticipant, isHost: Boolean) {
                     style = MaterialTheme.typography.bodyMedium,
                     fontWeight = FontWeight.SemiBold,
                     color = workspace.ink,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false),
                 )
                 if (participant.role.isNotBlank() && participant.role != participant.name) {
                     CouncilRolePill(text = participant.role, isHost = isHost)
@@ -240,8 +246,10 @@ private fun MemberRow(participant: CouncilParticipant, isHost: Boolean) {
             if (modelLabel.isNotBlank()) {
                 Text(
                     text = modelLabel,
-                    style = MaterialTheme.typography.labelSmall,
+                    style = type.meta,
                     color = workspace.faint,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
         }

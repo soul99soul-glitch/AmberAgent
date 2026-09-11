@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ListItem
@@ -29,6 +30,7 @@ import androidx.compose.ui.unit.dp
 import app.amber.agent.R
 import app.amber.agent.data.db.entity.MiniAppEntity
 import app.amber.agent.data.db.entity.MiniAppVersionEntity
+import app.amber.feature.ui.components.ui.workspaceColors
 import app.amber.feature.ui.theme.JetbrainsMono
 
 @Composable
@@ -40,9 +42,12 @@ fun MiniAppRenameDialog(
     var title by remember(app.id) { mutableStateOf(app.title) }
     var description by remember(app.id) { mutableStateOf(app.description) }
     val normalizedTitle = title.trim()
+    val workspace = workspaceColors()
 
     AlertDialog(
         onDismissRequest = onDismiss,
+        shape = RoundedCornerShape(14.dp),
+        containerColor = workspace.paper,
         title = { Text(stringResource(R.string.miniapp_rename_title)) },
         text = {
             Column {
@@ -87,8 +92,11 @@ fun MiniAppDeleteDialog(
     onDismiss: () -> Unit,
     onConfirm: () -> Unit,
 ) {
+    val workspace = workspaceColors()
     AlertDialog(
         onDismissRequest = onDismiss,
+        shape = RoundedCornerShape(14.dp),
+        containerColor = workspace.paper,
         title = { Text(stringResource(R.string.miniapp_delete_title)) },
         text = { Text(stringResource(R.string.miniapp_delete_message, app.title)) },
         confirmButton = {
@@ -141,8 +149,11 @@ fun MiniAppVersionHistoryDialog(
     onDismiss: () -> Unit,
     onRestore: (MiniAppVersionEntity) -> Unit,
 ) {
+    val workspace = workspaceColors()
     AlertDialog(
         onDismissRequest = onDismiss,
+        shape = RoundedCornerShape(14.dp),
+        containerColor = workspace.paper,
         title = { Text(stringResource(R.string.miniapp_version_history)) },
         text = {
             Column(
