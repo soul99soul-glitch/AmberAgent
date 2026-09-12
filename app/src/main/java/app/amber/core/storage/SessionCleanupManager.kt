@@ -50,14 +50,17 @@ data class CleanupResult(
  * P7-03 按时间清理会话：条件 `update_at < cutoffAt` 且非 pinned（默认排除
  * pinned）。执行顺序保证可重试、不重复删、不留不可追踪状态：
  *
- * 1. 校验预览的恢复 epoch，并重新 dry run；保留其它会话引用的附件。
- * 2. **先删物理附件文件**（含会话生成图目录），任一失败立即中止 —— 数据库
- *    尚未动，状态完全可追踪，重试安全。
- * 3. 单事务删除 DB 记录：附件引用（managed_files）→ FTS → 草稿 → 收藏 →
- *    会话（message_node 及其统计、compact、context_event 由外键级联）。
- *    事务失败则 DB 原样，重试即可。
+ * 1. 在一个 Room transaction 内重新选择并删除符合条件的 DB 会话记录；
+ *    managed_files 暂留，避免物理清理失败时丢掉 Files 页面索引。
+ * 2. 删除物理附件文件（含会话生成图目录）。
+ * 3. 另一个 DB transaction 只删除已经成功删掉的 managed_files 路径；失败的
+ *    路径保留，用户仍可从 Files 页面重试。
  *
- * 共享附件保留文件和登记行；专属附件在删会话前完成物理清理。
+ * DB 事务失败时不会发生物理删除；物理删除失败时会话已删，但对应文件记录
+ * 保留，避免把失败的文件删除伪装成完整成功。
+ *
+ * 执行使用恢复 epoch 和短写 gate；物理删除失败时保留对应 managed_files
+ * 行，用户仍可从 Files 页面重试。共享附件保留文件和登记行。
  */
 class SessionCleanupManager(
     private val context: Context,
@@ -98,8 +101,6 @@ class SessionCleanupManager(
     suspend fun execute(plan: CleanupDryRun): CleanupResult =
         withContext(Dispatchers.IO + SyncRestoreWriteEpoch(plan.restoreEpoch)) {
             restoreWriteGate.withCurrentWriterOrCancel {
-                // Once deletion starts, leaving the page must not cancel the
-                // database cleanup after the physical files have been removed.
                 withContext(NonCancellable) { executeCurrent(plan) }
             }
         }
@@ -109,43 +110,51 @@ class SessionCleanupManager(
         if (current.targets.isEmpty()) {
             return CleanupResult(0, 0, 0, 0L)
         }
-        deletePhysicalAttachments(current)
-        val db = database.openHelper.writableDatabase
-        database.withTransaction {
-            current.targets.forEach { target ->
-                // 先删附件引用记录，再删会话（同事务）。
-                target.attachmentPaths.forEach { path ->
-                    db.execSQL(
-                        "DELETE FROM managed_files WHERE relative_path = ?",
-                        arrayOf(path),
-                    )
-                }
-                db.execSQL(
-                    "DELETE FROM message_fts WHERE conversation_id = ?",
-                    arrayOf(target.conversationId),
-                )
-                db.execSQL(
-                    "DELETE FROM conversation_draft WHERE conversation_id = ?",
-                    arrayOf(target.conversationId),
-                )
-                db.execSQL(
-                    "DELETE FROM favorites WHERE ref_key LIKE 'node:' || ? || ':%'",
-                    arrayOf(target.conversationId),
-                )
-                // message_node / message_node_stat / message_day_stat /
-                // conversation_compact / conversation_context_event 由外键级联。
-                db.execSQL(
-                    "DELETE FROM conversationentity WHERE id = ?",
-                    arrayOf(target.conversationId),
-                )
-            }
+        // Remove conversation rows first but keep managed_files until each
+        // physical delete succeeds, so a failed file remains visible for retry.
+        val selected = database.withTransaction {
+            val db = database.openHelper.writableDatabase
+            deleteDatabaseRows(db, current)
+            current
         }
+        val physical = deletePhysicalAttachments(selected)
+        forgetDeletedManagedFiles(physical.deletedUploadPaths)
         return CleanupResult(
-            conversationCount = current.conversationCount,
-            messageNodeCount = current.messageNodeCount,
-            attachmentCount = current.attachmentCount,
-            deletedBytes = current.estimatedBytes,
+            conversationCount = selected.conversationCount,
+            messageNodeCount = selected.messageNodeCount,
+            attachmentCount = physical.deletedUploadPaths.size,
+            deletedBytes = physical.deletedBytes,
         )
+    }
+
+    private fun deleteDatabaseRows(
+        db: androidx.sqlite.db.SupportSQLiteDatabase,
+        plan: CleanupDryRun,
+    ) {
+        plan.targets.forEach { target ->
+            db.execSQL(
+                "DELETE FROM message_fts WHERE conversation_id = ?",
+                arrayOf(target.conversationId),
+            )
+            db.execSQL(
+                "DELETE FROM conversation_title_fts WHERE conversation_id = ?",
+                arrayOf(target.conversationId),
+            )
+            db.execSQL(
+                "DELETE FROM conversation_draft WHERE conversation_id = ?",
+                arrayOf(target.conversationId),
+            )
+            db.execSQL(
+                "DELETE FROM favorites WHERE ref_key LIKE 'node:' || ? || ':%'",
+                arrayOf(target.conversationId),
+            )
+            // message_node / message_node_stat / message_day_stat /
+            // conversation_compact / conversation_context_event 由外键级联。
+            db.execSQL(
+                "DELETE FROM conversationentity WHERE id = ?",
+                arrayOf(target.conversationId),
+            )
+        }
     }
 
     private fun buildTarget(
@@ -180,8 +189,10 @@ class SessionCleanupManager(
         )
     }
 
-    private fun managedBytes(db: androidx.sqlite.db.SupportSQLiteDatabase, paths: List<String>): Long =
-        if (paths.isEmpty()) 0L else db.query(
+    private fun managedBytes(
+        db: androidx.sqlite.db.SupportSQLiteDatabase,
+        paths: List<String>,
+    ): Long = if (paths.isEmpty()) 0L else db.query(
             "SELECT COALESCE(SUM(size_bytes), 0) FROM managed_files WHERE relative_path IN (" +
                 paths.joinToString(",") { "?" } + ")",
             paths.toTypedArray(),
@@ -199,18 +210,45 @@ class SessionCleanupManager(
         }
     }
 
-    private fun deletePhysicalAttachments(plan: CleanupDryRun) {
+    private data class PhysicalCleanupResult(
+        val deletedUploadPaths: Set<String>,
+        val deletedBytes: Long,
+    )
+
+    private fun deletePhysicalAttachments(plan: CleanupDryRun): PhysicalCleanupResult {
         val filesDir = context.filesDir
+        val deletedUploadPaths = linkedSetOf<String>()
+        var deletedBytes = 0L
         plan.targets.forEach { target ->
             target.attachmentPaths.forEach { path ->
                 val file = File(filesDir, path)
-                if (file.exists() && !file.delete()) {
-                    throw IllegalStateException("附件删除失败（${file.name}），已中止清理，可重试")
+                val size = if (file.isFile) file.length() else 0L
+                if (!file.exists() || file.delete()) {
+                    deletedUploadPaths += path
+                    deletedBytes += size
                 }
             }
             val chatImagesDir = File(filesDir, "${FileFolders.CHAT_IMAGES}/${target.conversationId}")
-            if (chatImagesDir.exists() && !chatImagesDir.deleteRecursively()) {
-                throw IllegalStateException("生成图目录删除失败，已中止清理，可重试")
+            val chatImageBytes = directoryBytes(chatImagesDir)
+            if (!chatImagesDir.exists() || chatImagesDir.deleteRecursively()) {
+                deletedBytes += chatImageBytes
+            }
+        }
+        return PhysicalCleanupResult(
+            deletedUploadPaths = deletedUploadPaths,
+            deletedBytes = deletedBytes,
+        )
+    }
+
+    private suspend fun forgetDeletedManagedFiles(paths: Set<String>) {
+        if (paths.isEmpty()) return
+        database.withTransaction {
+            val db = database.openHelper.writableDatabase
+            paths.forEach { path ->
+                db.execSQL(
+                    "DELETE FROM managed_files WHERE relative_path = ?",
+                    arrayOf(path),
+                )
             }
         }
     }

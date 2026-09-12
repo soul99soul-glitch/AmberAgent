@@ -162,6 +162,15 @@ fun WebView(
                 }
                 Log.d(TAG, "AndroidView: Resetting WebView")
             },
+            onRelease = { releasedWebView ->
+                state.interfaces.keys.forEach(releasedWebView::removeJavascriptInterface)
+                releasedWebView.stopLoading()
+                releasedWebView.removeAllViews()
+                releasedWebView.destroy()
+                if (state.webView === releasedWebView) {
+                    state.webView = null
+                }
+            },
             update = { webView ->
                 state.webView = webView
                 state.interfaces.forEach { (name, obj) ->

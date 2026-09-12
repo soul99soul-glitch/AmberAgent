@@ -7,7 +7,6 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
-import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.json.put
 import app.amber.ai.core.InputSchema
 import app.amber.ai.core.Tool
@@ -16,9 +15,12 @@ import app.amber.core.agent.utils.long
 import app.amber.core.agent.utils.requiredString
 import app.amber.core.agent.utils.string
 import app.amber.feature.webmount.primitives.NetworkLog
+import app.amber.feature.webmount.primitives.SessionHandle
 import app.amber.feature.webmount.primitives.WebMountLeaseInvalidatedException
 import app.amber.feature.webmount.profile.ProfileBridge
 import app.amber.feature.webmount.profile.ProfileRegistry
+import java.net.URI
+import java.util.Locale
 import java.util.UUID
 
 internal fun createSignedFetchTool(
@@ -41,7 +43,9 @@ internal fun createSignedFetchTool(
                 put("session_id", stringProp("Session id returned by wm_open."))
                 put("url", stringProp("Absolute http(s) URL to fetch (must be in the profile's origins)."))
                 put("method", stringProp("HTTP method, default GET. POST/PUT/PATCH/DELETE need approval."))
-                put("body", stringProp("Request body (string or JSON). Ignored for GET/HEAD."))
+                put("body", buildJsonObject {
+                    put("description", "Request body as a JSON value or text. Ignored for GET/HEAD.")
+                })
                 put("extra_params", buildJsonObject {
                     put("type", "object")
                     put("description", "Extra query params merged into the URL before signing.")
@@ -57,11 +61,17 @@ internal fun createSignedFetchTool(
         deps.track("wm_signed_fetch", "WebMount 签名请求", input) {
             val sessionId = input.requiredString("session_id")
             val url = input.requiredString("url")
-            require(url.startsWith("http://") || url.startsWith("https://")) {
-                "wm_signed_fetch only supports http(s) URLs"
+            val parsedUrl = runCatching { URI(url) }.getOrNull()
+            val scheme = parsedUrl?.scheme?.lowercase(Locale.ROOT)
+            require(
+                parsedUrl != null && parsedUrl.isAbsolute &&
+                    (scheme == "http" || scheme == "https") &&
+                    !parsedUrl.host.isNullOrBlank()
+            ) {
+                "wm_signed_fetch requires an absolute http(s) URL with a host"
             }
             val method = (input.string("method") ?: "GET").uppercase()
-            val body = input.string("body")
+            val body = input.jsonObject["body"] ?: JsonNull
             val extraParams = (input.jsonObject)["extra_params"] as? JsonObject
             val timeout = (input.long("timeout_ms") ?: 15_000L).coerceIn(1_000L, 60_000L)
             val scriptKey = input.string("sign_script") ?: "sign_request"
@@ -72,7 +82,14 @@ internal fun createSignedFetchTool(
                 val handle = lease.handle
                 val actionId = if (writeRequest) UUID.randomUUID().toString() else null
                 val dispatchWithLease = deps.dispatchWithLease(input, lease)
-                val currentUrl = handle.loadState.value.currentUrl ?: url
+                val loadState = handle.loadState.value
+                val currentUrl = loadState.currentUrl
+                    ?.takeIf { it.isNotBlank() }
+                    ?.takeIf {
+                        loadState.committedUrl?.isNotBlank() == true &&
+                            loadState.status == SessionHandle.LoadStatus.READY
+                    }
+                    ?: error("session page is not ready — wait for wm_open to finish")
                 val currentOrigin = ProfileRegistry.extractOrigin(currentUrl)
                     ?: error("session has no committed URL yet — call wm_open first")
                 val entry = profileOverride?.let { profileRegistry.byId(it) }
@@ -82,12 +99,13 @@ internal fun createSignedFetchTool(
                 val args = listOf<JsonElement>(
                     JsonPrimitive(url),
                     JsonPrimitive(method),
-                    body?.let { JsonPrimitive(it) } ?: JsonNull,
+                    body,
                     extraParams ?: buildJsonObject {},
                 )
                 // Holistic review B-2 fix: pass the outbound URL's host so
                 // ProfileBridge can enforce send_signed:<host> + origin.
                 val requestedHost = ProfileRegistry.extractOrigin(url)
+                    ?: error("wm_signed_fetch URL has no valid origin")
                 val result = try {
                     profileBridge.callSign(
                         handle = handle,

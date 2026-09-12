@@ -191,8 +191,11 @@ fun GeneratedImageCarousel(
                     scope.launch {
                         runCatching {
                             toaster.show(savingMessage)
-                            filesManager.saveMessageImage(context, target.url)
-                            toaster.show(message = savedMessage, type = ToastType.Success)
+                            val saved = filesManager.saveMessageImage(context, target.url)
+                            toaster.show(
+                                message = if (saved) savedMessage else context.getString(R.string.mermaid_export_failed),
+                                type = if (saved) ToastType.Success else ToastType.Error,
+                            )
                         }.onFailure {
                             toaster.show(message = it.toString(), type = ToastType.Error)
                         }

@@ -146,6 +146,7 @@ class InProcessAgentRunnerLaunchGateTest {
     private fun runnerWithAgent(
         store: AgentEventStore,
         scope: CoroutineScope,
+        awaitColdStartRecovery: suspend () -> Unit = {},
         launchContext: () -> CoroutineContext = { EmptyCoroutineContext },
         onInvoke: suspend (invocation: Int) -> FakeArtifact = { FakeArtifact("ok") },
     ): Harness {
@@ -170,6 +171,7 @@ class InProcessAgentRunnerLaunchGateTest {
             InProcessAgentRunner(
                 registry,
                 store,
+                awaitColdStartRecovery = awaitColdStartRecovery,
                 scope = scope,
                 launchContext = launchContext,
             ),
@@ -295,6 +297,55 @@ class InProcessAgentRunnerLaunchGateTest {
         assertEquals(RunStatus.FAILED, snapshot.status)
         assertNotNull(snapshot.error)
         // The fake RUNNING never lingers in the unfinished list.
+        assertTrue(harness.runner.listUnfinishedRuns().isEmpty())
+    }
+
+    @Test
+    fun `cold-start recovery blocks durable append and handler until ready`() = runTest {
+        val store = RecordingEventStore()
+        val recoveryReady = CompletableDeferred<Unit>()
+        val runId = AgentRunId("cold-start-recovery-gate-run")
+        val runnerScope = CoroutineScope(SupervisorJob() + StandardTestDispatcher(testScheduler))
+        val harness = runnerWithAgent(
+            store = store,
+            scope = runnerScope,
+            awaitColdStartRecovery = { recoveryReady.await() },
+        )
+
+        harness.runner.launch(descriptor.id, FakeInput("v"), requestedRunId = runId).getOrThrow()
+        advanceUntilIdle()
+
+        assertEquals(0, harness.invocations.get())
+        assertTrue(store.runs.isEmpty())
+
+        recoveryReady.complete(Unit)
+        advanceUntilIdle()
+
+        assertEquals(1, harness.invocations.get())
+        assertEquals(RunStatus.COMPLETED, store.runs.getValue(runId.value).status)
+    }
+
+    @Test
+    fun `cold-start recovery failure never appends a row or invokes the handler`() = runTest {
+        val store = RecordingEventStore()
+        val recoveryReady = CompletableDeferred<Unit>()
+        val runId = AgentRunId("cold-start-recovery-failure-run")
+        val runnerScope = CoroutineScope(SupervisorJob() + StandardTestDispatcher(testScheduler))
+        val harness = runnerWithAgent(
+            store = store,
+            scope = runnerScope,
+            awaitColdStartRecovery = { recoveryReady.await() },
+        )
+
+        harness.runner.launch(descriptor.id, FakeInput("v"), requestedRunId = runId).getOrThrow()
+        recoveryReady.completeExceptionally(IllegalStateException("cold-start recovery failed"))
+        advanceUntilIdle()
+
+        assertEquals(0, harness.invocations.get())
+        assertTrue(store.runs.isEmpty())
+        val snapshot = harness.runner.observe(runId).value
+        assertEquals(RunStatus.FAILED, snapshot.status)
+        assertNotNull(snapshot.error)
         assertTrue(harness.runner.listUnfinishedRuns().isEmpty())
     }
 

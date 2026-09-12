@@ -65,8 +65,8 @@ val webMountModule = module {
     single(createdAtStart = true) {
         WebMountOAuthClient(
             context = get(),
-            store = get(),
-            pendingStore = get(),
+            storeProvider = { get() },
+            pendingStoreProvider = { get() },
             dispatcher = get(),
             http = get(),
             appScope = get(),

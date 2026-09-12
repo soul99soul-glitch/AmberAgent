@@ -17,8 +17,12 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import app.amber.feature.novelworkspace.NovelWorkspaceBookExport
 import app.amber.feature.novelworkspace.NovelWorkspaceExchange
+import app.amber.feature.novelworkspace.NovelWorkspaceGhostwriteJobs
+import app.amber.feature.novelworkspace.NovelWorkspaceIoError
 import app.amber.feature.novelworkspace.NovelWorkspaceProjectRepository
 import app.amber.feature.novelworkspace.NovelWorkspaceProjectSummary
+import app.amber.feature.novel.domain.NovelError
+import app.amber.feature.novel.model.NovelProjectId
 import java.io.ByteArrayInputStream
 import java.util.UUID
 
@@ -137,14 +141,22 @@ class NovelProjectsViewModel(
             _state.value = _state.value.copy(busy = true, errorMessage = null)
             try {
                 withContext(Dispatchers.IO) {
-                    workspaceRepository.delete(projectId)
+                    val directory = workspaceRepository.projectDirectory(projectId)
+                    if (NovelWorkspaceGhostwriteJobs.listActive(directory).isNotEmpty()) {
+                        throw NovelWorkspaceIoError("当前项目仍有代笔批次运行，请先让批次完成或取消后再删除")
+                    }
                     // Also remove the legacy original, or the first-open migration would
-                    // resurrect the deleted book from its untouched legacy copy.
-                    runCatching {
-                        val legacyId = app.amber.feature.novel.model.NovelProjectId.parse(projectId)
+                    // resurrect the deleted book from its untouched legacy copy. Remove it
+                    // first so a workspace delete failure cannot make the next migration
+                    // recreate a book the author already deleted.
+                    try {
+                        val legacyId = NovelProjectId.parse(projectId)
                         val legacy = legacyRepository.loadProject(legacyId)
                         legacyRepository.deleteProject(legacyId, legacy.document.project.revision)
+                    } catch (_: NovelError.ProjectNotFound) {
+                        // Workspace-only imports have no legacy source to remove.
                     }
+                    workspaceRepository.delete(projectId)
                 }
                 refresh()
             } catch (error: CancellationException) {

@@ -275,6 +275,7 @@ class TerminalRuntime(
                         error = snapshot.error,
                         outputOffset = job.log.file.length(),
                         cancelCapability = false,
+                        clearError = true,
                     )
                 }
             }
@@ -871,6 +872,7 @@ class TerminalRuntime(
                 error = finalError,
                 outputOffset = job.log.file.length(),
                 cancelCapability = false,
+                clearError = true,
             )
         }
         when (finalStatus) {

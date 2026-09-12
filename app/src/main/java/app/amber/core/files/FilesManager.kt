@@ -18,6 +18,7 @@ import java.io.OutputStream
 import java.net.HttpURLConnection
 import java.net.URL
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
@@ -65,7 +66,7 @@ class FilesManager(
                 target.outputStream().use { output ->
                     input.copyToWithinLimit(output, MAX_CHAT_ATTACHMENT_BYTES, resolvedName)
                 }
-            }
+            } ?: error("Failed to open input stream for $uri")
         } catch (error: Throwable) {
             target.delete()
             throw error
@@ -96,9 +97,12 @@ class FilesManager(
         displayName: String,
         mimeType: String = "application/octet-stream",
     ): ManagedFileEntity = withContext(Dispatchers.IO) {
+        require(bytes.size.toLong() <= MAX_CHAT_ATTACHMENT_BYTES) {
+            "Chat attachment exceeds $MAX_CHAT_ATTACHMENT_BYTES byte limit"
+        }
         val target = createTargetFile(FileFolders.UPLOAD, displayName, mimeType)
-        target.writeBytes(bytes)
         try {
+            target.writeBytes(bytes)
             withManagedFileWrite {
                 val now = System.currentTimeMillis()
                 repository.insert(
@@ -124,9 +128,13 @@ class FilesManager(
         displayName: String = "pasted_text.txt",
         mimeType: String = "text/plain",
     ): ManagedFileEntity = withContext(Dispatchers.IO) {
+        val encodedText = text.toByteArray(Charsets.UTF_8)
+        require(encodedText.size.toLong() <= MAX_CHAT_ATTACHMENT_BYTES) {
+            "Chat attachment exceeds $MAX_CHAT_ATTACHMENT_BYTES byte limit"
+        }
         val target = createTargetFile(FileFolders.UPLOAD, displayName, mimeType)
-        target.writeText(text)
         try {
+            target.writeBytes(encodedText)
             withManagedFileWrite {
                 val now = System.currentTimeMillis()
                 repository.insert(
@@ -161,15 +169,14 @@ class FilesManager(
         File(context.filesDir, entity.relativePath)
 
     suspend fun createChatFilesByContents(uris: List<Uri>): List<Uri> {
-        // Capture the generation epoch before copying. The tracker runs in
-        // appScope after this function returns and must retain this token.
+        // Carry the generation epoch through the staged file and managed-row write.
         val expectedRestoreEpoch = currentCoroutineContext()[SyncRestoreWriteEpoch]?.value
         return withContext(Dispatchers.IO) {
             createChatFilesByContentsBlocking(uris, expectedRestoreEpoch)
         }
     }
 
-    private fun createChatFilesByContentsBlocking(
+    private suspend fun createChatFilesByContentsBlocking(
         uris: List<Uri>,
         expectedRestoreEpoch: Long?,
     ): List<Uri> {
@@ -179,36 +186,35 @@ class FilesManager(
             dir.mkdirs()
         }
         uris.forEach { uri ->
+            var file: File? = null
             runCatching {
                 val sourceName = getFileNameFromUri(uri) ?: uri.lastPathSegment ?: "file"
                 val sourceMime = getFileMimeType(uri)
                 requireUriSizeWithinLimit(uri, MAX_CHAT_ATTACHMENT_BYTES)
                 val fileName = buildUuidFileName(displayName = sourceName, mimeType = sourceMime)
-                val file = dir.resolve(fileName)
-                if (!file.exists()) {
-                    file.createNewFile()
+                val targetFile = dir.resolve(fileName)
+                file = targetFile
+                if (!targetFile.exists()) {
+                    targetFile.createNewFile()
                 }
                 val inputStream = context.contentResolver.openInputStream(uri)
                     ?: error("Failed to open input stream for $uri")
-                try {
-                    inputStream.use { input ->
-                        file.outputStream().use { output ->
-                            input.copyToWithinLimit(output, MAX_CHAT_ATTACHMENT_BYTES, sourceName)
-                        }
+                inputStream.use { input ->
+                    targetFile.outputStream().use { output ->
+                        input.copyToWithinLimit(output, MAX_CHAT_ATTACHMENT_BYTES, sourceName)
                     }
-                } catch (error: Throwable) {
-                    file.delete()
-                    throw error
                 }
-                val guessedMime = sourceMime ?: guessMimeType(file, sourceName)
+                val guessedMime = sourceMime ?: guessMimeType(targetFile, sourceName)
                 trackUploadFile(
-                    file = file,
+                    file = targetFile,
                     displayName = sourceName,
                     mimeType = guessedMime,
                     expectedRestoreEpoch = expectedRestoreEpoch,
                 )
-                newUris.add(file.toUri())
+                newUris.add(targetFile.toUri())
             }.onFailure {
+                file?.delete()
+                if (it is CancellationException) throw it
                 it.printStackTrace()
                 Log.e(TAG, "createChatFilesByContents: Failed to save file from $uri", it)
                 Logging.log(
@@ -220,37 +226,41 @@ class FilesManager(
         return newUris
     }
 
-    fun createChatFilesByByteArrays(
+    suspend fun createChatFilesByByteArrays(
         byteArrays: List<ByteArray>,
         expectedRestoreEpoch: Long? = null,
-    ): List<Uri> {
+    ): List<Uri> = withContext(Dispatchers.IO) {
         val newUris = mutableListOf<Uri>()
         val dir = context.filesDir.resolve(FileFolders.UPLOAD)
         if (!dir.exists()) {
             dir.mkdirs()
         }
         byteArrays.forEach { byteArray ->
-            require(byteArray.size <= MAX_CHAT_ATTACHMENT_BYTES) {
+            require(byteArray.size.toLong() <= MAX_CHAT_ATTACHMENT_BYTES) {
                 "Chat attachment exceeds $MAX_CHAT_ATTACHMENT_BYTES byte limit"
             }
             val fileName = buildUuidFileName(displayName = "image.png", mimeType = "image/png")
             val file = dir.resolve(fileName)
-            if (!file.exists()) {
-                file.createNewFile()
+            try {
+                if (!file.exists()) {
+                    file.createNewFile()
+                }
+                file.outputStream().use { outputStream ->
+                    outputStream.write(byteArray)
+                }
+                trackUploadFile(
+                    file = file,
+                    displayName = "image.png",
+                    mimeType = "image/png",
+                    expectedRestoreEpoch = expectedRestoreEpoch,
+                )
+                newUris.add(file.toUri())
+            } catch (error: Throwable) {
+                file.delete()
+                throw error
             }
-            val newUri = file.toUri()
-            file.outputStream().use { outputStream ->
-                outputStream.write(byteArray)
-            }
-            trackUploadFile(
-                file = file,
-                displayName = "image.png",
-                mimeType = "image/png",
-                expectedRestoreEpoch = expectedRestoreEpoch,
-            )
-            newUris.add(newUri)
         }
-        return newUris
+        newUris
     }
 
     private fun requireUriSizeWithinLimit(uri: Uri, maxBytes: Long) {
@@ -317,13 +327,7 @@ class FilesManager(
         }
     }
 
-    /**
-     * Schedule attachment cleanup. Callers that already own a background
-     * generation must pass the epoch captured when that generation started;
-     * otherwise the old callback could unlink a restored file before reaching
-     * the managed-files DAO gate.
-     */
-    fun deleteChatFiles(uris: List<Uri>, expectedRestoreEpoch: Long? = null) {
+    fun deleteChatFiles(uris: List<Uri>, expectedRestoreEpoch: Long? = null) =
         appScope.launch(Dispatchers.IO + restoreEpochContext(expectedRestoreEpoch)) {
             runCatching { deleteChatFilesInternal(uris) }
                 .onFailure {
@@ -331,7 +335,6 @@ class FilesManager(
                     Logging.log(TAG, "deleteChatFiles: cleanup failed ${it.message} | ${it.stackTraceToString()}")
                 }
         }
-    }
 
     /** Await cleanup when conversation deletion needs a decidable outcome. */
     suspend fun deleteChatFilesAndAwait(
@@ -361,7 +364,6 @@ class FilesManager(
                 }
                 relativePaths.add(relativePath)
             }.onFailure {
-                Log.e(TAG, "deleteChatFiles: Failed to inspect $uri", it)
                 Logging.log(TAG, "deleteChatFiles: Failed $uri ${it.message} | ${it.stackTraceToString()}")
             }
         }
@@ -373,7 +375,7 @@ class FilesManager(
                     // operations. This is one short path write, not a long
                     // attachment copy.
                     val file = File(context.filesDir, path)
-                    if (file.exists()) file.delete()
+                    check(!file.exists() || file.delete()) { "Failed to delete $path" }
                     repository.deleteByPath(path)
                 }
             } catch (rejected: app.amber.core.sync.core.SyncRestoreWriteRejectedException) {
@@ -399,8 +401,10 @@ class FilesManager(
     }
 
     suspend fun createChatTextFile(text: String): UIMessagePart.Document {
-        // Capture the generation epoch before staging the file; tracking is
-        // intentionally asynchronous and must not obtain a fresh epoch later.
+        val encodedText = text.toByteArray(Charsets.UTF_8)
+        require(encodedText.size.toLong() <= MAX_CHAT_ATTACHMENT_BYTES) {
+            "Chat attachment exceeds $MAX_CHAT_ATTACHMENT_BYTES byte limit"
+        }
         val expectedRestoreEpoch = currentCoroutineContext()[SyncRestoreWriteEpoch]?.value
         return withContext(Dispatchers.IO) {
             val dir = context.filesDir.resolve(FileFolders.UPLOAD)
@@ -409,18 +413,23 @@ class FilesManager(
             }
             val fileName = buildUuidFileName(displayName = "pasted_text.txt", mimeType = "text/plain")
             val file = dir.resolve(fileName)
-            file.writeText(text)
-            trackUploadFile(
-                file = file,
-                displayName = "pasted_text.txt",
-                mimeType = "text/plain",
-                expectedRestoreEpoch = expectedRestoreEpoch,
-            )
-            UIMessagePart.Document(
-                url = file.toUri().toString(),
-                fileName = "pasted_text.txt",
-                mime = "text/plain"
-            )
+            try {
+                file.writeBytes(encodedText)
+                trackUploadFile(
+                    file = file,
+                    displayName = "pasted_text.txt",
+                    mimeType = "text/plain",
+                    expectedRestoreEpoch = expectedRestoreEpoch,
+                )
+                UIMessagePart.Document(
+                    url = file.toUri().toString(),
+                    fileName = "pasted_text.txt",
+                    mime = "text/plain"
+                )
+            } catch (error: Throwable) {
+                file.delete()
+                throw error
+            }
         }
     }
 
@@ -476,6 +485,18 @@ class FilesManager(
         }
     }
 
+    /** Remove only unreferenced generated images owned by this conversation. */
+    suspend fun deleteChatImageFiles(conversationId: Uuid, uris: List<Uri>) = withContext(Dispatchers.IO) {
+        val root = context.filesDir.resolve("chat_images/$conversationId").canonicalFile
+        uris.forEach { uri ->
+            if (uri.scheme != "file") return@forEach
+            val file = uri.toFile().canonicalFile
+            if (file.parentFile == root && file.exists() && !file.delete()) {
+                Log.w(TAG, "Failed to delete generated image: $file")
+            }
+        }
+    }
+
     @OptIn(ExperimentalEncodingApi::class)
     fun createImageFileFromBase64(base64Data: String, filePath: String): File {
         val data = if (base64Data.startsWith("data:image")) {
@@ -500,7 +521,7 @@ class FilesManager(
     }
 
     @OptIn(ExperimentalEncodingApi::class)
-    suspend fun saveMessageImage(activityContext: Context, image: String) = withContext(Dispatchers.IO) {
+    suspend fun saveMessageImage(activityContext: Context, image: String): Boolean = withContext(Dispatchers.IO) {
         val activity = requireNotNull(activityContext.getActivity()) { "Activity not found" }
         when {
             image.startsWith("data:image") -> {
@@ -523,18 +544,28 @@ class FilesManager(
                 runCatching {
                     val url = URL(image)
                     val connection = url.openConnection() as HttpURLConnection
-                    connection.connect()
-
-                    if (connection.responseCode == HttpURLConnection.HTTP_OK) {
-                        val bitmap = BitmapFactory.decodeStream(connection.inputStream)
-                        activityContext.exportImage(activity, bitmap)
-                    } else {
-                        Log.e(
-                            TAG,
-                            "saveMessageImage: Failed to download image from $image, response code: ${connection.responseCode}"
-                        )
+                    try {
+                        connection.connect()
+                        if (connection.responseCode != HttpURLConnection.HTTP_OK) {
+                            Log.e(
+                                TAG,
+                                "saveMessageImage: Failed to download image from $image, response code: ${connection.responseCode}"
+                            )
+                            return@runCatching false
+                        }
+                        connection.inputStream.use { input ->
+                            val bitmap = BitmapFactory.decodeStream(input)
+                                ?: error("Cannot decode downloaded image")
+                            activityContext.exportImage(activity, bitmap)
+                        }
+                    } finally {
+                        connection.disconnect()
                     }
-                }.getOrNull()
+                }.getOrElse {
+                    if (it is CancellationException) throw it
+                    Log.e(TAG, "saveMessageImage: Failed to download image from $image", it)
+                    false
+                }
             }
 
             else -> error("Invalid image format")
@@ -597,7 +628,11 @@ class FilesManager(
         withManagedFileWrite {
             val entity = repository.getById(id) ?: return@withManagedFileWrite false
             if (deleteFromDisk) {
-                runCatching { getFile(entity).delete() }
+                val deleted = runCatching {
+                    val file = getFile(entity)
+                    !file.exists() || file.delete()
+                }.getOrDefault(false)
+                if (!deleted) return@withManagedFileWrite false
             }
             repository.deleteById(id) > 0
         }
@@ -624,46 +659,27 @@ class FilesManager(
         return "${Uuid.random()}.$ext"
     }
 
-    private fun trackUploadFile(
+    private suspend fun trackUploadFile(
         file: File,
         displayName: String,
         mimeType: String,
         expectedRestoreEpoch: Long? = null,
-    ) {
+    ) = withContext(restoreEpochContext(expectedRestoreEpoch)) {
         val relativePath = "${FileFolders.UPLOAD}/${file.name}"
-        appScope.launch(Dispatchers.IO + restoreEpochContext(expectedRestoreEpoch)) {
-            runCatching {
-                withManagedFileWrite {
-                    val existing = repository.getByPath(relativePath)
-                    if (existing != null) {
-                        return@withManagedFileWrite
-                    }
-                    val now = System.currentTimeMillis()
-                    repository.insert(
-                        ManagedFileEntity(
-                            folder = FileFolders.UPLOAD,
-                            relativePath = relativePath,
-                            displayName = displayName,
-                            mimeType = mimeType,
-                            sizeBytes = file.length(),
-                            createdAt = now,
-                            updatedAt = now,
-                        )
-                    )
-                }
-            }.onFailure {
-                if (it is app.amber.core.sync.core.SyncRestoreWriteRejectedException) {
-                    // The file was staged before the epoch expired. It is not
-                    // part of the restored managed-file set, so do not leave
-                    // an untracked attachment behind.
-                    file.delete()
-                }
-                Log.e(TAG, "trackUploadFile: Failed to track file ${file.absolutePath}", it)
-                Logging.log(
-                    TAG,
-                    "trackUploadFile: Failed to track file ${file.absolutePath} ${it.message} | ${it.stackTraceToString()}"
+        withManagedFileWrite {
+            if (repository.getByPath(relativePath) != null) return@withManagedFileWrite
+            val now = System.currentTimeMillis()
+            repository.insert(
+                ManagedFileEntity(
+                    folder = FileFolders.UPLOAD,
+                    relativePath = relativePath,
+                    displayName = displayName,
+                    mimeType = mimeType,
+                    sizeBytes = file.length(),
+                    createdAt = now,
+                    updatedAt = now,
                 )
-            }
+            )
         }
     }
 

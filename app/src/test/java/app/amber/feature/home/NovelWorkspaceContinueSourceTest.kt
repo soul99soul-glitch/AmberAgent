@@ -26,6 +26,15 @@ class NovelWorkspaceContinueSourceTest {
         val candidate = source.observe().first().single()
         assertEquals(ContinueRoute.NovelWorkspace(project.projectDirectory.name.uppercase(), "主线", "job-a"), candidate.route)
         assertEquals(ContinueStatus.PAUSED, candidate.status)
+        assertNotNull(
+            NovelWorkspaceGhostwriteJobs.transition(
+                project.projectDirectory,
+                job.id,
+                expectedStatuses = setOf(NovelWorkspaceGhostwriteJob.STATUS_PAUSED),
+                newStatus = NovelWorkspaceGhostwriteJob.STATUS_CANCELLED,
+                expectedExecutionId = job.executionKey,
+            )
+        )
         repository.delete(project.projectDirectory.name)
         assertTrue(source.observe().first().isEmpty())
     }

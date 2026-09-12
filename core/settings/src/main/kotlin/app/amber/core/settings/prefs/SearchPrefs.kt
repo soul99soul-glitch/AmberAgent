@@ -6,7 +6,7 @@ import androidx.datastore.preferences.core.MutablePreferences
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.emptyPreferences
-import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -16,6 +16,7 @@ import app.amber.core.settings.PreferencesKeys
 import app.amber.core.settings.secret.SecretRedactor
 import app.amber.core.settings.secret.SecretStore
 import app.amber.core.agent.utils.JsonInstant
+import app.amber.core.settings.shareSettingsRawFlow
 import app.amber.core.settings.toMutableStateFlow
 import app.amber.search.SearchCommonOptions
 import app.amber.search.SearchServiceOptions
@@ -42,12 +43,13 @@ class SearchPrefs(
 ) {
     private val redactor = SecretRedactor(secretStore)
 
-    internal val rawFlow: Flow<SearchPrefsData> = dataStore.data
+    internal val rawFlow: SharedFlow<SearchPrefsData> = dataStore.data
         .catch { e ->
             if (e is IOException) emit(emptyPreferences()) else throw e
         }
         .map { readFrom(it) }
         .distinctUntilChanged()
+        .shareSettingsRawFlow(scope)
 
     val flow: StateFlow<SearchPrefsData> = rawFlow
         .toMutableStateFlow(scope, SearchPrefsData())
@@ -61,7 +63,7 @@ class SearchPrefs(
         }
     }
 
-    private fun readFrom(p: Preferences): SearchPrefsData {
+    internal fun readFrom(p: Preferences): SearchPrefsData {
         val refs = redactor.readRefs(p)
         val decodedServices = p[PreferencesKeys.SEARCH_SERVICES]
             ?.decodeSearchServicesDroppingLegacy()

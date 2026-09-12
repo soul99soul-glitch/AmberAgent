@@ -1,6 +1,9 @@
 package app.amber.feature.webmount.core
 
 import android.content.Context
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -129,11 +132,21 @@ class WebMountManager(
             adapter.probe()
             currentStateOf(adapter)
         } else {
+            val previous = currentStateOf(adapter)
             updateLocalState(adapter) { it.copy(status = WebMountStatus.PROBING) }
-            val result = runCatching { adapter.probe() }.getOrElse { error ->
-                WebMountProbeResult.failed(error.message ?: error.toString(), error)
+            try {
+                val result = runCatching { adapter.probe() }.getOrElse { error ->
+                    if (error is CancellationException) throw error
+                    WebMountProbeResult.failed(error.message ?: error.toString(), error)
+                }
+                // Adapter network probes may catch cancellation as a failed
+                // response. Leaving Settings must not persist that as a site error.
+                currentCoroutineContext().ensureActive()
+                applyProbeResult(adapter, result, isWriteProbe = false)
+            } catch (error: CancellationException) {
+                updateLocalState(adapter) { previous }
+                throw error
             }
-            applyProbeResult(adapter, result, isWriteProbe = false)
         }
     }
 

@@ -3,6 +3,7 @@ package app.amber.core.context
 import app.amber.ai.ui.UIMessage
 import app.amber.ai.ui.UIMessagePart
 import app.amber.core.model.Conversation
+import kotlin.uuid.Uuid
 
 /**
  * Char-equivalent length weighted by tokenization density. CJK ideographs cost
@@ -54,6 +55,55 @@ internal fun String.weightedTokenChars(): Int {
  */
 object ContextFootprintEstimator {
 
+    /**
+     * Per-conversation cache for the UI fallback estimate. Streaming snapshots
+     * replace only the active message, so retaining the weighted cost by
+     * message identity avoids rescanning unchanged history on every frame.
+     * The cache is deliberately owned by the caller (the Chat top bar) rather
+     * than global; each estimate removes entries for messages outside the
+     * current selection, so branch snapshots do not retain old message values.
+     */
+    class ConversationInputTokenCache {
+        private data class CachedMessageWeight(
+            val message: UIMessage,
+            val weightedChars: Int,
+        )
+
+        private val messageWeights = mutableMapOf<Uuid, CachedMessageWeight>()
+
+        fun estimateConversationInputTokens(
+            conversation: Conversation,
+            activeCompacts: List<ConversationCompact> = emptyList(),
+        ): Int {
+            val messages = conversation.currentMessages
+            val currentIds = messages.asSequence().map { it.id }.toSet()
+            messageWeights.keys.retainAll(currentIds)
+            return ContextFootprintEstimator.estimateMessagesWithCompacts(
+                messages = messages,
+                activeCompacts = activeCompacts,
+                estimateMessages = ::estimateMessages,
+                estimateSummaryMessages = ::estimateSummaryMessages,
+            )
+        }
+
+        private fun estimateMessages(messages: List<UIMessage>): Int {
+            val weighted = messages.sumOf { message ->
+                val cached = messageWeights[message.id]
+                if (cached?.message === message) {
+                    cached.weightedChars
+                } else {
+                    val weight = ContextFootprintEstimator.estimateMessageWeightedChars(message)
+                    messageWeights[message.id] = CachedMessageWeight(message, weight)
+                    weight
+                }
+            }
+            return (weighted / 4).coerceAtLeast(messages.size * 4)
+        }
+
+        private fun estimateSummaryMessages(messages: List<UIMessage>): Int =
+            ContextFootprintEstimator.estimateMessages(messages)
+    }
+
     fun estimateConversationInputTokens(
         conversation: Conversation,
         activeCompacts: List<ConversationCompact> = emptyList(),
@@ -83,10 +133,25 @@ object ContextFootprintEstimator {
     private fun estimateMessagesWithCompacts(
         messages: List<UIMessage>,
         activeCompacts: List<ConversationCompact>,
+    ): Int = estimateMessagesWithCompacts(
+        messages = messages,
+        activeCompacts = activeCompacts,
+        estimateMessages = ::estimateMessages,
+        estimateSummaryMessages = ::estimateMessages,
+    )
+
+    private fun estimateMessagesWithCompacts(
+        messages: List<UIMessage>,
+        activeCompacts: List<ConversationCompact>,
+        estimateMessages: (List<UIMessage>) -> Int,
+        estimateSummaryMessages: (List<UIMessage>) -> Int,
     ): Int {
         if (activeCompacts.isEmpty()) return estimateMessages(messages)
         val existingMessageIds = messages.map { it.id.toString() }.toSet()
-        val completedCompacts = CompactSummaryPayloads.validCompletedCompacts(activeCompacts, existingMessageIds)
+        val completedCompacts = CompactSummaryPayloads.validCompletedCompacts(
+            activeCompacts,
+            existingMessageIds,
+        )
         if (completedCompacts.isEmpty()) return estimateMessages(messages)
 
         val coveredMessageIds = completedCompacts.flatMap { it.sourceMessageIds }.toSet()
@@ -97,16 +162,19 @@ object ContextFootprintEstimator {
         val summaryMessages = CompactSummaryPayloads
             .selectCompactsForInjection(activeCompacts, existingMessageIds)
             .map { compact -> UIMessage.system(CompactSummaryPayloads.injectionText(compact)) }
-        val summaryTokens = estimateMessages(summaryMessages)
+        val summaryTokens = estimateSummaryMessages(summaryMessages)
         return summaryTokens + estimateMessages(recentMessages)
     }
 
     fun estimateMessages(messages: List<UIMessage>): Int {
         val weighted = messages.sumOf { message ->
-            message.role.name.length + message.parts.sumOf { it.inputFootprintChars() }
+            estimateMessageWeightedChars(message)
         }
         return (weighted / 4).coerceAtLeast(messages.size * 4)
     }
+
+    private fun estimateMessageWeightedChars(message: UIMessage): Int =
+        message.role.name.length + message.parts.sumOf { it.inputFootprintChars() }
 
     private fun UIMessagePart.inputFootprintChars(): Int = when (this) {
         is UIMessagePart.Text -> text.weightedTokenChars()

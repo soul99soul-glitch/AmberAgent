@@ -201,12 +201,14 @@ class RouteActivity : ComponentActivity() {
     private val conversationRepository by inject<app.amber.core.repository.ConversationRepository>()
     private var navStack: MutableList<NavKey>? = null
     private var newIntentHandler: ((Intent) -> Unit)? = null
+    private var shareIntentConsumed = false
 
     // Volume key listener registry — last registered handler wins
     internal val volumeKeyListeners = mutableListOf<(isVolumeUp: Boolean) -> Boolean>()
 
     companion object {
         const val EXTRA_OPEN_CHAT_PROMPT = "openChatPrompt"
+        private const val STATE_SHARE_INTENT_CONSUMED = "shareIntentConsumed"
     }
 
     @SuppressLint("RestrictedApi")
@@ -235,6 +237,7 @@ class RouteActivity : ComponentActivity() {
         )
         disableNavigationBarContrast()
         super.onCreate(savedInstanceState)
+        shareIntentConsumed = savedInstanceState?.getBoolean(STATE_SHARE_INTENT_CONSUMED) ?: false
         if (CrashHandler.hasCrashed(this)) {
             startActivity(Intent(this, SafeModeActivity::class.java))
             finish()
@@ -316,22 +319,31 @@ class RouteActivity : ComponentActivity() {
             }
         }
 
-        LaunchedEffect(shareAction, shareText, streamUris) {
+        LaunchedEffect(currentIntent) {
+            if (shareIntentConsumed) return@LaunchedEffect
             when (shareAction) {
                 Intent.ACTION_SEND,
                 Intent.ACTION_SEND_MULTIPLE -> {
                     backStack.add(Screen.ShareHandler(text = shareText, streamUris = streamUris))
+                    shareIntentConsumed = true
                 }
 
                 Intent.ACTION_PROCESS_TEXT -> {
                     backStack.add(Screen.ShareHandler(text = shareText, streamUri = null))
+                    shareIntentConsumed = true
                 }
             }
         }
     }
 
+    override fun onSaveInstanceState(outState: Bundle) {
+        outState.putBoolean(STATE_SHARE_INTENT_CONSUMED, shareIntentConsumed)
+        super.onSaveInstanceState(outState)
+    }
+
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        shareIntentConsumed = false
         setIntent(intent)
         // WebMount OAuth callback: amberagent://oauth/<provider>?code=...&state=...
         // Dispatched before any other handler so the awaiting OAuth flow gets
@@ -916,7 +928,7 @@ class RouteActivity : ComponentActivity() {
 }
 
 private fun Intent.extractSharedText(): String {
-    val text = getStringExtra(Intent.EXTRA_TEXT)
+    val text = getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString()
         ?: getStringExtra(Intent.EXTRA_HTML_TEXT)
         ?: getCharSequenceExtra(Intent.EXTRA_PROCESS_TEXT)?.toString()
         ?: ""
@@ -996,7 +1008,8 @@ sealed interface Screen : NavKey {
     data class ShareHandler(
         val text: String,
         val streamUri: String? = null,
-        val streamUris: List<String> = emptyList()
+        val streamUris: List<String> = emptyList(),
+        val deliveryId: String = Uuid.random().toString(),
     ) : Screen
 
     @Serializable

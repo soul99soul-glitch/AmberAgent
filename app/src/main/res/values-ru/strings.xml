@@ -400,7 +400,6 @@
   <string name="setting_page_built_in_tools_url_context">Контекст URL</string>
   <string name="setting_page_built_in_tools_url_context_desc">Включить обработку содержимого по URL</string>
   <string name="setting_page_chat_storage">Хранилище чатов</string>
-  <string name="setting_page_chat_storage_desc">%1$d файлов, %2$.2f МБ</string>
   <string name="setting_page_code_display_settings">Отображение кода</string>
   <string name="setting_page_color_mode">Цветовая схема</string>
   <string name="setting_page_color_mode_dark">Тёмная</string>
@@ -411,9 +410,7 @@
   <string name="setting_page_config_api_title">Настройте API и модель</string>
   <string name="setting_page_data_settings">Настройки данных</string>
   <string name="setting_page_default_model">Модель и промпт по умолчанию</string>
-  <string name="setting_page_default_model_desc">Модели по умолчанию, модели для вспомогательных задач и промпты</string>
   <string name="setting_page_display_setting">Настройки отображения</string>
-  <string name="setting_page_display_setting_desc">Управление настройками отображения</string>
   <string name="setting_page_extensions">Расширения</string>
   <string name="setting_page_extensions_desc">Управление внедрением подсказок, навыками и другими возможностями</string>
   <string name="setting_page_general_settings">Общие настройки</string>
@@ -423,13 +420,11 @@
   <string name="setting_page_message_display_settings">Отображение сообщений</string>
   <string name="setting_page_model_and_services">Модели и службы</string>
   <string name="setting_page_providers">Провайдеры</string>
-  <string name="setting_page_providers_desc">Настроить поставщиков ИИ</string>
   <string name="setting_page_search_add_provider">Добавить поставщика</string>
   <string name="setting_page_search_common_options">Общие параметры</string>
   <string name="setting_page_search_delete_provider">Удалить поставщика</string>
   <string name="setting_page_search_result_size">Размер результата</string>
   <string name="setting_page_search_service">Служба поиска</string>
-  <string name="setting_page_search_service_desc">Настроить службу поиска</string>
   <string name="setting_page_search_title">Служба поиска</string>
   <string name="setting_page_theme_setting">Настройки темы</string>
   <string name="setting_provider_page_abilities">Возможности</string>
@@ -975,9 +970,7 @@
   <string name="setting_page_agent_auto_approve">Глобальное автоматическое подтверждение</string>
   <string name="setting_page_agent_auto_approve_desc">Автоматически подтверждает обычные вызовы инструментов. Если также включено автоматическое подтверждение высокого риска, инструменты, требующие подтверждения, выполняются без участия пользователя, кроме запросов ask_user, ожидающих вашего ответа.</string>
   <string name="setting_page_agent_execution">Запуск и отображение</string>
-  <string name="setting_page_agent_execution_desc">Цикл инструментов, предпросмотр и состояние в реальном времени</string>
   <string name="setting_page_agent_extensions">Навыки и расширения</string>
-  <string name="setting_page_agent_extensions_desc">Навыки, промпты и внешние серверы инструментов</string>
   <string name="setting_page_agent_generation_keepalive">Поддержание работы в фоне</string>
   <string name="setting_page_agent_generation_keepalive_desc">Использовать уведомление переднего плана во время генерации Amber.</string>
   <string name="setting_page_agent_generation_retry">Автоматически повторять генерацию</string>
@@ -1008,17 +1001,14 @@
   <string name="setting_page_agent_live_status_privacy">Скрывать конфиденциальное состояние в реальном времени</string>
   <string name="setting_page_agent_live_status_privacy_desc">Показывать только тип и состояние инструмента, скрывая личный текст.</string>
   <string name="setting_page_agent_memory">Основная память</string>
-  <string name="setting_page_agent_memory_desc">Постоянные знания, сохраняемые между разговорами AmberAgent</string>
   <string name="setting_page_agent_operation_preview">Предпросмотр операций</string>
   <string name="setting_page_agent_operation_preview_always">Всегда</string>
   <string name="setting_page_agent_operation_preview_auto">Авто</string>
   <string name="setting_page_agent_operation_preview_desc">Показывать карточку операций Agent в реальном времени над полем ввода.</string>
   <string name="setting_page_agent_operation_preview_hidden">Скрыто</string>
   <string name="setting_page_agent_permissions">Разрешения и подтверждение</string>
-  <string name="setting_page_agent_permissions_desc">Политика доступа к системе и подтверждения инструментов</string>
   <string name="setting_page_agent_runtime">Настройки Agent</string>
   <string name="setting_page_agent_sandbox">Среда выполнения Agent</string>
-  <string name="setting_page_agent_sandbox_desc">Состояние рабочего пространства, Alpine/proot и выполнения команд</string>
   <string name="setting_page_agent_skills">Навыки</string>
   <string name="setting_page_agent_skills_desc">Управлять пакетами навыков, которые Agent может загружать по запросу</string>
   <string name="setting_page_agent_tool_loop_steps">Лимит цикла инструментов</string>
@@ -1027,7 +1017,6 @@
   <string name="setting_page_cron_tasks">Задания Cron</string>
   <string name="setting_page_cron_tasks_desc">Просматривать запланированные задания Agent и состояние запланированных запусков</string>
   <string name="setting_page_experimental_features">Экспериментальные функции</string>
-  <string name="setting_page_experimental_features_desc">Просматривать функции AmberAgent, которые ещё требуют проверки на реальном устройстве</string>
   <string name="setting_page_favorites_desc">Просматривать сохранённые фрагменты разговоров</string>
   <string name="setting_page_system_access">Доступ к системе</string>
   <string name="setting_page_system_access_desc">Выдавать разрешения Android для инструментов Agent и проводить их аудит.</string>
@@ -1457,9 +1446,7 @@
   <string name="setting_display_page_base_family_title">Цветовая палитра</string>
   <string name="setting_display_page_base_family_warm">Тёплый Warm</string>
   <string name="setting_page_backup">Синхронизация и резервное копирование</string>
-  <string name="setting_page_backup_desc">Синхронизация с Google Cloud, локальные зашифрованные резервные копии и полное восстановление данных</string>
   <string name="setting_page_storage_cleanup">Хранилище и очистка</string>
-  <string name="setting_page_storage_cleanup_desc">Разбивка использования хранилища и очистка разговоров по сроку давности (закреплённые разговоры сохраняются)</string>
   <string name="setting_slides_fonts_desc">Загрузите пакеты китайских шрифтов, чтобы повысить точность отображения сгенерированных слайдов</string>
   <string name="setting_slides_fonts_title">Ресурсы шрифтов Slides</string>
   <string name="setting_storage_attachment_count">Файлов: %1$d</string>
@@ -3308,4 +3295,12 @@
   <string name="novel_batch_stage_polish">Редактура</string>
   <string name="novel_catalog_root_directory">Корневой каталог</string>
   <string name="novel_migration_failed_count">Не удалось перенести книг: %1$d. Исходные файлы остались на диске; подробности см. в настройках.</string>
+  <string name="provider_user_agent_presets">Предустановки User-Agent</string>
+  <string name="provider_file_import_select">Импорт JSON / Markdown</string>
+  <string name="provider_file_import_title">Предпросмотр импорта</string>
+  <string name="provider_file_import_hint">Выбранные записи будут добавлены как новые. Совпадающие имена по умолчанию не выбраны. Существующие настройки не изменятся; ключи скрыты.</string>
+  <string name="provider_file_import_duplicate">Совпадающее имя: при выборе добавится новая запись</string>
+  <string name="provider_file_import_confirm">Импортировать: %d</string>
+  <string name="provider_file_import_error">Не удалось прочитать файл. Используйте JSON-массив или объект providers, в том числе в блоке json Markdown (до 1 млн символов). Проверьте типы, URL и поля моделей.</string>
+  <string name="provider_file_import_save_error">Не удалось сохранить импорт. Повторите попытку.</string>
 </resources>

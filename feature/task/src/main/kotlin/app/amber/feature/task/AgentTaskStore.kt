@@ -66,8 +66,10 @@ class AgentTaskStore(
     }
 
     /**
-     * A null error argument preserves the current value for callers that only update other
-     * fields. Use the explicit clear flags when a completed or retried task has no error.
+     * A null [error]/[lastErrorCode] argument preserves the current value for callers that
+     * only update other fields. The clear flags mean "write exactly what was passed":
+     * a non-null argument overwrites the stored value and a null argument clears it, so a
+     * failure reporter can record an error and clear flags can reset both fields.
      */
     suspend fun update(
         taskId: String,
@@ -93,8 +95,8 @@ class AgentTaskStore(
             status = status ?: current.status,
             queueState = queueState ?: status?.toQueueState(current.type) ?: current.queueState,
             summary = summary ?: current.summary,
-            error = if (clearError) null else error ?: current.error,
-            lastErrorCode = if (clearLastErrorCode) null else lastErrorCode ?: current.lastErrorCode,
+            error = if (clearError) error else error ?: current.error,
+            lastErrorCode = if (clearError || clearLastErrorCode) lastErrorCode else lastErrorCode ?: current.lastErrorCode,
             outputPath = outputPath ?: current.outputPath,
             outputOffset = outputOffset ?: current.outputOffset,
             cancelCapability = cancelCapability ?: current.cancelCapability,

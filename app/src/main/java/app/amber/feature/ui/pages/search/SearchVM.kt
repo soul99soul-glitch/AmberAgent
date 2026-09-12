@@ -110,6 +110,8 @@ class SearchVM(
                 conversationRepo.rebuildAllIndexes { current, total ->
                     rebuildProgress = current to total
                 }
+                // Refresh results against the freshly rebuilt index.
+                scheduleSearch(searchQuery, immediate = true)
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Throwable) {

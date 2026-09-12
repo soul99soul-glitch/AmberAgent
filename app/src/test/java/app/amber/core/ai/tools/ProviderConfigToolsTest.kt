@@ -3,6 +3,7 @@ package app.amber.core.ai.tools
 import android.app.Application
 import android.content.Context
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
+import app.amber.agent.R
 import app.amber.ai.core.Tool
 import app.amber.ai.provider.Model
 import app.amber.ai.provider.ModelType
@@ -15,6 +16,7 @@ import app.amber.ai.provider.providers.openai.OpenAICodexAuthStore
 import app.amber.ai.provider.providers.openai.OpenAICodexAuthTokens
 import app.amber.ai.ui.ToolApprovalState
 import app.amber.ai.ui.UIMessagePart
+import app.amber.core.localization.OAuthDisplayLocalizer
 import app.amber.core.infra.AppScope
 import app.amber.core.model.MainAgentToolProfile
 import app.amber.core.settings.prefs.AgentPrefs
@@ -173,7 +175,11 @@ class ProviderConfigToolsTest {
         )
         withTimeout(5_000) { settingsStore.settingsFlow.first { !it.init } }
         val httpClient = OkHttpClient()
-        googleProvider = app.amber.ai.provider.providers.GoogleProvider(httpClient, context)
+        googleProvider = app.amber.ai.provider.providers.GoogleProvider(
+            client = httpClient,
+            context = context,
+            oauthCopy = OAuthDisplayLocalizer.googleGeminiOAuth(context),
+        )
         openAICodexAuthStore = OpenAICodexAuthStore(context)
         openAICodexAuthStore.clear(codexOAuthProvider.id)
         providerCatalog = ProviderCatalog(
@@ -387,7 +393,10 @@ class ProviderConfigToolsTest {
             false,
             result["models_modified"]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull(),
         )
-        assertTrue(result["error"]?.jsonPrimitive?.contentOrNull.orEmpty().contains("尚未登录"))
+        val error = result["error"]?.jsonPrimitive?.contentOrNull.orEmpty()
+        assertTrue(
+            error.contains(context.getString(R.string.setting_provider_page_gemini_oauth_session_missing))
+        )
         assertEquals(
             listOf("gemini-3-pro-preview"),
             settingsStore.settingsFlow.value.providers.single().models.map { it.modelId },

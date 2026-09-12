@@ -48,7 +48,6 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.window.SecureFlagPolicy
-import java.util.Locale
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.collectLatest
@@ -83,8 +82,7 @@ import app.amber.feature.webmount.oauth.WebMountOAuthTokenStore
 import app.amber.feature.webmount.usersites.AuthKind
 import app.amber.feature.webmount.usersites.UserSite
 import app.amber.feature.webmount.usersites.UserSiteRegistry
-import app.amber.feature.webmount.usersites.loginCookieCandidatesFor
-import app.amber.feature.webmount.usersites.requiredLoginCookieSetsFor
+import app.amber.feature.webmount.usersites.userSiteId
 import app.amber.feature.webmount.primitives.WebMountSessionOwner
 import app.amber.feature.ui.components.ui.workspaceColors
 import app.amber.feature.ui.context.LocalToaster
@@ -322,7 +320,10 @@ fun SettingExperimentalWebMountPage(
                                 onSignOut = if (site.authKind != AuthKind.ANONYMOUS) {
                                     {
                                         val urls = collectKnownUrlsFor(site, webMountManager, profileRegistry)
-                                        val cleared = cookieProvider.clearCookiesFor(urls)
+                                        val cleared = cookieProvider.clearCookiesFor(
+                                            urls,
+                                            WebMountLoginTarget.fromUserSite(site, webMountManager, profileRegistry).manualCookieFields,
+                                        )
                                         if (site.authKind == AuthKind.OAUTH) {
                                             oauthClient.disconnect(oauthProviderId)
                                             oauthRevision++
@@ -382,18 +383,21 @@ fun SettingExperimentalWebMountPage(
                                     }
                                 },
                                 onDelete = {
+                                    // B-5 fix: drop the authKind guard so a
+                                    // site whose kind flipped during its
+                                    // lifetime (e.g. once OAuth, now COOKIE)
+                                    // doesn't leak OAuth state. clearToken /
+                                    // clearCredentials are no-ops when no
+                                    // entry exists.
+                                    oauthStore.clearToken(oauthProviderId)
+                                    oauthStore.clearCredentials(oauthProviderId)
+                                    val urls = collectKnownUrlsFor(site, webMountManager, profileRegistry)
+                                    cookieProvider.clearCookiesFor(
+                                        urls,
+                                        WebMountLoginTarget.fromUserSite(site, webMountManager, profileRegistry).manualCookieFields,
+                                    )
+                                    profileRegistry.remove(site.id)
                                     if (userSiteRegistry.remove(site.id)) {
-                                        // B-5 fix: drop the authKind guard so a
-                                        // site whose kind flipped during its
-                                        // lifetime (e.g. once OAuth, now COOKIE)
-                                        // doesn't leak OAuth state. clearToken /
-                                        // clearCredentials are no-ops when no
-                                        // entry exists.
-                                        oauthStore.clearToken(oauthProviderId)
-                                        oauthStore.clearCredentials(oauthProviderId)
-                                        val urls = collectKnownUrlsFor(site, webMountManager, profileRegistry)
-                                        cookieProvider.clearCookiesFor(urls)
-                                        profileRegistry.remove(site.id)
                                         cookieRevision++
                                         toaster.show(deletedTemplate.format(site.displayName))
                                     }
@@ -419,7 +423,7 @@ fun SettingExperimentalWebMountPage(
             webMountManager = webMountManager,
             onClearSession = {
                 val urls = target.urls
-                val cleared = cookieProvider.clearCookiesFor(urls)
+                val cleared = cookieProvider.clearCookiesFor(urls, target.manualCookieFields)
                 if (site.authKind == AuthKind.OAUTH) {
                     oauthClient.disconnect(site.oauthProviderId ?: site.id)
                     oauthRevision++
@@ -557,7 +561,7 @@ fun SettingExperimentalWebMountPage(
             onAdd = { name, url, needsLogin, cookieName ->
                 val ok = userSiteRegistry.add(
                     UserSite(
-                        id = "user_" + slugify(name),
+                        id = userSiteId(name),
                         displayName = name,
                         homepageUrl = url,
                         authKind = if (needsLogin) AuthKind.COOKIE else AuthKind.ANONYMOUS,
@@ -608,24 +612,31 @@ private fun UserSiteCard(
     // onDismiss probe — no asymmetry between the row label and the toast.
     @Suppress("UNUSED_EXPRESSION") cookieRevision
     val loggedIn = run {
-        val urls = collectKnownUrlsFor(site, webMountManager, profileRegistry)
+        val loginTarget = WebMountLoginTarget.fromUserSite(site, webMountManager, profileRegistry)
+        val urls = loginTarget.urls
         if (urls.isEmpty()) {
             null
         } else {
             val snapshot = cookieProvider.snapshotCookies(urls)
-            val requiredSets = requiredLoginCookieSetsFor(site)
+            val requiredSets = loginTarget.requiredCookieSets
             when {
                 requiredSets.any { snapshot.containsAll(it) } -> true
                 requiredSets.isNotEmpty() -> false
-                else -> loginCookieCandidatesFor(site).takeIf { it.isNotEmpty() }
+                else -> loginTarget.candidateCookieNames.takeIf { it.isNotEmpty() }
                     ?.any { snapshot.valuesByName(it).isNotEmpty() }
             }
         }
     }
     val oauthProviderIdLocal = site.oauthProviderId ?: site.id
-    val hasToken = if (site.authKind == AuthKind.OAUTH) {
-        oauthStore.getToken(oauthProviderIdLocal) != null
-    } else false
+    val oauthToken = if (site.authKind == AuthKind.OAUTH) {
+        oauthStore.getToken(oauthProviderIdLocal)
+    } else null
+    // Keep physical token presence separate from local validity. An expired
+    // token can still be refreshed by WebMountOAuthClient when credentials and
+    // a refresh token are available; the list must not perform that network
+    // operation itself.
+    val hasToken = oauthToken != null
+    val tokenExpired = oauthToken?.isExpired() == true
     val hasCredentials = if (site.authKind == AuthKind.OAUTH) {
         oauthStore.getCredentials(oauthProviderIdLocal) != null
     } else false
@@ -675,6 +686,7 @@ private fun UserSiteCard(
                 stationState = stationState,
                 loggedIn = loggedIn,
                 hasToken = hasToken,
+                tokenExpired = tokenExpired,
                 hasCredentials = hasCredentials,
             )
         }
@@ -708,7 +720,7 @@ private fun UserSiteCard(
                     onClick = clearState,
                 )
             }
-            if (onConnect != null && !hasToken) {
+            if (onConnect != null && (!hasToken || tokenExpired)) {
                 ExperimentActionButton(
                     text = stringResource(R.string.setting_webmount_oauth_connect),
                     primary = true,
@@ -750,6 +762,7 @@ private fun SiteStatusPill(
     stationState: WebMountStationState?,
     loggedIn: Boolean?,
     hasToken: Boolean,
+    tokenExpired: Boolean,
     hasCredentials: Boolean,
 ) {
     val workspace = workspaceColors()
@@ -766,7 +779,7 @@ private fun SiteStatusPill(
             workspace.muted to R.string.setting_webmount_pill_rate_limited
         authKind == AuthKind.ANONYMOUS ->
             workspace.blue to R.string.setting_webmount_pill_public
-        authKind == AuthKind.OAUTH && hasToken ->
+        authKind == AuthKind.OAUTH && hasToken && !tokenExpired ->
             workspace.blue to R.string.setting_webmount_pill_connected
         authKind == AuthKind.OAUTH && hasCredentials ->
             workspace.muted to R.string.setting_webmount_pill_ready
@@ -1353,11 +1366,3 @@ private suspend fun installWebMountSlashCommand(
     }
     return true
 }
-
-private fun slugify(name: String): String =
-    name.trim()
-        .lowercase(Locale.ROOT)
-        .replace(Regex("[^a-z0-9]+"), "_")
-        .trim('_')
-        .ifBlank { "site" }
-        .take(40)

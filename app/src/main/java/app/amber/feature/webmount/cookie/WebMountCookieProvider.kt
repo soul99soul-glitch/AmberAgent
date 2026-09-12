@@ -154,8 +154,9 @@ class WebMountCookieProvider {
      *
      * Returns the count of cookies expired across all URLs.
      */
-    fun clearCookiesFor(urls: List<String>): Int {
+    fun clearCookiesFor(urls: List<String>, fieldHints: List<CookieFieldHint> = emptyList()): Int {
         val cookieManager = CookieManager.getInstance()
+        val hintsByName = fieldHints.associateBy { it.name }
         var cleared = 0
         urls.distinct().forEach { url ->
             val raw = cookieManager.getCookie(url) ?: return@forEach
@@ -168,6 +169,17 @@ class WebMountCookieProvider {
                     // value form for cookies set without an explicit path.
                     cookieManager.setCookie(url, "$name=; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT")
                     cookieManager.setCookie(url, "$name=; Expires=Thu, 01 Jan 1970 00:00:00 GMT")
+                    // Imported login cookies may belong to a parent domain
+                    // or a specific path; expire those same known scopes.
+                    hintsByName[name]?.let { hint ->
+                        targetUrlsFor(hint, listOf(url)).forEach { target ->
+                            cookieManager.setCookie(
+                                target.url,
+                                buildCookieString(name, "", hint, target) +
+                                    "; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT",
+                            )
+                        }
+                    }
                     cleared++
                 }
             }
@@ -213,7 +225,9 @@ class WebMountCookieProvider {
                 append("; Path=")
                 append(hint.path.ifBlank { "/" })
                 target.domain?.let { append("; Domain=").append(it) }
-                append("; Secure")
+                if (target.url.startsWith("https://", ignoreCase = true)) {
+                    append("; Secure")
+                }
                 hint.sameSite?.takeIf { it.isNotBlank() }?.let { append("; SameSite=").append(it) }
                 if (hint.httpOnly) append("; HttpOnly")
             }

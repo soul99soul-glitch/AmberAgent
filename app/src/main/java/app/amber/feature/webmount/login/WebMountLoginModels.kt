@@ -3,6 +3,7 @@ package app.amber.feature.webmount.login
 import app.amber.feature.webmount.cookie.CookieFieldHint
 import app.amber.feature.webmount.cookie.CookieSnapshot
 import app.amber.feature.webmount.core.WebMountAdapter
+import app.amber.feature.webmount.core.WebMountAuthMethod
 import app.amber.feature.webmount.core.WebMountManager
 import app.amber.feature.webmount.profile.ProfileRegistry
 import app.amber.feature.webmount.usersites.UserSite
@@ -30,28 +31,34 @@ data class WebMountLoginTarget(
             profileRegistry: ProfileRegistry,
         ): WebMountLoginTarget {
             val adapter = site.nativeAdapterId?.let { manager.adapterOf(it) }
+            val effectiveSite = site.copy(
+                loginCookieName = site.loginCookieName?.trim()?.takeIf { it.isNotBlank() }
+                    ?: profileRegistry.byId(site.nativeAdapterId ?: site.id)
+                        ?.profile?.hints?.loginCookie?.trim()?.takeIf { it.isNotBlank() },
+            )
             val adapterRequiredSets = adapter
                 ?.endpoints
                 ?.mapNotNull { endpoint -> endpoint.requiredCookieNames.takeIf { it.isNotEmpty() } }
                 .orEmpty()
-            val requiredSets = (requiredLoginCookieSetsFor(site) + adapterRequiredSets)
+            val requiredSets = (requiredLoginCookieSetsFor(effectiveSite) + adapterRequiredSets)
                 .filter { it.isNotEmpty() }
                 .distinct()
             val candidates = buildList {
-                site.loginCookieName?.trim()?.takeIf { it.isNotBlank() }?.let { add(it) }
-                addAll(loginCookieCandidatesFor(site))
+                addAll(loginCookieCandidatesFor(effectiveSite))
                 addAll(requiredSets.flatten())
             }.distinct()
             return WebMountLoginTarget(
                 id = site.id,
                 displayName = site.displayName,
                 startUrl = site.homepageUrl,
-                stationId = site.nativeAdapterId,
+                // The visible WebView proves cookie login. An OAuth-only
+                // adapter probe cannot verify it (e.g. Feishu DOM access).
+                stationId = adapter?.id?.takeIf { WebMountAuthMethod.COOKIE in adapter.authMethods },
                 urls = collectSiteUrls(site, manager, profileRegistry),
                 requiredCookieSets = requiredSets,
                 candidateCookieNames = candidates,
                 successUrlPatterns = loginSuccessUrlPatternsFor(site),
-                manualCookieFields = manualImportCookieFieldsFor(site),
+                manualCookieFields = manualImportCookieFieldsFor(effectiveSite),
             )
         }
 

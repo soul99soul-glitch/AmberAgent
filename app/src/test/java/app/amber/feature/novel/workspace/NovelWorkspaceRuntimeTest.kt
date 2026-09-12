@@ -83,7 +83,9 @@ class NovelWorkspaceRuntimeTest {
                 kotlinx.coroutines.SupervisorJob() +
                     kotlinx.coroutines.test.StandardTestDispatcher(it),
             )
-        }
+        } ?: kotlinx.coroutines.CoroutineScope(
+            kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Default,
+        )
         // Step 3: when the test shares the store, scopes get the real
         // persisting writer so the turn's domain events land in agent_event.
         val scopeFactory: ((app.amber.core.agent.runtime.AgentRunId, app.amber.core.agent.runtime.AgentInput) -> app.amber.core.agent.runtime.RunScope)? =
@@ -125,13 +127,11 @@ class NovelWorkspaceRuntimeTest {
             runScopeFactory = scopeFactory ?: { id, _ ->
                 app.amber.core.agent.runtime.adapter.LegacyRunScope(runId = id)
             },
-            scope = scope ?: kotlinx.coroutines.CoroutineScope(
-                kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Default,
-            ),
+            scope = scope,
         )
         return NovelWorkspaceGhostwriteCoordinator(
             runtime,
-            NovelTurnLauncher(runner, payloads),
+            NovelTurnLauncher(runner, payloads, scope),
         )
     }
 

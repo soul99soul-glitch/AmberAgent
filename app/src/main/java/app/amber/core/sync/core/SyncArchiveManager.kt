@@ -520,6 +520,20 @@ class SyncArchiveManager(
             context.getString(R.string.backup_format_incompatible, "settings.json")
         )
 
+        if (scope == RestoreScope.EVERYTHING) {
+            val requiredTables = SYNC_TABLES.filterNot { table ->
+                (preserveConversationTables && table in CONVERSATION_TABLES) ||
+                    (preserveGenMediaTables && table in GEN_MEDIA_TABLES)
+            }.toSet()
+            val missingTables = requiredTables - stagedTableFiles.keys
+            require(missingTables.isEmpty()) {
+                context.getString(
+                    R.string.backup_format_incompatible,
+                    "tables/${missingTables.sorted().joinToString(",")}.jsonl",
+                )
+            }
+        }
+
         val currentSettings = settingsStore.settingsFlow.value
         val decodedSettings = redactor.decodeSettingsForRestore(
             settingsJson = restoredSettingsJson,

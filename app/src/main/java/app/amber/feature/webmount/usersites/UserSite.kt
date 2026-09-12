@@ -1,6 +1,8 @@
 package app.amber.feature.webmount.usersites
 
 import kotlinx.serialization.Serializable
+import java.util.Locale
+import java.util.UUID
 
 /**
  * Phase 2 Plan v2 — single user-facing concept for "a website on the
@@ -59,4 +61,15 @@ enum class AuthKind {
     COOKIE,
     /** Site uses OAuth (the user enters app credentials + Connect). */
     OAUTH,
+}
+
+/** Stable, profile-compatible ids shared by the settings and agent add paths. */
+internal fun userSiteId(name: String): String {
+    val normalized = name.trim().lowercase(Locale.ROOT)
+    val slug = normalized.replace(Regex("[^a-z0-9]+"), "_").trim('_')
+    val suffix = if (slug.isBlank() || normalized.any { it.code > 127 } || slug.length > 40) {
+        "_" + UUID.nameUUIDFromBytes(normalized.toByteArray(Charsets.UTF_8))
+            .toString().replace("-", "").take(12)
+    } else ""
+    return "user_" + slug.ifBlank { "site" }.take(40) + suffix
 }

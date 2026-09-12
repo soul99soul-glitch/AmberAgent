@@ -4,6 +4,7 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Transaction
 import kotlinx.coroutines.flow.Flow
 import app.amber.agent.data.db.entity.MemoryDreamPlanEntity
 
@@ -20,6 +21,12 @@ interface MemoryDreamPlanDAO {
 
     @Query("UPDATE memory_dream_plan SET status = :status, dismissed_at = :dismissedAt WHERE status = 'pending'")
     suspend fun updatePendingStatus(status: String, dismissedAt: Long)
+
+    @Transaction
+    suspend fun replacePending(plan: MemoryDreamPlanEntity) {
+        updatePendingStatus("dismissed", plan.createdAt)
+        insert(plan)
+    }
 
     @Query("UPDATE memory_dream_plan SET status = 'applied', applied_at = :appliedAt WHERE id = :id")
     suspend fun markApplied(id: String, appliedAt: Long)

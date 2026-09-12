@@ -135,6 +135,20 @@ class McpImportTransactionTest {
     }
 
     @Test
+    fun nonObjectServerIsRejectedWithoutThrowing() {
+        val preflight = FakePreflight()
+        val prep = rejected(
+            prepare(
+                transaction(preflight = preflight),
+                """{"mcpServers":{"bad":null}}""",
+            )
+        )
+
+        assertTrue(prep.errors.any { it.contains("bad") && it.contains("JSON object") })
+        assertTrue("rejected candidates must not reach preflight", preflight.connected.isEmpty())
+    }
+
+    @Test
     fun duplicateNamesRejectTheWholeBatch() {
         val prep = rejected(prepare(transaction(), fixture("duplicate-names")))
 

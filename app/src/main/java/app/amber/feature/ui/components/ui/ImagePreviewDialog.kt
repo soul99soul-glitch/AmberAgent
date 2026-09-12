@@ -264,8 +264,11 @@ fun ImagePreviewDialog(
                                     runCatching {
                                         toaster.show(savingMessage)
                                         val imgUrl = images[state.currentPage]
-                                        filesManager.saveMessageImage(context, imgUrl)
-                                        toaster.show(message = savedMessage, type = ToastType.Success)
+                                        val saved = filesManager.saveMessageImage(context, imgUrl)
+                                        toaster.show(
+                                            message = if (saved) savedMessage else context.getString(R.string.mermaid_export_failed),
+                                            type = if (saved) ToastType.Success else ToastType.Error,
+                                        )
                                     }.onFailure {
                                         it.printStackTrace()
                                         toaster.show(

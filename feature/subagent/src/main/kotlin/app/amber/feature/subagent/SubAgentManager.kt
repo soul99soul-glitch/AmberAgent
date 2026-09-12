@@ -482,7 +482,7 @@ class SubAgentManager(
      * is not running keeps it queued — it is delivered when the thread next
      * runs (followup) and persisted once that turn's result lands. A message
      * is never dropped between dequeue and result persistence.
-     */
+    */
     suspend fun sendMessage(threadId: String, message: String): JsonObject = withContext(Dispatchers.IO) {
         threadOperationLock(threadId).withLock {
             if (!threadGraphEnabled()) {
@@ -501,12 +501,13 @@ class SubAgentManager(
             if (node.status == SubAgentRunStatus.CANCELLED) {
                 return@withLock errorPayload("thread_cancelled", "Thread $threadId was cancelled.")
             }
+            val safeMessage = message.take(MAX_SEND_MESSAGE_CHARS)
             val record = withContext(threadGraphWriteContext) {
-                threadGraphManager.enqueueMessage(threadId, message.take(MAX_SEND_MESSAGE_CHARS))
+                threadGraphManager.enqueueMessage(threadId, safeMessage)
             }
             val live = runs[threadId]?.snapshot
             val delivered = live?.status == SubAgentRunStatus.RUNNING && mailboxes[threadId]?.trySend(
-                UIMessage.user(message)
+                UIMessage.user(safeMessage)
             )?.isSuccess == true
             if (delivered) {
                 withContext(threadGraphWriteContext) {
@@ -816,6 +817,8 @@ class SubAgentManager(
             summary = result.summary.ifBlank { result.findings.joinToString("; ").take(1_000) },
             error = result.error.takeIf { it.isNotBlank() },
             cancelCapability = result.status == SubAgentRunStatus.APPROVAL_REQUIRED,
+            clearError = result.error.isBlank(),
+            clearLastErrorCode = true,
         )
         appendEvent(runtimeRun, "finished", runToPayload(next, includeDisplayText = true))
     }

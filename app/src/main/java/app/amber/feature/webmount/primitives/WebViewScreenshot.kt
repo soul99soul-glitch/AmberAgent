@@ -6,6 +6,7 @@ import android.util.Base64
 import android.util.Log
 import android.view.View
 import android.webkit.WebView
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -62,12 +63,14 @@ object WebViewScreenshot {
         quality: Int = 70,
         maxEdge: Int = 1280,
         timeoutMs: Long = 15_000L,
+        paddingPx: Int = 0,
     ): Result {
         val bitmap = runCatching {
             withTimeoutOrNull(timeoutMs) {
-                captureViewportRegion(handle, region, maxEdge)
+                captureViewportRegion(handle, region, maxEdge, paddingPx)
             } ?: return Result.Failed("region screenshot timed out after ${timeoutMs}ms")
         }.getOrElse { error ->
+            if (error is CancellationException) throw error
             return Result.Failed(error.message ?: "region screenshot failed")
         }
 
@@ -97,21 +100,21 @@ object WebViewScreenshot {
         handle: SessionHandle,
         region: Region,
         maxEdge: Int,
+        paddingPx: Int,
     ): Bitmap = withContext(Dispatchers.Main) {
         val webView = handle.webView
-        val viewport = drawViewportBitmap(webView, webView.width.coerceAtLeast(1), webView.height.coerceAtLeast(1))
-        if (region.x < 0 || region.y < 0 ||
-            region.x + region.width > viewport.width ||
-            region.y + region.height > viewport.height
-        ) {
-            viewport.recycle()
-            error("region is outside the visible viewport; scroll the target into view or pass a visible region")
-        }
-        val left = region.x.coerceIn(0, viewport.width - 1)
-        val top = region.y.coerceIn(0, viewport.height - 1)
-        val right = (region.x + region.width).coerceIn(left + 1, viewport.width)
-        val bottom = (region.y + region.height).coerceIn(top + 1, viewport.height)
-        val cropped = Bitmap.createBitmap(viewport, left, top, right - left, bottom - top)
+        val viewportWidth = webView.width.coerceAtLeast(1)
+        val viewportHeight = webView.height.coerceAtLeast(1)
+        val captureBounds = captureBounds(region, viewportWidth, viewportHeight, paddingPx)
+            ?: error("region is outside the visible viewport; scroll the target into view or pass a visible region")
+        val viewport = drawViewportBitmap(webView, viewportWidth, viewportHeight)
+        val cropped = Bitmap.createBitmap(
+            viewport,
+            captureBounds.x,
+            captureBounds.y,
+            captureBounds.width,
+            captureBounds.height,
+        )
         viewport.recycle()
         scaleDown(cropped, maxEdge.coerceAtLeast(64))
     }
@@ -255,6 +258,41 @@ object WebViewScreenshot {
         val width: Int,
         val height: Int,
     )
+
+    /**
+     * Return the viewport-clipped capture bounds for [region]. The original
+     * region must intersect the viewport; padding may then extend beyond an
+     * edge and is clipped back to the viewport.
+     */
+    internal fun captureBounds(
+        region: Region,
+        viewportWidth: Int,
+        viewportHeight: Int,
+        paddingPx: Int = 0,
+    ): Region? {
+        if (viewportWidth <= 0 || viewportHeight <= 0 || region.width <= 0 || region.height <= 0) return null
+        val rawLeft = region.x.toLong()
+        val rawTop = region.y.toLong()
+        val rawRight = rawLeft + region.width.toLong()
+        val rawBottom = rawTop + region.height.toLong()
+        val visibleLeft = maxOf(rawLeft, 0L)
+        val visibleTop = maxOf(rawTop, 0L)
+        val visibleRight = minOf(rawRight, viewportWidth.toLong())
+        val visibleBottom = minOf(rawBottom, viewportHeight.toLong())
+        if (visibleLeft >= visibleRight || visibleTop >= visibleBottom) return null
+
+        val padding = paddingPx.coerceAtLeast(0).toLong()
+        val captureLeft = maxOf(rawLeft - padding, 0L)
+        val captureTop = maxOf(rawTop - padding, 0L)
+        val captureRight = minOf(rawRight + padding, viewportWidth.toLong())
+        val captureBottom = minOf(rawBottom + padding, viewportHeight.toLong())
+        return Region(
+            x = captureLeft.toInt(),
+            y = captureTop.toInt(),
+            width = (captureRight - captureLeft).toInt(),
+            height = (captureBottom - captureTop).toInt(),
+        )
+    }
 
     private const val TAG = "WebMountScreenshot"
     private const val MAX_FULL_PAGE_HEIGHT = 16_384

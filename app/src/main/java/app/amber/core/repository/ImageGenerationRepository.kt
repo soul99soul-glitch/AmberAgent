@@ -39,20 +39,31 @@ class ImageGenerationRepository(
         conversationId: Uuid,
         mode: ImageGenerationMode = ImageGenerationMode.CREATE,
         sourceImageUrl: String? = null,
-    ): Result<List<GeneratedImageFile>> = runCatching {
-        val invocation = invoke(modelId, prompt, aspectRatio, numOfImages, conversationId, mode, sourceImageUrl)
-        val dir = filesManager.getChatImagesDir(conversationId)
-        invocation.results.mapIndexed { index, item ->
-            val timestamp = System.currentTimeMillis()
-            val filename = "${timestamp}_$index.png"
-            val file = File(dir, filename)
-            filesManager.createImageFileFromBase64(item.data, file.absolutePath)
-            GeneratedImageFile(
-                file = file,
-                relativePath = "chat_images/${conversationId}/${file.name}",
-                modelDisplayName = invocation.modelDisplayName,
-                mimeType = item.mimeType,
-            )
+    ): Result<List<GeneratedImageFile>> {
+        val createdFiles = mutableListOf<File>()
+        return runCatching {
+            val invocation = invoke(modelId, prompt, aspectRatio, numOfImages, conversationId, mode, sourceImageUrl)
+            require(invocation.results.isNotEmpty()) { "Image generation returned no images" }
+            val dir = filesManager.getChatImagesDir(conversationId)
+            invocation.results.mapIndexed { index, item ->
+                val timestamp = System.currentTimeMillis()
+                val filename = "${timestamp}_$index.png"
+                val file = File(dir, filename)
+                // Track only paths that did not exist before this invocation;
+                // a failed write must never remove an older generated image.
+                if (!file.exists()) createdFiles += file
+                filesManager.createImageFileFromBase64(item.data, file.absolutePath)
+                GeneratedImageFile(
+                    file = file,
+                    relativePath = "chat_images/${conversationId}/${file.name}",
+                    modelDisplayName = invocation.modelDisplayName,
+                    mimeType = item.mimeType,
+                )
+            }
+        }.onFailure {
+            // Keep the original provider/decode/write exception. Cleanup is
+            // best-effort and limited to files newly created by this call.
+            createdFiles.forEach { file -> runCatching { file.delete() } }
         }
     }
 

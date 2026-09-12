@@ -213,7 +213,10 @@ val EMPTY_RECIPE_DIGEST: String by lazy { ContentDigest.sha256("") }
 
 /** Write-step / capability analysis used by the import preview and tool metadata. */
 fun RecipeManifest.toDefinition(manifestJson: String, primitiveRegistry: ToolRegistry): RecipeDefinition {
-    val writeCount = (steps + compensate).count { primitiveRegistry.metadataFor(it.tool)?.mutates == true }
+    val writeCount = (steps + compensate).count { step ->
+        primitiveRegistry.evaluateInvocation(step.tool, step.args)?.mutates
+            ?: primitiveRegistry.metadataFor(step.tool)?.mutates == true
+    }
     return RecipeDefinition(
         name = name,
         version = version,

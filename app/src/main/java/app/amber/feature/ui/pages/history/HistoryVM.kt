@@ -3,21 +3,25 @@ package app.amber.feature.ui.pages.history
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import androidx.paging.cachedIn
 import androidx.paging.PagingData
+import androidx.paging.cachedIn
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flow
-import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.withContext
 import app.amber.core.model.Conversation
+import app.amber.core.infra.AppScope
 import app.amber.core.repository.ConversationRepository
 import app.amber.core.service.ChatService
 import app.amber.core.sync.core.SyncRestoreWriteEpoch
@@ -29,6 +33,7 @@ private const val TAG = "HistoryVM"
 class HistoryVM(
     private val conversationRepo: ConversationRepository,
     private val chatService: ChatService,
+    private val appScope: AppScope,
     private val restoreWriteGate: SyncRestoreWriteGate? = null,
 ) : ViewModel() {
     private val reloadRequests = MutableStateFlow(0)
@@ -60,18 +65,19 @@ class HistoryVM(
     /** 在途删除任务：Undo/purge 必须先 join，避免在途 delete 把刚恢复的会话再次删掉。 */
     private val deleteJobs = mutableMapOf<Uuid, Job>()
 
-    fun deleteConversation(conversation: Conversation) {
-        val job = viewModelScope.launch {
+    fun deleteConversation(conversation: Conversation): Deferred<Unit> {
+        val job = appScope.async(Dispatchers.Main.immediate) {
             // Cleanup is deferred so the snackbar Undo can restore the
             // conversation with attachments/images/favorites intact.
             chatService.deleteConversation(conversation, deferCleanup = true)
         }
         deleteJobs[conversation.id] = job
         job.invokeOnCompletion { deleteJobs.remove(conversation.id, job) }
+        return job
     }
 
     fun purgeDeletedConversation(conversation: Conversation) {
-        viewModelScope.launch {
+        appScope.launch(Dispatchers.Main.immediate) {
             deleteJobs[conversation.id]?.join()
             chatService.purgeDeletedConversation(conversation)
         }
@@ -89,16 +95,20 @@ class HistoryVM(
         }
     }
 
-    fun restoreConversation(conversation: Conversation) {
-        viewModelScope.launch {
+    fun restoreConversation(conversation: Conversation): Deferred<Unit> =
+        appScope.async(Dispatchers.Main.immediate) {
             val expectedRestoreEpoch = captureRestoreEpoch()
             deleteJobs[conversation.id]?.join()
-            withRestoreWrite(expectedRestoreEpoch) {
-                conversationRepo.insertConversation(conversation)
-                chatService.markConversationRestored(conversation.id)
+            try {
+                withRestoreWrite(expectedRestoreEpoch) {
+                    conversationRepo.insertConversation(conversation)
+                    chatService.markConversationRestored(conversation.id)
+                }
+            } catch (error: Exception) {
+                purgeDeletedConversation(conversation)
+                throw error
             }
         }
-    }
 
     suspend fun getFullConversation(conversationId: Uuid): Conversation? {
         return conversationRepo.getConversationById(conversationId)

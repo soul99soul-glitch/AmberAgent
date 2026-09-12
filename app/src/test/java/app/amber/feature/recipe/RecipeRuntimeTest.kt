@@ -270,6 +270,30 @@ class RecipeRuntimeTest {
     }
 
     @Test
+    fun `recipe preview counts dynamic signed fetch writes conservatively`() {
+        val signedFetch = Tool(
+            name = "wm_signed_fetch",
+            description = "Test dynamic signed fetch primitive",
+            execute = { listOf(UIMessagePart.Text("{}")) },
+        )
+        val primitives = ToolRegistry.from(listOf(signedFetch))
+        val manifest = """
+            {"schemaVersion": 1, "name": "signed_fetch_preview", "version": "1.0.0",
+             "inputs": [{"name": "method", "type": "string"}],
+             "steps": [
+                {"id": "read", "tool": "wm_signed_fetch", "args": {"method": "GET"}},
+                {"id": "write", "tool": "wm_signed_fetch", "args": {"method": "POST"}},
+                {"id": "deferred", "tool": "wm_signed_fetch", "args": {"method": "${'$'}input.method"}}
+             ]}
+        """.trimIndent()
+
+        val definition = RecipeManifestParser.parse(manifest).toDefinition(manifest, primitives)
+
+        assertTrue(definition.hasWriteSteps)
+        assertEquals(2, definition.writeStepCount)
+    }
+
+    @Test
     fun `recipe management mutations are high risk mandatory non idempotent writes`() = runBlocking {
         val tools = RecipeToolFactory(registry, json).createTools(
             context = runContext(installed = registry.installed()),

@@ -34,7 +34,6 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -53,6 +52,10 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.util.fastForEach
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListScope
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.dokar.sonner.ToastType
 import com.composables.icons.lucide.Lucide
@@ -96,12 +99,55 @@ fun SettingAgentMemoryPage(
     val vm = koinViewModel<SettingAgentMemoryVM>()
     val navController = LocalNavController.current
     val settings by vm.settings.collectAsStateWithLifecycle()
-    val memories by vm.memories.collectAsStateWithLifecycle()
-    val shortTermMemories by vm.shortTermMemories.collectAsStateWithLifecycle()
-    val longTermMemories by vm.longTermMemories.collectAsStateWithLifecycle()
-    val pendingCandidates by vm.pendingCandidates.collectAsStateWithLifecycle()
-    val recentMemoryEvents by vm.recentMemoryEvents.collectAsStateWithLifecycle()
-    val dreamPlan by vm.dreamPlan.collectAsStateWithLifecycle()
+    val memoryCounts by if (subpage == MemorySettingsSubpage.Overview) {
+        vm.memoryCounts.collectAsStateWithLifecycle()
+    } else {
+        remember { mutableStateOf<Map<String, Int>>(emptyMap()) }
+    }
+    val memories by if (subpage == MemorySettingsSubpage.Library) {
+        vm.memories.collectAsStateWithLifecycle()
+    } else {
+        remember { mutableStateOf(emptyList<AssistantMemory>()) }
+    }
+    val shortTermMemories by if (subpage == MemorySettingsSubpage.Library) {
+        vm.shortTermMemories.collectAsStateWithLifecycle()
+    } else {
+        remember { mutableStateOf(emptyList<AssistantMemory>()) }
+    }
+    val longTermMemories by if (subpage == MemorySettingsSubpage.Library) {
+        vm.longTermMemories.collectAsStateWithLifecycle()
+    } else {
+        remember { mutableStateOf(emptyList<AssistantMemory>()) }
+    }
+    val pendingCandidateCount by if (
+        subpage == MemorySettingsSubpage.Overview ||
+        subpage == MemorySettingsSubpage.Worker
+    ) {
+        vm.pendingCandidateCount.collectAsStateWithLifecycle()
+    } else {
+        remember { mutableStateOf(0) }
+    }
+    val pendingCandidates by if (subpage == MemorySettingsSubpage.Library) {
+        vm.pendingCandidates.collectAsStateWithLifecycle()
+    } else {
+        remember { mutableStateOf<List<MemoryCandidate>>(emptyList()) }
+    }
+    val recentMemoryEvents by if (
+        subpage == MemorySettingsSubpage.Worker ||
+        subpage == MemorySettingsSubpage.Library
+    ) {
+        vm.recentMemoryEvents.collectAsStateWithLifecycle()
+    } else {
+        remember { mutableStateOf<List<MemoryEvent>>(emptyList()) }
+    }
+    val dreamPlan by if (
+        subpage == MemorySettingsSubpage.Overview ||
+        subpage == MemorySettingsSubpage.Worker
+    ) {
+        vm.dreamPlan.collectAsStateWithLifecycle()
+    } else {
+        remember { mutableStateOf<PersistedMemoryDreamPlan?>(null) }
+    }
     val memoryTaskRunning by vm.memoryTaskRunning.collectAsStateWithLifecycle()
     val operationMessage by vm.operationMessage.collectAsStateWithLifecycle()
     val memoryMutation by vm.memoryMutation.collectAsStateWithLifecycle()
@@ -276,16 +322,46 @@ fun SettingAgentMemoryPage(
         modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
         containerColor = workspaceColors().canvas,
     ) { innerPadding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding)
-                .padding(horizontal = SettingPageHorizontalInset, vertical = 8.dp)
-                .verticalScroll(rememberScrollState())
-                .imePadding(),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
-        ) {
-            when (subpage) {
+        if (subpage == MemorySettingsSubpage.Library) {
+            MemoryLibrarySubpage(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding)
+                    .padding(horizontal = SettingPageHorizontalInset, vertical = 8.dp)
+                    .imePadding(),
+                memories = memories,
+                shortTermMemories = shortTermMemories,
+                longTermMemories = longTermMemories,
+                pendingCandidates = pendingCandidates,
+                recentMemoryEvents = recentMemoryEvents,
+                running = memoryTaskRunning,
+                onAcceptCandidate = vm::acceptCandidate,
+                onIgnoreCandidate = vm::ignoreCandidate,
+                onIgnoreLowConfidenceCandidates = vm::ignoreLowConfidenceCandidates,
+                onExport = {
+                    val baseDir = context.getExternalFilesDir(null) ?: context.filesDir
+                    vm.exportMemories(baseDir)
+                },
+                onImport = {
+                    val baseDir = context.getExternalFilesDir(null) ?: context.filesDir
+                    vm.importMemories(File(baseDir, "AmberAgentMemory"))
+                },
+                onAddMemory = { editingMemory = AssistantMemory(0, "") },
+                onEditMemory = { editingMemory = it },
+                onDeleteMemory = { pendingDeleteMemory = it },
+                onInfoClick = { title, text -> memoryInfoDialog = title to text },
+            )
+        } else {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding)
+                    .padding(horizontal = SettingPageHorizontalInset, vertical = 8.dp)
+                    .verticalScroll(rememberScrollState())
+                    .imePadding(),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                when (subpage) {
                 MemorySettingsSubpage.Overview -> {
                     AgentSoulCard(
                         value = settings.agentRuntime.agentSoulMarkdown,
@@ -294,10 +370,10 @@ fun SettingAgentMemoryPage(
                         },
                     )
                     MemoryOverviewEntries(
-                        pendingCandidateCount = pendingCandidates.size,
-                        coreCount = memories.size,
-                        shortCount = shortTermMemories.size,
-                        longCount = longTermMemories.size,
+                        pendingCandidateCount = pendingCandidateCount,
+                        coreCount = memoryCounts[MemoryRepository.GLOBAL_MEMORY_ID] ?: 0,
+                        shortCount = memoryCounts[MemoryRepository.SHORT_TERM_MEMORY_ID] ?: 0,
+                        longCount = memoryCounts[MemoryRepository.LONG_TERM_MEMORY_ID] ?: 0,
                         hasPendingDreamPlan = dreamPlan != null,
                         onOpen = { target -> navController.navigate(target.toScreen()) },
                     )
@@ -310,7 +386,7 @@ fun SettingAgentMemoryPage(
 
                 MemorySettingsSubpage.Worker -> MemoryWorkerSubpage(
                     settings = settings,
-                    pendingCandidateCount = pendingCandidates.size,
+                    pendingCandidateCount = pendingCandidateCount,
                     eventCount = recentMemoryEvents.size,
                     dreamPlan = dreamPlan,
                     running = memoryTaskRunning,
@@ -325,29 +401,8 @@ fun SettingAgentMemoryPage(
                     onUpdate = vm::updateAgentRuntime,
                 )
 
-                MemorySettingsSubpage.Library -> MemoryLibrarySubpage(
-                    memories = memories,
-                    shortTermMemories = shortTermMemories,
-                    longTermMemories = longTermMemories,
-                    pendingCandidates = pendingCandidates,
-                    recentMemoryEvents = recentMemoryEvents,
-                    running = memoryTaskRunning,
-                    onAcceptCandidate = vm::acceptCandidate,
-                    onIgnoreCandidate = vm::ignoreCandidate,
-                    onIgnoreLowConfidenceCandidates = vm::ignoreLowConfidenceCandidates,
-                    onExport = {
-                        val baseDir = context.getExternalFilesDir(null) ?: context.filesDir
-                        vm.exportMemories(baseDir)
-                    },
-                    onImport = {
-                        val baseDir = context.getExternalFilesDir(null) ?: context.filesDir
-                        vm.importMemories(File(baseDir, "AmberAgentMemory"))
-                    },
-                    onAddMemory = { editingMemory = AssistantMemory(0, "") },
-                    onEditMemory = { editingMemory = it },
-                    onDeleteMemory = { pendingDeleteMemory = it },
-                    onInfoClick = { title, text -> memoryInfoDialog = title to text },
-                )
+                MemorySettingsSubpage.Library -> Unit
+                }
             }
         }
     }
@@ -1128,6 +1183,7 @@ private fun MemoryCompactionSubpage(
 
 @Composable
 private fun MemoryLibrarySubpage(
+    modifier: Modifier,
     memories: List<AssistantMemory>,
     shortTermMemories: List<AssistantMemory>,
     longTermMemories: List<AssistantMemory>,
@@ -1148,70 +1204,99 @@ private fun MemoryLibrarySubpage(
     var showEventsDialog by remember { mutableStateOf(false) }
     // 设计稿默认展示候选审核区，真实候选仍由仓库状态决定；空列表时继续显示空态。
     var showCandidates by remember { mutableStateOf(true) }
+    val coreMemoryTitle = stringResource(R.string.memory_core_title)
+    val coreMemoryEmptyText = stringResource(R.string.setting_agent_memory_empty)
+    val coreMemoryInfoTitle = stringResource(R.string.memory_core_info_title)
+    val coreMemoryInfoText = stringResource(R.string.memory_core_info_body)
+    val shortTermMemoryTitle = stringResource(R.string.memory_short_title)
+    val shortTermMemoryEmptyText = stringResource(R.string.setting_agent_memory_short_empty)
+    val shortTermMemoryInfoTitle = stringResource(R.string.setting_agent_memory_short_info_title)
+    val shortTermMemoryInfoText = stringResource(R.string.setting_agent_memory_short_info_body)
+    val longTermMemoryTitle = stringResource(R.string.memory_long_title)
+    val longTermMemoryEmptyText = stringResource(R.string.setting_agent_memory_long_empty)
+    val longTermMemoryInfoTitle = stringResource(R.string.setting_agent_memory_long_info_title)
+    val longTermMemoryInfoText = stringResource(R.string.setting_agent_memory_long_info_body)
 
-    MemorySummarySection(
-        coreMemories = memories,
-        longTermMemories = longTermMemories,
-        shortTermMemories = shortTermMemories,
-        onEditMemory = onEditMemory,
-    )
+    LazyColumn(
+        modifier = modifier,
+        state = rememberLazyListState(),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        item("memory_summary") {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                MemorySummarySection(
+                    coreMemories = memories,
+                    longTermMemories = longTermMemories,
+                    shortTermMemories = shortTermMemories,
+                    onEditMemory = onEditMemory,
+                )
+            }
+        }
 
-    MemoryCandidateInboxEntry(
-        candidateCount = pendingCandidates.size,
-        lowConfidenceCount = pendingCandidates.count { it.confidence < LOW_CONFIDENCE_CANDIDATE_THRESHOLD },
-        expanded = showCandidates,
-        onToggle = { showCandidates = !showCandidates },
-    )
-    if (showCandidates) {
-        MemoryCandidatesSection(
-            candidates = pendingCandidates,
-            onAccept = onAcceptCandidate,
-            onIgnore = onIgnoreCandidate,
-            onIgnoreLowConfidence = onIgnoreLowConfidenceCandidates,
+        item("memory_candidate_inbox") {
+            MemoryCandidateInboxEntry(
+                candidateCount = pendingCandidates.size,
+                lowConfidenceCount = pendingCandidates.count {
+                    it.confidence < LOW_CONFIDENCE_CANDIDATE_THRESHOLD
+                },
+                expanded = showCandidates,
+                onToggle = { showCandidates = !showCandidates },
+            )
+        }
+
+        if (showCandidates) {
+            memoryCandidatesSection(
+                candidates = pendingCandidates,
+                onAccept = onAcceptCandidate,
+                onIgnore = onIgnoreCandidate,
+                onIgnoreLowConfidence = onIgnoreLowConfidenceCandidates,
+            )
+        }
+
+        memoryRecordsSection(
+            title = coreMemoryTitle,
+            emptyText = coreMemoryEmptyText,
+            memories = memories,
+            infoTitle = coreMemoryInfoTitle,
+            infoText = coreMemoryInfoText,
+            onInfoClick = onInfoClick,
+            onAddMemory = onAddMemory,
+            onEditMemory = onEditMemory,
+            onDeleteMemory = onDeleteMemory,
         )
+
+        memoryRecordsSection(
+            title = shortTermMemoryTitle,
+            emptyText = shortTermMemoryEmptyText,
+            memories = shortTermMemories,
+            infoTitle = shortTermMemoryInfoTitle,
+            infoText = shortTermMemoryInfoText,
+            onInfoClick = onInfoClick,
+            onAddMemory = null,
+            onEditMemory = onEditMemory,
+            onDeleteMemory = onDeleteMemory,
+        )
+
+        memoryRecordsSection(
+            title = longTermMemoryTitle,
+            emptyText = longTermMemoryEmptyText,
+            memories = longTermMemories,
+            infoTitle = longTermMemoryInfoTitle,
+            infoText = longTermMemoryInfoText,
+            onInfoClick = onInfoClick,
+            onAddMemory = null,
+            onEditMemory = onEditMemory,
+            onDeleteMemory = onDeleteMemory,
+        )
+
+        item("memory_maintenance") {
+            MemoryMaintenanceSection(
+                eventCount = recentMemoryEvents.size,
+                onOpenPortability = { showPortabilityDialog = true },
+                onOpenEvents = { showEventsDialog = true },
+            )
+        }
     }
-
-    MemoryRecordsSection(
-        title = stringResource(R.string.memory_core_title),
-        emptyText = stringResource(R.string.setting_agent_memory_empty),
-        memories = memories,
-        infoTitle = stringResource(R.string.memory_core_info_title),
-        infoText = stringResource(R.string.memory_core_info_body),
-        onInfoClick = onInfoClick,
-        onAddMemory = onAddMemory,
-        onEditMemory = onEditMemory,
-        onDeleteMemory = onDeleteMemory,
-    )
-
-    MemoryRecordsSection(
-        title = stringResource(R.string.memory_short_title),
-        emptyText = stringResource(R.string.setting_agent_memory_short_empty),
-        memories = shortTermMemories,
-        infoTitle = stringResource(R.string.setting_agent_memory_short_info_title),
-        infoText = stringResource(R.string.setting_agent_memory_short_info_body),
-        onInfoClick = onInfoClick,
-        onAddMemory = null,
-        onEditMemory = onEditMemory,
-        onDeleteMemory = onDeleteMemory,
-    )
-
-    MemoryRecordsSection(
-        title = stringResource(R.string.memory_long_title),
-        emptyText = stringResource(R.string.setting_agent_memory_long_empty),
-        memories = longTermMemories,
-        infoTitle = stringResource(R.string.setting_agent_memory_long_info_title),
-        infoText = stringResource(R.string.setting_agent_memory_long_info_body),
-        onInfoClick = onInfoClick,
-        onAddMemory = null,
-        onEditMemory = onEditMemory,
-        onDeleteMemory = onDeleteMemory,
-    )
-
-    MemoryMaintenanceSection(
-        eventCount = recentMemoryEvents.size,
-        onOpenPortability = { showPortabilityDialog = true },
-        onOpenEvents = { showEventsDialog = true },
-    )
 
     if (showPortabilityDialog) {
         AlertDialog(
@@ -1491,86 +1576,104 @@ private fun AssistantMemory.isSummarySensitive(): Boolean {
     return isSensitiveMemoryContent(content)
 }
 
-@Composable
-private fun MemoryCandidatesSection(
+private fun LazyListScope.memoryCandidatesSection(
     candidates: List<MemoryCandidate>,
     onAccept: (String) -> Unit,
     onIgnore: (String) -> Unit,
     onIgnoreLowConfidence: () -> Unit,
 ) {
-    SectionLabel(
-        text = stringResource(R.string.memory_candidate_review_title),
-        modifier = Modifier.padding(horizontal = 8.dp),
-    )
-    if (candidates.isEmpty()) {
-        Text(
-            text = stringResource(R.string.memory_candidate_empty),
-            style = LocalAmberType.current.secondary,
-            color = workspaceColors().muted,
+    item("memory_candidate_section_label") {
+        SectionLabel(
+            text = stringResource(R.string.memory_candidate_review_title),
             modifier = Modifier.padding(horizontal = 8.dp),
         )
+    }
+    if (candidates.isEmpty()) {
+        item("memory_candidate_empty") {
+            Text(
+                text = stringResource(R.string.memory_candidate_empty),
+                style = LocalAmberType.current.secondary,
+                color = workspaceColors().muted,
+                modifier = Modifier.padding(horizontal = 8.dp),
+            )
+        }
         return
     }
     val lowConfidenceCount = candidates.count { it.confidence < LOW_CONFIDENCE_CANDIDATE_THRESHOLD }
     if (lowConfidenceCount > 0) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 8.dp),
-            horizontalArrangement = Arrangement.End,
-        ) {
-            TextButton(onClick = onIgnoreLowConfidence) {
-                Text(stringResource(R.string.memory_ignore_low_confidence, lowConfidenceCount))
+        item("memory_candidate_low_confidence") {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 8.dp),
+                horizontalArrangement = Arrangement.End,
+            ) {
+                TextButton(onClick = onIgnoreLowConfidence) {
+                    Text(stringResource(R.string.memory_ignore_low_confidence, lowConfidenceCount))
+                }
             }
         }
     }
-    candidates.forEach { candidate ->
-        AmberCard(
-            modifier = Modifier.fillMaxWidth(),
+    items(candidates, key = { "memory_candidate_${it.id}" }) { candidate ->
+        MemoryCandidateCard(
+            candidate = candidate,
+            onAccept = { onAccept(candidate.id) },
+            onIgnore = { onIgnore(candidate.id) },
+        )
+    }
+}
+
+@Composable
+private fun MemoryCandidateCard(
+    candidate: MemoryCandidate,
+    onAccept: () -> Unit,
+    onIgnore: () -> Unit,
+) {
+    AmberCard(
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Column(
-                modifier = Modifier.padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                val reviewSuffix = if (candidate.confidence >= LOW_CONFIDENCE_CANDIDATE_THRESHOLD) {
-                    stringResource(R.string.memory_recommend_manual_review)
-                } else {
-                    ""
-                }
+            val reviewSuffix = if (candidate.confidence >= LOW_CONFIDENCE_CANDIDATE_THRESHOLD) {
+                stringResource(R.string.memory_recommend_manual_review)
+            } else {
+                ""
+            }
+            Text(
+                text = stringResource(
+                    R.string.memory_candidate_meta,
+                    candidate.scope.wireName,
+                    candidate.kind.wireName,
+                    "%.2f".format(candidate.confidence),
+                    reviewSuffix,
+                ),
+                // Graphite §3: scope/kind tags + confidence value are machine-facts → MONO.
+                style = LocalAmberType.current.meta,
+                color = LocalAmberTokens.current.accent,
+            )
+            Text(
+                text = candidate.content,
+                style = LocalAmberType.current.body,
+                maxLines = 4,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (candidate.reason.isNotBlank()) {
                 Text(
-                    text = stringResource(
-                        R.string.memory_candidate_meta,
-                        candidate.scope.wireName,
-                        candidate.kind.wireName,
-                        "%.2f".format(candidate.confidence),
-                        reviewSuffix,
-                    ),
-                    // Graphite §3: scope/kind tags + confidence value are machine-facts → MONO.
-                    style = LocalAmberType.current.meta,
-                    color = LocalAmberTokens.current.accent,
-                )
-                Text(
-                    text = candidate.content,
-                    style = LocalAmberType.current.body,
-                    maxLines = 4,
+                    text = candidate.reason,
+                    style = LocalAmberType.current.secondary,
+                    color = workspaceColors().muted,
+                    maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
-                if (candidate.reason.isNotBlank()) {
-                    Text(
-                        text = candidate.reason,
-                        style = LocalAmberType.current.secondary,
-                        color = workspaceColors().muted,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                    )
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TextButton(onClick = onAccept) {
+                    Text(stringResource(R.string.memory_accept))
                 }
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    TextButton(onClick = { onAccept(candidate.id) }) {
-                        Text(stringResource(R.string.memory_accept))
-                    }
-                    TextButton(onClick = { onIgnore(candidate.id) }) {
-                        Text(stringResource(R.string.memory_ignore))
-                    }
+                TextButton(onClick = onIgnore) {
+                    Text(stringResource(R.string.memory_ignore))
                 }
             }
         }
@@ -1802,8 +1905,7 @@ private fun MemoryPortabilitySection(
     }
 }
 
-@Composable
-private fun MemoryRecordsSection(
+private fun LazyListScope.memoryRecordsSection(
     title: String,
     emptyText: String,
     memories: List<AssistantMemory>,
@@ -1813,6 +1915,44 @@ private fun MemoryRecordsSection(
     onAddMemory: (() -> Unit)?,
     onEditMemory: (AssistantMemory) -> Unit,
     onDeleteMemory: (AssistantMemory) -> Unit,
+) {
+    item("memory_records_header_$title") {
+        MemoryRecordsHeader(
+            title = title,
+            infoTitle = infoTitle,
+            infoText = infoText,
+            onInfoClick = onInfoClick,
+            onAddMemory = onAddMemory,
+        )
+    }
+
+    if (memories.isEmpty()) {
+        item("memory_records_empty_$title") {
+            Text(
+                text = emptyText,
+                style = LocalAmberType.current.secondary,
+                color = workspaceColors().muted,
+                modifier = Modifier.padding(horizontal = 8.dp),
+            )
+        }
+    } else {
+        items(memories, key = { "memory_record_${it.id}" }) { memory ->
+            MemoryItem(
+                memory = memory,
+                onEditMemory = onEditMemory,
+                onDeleteMemory = onDeleteMemory,
+            )
+        }
+    }
+}
+
+@Composable
+private fun MemoryRecordsHeader(
+    title: String,
+    infoTitle: String?,
+    infoText: String?,
+    onInfoClick: ((String, String) -> Unit)?,
+    onAddMemory: (() -> Unit)?,
 ) {
     Box(
         modifier = Modifier
@@ -1876,25 +2016,6 @@ private fun MemoryRecordsSection(
                     }
                 }
             }
-        }
-    }
-
-    if (memories.isEmpty()) {
-        Text(
-            text = emptyText,
-            style = LocalAmberType.current.secondary,
-            color = workspaceColors().muted,
-            modifier = Modifier.padding(horizontal = 8.dp),
-        )
-    }
-
-    memories.fastForEach { memory ->
-        key(memory.id) {
-            MemoryItem(
-                memory = memory,
-                onEditMemory = onEditMemory,
-                onDeleteMemory = onDeleteMemory,
-            )
         }
     }
 }

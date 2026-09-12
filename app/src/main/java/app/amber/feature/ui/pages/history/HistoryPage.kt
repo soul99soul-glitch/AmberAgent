@@ -46,6 +46,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -54,6 +55,7 @@ import androidx.paging.LoadState
 import androidx.paging.compose.collectAsLazyPagingItems
 import androidx.paging.compose.itemKey
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.CancellationException
 import app.amber.agent.R
 import app.amber.agent.Screen
 import app.amber.core.model.Conversation
@@ -75,6 +77,7 @@ fun HistoryPage(vm: HistoryVM = koinViewModel()) {
     val navController = LocalNavController.current
     val scope = rememberCoroutineScope()
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
+    val context = LocalContext.current
     val snackbarHostState = remember { SnackbarHostState() }
     var showDeleteAllDialog by remember { mutableStateOf(false) }
 
@@ -199,16 +202,27 @@ fun HistoryPage(vm: HistoryVM = koinViewModel()) {
                                 scope.launch {
                                     // 先获取完整的对话数据（包含 messageNodes），用于撤销恢复
                                     val fullConversation = vm.getFullConversation(conversation.id) ?: conversation
-                                    vm.deleteConversation(conversation)
-                                    val result = snackbarHostState.showSnackbar(
-                                        message = snackMessageDeleted,
-                                        actionLabel = snackMessageUndo,
-                                        withDismissAction = true,
-                                    )
-                                    if (result == SnackbarResult.ActionPerformed) {
-                                        vm.restoreConversation(fullConversation)
-                                    } else {
-                                        vm.purgeDeletedConversation(fullConversation)
+                                    val deletion = vm.deleteConversation(conversation)
+                                    var restoreRequested = false
+                                    try {
+                                        deletion.await()
+                                        val result = snackbarHostState.showSnackbar(
+                                            message = snackMessageDeleted,
+                                            actionLabel = snackMessageUndo,
+                                            withDismissAction = true,
+                                        )
+                                        if (result == SnackbarResult.ActionPerformed) {
+                                            restoreRequested = true
+                                            vm.restoreConversation(fullConversation).await()
+                                        }
+                                    } catch (error: CancellationException) {
+                                        throw error
+                                    } catch (error: Exception) {
+                                        snackbarHostState.showSnackbar(
+                                            error.message ?: context.getString(R.string.error_title_operation)
+                                        )
+                                    } finally {
+                                        if (!restoreRequested) vm.purgeDeletedConversation(fullConversation)
                                     }
                                 }
                             },

@@ -379,7 +379,7 @@ class DefaultRunKernel(
                                 toolCallId = tool.toolCallId,
                                 toolName = tool.toolName,
                                 input = tool.input,
-                                effectClass = toolDef?.effectClass() ?: ToolEffectClass.NON_IDEMPOTENT_WRITE,
+                                effectClass = toolDef?.effectClass(tool.input) ?: ToolEffectClass.NON_IDEMPOTENT_WRITE,
                                 messagePersistenceCursor = messageId,
                             )
                             effects[tool.toolCallId] = effect

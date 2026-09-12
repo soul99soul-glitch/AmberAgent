@@ -11,6 +11,7 @@ import app.amber.agent.data.db.entity.MemoryCandidateEntity
 import app.amber.agent.data.db.entity.MemoryEntity
 import app.amber.agent.data.db.entity.MemoryEventEntity
 import app.amber.core.memory.dream.MemoryDreamApplier
+import app.amber.core.memory.dream.MemoryMergeSuggestion
 import app.amber.core.memory.dream.MemoryDreamPlan
 import app.amber.core.memory.dream.MemorySupersedeSuggestion
 import app.amber.core.memory.model.MemoryEventType
@@ -24,6 +25,55 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class MemoryDreamApplierTest {
+    @Test
+    fun mergeThenPromoteUsesTheRevisionReturnedByTheMerge() = runBlocking {
+        val memoryDao = FakeMemoryDao(
+            listOf(
+                entity(
+                    id = 1,
+                    assistantId = MemoryRepository.SHORT_TERM_MEMORY_ID,
+                    content = "用户偏好中文回复。",
+                    scope = MemoryScope.SHORT_TERM,
+                    kind = MemoryKind.PROJECT,
+                    confidence = 0.9f,
+                ),
+                entity(
+                    id = 2,
+                    assistantId = MemoryRepository.SHORT_TERM_MEMORY_ID,
+                    content = "用户偏好简洁回复。",
+                    scope = MemoryScope.SHORT_TERM,
+                    kind = MemoryKind.PROJECT,
+                    confidence = 0.8f,
+                ),
+            )
+        )
+        val repository = MemoryRepository(memoryDao, FakeMemoryCandidateDao(), FakeMemoryEventDao())
+        val applier = MemoryDreamApplier(repository, MemoryEventLogger(repository))
+
+        val applied = applier.apply(
+            MemoryDreamPlan(
+                mergeSuggestions = listOf(
+                    MemoryMergeSuggestion(
+                        targetMemoryId = 1,
+                        duplicateMemoryIds = listOf(2),
+                        mergedContent = "用户偏好中文简洁回复。",
+                    )
+                ),
+                promoteMemoryIds = listOf(1),
+            )
+        )
+
+        val records = repository.getAllRecords().associateBy { it.id }
+        assertEquals(1, applied.mergeSuggestions.size)
+        assertEquals(listOf(1), applied.promoteMemoryIds)
+        assertEquals("用户偏好中文简洁回复。", records.getValue(1).content)
+        assertEquals(MemoryScope.LONG_TERM, records.getValue(1).scope)
+        assertEquals(MemoryRepository.LONG_TERM_MEMORY_ID, records.getValue(1).assistantId)
+        assertEquals(3, records.getValue(1).revision)
+        assertTrue(records.getValue(2).archived)
+        assertEquals(2, records.getValue(2).revision)
+    }
+
     @Test
     fun supersedeCreatesNewRecordArchivesOldAndLogsEvents() = runBlocking {
         val memoryDao = FakeMemoryDao(
@@ -128,6 +178,7 @@ class MemoryDreamApplierTest {
         kind: MemoryKind,
         sourceConversationId: String? = null,
         sourceMessageIdsJson: String = "[]",
+        confidence: Float = 0.9f,
         pinned: Boolean = false,
     ) = MemoryEntity(
         id = id,
@@ -137,7 +188,7 @@ class MemoryDreamApplierTest {
         kind = kind.wireName,
         sourceConversationId = sourceConversationId,
         sourceMessageIdsJson = sourceMessageIdsJson,
-        confidence = 0.9f,
+        confidence = confidence,
         pinned = pinned,
         archived = false,
         createdAt = 1_000L + id,
@@ -292,6 +343,9 @@ private class FakeMemoryCandidateDao : MemoryCandidateDAO {
 
     override fun getCandidatesByStatusFlow(status: String): Flow<List<MemoryCandidateEntity>> =
         flowOf(candidates.filter { it.status == status })
+
+    override fun countCandidatesByStatusFlow(status: String): Flow<Int> =
+        flowOf(candidates.count { it.status == status })
 
     override suspend fun getCandidatesByStatus(status: String): List<MemoryCandidateEntity> =
         candidates.filter { it.status == status }

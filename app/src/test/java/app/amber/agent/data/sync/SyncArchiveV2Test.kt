@@ -4,6 +4,7 @@ import android.app.Application
 import android.content.Context
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.room.Room
+import app.amber.agent.R
 import app.amber.ai.provider.providers.google.GoogleGeminiAuthStore
 import app.amber.ai.provider.providers.openai.OpenAICodexAuthStore
 import app.amber.agent.data.db.AppDatabase
@@ -182,7 +183,7 @@ class SyncArchiveV2Test {
             )
         }.exceptionOrNull()
         assertTrue(error is IllegalArgumentException)
-        assertTrue(error!!.message!!.contains("口令错误") || error.message!!.contains("损坏"))
+        assertEquals(context.getString(R.string.backup_incompatible), error!!.message)
     }
 
     @Test
@@ -300,7 +301,12 @@ class SyncArchiveV2Test {
                 )
             }.exceptionOrNull()
             assertTrue(error is IllegalArgumentException)
-            assertTrue(error?.message.orEmpty().contains("缺少完整恢复所需数据集"))
+            assertTrue(
+                error?.message.orEmpty().startsWith(
+                    context.getString(R.string.backup_format_incompatible, "")
+                )
+            )
+            assertTrue(error?.message.orEmpty().contains("files"))
             assertEquals(listOf("local-conversation"), database.conversationDao().getAllIds())
         } finally {
             manager.discardVerification(verification)
@@ -406,7 +412,7 @@ class SyncArchiveV2Test {
             otherDeviceManager.verifyArchive(archiveFile(archive), SyncRestoreRequest(passphrase = ""))
         }.exceptionOrNull()
         assertTrue(error is IllegalStateException)
-        assertTrue(error!!.message!!.contains("设备绑定"))
+        assertEquals(context.getString(R.string.backup_device_bound_restore_hint), error!!.message)
     }
 
     // ---------------- fixtures ----------------

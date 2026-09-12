@@ -79,6 +79,7 @@ class LiveModeManager(
     }
 
     fun pause() {
+        analysisGeneration.incrementAndGet()
         _state.update {
             it.copy(
                 paused = true,
@@ -104,6 +105,7 @@ class LiveModeManager(
     }
 
     fun stop() {
+        analysisGeneration.incrementAndGet()
         loopJob?.cancel()
         loopJob = null
         eventJob?.cancel()
@@ -345,6 +347,7 @@ class LiveModeManager(
         analysisJob = appScope.launch(Dispatchers.IO) {
             try {
                 _state.update {
+                    if (generation != analysisGeneration.get()) return@update it
                     it.copy(
                         analyzing = true,
                         requestedAction = if (actionLabel == DEFAULT_ACTION_LABEL) it.requestedAction else actionLabel,
@@ -397,20 +400,22 @@ class LiveModeManager(
             } catch (error: Throwable) {
                 Log.e(TAG, "Live analysis failed", error)
                 withContext(Dispatchers.Main.immediate) {
-                    val failure = LiveFailure.from(
-                        context = context,
-                        error = error,
-                        actionLabel = localizedActionLabel(actionLabel),
-                    )
-                    if (failure.retryable) engine.onRetryableFailure(System.currentTimeMillis())
-                    _state.update {
-                        it.copy(
-                            analyzing = false,
-                            statusText = failure.statusText,
-                            error = failure.message,
-                            completedAction = "",
-                            nextAnalysisAfterMillis = if (failure.retryable) engine.backoffUntilMillis() else 0L,
+                    if (generation == analysisGeneration.get()) {
+                        val failure = LiveFailure.from(
+                            context = context,
+                            error = error,
+                            actionLabel = localizedActionLabel(actionLabel),
                         )
+                        if (failure.retryable) engine.onRetryableFailure(System.currentTimeMillis())
+                        _state.update {
+                            it.copy(
+                                analyzing = false,
+                                statusText = failure.statusText,
+                                error = failure.message,
+                                completedAction = "",
+                                nextAnalysisAfterMillis = if (failure.retryable) engine.backoffUntilMillis() else 0L,
+                            )
+                        }
                     }
                 }
             }

@@ -23,6 +23,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -45,6 +46,9 @@ import app.amber.feature.ui.theme.LocalDarkMode
 import app.amber.core.utils.escapeHtml
 import app.amber.core.utils.exportImage
 import app.amber.core.utils.toCssHex
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 private val mermaidHeightCache = CacheBuilder.newBuilder()
     .maximumSize(100)
@@ -67,6 +71,7 @@ fun Mermaid(
     val context = LocalContext.current
     val activity = LocalActivity.current
     val toaster = LocalToaster.current
+    val scope = rememberCoroutineScope()
 
     var contentHeight by remember { mutableIntStateOf(mermaidHeightCache.getIfPresent(code) ?: 150) }
     val height = with(density) {
@@ -81,31 +86,23 @@ fun Mermaid(
                 mermaidHeightCache.put(code, contentHeight)
             },
             onExportImage = { base64Image ->
-                runCatching {
-                    activity?.let {
-                        // 解码Base64图像并保存
-                        try {
+                scope.launch {
+                    val saved = withContext(Dispatchers.IO) {
+                        runCatching {
+                            val target = activity ?: return@runCatching false
                             val imageBytes = Base64.decode(base64Image, Base64.DEFAULT)
-                            val bitmap =
-                                BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.size)
-                            context.exportImage(
-                                it,
-                                bitmap,
-                                "mermaid_${System.currentTimeMillis()}.png"
-                            )
-                        } catch (e: Exception) {
-                            e.printStackTrace()
-                        }
+                            val bitmap = BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.size)
+                                ?: return@runCatching false
+                            try {
+                                context.exportImage(target, bitmap, "mermaid_${System.currentTimeMillis()}.png")
+                            } finally {
+                                bitmap.recycle()
+                            }
+                        }.onFailure { it.printStackTrace() }.getOrDefault(false)
                     }
                     toaster.show(
-                        context.getString(R.string.mermaid_export_success),
-                        type = ToastType.Success
-                    )
-                }.onFailure {
-                    it.printStackTrace()
-                    toaster.show(
-                        context.getString(R.string.mermaid_export_failed),
-                        type = ToastType.Error
+                        context.getString(if (saved) R.string.mermaid_export_success else R.string.mermaid_export_failed),
+                        type = if (saved) ToastType.Success else ToastType.Error,
                     )
                 }
             }

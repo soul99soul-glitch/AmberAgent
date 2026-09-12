@@ -15,8 +15,8 @@ internal object WebMountPageSnapshotCache {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Entry>?): Boolean = size > MAX_ENTRIES
     }
 
-    fun get(sessionId: String, kind: String, pageState: JsonElement): JsonElement? {
-        val key = key(sessionId, kind, pageState) ?: return null
+    fun get(sessionId: String, kind: String, pageState: JsonElement, options: JsonObject? = null): JsonElement? {
+        val key = key(sessionId, kind, pageState, options) ?: return null
         return synchronized(lock) {
             val entry = entries[key] ?: return@synchronized null
             if (clock() - entry.createdAtMs > TTL_MS) {
@@ -28,8 +28,8 @@ internal object WebMountPageSnapshotCache {
         }
     }
 
-    fun put(sessionId: String, kind: String, pageState: JsonElement, payload: JsonElement) {
-        val key = key(sessionId, kind, pageState) ?: return
+    fun put(sessionId: String, kind: String, pageState: JsonElement, payload: JsonElement, options: JsonObject? = null) {
+        val key = key(sessionId, kind, pageState, options) ?: return
         synchronized(lock) {
             sweepExpiredLocked()
             entries[key] = Entry(clock(), payload)
@@ -67,14 +67,14 @@ internal object WebMountPageSnapshotCache {
         }
     }
 
-    private fun key(sessionId: String, kind: String, pageState: JsonElement): String? {
+    private fun key(sessionId: String, kind: String, pageState: JsonElement, options: JsonObject?): String? {
         val obj = runCatching { pageState.jsonObject }.getOrNull() ?: return null
         val url = obj.string("url") ?: return null
         val fingerprint = obj.string("semantic_fingerprint") ?: return null
         val scroll = (obj["scroll"] as? JsonObject)?.let { scrollObj ->
             "${scrollObj.primitive("x")}:${scrollObj.primitive("y")}"
         }.orEmpty()
-        return "$sessionId|$kind|$url|$scroll|$fingerprint"
+        return "$sessionId|$kind|$url|$scroll|$fingerprint|$options"
     }
 
     private data class Entry(

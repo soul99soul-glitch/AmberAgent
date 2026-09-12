@@ -90,32 +90,16 @@ class SessionHandle internal constructor(
         dispatchWithLease: ((() -> Unit) -> Boolean)? = null,
     ): LoadState {
         ensureAlive()
-        val loadId = startLoad(url)
-        val completion = pendingLoad.get()?.completion
-            ?: error("startLoad failed to install completion")
+        val request = newLoadRequest()
         try {
             withContext(Dispatchers.Main) {
-                dispatchOnMain(dispatchWithLease, "loadUrl") {
-                    installDocumentStartBridge(url)
-                    webView.loadUrl(url)
-                }
+                startLoadAndNavigate(request, url, dispatchWithLease)
             }
-            withTimeoutOrNull(timeoutMs) { completion.await() }
+            withTimeoutOrNull(timeoutMs) { request.completion.await() }
         } finally {
             // Drop the completion if it's still ours; mark FAILED on timeout so
             // a stuck LOADING state doesn't linger forever.
-            val current = pendingLoad.get()
-            if (current?.loadId == loadId && !completion.isCompleted) {
-                pendingLoad.compareAndSet(current, null)
-                completion.completeExceptionally(JsBridge.JsBridgeException("loadUrl timed out / cancelled"))
-                if (_loadState.value.loadId == loadId && _loadState.value.status == LoadStatus.LOADING) {
-                    _loadState.value = _loadState.value.copy(
-                        status = LoadStatus.FAILED,
-                        error = "load timed out after ${timeoutMs}ms",
-                        updatedAtMs = System.currentTimeMillis(),
-                    )
-                }
-            }
+            clearPendingLoad(request, "loadUrl timed out / cancelled", "load timed out after ${timeoutMs}ms")
         }
         lastActivityMs.set(System.currentTimeMillis())
         return _loadState.value
@@ -131,37 +115,42 @@ class SessionHandle internal constructor(
         dispatchWithLease: ((() -> Unit) -> Boolean)? = null,
     ): LoadState {
         ensureAlive()
-        val loadId = startLoad(url)
+        val request = newLoadRequest()
+        var navigated = false
         try {
             withContext(Dispatchers.Main) {
-                dispatchOnMain(dispatchWithLease, "loadUrlNoWait") {
-                    installDocumentStartBridge(url)
-                    webView.loadUrl(url)
-                }
+                startLoadAndNavigate(request, url, dispatchWithLease)
+                navigated = true
             }
-        } catch (error: Throwable) {
-            failLoadIfCurrent(loadId, error)
-            throw error
+        } finally {
+            // A cancellation before the Main block runs must not strand a
+            // request; this also covers a failure after state installation but
+            // before navigation returns.
+            if (!navigated) {
+                clearPendingLoad(
+                    request,
+                    "loadUrl cancelled before navigation",
+                    "load cancelled before navigation",
+                )
+            }
         }
         lastActivityMs.set(System.currentTimeMillis())
         return _loadState.value
     }
 
-    /**
-     * Synchronously bump the load sequence, install a fresh pendingLoad,
-     * cancel any prior in-flight load, and seed [_loadState] with the
-     * LOADING placeholder. Used by both [loadUrl] and [loadUrlNoWait] so
-     * state updates always happen before the WebView actually starts loading.
-     */
-    private fun startLoad(url: String): Long {
-        val loadId = loadSeq.incrementAndGet()
-        val completion = CompletableDeferred<Unit>()
-        val prior = pendingLoad.getAndSet(LoadCompletion(loadId, completion))
+    /** Install the load state and navigate on Main as one serialized section. */
+    private fun startLoadAndNavigate(
+        request: LoadCompletion,
+        url: String,
+        dispatchWithLease: ((() -> Unit) -> Boolean)?,
+    ) {
+        ensureAlive()
+        val prior = pendingLoad.getAndSet(request)
         prior?.completion?.completeExceptionally(
-            JsBridge.JsBridgeException("superseded by load #$loadId")
+            JsBridge.JsBridgeException("superseded by load #${request.loadId}")
         )
         _loadState.value = LoadState(
-            loadId = loadId,
+            loadId = request.loadId,
             requestedUrl = url,
             committedUrl = null,
             currentUrl = null,
@@ -171,7 +160,47 @@ class SessionHandle internal constructor(
             error = null,
             updatedAtMs = System.currentTimeMillis(),
         )
-        return loadId
+        try {
+            dispatchOnMain(dispatchWithLease, "loadUrl") {
+                installDocumentStartBridge(url)
+                webView.loadUrl(url)
+            }
+        } catch (error: Exception) {
+            clearPendingLoad(
+                request,
+                "loadUrl failed: ${error.message ?: error::class.java.simpleName}",
+                "load failed: ${error.message ?: error::class.java.simpleName}",
+            )
+            throw error
+        }
+    }
+
+    private fun newLoadRequest(): LoadCompletion = LoadCompletion(
+        loadId = loadSeq.incrementAndGet(),
+        completion = CompletableDeferred(),
+    )
+
+    private fun clearPendingLoad(
+        request: LoadCompletion,
+        completionError: String,
+        stateError: String,
+    ) {
+        val current = pendingLoad.get()
+        if (current?.loadId != request.loadId || !pendingLoad.compareAndSet(current, null)) return
+        if (!request.completion.isCompleted) {
+            request.completion.completeExceptionally(JsBridge.JsBridgeException(completionError))
+        }
+        val state = _loadState.value
+        if (state.loadId == request.loadId && state.status == LoadStatus.LOADING) {
+            _loadState.compareAndSet(
+                state,
+                state.copy(
+                    status = LoadStatus.FAILED,
+                    error = stateError,
+                    updatedAtMs = System.currentTimeMillis(),
+                ),
+            )
+        }
     }
 
     /**
@@ -215,25 +244,18 @@ class SessionHandle internal constructor(
             "(function(){try{__amberWm_call($methodLit,$argsLit,$reqIdLit);}" +
                 "catch(e){AmberWM.reject($reqIdLit,'host eval failed: '+(e&&e.message));}})();"
 
-        try {
+        val result = try {
+            // Keep dispatch inside the cleanup scope. Cancellation between
+            // expect() and entering Dispatchers.Main must not leak the entry.
             withContext(Dispatchers.Main) {
                 dispatchOnMain(dispatchWithLease, "callBridge") {
                     webView.evaluateJavascript(script, null)
                 }
             }
-        } catch (error: Throwable) {
-            // The owner can reject the dispatch before WebView sees anything;
-            // do not leave the request in JsBridge.pending in that case.
-            jsBridge.forget(requestId)
-            throw error
-        }
-        // try/finally so the pending entry is always cleaned up — including
-        // when the caller's coroutine is structurally cancelled (e.g. agent
-        // stops a tool turn). Without this, the entry leaks until the entire
-        // session is destroyed.
-        val result = try {
             withTimeoutOrNull(timeoutMs) { deferred.await() }
         } finally {
+            // Clean up even when the caller's coroutine is structurally
+            // cancelled (e.g. the agent stops a tool turn).
             jsBridge.forget(requestId)
             lastActivityMs.set(System.currentTimeMillis())
         }
@@ -622,17 +644,12 @@ class SessionHandle internal constructor(
                 "AmberWM.resolve($reqIdLit, JSON.stringify(r));" +
                 "}catch(e){AmberWM.reject($reqIdLit, String((e&&e.message)||e));}})();"
 
-        try {
+        val result = try {
             withContext(Dispatchers.Main) {
                 dispatchOnMain(dispatchWithLease, "callPageFn") {
                     webView.evaluateJavascript(script, null)
                 }
             }
-        } catch (error: Throwable) {
-            jsBridge.forget(requestId)
-            throw error
-        }
-        val result = try {
             withTimeoutOrNull(timeoutMs) { deferred.await() }
         } finally {
             jsBridge.forget(requestId)
@@ -650,6 +667,7 @@ class SessionHandle internal constructor(
     }
 
     internal fun onPageStarted(url: String) {
+        updateBridgeCoverage(url)
         _loadState.value = _loadState.value.copy(
             committedUrl = url,
             currentUrl = url,
@@ -661,6 +679,7 @@ class SessionHandle internal constructor(
     }
 
     internal fun onPageFinished(url: String, title: String?) {
+        updateBridgeCoverage(url)
         val expectedLoadId = _loadState.value.loadId
         _loadState.value = _loadState.value.copy(
             currentUrl = url,
@@ -736,24 +755,20 @@ class SessionHandle internal constructor(
         throw WebMountLeaseInvalidatedException("webmount lease invalidated before $operation dispatch")
     }
 
-    private fun failLoadIfCurrent(loadId: Long, error: Throwable) {
-        val current = pendingLoad.get()
-        if (current?.loadId != loadId) return
-        if (pendingLoad.compareAndSet(current, null)) {
-            current.completion.completeExceptionally(error)
-        }
-        if (_loadState.value.loadId == loadId) {
-            _loadState.value = _loadState.value.copy(
-                status = LoadStatus.FAILED,
-                error = error.message ?: error.toString(),
-                updatedAtMs = System.currentTimeMillis(),
-            )
-        }
-    }
-
     private fun installDocumentStartBridge(url: String) {
         val origin = WebViewCompatibility.originFor(url)
-        if (origin == null || origin == documentStartOrigin) return
+        if (origin == null) {
+            bridgeInjectionCoverage = "page_finished"
+            return
+        }
+        if (origin == documentStartOrigin) {
+            bridgeInjectionCoverage = if (documentStartHandlers.isNotEmpty()) {
+                "document_start"
+            } else {
+                "page_finished"
+            }
+            return
+        }
         documentStartHandlers.forEach { handler -> runCatching { handler.remove() } }
         documentStartHandlers.clear()
         documentStartOrigin = origin
@@ -766,6 +781,17 @@ class SessionHandle internal constructor(
                 setOf(origin),
             )
             bridgeInjectionCoverage = "document_start"
+        }
+    }
+
+    private fun updateBridgeCoverage(url: String) {
+        bridgeInjectionCoverage = if (
+            WebViewCompatibility.originFor(url) == documentStartOrigin &&
+            documentStartHandlers.isNotEmpty()
+        ) {
+            "document_start"
+        } else {
+            "page_finished"
         }
     }
 

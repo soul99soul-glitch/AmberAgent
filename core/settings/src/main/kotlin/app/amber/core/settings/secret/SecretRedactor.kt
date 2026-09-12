@@ -98,7 +98,7 @@ class SecretRedactor(private val secretStore: SecretStore) {
         }
     }
 
-    /** orphan 回收：只删设置拥有且确认不再被任何设置引用的项。 */
+    /** 设置引用不包含 SSH 等独立存储，只回收设置自身拥有的凭据。 */
     fun deleteOrphans(active: Set<SecretDescriptor>) {
         secretStore.listOrphans(active)
             .filter { it.scope in SETTINGS_SECRET_SCOPES }

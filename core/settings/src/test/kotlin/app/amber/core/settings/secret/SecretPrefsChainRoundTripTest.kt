@@ -15,12 +15,15 @@ import app.amber.core.settings.Settings
 import app.amber.core.settings.secret.SecretDescriptor
 import app.amber.core.settings.secret.SecretRedactor
 import app.amber.core.settings.secret.SecretReference
+import app.amber.core.settings.secret.SecretCipher
 import app.amber.core.settings.secret.SecretStore
 import app.amber.core.settings.secret.SettingsSecretMigrator
+import app.amber.core.settings.secret.inMemoryBackend
 import app.amber.core.settings.secret.fakeSecretStore
 import app.amber.core.settings.ssh.SshProfileStore
 import app.amber.feature.terminal.SshAuthMethod
 import app.amber.feature.terminal.SshProfile
+import app.amber.search.SearchCommonOptions
 import androidx.datastore.core.DataStore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -148,6 +151,82 @@ class SecretPrefsChainRoundTripTest {
     }
 
     @Test
+    fun `unchanged credentials are not re-encrypted while another setting changes`() = runBlocking {
+        val countingCipher = CountingCipher()
+        secretStore = SecretStore(inMemoryBackend(), countingCipher)
+        secretRedactor = SecretRedactor(secretStore)
+        val aggregator = buildAggregator()
+        aggregator.settingsFlow.awaitUntil { !it.init }
+
+        val provider = ProviderSetting.OpenAI(apiKey = "sk-unchanged-credential-11")
+        aggregator.update(Settings(providers = listOf(provider)))
+        val afterProviderSave = countingCipher.encryptCalls
+        assertTrue("initial credential must be encrypted", afterProviderSave > 0)
+
+        val persisted = aggregator.settingsFlow.awaitUntil {
+            !it.init && it.providers.firstOrNull()?.id == provider.id
+        }
+        aggregator.update(persisted.copy(systemPrompt = "changed without credential edit"))
+
+        assertEquals(
+            "a non-secret setting change must not re-encrypt unchanged credentials",
+            afterProviderSave,
+            countingCipher.encryptCalls,
+        )
+        val afterNonSecretSave = aggregator.settingsFlow.awaitUntil {
+            !it.init && it.systemPrompt == "changed without credential edit"
+        }
+        assertEquals(
+            "sk-unchanged-credential-11",
+            (afterNonSecretSave.providers.single() as ProviderSetting.OpenAI).apiKey,
+        )
+
+        aggregator.update(
+            afterNonSecretSave.copy(
+                providers = listOf(provider.copy(apiKey = "sk-changed-credential-22")),
+            )
+        )
+        assertTrue(
+            "an actual credential change must still be encrypted",
+            countingCipher.encryptCalls > afterProviderSave,
+        )
+        val afterCredentialSave = aggregator.settingsFlow.awaitUntil {
+            !it.init &&
+                (it.providers.single() as ProviderSetting.OpenAI).apiKey == "sk-changed-credential-22"
+        }
+        assertEquals(
+            "sk-changed-credential-22",
+            (afterCredentialSave.providers.single() as ProviderSetting.OpenAI).apiKey,
+        )
+    }
+
+    @Test
+    fun `consecutive transforms preserve the persisted snapshot and clamp values`() = runBlocking {
+        val aggregator = buildAggregator()
+        aggregator.settingsFlow.awaitUntil { !it.init }
+
+        aggregator.update(Settings(systemPrompt = "first update"))
+        aggregator.update { current -> current.copy(contextMessageSize = 321) }
+        aggregator.update { current -> current.copy(systemPrompt = "second update") }
+
+        val persisted = dataStore.data.first()
+        assertEquals("second update", persisted[PreferencesKeys.AMBER_SYSTEM_PROMPT])
+        assertEquals(321, persisted[PreferencesKeys.AMBER_CONTEXT_MESSAGE_SIZE])
+
+        val current = aggregator.settingsFlow.awaitUntil {
+            !it.init && it.systemPrompt == "second update" && it.contextMessageSize == 321
+        }
+        aggregator.update(
+            current.copy(searchCommonOptions = SearchCommonOptions(resultSize = 999))
+        )
+        val clamped = dataStore.data.first()[PreferencesKeys.SEARCH_COMMON]
+        assertEquals(
+            30,
+            clamped?.let { JsonInstant.decodeFromString<SearchCommonOptions>(it).resultSize } ?: -1,
+        )
+    }
+
+    @Test
     fun `clearing a provider key reclaims its orphan secret through the real save path`() = runBlocking {
         val aggregator = buildAggregator()
         aggregator.settingsFlow.awaitUntil { !it.init }
@@ -222,5 +301,16 @@ class SecretPrefsChainRoundTripTest {
         assertEquals(reference, secretRedactor.readRefs(persisted)[descriptor.key])
         assertEquals("Bearer legacy-secret", secretStore.read(descriptor))
         assertEquals("updated while retrying", persisted[PreferencesKeys.AMBER_SYSTEM_PROMPT])
+    }
+
+    private class CountingCipher : SecretCipher {
+        var encryptCalls: Int = 0
+
+        override fun encrypt(plaintext: String): String {
+            encryptCalls += 1
+            return "enc:$encryptCalls:$plaintext"
+        }
+
+        override fun decrypt(stored: String): String = stored.substringAfter(":").substringAfter(":")
     }
 }

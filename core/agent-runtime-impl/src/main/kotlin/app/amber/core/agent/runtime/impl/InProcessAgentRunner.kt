@@ -41,6 +41,12 @@ class InProcessAgentRunner(
         LegacyRunScope(runId = id)
     },
     /**
+     * Production waits for cold-start durable recovery before the launch gate
+     * can append or resume a run. The default keeps the core runner usable in
+     * tests and non-Android hosts.
+     */
+    private val awaitColdStartRecovery: suspend () -> Unit = {},
+    /**
      * Coroutine scope handler jobs run on. Tests pass a virtual-time scope
      * (StandardTestDispatcher) so `withTimeout` callers under runTest and the
      * handler share one clock.
@@ -174,6 +180,12 @@ class InProcessAgentRunner(
                 interruptedReason = null,
             )
             try {
+                // Recovery must settle the previous process's unfinished rows
+                // before this activation decides whether it owns a durable
+                // run. Keep this inside the lazy job: launch remains
+                // non-suspending and a failed recovery becomes the normal
+                // pre-ownership FAILED snapshot below without appending a row.
+                awaitColdStartRecovery()
                 // ---- Launch gate: the durable row, not the in-memory
                 // snapshot, decides whether this activation may execute the
                 // handler (see [gateHandler]). Ownership transfer — epoch

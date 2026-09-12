@@ -3,6 +3,7 @@ package app.amber.feature.novel.workspace
 import app.amber.core.agent.runtime.Agent
 import app.amber.core.agent.runtime.AgentDescriptor
 import app.amber.core.agent.runtime.AgentHandler
+import kotlinx.coroutines.CancellationException
 
 /**
  * Kernel adapter for one workspace turn: resolves the runtime payload
@@ -24,6 +25,9 @@ class NovelTurnAgent(
     override val handler = AgentHandler<NovelTurnInput, NovelTurnArtifact> { _, scope ->
         val payload = payloads.resolve(scope.runId.value)
             ?: error("No novel turn payload registered for run ${scope.runId.value}")
+        if (!payload.claimHandler()) {
+            throw CancellationException("Novel turn was cancelled before its handler started")
+        }
         try {
             var artifact: NovelTurnArtifact? = null
             // Step 5: thread the run scope's identity + protocol event writer
@@ -72,6 +76,7 @@ class NovelTurnAgent(
             )
         } finally {
             payload.events.close()
+            payload.completion.complete(Unit)
         }
     }
 }

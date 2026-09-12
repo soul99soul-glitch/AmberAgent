@@ -10,6 +10,20 @@ import org.junit.Test
 
 class WebMountPageSnapshotCacheTest {
     @Test
+    fun cacheSeparatesObservationBudgets() {
+        WebMountPageSnapshotCache.clear()
+        val state = pageState(fingerprint = "a", scrollY = 0)
+        val payload = buildJsonObject { put("text", "short observation") }
+        val small = buildJsonObject { put("max_text_chars", 1_000); put("max_nodes", 1); put("max_visual_candidates", 0) }
+        val large = buildJsonObject { put("max_text_chars", 60_000); put("max_nodes", 300); put("max_visual_candidates", 120) }
+
+        WebMountPageSnapshotCache.put("s1", "observe", state, payload, small)
+
+        assertEquals(payload, WebMountPageSnapshotCache.get("s1", "observe", state, small))
+        assertNull(WebMountPageSnapshotCache.get("s1", "observe", state, large))
+    }
+
+    @Test
     fun cacheHitsForSameSemanticState() {
         WebMountPageSnapshotCache.clear()
         val state = pageState(fingerprint = "a", scrollY = 0)

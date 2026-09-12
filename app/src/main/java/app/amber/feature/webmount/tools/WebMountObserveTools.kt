@@ -39,13 +39,18 @@ internal fun createObserveTool(deps: WebMountDeps): Tool = Tool(
             deps.withAgentSession(input, sessionId) { lease ->
                 val handle = lease.handle
                 val dispatchWithLease = deps.dispatchWithLease(input, lease)
+                val args = buildJsonObject {
+                    put("max_text_chars", (input.long("max_text_chars") ?: 12_000L).coerceIn(1_000L, 60_000L))
+                    put("max_nodes", (input.long("max_nodes") ?: 80L).coerceIn(1L, 300L))
+                    put("max_visual_candidates", (input.long("max_visual_candidates") ?: 30L).coerceIn(0L, 120L))
+                }
                 val state = handle.callBridge(
                     "semantic_state",
                     buildJsonObject {},
                     timeoutMs = 3_000L,
                     dispatchWithLease = dispatchWithLease,
                 )
-                val cachedCandidate = WebMountPageSnapshotCache.get(sessionId, "observe", state)
+                val cachedCandidate = WebMountPageSnapshotCache.get(sessionId, "observe", state, args)
                 val restoredRefs = cachedCandidate?.let { observed ->
                     try {
                         handle.callBridge(
@@ -62,18 +67,13 @@ internal fun createObserveTool(deps: WebMountDeps): Tool = Tool(
                 }
                 val cached = cachedCandidate?.takeIf { restoredRefs?.intField("missing") == 0 }
                 val observed = cached ?: run {
-                    val args = buildJsonObject {
-                        put("max_text_chars", (input.long("max_text_chars") ?: 12_000L).coerceIn(1_000L, 60_000L))
-                        put("max_nodes", (input.long("max_nodes") ?: 80L).coerceIn(1L, 300L))
-                        put("max_visual_candidates", (input.long("max_visual_candidates") ?: 30L).coerceIn(0L, 120L))
-                    }
                     handle.callBridge(
                         "observe",
                         args,
                         timeoutMs = 12_000L,
                         dispatchWithLease = dispatchWithLease,
                     ).also {
-                        WebMountPageSnapshotCache.put(sessionId, "observe", state, it)
+                        WebMountPageSnapshotCache.put(sessionId, "observe", state, it, args)
                     }
                 }
                 val currentUrl = handle.loadState.value.currentUrl

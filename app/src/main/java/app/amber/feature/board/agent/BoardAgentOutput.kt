@@ -33,10 +33,10 @@ data class BoardAgentItem(
  * Convert a validated [BoardAgentItem] into a persisted [BoardItemEntity].
  *
  * The entity id is **deterministically derived** from `(boardDate, source_ref, category)`
- * so re-running the agent on the same signal set produces the same id. Combined with
- * `OnConflictStrategy.REPLACE` in [BoardItemDAO], this gives free idempotency: worker
- * retries, crash recovery, and manual re-triggers all converge on the same row instead
- * of accumulating duplicates.
+ * so re-running the agent on the same signal set produces the same id. The
+ * lifecycle-preserving upsert in [BoardItemDAO] gives idempotency: worker retries, crash
+ * recovery, and manual re-triggers all converge on the same row instead of accumulating
+ * duplicates without resetting a user's completed/dismissed state.
  *
  * [sourceContent] comes from the original signal's content (not the agent's echo), so
  * the "聊一下" flow can show the full original context rather than the agent's summary.

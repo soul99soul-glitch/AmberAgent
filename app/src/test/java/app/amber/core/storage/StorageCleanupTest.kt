@@ -3,6 +3,7 @@ package app.amber.core.storage
 import android.app.Application
 import android.content.Context
 import androidx.room.Room
+import androidx.core.net.toUri
 import androidx.room.RoomDatabase
 import app.amber.agent.data.db.AppDatabase
 import app.amber.agent.data.db.entity.ConversationDraftEntity
@@ -10,6 +11,9 @@ import app.amber.agent.data.db.entity.ConversationEntity
 import app.amber.agent.data.db.entity.ManagedFileEntity
 import app.amber.agent.data.db.entity.MessageNodeEntity
 import app.amber.core.files.FileFolders
+import app.amber.core.files.FilesManager
+import app.amber.core.infra.AppScope
+import app.amber.core.repository.FilesRepository
 import app.amber.core.sync.core.SyncRestoreWriteGate
 import app.amber.core.sync.core.SyncRestoreWriteRejectedException
 import java.io.File
@@ -36,7 +40,7 @@ import org.robolectric.annotation.Config
  * P7-03 会话存储占用与按时间清理。
  *
  * 覆盖计划测试清单：分类统计正确、cutoff 与非 pinned 过滤、dry run 数字与
- * 实际删除一致、删除后附件无孤儿、失败重试不重复删。
+ * 实际删除一致、删除后附件无孤儿、失败文件可从 Files 页面重试。
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34], application = Application::class)
@@ -87,6 +91,15 @@ class StorageCleanupTest {
                 message_id TEXT,
                 conversation_id TEXT,
                 title TEXT,
+                update_at TEXT
+            )
+            """.trimIndent()
+        )
+        database.openHelper.writableDatabase.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS conversation_title_fts(
+                title TEXT,
+                conversation_id TEXT,
                 update_at TEXT
             )
             """.trimIndent()
@@ -183,6 +196,9 @@ class StorageCleanupTest {
         ftsDb.execSQL(
             "INSERT INTO message_fts(text, node_id, message_id, conversation_id, title, update_at) VALUES ('x','n','m','conv-a','t','1')"
         )
+        ftsDb.execSQL(
+            "INSERT INTO conversation_title_fts(title, conversation_id, update_at) VALUES ('t','conv-a','1')"
+        )
         database.conversationDraftDao().upsert(
             ConversationDraftEntity(
                 conversationId = "conv-a",
@@ -216,6 +232,9 @@ class StorageCleanupTest {
         assertEquals(0, ftsDb.query("SELECT COUNT(*) FROM message_fts WHERE conversation_id = 'conv-a'").use { c ->
             if (c.moveToFirst()) c.getInt(0) else -1
         })
+        assertEquals(0, ftsDb.query("SELECT COUNT(*) FROM conversation_title_fts WHERE conversation_id = 'conv-a'").use { c ->
+            if (c.moveToFirst()) c.getInt(0) else -1
+        })
         assertEquals(null, database.conversationDraftDao().get("conv-a"))
         assertEquals(0, database.favoriteDao().deleteByConversation("conv-a"))
     }
@@ -223,7 +242,7 @@ class StorageCleanupTest {
     // ---------------- 失败重试不重复删 ----------------
 
     @Test
-    fun failureAbortsBeforeDbAndRetryIsIdempotent() = runBlocking {
+    fun physicalDeleteFailureKeepsFailedManagedFileVisibleForRetry() = runBlocking {
         seedConversation("conv-a", updatedAt = now - 100L * 24 * 60 * 60 * 1000, pinned = false, messageCount = 1)
         seedAttachment("conv-a", "upload/a.txt", "hello".toByteArray())
         // 让物理删除失败：把第二个“附件”变成一个非空目录（delete() 返回 false）。
@@ -255,26 +274,29 @@ class StorageCleanupTest {
         val plan = cleanup.dryRun(cutoffAt = oldCutoff)
         assertEquals(2, plan.attachmentCount)
 
-        // 第一次执行：物理删除失败 → 中止，DB 未动。
-        val firstError = runCatching { cleanup.execute(plan) }.exceptionOrNull()
-        assertTrue(firstError != null)
-        assertEquals(1, database.conversationDao().getAllIds().size)
-        assertEquals(2, database.managedFileDao().listByFolder(FileFolders.UPLOAD).first().size)
+        // 清理先删会话 DB，再尽力删物理文件；失败的 managed row 留在 Files 页面。
+        val result = cleanup.execute(plan)
+        assertEquals(1, result.conversationCount)
+        assertEquals(1, result.attachmentCount)
+        assertEquals(0, database.conversationDao().getAllIds().size)
+        assertFalse(File(context.filesDir, "upload/a.txt").exists())
+        val remaining = database.managedFileDao().listByFolder(FileFolders.UPLOAD).first()
+        assertEquals(listOf("upload/blocking.txt"), remaining.map { it.relativePath })
+
+        // Files 页面重试仍会尊重物理删除失败，不会先删 managed row。
+        val filesManager = FilesManager(context, FilesRepository(database.managedFileDao()), AppScope())
+        assertFalse(filesManager.delete(remaining.single().id))
+        assertEquals(1, database.managedFileDao().listByFolder(FileFolders.UPLOAD).first().size)
+        // 会话/草稿附件清理也必须保留删除失败的文件索引。
+        filesManager.deleteChatFiles(listOf(blocking.toUri())).join()
+        assertEquals(1, database.managedFileDao().listByFolder(FileFolders.UPLOAD).first().size)
 
         // 修复阻塞（删掉目录里的文件，使目录可删除）。
         File(blocking, "inner").delete()
         assertTrue(blocking.delete())
 
-        // 重试成功。
-        val result = cleanup.execute(cleanup.dryRun(cutoffAt = oldCutoff))
-        assertEquals(1, result.conversationCount)
-        assertEquals(2, result.attachmentCount)
-        assertEquals(0, database.conversationDao().getAllIds().size)
-
-        // 再次执行：没有可删内容，不重复删。
-        val second = cleanup.execute(cleanup.dryRun(cutoffAt = oldCutoff))
-        assertEquals(0, second.conversationCount)
-        assertEquals(0, second.attachmentCount)
+        assertTrue(filesManager.delete(remaining.single().id))
+        assertEquals(0, database.managedFileDao().listByFolder(FileFolders.UPLOAD).first().size)
     }
 
     @Test
@@ -353,6 +375,22 @@ class StorageCleanupTest {
     }
 
     // ---------------- fixtures ----------------
+
+    @Test
+    fun removedGeneratedImagesAreCleanedWithinTheirConversationOnly() = runBlocking {
+        val filesManager = FilesManager(context, FilesRepository(database.managedFileDao()), AppScope())
+        val id = kotlin.uuid.Uuid.random()
+        val removed = File(filesManager.getChatImagesDir(id), "removed.png").apply { writeText("image") }
+        val retained = File(removed.parentFile, "retained.png").apply { writeText("image") }
+        val other = File(filesManager.getChatImagesDir(kotlin.uuid.Uuid.random()), "other.png")
+            .apply { writeText("image") }
+
+        filesManager.deleteChatImageFiles(id, listOf(removed.toUri(), other.toUri()))
+
+        assertFalse(removed.exists())
+        assertTrue(retained.exists())
+        assertTrue(other.exists())
+    }
 
     private suspend fun seedConversation(
         id: String,

@@ -228,6 +228,11 @@ class BackupVM(
 
     fun cancelGoogleAuthorization(resultCode: Int? = null) {
         googleAuthorizationInFlight = false
+        // A cancelled auth must also cancel the export that was waiting for
+        // it. Keeping the passphrase/request here would otherwise cause a
+        // later, unrelated successful connection to upload without a fresh
+        // user confirmation.
+        pendingGoogleUpload = null
         googleMessage.value = if (resultCode == 0) {
             backupMessage(R.string.backup_google_authorization_not_completed)
         } else {

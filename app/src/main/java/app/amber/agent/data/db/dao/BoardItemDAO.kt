@@ -4,16 +4,68 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Transaction
 import kotlinx.coroutines.flow.Flow
 import app.amber.agent.data.db.entity.BoardItemEntity
 
 @Dao
 interface BoardItemDAO {
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun insertAll(items: List<BoardItemEntity>)
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertIfAbsent(item: BoardItemEntity): Long
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun insert(item: BoardItemEntity)
+    @Query(
+        """
+        UPDATE board_item
+        SET title = :title,
+            source_type = :sourceType,
+            source_ref = :sourceRef,
+            source_content = :sourceContent,
+            urgency = :urgency,
+            category = :category,
+            reason = :reason,
+            suggestion = :suggestion,
+            signal_time = :signalTime,
+            board_date = :boardDate
+        WHERE id = :id
+        """
+    )
+    suspend fun updateGeneratedFields(
+        id: String,
+        title: String,
+        sourceType: String,
+        sourceRef: String,
+        sourceContent: String,
+        urgency: String,
+        category: String,
+        reason: String,
+        suggestion: String,
+        signalTime: Long,
+        boardDate: String,
+    )
+
+    /** Upsert generated fields without resetting the user's lifecycle decision. */
+    @Transaction
+    suspend fun insertAll(items: List<BoardItemEntity>) {
+        for (item in items) insert(item)
+    }
+
+    @Transaction
+    suspend fun insert(item: BoardItemEntity) {
+        insertIfAbsent(item)
+        updateGeneratedFields(
+            id = item.id,
+            title = item.title,
+            sourceType = item.sourceType,
+            sourceRef = item.sourceRef,
+            sourceContent = item.sourceContent,
+            urgency = item.urgency,
+            category = item.category,
+            reason = item.reason,
+            suggestion = item.suggestion,
+            signalTime = item.signalTime,
+            boardDate = item.boardDate,
+        )
+    }
 
     @Query("SELECT * FROM board_item WHERE id = :id")
     suspend fun getById(id: String): BoardItemEntity?

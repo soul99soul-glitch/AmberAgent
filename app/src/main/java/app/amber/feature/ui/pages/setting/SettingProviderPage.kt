@@ -11,6 +11,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
@@ -29,8 +30,14 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Scaffold
@@ -40,6 +47,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -50,6 +58,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.dokar.sonner.ToastType
 import io.github.g00fy2.quickie.QRResult
@@ -66,7 +75,6 @@ import app.amber.feature.ui.pages.setting.components.ProviderAuthBadge
 import app.amber.feature.ui.pages.setting.components.ProviderCard
 import app.amber.feature.ui.pages.setting.components.ProviderCommandButton
 import app.amber.feature.ui.pages.setting.components.ProviderGhostButton
-import app.amber.feature.ui.pages.setting.components.ProviderHairline
 import app.amber.feature.ui.pages.setting.components.ProviderIconButton
 import app.amber.feature.ui.pages.setting.components.ProviderLiveDot
 import app.amber.feature.ui.pages.setting.components.ProviderMonogram
@@ -75,6 +83,7 @@ import app.amber.feature.ui.pages.setting.components.ProviderSheetGrabber
 import app.amber.feature.ui.pages.setting.components.ProviderSplitBar
 import app.amber.feature.ui.pages.setting.components.ProviderTemplatePickerSheet
 import app.amber.feature.ui.pages.setting.components.ProviderTerminalFilter
+import app.amber.feature.ui.pages.setting.components.ProviderHairline
 import app.amber.feature.ui.pages.setting.components.providerAuthLabel
 import app.amber.feature.ui.pages.setting.components.providerSlugLabel
 import app.amber.feature.ui.pages.setting.components.toProviderMonogram
@@ -83,6 +92,10 @@ import app.amber.feature.ui.theme.LocalAmberType
 import app.amber.core.utils.ImageUtils
 import org.koin.androidx.compose.koinViewModel
 import kotlin.uuid.Uuid
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @Composable
 fun SettingProviderPage(vm: SettingVM = koinViewModel()) {
@@ -113,7 +126,10 @@ fun SettingProviderPage(vm: SettingVM = koinViewModel()) {
                 title = stringResource(R.string.setting_page_providers),
                 onBack = { navController.popBackStack() },
                 actions = {
-                    ImportProviderButton {
+                    ImportProviderButton(
+                        existingProviders = settings.providers,
+                        onImport = vm::importProviders,
+                    ) {
                         vm.updateSettings(
                             settings.copy(
                                 providers = listOf(it.copyProvider(Uuid.random())) + settings.providers
@@ -172,22 +188,24 @@ fun SettingProviderPage(vm: SettingVM = koinViewModel()) {
                             count = onlineProviders.size,
                         )
                     }
-                    item("online_group") {
-                        ProviderCard(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(bottom = 4.dp),
+                    itemsIndexed(
+                        items = onlineProviders,
+                        key = { _, provider -> "online_provider_${provider.id}" },
+                    ) { index, provider ->
+                        ProviderGroupRow(
+                            index = index,
+                            lastIndex = onlineProviders.lastIndex,
+                            modifier = Modifier.padding(
+                                bottom = if (index == onlineProviders.lastIndex) 4.dp else 0.dp,
+                            ),
                         ) {
-                            onlineProviders.forEachIndexed { index, provider ->
-                                if (index > 0) ProviderHairline()
-                                ProviderItem(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    provider = provider,
-                                    onEdit = {
-                                        navController.navigate(Screen.SettingProviderDetail(providerId = provider.id.toString()))
-                                    },
-                                )
-                            }
+                            ProviderItem(
+                                modifier = Modifier.fillMaxWidth(),
+                                provider = provider,
+                                onEdit = {
+                                    navController.navigate(Screen.SettingProviderDetail(providerId = provider.id.toString()))
+                                },
+                            )
                         }
                     }
                 }
@@ -198,28 +216,70 @@ fun SettingProviderPage(vm: SettingVM = koinViewModel()) {
                             count = disabledProviders.size,
                         )
                     }
-                    item("disabled_group") {
-                        ProviderCard(
+                    itemsIndexed(
+                        items = disabledProviders,
+                        key = { _, provider -> "disabled_provider_${provider.id}" },
+                    ) { index, provider ->
+                        ProviderGroupRow(
+                            index = index,
+                            lastIndex = disabledProviders.lastIndex,
                             modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(bottom = 18.dp)
+                                .padding(bottom = if (index == disabledProviders.lastIndex) 18.dp else 0.dp)
                                 .alpha(0.62f),
                         ) {
-                            disabledProviders.forEachIndexed { index, provider ->
-                                if (index > 0) ProviderHairline()
-                                ProviderItem(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    provider = provider,
-                                    onEdit = {
-                                        navController.navigate(Screen.SettingProviderDetail(providerId = provider.id.toString()))
-                                    },
-                                )
-                            }
+                            ProviderItem(
+                                modifier = Modifier.fillMaxWidth(),
+                                provider = provider,
+                                onEdit = {
+                                    navController.navigate(Screen.SettingProviderDetail(providerId = provider.id.toString()))
+                                },
+                            )
                         }
                     }
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun ProviderGroupRow(
+    index: Int,
+    lastIndex: Int,
+    modifier: Modifier = Modifier,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    val t = LocalAmberTokens.current
+    val first = index == 0
+    val last = index == lastIndex
+    val shape = RoundedCornerShape(
+        topStart = if (first) 14.dp else 0.dp,
+        topEnd = if (first) 14.dp else 0.dp,
+        bottomEnd = if (last) 14.dp else 0.dp,
+        bottomStart = if (last) 14.dp else 0.dp,
+    )
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .background(t.surface)
+            .drawBehind {
+                val stroke = 1.dp.toPx()
+                val radius = 14.dp.toPx()
+                val half = stroke / 2f
+                val top = if (first) half else -radius
+                val bottom = if (last) size.height - half else size.height + radius
+                drawRoundRect(
+                    color = t.line,
+                    topLeft = Offset(half, top),
+                    size = Size(size.width - stroke, bottom - top),
+                    cornerRadius = CornerRadius(radius, radius),
+                    style = androidx.compose.ui.graphics.drawscope.Stroke(width = stroke),
+                )
+            },
+    ) {
+        if (!first) ProviderHairline()
+        content()
     }
 }
 
@@ -325,11 +385,36 @@ private fun ProviderStatSep() {
 
 @Composable
 private fun ImportProviderButton(
+    existingProviders: List<ProviderSetting>,
+    onImport: suspend (List<ProviderSetting>) -> Unit,
     onAdd: (ProviderSetting) -> Unit
 ) {
     val toaster = LocalToaster.current
     val context = LocalContext.current
     var showImportDialog by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    var fileProviders by remember { mutableStateOf<List<ProviderSetting>?>(null) }
+    var fileBusy by remember { mutableStateOf(false) }
+    val pickFileLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) scope.launch {
+            fileBusy = true
+            try {
+                fileProviders = withContext(Dispatchers.IO) {
+                    context.contentResolver.openInputStream(uri)?.use(::readProviderImport)
+                        ?: error("Cannot open import file")
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                // Parser and resolver exception messages may contain credentials from the file.
+                toaster.show(context.getString(R.string.provider_file_import_error), type = ToastType.Error)
+            } finally {
+                fileBusy = false
+            }
+        }
+    }
 
     val scanQrCodeLauncher = rememberLauncherForActivityResult(ScanQRCode()) { result ->
         handleQRResult(result, onAdd, toaster, context)
@@ -347,7 +432,7 @@ private fun ImportProviderButton(
         imageVector = Lucide.Share,
         contentDescription = stringResource(R.string.setting_provider_page_import_dialog_title),
         rotate180 = true,
-        onClick = { showImportDialog = true },
+        onClick = { if (!fileBusy) showImportDialog = true },
     )
 
     if (showImportDialog) {
@@ -364,6 +449,34 @@ private fun ImportProviderButton(
                         ActivityResultContracts.PickVisualMedia.ImageOnly
                     )
                 )
+            },
+            onPickFile = {
+                showImportDialog = false
+                pickFileLauncher.launch(arrayOf("application/json", "text/*", "application/octet-stream"))
+            },
+        )
+    }
+    fileProviders?.let { providers ->
+        ProviderFileImportPreview(
+            providers = providers,
+            existingProviders = existingProviders,
+            saving = fileBusy,
+            onDismiss = { if (!fileBusy) fileProviders = null },
+            onConfirm = { selected ->
+                scope.launch {
+                    fileBusy = true
+                    try {
+                        onImport(selected)
+                        fileProviders = null
+                        toaster.show(context.getString(R.string.setting_provider_page_import_success), type = ToastType.Success)
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (_: Exception) {
+                        toaster.show(context.getString(R.string.provider_file_import_save_error), type = ToastType.Error)
+                    } finally {
+                        fileBusy = false
+                    }
+                }
             },
         )
     }
@@ -450,6 +563,7 @@ private fun ProviderImportDialog(
     onDismiss: () -> Unit,
     onScanQr: () -> Unit,
     onPickImage: () -> Unit,
+    onPickFile: () -> Unit,
 ) {
     val t = LocalAmberTokens.current
     val type = LocalAmberType.current
@@ -484,6 +598,11 @@ private fun ProviderImportDialog(
                     text = stringResource(R.string.setting_provider_page_select_from_gallery),
                     imageVector = Lucide.Image,
                     onClick = onPickImage,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                ProviderCommandButton(
+                    text = stringResource(R.string.provider_file_import_select),
+                    onClick = onPickFile,
                     modifier = Modifier.fillMaxWidth(),
                 )
                 ProviderCommandButton(

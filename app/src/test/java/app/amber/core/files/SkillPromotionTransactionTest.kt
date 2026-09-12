@@ -286,4 +286,43 @@ class SkillPromotionTransactionTest {
         val result = tx.rollback("missing-skill", "session-1", "run-1")
         assertTrue(result is SkillPromotionTransaction.RollbackResult.NoPrevious)
     }
+
+    @Test
+    fun `rollback failure keeps the previous snapshot and metadata`() = runBlocking {
+        val tx = transaction()
+        val first = ready(prepare(tx, files = mapOf("SKILL.md" to skillMdV1)))
+        val firstApply = tx.apply("demo-skill", first.candidateFiles, "session-1", "run-1", first.preview.digest)
+        assertTrue(firstApply is SkillPromotionTransaction.ApplyResult.Applied)
+        val second = ready(prepare(tx, files = mapOf("SKILL.md" to skillMdV2)))
+        val secondApply = tx.apply("demo-skill", second.candidateFiles, "session-2", "run-2", second.preview.digest)
+        assertTrue(secondApply is SkillPromotionTransaction.ApplyResult.Applied)
+
+        val previousDir = File(context.filesDir, "${FileFolders.SKILLS_PREVIOUS}/demo-skill")
+        val previousMeta = skillManager.previousSkillMeta("demo-skill")
+        assertNotNull(previousMeta)
+        assertTrue(previousDir.resolve("SKILL.md").exists())
+
+        // Keep the active candidate unchanged so the real transaction CAS
+        // passes, then block the previous root. The target -> swap rename can
+        // proceed, but previous -> target must fail at the filesystem boundary.
+        val previousRoot = File(context.filesDir, FileFolders.SKILLS_PREVIOUS)
+        val originalPermissions = Files.getPosixFilePermissions(previousRoot.toPath())
+        try {
+            Files.setPosixFilePermissions(
+                previousRoot.toPath(),
+                setOf(
+                    java.nio.file.attribute.PosixFilePermission.OWNER_READ,
+                    java.nio.file.attribute.PosixFilePermission.OWNER_EXECUTE,
+                ),
+            )
+            val result = tx.rollback("demo-skill", "session-3", "run-3")
+            assertTrue(result is SkillPromotionTransaction.RollbackResult.NoPrevious)
+        } finally {
+            Files.setPosixFilePermissions(previousRoot.toPath(), originalPermissions)
+        }
+
+        assertTrue(skillManager.readSkillContent("demo-skill")!!.contains("Second version body"))
+        assertEquals(previousMeta, skillManager.previousSkillMeta("demo-skill"))
+        assertTrue(previousDir.resolve("SKILL.md").exists())
+    }
 }

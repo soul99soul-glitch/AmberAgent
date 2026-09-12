@@ -184,10 +184,11 @@ internal fun createVisualReadTool(
                 val maxEdge = (input.long("max_edge") ?: 1_280L).coerceIn(320L, 1_600L).toInt()
                 val image = WebViewScreenshot.captureRegion(
                     handle = handle,
-                    region = region.expand(8),
+                    region = region,
                     format = WebViewScreenshot.Format.JPEG,
                     quality = 70,
                     maxEdge = maxEdge,
+                    paddingPx = 8,
                 )
                 when (image) {
                     is WebViewScreenshot.Result.Failed -> listOf(UIMessagePart.Text(buildJsonObject {
@@ -235,14 +236,6 @@ internal fun createVisualReadTool(
         }
     },
 )
-
-private fun WebViewScreenshot.Region.expand(px: Int): WebViewScreenshot.Region =
-    WebViewScreenshot.Region(
-        x = (x - px).coerceAtLeast(0),
-        y = (y - px).coerceAtLeast(0),
-        width = width + px * 2,
-        height = height + px * 2,
-    )
 
 private fun kotlinx.serialization.json.JsonElement.explicitRegion(): WebViewScreenshot.Region? {
     val x = long("x")?.toInt()

@@ -39,12 +39,30 @@ class WebMountOAuthTokenStore(context: Context) {
     private val creds: SharedPreferences? = tryCreateEncryptedPrefs(context, CRED_FILE)
     private val memTokens = ConcurrentHashMap<String, WebMountOAuthToken>()
     private val memCreds = ConcurrentHashMap<String, OAuthAppCredentials>()
+    private val tokenMutationLock = Any()
     private val _updates = MutableSharedFlow<String>(extraBufferCapacity = 8)
     val updates: SharedFlow<String> = _updates.asSharedFlow()
 
     // ---- tokens ------------------------------------------------------------
 
     fun putToken(provider: String, token: WebMountOAuthToken) {
+        synchronized(tokenMutationLock) {
+            putTokenLocked(provider, token)
+        }
+    }
+
+    /** Store [token] only while [expected] is still the current token. */
+    fun putTokenIfCurrent(
+        provider: String,
+        expected: WebMountOAuthToken,
+        token: WebMountOAuthToken,
+    ): Boolean = synchronized(tokenMutationLock) {
+        if (getToken(provider) != expected) return@synchronized false
+        putTokenLocked(provider, token)
+        true
+    }
+
+    private fun putTokenLocked(provider: String, token: WebMountOAuthToken) {
         val raw = json.encodeToString(JsonElement.serializer(), token.toJson())
         if (tokens != null) {
             tokens.edit().putString(provider, raw).apply()
@@ -64,9 +82,11 @@ class WebMountOAuthTokenStore(context: Context) {
     }
 
     fun clearToken(provider: String) {
-        tokens?.edit()?.remove(provider)?.apply()
-        memTokens.remove(provider)
-        _updates.tryEmit(provider)
+        synchronized(tokenMutationLock) {
+            tokens?.edit()?.remove(provider)?.apply()
+            memTokens.remove(provider)
+            _updates.tryEmit(provider)
+        }
     }
 
     fun tokenProviders(): Set<String> =

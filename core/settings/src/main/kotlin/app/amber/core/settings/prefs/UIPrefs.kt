@@ -5,7 +5,7 @@ import androidx.datastore.core.IOException
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.emptyPreferences
-import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -15,6 +15,7 @@ import app.amber.core.agent.utils.JsonInstant
 import app.amber.core.settings.DEFAULT_PRESET_THEME_ID
 import app.amber.core.settings.DisplaySetting
 import app.amber.core.settings.PreferencesKeys
+import app.amber.core.settings.shareSettingsRawFlow
 import app.amber.core.settings.toMutableStateFlow
 
 data class UIPrefsData(
@@ -30,12 +31,13 @@ class UIPrefs(
     private val dataStore: DataStore<Preferences>,
     scope: AppScope,
 ) {
-    internal val rawFlow: Flow<UIPrefsData> = dataStore.data
+    internal val rawFlow: SharedFlow<UIPrefsData> = dataStore.data
         .catch { e ->
             if (e is IOException) emit(emptyPreferences()) else throw e
         }
         .map { readFrom(it) }
         .distinctUntilChanged()
+        .shareSettingsRawFlow(scope)
 
     val flow: StateFlow<UIPrefsData> = rawFlow
         .toMutableStateFlow(scope, UIPrefsData())
@@ -49,7 +51,7 @@ class UIPrefs(
         }
     }
 
-    private fun readFrom(p: Preferences): UIPrefsData = UIPrefsData(
+    internal fun readFrom(p: Preferences): UIPrefsData = UIPrefsData(
         dynamicColor = p[PreferencesKeys.DYNAMIC_COLOR] ?: false,
         themeId = p[PreferencesKeys.THEME_ID] ?: DEFAULT_PRESET_THEME_ID,
         developerMode = p[PreferencesKeys.DEVELOPER_MODE] == true,

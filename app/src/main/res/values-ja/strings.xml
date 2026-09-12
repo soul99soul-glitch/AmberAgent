@@ -400,7 +400,6 @@
   <string name="setting_page_built_in_tools_url_context">URLコンテキスト</string>
   <string name="setting_page_built_in_tools_url_context_desc">URLコンテンツ処理を有効化</string>
   <string name="setting_page_chat_storage">チャット保存</string>
-  <string name="setting_page_chat_storage_desc">%1$d ファイル、%2$.2f MB</string>
   <string name="setting_page_code_display_settings">コード表示</string>
   <string name="setting_page_color_mode">カラーモード</string>
   <string name="setting_page_color_mode_dark">ダーク</string>
@@ -411,9 +410,7 @@
   <string name="setting_page_config_api_title">APIとモデルを設定してください</string>
   <string name="setting_page_data_settings">データ設定</string>
   <string name="setting_page_default_model">デフォルトモデルとプロンプト</string>
-  <string name="setting_page_default_model_desc">デフォルトモデル、補助タスク用モデル、プロンプト</string>
   <string name="setting_page_display_setting">表示設定</string>
-  <string name="setting_page_display_setting_desc">表示設定を管理</string>
   <string name="setting_page_extensions">拡張機能</string>
   <string name="setting_page_extensions_desc">プロンプトインジェクション、スキルなどを管理</string>
   <string name="setting_page_general_settings">一般設定</string>
@@ -423,13 +420,11 @@
   <string name="setting_page_message_display_settings">メッセージ表示</string>
   <string name="setting_page_model_and_services">モデルとサービス</string>
   <string name="setting_page_providers">プロバイダー</string>
-  <string name="setting_page_providers_desc">AIプロバイダーを設定</string>
   <string name="setting_page_search_add_provider">プロバイダー追加</string>
   <string name="setting_page_search_common_options">共通オプション</string>
   <string name="setting_page_search_delete_provider">プロバイダー削除</string>
   <string name="setting_page_search_result_size">結果数</string>
   <string name="setting_page_search_service">検索サービス</string>
-  <string name="setting_page_search_service_desc">検索サービスを設定</string>
   <string name="setting_page_search_title">検索サービス</string>
   <string name="setting_page_theme_setting">テーマ設定</string>
   <string name="setting_provider_page_abilities">能力</string>
@@ -975,9 +970,7 @@
   <string name="setting_page_agent_auto_approve">グローバル自動承認</string>
   <string name="setting_page_agent_auto_approve_desc">通常のツール呼び出しを自動承認します。高リスクの自動承認も有効にすると、回答が必要な ask_user プロンプトを除き、承認が必要なツールも無人で実行されます。</string>
   <string name="setting_page_agent_execution">実行と表示</string>
-  <string name="setting_page_agent_execution_desc">ツールループ、プレビュー、ライブステータス</string>
   <string name="setting_page_agent_extensions">スキルと拡張機能</string>
-  <string name="setting_page_agent_extensions_desc">スキル、プロンプト、外部ツールサーバー</string>
   <string name="setting_page_agent_generation_keepalive">バックグラウンドのキープアライブ</string>
   <string name="setting_page_agent_generation_keepalive_desc">Amber の生成中にフォアグラウンド通知を使用します。</string>
   <string name="setting_page_agent_generation_retry">生成を自動再試行</string>
@@ -1008,17 +1001,14 @@
   <string name="setting_page_agent_live_status_privacy">機密なライブステータスを非表示</string>
   <string name="setting_page_agent_live_status_privacy_desc">ツールの種類と状態だけを表示し、プライベートなテキストを隠します。</string>
   <string name="setting_page_agent_memory">コアメモリ</string>
-  <string name="setting_page_agent_memory_desc">AmberAgent の会話をまたいで保持される永続的な知識</string>
   <string name="setting_page_agent_operation_preview">操作プレビュー</string>
   <string name="setting_page_agent_operation_preview_always">常に</string>
   <string name="setting_page_agent_operation_preview_auto">自動</string>
   <string name="setting_page_agent_operation_preview_desc">入力欄の上に Agent のライブ操作カードを表示します。</string>
   <string name="setting_page_agent_operation_preview_hidden">非表示</string>
   <string name="setting_page_agent_permissions">権限と承認</string>
-  <string name="setting_page_agent_permissions_desc">システムアクセスとツール承認ポリシー</string>
   <string name="setting_page_agent_runtime">Agent 設定</string>
   <string name="setting_page_agent_sandbox">Agent ランタイム</string>
-  <string name="setting_page_agent_sandbox_desc">ワークスペース、Alpine/proot、コマンド実行の状態</string>
   <string name="setting_page_agent_skills">スキル</string>
   <string name="setting_page_agent_skills_desc">Agent が必要に応じて読み込めるスキルパッケージを管理します</string>
   <string name="setting_page_agent_tool_loop_steps">ツールループの上限</string>
@@ -1027,7 +1017,6 @@
   <string name="setting_page_cron_tasks">Cron タスク</string>
   <string name="setting_page_cron_tasks_desc">スケジュールされた Agent ジョブと予定実行の状態を確認します</string>
   <string name="setting_page_experimental_features">実験的機能</string>
-  <string name="setting_page_experimental_features_desc">実機での検証がまだ必要な AmberAgent 機能をプレビューします</string>
   <string name="setting_page_favorites_desc">保存した会話スニペットを確認します</string>
   <string name="setting_page_system_access">システムアクセス</string>
   <string name="setting_page_system_access_desc">Agent ツールの Android 権限を付与・監査します。</string>
@@ -1457,9 +1446,7 @@
   <string name="setting_display_page_base_family_title">配色</string>
   <string name="setting_display_page_base_family_warm">ウォーム Warm</string>
   <string name="setting_page_backup">同期とバックアップ</string>
-  <string name="setting_page_backup_desc">Google クラウド同期、ローカル暗号化バックアップ、完全なデータ復元</string>
   <string name="setting_page_storage_cleanup">ストレージとクリーンアップ</string>
-  <string name="setting_page_storage_cleanup_desc">ストレージ使用量の内訳と期間指定の会話クリーンアップ（ピン留めした会話は保持）</string>
   <string name="setting_slides_fonts_desc">中国語フォントパッケージをダウンロードして、生成スライドの再現性を高めます</string>
   <string name="setting_slides_fonts_title">Slides フォントリソース</string>
   <string name="setting_storage_attachment_count">%1$d 個のファイル</string>
@@ -3308,4 +3295,12 @@
   <string name="novel_batch_stage_polish">推敲中</string>
   <string name="novel_catalog_root_directory">ルートディレクトリ</string>
   <string name="novel_migration_failed_count">%1$d冊の移行に失敗しました。元のファイルはディスクに残っています。詳細は設定で確認してください。</string>
+  <string name="provider_user_agent_presets">User-Agent プリセット</string>
+  <string name="provider_file_import_select">JSON / Markdown ファイルから読み込む</string>
+  <string name="provider_file_import_title">プロバイダーの読み込みを確認</string>
+  <string name="provider_file_import_hint">選択した項目を新規プロバイダーとして追加します。同名の項目は初期状態で未選択です。既存設定は変更せず、キーは表示しません。</string>
+  <string name="provider_file_import_duplicate">同名の項目：選択すると新規追加</string>
+  <string name="provider_file_import_confirm">%d 件を読み込む</string>
+  <string name="provider_file_import_error">読み込めません。JSON 配列または providers オブジェクトを使用してください。Markdown の json コードブロックにも対応します（100万文字まで）。種類、URL、モデルの項目を確認してください。</string>
+  <string name="provider_file_import_save_error">保存できませんでした。再試行してください。</string>
 </resources>

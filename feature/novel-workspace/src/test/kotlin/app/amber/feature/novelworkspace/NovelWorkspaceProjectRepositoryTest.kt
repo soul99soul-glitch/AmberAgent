@@ -98,6 +98,37 @@ class NovelWorkspaceProjectRepositoryTest {
     }
 
     @Test
+    fun `rename and delete refuse an active ghostwrite job`() {
+        val repo = repository()
+        val installed = repo.install(projectId, bookFiles("运行中"))
+        NovelWorkspaceGhostwriteJobs.save(
+            NovelWorkspaceGhostwriteJob(
+                id = "job-1",
+                branchSlug = "主线",
+                targetChapterCount = 1,
+                startOrdinal = 0,
+                createdAt = exportedAt,
+                updatedAt = exportedAt,
+            ),
+            installed.projectDirectory,
+        )
+
+        try {
+            repo.renameProject(projectId, "不应重命名")
+            fail("expected active ghostwrite rejection")
+        } catch (expected: NovelWorkspaceIoError) {
+            assertTrue(expected.message!!.contains("代笔批次"))
+        }
+        try {
+            repo.delete(projectId)
+            fail("expected active ghostwrite rejection")
+        } catch (expected: NovelWorkspaceIoError) {
+            assertTrue(expected.message!!.contains("代笔批次"))
+        }
+        assertEquals("运行中", repo.listProjects().single().name)
+    }
+
+    @Test
     fun `createBlank installs a minimal self-consistent book`() {
         val repo = repository()
         val result = repo.createBlank(name = "新书", mainBranchName = "主线", now = exportedAt)

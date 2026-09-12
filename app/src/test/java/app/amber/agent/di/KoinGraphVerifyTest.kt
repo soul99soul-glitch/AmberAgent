@@ -83,6 +83,15 @@ class KoinGraphVerifyTest {
             definition<app.amber.feature.novelworkspace.NovelWorkspaceProjectRepository>(
                 java.io.File::class,
             ),
+            // AgentInfraModule builds this from Context; verifier reflects its
+            // File primary constructor even though Koin never resolves File.
+            definition<app.amber.feature.reminder.ReminderStore>(
+                java.io.File::class,
+            ),
+            // RepositoryModule obtains this from Context rather than resolving a binding.
+            definition<app.amber.core.conversation.exchange.ConversationExchangeFileHandler>(
+                android.content.ContentResolver::class,
+            ),
             // runtime 在工厂里构造（NovelWorkspaceRuntime(get())）后传入协调器
             definition<app.amber.feature.novel.workspace.NovelWorkspaceGhostwriteCoordinator>(
                 app.amber.feature.novel.workspace.NovelWorkspaceRuntime::class,

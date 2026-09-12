@@ -1,6 +1,7 @@
 package app.amber.feature.board.agent
 
 import android.util.Log
+import kotlinx.coroutines.CancellationException
 import app.amber.ai.provider.ProviderCatalog
 import app.amber.ai.provider.TextGenerationParams
 import app.amber.ai.ui.UIMessage
@@ -37,16 +38,22 @@ class BoardAgent(
         val settings = settingsStore.settingsFlow.value
         val prompt = BoardPrompt.build(scoredSignals, focusRules, locale = locale)
 
-        val rawText = callModel(settings, prompt, locale)
-            ?: return BoardRunResult.Failed(
-                "model call failed" + (lastCallFailureReason?.let {
-                    if (locale.language.equals("zh", ignoreCase = true)) "：$it" else ": $it"
-                } ?: "")
-            )
+        val firstCall = callModel(settings, prompt, locale)
+        if (firstCall.isFailure) {
+            return modelCallFailed(firstCall.exceptionOrNull()!!, locale)
+        }
+        val rawText = firstCall.getOrNull()
+            ?: return BoardRunResult.Failed("model call failed")
 
-        val parsed = BoardOutputParser.parse(rawText)
-            ?: retry(settings, prompt, locale)
-            ?: return BoardRunResult.Failed("parse failed after retry")
+        var parsed = BoardOutputParser.parse(rawText)
+        if (parsed == null) {
+            val retryResult = retry(settings, prompt, locale)
+            if (retryResult.isFailure) {
+                return modelCallFailed(retryResult.exceptionOrNull()!!, locale)
+            }
+            parsed = retryResult.getOrNull()
+                ?: return BoardRunResult.Failed("parse failed after retry")
+        }
 
         val signalsByKey = scoredSignals.associateBy { boardSignalKey(it.signal.sourceType, it.signal.sourceRef) }
         val validation = BoardOutputValidator.validate(parsed, scoredSignals)
@@ -67,7 +74,7 @@ class BoardAgent(
         return BoardRunResult.Success(summary = output.summary, itemCount = entities.size)
     }
 
-    private suspend fun retry(settings: Settings, prompt: String, locale: Locale): BoardAgentOutput? {
+    private suspend fun retry(settings: Settings, prompt: String, locale: Locale): Result<BoardAgentOutput?> {
         Log.w(TAG, "first parse failed, retrying once with corrective hint")
         // Append a corrective hint so we don't pay for an identical second round-trip
         // when the first one drifted off the JSON contract.
@@ -76,34 +83,37 @@ class BoardAgent(
         } else {
             "\n\n## Retry hint\nThe previous output was not valid JSON. Return only a JSON object; no code fences or surrounding explanation."
         }
-        val text = callModel(settings, correctedPrompt, locale) ?: return null
-        return BoardOutputParser.parse(text)
+        val call = callModel(settings, correctedPrompt, locale)
+        if (call.isFailure) return Result.failure(call.exceptionOrNull()!!)
+        return Result.success(call.getOrNull()?.let(BoardOutputParser::parse))
     }
 
-    /** Stores the reason for the last callModel failure for user-facing messages. */
-    private var lastCallFailureReason: String? = null
+    private fun modelCallFailed(error: Throwable, locale: Locale): BoardRunResult.Failed {
+        val detail = error.message?.take(100) ?: error::class.simpleName
+        val suffix = detail?.let {
+            if (locale.language.equals("zh", ignoreCase = true)) "：$it" else ": $it"
+        }.orEmpty()
+        return BoardRunResult.Failed("model call failed$suffix", cause = error)
+    }
 
-    private suspend fun callModel(settings: Settings, prompt: String, locale: Locale): String? {
+    private suspend fun callModel(settings: Settings, prompt: String, locale: Locale): Result<String?> {
         val model = resolveModel(settings)
         if (model == null) {
-            lastCallFailureReason = if (locale.language.equals("zh", ignoreCase = true)) {
+            return Result.failure(IllegalStateException(if (locale.language.equals("zh", ignoreCase = true)) {
                 "请先配置聊天模型（设置 → 模型）"
             } else {
                 "Configure a chat model in Settings > Models."
-            }
-            return null
+            }))
         }
         val provider = model.findProvider(settings.providers)
         if (provider == null) {
-            lastCallFailureReason = if (locale.language.equals("zh", ignoreCase = true)) {
+            return Result.failure(IllegalStateException(if (locale.language.equals("zh", ignoreCase = true)) {
                 "模型 ${model.displayName} 的提供商不可用"
             } else {
                 "The provider for model ${model.displayName} is unavailable"
-            }
-            return null
+            }))
         }
-        lastCallFailureReason = null
-        return runCatching {
+        return try {
             val response = providerCatalog.text(provider).complete(
                 providerSetting = provider,
                 messages = listOf(
@@ -122,11 +132,13 @@ class BoardAgent(
                     customBody = model.boardRequestBodies(settings.providers),
                 ),
             )
-            response.choices.firstOrNull()?.message?.toText()
-        }.onFailure { e ->
-            Log.e(TAG, "board model call failed", e)
-            lastCallFailureReason = e.message?.take(100) ?: e::class.simpleName
-        }.getOrNull()
+            Result.success(response.choices.firstOrNull()?.message?.toText())
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Throwable) {
+            Log.e(TAG, "board model call failed", error)
+            Result.failure(error)
+        }
     }
 
     private fun resolveModel(settings: Settings): app.amber.ai.provider.Model? {
@@ -145,5 +157,5 @@ class BoardAgent(
 sealed interface BoardRunResult {
     data class Success(val summary: String, val itemCount: Int) : BoardRunResult
     data object Empty : BoardRunResult
-    data class Failed(val reason: String) : BoardRunResult
+    data class Failed(val reason: String, val cause: Throwable? = null) : BoardRunResult
 }

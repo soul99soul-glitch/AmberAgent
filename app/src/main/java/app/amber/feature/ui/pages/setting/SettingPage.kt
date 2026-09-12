@@ -3,6 +3,8 @@ package app.amber.feature.ui.pages.setting
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -14,7 +16,6 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -26,7 +27,6 @@ import androidx.compose.runtime.produceState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.res.stringResource
@@ -78,6 +78,7 @@ import app.amber.feature.ui.theme.LocalAmberType
 import app.amber.core.utils.plus
 import org.koin.androidx.compose.koinViewModel
 import org.koin.compose.koinInject
+import java.util.Locale
 
 @Composable
 fun SettingPage(vm: SettingVM = koinViewModel()) {
@@ -168,7 +169,7 @@ fun SettingPage(vm: SettingVM = koinViewModel()) {
                                 },
                             )
                         },
-                        headlineContent = { Text(stringResource(R.string.setting_page_appearance)) },
+                        headlineContent = { SettingRowTitle(stringResource(R.string.setting_page_appearance)) },
                     )
                     item(
                         onClick = { navController.navigate(Screen.SettingDisplay) },
@@ -328,38 +329,36 @@ fun SettingPage(vm: SettingVM = koinViewModel()) {
                     item(
                         onClick = { navController.navigate(Screen.SettingFiles) },
                         leadingContent = { SettingLeadingIcon(Lucide.ImageUp) },
-                        supportingContent = {
-                            if (storageState.first == -1) {
-                                Text(stringResource(R.string.calculating))
-                            } else {
-                                Text(
-                                    stringResource(
-                                        R.string.setting_page_chat_storage_desc,
-                                        storageState.first,
-                                        storageState.second / 1024 / 1024.0
-                                    ),
-                                    style = LocalAmberType.current.meta,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
+                        trailingContent = {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                if (storageState.first == -1) {
+                                    Text(
+                                        stringResource(R.string.calculating),
+                                        style = LocalAmberType.current.meta,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                } else {
+                                    // Machine-fact (count · size) → mono（design §3）；数字+单位 locale 无关，
+                                    // 定长 US 格式避免本地化长句把 trailing 撑爆（EN/RU 曾溢出 6-31dp）。
+                                    Text(
+                                        text = "${storageState.first} · " +
+                                            "%.2f MB".format(Locale.US, storageState.second / 1024 / 1024.0),
+                                        style = LocalAmberType.current.meta,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                }
+                                Spacer(Modifier.width(4.dp))
+                                SettingChevron()
                             }
                         },
-                        headlineContent = { Text(stringResource(R.string.setting_page_chat_storage)) },
-                        trailingContent = { SettingChevron() },
+                        headlineContent = { SettingRowTitle(stringResource(R.string.setting_page_chat_storage)) },
                     )
                 }
             }
         }
     }
-}
-
-@Composable
-private fun SettingSupporting(text: String) {
-    Text(
-        text = text,
-        maxLines = 2,
-        overflow = TextOverflow.Ellipsis,
-    )
 }
 
 @Composable
@@ -378,6 +377,11 @@ private fun SettingLeadingIcon(
     tone: WorkspaceTone = WorkspaceTone.Neutral,
 ) {
     WorkspaceLeadingIcon(icon = icon, size = 32.dp, iconSize = 17.dp, tone = tone)
+}
+
+@Composable
+private fun SettingRowTitle(text: String) {
+    Text(text = text, maxLines = 1, overflow = TextOverflow.Ellipsis)
 }
 
 @Composable

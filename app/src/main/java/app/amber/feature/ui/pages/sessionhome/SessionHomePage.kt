@@ -40,7 +40,6 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -85,7 +84,8 @@ import app.amber.agent.Screen
 import app.amber.core.model.AMBER_AGENT_ID
 import app.amber.core.model.Conversation
 import app.amber.core.repository.ConversationRepository
-import app.amber.core.service.ChatService
+import app.amber.core.sync.core.SyncRestoreWriteEpoch
+import app.amber.core.sync.core.SyncRestoreWriteGate
 import app.amber.core.settings.Settings
 import app.amber.core.settings.findModelById
 import app.amber.core.settings.prefs.SettingsAggregator
@@ -98,6 +98,7 @@ import app.amber.feature.ui.context.LocalSettings
 import app.amber.feature.ui.context.LocalToaster
 import app.amber.feature.ui.theme.JetBrainsMonoFamily
 import app.amber.feature.ui.theme.LocalAmberTokens
+import app.amber.feature.ui.theme.LocalAmberType
 import app.amber.feature.home.ContinueCandidate
 import app.amber.feature.home.ContinueRoute
 import app.amber.feature.home.ContinueSourceKind
@@ -110,6 +111,9 @@ import kotlinx.coroutines.launch
 import androidx.compose.material3.Text
 import androidx.compose.material3.ripple
 import androidx.compose.ui.res.painterResource
+import androidx.paging.LoadState
+import androidx.paging.compose.collectAsLazyPagingItems
+import androidx.paging.compose.itemKey
 import com.composables.icons.lucide.Lucide
 import com.composables.icons.lucide.BookOpenText
 import com.composables.icons.lucide.MessageCircle
@@ -128,6 +132,7 @@ import com.dokar.sonner.ToastType
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import org.koin.androidx.compose.koinViewModel
 import org.koin.compose.koinInject
+import kotlinx.coroutines.CancellationException
 
 /**
  * Session 首页 —— Fixed home of the app (Terminal × Modern graphite design).
@@ -145,37 +150,40 @@ fun SessionHomePage() {
     val navController = LocalNavController.current
     val settings = LocalSettings.current
     val tokens = LocalAmberTokens.current
+    val toaster = LocalToaster.current
     val vm: SessionHomeVM = koinViewModel()
-    val conversations = vm.conversations.collectAsStateWithLifecycle().value
-    val conversationsLoaded = vm.conversationsLoaded.collectAsStateWithLifecycle().value
+    val conversations = vm.conversations.collectAsLazyPagingItems()
     val hasConversationError = vm.hasConversationError.collectAsStateWithLifecycle().value
     var homeSearchQuery by rememberSaveable { mutableStateOf("") }
     var homeSearchExpanded by rememberSaveable { mutableStateOf(false) }
     val homeSearchFocusRequester = remember { FocusRequester() }
     val focusManager = LocalFocusManager.current
     val keyboardController = LocalSoftwareKeyboardController.current
-    val visibleConversations = filterHomeConversations(
-        conversations = conversations,
-        query = homeSearchQuery,
-        untitledLabel = stringResource(R.string.parity_home_new_conversation),
-    )
+    val untitledConversationLabel = stringResource(R.string.parity_home_new_conversation)
+    val refreshError = conversations.loadState.refresh as? LoadState.Error
+    val appendError = conversations.loadState.append as? LoadState.Error
+    val isRefreshLoading = conversations.loadState.refresh is LoadState.Loading
     val continueCandidates = vm.continueCandidates.collectAsStateWithLifecycle().value
     val hasContinueError = vm.hasContinueError.collectAsStateWithLifecycle().value
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
-    val toaster = LocalToaster.current
     // A full-height radius clamps to exactly half the measured height, including pixel rounding.
     val fabShape = AmberContinuousShape(cornerRadius = 44.dp)
     val fabInteractionSource = remember { MutableInteractionSource() }
+    val operationError = stringResource(R.string.error_title_operation)
+
+    LaunchedEffect(homeSearchQuery, untitledConversationLabel) {
+        vm.setHomeSearchQuery(homeSearchQuery, untitledConversationLabel)
+    }
 
     // Council Room: 首页没有「当前会话」，每次点议会现开一个新会话承载（council_state
     // 以 UPDATE 写在会话行上，行不存在房间会丢，故必须先落库；开房失败则回收占位会话）。
     val councilRoomManager: CouncilRoomManager = koinInject()
     val settingsStore: SettingsAggregator = koinInject()
     val conversationRepo: ConversationRepository = koinInject()
-    val chatService: ChatService = koinInject()
+    val restoreWriteGate: SyncRestoreWriteGate = koinInject()
     val openCouncilRoom: () -> Unit = {
-        scope.launch {
+        scope.launch(SyncRestoreWriteEpoch(restoreWriteGate.currentEpoch())) {
             val targetConversationId = Uuid.random()
             val councilSettings = settingsStore.settingsFlow.value
             val councilConversation = Conversation.ofId(
@@ -183,27 +191,58 @@ fun SessionHomePage() {
                 assistantId = AMBER_AGENT_ID,
                 newConversation = true,
             ).updateCurrentMessages(councilSettings.presetMessages)
-            chatService.saveConversation(targetConversationId, councilConversation)
-            val guests = councilSettings.agentRuntime.modelCouncil.defaultSeats.map { seat ->
-                seat.toCouncilParticipant().copy(
-                    modelName = councilSettings.findModelById(seat.modelId)?.displayName.orEmpty(),
+            var placeholderInserted = false
+            try {
+                restoreWriteGate.withCurrentWriterOrCancel {
+                    conversationRepo.insertConversation(councilConversation)
+                }
+                placeholderInserted = true
+                val guests = councilSettings.agentRuntime.modelCouncil.defaultSeats.map { seat ->
+                    seat.toCouncilParticipant().copy(
+                        modelName = councilSettings.findModelById(seat.modelId)?.displayName.orEmpty(),
+                    )
+                }
+                val result = councilRoomManager.openRoom(
+                    conversationId = targetConversationId,
+                    hostAssistantId = AMBER_AGENT_ID,
+                    hostName = "Amber",
+                    objective = "多模型协作讨论",
+                    initialGuests = guests,
+                    maxRounds = councilSettings.agentRuntime.modelCouncil.defaultRounds.coerceIn(2, 6),
+                    hostModelIdOverride = councilSettings.agentRuntime.modelCouncil.hostModelId,
                 )
+                if (result is CouncilRoomOpResult.Err) {
+                    conversationRepo.deleteConversation(councilConversation)
+                    placeholderInserted = false
+                    toaster.show(
+                        result.message.ifBlank { result.code },
+                        type = ToastType.Error,
+                    )
+                    android.util.Log.w("SessionHomeCouncil", "openRoom failed: ${result.code}")
+                    return@launch
+                }
+                navController.navigate(Screen.CouncilRoom(conversationId = targetConversationId.toString()))
+            } catch (cancel: CancellationException) {
+                throw cancel
+            } catch (error: Exception) {
+                if (placeholderInserted) {
+                    try {
+                        conversationRepo.deleteConversation(councilConversation)
+                    } catch (cancel: CancellationException) {
+                        throw cancel
+                    } catch (cleanupError: Exception) {
+                        android.util.Log.e(
+                            "SessionHomeCouncil",
+                            "failed to clean up placeholder conversation",
+                            cleanupError,
+                        )
+                    }
+                }
+                val message = error.message?.takeIf { it.isNotBlank() }
+                    ?: operationError
+                toaster.show(message, type = ToastType.Error)
+                android.util.Log.e("SessionHomeCouncil", "failed to open council room", error)
             }
-            val result = councilRoomManager.openRoom(
-                conversationId = targetConversationId,
-                hostAssistantId = AMBER_AGENT_ID,
-                hostName = "Amber",
-                objective = "多模型协作讨论",
-                initialGuests = guests,
-                maxRounds = councilSettings.agentRuntime.modelCouncil.defaultRounds.coerceIn(2, 6),
-                hostModelIdOverride = councilSettings.agentRuntime.modelCouncil.hostModelId,
-            )
-            if (result is CouncilRoomOpResult.Err) {
-                vm.deleteConversation(councilConversation)
-                android.util.Log.w("SessionHomeCouncil", "openRoom failed: ${result.code}")
-                return@launch
-            }
-            navController.navigate(Screen.CouncilRoom(conversationId = targetConversationId.toString()))
         }
     }
 
@@ -338,7 +377,7 @@ fun SessionHomePage() {
                     HomeConversationHeader()
                 }
 
-                if (hasConversationError && conversations.isEmpty()) {
+                if (hasConversationError && conversations.itemCount == 0) {
                     item(key = "home_conversations_error") {
                         HomeConversationErrorState(onRetry = vm::retryConversations)
                     }
@@ -348,25 +387,38 @@ fun SessionHomePage() {
                             HomeConversationInlineError(onRetry = vm::retryConversations)
                         }
                     }
-                    if (conversationsLoaded && visibleConversations.isEmpty() && homeSearchQuery.isNotBlank()) {
+                    if (refreshError != null && conversations.itemCount > 0) {
+                        item(key = "home_conversations_refresh_error_inline") {
+                            HomeConversationInlineError(onRetry = { conversations.retry() })
+                        }
+                    }
+                    if (refreshError != null && conversations.itemCount == 0) {
+                        item(key = "home_conversations_refresh_error") {
+                            HomeConversationErrorState(onRetry = { conversations.retry() })
+                        }
+                    }
+                    if (!isRefreshLoading && refreshError == null && conversations.itemCount == 0 &&
+                        homeSearchQuery.isNotBlank()
+                    ) {
                         item(key = "home_search_empty") {
                             HomeSearchEmptyState()
                         }
-                    } else if (conversationsLoaded && conversations.isEmpty()) {
+                    } else if (!isRefreshLoading && refreshError == null && conversations.itemCount == 0) {
                         item(key = "home_empty") {
                             HomeEmptyState(modifier = Modifier.padding(vertical = 56.dp))
                         }
                     }
 
-                    itemsIndexed(
-                        items = visibleConversations,
-                        key = { _, conversation -> conversation.id.toString() },
-                    ) { index, conversation ->
+                    items(
+                        count = conversations.itemCount,
+                        key = conversations.itemKey { it.id.toString() },
+                    ) { index ->
+                        val conversation = conversations[index] ?: return@items
                         HomeSessionRow(
                             conversation = conversation,
                             tileColor = homeConversationTileColor(conversation, tokens),
                             isFirst = index == 0,
-                            isLast = index == visibleConversations.lastIndex,
+                            isLast = index == conversations.itemCount - 1,
                             // 首页是 hub：用 push（保留 SessionHome 在栈底），返回能回到首页；
                             // 不能用 navigateToChatPage（其内部 clearAndNavigate 会清掉首页）
                             onOpen = {
@@ -378,18 +430,25 @@ fun SessionHomePage() {
                             onTogglePin = { vm.updatePinnedStatus(conversation) },
                         )
                     }
+
+                    if (appendError != null) {
+                        item(key = "home_conversations_append_error") {
+                            HomeConversationInlineError(onRetry = { conversations.retry() })
+                        }
+                    }
                 }
             }
         }
 
         // 列表底部渐隐，给 FAB 让出视觉空间（对齐设计稿的 mask 渐隐）。
         // 让位 navigationBars：锚到「列表视口底」而非屏幕底，三键导航下不失效。
+        // 高度 72 = FAB 占位（bottom 24 + 胶囊高 48），盖住胶囊顶缘以上的列表行。
         Box(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .windowInsetsPadding(WindowInsets.navigationBars)
                 .fillMaxWidth()
-                .height(52.dp)
+                .height(72.dp)
                 .background(
                     Brush.verticalGradient(
                         colors = listOf(Color.Transparent, tokens.bg),
@@ -397,7 +456,7 @@ fun SessionHomePage() {
                 )
         )
 
-        // Floating new-session button
+        // Floating new-session button —— iOS 同款胶囊（铅笔 + 新对话）
         Box(
             modifier = Modifier
                 .align(Alignment.BottomEnd)
@@ -692,7 +751,7 @@ internal fun filterHomeConversations(
     val trimmedQuery = query.trim()
     if (trimmedQuery.isEmpty()) return conversations
     return conversations.filter { conversation ->
-        (conversation.title.ifBlank { untitledLabel })
+        conversation.title.ifBlank { untitledLabel }
             .contains(trimmedQuery, ignoreCase = true)
     }
 }

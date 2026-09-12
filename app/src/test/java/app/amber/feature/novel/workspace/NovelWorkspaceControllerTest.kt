@@ -68,17 +68,18 @@ class NovelWorkspaceControllerTest {
                 factory = { NovelTurnAgent(payloads) },
             )
         }
+        val runnerScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
         val runner = InProcessAgentRunner(
             registry = registry,
             eventStore = InMemoryAgentEventStore(),
             runScopeFactory = { id, _ -> LegacyRunScope(runId = id) },
-            scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined),
+            scope = runnerScope,
         )
         controller = NovelWorkspaceGhostwriteController(
             context,
             NovelWorkspaceGhostwriteCoordinator(
                 NovelWorkspaceRuntime(NoopKernel),
-                NovelTurnLauncher(runner, payloads),
+                NovelTurnLauncher(runner, payloads, runnerScope),
             ),
         )
     }

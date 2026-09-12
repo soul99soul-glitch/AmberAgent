@@ -110,15 +110,17 @@ class LocalFolderSyncProvider(
             // 归档已 rename publish 为最终名后的引用；sidecar 发布失败时据此回滚。
             var publishedArchiveUri: Uri? = null
             try {
-                archiveManager.createArchiveFile(
+                val createdArchive = archiveManager.createArchiveFile(
                     SyncExportRequest(
                         mode = request.mode,
                         passphrase = request.passphrase,
                         encryptionMode = request.encryptionMode,
                     )
-                ).let { created ->
-                    created.copyTo(archiveFile, overwrite = true)
-                    created.delete()
+                )
+                try {
+                    createdArchive.copyTo(archiveFile, overwrite = true)
+                } finally {
+                    createdArchive.delete()
                 }
                 val contentSha256 = crypto.sha256(archiveFile)
                 val preview = archiveManager.inspectArchive(archiveFile)

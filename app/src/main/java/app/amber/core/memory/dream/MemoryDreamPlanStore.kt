@@ -53,7 +53,6 @@ class MemoryDreamPlanStore(
         source: MemoryDreamPlanSource,
         now: Long = System.currentTimeMillis(),
     ): PersistedMemoryDreamPlan = withPlanWriter {
-        dao.updatePendingStatus(MemoryDreamPlanStatus.DISMISSED.wireName, now)
         val entity = MemoryDreamPlanEntity(
             id = Uuid.random().toString(),
             planJson = json.encodeToString(MemoryDreamPlan.serializer(), plan),
@@ -68,7 +67,7 @@ class MemoryDreamPlanStore(
             appliedAt = null,
             dismissedAt = null,
         )
-        dao.insert(entity)
+        dao.replacePending(entity)
         entity.toPersisted()
     }
 
@@ -99,7 +98,6 @@ class MemoryDreamPlanStore(
         source: MemoryDreamPlanSource,
         now: Long = System.currentTimeMillis(),
     ): PersistedMemoryDreamPlan = withPlanWriter {
-        dao.updatePendingStatus(MemoryDreamPlanStatus.DISMISSED.wireName, now)
         val entity = MemoryDreamPlanEntity(
             id = Uuid.random().toString(),
             planJson = json.encodeToString(MemoryDreamPlan.serializer(), plan),
@@ -114,7 +112,7 @@ class MemoryDreamPlanStore(
             appliedAt = now,
             dismissedAt = null,
         )
-        dao.insert(entity)
+        dao.replacePending(entity)
         entity.toPersisted()
     }
 

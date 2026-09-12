@@ -124,6 +124,9 @@ class NovelWorkspaceProjectRepository(private val rootDirectory: File) {
 
     fun delete(id: String) {
         val directory = projectDirectory(id)
+        NovelWorkspaceGhostwriteJobs.listActive(directory).firstOrNull()?.let {
+            throw NovelWorkspaceIoError("当前项目仍有代笔批次运行，请先让批次完成或取消后再删除")
+        }
         if (directory.exists() && !directory.deleteRecursively()) {
             throw NovelWorkspaceIoError("Cannot delete workspace project: $id")
         }
@@ -132,6 +135,9 @@ class NovelWorkspaceProjectRepository(private val rootDirectory: File) {
     /** Rename a project: update project.md title and commit (host-level, self-contained). */
     fun renameProject(id: String, newName: String, now: Instant = Instant.now()) {
         val directory = projectDirectory(id)
+        NovelWorkspaceGhostwriteJobs.listActive(directory).firstOrNull()?.let {
+            throw NovelWorkspaceIoError("当前项目仍有代笔批次运行，请先让批次完成或取消后再重命名")
+        }
         val store = NovelWorkspaceStore(directory)
         val existing = store.read(NovelWorkspacePaths.PROJECT_FILE)
             ?: throw NovelWorkspaceIoError("项目不存在：$id")

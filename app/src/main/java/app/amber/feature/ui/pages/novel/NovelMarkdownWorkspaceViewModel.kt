@@ -43,10 +43,14 @@ import java.time.Instant
 import java.util.UUID
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 
 /**
@@ -149,6 +153,48 @@ private data class NovelGhostwriteRefresh(
     val canUndo: Boolean,
 )
 
+private data class NovelWorkspaceReloadSnapshot(
+    val projectDirectory: File? = null,
+    val branchId: String? = null,
+    val branchSlug: String? = null,
+    val title: String = "",
+    val branches: List<NovelWorkspaceBranches.NovelWorkspaceBranchInfo> = emptyList(),
+    val messages: List<NovelMarkdownMessageUi> = emptyList(),
+    val chapters: List<NovelMarkdownChapterUi> = emptyList(),
+    val drafts: List<NovelMarkdownDraftUi> = emptyList(),
+    val catalog: NovelWorkspaceCatalog.NovelWorkspaceCatalogData? = null,
+    val proposals: List<NovelWorkspaceWriteProposal> = emptyList(),
+    val plotStale: Boolean = false,
+    val unresolvedFromOrdinal: Int? = null,
+    val writingModelId: String? = null,
+    val reviewModelId: String? = null,
+    val injection: app.amber.feature.novelworkspace.NovelWorkspaceInjectionFlags =
+        app.amber.feature.novelworkspace.NovelWorkspaceInjectionFlags(),
+    val canUndo: Boolean = false,
+)
+
+private data class NovelWorkspaceContentSnapshot(
+    val messages: List<NovelMarkdownMessageUi>,
+    val chapters: List<NovelMarkdownChapterUi>,
+    val drafts: List<NovelMarkdownDraftUi>,
+    val catalog: NovelWorkspaceCatalog.NovelWorkspaceCatalogData?,
+    val proposals: List<NovelWorkspaceWriteProposal>,
+    val plotStale: Boolean,
+    val unresolvedFromOrdinal: Int?,
+    val canUndo: Boolean,
+)
+
+private data class NovelWorkspaceSendCompletion(
+    val content: NovelWorkspaceContentSnapshot,
+    val producedNothing: Boolean,
+)
+
+private data class NovelWorkspaceSendPreparation(
+    val isBlankBook: Boolean,
+    val filesBeforeQuickstart: Int,
+    val messages: List<NovelMarkdownMessageUi>,
+)
+
 class NovelMarkdownWorkspaceViewModel(
     projectId: String,
     private val repository: NovelWorkspaceProjectRepository,
@@ -177,6 +223,10 @@ class NovelMarkdownWorkspaceViewModel(
     /** In-flight chat turn; cancellable so the composer's stop button can end it. */
     private var turnJob: kotlinx.coroutines.Job? = null
     private var ghostwriteRefreshJob: kotlinx.coroutines.Job? = null
+    private var reloadJob: Job? = null
+    // All reload coordination is launched from the ViewModel's main scope; a plain counter
+    // is sufficient and keeps this UI-only guard lightweight.
+    private var reloadGeneration = 0L
 
     /** Stop the in-flight turn (composer stop). Partial output is discarded; the
      *  workspace runtime rolls back any uncommitted canon writes on cancellation. */
@@ -189,62 +239,131 @@ class NovelMarkdownWorkspaceViewModel(
     }
 
     fun reload() {
-        viewModelScope.launch {
-            reloadState()
+        reloadJob?.cancel()
+        val generation = ++reloadGeneration
+        reloadJob = viewModelScope.launch {
+            reloadState(generation)
         }
     }
 
-    private fun reloadState() {
-        runCatching {
-            if (!repository.exists(projectId)) {
-                _state.value = _state.value.copy(loading = false, exists = false)
-                return@runCatching
+    private suspend fun reloadState(expectedGeneration: Long) {
+        // Capture mutable navigation state on the ViewModel's main scope before the
+        // snapshot work moves to IO. A stale/cancelled reload must never consume a
+        // newer branch or deep-link focus and publish it later.
+        val focusRequest = pendingFocus
+        pendingFocus = null
+        try {
+            val snapshot = withContext(Dispatchers.IO) {
+                readWorkspaceSnapshot(focusRequest)
             }
-            val directory = repository.projectDirectory(projectId)
-            val store = NovelWorkspaceStore(directory)
-            val ledger = NovelWorkspaceLedger.load(directory)
-            projectDirectory = directory
-            // Notification/deep-link focus is view-only: resolve it against durable state
-            // without changing the app's active branch or resuming a Worker implicitly.
-            val focusRequest = pendingFocus
-            pendingFocus = null
-            val focus = focusRequest?.resolve(store)
-            // 活跃分支：.amber/branch.json 标记优先，缺失回退 manifest.mainBranch。
-            val slug = focus?.branchSlug ?: NovelWorkspaceBranches.activeSlug(directory)
-            branchId = focus?.branchId ?: NovelWorkspaceLedger.branchId(store, ledger, slug)
-            branchSlug = slug
+            if (expectedGeneration != reloadGeneration) return
+
+            projectDirectory = snapshot.projectDirectory
+            branchId = snapshot.branchId
+            branchSlug = snapshot.branchSlug
             _state.value = _state.value.copy(
-                loading = false,
-                exists = true,
-                title = NovelWorkspaceProjectTitle.read(store),
-                branchSlug = slug,
-                branches = NovelWorkspaceBranches.list(directory, slug),
-                messages = loadMessages(directory),
-                chapters = loadChapters(store),
-                catalog = loadCatalog(directory, ledger, slug),
-                proposals = proposalsForThisProject(),
-                drafts = loadDrafts(store),
-                plotStale = NovelWorkspaceLedger.isPlotStale(store, ledger, slug),
-                unresolvedFromOrdinal = NovelWorkspaceUnresolvedStore
-                    .entryFor(directory, slug)?.fromOrdinal,
-                writingModelId = NovelWorkspaceProjectSettingsStore.load(directory).writingModelId,
-                reviewModelId = NovelWorkspaceProjectSettingsStore.load(directory).reviewModelId,
-                injection = NovelWorkspaceProjectSettingsStore.load(directory).injection
-                    ?: app.amber.feature.novelworkspace.NovelWorkspaceInjectionFlags(),
-                canUndo = runtime.canUndo(directory, slug),
+                // Keep the page gated until the existing ghostwrite reconciliation finishes;
+                // otherwise send() could accept a turn before the durable batch projection arrives.
+                loading = true,
+                exists = snapshot.projectDirectory != null,
+                title = snapshot.title,
+                branchSlug = snapshot.branchSlug,
+                branches = snapshot.branches,
+                messages = snapshot.messages,
+                chapters = snapshot.chapters,
+                catalog = snapshot.catalog,
+                proposals = snapshot.proposals,
+                drafts = snapshot.drafts,
+                plotStale = snapshot.plotStale,
+                unresolvedFromOrdinal = snapshot.unresolvedFromOrdinal,
+                writingModelId = snapshot.writingModelId,
+                reviewModelId = snapshot.reviewModelId,
+                injection = snapshot.injection,
+                canUndo = snapshot.canUndo,
             )
-        }.onFailure { error ->
-            _state.value = _state.value.copy(
-                loading = false,
-                errorMessage = error.message ?: text(R.string.error_title_operation),
-            )
+            // Keep the existing WorkManager reconciliation and refresh contract after the
+            // base workspace snapshot has been published. Waiting suspends the main scope.
+            refreshGhostwrite()
+            ghostwriteRefreshJob?.join()
+            if (expectedGeneration != reloadGeneration) return
+            _state.value = _state.value.copy(loading = false)
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            if (expectedGeneration == reloadGeneration) {
+                _state.value = _state.value.copy(
+                    loading = false,
+                    errorMessage = error.message ?: text(R.string.error_title_operation),
+                )
+            }
         }
-        refreshGhostwrite()
+    }
+
+    /** Read one coherent workspace projection on IO before publishing it to the UI. */
+    private suspend fun readWorkspaceSnapshot(
+        focusRequest: NovelWorkspaceFocus?,
+    ): NovelWorkspaceReloadSnapshot {
+        if (!repository.exists(projectId)) return NovelWorkspaceReloadSnapshot()
+
+        val directory = repository.projectDirectory(projectId)
+        val store = NovelWorkspaceStore(directory)
+        val ledger = NovelWorkspaceLedger.load(directory)
+        // Notification/deep-link focus is view-only: resolve it against durable state without
+        // changing the app's active branch or implicitly resuming a Worker.
+        val focus = focusRequest?.resolve(store)
+        val slug = focus?.branchSlug ?: NovelWorkspaceBranches.activeSlug(directory)
+        val resolvedBranchId = focus?.branchId ?: NovelWorkspaceLedger.branchId(store, ledger, slug)
+        val projectSettings = NovelWorkspaceProjectSettingsStore.load(directory)
+        val chapters = loadChapters(store, slug)
+        val drafts = loadDrafts(store)
+        val catalog = loadCatalog(directory, ledger, slug)
+        return NovelWorkspaceReloadSnapshot(
+            projectDirectory = directory,
+            branchId = resolvedBranchId,
+            branchSlug = slug,
+            title = NovelWorkspaceProjectTitle.read(store),
+            branches = NovelWorkspaceBranches.list(directory, slug),
+            messages = loadMessages(directory, resolvedBranchId),
+            chapters = chapters,
+            drafts = drafts,
+            catalog = catalog,
+            proposals = runtime.pendingProposals.value.filter { it.projectDirectory == directory },
+            plotStale = NovelWorkspaceLedger.isPlotStale(store, ledger, slug),
+            unresolvedFromOrdinal = NovelWorkspaceUnresolvedStore.entryFor(directory, slug)?.fromOrdinal,
+            writingModelId = projectSettings.writingModelId,
+            reviewModelId = projectSettings.reviewModelId,
+            injection = projectSettings.injection
+                ?: app.amber.feature.novelworkspace.NovelWorkspaceInjectionFlags(),
+            canUndo = runtime.canUndo(directory, slug),
+        )
+    }
+
+    private fun loadWorkspaceContentSnapshot(
+        directory: File,
+        branch: String,
+        slug: String,
+    ): NovelWorkspaceContentSnapshot {
+        val store = NovelWorkspaceStore(directory)
+        val ledger = NovelWorkspaceLedger.load(directory)
+        return NovelWorkspaceContentSnapshot(
+            messages = loadMessages(directory, branch),
+            chapters = loadChapters(store, slug),
+            drafts = loadDrafts(store),
+            catalog = loadCatalog(directory, ledger, slug),
+            proposals = proposalsForThisProject(directory),
+            plotStale = NovelWorkspaceLedger.isPlotStale(store, ledger, slug),
+            unresolvedFromOrdinal = NovelWorkspaceUnresolvedStore.entryFor(directory, slug)?.fromOrdinal,
+            canUndo = runtime.canUndo(directory, slug),
+        )
     }
 
     fun send(text: String): Boolean {
         val trimmed = text.trim()
         if (trimmed.isEmpty() || _state.value.busy) return false
+        if (_state.value.loading) {
+            _state.value = _state.value.copy(errorMessage = text(R.string.novel_loading))
+            return false
+        }
         val directory = projectDirectory
         val branch = branchId
         val slug = branchSlug
@@ -252,7 +371,7 @@ class NovelMarkdownWorkspaceViewModel(
             _state.value = _state.value.copy(errorMessage = text(R.string.novel_loading))
             return false
         }
-        if (hasActiveGhostwrite()) {
+        if (hasKnownActiveGhostwrite()) {
             _state.value = _state.value.copy(errorMessage = text(R.string.novel_batch_in_use))
             return false
         }
@@ -282,35 +401,74 @@ class NovelMarkdownWorkspaceViewModel(
             _state.value = _state.value.copy(errorMessage = text(R.string.novel_ghostwrite_error_model_missing))
             return false
         }
-        // A blank book (no chapters, no setting cards) treats the message as the quickstart
-        // seed and generates the initial settings. Chapter/setting emptiness — not message
-        // history — is the criterion, so a failed first turn re-triggers quickstart instead
-        // of permanently falling back to plain discussion.
-        val isBlankBook = _state.value.chapters.isEmpty() &&
-            NovelWorkspaceStore(directory).list(NovelWorkspacePaths.SETTING_DIR).isEmpty()
-        // Quickstart must actually produce files; a read-only turn is a silent failure
-        // for a first-time user, so measure what exists and check it after the turn.
-        val filesBeforeQuickstart = if (isBlankBook) NovelWorkspaceStore(directory).list().size else -1
-        appendSessionMessage(directory, branch, NovelWorkspaceSessionMessage(
-            id = UUID.randomUUID().toString().uppercase(),
-            role = "user",
-            kind = "userInput",
-            content = trimmed,
-            createdAt = Instant.now(),
-        ))
         _state.value = _state.value.copy(
             busy = true,
             errorMessage = null,
             streamingText = "",
             reasoningText = "",
             toolActivity = null,
-            messages = loadMessages(directory),
         )
         turnJob?.cancel()
+        val acceptedMessage = NovelWorkspaceSessionMessage(
+            id = UUID.randomUUID().toString().uppercase(),
+            role = "user",
+            kind = "userInput",
+            content = trimmed,
+            createdAt = Instant.now(),
+        )
+        val acceptedMessageUi = NovelMarkdownMessageUi(
+            id = acceptedMessage.id,
+            role = MessageRole.USER,
+            content = acceptedMessage.content,
+        )
         turnJob = viewModelScope.launch {
-            android.util.Log.i("NovelWorkspace", "send: turn starting (blank=$isBlankBook)")
+            var isBlankBook = false
+            var filesBeforeQuickstart = -1
             var finalText = ""
             try {
+                // Keep the send() Boolean contract synchronous: all cheap gates above decide
+                // whether a turn is accepted, while the filesystem preflight and user-message
+                // append happen off the main thread after acceptance. NonCancellable preserves
+                // the old ordering guarantee that an accepted user message is durable even when
+                // the user immediately presses Stop.
+                val preparation = try {
+                    // Keep the accepted user message durable even when Stop arrives during the
+                    // following reads. Only the read-modify-write append is non-cancellable;
+                    // scans and message projection remain cancellable IO work.
+                    withContext(NonCancellable + Dispatchers.IO) {
+                        appendSessionMessage(directory, branch, acceptedMessage)
+                    }
+                    val quickstart = withContext(Dispatchers.IO) {
+                        val store = NovelWorkspaceStore(directory)
+                        val blank = _state.value.chapters.isEmpty() &&
+                            store.list(NovelWorkspacePaths.SETTING_DIR).isEmpty()
+                        val filesBefore = if (blank) store.list().size else -1
+                        blank to filesBefore
+                    }
+                    val messages = withContext(Dispatchers.IO) {
+                        loadMessages(directory, branch)
+                    }
+                    NovelWorkspaceSendPreparation(
+                        isBlankBook = quickstart.first,
+                        filesBeforeQuickstart = quickstart.second,
+                        messages = messages,
+                    )
+                } catch (cancel: CancellationException) {
+                    // The accepted user message was already durably appended. Publish that
+                    // known message even when Stop cancels the follow-up read; do not continue
+                    // into model execution after rethrowing cancellation.
+                    if (_state.value.messages.none { it.id == acceptedMessageUi.id }) {
+                        _state.value = _state.value.copy(
+                            messages = _state.value.messages + acceptedMessageUi,
+                        )
+                    }
+                    throw cancel
+                }
+                isBlankBook = preparation.isBlankBook
+                filesBeforeQuickstart = preparation.filesBeforeQuickstart
+                _state.value = _state.value.copy(messages = preparation.messages)
+                currentCoroutineContext().ensureActive()
+                android.util.Log.i("NovelWorkspace", "send: turn starting (blank=$isBlankBook)")
                 turnLauncher.launch(
                 NovelWorkspaceRuntime.TurnRequest(
                     projectDirectory = directory,
@@ -357,44 +515,52 @@ class NovelMarkdownWorkspaceViewModel(
                     is NovelWorkspaceRuntime.TurnEvent.Completed -> {
                         android.util.Log.i("NovelWorkspace", "send: Completed finalLen=${event.finalText.length}")
                         if (event.finalText.isNotBlank()) {
-                            appendSessionMessage(directory, branch, NovelWorkspaceSessionMessage(
-                                id = UUID.randomUUID().toString().uppercase(),
-                                role = "assistant",
-                                kind = "discussion",
-                                content = event.finalText,
-                                createdAt = Instant.now(),
-                            ))
+                            withContext(NonCancellable + Dispatchers.IO) {
+                                appendSessionMessage(
+                                    directory,
+                                    branch,
+                                    NovelWorkspaceSessionMessage(
+                                        id = UUID.randomUUID().toString().uppercase(),
+                                        role = "assistant",
+                                        kind = "discussion",
+                                        content = event.finalText,
+                                        createdAt = Instant.now(),
+                                    ),
+                                )
+                            }
                         }
-                        val store = NovelWorkspaceStore(directory)
-                        // Device-observed failure: the quickstart turn can spend its whole
-                        // budget reading an empty book and produce nothing — surface that
-                        // instead of ending as a silent empty turn.
-                        val producedNothing = isBlankBook &&
-                            filesBeforeQuickstart >= 0 &&
-                            store.list().size == filesBeforeQuickstart
+                        val completion = withContext(Dispatchers.IO) {
+                            val store = NovelWorkspaceStore(directory)
+                            // Device-observed failure: the quickstart turn can spend its whole
+                            // budget reading an empty book and produce nothing — surface that
+                            // instead of ending as a silent empty turn.
+                            val producedNothing = isBlankBook &&
+                                filesBeforeQuickstart >= 0 &&
+                                store.list().size == filesBeforeQuickstart
+                            NovelWorkspaceSendCompletion(
+                                content = loadWorkspaceContentSnapshot(directory, branch, slug),
+                                producedNothing = producedNothing,
+                            )
+                        }
+                        currentCoroutineContext().ensureActive()
                         _state.value = _state.value.copy(
                             busy = false,
                             streamingText = "",
                             reasoningText = "",
                             toolActivity = null,
-                            errorMessage = if (producedNothing) {
+                            errorMessage = if (completion.producedNothing) {
                                 text(R.string.novel_no_setting_files)
                             } else {
                                 null
                             },
-                            messages = loadMessages(directory),
-                            chapters = loadChapters(store),
-                            drafts = loadDrafts(store),
-                            proposals = proposalsForThisProject(),
-                            plotStale = NovelWorkspaceLedger.isPlotStale(
-                                store,
-                                NovelWorkspaceLedger.load(directory),
-                                slug,
-                            ),
-                            unresolvedFromOrdinal = NovelWorkspaceUnresolvedStore
-                                .entryFor(directory, slug)?.fromOrdinal,
-                            catalog = loadCatalog(directory, slug),
-                            canUndo = runtime.canUndo(directory, slug),
+                            messages = completion.content.messages,
+                            chapters = completion.content.chapters,
+                            drafts = completion.content.drafts,
+                            proposals = completion.content.proposals,
+                            plotStale = completion.content.plotStale,
+                            unresolvedFromOrdinal = completion.content.unresolvedFromOrdinal,
+                            catalog = completion.content.catalog,
+                            canUndo = completion.content.canUndo,
                         )
                     }
                     is NovelWorkspaceRuntime.TurnEvent.Failed -> {
@@ -946,17 +1112,21 @@ class NovelMarkdownWorkspaceViewModel(
         }
     }
 
-    fun readChapter(path: String): String? = readFileBody(path)
+    suspend fun readChapter(path: String): String? = readFileBody(path)
 
     /** Body of any book file (setting cards, foreshadowing nodes) for the 设定 tab editor. */
-    fun readFileBody(path: String): String? {
+    suspend fun readFileBody(path: String): String? {
         val directory = projectDirectory ?: return null
-        return runCatching {
-            val store = NovelWorkspaceStore(directory)
-            val content = store.read(path) ?: return@runCatching null
-            NovelWorkspaceMarkdown.parseFile(content).body
-        }.getOrNull()
+        return withContext(Dispatchers.IO) {
+            readFileBodyBlocking(directory, path)
+        }
     }
+
+    private fun readFileBodyBlocking(directory: File, path: String): String? = runCatching {
+        val store = NovelWorkspaceStore(directory)
+        val content = store.read(path) ?: return@runCatching null
+        NovelWorkspaceMarkdown.parseFile(content).body
+    }.getOrNull()
 
     // ── 多分支：新建 / 切换（branch sheet）────────────────────────────
 
@@ -1001,6 +1171,11 @@ class NovelMarkdownWorkspaceViewModel(
             _state.value = _state.value.copy(errorMessage = text(R.string.novel_in_progress))
             return
         }
+        // Invalidate an in-flight initial/reload snapshot before changing the active branch.
+        // Its IO work may finish later, but the generation check in reloadState prevents it
+        // from publishing the old branch over the newly selected one.
+        reloadJob?.cancel()
+        val reloadGeneration = ++this.reloadGeneration
         viewModelScope.launch {
             _state.value = _state.value.copy(busy = true, errorMessage = null)
             try {
@@ -1025,7 +1200,7 @@ class NovelMarkdownWorkspaceViewModel(
                     toolActivity = null,
                     consistencyReport = null,
                 )
-                reloadState()
+                reloadState(reloadGeneration)
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Exception) {
@@ -1122,8 +1297,8 @@ class NovelMarkdownWorkspaceViewModel(
         _state.value = _state.value.copy(composerMode = mode)
     }
 
-    private fun proposalsForThisProject(): List<NovelWorkspaceWriteProposal> {
-        val directory = projectDirectory ?: return emptyList()
+    private fun proposalsForThisProject(directory: File? = projectDirectory): List<NovelWorkspaceWriteProposal> {
+        directory ?: return emptyList()
         return runtime.pendingProposals.value.filter { it.projectDirectory == directory }
     }
 
@@ -1137,8 +1312,14 @@ class NovelMarkdownWorkspaceViewModel(
         return NovelWorkspaceGhostwriteJobs.activeFor(directory, slug) != null
     }
 
-    private fun loadMessages(directory: File): List<NovelMarkdownMessageUi> {
-        val branch = branchId ?: return emptyList()
+    /** Fast UI callback guard used by send(); the runtime still performs the durable owner CAS. */
+    private fun hasKnownActiveGhostwrite(): Boolean =
+        _state.value.ghostwriteJob?.status == NovelWorkspaceGhostwriteJob.STATUS_RUNNING ||
+            _state.value.ghostwriteJob?.status == NovelWorkspaceGhostwriteJob.STATUS_PAUSED ||
+            _state.value.ghostwriteJob?.status == NovelWorkspaceGhostwriteJob.STATUS_FAILED
+
+    private fun loadMessages(directory: File, branch: String? = branchId): List<NovelMarkdownMessageUi> {
+        branch ?: return emptyList()
         return NovelWorkspaceSessions.load(directory).sessions[branch].orEmpty().map { message ->
             NovelMarkdownMessageUi(
                 id = message.id,
@@ -1152,8 +1333,8 @@ class NovelMarkdownWorkspaceViewModel(
         }
     }
 
-    private fun loadChapters(store: NovelWorkspaceStore): List<NovelMarkdownChapterUi> {
-        val slug = branchSlug ?: return emptyList()
+    private fun loadChapters(store: NovelWorkspaceStore, slug: String? = branchSlug): List<NovelMarkdownChapterUi> {
+        slug ?: return emptyList()
         val prefix = NovelWorkspacePaths.branchPrefix(slug) + "/chapters"
         return store.list(prefix).mapNotNull { path ->
             val content = store.read(path) ?: return@mapNotNull null
@@ -1579,7 +1760,9 @@ class NovelMarkdownWorkspaceViewModel(
         }
     }
     private fun resolveWritingModel(settings: app.amber.core.settings.Settings): app.amber.ai.provider.Model? {
-        val override = projectDirectory?.let { NovelWorkspaceProjectSettingsStore.load(it).writingModelId }
+        // Project settings are loaded into the UI snapshot on IO. Reusing that value keeps
+        // button callbacks (send, rewrite, batch start) free of synchronous file reads.
+        val override = _state.value.writingModelId
         if (override != null) {
             runCatching { Uuid.parse(override) }.getOrNull()?.let { uuid ->
                 settings.findModelById(uuid)?.let { return it }
@@ -1591,7 +1774,7 @@ class NovelMarkdownWorkspaceViewModel(
     /** Review model: project review override → writing override → global chat model. */
     @OptIn(ExperimentalUuidApi::class)
     private fun resolveReviewModel(settings: app.amber.core.settings.Settings): app.amber.ai.provider.Model? {
-        val reviewOverride = projectDirectory?.let { NovelWorkspaceProjectSettingsStore.load(it).reviewModelId }
+        val reviewOverride = _state.value.reviewModelId
         if (reviewOverride != null) {
             runCatching { Uuid.parse(reviewOverride) }.getOrNull()?.let { uuid ->
                 settings.findModelById(uuid)?.let { return it }
@@ -1722,7 +1905,7 @@ class NovelMarkdownWorkspaceViewModel(
     }
 
     fun currentWritingModelId(): String? =
-        projectDirectory?.let { NovelWorkspaceProjectSettingsStore.load(it).writingModelId }
+        _state.value.writingModelId
 
     // ── Ghostwrite panel backing: author-editable control files + injected-brief preview.
 
@@ -1732,8 +1915,13 @@ class NovelMarkdownWorkspaceViewModel(
     private fun upcomingPath(): String? =
         branchSlug?.let { NovelWorkspacePaths.branchPrefix(it) + "/plan/upcoming.md" }
 
-    fun readChapterPlan(): String =
-        pathRead(planPath()) ?: ""
+    suspend fun readChapterPlan(): String {
+        val directory = projectDirectory ?: return ""
+        val slug = branchSlug ?: return ""
+        return withContext(Dispatchers.IO) {
+            pathRead(directory, NovelWorkspacePaths.branchPrefix(slug) + "/plan/this-chapter.md") ?: ""
+        }
+    }
 
     fun saveChapterPlan(body: String): Boolean {
         projectDirectory ?: return false
@@ -1745,36 +1933,51 @@ class NovelMarkdownWorkspaceViewModel(
         return pathWrite(planPath(), body)
     }
 
-    fun readUpcomingArc(): String = pathRead(upcomingPath()) ?: ""
+    suspend fun readUpcomingArc(): String {
+        val directory = projectDirectory ?: return ""
+        val slug = branchSlug ?: return ""
+        return withContext(Dispatchers.IO) {
+            pathRead(directory, NovelWorkspacePaths.branchPrefix(slug) + "/plan/upcoming.md") ?: ""
+        }
+    }
 
     fun saveUpcomingArc(body: String) = pathWrite(upcomingPath(), body)
 
     /** Writing preference = the setting/writing card (first file; created on save). */
-    fun readWritingPreference(): String {
+    suspend fun readWritingPreference(): String {
         val directory = projectDirectory ?: return ""
-        val store = NovelWorkspaceStore(directory)
-        val first = store.list(NovelWorkspacePaths.SETTING_DIR + "/writing").firstOrNull()
-        return pathRead(first) ?: ""
+        return withContext(Dispatchers.IO) {
+            val store = NovelWorkspaceStore(directory)
+            val first = store.list(NovelWorkspacePaths.SETTING_DIR + "/writing").firstOrNull()
+            pathRead(directory, first) ?: ""
+        }
     }
 
     // saveWritingPreference 已上移至设定 tab 的 saveFileEdit 旁：两入口共用 commitFileEdit
     // （手改 commit + undo，J7 口径统一）。
 
     /** What the host will inject as constraints next turn (ghostwrite panel preview). */
-    fun briefPreview(): String {
+    suspend fun briefPreview(): String {
         val directory = projectDirectory ?: return ""
         val slug = branchSlug ?: return ""
-        return runCatching {
-            app.amber.feature.novelworkspace.NovelWorkspaceContextAssembler.assemble(
-                NovelWorkspaceStore(directory), slug,
-                flags = _state.value.injection,
-                locale = context.appLocale(),
-            )
-        }.getOrDefault("")
+        val flags = _state.value.injection
+        return withContext(Dispatchers.IO) {
+            runCatching {
+                app.amber.feature.novelworkspace.NovelWorkspaceContextAssembler.assemble(
+                    NovelWorkspaceStore(directory), slug,
+                    flags = flags,
+                    locale = context.appLocale(),
+                )
+            }.getOrDefault("")
+        }
     }
 
     private fun pathRead(path: String?): String? {
         val directory = projectDirectory ?: return null
+        return pathRead(directory, path)
+    }
+
+    private fun pathRead(directory: File, path: String?): String? {
         if (path == null) return null
         return runCatching {
             NovelWorkspaceMarkdown.parseFile(NovelWorkspaceStore(directory).read(path) ?: "").body

@@ -119,7 +119,9 @@ class SkillDetailVM(
         return dirs + files
     }
 
-    fun readFile(skillFile: SkillFile): String = skillFile.file.readText()
+    suspend fun readFile(skillFile: SkillFile): String = withContext(Dispatchers.IO) {
+        skillFile.file.readText()
+    }
 
     // Returns null on success, error message on failure
     fun saveFile(relativePath: String, content: String, onResult: (String?) -> Unit) {

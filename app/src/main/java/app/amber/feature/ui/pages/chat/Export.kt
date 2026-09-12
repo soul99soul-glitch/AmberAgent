@@ -3,7 +3,6 @@ package app.amber.feature.ui.pages.chat
 import android.content.Context
 import android.graphics.Bitmap
 import android.net.Uri
-import android.widget.Toast
 import com.composables.icons.lucide.Lucide
 import com.composables.icons.lucide.BookOpen
 import com.composables.icons.lucide.BookMarked
@@ -68,9 +67,7 @@ import coil3.request.allowHardware
 import coil3.request.crossfade
 import com.dokar.sonner.ToastType
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
 import app.amber.ai.core.MessageRole
@@ -206,7 +203,7 @@ fun ChatExportSheet(
                             Button(
                                 onClick = {
                                     scope.launch {
-                                        runCatching {
+                                        val saved = runCatching {
                                             exportToImage(
                                                 context = context,
                                                 scope = scope,
@@ -216,19 +213,20 @@ fun ChatExportSheet(
                                                 settings = settings,
                                                 options = imageExportOptions
                                             )
-                                        }.onFailure {
+                                        }.getOrElse {
                                             it.printStackTrace()
-                                            toaster.show(
-                                                message = "Failed to export image: ${it.message}",
-                                                type = ToastType.Error
-                                            )
+                                            false
                                         }
+                                        toaster.show(
+                                            message = if (saved) {
+                                                imageSuccessMessage
+                                            } else {
+                                                context.getString(R.string.mermaid_export_failed)
+                                            },
+                                            type = if (saved) ToastType.Success else ToastType.Error,
+                                        )
+                                        if (saved) onDismissRequest()
                                     }
-                                    toaster.show(
-                                        imageSuccessMessage,
-                                        type = ToastType.Success
-                                    )
-                                    onDismissRequest()
                                 }
                             ) {
                                 Text(stringResource(R.string.mermaid_export))
@@ -400,15 +398,12 @@ private suspend fun exportToImage(
     messages: List<UIMessage>,
     settings: Settings,
     options: ImageExportOptions = ImageExportOptions()
-) {
+): Boolean {
     val filename = "chat-export-${LocalDateTime.now().format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd_HH-mm-ss"))}.png"
     val composer = BitmapComposer(scope)
     val activity = context.getActivity()
     if (activity == null) {
-        withContext(Dispatchers.Main) {
-            Toast.makeText(context, "Failed to get activity", Toast.LENGTH_SHORT).show()
-        }
-        return
+        return false
     }
 
     val bitmap = composer.composableToBitmap(
@@ -426,7 +421,7 @@ private suspend fun exportToImage(
         }
     )
 
-    try {
+    return try {
         val dir = context.appTempFolder
         val file = dir.resolve(filename)
         if (!file.exists()) {
@@ -441,7 +436,7 @@ private suspend fun exportToImage(
         }
 
         // Save to gallery
-        context.exportImage(activity, bitmap, filename)
+        if (!context.exportImage(activity, bitmap, filename)) return false
 
         // Share the file
         val uri = FileProvider.getUriForFile(
@@ -450,11 +445,10 @@ private suspend fun exportToImage(
             file
         )
         shareFile(context, uri, "image/png")
+        true
     } catch (e: Exception) {
         e.printStackTrace()
-        withContext(Dispatchers.Main) {
-            Toast.makeText(context, "Failed to export image: ${e.message}", Toast.LENGTH_SHORT).show()
-        }
+        false
     } finally {
         bitmap.recycle()
     }

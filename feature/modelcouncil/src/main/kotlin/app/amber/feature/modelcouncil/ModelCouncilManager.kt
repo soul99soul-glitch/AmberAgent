@@ -606,6 +606,9 @@ class ModelCouncilManager(
                 summary = result.finalRecommendation.ifBlank { result.error }.take(4_000),
                 error = result.error.takeIf { it.isNotBlank() },
                 cancelCapability = false,
+                clearError = true,
+                // 并集 store 语义下 clearError 不再连带清 code，显式同清以复现旧行为
+                clearLastErrorCode = true,
             )
         }
         appendEvent(runtimeRun, "finished", runToPayload(next))

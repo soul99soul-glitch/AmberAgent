@@ -7,9 +7,13 @@ import android.util.Log
 import androidx.browser.customtabs.CustomTabsIntent
 import io.ktor.client.HttpClient
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.withContext
 import app.amber.common.oauth.LoopbackOAuthCallbackServer
 import app.amber.agent.AppScope
 import app.amber.core.localization.OAuthDisplayLocalizer
@@ -43,14 +47,17 @@ import java.util.concurrent.ConcurrentHashMap
  */
 class WebMountOAuthClient(
     private val context: Context,
-    private val store: WebMountOAuthTokenStore,
-    private val pendingStore: PendingOAuthStore,
+    storeProvider: () -> WebMountOAuthTokenStore,
+    pendingStoreProvider: () -> PendingOAuthStore,
     private val dispatcher: OAuthCallbackDispatcher,
     private val http: HttpClient,
     private val appScope: AppScope,
 ) {
+    private val store by lazy(storeProvider)
+    private val pendingStore by lazy(pendingStoreProvider)
 
     private val providers = ConcurrentHashMap<String, OAuthProvider>()
+    private val refreshLocks = ConcurrentHashMap<String, Mutex>()
 
     /**
      * States currently being handled by a live in-process [connect] coroutine.
@@ -68,10 +75,16 @@ class WebMountOAuthClient(
         // Pair with the encrypted [pendingStore] so we still have the
         // code_verifier for the exchange.
         appScope.launch {
-            dispatcher.events.collect { callback -> handleEventForResume(callback) }
+            dispatcher.events.collect { callback ->
+                withContext(Dispatchers.IO) { handleEventForResume(callback) }
+            }
         }
-        // Drop pending entries that have outlived the OAuth user-action window.
-        appScope.launch { pendingStore.purgeStale(PENDING_TTL_MS) }
+        // Keep the callback subscription eager, but resolve encrypted stores and
+        // purge expired entries off the Application's synchronous startup path.
+        appScope.launch(Dispatchers.IO) {
+            store
+            pendingStore.purgeStale(PENDING_TTL_MS)
+        }
     }
 
     fun register(provider: OAuthProvider) {
@@ -273,19 +286,30 @@ class WebMountOAuthClient(
         val provider = providers[providerId] ?: return null
         val current = store.getToken(providerId) ?: return null
         if (!current.isExpired(skewMs = REFRESH_SKEW_MS)) return current.accessToken
-        val refreshToken = current.refreshToken ?: return null
-        val credentials = store.getCredentials(providerId) ?: return null
-        return runCatching {
-            val refreshed = provider.refresh(
-                credentials,
-                refreshToken,
-                http,
-                errorCopy = OAuthDisplayLocalizer.oauthProviderErrors(context),
-            )
-            store.putToken(providerId, refreshed)
-            refreshed.accessToken
-        }.onFailure { Log.w(TAG, "Inline refresh failed for $providerId", it) }
-            .getOrNull()
+        val lock = refreshLocks.computeIfAbsent(providerId) { Mutex() }
+        return lock.withLock {
+            // Another caller may have refreshed while this caller waited.
+            val latest = store.getToken(providerId) ?: return@withLock null
+            if (!latest.isExpired(skewMs = REFRESH_SKEW_MS)) return@withLock latest.accessToken
+            val refreshToken = latest.refreshToken ?: return@withLock null
+            val credentials = store.getCredentials(providerId) ?: return@withLock null
+            runCatching {
+                val refreshed = provider.refresh(
+                    credentials,
+                    refreshToken,
+                    http,
+                    errorCopy = OAuthDisplayLocalizer.oauthProviderErrors(context),
+                )
+                if (!store.putTokenIfCurrent(providerId, latest, refreshed)) {
+                    Log.i(TAG, "Discarding stale OAuth refresh result for $providerId")
+                    return@runCatching null
+                }
+                refreshed.accessToken
+            }.onFailure {
+                if (it is CancellationException) throw it
+                Log.w(TAG, "Inline refresh failed for $providerId", it)
+            }.getOrNull()
+        }
     }
 
     // ----------------------------------------------------------------------

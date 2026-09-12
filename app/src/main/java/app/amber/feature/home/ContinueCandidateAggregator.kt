@@ -1,11 +1,12 @@
 package app.amber.feature.home
 
 import app.amber.agent.data.db.entity.ContinueCandidateDismissEntity
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flow
-import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.flowOn
 import java.time.Instant
 
 /**
@@ -41,6 +42,6 @@ class ContinueCandidateAggregator(
                 dismissStore.deleteExpired(now().toEpochMilli())
                 emit(sortContinueCandidates(candidates))
             }
-        }
+        }.flowOn(Dispatchers.Default)
     }
 }

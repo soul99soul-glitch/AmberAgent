@@ -6,7 +6,7 @@ import androidx.datastore.preferences.core.MutablePreferences
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.emptyPreferences
-import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -24,6 +24,7 @@ import app.amber.core.sync.s3.S3Config
 import app.amber.core.settings.secret.SecretRedactor
 import app.amber.core.settings.secret.SecretStore
 import app.amber.core.agent.utils.JsonInstant
+import app.amber.core.settings.shareSettingsRawFlow
 import app.amber.core.settings.toMutableStateFlow
 import kotlin.uuid.Uuid
 
@@ -50,12 +51,13 @@ class ExtensionPrefs(
 ) {
     private val redactor = SecretRedactor(secretStore)
 
-    internal val rawFlow: Flow<ExtensionPrefsData> = dataStore.data
+    internal val rawFlow: SharedFlow<ExtensionPrefsData> = dataStore.data
         .catch { e ->
             if (e is IOException) emit(emptyPreferences()) else throw e
         }
         .map { readFrom(it) }
         .distinctUntilChanged()
+        .shareSettingsRawFlow(scope)
 
     val flow: StateFlow<ExtensionPrefsData> = rawFlow
         .toMutableStateFlow(scope, ExtensionPrefsData())
@@ -69,7 +71,7 @@ class ExtensionPrefs(
         }
     }
 
-    private fun readFrom(p: Preferences): ExtensionPrefsData {
+    internal fun readFrom(p: Preferences): ExtensionPrefsData {
         val refs = redactor.readRefs(p)
         return ExtensionPrefsData(
             mcpServers = p[PreferencesKeys.MCP_SERVERS]?.let { raw ->

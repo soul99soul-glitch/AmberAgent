@@ -1,10 +1,9 @@
 package app.amber.feature.ui.pages.sessionhome
 
+import androidx.paging.PagingData
 import app.amber.core.model.Conversation
-import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.flow
-import kotlinx.coroutines.flow.stateIn
-import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -13,38 +12,34 @@ import org.junit.Test
 class SessionHomeConversationStreamTest {
 
     @Test
-    fun `stream error keeps the last conversation list and reports the error`() = runTest {
+    fun `paging stream keeps the emitted page and reports the error`() = runTest {
         val conversation = Conversation.ofId(kotlin.uuid.Uuid.random()).copy(title = "Saved")
         var error: Throwable? = null
-        val state = observeConversationStream(
+        val pages = mutableListOf<PagingData<Conversation>>()
+        observeConversationPaging(
             source = {
                 flow {
-                    emit(listOf(conversation))
+                    emit(PagingData.from(listOf(conversation)))
                     throw IllegalStateException("database unavailable")
                 }
             },
-            onValue = {},
             onError = { error = it },
-        ).stateIn(this, SharingStarted.Eagerly, emptyList())
+        ).collect { pages += it }
 
-        advanceUntilIdle()
-
-        assertEquals(listOf(conversation), state.value)
+        assertEquals(1, pages.size)
         assertTrue(error is IllegalStateException)
     }
 
     @Test
-    fun `stream construction error reports without emitting an empty replacement`() = runTest {
+    fun `paging construction error reports without emitting an empty replacement`() = runTest {
         var error: Throwable? = null
-        val state = observeConversationStream(
+        val pages = mutableListOf<PagingData<Conversation>>()
+        observeConversationPaging(
             source = { throw IllegalStateException("database unavailable") },
-            onValue = {},
             onError = { error = it },
-        ).stateIn(this, SharingStarted.Eagerly, listOf(Conversation.ofId(kotlin.uuid.Uuid.random())))
-
-        advanceUntilIdle()
+        ).collect { pages += it }
 
         assertTrue(error is IllegalStateException)
-        assertEquals(1, state.value.size)
+        assertTrue(pages.isEmpty())
     }
 }

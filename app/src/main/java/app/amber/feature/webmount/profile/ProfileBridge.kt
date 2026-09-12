@@ -95,9 +95,9 @@ class ProfileBridge(
     /**
      * End-to-end signing call (Phase 2 holistic review B-1 + B-2 fix):
      *  1. Validate origin allow-list (L3 — current WebView page).
-     *  2. Validate `send_signed:<host>` for the requested URL's host if
-     *     supplied (so a profile can be scoped to e.g. api.bilibili.com
-     *     even if the page is on www.bilibili.com).
+     *  2. Validate `send_signed:<host>` for the requested URL's host (so a
+     *     profile can be scoped to e.g. api.bilibili.com even if the page is
+     *     on www.bilibili.com).
      *  3. Validate the profile granted `call_page_fn:<fnName>`.
      *  4. Acquire a rate-limit slot (L5; user-imported capped tighter).
      *  5. Inject the host shim (idempotent JS) so the function exists.
@@ -116,7 +116,7 @@ class ProfileBridge(
         scriptKey: String,
         args: List<JsonElement>,
         timeoutMs: Long = 8_000L,
-        requestedUrlHost: String? = null,
+        requestedUrlHost: String,
         dispatchWithLease: ((() -> Unit) -> Boolean)? = null,
     ): SignResult {
         val script = entry.profile.scripts[scriptKey]
@@ -137,18 +137,16 @@ class ProfileBridge(
         // wm_signed_fetch could direct the shim's in-page fetch
         // anywhere — the SOP would block credentialed requests but
         // the bridge would still expose the response shape.
-        if (requestedUrlHost != null) {
-            val sendSignedHosts = entry.effective.granted
-                .filterIsInstance<ProfilePermission.SendSigned>()
-                .map { it.host }
-            val originAllowed = entry.profile.origins.any { it == requestedUrlHost }
-            val signedAllowed = sendSignedHosts.any { it == requestedUrlHost }
-            if (!originAllowed && !signedAllowed) {
-                return SignResult.Error(
-                    "Outbound host '$requestedUrlHost' not in profile origins " +
-                        "or send_signed permissions"
-                )
-            }
+        val sendSignedHosts = entry.effective.granted
+            .filterIsInstance<ProfilePermission.SendSigned>()
+            .map { it.host }
+        val originAllowed = entry.profile.origins.any { it == requestedUrlHost }
+        val signedAllowed = sendSignedHosts.any { it == requestedUrlHost }
+        if (!originAllowed && !signedAllowed) {
+            return SignResult.Error(
+                "Outbound host '$requestedUrlHost' not in profile origins " +
+                    "or send_signed permissions"
+            )
         }
         if (!acquireSlot(entry)) {
             return SignResult.RateLimited(

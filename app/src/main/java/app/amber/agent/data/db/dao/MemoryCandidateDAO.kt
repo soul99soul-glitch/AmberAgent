@@ -16,6 +16,9 @@ interface MemoryCandidateDAO {
     @Query("SELECT * FROM memory_candidate WHERE status = :status ORDER BY created_at DESC")
     fun getCandidatesByStatusFlow(status: String): Flow<List<MemoryCandidateEntity>>
 
+    @Query("SELECT COUNT(*) FROM memory_candidate WHERE status = :status")
+    fun countCandidatesByStatusFlow(status: String): Flow<Int>
+
     @Query("SELECT * FROM memory_candidate WHERE status = :status ORDER BY created_at DESC")
     suspend fun getCandidatesByStatus(status: String): List<MemoryCandidateEntity>
 

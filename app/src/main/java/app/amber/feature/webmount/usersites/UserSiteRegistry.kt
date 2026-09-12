@@ -131,12 +131,13 @@ class UserSiteRegistry(context: Context) {
             // site needs login, so they ended up with no Sign-in button.
             // Promote them to COOKIE on first read after the upgrade and
             // persist so it sticks.
+            val seedVersion = prefs.getInt(KEY_SEED_VERSION, if (seeded) 1 else 0)
             val migratedBase = parsed.map { site ->
                 var next = site
                 // Migration A: user-added sites added before the "需要登录" Switch
                 // defaulted to ANONYMOUS + no cookie → bump to COOKIE so the
                 // login button reappears.
-                if (next.id.startsWith("user_") &&
+                if (seedVersion < 3 && next.id.startsWith("user_") &&
                     next.authKind == AuthKind.ANONYMOUS &&
                     next.loginCookieName == null &&
                     next.nativeAdapterId == null
@@ -171,7 +172,6 @@ class UserSiteRegistry(context: Context) {
                 }
                 next
             }.let { sites ->
-                val seedVersion = prefs.getInt(KEY_SEED_VERSION, if (seeded) 1 else 0)
                 if (seedVersion >= CURRENT_SEED_VERSION) return@let sites
                 val existingIds = sites.map { it.id }.toSet()
                 val existingSignatures = sites.map { it.seedAutoAddSignature() }.toSet()

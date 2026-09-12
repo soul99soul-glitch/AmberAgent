@@ -94,6 +94,12 @@ class SecretStore(
 
     /** 更新（upsert）一条 secret。 */
     fun update(descriptor: SecretDescriptor, value: String) {
+        // SettingsAggregator commonly replays a fully rehydrated snapshot when
+        // only a non-secret field changed. Avoid a fresh Keystore encryption and
+        // synchronous SharedPreferences commit when the stored plaintext is
+        // already identical. A failed decrypt returns null and therefore keeps
+        // the original repair/upsert behavior.
+        if (read(descriptor) == value) return
         backend.put(descriptor.key, cipher.encrypt(value))
     }
 
