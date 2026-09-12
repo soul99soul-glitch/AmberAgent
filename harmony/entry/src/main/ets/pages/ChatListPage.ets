@@ -1,8 +1,10 @@
 // ChatListPage — Android 风格会话首页
 // 保留真实数据逻辑: repo.list/search/删除/撤销/置顶/删除全部
 
-import { router, promptAction, picker } from '@kit.ArkUI';
-import { pasteboard, util } from '@kit.BasicServicesKit';
+import { router, promptAction } from '@kit.ArkUI';
+import { picker } from '@kit.CoreFileKit';
+import { pasteboard } from '@kit.BasicServicesKit';
+import { util } from '@kit.ArkTS';
 import { fileIo } from '@kit.CoreFileKit';
 import type { Context } from '@kit.AbilityKit';
 import type { Conversation, ConversationSummary, UIMessage, DisplaySetting } from '@amber/chat-domain';
@@ -445,7 +447,7 @@ struct ChatListPage {
         return;
       }
       const md: string = exportConversationMarkdown(conv, { fallbackTitle: '未命名对话' });
-      const data: pasteboard.Data = { plainText: md };
+      const data = pasteboard.createData(pasteboard.MIMETYPE_TEXT_PLAIN, md);
       const pb: pasteboard.SystemPasteboard = pasteboard.getSystemPasteboard();
       pb.setData(data).then((): void => {
         promptAction.showToast({ message: '已复制 Markdown 到剪贴板', duration: 1800 });
@@ -490,7 +492,7 @@ struct ChatListPage {
       fileIo.closeSync(file.fd);
       promptAction.showToast({ message: `已导出 ${fileName}`, duration: 2000 });
     } catch (e) {
-      const msg: string = e instanceof Error ? e.message : String(e);
+      const msg: string = (e as Error).message;
       promptAction.showToast({ message: `导出失败：${msg}`, duration: 2000 });
     }
   }
@@ -511,7 +513,7 @@ struct ChatListPage {
       fileIo.closeSync(file.fd);
       promptAction.showToast({ message: `已保存到应用目录 ${fileName}`, duration: 2200 });
     } catch (e) {
-      const msg: string = e instanceof Error ? e.message : String(e);
+      const msg: string = (e as Error).message;
       promptAction.showToast({ message: `导出失败：${msg}`, duration: 2000 });
     }
   }

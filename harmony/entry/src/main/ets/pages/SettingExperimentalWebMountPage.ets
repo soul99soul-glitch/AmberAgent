@@ -14,6 +14,7 @@ import { loadWebMountSites, saveWebMountSites, makeUserSite, hostOf, isSeedSite,
 import type { UserSiteEntry } from '../platform_impl/WebMountSites.ets';
 import {
   makeFeishuPkce, exchangeFeishuCode, createKvWebMountTokenStore, feishuTokenStatusText,
+  type FeishuExchangeInput,
 } from '../platform_impl/WebMountOAuthSupport.ets';
 import { buildFeishuAuthorizationUrl, type WebMountPkce, type WebMountOAuthToken } from '@amber/chat-domain';
 
@@ -121,12 +122,13 @@ struct SettingExperimentalWebMountPage {
     this.feishuBusy = true;
     this.feishuStatus = '兑换中…';
     try {
-      const token = await exchangeFeishuCode(getAppContainer().httpClient, {
+      const exchangeInput: FeishuExchangeInput = {
         appId: this.feishuAppId.trim(),
         appSecret: this.feishuAppSecret.trim(),
         code: this.feishuAuthCode.trim(),
         codeVerifier: this.feishuPkce.codeVerifier,
-      });
+      };
+      const token = await exchangeFeishuCode(getAppContainer().httpClient, exchangeInput);
       await createKvWebMountTokenStore(getChatKvStore()).set(token);
       this.feishuToken = token;
       this.feishuStatus = feishuTokenStatusText(token);

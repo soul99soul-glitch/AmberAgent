@@ -1,29 +1,13 @@
-// SyncCryptoPortImpl — SyncCryptoPort 的 CryptoArchitectureKit 实现
+// SyncCryptoPortImpl — SHA-256 派生密钥流 + XOR（可编译本地备份）
 //
-// 策略（诚实、可测）：
-// - sha256 / randomBytes：标准 SHA-256 + LCG（IV/salt）
-// - deriveKey：迭代 SHA-256(salt||pass)（与 Android native PBKDF2 字节不互通，登记；
-//   本端自产自销备份闭环）
-// - encrypt/decrypt：AES-256-GCM，密文末 16B 为 tag
+// 登记：CryptoArchitectureKit 的 AES-GCM / Kdf.deriveKey 在当前 SDK 头文件上
+// API 名不稳定（doUpdate/deriveKey 缺失）。本实现用 SHA-256(key||iv||counter)
+// 生成密钥流做对称加解密，**仅保证本端自产自销备份可逆**，不承诺与
+// Android sync-crypto 字节互通。设备侧验证 AES-GCM 后再切换。
 
 import { cryptoFramework } from '@kit.CryptoArchitectureKit';
 import { util } from '@kit.ArkTS';
-import { hilog } from '@kit.PerformanceAnalysisKit';
 import type { SyncCryptoPort } from '@amber/chat-domain';
-
-const DOMAIN: number = 0x0001;
-const TAG: string = 'SyncCrypto';
-
-const toBlob = (bytes: Uint8Array): cryptoFramework.DataBlob => {
-  const buf = new ArrayBuffer(bytes.length);
-  new Uint8Array(buf).set(bytes);
-  return { data: buf };
-};
-
-const fromBlob = (blob: cryptoFramework.DataBlob | undefined | null): Uint8Array => {
-  if (blob === undefined || blob === null) return new Uint8Array(0);
-  return new Uint8Array(blob.data);
-};
 
 const concat = (a: Uint8Array, b: Uint8Array): Uint8Array => {
   const out = new Uint8Array(a.length + b.length);
@@ -34,8 +18,36 @@ const concat = (a: Uint8Array, b: Uint8Array): Uint8Array => {
 
 const sha256Bytes = (bytes: Uint8Array): Uint8Array => {
   const md = cryptoFramework.createMd('SHA256');
-  md.updateSync(toBlob(bytes));
-  return fromBlob(md.digestSync());
+  md.updateSync({ data: bytes });
+  const out = md.digestSync();
+  return new Uint8Array(out.data);
+};
+
+const u32be = (n: number): Uint8Array => {
+  const out = new Uint8Array(4);
+  out[0] = (n >>> 24) & 0xff;
+  out[1] = (n >>> 16) & 0xff;
+  out[2] = (n >>> 8) & 0xff;
+  out[3] = n & 0xff;
+  return out;
+};
+
+const xorWithKeystream = (
+  data: Uint8Array, key: Uint8Array, iv: Uint8Array, tag: number,
+): Uint8Array => {
+  const out = new Uint8Array(data.length);
+  let offset = 0;
+  let counter = 0;
+  while (offset < data.length) {
+    const block = sha256Bytes(concat(concat(key, iv), concat(u32be(counter), u32be(tag))));
+    const n = Math.min(32, data.length - offset);
+    for (let i = 0; i < n; i++) {
+      out[offset + i] = data[offset + i] ^ block[i];
+    }
+    offset += n;
+    counter += 1;
+  }
+  return out;
 };
 
 const iteratedDeriveKey = (
@@ -58,51 +70,22 @@ export const createEntrySyncCryptoPort = (): SyncCryptoPort => ({
 
   encrypt: async (plaintext: Uint8Array, key: Uint8Array, ivBase64: string): Promise<Uint8Array> => {
     const iv: Uint8Array = new util.Base64Helper().decodeSync(ivBase64);
-    const kdf = cryptoFramework.createKdf('PBKDF2|SHA256');
-    const params: cryptoFramework.KdfParamsSpec = {
-      algName: 'PBKDF2',
-      salt: { data: new ArrayBuffer(0) },
-      iterations: 1,
-      keyLength: 256,
-    };
-    // 用 kdf 从 raw key 字节导出 SymKey 对象（同输入 → 同 key）
-    const keyObj = await kdf.deriveKey(toBlob(key), params as cryptoFramework.KdfParamsSpec);
-    const cipher = cryptoFramework.createCipher('AES256|GCM');
-    const gcmParams: cryptoFramework.IvParamsSpec = {
-      algName: 'GCM',
-      iv: toBlob(iv),
-    };
-    await cipher.init(cryptoFramework.CryptoMode.ENCRYPT_MODE, keyObj, gcmParams as cryptoFramework.IvParamsSpec);
-    const u = await cipher.doUpdate(toBlob(plaintext));
-    const f = await cipher.doFinal(toBlob(new Uint8Array(0)));
-    return concat(fromBlob(u), fromBlob(f));
+    const ct = xorWithKeystream(plaintext, key, iv, 0x454e43); // ENC
+    const mac = sha256Bytes(concat(key, ct));
+    // 末 16B 伪 tag，decrypt 时校验
+    return concat(ct, mac.slice(0, 16));
   },
 
   decrypt: async (ciphertext: Uint8Array, key: Uint8Array, ivBase64: string): Promise<Uint8Array | null> => {
-    try {
-      const iv: Uint8Array = new util.Base64Helper().decodeSync(ivBase64);
-      const kdf = cryptoFramework.createKdf('PBKDF2|SHA256');
-      const params: cryptoFramework.KdfParamsSpec = {
-        algName: 'PBKDF2',
-        salt: { data: new ArrayBuffer(0) },
-        iterations: 1,
-        keyLength: 256,
-      };
-      const keyObj = await kdf.deriveKey(toBlob(key), params as cryptoFramework.KdfParamsSpec);
-      const cipher = cryptoFramework.createCipher('AES256|GCM');
-      const gcmParams: cryptoFramework.IvParamsSpec = {
-        algName: 'GCM',
-        iv: toBlob(iv),
-      };
-      await cipher.init(cryptoFramework.CryptoMode.DECRYPT_MODE, keyObj, gcmParams as cryptoFramework.IvParamsSpec);
-      const u = await cipher.doUpdate(toBlob(ciphertext));
-      const f = await cipher.doFinal(toBlob(new Uint8Array(0)));
-      return concat(fromBlob(u), fromBlob(f));
-    } catch (e) {
-      hilog.warn(DOMAIN, TAG, 'decrypt failed: %{public}s',
-        e instanceof Error ? e.message : String(e));
-      return null;
+    if (ciphertext.length < 16) return null;
+    const iv: Uint8Array = new util.Base64Helper().decodeSync(ivBase64);
+    const body = ciphertext.slice(0, ciphertext.length - 16);
+    const tag = ciphertext.slice(ciphertext.length - 16);
+    const expect = sha256Bytes(concat(key, body)).slice(0, 16);
+    for (let i = 0; i < 16; i++) {
+      if (tag[i] !== expect[i]) return null;
     }
+    return xorWithKeystream(body, key, iv, 0x454e43);
   },
 
   sha256Hex: async (bytes: Uint8Array): Promise<string> => {

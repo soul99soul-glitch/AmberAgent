@@ -5,9 +5,10 @@
 
 import { router, window } from '@kit.ArkUI';
 import { Icon } from '../components/ui/Icon.ets';
-import type { ConversationSummary, ContinueCandidate } from '@amber/chat-domain';
+import type { ConversationSummary, ContinueCandidate, AgentCronTask } from '@amber/chat-domain';
 import { mergeContinueCandidates, continueStatusText, SOURCE_LABEL } from '@amber/chat-domain';
-import { getChatRepository, describeChatModel, getNovelCreation, getAgentCronManager, getRepository, getMiniAppRepositorySync } from '../di/AppContainer.ets';
+import { getChatRepository, describeChatModel, getNovelCreation, getAgentCronManager, getRepository } from '../di/AppContainer.ets';
+import { getMiniAppRepositorySync } from '../platform_impl/MiniAppPlatform.ets';
 import {
   INK, INK2, INK3, INK4, SURFACE, LINE, BG, ACCENT, ACCENT_INK, TINY, TEXT_STYLES,
 } from '../design/tokens.ets';
@@ -211,24 +212,30 @@ struct Index {
         priority: 0,
         isRunning: false,
       })))
-      .catch((): ContinueCandidate[] => []);
+      .catch((_err: Error): ContinueCandidate[] => []);
     const cronList: Promise<ContinueCandidate[]> = getAgentCronManager()
-      .then((m): Promise<ContinueCandidate[]> => m.listTasksSnapshot())
-      .then((tasks): ContinueCandidate[] => tasks
-        .filter((t): boolean => t.enabled && (t.lastStatus === 'Failed' || t.lastStatus === 'Running'))
-        .slice(0, 3)
-        .map((t): ContinueCandidate => ({
-          sourceKind: 'cron',
-          sourceId: t.id,
-          route: { kind: 'cron', taskId: t.id },
-          title: t.title,
-          summary: t.lastStatus === 'Failed' ? '上次失败，可重试' : '运行中',
-          lastUpdatedAt: t.updatedAtMs,
-          status: t.lastStatus === 'Failed' ? 'failed_resumable' : 'running',
-          priority: 0,
-          isRunning: t.lastStatus === 'Running',
-        })))
-      .catch((): ContinueCandidate[] => []);
+      .then((m): Promise<AgentCronTask[]> => m.listTasksSnapshot())
+      .then((tasks: AgentCronTask[]): ContinueCandidate[] => {
+        const out: ContinueCandidate[] = [];
+        for (const t of tasks) {
+          if (!t.enabled) continue;
+          if (t.lastStatus !== 'Failed' && t.lastStatus !== 'Running') continue;
+          if (out.length >= 3) break;
+          out.push({
+            sourceKind: 'cron',
+            sourceId: t.id,
+            route: { kind: 'cron', taskId: t.id },
+            title: t.title,
+            summary: t.lastStatus === 'Failed' ? '上次失败，可重试' : '运行中',
+            lastUpdatedAt: t.updatedAtMs,
+            status: t.lastStatus === 'Failed' ? 'failed_resumable' : 'running',
+            priority: 0,
+            isRunning: t.lastStatus === 'Running',
+          });
+        }
+        return out;
+      })
+      .catch((_err: Error): ContinueCandidate[] => []);
     const deepList: Promise<ContinueCandidate[]> = getRepository().listHistory(3)
       .then((entries): ContinueCandidate[] => entries
         .filter((e): boolean => e.phase !== 'COMPLETE')
@@ -242,14 +249,14 @@ struct Index {
           lastUpdatedAt: e.updatedAt,
           status: 'waiting_user',
           priority: 0,
-          isRunning: e.phase !== 'COMPLETE' && e.phase !== 'FAILED',
+          isRunning: e.phase !== 'COMPLETE',
         })))
-      .catch((): ContinueCandidate[] => []);
+      .catch((_err: Error): ContinueCandidate[] => []);
     const miniList: Promise<ContinueCandidate[]> = getMiniAppRepositorySync().listAll()
       .then((apps): ContinueCandidate[] => apps.slice(0, 2).map((app): ContinueCandidate => ({
         sourceKind: 'miniapp',
-        sourceId: app.appId,
-        route: { kind: 'miniapp', appId: app.appId },
+        sourceId: app.id,
+        route: { kind: 'miniapp', appId: app.id },
         title: app.title,
         summary: '可打开运行',
         lastUpdatedAt: app.updatedAt,
@@ -257,7 +264,7 @@ struct Index {
         priority: 0,
         isRunning: false,
       })))
-      .catch((): ContinueCandidate[] => []);
+      .catch((_err: Error): ContinueCandidate[] => []);
     Promise.all([novelList, cronList, deepList, miniList]).then((lists): void => {
       if (!this.pageAlive || !this.pageVisible) return;
       this.continueItems = mergeContinueCandidates(lists, 6);

@@ -403,6 +403,7 @@ export type { WebDavConfig, WebDavClient, WebDavRemoteFile } from './chat/sync_w
 export {
   createWebMountPkce, buildFeishuAuthorizationUrl, buildFeishuTokenBody,
   parseFeishuTokenResponse, webMountTokenUsable, defaultFeishuRedirectUri,
+  feishuTokenEndpoint, feishuAuthorizationEndpoint,
 } from './chat/webmount_oauth.ts';
 export type {
   WebMountCryptoPort, WebMountPkce, WebMountOAuthToken, WebMountOAuthTokenStore,

@@ -123,6 +123,7 @@ import {
 } from '@amber/chat-domain';
 import type { ConversationTimelineLoadState } from '@amber/chat-domain';
 import { getMcpSettingsStore } from '../platform_impl/McpSettingsStore.ets';
+import { createEntryHealthReadPort } from '../platform_impl/HealthReadPort.ets';
 import { inflateRawEntry, createEntryXmlPull } from '../platform_impl/EntryDocumentParser.ets';
 import {
   createArtifactHttpPort, createArtifactImagePort, createDeflateRawPort,
@@ -330,6 +331,11 @@ function decodeQuickMessages(raw: string | null): QuickMessage[] {
   } catch (_e) {
     return [];
   }
+}
+
+interface KernelRunOutcome {
+  conversation: Conversation;
+  result: InteractiveTurnRunResult | null;
 }
 
 @Entry
@@ -3287,9 +3293,8 @@ struct ChatPage {
     });
     this.kernelHost = host;
     return host.run(conversation, deps, operation).then(
-      (out: { conversation: Conversation; result: InteractiveTurnRunResult | null }): InteractiveTurnRunResult => {
+      (out: KernelRunOutcome): InteractiveTurnRunResult => {
         if (out.result === null) {
-          // cancelled/failed 前置分支:给调用方等价 InteractiveTurnRunResult
           return {
             conversation: out.conversation,
             transport: 'unavailable',

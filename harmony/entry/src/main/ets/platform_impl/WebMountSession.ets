@@ -62,7 +62,11 @@ export class WebMountSession {
   }
 
   public listTabs(): WebMountTab[] {
-    return this.tabs.map((t: WebMountTab): WebMountTab => ({ ...t }));
+    const out: WebMountTab[] = [];
+    for (const t of this.tabs) {
+      out.push({ id: t.id, title: t.title, url: t.url });
+    }
+    return out;
   }
 
   public openTab(tabId: string): WebMountTab {

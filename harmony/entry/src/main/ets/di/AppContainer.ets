@@ -485,7 +485,7 @@ const createEntryCronRunExecutor = (): (taskId: string) => Promise<void> => {
     } catch (e) {
       const message: string = e instanceof Error ? e.message : String(e);
       notifyCronFailed(task.id, task.title, message);
-      throw e;
+      throw new Error(message);
     }
   };
 };

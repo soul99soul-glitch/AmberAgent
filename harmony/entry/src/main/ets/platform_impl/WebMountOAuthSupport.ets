@@ -2,12 +2,13 @@
 //
 // Crypto：CryptoArchitectureKit SHA-256 → base64url。
 // 交换：HttpClient Port POST token endpoint。
-// 存储：KV 'webmount_feishu_token'；状态 UI 读写。
+// 存储：KV 'webmount_feishu_token'。
 
 import { cryptoFramework } from '@kit.CryptoArchitectureKit';
 import { util } from '@kit.ArkTS';
 import { hilog } from '@kit.PerformanceAnalysisKit';
-import type { HttpClient, KeyValueStore } from '@amber/chat-domain';
+import type { KeyValueStore, JsonObject, JsonValue } from '@amber/chat-domain';
+import type { HttpClient } from '@amber/deepread-domain';
 import {
   createWebMountPkce, buildFeishuTokenBody, parseFeishuTokenResponse,
   webMountTokenUsable, feishuTokenEndpoint,
@@ -18,72 +19,109 @@ const DOMAIN: number = 0x0001;
 const TAG: string = 'WebMountOAuth';
 const TOKEN_KEY: string = 'webmount_feishu_token';
 
-const toBlob = (bytes: Uint8Array): cryptoFramework.DataBlob => {
-  const buf = new ArrayBuffer(bytes.length);
-  new Uint8Array(buf).set(bytes);
-  return { data: buf };
-};
-
 const base64Url = (bytes: Uint8Array): string => {
   const helper = new util.Base64Helper();
   return helper.encodeToStringSync(bytes)
     .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 };
 
-export const createWebMountCryptoPort = (): WebMountCryptoPort => ({
-  sha256Base64Url: async (input: string): Promise<string> => {
-    const md = cryptoFramework.createMd('SHA256');
-    const raw: Uint8Array = util.TextEncoder.create('utf-8').encodeInto(input);
-    md.updateSync(toBlob(raw));
-    const digest = md.digestSync();
-    return base64Url(new Uint8Array(digest.data));
-  },
-  randomBase64Url: async (byteLength: number): Promise<string> => {
-    const out = new Uint8Array(byteLength);
-    let seed = (Date.now() ^ Math.imul(byteLength, 0x9e3779b9)) >>> 0;
-    for (let i = 0; i < byteLength; i++) {
-      seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
-      out[i] = (seed >>> 16) & 0xff;
-    }
-    return base64Url(out);
-  },
-});
+const sha256Base64Url = async (input: string): Promise<string> => {
+  const md = cryptoFramework.createMd('SHA256');
+  const raw: Uint8Array = util.TextEncoder.create('utf-8').encodeInto(input);
+  md.updateSync({ data: raw });
+  const digest = md.digestSync();
+  return base64Url(new Uint8Array(digest.data));
+};
 
-export const createKvWebMountTokenStore = (kv: KeyValueStore) => ({
-  get: async (): Promise<WebMountOAuthToken | null> => {
-    const raw = await kv.get(TOKEN_KEY);
-    if (raw === null || raw.length === 0) return null;
-    try {
-      const parsed: unknown = JSON.parse(raw);
-      if (typeof parsed !== 'object' || parsed === null) return null;
-      const o = parsed as Record<string, unknown>;
-      if (typeof o['accessToken'] !== 'string') return null;
-      return {
-        accessToken: o['accessToken'],
-        refreshToken: typeof o['refreshToken'] === 'string' ? o['refreshToken'] : null,
-        expiresAtMillis: typeof o['expiresAtMillis'] === 'number' ? o['expiresAtMillis'] : 0,
-        tokenType: typeof o['tokenType'] === 'string' ? o['tokenType'] : 'Bearer',
-        scope: typeof o['scope'] === 'string' ? o['scope'] : null,
-      };
-    } catch {
-      return null;
-    }
-  },
-  set: async (token: WebMountOAuthToken | null): Promise<void> => {
+const randomBase64Url = async (byteLength: number): Promise<string> => {
+  const out = new Uint8Array(byteLength);
+  let seed = (Date.now() ^ Math.imul(byteLength, 0x9e3779b9)) >>> 0;
+  for (let i = 0; i < byteLength; i++) {
+    seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+    out[i] = (seed >>> 16) & 0xff;
+  }
+  return base64Url(out);
+};
+
+class WebMountCryptoPortImpl implements WebMountCryptoPort {
+  sha256Base64Url(input: string): Promise<string> {
+    return sha256Base64Url(input);
+  }
+
+  randomBase64Url(byteLength: number): Promise<string> {
+    return randomBase64Url(byteLength);
+  }
+}
+
+export const createWebMountCryptoPort = (): WebMountCryptoPort =>
+  new WebMountCryptoPortImpl();
+
+export interface FeishuExchangeInput {
+  appId: string;
+  appSecret: string;
+  code: string;
+  codeVerifier: string;
+  redirectUri?: string;
+}
+
+export interface KvWebMountTokenStore {
+  get(): Promise<WebMountOAuthToken | null>;
+  set(token: WebMountOAuthToken | null): Promise<void>;
+}
+
+const parseTokenJson = (raw: string): WebMountOAuthToken | null => {
+  const o: JsonObject = JSON.parse(raw) as JsonObject;
+  const access: JsonValue | undefined = o['accessToken'];
+  if (typeof access !== 'string') return null;
+  const refresh = o['refreshToken'];
+  const exp = o['expiresAtMillis'];
+  const ttype = o['tokenType'];
+  const scope = o['scope'];
+  const token: WebMountOAuthToken = {
+    accessToken: access,
+    refreshToken: typeof refresh === 'string' ? refresh : null,
+    expiresAtMillis: typeof exp === 'number' ? exp : 0,
+    tokenType: typeof ttype === 'string' ? ttype : 'Bearer',
+    scope: typeof scope === 'string' ? scope : null,
+  };
+  return token;
+};
+
+class KvWebMountTokenStoreImpl implements KvWebMountTokenStore {
+  private readonly kv: KeyValueStore;
+
+  constructor(kv: KeyValueStore) {
+    this.kv = kv;
+  }
+
+  get(): Promise<WebMountOAuthToken | null> {
+    return this.kv.get(TOKEN_KEY).then((raw: string | null): WebMountOAuthToken | null => {
+      if (raw === null || raw.length === 0) return null;
+      try {
+        return parseTokenJson(raw);
+      } catch (_err) {
+        return null;
+      }
+    });
+  }
+
+  set(token: WebMountOAuthToken | null): Promise<void> {
     if (token === null) {
-      await kv.delete(TOKEN_KEY);
-      return;
+      return this.kv.delete(TOKEN_KEY);
     }
-    await kv.put(TOKEN_KEY, JSON.stringify(token));
-  },
-});
+    return this.kv.put(TOKEN_KEY, JSON.stringify(token));
+  }
+}
+
+export const createKvWebMountTokenStore = (kv: KeyValueStore): KvWebMountTokenStore =>
+  new KvWebMountTokenStoreImpl(kv);
 
 export const makeFeishuPkce = (): Promise<WebMountPkce> =>
   createWebMountPkce(createWebMountCryptoPort());
 
 export const exchangeFeishuCode = async (
   http: HttpClient,
-  input: { appId: string; appSecret: string; code: string; codeVerifier: string; redirectUri?: string },
+  input: FeishuExchangeInput,
 ): Promise<WebMountOAuthToken> => {
   const body = buildFeishuTokenBody({
     appId: input.appId,

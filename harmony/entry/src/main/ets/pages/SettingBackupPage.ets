@@ -12,7 +12,7 @@ import {
 import { PageTitleBar, SectionHeader, NavRow, PageSpacer, ToggleRow } from '../components/PageTemplate.ets';
 import { getChatRepository, getChatKvStore, getAppContainer } from '../di/AppContainer.ets';
 import { createEntrySyncCryptoPort } from '../platform_impl/SyncCryptoPort.ets';
-import type { Conversation, ConversationSummary } from '@amber/chat-domain';
+import type { Conversation, ConversationSummary, JsonObject, JsonValue } from '@amber/chat-domain';
 import {
   createSyncBackup, restoreSyncBackup, inspectSyncArchive,
   createWebDavClient, webDavBackupFileName,
@@ -81,12 +81,12 @@ struct SettingBackupPage {
       const assistants = await loadAssistants(kv);
       const providers = await loadProviders(kv);
       const settingsBlob: Record<string, object> = {};
-      if (assistants !== null) settingsBlob['assistants'] = assistants as unknown as object;
-      if (providers !== null) settingsBlob['providers'] = providers as unknown as object;
+      if (assistants !== null) { settingsBlob['assistants'] = assistants as object; }
+      if (providers !== null) { settingsBlob['providers'] = providers as object; }
       const crypto = createEntrySyncCryptoPort();
       const bytes = await createSyncBackup(crypto, {
         conversations,
-        settings: settingsBlob as never,
+        settings: settingsBlob as JsonObject,
         appVersionName: 'harmony-preview',
         appVersionCode: 1,
         deviceId: 'harmony',
@@ -139,12 +139,12 @@ struct SettingBackupPage {
       const assistants = await loadAssistants(kv);
       const providers = await loadProviders(kv);
       const settingsBlob: Record<string, object> = {};
-      if (assistants !== null) settingsBlob['assistants'] = assistants as unknown as object;
-      if (providers !== null) settingsBlob['providers'] = providers as unknown as object;
+      if (assistants !== null) { settingsBlob['assistants'] = assistants as object; }
+      if (providers !== null) { settingsBlob['providers'] = providers as object; }
       const crypto = createEntrySyncCryptoPort();
       const bytes = await createSyncBackup(crypto, {
         conversations,
-        settings: settingsBlob as never,
+        settings: settingsBlob as JsonObject,
         appVersionName: 'harmony-preview',
         appVersionCode: 1,
         deviceId: 'harmony',
@@ -232,13 +232,15 @@ struct SettingBackupPage {
       }
       let settingsNote = '（未勾选，settings 未覆盖）';
       if (this.restoreSettings && result.payload.settings !== undefined) {
-        const blob = result.payload.settings as Record<string, unknown>;
+        const blob: JsonObject = result.payload.settings as JsonObject;
         const kv = getChatKvStore();
-        if (blob['assistants'] !== undefined && Array.isArray(blob['assistants'])) {
-          await saveAssistants(kv, blob['assistants'] as never);
+        const assistantsJson: JsonValue | undefined = blob['assistants'];
+        if (Array.isArray(assistantsJson)) {
+          await saveAssistants(kv, assistantsJson as never);
         }
-        if (blob['providers'] !== undefined && Array.isArray(blob['providers'])) {
-          await saveProviders(kv, blob['providers'] as never);
+        const providersJson: JsonValue | undefined = blob['providers'];
+        if (Array.isArray(providersJson)) {
+          await saveProviders(kv, providersJson as never);
         }
         settingsNote = '（已覆盖 settings）';
       }

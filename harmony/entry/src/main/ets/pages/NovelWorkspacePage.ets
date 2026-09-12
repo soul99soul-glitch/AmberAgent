@@ -599,7 +599,7 @@ struct NovelWorkspacePage {
     return INK3;
   }
 
-  private createWorkspaceBranch(name: string): Promise<void> {
+  private async createWorkspaceBranch(name: string): Promise<void> {
     if (this.busy) return;
     this.busy = true;
     try {

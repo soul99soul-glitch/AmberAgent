@@ -311,10 +311,13 @@ export const createWebMountTools = (session: WebMountSession, includeEval: boole
         const raw: string = await session.evalJson(probe);
         let matched: boolean = false;
         try {
-          const parsed: unknown = JSON.parse(raw);
-          if (typeof parsed === 'object' && parsed !== null) {
-            const obj = parsed as { ok?: boolean; value?: { matched?: boolean } };
-            matched = obj.ok === true && obj.value !== undefined && obj.value.matched === true;
+          const parsedObj: JsonValue = JSON.parse(raw) as JsonValue;
+          if (typeof parsedObj === 'object' && parsedObj !== null && !Array.isArray(parsedObj)) {
+            const obj: JsonObject = parsedObj as JsonObject;
+            const val: JsonValue | undefined = obj['value'];
+            if (typeof val === 'object' && val !== null && !Array.isArray(val)) {
+              matched = obj['ok'] === true && (val as JsonObject)['matched'] === true;
+            }
           }
         } catch {
           matched = false;
