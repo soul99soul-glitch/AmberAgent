@@ -77,7 +77,7 @@ const WORKSPACE_STATE_VERSION: number = 1;
 export type NovelWorkspaceMutationKind =
   | 'compat_update' | 'rename' | 'model_change' | 'manual_edit' | 'chapter_delete'
   | 'material_edit' | 'material_delete' | 'collect' | 'suggestion_refresh'
-  | 'proposal_resolve' | 'generation_commit' | 'polish_adopt' | 'chapter_discard'
+  | 'proposal_resolve' | 'proposal_create' | 'generation_commit' | 'polish_adopt' | 'chapter_discard'
   | 'version_restore' | 'discussion_archive' | 'interrupt_commit' | 'create_branch'
   | 'undo' | 'plot_sync' | 'unresolved_resolve' | 'transcript_checkpoint'
   | 'branch_settings_change' | 'batch_polish_commit';

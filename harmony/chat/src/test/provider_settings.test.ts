@@ -130,7 +130,7 @@ test('hasUsableAuth 矩阵(ProviderSetting.kt:389-408)', () => {
   assert.equal(hasUsableAuth(makeProviderSettingOpenAIVariant({ apiKey: 'k' })), true);
   assert.equal(hasUsableAuth(makeProviderSettingOpenAIVariant({
     apiKey: 'k', useResponseApi: true,
-  })), false);
+  })), true); // Responses API 已落地(spiral Phase 1)
   assert.equal(hasUsableAuth(makeProviderSettingOpenAIVariant({ authMode: 'codex_oauth' })), false);
   assert.equal(hasUsableAuth(makeProviderSettingGoogle({ apiKey: 'k' })), true);
   assert.equal(hasUsableAuth(makeProviderSettingGoogle({ authMode: 'gemini_code_assist_oauth' })), false);

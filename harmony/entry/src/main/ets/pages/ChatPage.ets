@@ -84,6 +84,9 @@ import {
   createMiniAppPromptTransformer, createMiniAppOutputTransformer,
   makeMiniAppSetting, loadMiniAppSetting,
   runInteractiveTurn,
+  createChatKernelHost,
+  type ChatKernelHost,
+  type KernelPhase,
 } from '@amber/chat-domain';
 import type {
   MiniAppSetting, MiniAppRecord, MiniAppRepository,
@@ -1101,6 +1104,9 @@ struct ChatPage {
       this.convertSteerQueue();
       return;
     }
+    if (this.kernelHost !== null) {
+      this.kernelHost.cancel('user');
+    }
     this.abortController?.abort();
     this.convertSteerQueue();
   }
@@ -1744,7 +1750,7 @@ struct ChatPage {
                 this.captureStreamCheckpoint(msgs);
               },
             };
-            return runInteractiveTurn(
+            return this.runViaKernel(
               conv,
               deps,
               (runtimeDeps: ChatTurnDeps): Promise<Conversation> =>
@@ -3264,6 +3270,36 @@ struct ChatPage {
     await saveAssistants(kv, next);
   }
 
+  // Kernel façade:统一 phase 生命周期(对齐 iOS ChatKernelRunHost 可观察语义)
+  private kernelHost: ChatKernelHost | null = null;
+  private kernelPhase: KernelPhase = 'idle';
+
+  private runViaKernel(
+    conversation: Conversation,
+    deps: ChatTurnDeps,
+    operation: (runtimeDeps: ChatTurnDeps) => Promise<Conversation>,
+  ): Promise<InteractiveTurnRunResult> {
+    const host = createChatKernelHost({
+      onPhase: (phase: KernelPhase): void => {
+        this.kernelPhase = phase;
+      },
+    });
+    this.kernelHost = host;
+    return host.run(conversation, deps, operation).then(
+      (out: { conversation: Conversation; result: InteractiveTurnRunResult | null }): InteractiveTurnRunResult => {
+        if (out.result === null) {
+          // cancelled/failed 前置分支:给调用方等价 InteractiveTurnRunResult
+          return {
+            conversation: out.conversation,
+            transport: 'unavailable',
+            firstParsedDeltaAt: null,
+            dataEndAt: null,
+          };
+        }
+        return out.result;
+      });
+  }
+
   // steer 消息步间消费(Android session.dequeueSteerPendingUserMessages,
   //   GenerationHandler:386-390):生成中到达的 STEER 出队 → user 消息注入会话;
   //   出队后 durable persist + 审计(D-052 同规)
@@ -3413,7 +3449,7 @@ struct ChatPage {
             this.captureStreamCheckpoint(msgs);
           },
         };
-        return runInteractiveTurn(
+        return this.runViaKernel(
           conv,
           deps,
           (runtimeDeps: ChatTurnDeps): Promise<Conversation> =>
@@ -3926,21 +3962,21 @@ struct ChatPage {
             this.conversation = blocker.conversation;
             this.refreshRowsAfterConversationChange(previous, blocker.conversation);
             return getChatRepository().save(blocker.conversation)
-              .then((): Promise<InteractiveTurnRunResult> => runInteractiveTurn(
+              .then((): Promise<InteractiveTurnRunResult> => this.runViaKernel(
                 blocker.conversation, deps,
                 (runtimeDeps: ChatTurnDeps): Promise<Conversation> => runToolLoopContinuation(
                   blocker.conversation, runtimeDeps, this.buildToolLoop(rt, blocker.conversation))))
               .then((result: InteractiveTurnRunResult): Conversation => result.conversation);
           }
           return getChatRepository().save(blocker.conversation)
-            .then((): Promise<InteractiveTurnRunResult> => runInteractiveTurn(
+            .then((): Promise<InteractiveTurnRunResult> => this.runViaKernel(
               blocker.conversation, deps,
               (runtimeDeps: ChatTurnDeps): Promise<Conversation> => runChatTurnWithTools(
                 blocker.conversation, userInput, runtimeDeps,
                 this.buildToolLoop(rt, blocker.conversation))))
             .then((result: InteractiveTurnRunResult): Conversation => result.conversation);
         }
-        return runInteractiveTurn(
+        return this.runViaKernel(
           conv, deps,
           (runtimeDeps: ChatTurnDeps): Promise<Conversation> => runChatTurnWithTools(
             conv, userInput, runtimeDeps, this.buildToolLoop(rt, conv)))

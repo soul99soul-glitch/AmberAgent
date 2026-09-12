@@ -104,11 +104,10 @@ struct ChatProviderDetailPage {
       const v: ProviderSettingOpenAIVariant = p as ProviderSettingOpenAIVariant;
       this.chatPath = v.chatCompletionsPath;
       this.useResponseApi = v.useResponseApi;
-      if (v.authMode !== 'api_key' || v.useResponseApi) {
+      // Responses API 已落地(域层 openai_responses_*);仅非 api_key 认证仍不支持
+      if (v.authMode !== 'api_key') {
         this.apiKey = '';
-        this.unsupportedAuthMsg = v.useResponseApi
-          ? '历史配置启用了 Responses API，当前 Harmony 版本不支持。填写 API Key 并保存可迁移为 Chat Completions。'
-          : '历史 OAuth/Token Plan 当前 Harmony 版本不支持。填写 API Key 并保存可迁移。';
+        this.unsupportedAuthMsg = '历史 OAuth/Token Plan 当前 Harmony 版本不支持。填写 API Key 并保存可迁移。';
       }
     } else if (p.type === 'google') {
       const v: ProviderSettingGoogle = p as ProviderSettingGoogle;
@@ -194,7 +193,7 @@ struct ChatProviderDetailPage {
         baseUrl: this.baseUrl.trim(),
         apiKey: this.apiKey.trim(),
         chatCompletionsPath: this.chatPath.trim(),
-        useResponseApi: false,
+        useResponseApi: this.useResponseApi,
         models,
         authMode: 'api_key',
         brand: o.brand,
@@ -382,6 +381,15 @@ struct ChatProviderDetailPage {
               label: '启用', checked: this.providerEnabled, isLast: false,
               onToggle: (): void => { this.providerEnabled = !this.providerEnabled; },
             })
+
+            if (this.provider !== null && this.provider.type === 'openai') {
+              ToggleRow({
+                label: '使用 Responses API',
+                checked: this.useResponseApi,
+                isLast: false,
+                onToggle: (): void => { this.useResponseApi = !this.useResponseApi; },
+              })
+            }
 
             this.field('名称', 'Provider 名称', this.name,
               (v: string): void => { this.name = v; }, false, false)

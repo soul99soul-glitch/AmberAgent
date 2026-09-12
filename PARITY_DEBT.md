@@ -27,7 +27,13 @@
 
 ## 已消除
 
-（暂无）
+- **OpenAI Responses API 传输层缺失**（2026-09-11，harmony-agent-core-spiral Phase 1）：鸿蒙仅有 Chat Completions。已落地 `openai_responses_request/parse/api` + `useResponseApi` 分流 + Provider 详情页开关；resume store Port 可注入（完整断线重连 GET /responses/{id} 仍后续）。Android 锚点 `ResponseAPI.kt` / `ResponseStreamReconciler.kt`。Codex OAuth 流与 image_generation built-in 强制 store 仍裁剪。
+
+- **Grok 端点缺失**（2026-09-11 Phase 1）：常量/状态机/CLI proxy 请求构造 + TokenStore Port 已落地；系统浏览器 OAuth UI 仍 out of scope。
+
+- **STEER 生成中注入**（确认已实现）：`tool_loop.consumeSteerMessages` + ChatPage `drainSteerMessages` + 步间单测。
+
+- **ToolActivity 事件**（确认已实现）：`McpToolActivityPort` + mcp_tools start/complete/fail 测试。
 
 ## regenerate 窗口化 merge 偏差(D-024,2026-07-28)
 - Android: regenerate 经 mergeGeneratedMessagesIntoWindow/streamingTail 合并 + invalidateCompacts(ContextEngine);依附时间线分页架构。

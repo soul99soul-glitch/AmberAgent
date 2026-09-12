@@ -23,6 +23,10 @@ import {
 } from './error.ts';
 import { systemPrompt, MAX_USER_CHARS, MAX_OUTPUT_CHARS } from './context_builder.ts';
 import { analyzeChapterSuggestions } from './suggestion_engine.ts';
+import { runContinuityAudit } from './continuity_audit.ts';
+import type { NovelAuditReport } from './continuity_audit.ts';
+import { parseSettingProposals } from './setting_proposal_parser.ts';
+import type { NovelSettingProposal } from './models.ts';
 import type { NovelModelRunning, NovelModelRequest, NovelModelEvent, NovelModelStream } from './model_running.ts';
 import type { NovelToolContinuationVerdict } from './model_running.ts';
 import type {
@@ -510,6 +514,41 @@ export class NovelCreation {
       });
     }
     return { ok: issues.length === 0, activeBranchId: status.activeBranchId, issues };
+  }
+
+  /** LLM 全文连续性审计(iOS NovelContinuityAudit);结构检查仍用 checkConsistency */
+  async runContinuityAudit(projectId: string): Promise<NovelAuditReport> {
+    const project: NovelProject = await this.repository.loadProject(projectId);
+    if (project.modelPolicy.stateSync === null) {
+      throw invalidInput('请先配置内部职责模型');
+    }
+    return runContinuityAudit(
+      this.modelRunning, project, project.modelPolicy.stateSync, this.idleTimeoutMs * 2);
+  }
+
+  /** 从讨论/写作文本解析设定提案并写入项目(替换同 source 的 pending) */
+  async ingestSettingProposals(
+    projectId: string, sourceMessageId: string, text: string,
+  ): Promise<NovelSettingProposal[]> {
+    const now: number = this.nowMs();
+    const parsed: NovelSettingProposal[] =
+      parseSettingProposals(text, sourceMessageId, now);
+    if (parsed.length === 0) return [];
+    let saved: NovelSettingProposal[] = [];
+    await this.commitMutation(
+      projectId, 'proposal_create',
+      (project: NovelProject): NovelProject => {
+        const kept: NovelSettingProposal[] = project.settingProposals.filter(
+          (p: NovelSettingProposal): boolean =>
+            !(p.status === 'pending' && p.sourceMessageId === sourceMessageId));
+        saved = parsed;
+        return {
+          ...project,
+          settingProposals: [...kept, ...parsed],
+          updatedAt: now,
+        };
+      });
+    return saved;
   }
 
   async workspaceList(projectId: string, path: string = ''): Promise<NovelWorkspaceListResult> {

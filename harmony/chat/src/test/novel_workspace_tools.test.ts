@@ -49,10 +49,21 @@ const makePort = (calls: PortCall[]): NovelWorkspaceToolPort => ({
     calls.push({ name: 'write', input: input as unknown as JsonObject });
     return Promise.resolve({ operation: 'write' });
   },
+  audit(): Promise<JsonObject> {
+    calls.push({ name: 'audit', input: null });
+    return Promise.resolve({ operation: 'audit', ok: true, issue_count: 0, issues: [] });
+  },
+  ingestSettingProposals(sourceMessageId, text): Promise<JsonObject> {
+    calls.push({
+      name: 'ingestSettingProposals',
+      input: { source_message_id: sourceMessageId, text } as JsonObject,
+    });
+    return Promise.resolve({ operation: 'ingest', ingested: 0, titles: [] });
+  },
 });
 
 describe('createNovelWorkspaceTools', () => {
-  it('registers five tools in the stable C5 order with read-only/write approval flags', () => {
+  it('registers C5 workspace tools plus continuity audit and setting proposal ingest', () => {
     const tools: AgentTool[] = createNovelWorkspaceTools(makePort([]));
     assert.deepEqual(tools.map((item: AgentTool): string => item.name), [
       'novel_workspace_list',
@@ -60,6 +71,8 @@ describe('createNovelWorkspaceTools', () => {
       'novel_workspace_grep',
       'novel_workspace_status',
       'novel_workspace_write',
+      'novel_continuity_audit',
+      'novel_ingest_setting_proposals',
     ]);
     ['novel_workspace_list', 'novel_workspace_read', 'novel_workspace_grep', 'novel_workspace_status']
       .forEach((name: string): void => {
@@ -72,6 +85,9 @@ describe('createNovelWorkspaceTools', () => {
     assert.equal(write.needsApproval, true);
     assert.equal(write.allowsAutoApproval, false);
     assert.equal(write.mandatoryApproval, false);
+    const ingest: AgentTool = tool(tools, 'novel_ingest_setting_proposals');
+    assert.equal(ingest.needsApproval, true);
+    assert.equal(ingest.allowsAutoApproval, false);
   });
 
   it('publishes complete object schemas, including discriminated write/delete patches', () => {

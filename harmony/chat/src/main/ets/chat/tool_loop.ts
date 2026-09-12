@@ -11,8 +11,8 @@
 //   - maxSteps = maxToolLoopSteps coerceIn(16, 512)(ChatService:1349-1352,
 //     默认 DEFAULT_AGENT_MAX_TOOL_LOOP_STEPS=256,PreferencesStore.kt:268-270)
 // 偏差登记:
-//   - ToolExposureState 懒暴露(ToolSearch.kt)= P1(目录小时 toolsForStep=全量,
-//     等价);SpeculativeToolRunner = P1(prefetchedTools 恒空)
+//   - ToolExposureState 懒暴露与 SpeculativeToolRunner 已接线(D-062/D-063;
+//     toolsForStep/prefetchedTools 非空路径见下方实现)
 //   - Android 每步 generateInternal 内部 prepareContext → 本实现每步调
 //     deps.prepareContextMessages(同语义位置);budget 提示经 dynamic system 块
 //     (buildSystemPromptParts:726-736 现存子集)

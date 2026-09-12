@@ -141,6 +141,14 @@ export {
   SUGGESTION_SYSTEM_PROMPT, buildSuggestionUserPrompt, mapSuggestionKind, parseSuggestions,
   collectModelText, analyzeChapterSuggestions, MAX_SUGGESTIONS,
 } from './novel/suggestion_engine.ts';
+export {
+  parseAuditReport, buildAuditUserPrompt, runContinuityAudit,
+  CONTINUITY_AUDIT_SYSTEM_PROMPT, AUDIT_MAX_ISSUES,
+} from './novel/continuity_audit.ts';
+export type { NovelAuditIssue, NovelAuditReport, NovelAuditSeverity } from './novel/continuity_audit.ts';
+export {
+  parseSettingProposals, isSettingProposalEnvelope, SETTING_PROPOSAL_MARKER, MAX_PROPOSALS,
+} from './novel/setting_proposal_parser.ts';
 export type {
   NovelProjectRepository, NovelWorkspaceMutationKind, NovelWorkspaceCas, NovelWorkspaceStatus,
 } from './novel/repository.ts';

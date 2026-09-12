@@ -22,6 +22,13 @@ export interface WebMountHostHooks {
   onMountNeeded: () => void;   // 首次 open 时要求宿主挂载 Web 组件
 }
 
+// 逻辑 tab(单 Web 组件:active tab 的 url 由 WebView 呈现;其余 tab 仅记状态)
+export interface WebMountTab {
+  id: string;
+  title: string;
+  url: string;
+}
+
 export class WebMountSession {
   private controller: webview.WebviewController = new webview.WebviewController();
   private currentUrl: string = '';
@@ -30,6 +37,8 @@ export class WebMountSession {
   private pageEndWaiters: Array<() => void> = [];
   private hooks: WebMountHostHooks | null = null;
   private uiContext: UIContext | null = null;
+  private tabs: WebMountTab[] = [{ id: 'main', title: '', url: '' }];
+  private activeTabId: string = 'main';
 
   public bindHooks(hooks: WebMountHostHooks): void {
     this.hooks = hooks;
@@ -48,6 +57,51 @@ export class WebMountSession {
     return this.currentUrl;
   }
 
+  public getActiveTabId(): string {
+    return this.activeTabId;
+  }
+
+  public listTabs(): WebMountTab[] {
+    return this.tabs.map((t: WebMountTab): WebMountTab => ({ ...t }));
+  }
+
+  public openTab(tabId: string): WebMountTab {
+    const existing: WebMountTab | undefined = this.tabs.find(
+      (t: WebMountTab): boolean => t.id === tabId);
+    if (existing !== undefined) return existing;
+    const created: WebMountTab = { id: tabId, title: '', url: '' };
+    this.tabs.push(created);
+    return created;
+  }
+
+  public selectTab(tabId: string): WebMountTab {
+    const hit: WebMountTab | undefined = this.tabs.find(
+      (t: WebMountTab): boolean => t.id === tabId);
+    if (hit === undefined) throw new Error(`tab not found: ${tabId}`);
+    this.activeTabId = tabId;
+    return hit;
+  }
+
+  public closeTab(tabId: string): boolean {
+    if (tabId === 'main') throw new Error('cannot close main tab');
+    const idx: number = this.tabs.findIndex((t: WebMountTab): boolean => t.id === tabId);
+    if (idx < 0) return false;
+    this.tabs.splice(idx, 1);
+    if (this.activeTabId === tabId) {
+      this.activeTabId = this.tabs.length > 0 ? this.tabs[0].id : 'main';
+    }
+    return true;
+  }
+
+  private touchActiveTab(url: string, title: string = ''): void {
+    for (const t of this.tabs) {
+      if (t.id === this.activeTabId) {
+        t.url = url;
+        if (title.length > 0) t.title = title;
+      }
+    }
+  }
+
   public markHostMounted(): void {
     this.hostMounted = true;
   }
@@ -56,6 +110,7 @@ export class WebMountSession {
   public markPageEnd(url: string): void {
     this.pageReady = true;
     this.currentUrl = url;
+    this.touchActiveTab(url);
     const waiters: Array<() => void> = this.pageEndWaiters;
     this.pageEndWaiters = [];
     for (const w of waiters) w();
@@ -88,9 +143,30 @@ export class WebMountSession {
     }
     this.pageReady = false;
     this.currentUrl = url;
+    this.touchActiveTab(url);
     this.controller.loadUrl(url);
     await this.waitForPageEnd();
     if (!this.pageReady) throw new Error(`page load timeout: ${url}`);
+  }
+
+  public back(): boolean {
+    if (!this.controller.accessBackward()) return false;
+    this.controller.backward();
+    this.pageReady = true;
+    return true;
+  }
+
+  public forward(): boolean {
+    if (!this.controller.accessForward()) return false;
+    this.controller.forward();
+    this.pageReady = true;
+    return true;
+  }
+
+  public async reload(): Promise<void> {
+    this.pageReady = false;
+    this.controller.refresh();
+    await this.waitForPageEnd();
   }
 
   public isReady(): boolean {

@@ -1,9 +1,12 @@
 // ChatListPage — Android 风格会话首页
 // 保留真实数据逻辑: repo.list/search/删除/撤销/置顶/删除全部
 
-import { router, promptAction } from '@kit.ArkUI';
+import { router, promptAction, picker } from '@kit.ArkUI';
+import { pasteboard, util } from '@kit.BasicServicesKit';
+import { fileIo } from '@kit.CoreFileKit';
+import type { Context } from '@kit.AbilityKit';
 import type { Conversation, ConversationSummary, UIMessage, DisplaySetting } from '@amber/chat-domain';
-import { loadDisplaySetting } from '@amber/chat-domain';
+import { loadDisplaySetting, exportConversationMarkdown, exportFileNameFor } from '@amber/chat-domain';
 import { getChatKvStore, getChatRepository } from '../di/AppContainer.ets';
 import { cleanupDeletedConversation } from '../platform_impl/ManagedFileStore.ets';
 import { Icon } from '../components/ui/Icon.ets';
@@ -422,12 +425,95 @@ struct ChatListPage {
     promptAction.showActionMenu({
       buttons: [
         { text: item.isPinned ? '取消置顶' : '置顶', color: INK },
+        { text: '复制 Markdown', color: INK },
+        { text: '导出 Markdown 文件', color: INK },
         { text: '删除', color: ERROR },
       ],
     }).then((result: ActionMenuResult): void => {
       if (result.index === 0) this.togglePin(item);
-      else if (result.index === 1) this.onDelete(item);
+      else if (result.index === 1) this.exportMarkdown(item);
+      else if (result.index === 2) this.exportMarkdownFile(item);
+      else if (result.index === 3) this.onDelete(item);
     }).catch((): void => {});
+  }
+
+  // 会话导出 Markdown → 剪贴板
+  private exportMarkdown(item: ConversationSummary): void {
+    getChatRepository().getById(item.id).then((conv: Conversation | null): void => {
+      if (conv === null) {
+        promptAction.showToast({ message: '会话不存在', duration: 1600 });
+        return;
+      }
+      const md: string = exportConversationMarkdown(conv, { fallbackTitle: '未命名对话' });
+      const data: pasteboard.Data = { plainText: md };
+      const pb: pasteboard.SystemPasteboard = pasteboard.getSystemPasteboard();
+      pb.setData(data).then((): void => {
+        promptAction.showToast({ message: '已复制 Markdown 到剪贴板', duration: 1800 });
+      }).catch((e: Error): void => {
+        promptAction.showToast({ message: `导出失败：${e.message}`, duration: 2000 });
+      });
+    }).catch((e: Error): void => {
+      promptAction.showToast({ message: `导出失败：${e.message}`, duration: 2000 });
+    });
+  }
+
+  // 会话导出 Markdown 文件(DocumentViewPicker;失败回落 filesDir/exports)
+  private exportMarkdownFile(item: ConversationSummary): void {
+    getChatRepository().getById(item.id).then((conv: Conversation | null): void => {
+      if (conv === null) {
+        promptAction.showToast({ message: '会话不存在', duration: 1600 });
+        return;
+      }
+      const md: string = exportConversationMarkdown(conv, { fallbackTitle: '未命名对话' });
+      const fileName: string = exportFileNameFor(conv, 'md');
+      const ctx: Context = AppStorage.get<Context>('abilityContext') as Context;
+      const docPicker = new picker.DocumentViewPicker(ctx);
+      docPicker.save({ newFileNames: [fileName] }).then((uris: string[]): void => {
+        if (uris.length > 0) {
+          this.writeExportFile(uris[0], md, fileName);
+        } else {
+          this.exportToAppDir(md, fileName);
+        }
+      }).catch((): void => {
+        this.exportToAppDir(md, fileName);
+      });
+    }).catch((e: Error): void => {
+      promptAction.showToast({ message: `导出失败：${e.message}`, duration: 2000 });
+    });
+  }
+
+  private writeExportFile(uri: string, content: string, fileName: string): void {
+    try {
+      const file: fileIo.File = fileIo.openSync(
+        uri, fileIo.OpenMode.READ_WRITE | fileIo.OpenMode.CREATE | fileIo.OpenMode.TRUNC);
+      fileIo.writeSync(file.fd, util.TextEncoder.create('utf-8').encodeInto(content));
+      fileIo.closeSync(file.fd);
+      promptAction.showToast({ message: `已导出 ${fileName}`, duration: 2000 });
+    } catch (e) {
+      const msg: string = e instanceof Error ? e.message : String(e);
+      promptAction.showToast({ message: `导出失败：${msg}`, duration: 2000 });
+    }
+  }
+
+  private exportToAppDir(content: string, fileName: string): void {
+    const ctx: Context = AppStorage.get<Context>('abilityContext') as Context;
+    const dir: string = `${ctx.filesDir}/exports`;
+    try {
+      fileIo.mkdirSync(dir, true);
+    } catch {
+      // 已存在
+    }
+    const path: string = `${dir}/${fileName}`;
+    try {
+      const file: fileIo.File = fileIo.openSync(
+        path, fileIo.OpenMode.READ_WRITE | fileIo.OpenMode.CREATE | fileIo.OpenMode.TRUNC);
+      fileIo.writeSync(file.fd, util.TextEncoder.create('utf-8').encodeInto(content));
+      fileIo.closeSync(file.fd);
+      promptAction.showToast({ message: `已保存到应用目录 ${fileName}`, duration: 2200 });
+    } catch (e) {
+      const msg: string = e instanceof Error ? e.message : String(e);
+      promptAction.showToast({ message: `导出失败：${msg}`, duration: 2000 });
+    }
   }
 
   @Builder

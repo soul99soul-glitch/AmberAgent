@@ -332,6 +332,79 @@ export type {
 export { createOpenAIChatApi, asChatStreamProvider, openAIAuthHeaders } from './chat/openai_chat_api.ts';
 export type { OpenAIChatApiDeps, OpenAIChatApi, CallOpts } from './chat/openai_chat_api.ts';
 
+// OpenAI Responses API + Grok + Google OAuth 契约 (harmony-agent-core-spiral Phase 1)
+export {
+  buildResponsesRequestBody, buildResponsesInput, supportsResponsesResume,
+  resolveResponseProviderCapabilities, openAIResponsesReasoningEffort,
+} from './chat/openai_responses_request.ts';
+export type {
+  ResponseProviderCapabilities, ResponseCursor, ResponseResumeStore, ResponsesResumeRequest,
+  BuildResponsesRequestOpts,
+} from './chat/openai_responses_request.ts';
+export {
+  parseResponsesStreamEvent, parseResponsesOutput, ResponseStreamReconciler,
+  OPENAI_TOOL_CALL_ID_METADATA_KEY,
+} from './chat/openai_responses_parse.ts';
+export { createKvResponseResumeStore, responsesResumeKey } from './chat/openai_responses_resume_store.ts';
+export {
+  createOpenAIResponsesApi, asResponsesChatStreamProvider,
+  responsesEndpointUrl, isOfficialOpenAIHost,
+} from './chat/openai_responses_api.ts';
+export type { OpenAIResponsesApi, OpenAIResponsesApiDeps } from './chat/openai_responses_api.ts';
+export {
+  grokAuthStatusFrom, grokNeedsRefresh, resolveGrokBearer, buildGrokCliChatRequest,
+  GrokAuthError,
+  GROK_OAUTH_AUTHORIZATION_ENDPOINT, GROK_OAUTH_TOKEN_ENDPOINT, GROK_CLI_PROXY_BASE_URL,
+  GROK_OAUTH_REDIRECT_URI, GROK_OAUTH_SCOPE, GROK_REFRESH_SKEW_MS,
+} from './chat/grok_oauth.ts';
+export type { GrokOAuthTokens, GrokAuthStatus, GrokAuthStatusCode, GrokTokenStore } from './chat/grok_oauth.ts';
+export {
+  classifyGoogleAuthForm, GoogleAuthNotImplementedError, isGoogleAuthNotImplementedError,
+  throwGoogleAuthNotImplemented,
+} from './chat/google_oauth_contracts.ts';
+export type { GoogleAuthNotImplementedKind, GoogleProviderAuthForm } from './chat/google_oauth_contracts.ts';
+
+// Kernel façade (Phase 3)
+export {
+  createChatKernelHost, isKernelTerminalPhase,
+} from './chat/chat_kernel_host.ts';
+export type {
+  KernelPhase, KernelPhaseContext, KernelTerminalCause, ChatKernelHost, ChatKernelHostDeps,
+  ApprovalRequest,
+} from './chat/chat_kernel_host.ts';
+
+// 会话导出 + Cron 执行器 (completion spiral Phase 2-3)
+export {
+  exportConversationMarkdown, exportConversationJson, exportConversationJsonString,
+  exportFileNameFor, maskSensitiveJsonObject,
+} from './chat/conversation_export.ts';
+export type { ConversationExportOptions, ConversationExportJson } from './chat/conversation_export.ts';
+export {
+  runCronTaskOnce, fireDueCronTasks, isCronTaskDue,
+} from './chat/agent_cron_run_executor.ts';
+export type { CronNotifierPort, CronRunExecutorDeps, CronRunResult } from './chat/agent_cron_run_executor.ts';
+export {
+  evaluateWebMountWait, parseWaitProbeJson,
+} from './chat/webmount_wait.ts';
+export type { WebMountWaitConditions, WebMountWaitProbe, WebMountWaitResult } from './chat/webmount_wait.ts';
+export {
+  createSyncBackup, restoreSyncBackup, inspectSyncArchive, buildSyncPayload, decodeArchive,
+  SYNC_ARCHIVE_VERSION, MANIFEST_ENTRY, PAYLOAD_ENTRY,
+} from './chat/sync_snapshot.ts';
+export type {
+  SyncManifest, SyncCryptoPort, SyncPayload, SyncBackupInput, SyncInspectPreview, SyncRestoreResult,
+} from './chat/sync_snapshot.ts';
+export {
+  createWebDavClient, webDavBuildUrl, webDavBackupFileName,
+} from './chat/sync_webdav.ts';
+export type { WebDavConfig, WebDavClient, WebDavRemoteFile } from './chat/sync_webdav.ts';
+export {
+  mergeContinueCandidates, continueStatusText, STATUS_RANK, SOURCE_LABEL,
+} from './chat/continue_candidate.ts';
+export type { ContinueCandidate, ContinueRoute, ContinueSourceKind, ContinueStatus } from './chat/continue_candidate.ts';
+export { buildHealthSummary, healthSummaryToolJson } from './chat/health_summary.ts';
+export type { HealthMetricRecord, HealthDailySummary, HealthWeeklySummary, HealthSummary, HealthRecordType } from './chat/health_summary.ts';
+
 // Claude(D-044):请求构建 + 解析 + API 组装
 // (SYSTEM_PROMPT_CACHE_* 常量由 context_assembly 导出,claude_request 复用)
 export {

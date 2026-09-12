@@ -41,6 +41,10 @@ export interface NovelWorkspaceToolPort {
   grep(input: NovelWorkspaceGrepToolInput): Promise<JsonObject>;
   status(): Promise<JsonObject>;
   write(input: NovelWorkspaceWriteToolInput): Promise<JsonObject>;
+  /** LLM 全文连续性审计(iOS 对齐);宿主委托 NovelCreation.runContinuityAudit */
+  audit(): Promise<JsonObject>;
+  /** 解析 assistant 正文中的设定提案并入库;返回 ingested 条数 */
+  ingestSettingProposals(sourceMessageId: string, text: string): Promise<JsonObject>;
 }
 
 interface CompleteInputSchema extends InputSchemaObj {
@@ -151,5 +155,32 @@ export const createNovelWorkspaceTools = (port: NovelWorkspaceToolPort): AgentTo
     allowsAutoApproval: false,
     execute: (input: JsonValue): Promise<UIMessagePart[]> =>
       port.write(input as unknown as NovelWorkspaceWriteToolInput).then(textPart),
+  }),
+  makeAgentTool({
+    name: 'novel_continuity_audit',
+    description: 'Run an LLM continuity audit over the whole novel (plot, names, timeline). '
+      + 'Returns JSON issues with severity/chapterRef/summary/suggestion. Uses the stateSync model.',
+    parameters: (): CompleteInputSchema => objectSchema({}, []),
+    execute: (): Promise<UIMessagePart[]> => port.audit().then(textPart),
+  }),
+  makeAgentTool({
+    name: 'novel_ingest_setting_proposals',
+    description: 'Parse novel_setting_proposal JSON from an assistant message body and stage them '
+      + 'as pending setting proposals on the project (does not apply them).',
+    parameters: (): CompleteInputSchema => objectSchema({
+      source_message_id: stringSchema('Assistant message id that contained the proposal JSON.'),
+      text: stringSchema('Full assistant text containing fenced or raw novel_setting_proposal JSON.'),
+    }, ['source_message_id', 'text']),
+    needsApproval: true,
+    allowsAutoApproval: false,
+    execute: (input: JsonValue): Promise<UIMessagePart[]> => {
+      const obj = input as { source_message_id?: string; text?: string };
+      const sourceMessageId: string = String(obj?.source_message_id ?? '');
+      const text: string = String(obj?.text ?? '');
+      if (sourceMessageId.length === 0 || text.length === 0) {
+        throw new Error('source_message_id and text are required');
+      }
+      return port.ingestSettingProposals(sourceMessageId, text).then(textPart);
+    },
   }),
 ];

@@ -198,15 +198,36 @@ test('asChatStreamProvider: 适配 chat_turn 的 ChatStreamProvider 接口', asy
   assert.equal(dataEnded, true);
 });
 
-test('Responses API remains unsupported at the request boundary', async () => {
-  const unsupported = makeProviderSettingOpenAI({ useResponseApi: true });
+test('useResponseApi=true routes to Responses /responses endpoint', async () => {
+  const captured: Array<{ url: string; body: string }> = [];
+  const http = {
+    fetch: async (req: { url: string; body?: string }) => {
+      captured.push({ url: req.url, body: req.body ?? '' });
+      return {
+        status: 200,
+        headers: {},
+        body: JSON.stringify({
+          id: 'resp_1',
+          model: 'gpt-4o',
+          status: 'completed',
+          output: [{ type: 'message', content: [{ type: 'output_text', text: 'ok' }] }],
+        }),
+      };
+    },
+    fetchStream: async (req: { url: string; body?: string }) => {
+      captured.push({ url: req.url, body: req.body ?? '' });
+      return { status: 200, headers: {}, body: '' };
+    },
+  };
   const api = createOpenAIChatApi({
-    http: fakeHttp({ status: 200, chunks: [SSE_TEXT] }, { req: null }),
-    setting: unsupported,
+    http,
+    setting: makeProviderSettingOpenAI({ useResponseApi: true, baseUrl: 'https://api.openai.com/v1' }),
   });
-  await assert.rejects(
-    api.streamText([makeUserMessage('hi')], params, (): void => {}),
-    /Responses API/);
+  const chunk = await api.generateText([makeUserMessage('hi')], params);
+  assert.equal(captured.length, 1);
+  assert.ok(captured[0].url.endsWith('/responses'));
+  assert.equal(JSON.parse(captured[0].body)['stream'], false);
+  assert.equal(chunk.choices[0].message!.parts[0].type, 'text');
 });
 
 test('openAIAuthHeaders: mimo_coding_plan/token-plan 主机用 api-key,其余 Bearer(:545-557)', async () => {

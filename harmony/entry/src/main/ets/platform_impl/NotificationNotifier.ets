@@ -126,6 +126,26 @@ export const notifyGenerationDone = (senderName: string, contentText: string): v
   publishBasicNotification(GENERATION_DONE_ID, senderName, contentText);
 };
 
+// 生成失败通知(与完成同 id 覆盖;不含密钥,仅错误摘要)
+export const notifyGenerationFailed = (senderName: string, errorText: string): void => {
+  const brief: string = errorText.length > 80 ? `${errorText.substring(0, 80)}…` : errorText;
+  publishBasicNotification(GENERATION_DONE_ID, `${senderName} · 生成失败`, brief);
+};
+
+// Cron 任务通知(与 DeepRead 同一 publish 入口)
+export const notifyCronRunning = (taskId: string, title: string): void => {
+  publishBasicNotification(notificationIdFor(`cron:${taskId}`), '定时任务运行中', title);
+};
+
+export const notifyCronCompleted = (taskId: string, title: string): void => {
+  publishBasicNotification(notificationIdFor(`cron:${taskId}`), '定时任务完成', title);
+};
+
+export const notifyCronFailed = (taskId: string, title: string, errorText: string): void => {
+  const brief: string = errorText.length > 60 ? `${errorText.substring(0, 60)}…` : errorText;
+  publishBasicNotification(notificationIdFor(`cron:${taskId}`), `定时任务失败 · ${title}`, brief);
+};
+
 class NotificationNotifierImpl implements Notifier {
   async notifyRunning(topicId: string, title: string): Promise<void> {
     const wa: object | null = await buildArticleWantAgent(topicId, title, '');

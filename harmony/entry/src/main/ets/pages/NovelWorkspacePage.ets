@@ -38,6 +38,7 @@ import {
   NovelWorkspaceStatus, StreamTransportState, UIMessage, makeUIMessage,
   UIMessagePart, novelMessageUi, novelMessageText, NovelToolContinuationVerdict,
   NovelModelPolicy, NovelModelTarget, NovelBranchSettings, NovelConsistencyReport,
+  NovelAuditIssue, NovelAuditReport,
   DurableGhostwriteJob, GhostwriteStage, DurablePolishJob, PolishContextOptions, PolishStage,
 } from '@amber/deepread-domain';
 import {
@@ -108,6 +109,9 @@ struct NovelWorkspacePage {
   @State settingsSection: number = 0;
   @State errorMsg: string = '';
   @State consistencyMessage: string = '';
+  @State auditRunning: boolean = false;
+  @State auditMessage: string = '';
+  @State auditIssues: NovelAuditIssue[] = [];
   @State modelOptions: NovelModelOptionView[] = [];
   @State busy: boolean = false;
   // 聊天
@@ -562,7 +566,40 @@ struct NovelWorkspacePage {
     }
   }
 
-  private async createWorkspaceBranch(name: string): Promise<void> {
+  // LLM 全文连续性审计(iOS NovelContinuityAudit);需已配置 stateSync 职责模型
+  private async runLlmContinuityAudit(): Promise<void> {
+    if (this.auditRunning || this.busy) return;
+    const p: NovelProject | null = this.project;
+    if (p !== null && p.modelPolicy.stateSync === null) {
+      this.auditMessage = '请先在工作区设定中配置「内部职责」模型';
+      this.auditIssues = [];
+      return;
+    }
+    this.auditRunning = true;
+    this.auditMessage = '审计中…（检查情节、人名与时间线）';
+    this.auditIssues = [];
+    try {
+      const report: NovelAuditReport = await getNovelCreation().runContinuityAudit(this.projectId);
+      this.auditIssues = report.issues;
+      this.auditMessage = report.ok
+        ? '未发现连续性问题。'
+        : `发现 ${report.issues.length} 条问题（不自动改稿）。`;
+      this.errorMsg = '';
+    } catch (error) {
+      this.auditMessage = '';
+      this.showWorkspaceOperationError('连续性审计失败', error);
+    } finally {
+      this.auditRunning = false;
+    }
+  }
+
+  private auditSeverityColor(severity: string): string {
+    if (severity === 'blocker') return ERROR;
+    if (severity === 'major') return ACCENT;
+    return INK3;
+  }
+
+  private createWorkspaceBranch(name: string): Promise<void> {
     if (this.busy) return;
     this.busy = true;
     try {
@@ -1544,6 +1581,10 @@ struct NovelWorkspacePage {
             .height(44).padding({ left: 8, right: 8 }).textAlign(TextAlign.Center)
             .opacity(this.busy ? 0.5 : 1)
             .onClick((): void => { this.runConsistencyCheck(); })
+          Text('深度审计').fontSize(12).fontColor(INK3)
+            .height(44).padding({ left: 8, right: 8 }).textAlign(TextAlign.Center)
+            .opacity(this.auditRunning ? 0.5 : 1)
+            .onClick((): void => { this.runLlmContinuityAudit(); })
           Text('撤销').fontSize(12)
             .fontColor(this.workspaceStatus?.canUndo && !this.novelJobLocksWorkspace() ? INK3 : INK4)
             .constraintSize({ minWidth: 44 }).height(44)
@@ -1570,6 +1611,33 @@ struct NovelWorkspacePage {
         if (this.consistencyMessage.length > 0) {
           Text(this.consistencyMessage).fontSize(12).fontColor(INK3).lineHeight(18)
             .width('100%').padding({ left: 20, right: 20, bottom: 10 })
+        }
+
+        if (this.auditMessage.length > 0 || this.auditIssues.length > 0) {
+          Column() {
+            Text(this.auditMessage).fontSize(12).fontColor(INK3).lineHeight(18)
+            ForEach(this.auditIssues, (issue: NovelAuditIssue): void => {
+              Column() {
+                Row() {
+                  Text(issue.severity).fontSize(11).fontColor(this.auditSeverityColor(issue.severity))
+                    .padding({ left: 6, right: 6, top: 2, bottom: 2 }).borderRadius(6)
+                    .backgroundColor(SURFACE2)
+                  Text(issue.chapterRef).fontSize(12).fontColor(INK3).margin({ left: 6 })
+                }
+                Text(issue.summary).fontSize(13).fontColor(INK).lineHeight(18).margin({ top: 4 })
+                if (issue.suggestion.length > 0) {
+                  Text(`建议：${issue.suggestion}`).fontSize(12).fontColor(INK3).lineHeight(17).margin({ top: 2 })
+                }
+              }
+              .width('100%').alignItems(HorizontalAlign.Start)
+              .padding({ left: 12, right: 12, top: 10, bottom: 10 })
+              .backgroundColor(SURFACE).borderRadius(10)
+              .margin({ top: 8 })
+            }, (issue: NovelAuditIssue): string =>
+              `${issue.severity}|${issue.chapterRef}|${issue.summary}`)
+          }
+          .width('100%').alignItems(HorizontalAlign.Start)
+          .padding({ left: 20, right: 20, bottom: 12 })
         }
 
         if (this.polishJob !== null) {

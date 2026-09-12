@@ -201,9 +201,8 @@ export const googleAuthModeFixedBaseUrl = (mode: GoogleAuthMode): string | null 
 export const hasUsableAuth = (setting: ProviderSetting): boolean => {
   if (!setting.enabled) return false;
   if (setting.type === 'openai') {
-    // OAuth/coding-plan and Responses API transports are not implemented.
-    return setting.authMode === 'api_key' && !setting.useResponseApi
-      && setting.apiKey.trim().length > 0;
+    // OAuth/coding-plan 未实现;Responses API 已落地(域层 openai_responses_*)
+    return setting.authMode === 'api_key' && setting.apiKey.trim().length > 0;
   }
   if (setting.type === 'google') {
     // Service-account JWT and Gemini Code Assist OAuth are not implemented.

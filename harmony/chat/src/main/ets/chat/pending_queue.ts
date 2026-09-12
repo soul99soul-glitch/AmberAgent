@@ -11,8 +11,9 @@
 // collectable 为一条合成消息。
 //
 // 裁剪(登记 D-048):
-//   - 持久化(Android PendingMessageStore 进程杀恢复)→ 鸿蒙 MVP 内存态
-//   - STEER 进行中注入(生成中流内插消息,依赖 GenerationHandler 注入点)= P1
+//   - 持久化(Android PendingMessageStore 进程杀恢复)→ 鸿蒙 KV Port(pending_queue_store)
+//   - STEER 生成中步间注入已落地:tool_loop.consumeSteerMessages + ChatPage.drainSteerMessages
+//     (单跑 runChatTurn 无步间点,与 Android 单步路径同语义)
 //   - 工具阻塞跳出(hasPendingOrUnexecutedTools)→ 鸿蒙尚无工具执行,
 //     循环无条件排空
 //   - previewText else 分支:Kotlin data class toString 无对应,用 JSON.stringify

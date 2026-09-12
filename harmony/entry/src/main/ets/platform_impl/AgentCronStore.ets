@@ -43,8 +43,9 @@ const TAG: string = 'Chat.AgentCron';
 
 export const AGENT_CRON_TASKS_KV_KEY: string = 'agent_cron_tasks_json';
 
-// WorkScheduler + chat run executor are not wired in this Harmony target yet.
-export const AGENT_CRON_EXECUTION_AVAILABLE: boolean = false;
+// 应用存活期定时器 + chat run executor 已接线(AppContainer.createEntryCronRunExecutor)。
+// 进程死后 WorkSchedulerExtensionAbility 仍 P1(PD-011)。
+export const AGENT_CRON_EXECUTION_AVAILABLE: boolean = true;
 
 const filesDirPath = (): string => {
   const ctx: Context = AppStorage.get<Context>('abilityContext') as Context;

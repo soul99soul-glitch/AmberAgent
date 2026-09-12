@@ -107,6 +107,8 @@ struct SettingPage {
             onRowClick: (): void => { this.go('pages/HistoryPage'); } })
           NavRow({ label: '收藏', desc: '收藏的消息与内容', iconName: 'star',
             onRowClick: (): void => { this.go('pages/FavoritePage'); } })
+          NavRow({ label: '备份与恢复', desc: '本地加密导出与恢复会话', iconName: 'folder',
+            onRowClick: (): void => { this.go('pages/SettingBackupPage'); } })
           NavRow({ label: '深度阅读', desc: '热点榜单与深度文章', iconName: 'book', isLast: true,
             onRowClick: (): void => { this.go('pages/BoardPage'); } })
 

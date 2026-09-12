@@ -5,8 +5,9 @@
 
 import { router, window } from '@kit.ArkUI';
 import { Icon } from '../components/ui/Icon.ets';
-import type { ConversationSummary } from '@amber/chat-domain';
-import { getChatRepository, describeChatModel } from '../di/AppContainer.ets';
+import type { ConversationSummary, ContinueCandidate } from '@amber/chat-domain';
+import { mergeContinueCandidates, continueStatusText, SOURCE_LABEL } from '@amber/chat-domain';
+import { getChatRepository, describeChatModel, getNovelCreation, getAgentCronManager, getRepository } from '../di/AppContainer.ets';
 import {
   INK, INK2, INK3, INK4, SURFACE, LINE, BG, ACCENT, ACCENT_INK, TINY, TEXT_STYLES,
 } from '../design/tokens.ets';
@@ -131,6 +132,7 @@ struct Index {
   @StorageProp('accentColor') accentColorStore: string = ACCENT;
   @State inputText: string = '';
   @State recentItems: ConversationSummary[] = [];
+  @State continueItems: ContinueCandidate[] = [];
   @State loaded: boolean = false;
   @State modelLabel: string = '';
   @State inputFocused: boolean = false;
@@ -148,6 +150,7 @@ struct Index {
     this.pageAlive = true;
     this.pageVisible = true;
     this.loadRecent();
+    this.loadContinue();
     this.loadModelLabel();
     this.attachKeyboardListener();
   }
@@ -155,6 +158,7 @@ struct Index {
   onPageShow(): void {
     this.pageVisible = true;
     this.loadModelLabel();
+    this.loadContinue();
     this.attachKeyboardListener();
   }
 
@@ -191,6 +195,74 @@ struct Index {
       this.recentItems = [];
       this.loaded = true;
     });
+  }
+
+  // 首页「继续」：小说项目 + 到期/运行中 cron（Android ContinueAggregator 子集）
+  private loadContinue(): void {
+    const novelList: Promise<ContinueCandidate[]> = getNovelCreation().listProjects()
+      .then((projects): ContinueCandidate[] => projects.slice(0, 3).map((p): ContinueCandidate => ({
+        sourceKind: 'novel',
+        sourceId: p.id,
+        route: { kind: 'novel', projectId: p.id },
+        title: p.name.length > 0 ? p.name : '未命名小说',
+        summary: `${p.chapters.length} 章 · ${p.messages.length} 条讨论`,
+        lastUpdatedAt: p.updatedAt,
+        status: p.chapters.length > 0 ? 'draft' : 'waiting_user',
+        priority: 0,
+        isRunning: false,
+      })))
+      .catch((): ContinueCandidate[] => []);
+    const cronList: Promise<ContinueCandidate[]> = getAgentCronManager()
+      .then((m): Promise<ContinueCandidate[]> => m.listTasksSnapshot())
+      .then((tasks): ContinueCandidate[] => tasks
+        .filter((t): boolean => t.enabled && (t.lastStatus === 'Failed' || t.lastStatus === 'Running'))
+        .slice(0, 3)
+        .map((t): ContinueCandidate => ({
+          sourceKind: 'cron',
+          sourceId: t.id,
+          route: { kind: 'cron', taskId: t.id },
+          title: t.title,
+          summary: t.lastStatus === 'Failed' ? '上次失败，可重试' : '运行中',
+          lastUpdatedAt: t.updatedAtMs,
+          status: t.lastStatus === 'Failed' ? 'failed_resumable' : 'running',
+          priority: 0,
+          isRunning: t.lastStatus === 'Running',
+        })))
+      .catch((): ContinueCandidate[] => []);
+    const deepList: Promise<ContinueCandidate[]> = getRepository().listHistory(3)
+      .then((entries): ContinueCandidate[] => entries
+        .filter((e): boolean => e.phase !== 'COMPLETE')
+        .slice(0, 3)
+        .map((e): ContinueCandidate => ({
+          sourceKind: 'deepread',
+          sourceId: e.topicId,
+          route: { kind: 'deepread', topicId: e.topicId, title: e.title },
+          title: e.title.length > 0 ? e.title : '深度阅读',
+          summary: e.phase,
+          lastUpdatedAt: e.updatedAt,
+          status: 'waiting_user',
+          priority: 0,
+          isRunning: e.phase !== 'COMPLETE' && e.phase !== 'FAILED',
+        })))
+      .catch((): ContinueCandidate[] => []);
+    Promise.all([novelList, cronList, deepList]).then((lists): void => {
+      if (!this.pageAlive || !this.pageVisible) return;
+      this.continueItems = mergeContinueCandidates(lists, 6);
+    }).catch((): void => {
+      if (!this.pageAlive || !this.pageVisible) return;
+      this.continueItems = [];
+    });
+  }
+
+  private openContinue(item: ContinueCandidate): void {
+    if (item.route.kind === 'novel') {
+      router.pushUrl({
+        url: 'pages/NovelWorkspacePage',
+        params: { projectId: item.route.projectId },
+      });
+    } else if (item.route.kind === 'cron') {
+      router.pushUrl({ url: 'pages/SettingCronTasksPage' });
+    }
   }
 
   private updateInputHeight(value: string): void {
@@ -362,6 +434,16 @@ struct Index {
       } else {
         Scroll() {
           Column() {
+            if (this.continueItems.length > 0) {
+              SectionHeader({ label: '继续' })
+              ForEach(this.continueItems, (item: ContinueCandidate): void => {
+                IndexRecentRow({
+                  title: `${SOURCE_LABEL[item.sourceKind]} · ${item.title}`,
+                  timeText: continueStatusText(item.status),
+                  onSelect: (): void => { this.openContinue(item); },
+                })
+              }, (item: ContinueCandidate): string => `cont-${item.sourceKind}-${item.sourceId}`)
+            }
             SectionHeader({ label: '最近' })
             ForEach(this.recentItems, (item: ConversationSummary): void => {
               IndexRecentRow({

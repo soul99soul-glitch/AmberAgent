@@ -46,6 +46,7 @@ const evalToPart = async (session: WebMountSession, expr: string): Promise<UIMes
 };
 
 // 页面 outline + 交互元素 ref 标注(click 以 [data-wm-ref=N] 命中)
+// 脱敏:password 与 token/secret 命名的 input 不回传 value
 const EXTRACT_JS: string = `(function(){
   const els = [];
   const seen = new Set();
@@ -59,10 +60,14 @@ const EXTRACT_JS: string = `(function(){
     if (style.display === 'none' || style.visibility === 'hidden') continue;
     const ref = 'wm-' + (i++);
     el.setAttribute('data-wm-ref', ref);
-    const text = (el.innerText || el.value || el.getAttribute('aria-label') || '').trim().slice(0, 80);
     const tag = el.tagName.toLowerCase();
+    const type = (el.getAttribute('type') || '').toLowerCase();
+    const name = (el.getAttribute('name') || '').toLowerCase();
+    const isSecret = type === 'password' || /token|secret|api[_-]?key|password/.test(name);
+    let text = (el.innerText || el.value || el.getAttribute('aria-label') || '').trim().slice(0, 80);
+    if (isSecret) text = '***';
     const href = tag === 'a' ? el.getAttribute('href') || '' : '';
-    els.push({ ref, tag, text, href });
+    els.push({ ref, tag, text, href, type: type || undefined });
   }
   const bodyText = (document.body ? document.body.innerText : '').replace(/\\s+/g, ' ').trim().slice(0, 5000);
   return { url: location.href, title: document.title, text: bodyText, elements: els };
@@ -261,9 +266,192 @@ export const createWebMountTools = (session: WebMountSession, includeEval: boole
     },
   });
 
+  // wait:轮询 eval 直到条件满足或超时(Android wm_wait 语义子集)
+  const waitProbeJs = (
+    urlIncludes: string, titleIncludes: string, selector: string, textIncludes: string,
+  ): string => `(function(){
+    const u = ${JSON.stringify(urlIncludes)};
+    const t = ${JSON.stringify(titleIncludes)};
+    const s = ${JSON.stringify(selector)};
+    const x = ${JSON.stringify(textIncludes)};
+    if (u.length > 0 && location.href.indexOf(u) < 0) return { matched: false, reason: 'url' };
+    if (t.length > 0 && document.title.indexOf(t) < 0) return { matched: false, reason: 'title' };
+    if (s.length > 0 && document.querySelector(s) === null) return { matched: false, reason: 'selector' };
+    if (x.length > 0 && (document.body ? document.body.innerText : '').indexOf(x) < 0) {
+      return { matched: false, reason: 'text' };
+    }
+    return { matched: true, url: location.href, title: document.title };
+  })()`;
+
+  const waitTool: AgentTool = makeAgentTool({
+    name: 'wm_wait',
+    description: 'Wait until a page condition holds: url_includes / title_includes / '
+      + 'selector_visible / text_includes. Polls until timeoutMs (default 10000).',
+    parameters: (): InputSchemaObj | null => makeInputSchemaObj({
+      'url_includes': { type: 'string', description: 'Substring expected in location.href.' },
+      'title_includes': { type: 'string', description: 'Substring expected in document.title.' },
+      'selector': { type: 'string', description: 'CSS selector that must exist.' },
+      'text_includes': { type: 'string', description: 'Substring expected in body text.' },
+      'timeout_ms': { type: 'number', description: 'Max wait in ms (default 10000, max 60000).' },
+    } as JsonObject, null),
+    execute: async (input: JsonValue): Promise<UIMessagePart[]> => {
+      if (!session.isReady()) throw new Error('no page loaded; call wm_open first');
+      const urlIncludes: string = strOf(input, 'url_includes', '');
+      const titleIncludes: string = strOf(input, 'title_includes', '');
+      const selector: string = strOf(input, 'selector', '');
+      const textIncludes: string = strOf(input, 'text_includes', '');
+      if (urlIncludes.length === 0 && titleIncludes.length === 0
+        && selector.length === 0 && textIncludes.length === 0) {
+        throw new Error('at least one wait condition is required');
+      }
+      const timeoutMs: number = Math.min(Math.max(numOf(input, 'timeout_ms', 10000), 0), 60000);
+      const probe: string = waitProbeJs(urlIncludes, titleIncludes, selector, textIncludes);
+      const started: number = Date.now();
+      for (;;) {
+        const raw: string = await session.evalJson(probe);
+        let matched: boolean = false;
+        try {
+          const parsed: unknown = JSON.parse(raw);
+          if (typeof parsed === 'object' && parsed !== null) {
+            const obj = parsed as { ok?: boolean; value?: { matched?: boolean } };
+            matched = obj.ok === true && obj.value !== undefined && obj.value.matched === true;
+          }
+        } catch {
+          matched = false;
+        }
+        const waited: number = Date.now() - started;
+        if (matched) {
+          return textPart({ matched: true, waited_ms: waited, url: session.getUrl() });
+        }
+        if (waited >= timeoutMs) {
+          return textPart({ matched: false, waited_ms: waited, url: session.getUrl() });
+        }
+        await new Promise<void>((r: () => void): void => { setTimeout(r, 200); });
+      }
+    },
+  });
+
+  const backTool: AgentTool = makeAgentTool({
+    name: 'wm_back',
+    description: 'Navigate back in the WebMount session history.',
+    execute: async (): Promise<UIMessagePart[]> => {
+      const ok: boolean = session.back();
+      return textPart({ went_back: ok, url: session.getUrl() });
+    },
+  });
+
+  const forwardTool: AgentTool = makeAgentTool({
+    name: 'wm_forward',
+    description: 'Navigate forward in the WebMount session history.',
+    execute: async (): Promise<UIMessagePart[]> => {
+      const ok: boolean = session.forward();
+      return textPart({ went_forward: ok, url: session.getUrl() });
+    },
+  });
+
+  const reloadTool: AgentTool = makeAgentTool({
+    name: 'wm_reload',
+    description: 'Reload the current WebMount page and wait for load end.',
+    execute: async (): Promise<UIMessagePart[]> => {
+      await session.reload();
+      return textPart({ reloaded: true, url: session.getUrl() });
+    },
+  });
+
+  const tabListTool: AgentTool = makeAgentTool({
+    name: 'wm_tab_list',
+    description: 'List WebMount logical tabs and the active tab id.',
+    execute: async (): Promise<UIMessagePart[]> => {
+      return textPart({
+        active: session.getActiveTabId(),
+        tabs: session.listTabs().map((t): JsonObject =>
+          ({ id: t.id, title: t.title, url: t.url } as JsonObject)),
+      });
+    },
+  });
+
+  const tabOpenTool: AgentTool = makeAgentTool({
+    name: 'wm_tab_open',
+    description: 'Create (or reuse) a logical tab id. Call wm_open afterwards to load a URL into it.',
+    parameters: (): InputSchemaObj | null => makeInputSchemaObj({
+      'tab_id': { type: 'string', description: 'Stable tab id (e.g. search, docs).' },
+    } as JsonObject, ['tab_id']),
+    execute: async (input: JsonValue): Promise<UIMessagePart[]> => {
+      const tabId: string = strOf(input, 'tab_id', '');
+      if (tabId.length === 0) throw new Error('tab_id is required');
+      const tab = session.openTab(tabId);
+      session.selectTab(tabId);
+      return textPart({ opened: true, tab: { id: tab.id, url: tab.url } });
+    },
+  });
+
+  const tabSelectTool: AgentTool = makeAgentTool({
+    name: 'wm_tab_select',
+    description: 'Select a logical tab. If it has a url, reloads that url in the shared WebView.',
+    parameters: (): InputSchemaObj | null => makeInputSchemaObj({
+      'tab_id': { type: 'string', description: 'Tab id from wm_tab_list.' },
+    } as JsonObject, ['tab_id']),
+    execute: async (input: JsonValue): Promise<UIMessagePart[]> => {
+      const tabId: string = strOf(input, 'tab_id', '');
+      if (tabId.length === 0) throw new Error('tab_id is required');
+      const tab = session.selectTab(tabId);
+      if (tab.url.length > 0) {
+        const sites: UserSiteEntry[] = await loadWebMountSites(getChatKvStore());
+        if (!siteAllowsUrl(sites, tab.url)) {
+          return textPart({ selected: true, tab_id: tabId, warning: 'tab url no longer allowed' });
+        }
+        await session.open(tab.url);
+      }
+      return textPart({ selected: true, tab_id: tabId, url: session.getUrl() });
+    },
+  });
+
+  const tabCloseTool: AgentTool = makeAgentTool({
+    name: 'wm_tab_close',
+    description: 'Close a logical tab (main cannot be closed).',
+    parameters: (): InputSchemaObj | null => makeInputSchemaObj({
+      'tab_id': { type: 'string', description: 'Tab id to close.' },
+    } as JsonObject, ['tab_id']),
+    execute: async (input: JsonValue): Promise<UIMessagePart[]> => {
+      const tabId: string = strOf(input, 'tab_id', '');
+      if (tabId.length === 0) throw new Error('tab_id is required');
+      const closed: boolean = session.closeTab(tabId);
+      return textPart({ closed, tab_id: tabId, active: session.getActiveTabId() });
+    },
+  });
+
+  // wm_tab_* 与 wait 导航组:始终暴露(对齐 Android tab/wait 工具面)
+  // 视觉读页：DOM 大纲 + 截图 image part（供 vision 模型 OCR）
+  const readPageTool: AgentTool = makeAgentTool({
+    name: 'wm_read_page',
+    description: 'Read the current page: returns DOM outline (wm_extract) plus a screenshot '
+      + 'image part for vision/OCR models. Use when text is canvas-rendered or extract is insufficient.',
+    execute: async (): Promise<UIMessagePart[]> => {
+      if (!session.isReady()) throw new Error('no page loaded; call wm_open first');
+      const outline: UIMessagePart[] = await evalToPart(session, EXTRACT_JS);
+      let shot: UIMessagePart | null = null;
+      try {
+        const dataUrl: string = await session.screenshotDataUrl();
+        shot = { type: 'image', url: dataUrl, metadata: null };
+      } catch (e) {
+        shot = {
+          type: 'text',
+          text: `screenshot unavailable: ${e instanceof Error ? e.message : String(e)}`,
+          metadata: null,
+        };
+      }
+      return shot === null ? outline : [...outline, shot];
+    },
+  });
+
+  const extras: AgentTool[] = [
+    waitTool, backTool, forwardTool, reloadTool,
+    tabListTool, tabOpenTool, tabSelectTool, tabCloseTool, readPageTool,
+  ];
+
   return includeEval
     ? [openTool, stateTool, extractTool, clickTool, typeTool, scrollTool, screenshotTool,
-      stationsTool, siteAddTool, siteRemoveTool, evalTool]
+      stationsTool, siteAddTool, siteRemoveTool, ...extras, evalTool]
     : [openTool, stateTool, extractTool, clickTool, typeTool, scrollTool, screenshotTool,
-      stationsTool, siteAddTool, siteRemoveTool];
+      stationsTool, siteAddTool, siteRemoveTool, ...extras];
 };

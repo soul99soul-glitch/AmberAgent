@@ -24,7 +24,7 @@ import { createPreferencesStorage } from '../platform_impl/PreferencesStorage.et
 import { createRdbRepository } from '../platform_impl/RdbRepository.ets';
 import { createOpenAiCompatibleAiClient } from '../platform_impl/OpenAiCompatibleAiClient.ets';
 import { createTavilyAndFallbackRegistry } from '../platform_impl/SearchRegistry.ets';
-import { createNotificationNotifier } from '../platform_impl/NotificationNotifier.ets';
+import { createNotificationNotifier, notifyCronRunning, notifyCronCompleted, notifyCronFailed } from '../platform_impl/NotificationNotifier.ets';
 import { createFileStore } from '../platform_impl/FileStore.ets';
 import { getChatKeyRoulette } from '../platform_impl/KeyRouletteSupport.ets';
 import { createModelCouncilRunner } from '../platform_impl/ModelCouncilRunner.ets';
@@ -66,6 +66,11 @@ import {
   SubAgentManager, GenerationSubAgentRunner, ChatStreamSubAgentGenerationPort,
   SubAgentTools,
   createAskUserTool, createNovelWorkspaceTools,
+  createKvResponseResumeStore,
+  AgentCronTools,
+  runChatTurn,
+  thinkTagTransformer, regexOutputTransformer,
+  type ChatTurnDeps,
 } from '@amber/chat-domain';
 import { findModelByIdInProviders } from '../platform_impl/OcrSupport.ets';
 import { createChatKvStore } from '../platform_impl/ChatKvStore.ets';
@@ -430,20 +435,81 @@ export const getAgentTaskTools = async (): Promise<AgentTool[]> => {
 };
 
 let agentCronManagerPromise: Promise<AgentCronManager> | null = null;
+
+// 无头执行体:仅跑 ChatTurn;状态机(prepare/markStarted/Completed/Failed/scheduleNext)
+// 由 AgentCronSchedulerPort.fire 负责(AgentCronWorker.doWork 控制流)。
+const createEntryCronRunExecutor = (): (taskId: string) => Promise<void> => {
+  return async (taskId: string): Promise<void> => {
+    const manager: AgentCronManager = await getAgentCronManager();
+    const tasks = await manager.listTasksSnapshot();
+    const task = tasks.find((t): boolean => t.id === taskId);
+    if (task === undefined) {
+      throw new Error(`Cron task not found: ${taskId}`);
+    }
+    notifyCronRunning(task.id, task.title);
+    try {
+      let conversation = task.conversationId.length > 0
+        ? await getChatRepository().getById(task.conversationId)
+        : null;
+      if (conversation === null) {
+        conversation = {
+          id: task.conversationId.length > 0 ? task.conversationId : `cron-${task.id}`,
+          assistantId: '',
+          title: task.title,
+          createAt: new Date().toISOString(),
+          updateAt: new Date().toISOString(),
+          chatSuggestions: [],
+          isPinned: false,
+          autoApproveToolCalls: false,
+          messageNodes: [],
+        };
+        await getChatRepository().save(conversation);
+      }
+      const runtime = await resolveChatRuntime(
+        conversation.assistantId.length > 0 ? conversation.assistantId : undefined,
+      );
+      if (runtime === null) {
+        throw new Error('Cron run failed: no usable chat provider/model');
+      }
+      const deps: ChatTurnDeps = {
+        assistant: runtime.assistant,
+        inputTransformers: [],
+        outputTransformers: [thinkTagTransformer, regexOutputTransformer],
+        provider: asChatStreamProvider(runtime.api, (): TextGenerationParams => runtime.params),
+        store: getChatRepository(),
+        contextMessageSize: runtime.contextMessageSize,
+      };
+      const out = await runChatTurn(conversation, task.prompt, deps);
+      await getChatRepository().save(out);
+      notifyCronCompleted(task.id, task.title);
+    } catch (e) {
+      const message: string = e instanceof Error ? e.message : String(e);
+      notifyCronFailed(task.id, task.title, message);
+      throw e;
+    }
+  };
+};
+
 export const getAgentCronManager = (): Promise<AgentCronManager> => {
   if (agentCronManagerPromise === null) {
     agentCronManagerPromise = (async (): Promise<AgentCronManager> =>
       new AgentCronManager(
         createEntryCronPersistencePort(getChatKvStore()),
-        createEntryCronSchedulerPort({ manager: (): Promise<AgentCronManager> => getAgentCronManager() }),
+        createEntryCronSchedulerPort({
+          manager: (): Promise<AgentCronManager> => getAgentCronManager(),
+          runExecutor: createEntryCronRunExecutor(),
+        }),
         await getAgentTaskStore(),
       ))();
   }
   return agentCronManagerPromise;
 };
 
-// Cron 执行器/WorkScheduler 尚未接线：不向模型暴露会创建不可执行任务的工具。
-export const getAgentCronTools = async (): Promise<AgentTool[]> => [];
+// Cron 执行器已接线:暴露四件工具(创建/列表/立即运行/删除)
+export const getAgentCronTools = async (): Promise<AgentTool[]> => {
+  const manager = await getAgentCronManager();
+  return new AgentCronTools(manager).getTools();
+};
 
 export const isAgentCronExecutionAvailable = (): boolean =>
   AGENT_CRON_EXECUTION_AVAILABLE;
@@ -1168,9 +1234,7 @@ export const describeChatModel = async (): Promise<string> => {
 export const buildProviderApi = (
   chosen: ProviderSetting, customHeaderRecord: Record<string, string>,
 ): OpenAIChatApi => {
-  if (chosen.type === 'openai' && (chosen as ProviderSettingOpenAIVariant).useResponseApi) {
-    throw new Error('OpenAI Responses API 未落地');
-  }
+  // useResponseApi=true 走 createOpenAIChatApi 内部分流(Responses);不再在此 throw
   if (!hasUsableAuth(chosen)) {
     throw new Error('Provider 鉴权未配置或当前 Harmony 版本不支持');
   }
@@ -1223,6 +1287,11 @@ export const buildProviderApi = (
     },
     // D-038:图片编码(data:/http(s): 直通,file:// 读文件编码;失败即抛)
     encodeImage: encodeImageForChat,
+    // P6-01:官方 OpenAI + api_key 时注入 resume cursor KV Port
+    resumeStore: openaiSetting.useResponseApi === true
+      ? createKvResponseResumeStore(getChatKvStore())
+      : undefined,
+    enableResponsesResume: openaiSetting.useResponseApi === true,
   });
 };
 
@@ -1330,6 +1399,24 @@ const novelWorkspaceToolPort = (projectId: string): NovelWorkspaceToolPort => ({
       status: proposal.status,
       branch_id: proposal.expectedCas.branchId,
       patch_count: proposal.patches.length,
+    };
+  },
+  audit: async () => {
+    const report = await getNovelCreation().runContinuityAudit(projectId);
+    return {
+      ok: report.ok,
+      issue_count: report.issues.length,
+      issues: report.issues.map((issue): string =>
+        `[${issue.severity}] ${issue.chapterRef}: ${issue.summary}` +
+        (issue.suggestion.length > 0 ? ` → ${issue.suggestion}` : '')),
+    };
+  },
+  ingestSettingProposals: async (sourceMessageId: string, text: string) => {
+    const proposals = await getNovelCreation().ingestSettingProposals(
+      projectId, sourceMessageId, text);
+    return {
+      ingested: proposals.length,
+      titles: proposals.map((p): string => p.title),
     };
   },
 });

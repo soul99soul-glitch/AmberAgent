@@ -24,6 +24,7 @@ import {
   parseOpenAiStreamEventData,
 } from './openai_parse.ts';
 import type { ChatStreamProvider, StreamOpts } from './chat_turn.ts';
+import { createOpenAIResponsesApi } from './openai_responses_api.ts';
 
 export interface OpenAIChatApiDeps {
   http: HttpClient;
@@ -31,6 +32,10 @@ export interface OpenAIChatApiDeps {
   // adapter 注入的额外 header(auth/custom/referer);secret 由 adapter 持有
   headers?: () => Record<string, string>;
   encodeImage?: ImageEncoder;
+  /** P6-01:官方端点 + 用户开关时注入;chat_completions 路径忽略 */
+  resumeStore?: import('./openai_responses_request.ts').ResponseResumeStore;
+  enableResponsesResume?: boolean;
+  runId?: string;
 }
 
 export interface CallOpts {
@@ -54,9 +59,8 @@ const buildRequest = (
   params: TextGenerationParams,
   stream: boolean,
 ): HttpRequest => {
-  if (deps.setting.useResponseApi) {
-    throw new Error('OpenAI Responses API 未落地');
-  }
+  // useResponseApi=true 时由 createOpenAIChatApi 分流到 Responses 实现,
+  // 本函数仅服务 chat_completions 路径。
   const body = buildChatCompletionRequest({
     messages, params, setting: deps.setting, stream, encodeImage: deps.encodeImage,
   });
@@ -87,6 +91,25 @@ const errorFromFailureBody = (status: number, bodyRaw: string): Error => {
 };
 
 export const createOpenAIChatApi = (deps: OpenAIChatApiDeps): OpenAIChatApi => {
+  // useResponseApi=true → Responses 实现;chat_completions 路径不变
+  if (deps.setting.useResponseApi === true) {
+    const responses = createOpenAIResponsesApi({
+      http: deps.http,
+      setting: deps.setting,
+      headers: deps.headers,
+      encodeImage: deps.encodeImage,
+      resumeStore: deps.resumeStore,
+      enableResponsesResume: deps.enableResponsesResume,
+      runId: deps.runId,
+    });
+    return {
+      streamText: (messages, params, onChunk, opts) =>
+        responses.streamText(messages, params, onChunk, opts),
+      generateText: (messages, params, opts) =>
+        responses.generateText(messages, params, opts),
+    };
+  }
+
   const streamText = async (
     messages: UIMessage[],
     params: TextGenerationParams,
