@@ -60,6 +60,12 @@ class SessionHomeVM(
         }
     }
 
+    suspend fun updateUserNickname(nickname: String) {
+        settingsStore.update { current ->
+            current.copy(displaySetting = current.displaySetting.copy(userNickname = nickname.trim()))
+        }
+    }
+
     fun updateSettings(newSettings: Settings) {
         viewModelScope.launch {
             val oldSettings = settingsStore.settingsFlow.first()

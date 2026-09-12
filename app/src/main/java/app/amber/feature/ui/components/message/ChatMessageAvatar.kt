@@ -11,6 +11,7 @@ import androidx.compose.material3.LocalContentColor
 import androidx.compose.ui.graphics.Color
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -49,13 +50,14 @@ fun ChatMessageUserAvatar(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Column(
-                modifier = Modifier,
+                modifier = Modifier.weight(1f, fill = false),
                 horizontalAlignment = Alignment.End,
             ) {
                 Text(
                     text = nickname.ifEmpty { stringResource(R.string.user_default_name) },
                     style = MaterialTheme.typography.titleSmall,
                     maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                     color = LocalContentColor.current.copy(alpha = 0.85f),
                 )
                 if (settings.displaySetting.showDateBelowName) {

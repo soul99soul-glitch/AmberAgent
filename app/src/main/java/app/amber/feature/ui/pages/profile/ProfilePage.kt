@@ -1,6 +1,23 @@
 package app.amber.feature.ui.pages.profile
 
 import android.graphics.Paint
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.size
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Icon
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.text.style.TextOverflow
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.Pencil
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.launch
 import android.graphics.Typeface
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
@@ -76,6 +93,56 @@ fun ProfilePage(
 
     val defaultNickname = stringResource(R.string.profile_default_nickname)
     val nickname = settings.displaySetting.userNickname.ifBlank { defaultNickname }
+    var editingNickname by rememberSaveable { mutableStateOf(false) }
+    var nicknameDraft by rememberSaveable { mutableStateOf("") }
+    var savingNickname by remember { mutableStateOf(false) }
+    var nicknameError by remember { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
+
+    if (editingNickname) {
+        AlertDialog(
+            onDismissRequest = { if (!savingNickname) editingNickname = false },
+            title = { Text(stringResource(R.string.chat_page_edit_nickname)) },
+            text = {
+                OutlinedTextField(
+                    value = nicknameDraft,
+                    onValueChange = { nicknameDraft = it; nicknameError = null },
+                    placeholder = { Text(stringResource(R.string.chat_page_nickname_placeholder)) },
+                    singleLine = true,
+                    enabled = !savingNickname,
+                    isError = nicknameError != null,
+                    supportingText = nicknameError?.let { error -> { Text(error) } },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = nicknameDraft.isNotBlank() && !savingNickname,
+                    onClick = {
+                        savingNickname = true
+                        scope.launch {
+                            try {
+                                sessionHomeVm.updateUserNickname(nicknameDraft)
+                                editingNickname = false
+                            } catch (error: CancellationException) {
+                                throw error
+                            } catch (error: Exception) {
+                                nicknameError = error.localizedMessage ?: error.toString()
+                            } finally {
+                                savingNickname = false
+                            }
+                        }
+                    },
+                ) { Text(stringResource(R.string.chat_page_save)) }
+            },
+            dismissButton = {
+                TextButton(
+                    enabled = !savingNickname,
+                    onClick = { editingNickname = false },
+                ) { Text(stringResource(R.string.cancel)) }
+            },
+        )
+    }
 
     Scaffold(
         topBar = {
@@ -114,11 +181,34 @@ fun ProfilePage(
                     },
                 )
                 Spacer(Modifier.height(16.dp))
-                Text(
-                    text = nickname,
-                    style = LocalAmberType.current.screenTitle,
-                    color = tokens.ink,
-                )
+                Row(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(12.dp))
+                        .clickable {
+                            nicknameDraft = settings.displaySetting.userNickname
+                            nicknameError = null
+                            editingNickname = true
+                        }
+                        .heightIn(min = 48.dp)
+                        .padding(horizontal = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text(
+                        text = nickname,
+                        style = LocalAmberType.current.screenTitle,
+                        color = tokens.ink,
+                        modifier = Modifier.weight(1f, fill = false),
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Icon(
+                        imageVector = Lucide.Pencil,
+                        contentDescription = stringResource(R.string.chat_page_edit_nickname),
+                        tint = tokens.ink3,
+                        modifier = Modifier.size(16.dp),
+                    )
+                }
                 Spacer(Modifier.height(6.dp))
                 Row(
                     modifier = Modifier.fillMaxWidth(),
