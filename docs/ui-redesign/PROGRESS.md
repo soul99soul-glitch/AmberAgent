@@ -69,3 +69,9 @@
 - 最后仅视觉的MiniApp标题改动再次assemble成功（9s），最终APK安装与冷启动通过；源码提交`1c2983f`，包校验见BUILD.json。资料统计第五项的实际横滚证据已补phase5-profile-narrow-scrolled.png。
 
 - 最后独立视觉复核确认小应用孤字和卡片对齐问题关闭，无阻断。工作树已移至`/Users/arquiel/Downloads/AI/AmberAgent/android-ui-refinement`；源码与APK SHA绑定见ACCEPTANCE/BUILD.json。Phase0–5完成，未合并或推送main。
+
+## 后续 · 思考等级文案
+
+- 源码提交`2e39b01`：ChatMessageReasoning的token预算标签改为实际ReasoningLevel名称；XHigh简繁中文统一为极高/極高，Max仍独立显示最大。进行中使用“正在思考”，耗时放在extra；已有动态思考标题保留。未改provider参数与等级解析。
+- locale-tui添加源字符串成功，自动翻译因缺少API key失败；使用同工具StringsXmlParser补齐五种语言，六份XML合法且key唯一。
+- 既有ChatMessageReasoningTest 6项通过、assembleDebug成功；隔离API36模拟器覆盖安装、冷启动成功。最终包SHA及源码绑定更新至BUILD.json，既有截图仍属于前一轮视觉验收。

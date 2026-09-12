@@ -1,11 +1,11 @@
 {
-  "sourceCommit": "1c2983f",
+  "sourceCommit": "2e39b01",
   "applicationId": "app.amber.agent.graphite",
-  "apkBytes": 108308883,
-  "sha256": "90e0455460322bf57f63b8cbf9dbe5c50502f6bdda77c485912387971fbc20a9",
+  "apkBytes": 106559621,
+  "sha256": "75dca5be1fe089ee7027d3926abeb2d464e39e3556a472ce825b0c1e92b918f5",
   "abi": "arm64-v8a",
   "variant": "debug",
-  "verification": "API36 emulator; 79 targeted JVM/Robolectric tests before final visual-only title adjustment; final assemble and install after adjustment",
+  "verification": "Original 79 targeted JVM/Robolectric tests; reasoning label follow-up: 6 ChatMessageReasoning tests and assembleDebug passed. API36 emulator installation tracked in PROGRESS.md.",
   "nativeLibraries": [
     "lib/arm64-v8a/libandroidx.graphics.path.so",
     "lib/arm64-v8a/libbarhopper_v3.so",

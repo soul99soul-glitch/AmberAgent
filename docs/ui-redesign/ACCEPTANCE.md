@@ -46,8 +46,10 @@
 
 ## 安装包与源码绑定
 
-工作目录：`/Users/arquiel/Downloads/AI/AmberAgent/android-ui-refinement`。源码提交：`1c2983f`；其后的交付提交只包含文档和截图。
+工作目录：`/Users/arquiel/Downloads/AI/AmberAgent/android-ui-refinement`。源码提交：`2e39b01`；其后的交付提交只包含文档和截图。
 
 [安装实验 APK](/Users/arquiel/Downloads/AI/AmberAgent/android-ui-refinement/app/build/outputs/apk/debug/app-universal-debug.apk)（ARM64，Debug，约103.3 MiB）。包名 `app.amber.agent.graphite`，可与正式包并存，不包含模拟器夹具。
 
-SHA-256：`90e0455460322bf57f63b8cbf9dbe5c50502f6bdda77c485912387971fbc20a9`。完整构建清单见[BUILD.json](BUILD.json)。
+SHA-256：`75dca5be1fe089ee7027d3926abeb2d464e39e3556a472ce825b0c1e92b918f5`。完整构建清单见[BUILD.json](BUILD.json)。
+
+思考状态后续调整：等级显示为低/中/高/极高/最大，替代token预算；进行中使用“正在思考”，耗时在旁显示。6项既有思考组件测试与构建通过，原始截图尚未补拍这一文案变化。
