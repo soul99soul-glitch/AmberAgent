@@ -75,3 +75,8 @@
 - 源码提交`2e39b01`：ChatMessageReasoning的token预算标签改为实际ReasoningLevel名称；XHigh简繁中文统一为极高/極高，Max仍独立显示最大。进行中使用“正在思考”，耗时放在extra；已有动态思考标题保留。未改provider参数与等级解析。
 - locale-tui添加源字符串成功，自动翻译因缺少API key失败；使用同工具StringsXmlParser补齐五种语言，六份XML合法且key唯一。
 - 既有ChatMessageReasoningTest 6项通过、assembleDebug成功；隔离API36模拟器覆盖安装、冷启动成功。最终包SHA及源码绑定更新至BUILD.json，既有截图仍属于前一轮视觉验收。
+
+## 后续 · 思考图标方形色块
+
+- 源码提交`94a7b2f`：ChainOfThought固定20dp遮罩使用M3背景色；ChatMessageMessagePartsBlock已传drawTimeline=false，却仍保留遮罩，引发与聊天背景的色差。仅在无时间线时将遮罩设透明，有时间线场景保留原逻辑，未改图标尺寸/点击布局。
+- assembleDebug成功（13s）；隔离API36模拟器覆盖安装和冷启动通过，实际点击思考展开/折叠，截图确认方块消失。未为单一绘制条件新增测试框架。
