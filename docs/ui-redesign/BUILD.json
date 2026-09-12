@@ -1,11 +1,11 @@
 {
-  "sourceCommit": "2e1f6ce",
+  "sourceCommit": "ee22ffc",
   "applicationId": "app.amber.agent.graphite",
-  "apkBytes": 108395990,
-  "sha256": "efa5250997dfb09ddedf77a40083ce70e91be3ce2243334d438b07669bb86d72",
+  "apkBytes": 107022947,
+  "sha256": "3a312a3a241a5001d34b1b95edf4eec686845849c18a5135293005a8c7239326",
   "abi": "arm64-v8a",
   "variant": "debug",
-  "verification": "Original phased tests and prior follow-up checks in PROGRESS.md. Nickname follow-up: assembleDebug passed; API36 emulator blank-save, cancel, save, process restart, and existing chat signature verified; independent source review passed.",
+  "verification": "SSH backport: 65 targeted JVM tests plus 8 loopback tests passed. Both app packages installed on Xiaomi M610BB and executed an actual SSH command through TerminalRuntime, Keystore and pinned host key. Provider/model import and cold-start equality verification passed.",
   "nativeLibraries": [
     "lib/arm64-v8a/libandroidx.graphics.path.so",
     "lib/arm64-v8a/libbarhopper_v3.so",
@@ -28,5 +28,11 @@
     "lib/arm64-v8a/libucrop.so"
   ],
   "apkPath": "/Users/arquiel/Downloads/AI/AmberAgent/android-ui-refinement/app/build/outputs/apk/debug/app-universal-debug.apk",
-  "workspacePath": "/Users/arquiel/Downloads/AI/AmberAgent/android-ui-refinement"
+  "workspacePath": "/Users/arquiel/Downloads/AI/AmberAgent/android-ui-refinement",
+  "stableBuild": {
+    "sourceCommit": "e771914",
+    "apkPath": "/Users/arquiel/Downloads/AI/AmberAgent/android/app/build/outputs/apk/graphite/app-universal-graphite.apk",
+    "sha256": "06483d6edc90ae5a04d82dc65df6ac35ccf2567ef46f4ffff035aff508f9b53e",
+    "applicationId": "app.amber.agent"
+  }
 }

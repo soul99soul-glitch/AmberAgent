@@ -86,3 +86,7 @@
 - 源码提交`2e1f6ce`：已有displaySetting.userNickname及消息署名消费者，但Profile缺少编辑入口。复用现有字段/本地化字符串，在昵称旁增加铅笔与编辑对话框，保存成功后关闭，取消不写入。SessionHomeVM通过SettingsAggregator.update(transform)更新当前displaySetting的单一字段，不覆盖头像/其他设置。聊天长昵称列限制剩余宽度，固定头像保留。
 - 编译初次引用不存在的save资源，改为已有chat_page_save后assembleDebug通过（24s）。独立review未发现真实回归。
 - 隔离API36模拟器实际验证：空白保存被禁用；修改草稿再取消后仍为原昵称；保存Alex后资料页立即更新；force-stop并冷启动后已有聊天署名仍为Alex。IME首次将测试输入组合成中英混合字符，按实际提交值核对保存；随后明确输入并提交Alex。无真实provider调用，测试昵称未写入默认资源。
+
+## 后续 · 双版本SSH与配置迁移
+
+见[SSH_DELIVERY.md](SSH_DELIVERY.md)：已有SSH精准移植、65项定点与8项回环、独立review及ModelCouncil HOME修复、两版本真机命令回执、16provider/18model迁移与重启核对均闭合。main源码未修改；实验分支源码提交ee22ffc。

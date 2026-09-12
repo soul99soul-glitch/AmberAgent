@@ -46,14 +46,16 @@
 
 ## 安装包与源码绑定
 
-工作目录：`/Users/arquiel/Downloads/AI/AmberAgent/android-ui-refinement`。源码提交：`2e1f6ce`；其后的交付提交只包含文档和截图。
+工作目录：`/Users/arquiel/Downloads/AI/AmberAgent/android-ui-refinement`。源码提交：`ee22ffc`；其后的交付提交只包含文档和截图。
 
 [安装实验 APK](/Users/arquiel/Downloads/AI/AmberAgent/android-ui-refinement/app/build/outputs/apk/debug/app-universal-debug.apk)（ARM64，Debug，约103.3 MiB）。包名 `app.amber.agent.graphite`，可与正式包并存，不包含模拟器夹具。
 
-SHA-256：`efa5250997dfb09ddedf77a40083ce70e91be3ce2243334d438b07669bb86d72`。完整构建清单见[BUILD.json](BUILD.json)。
+SHA-256：`3a312a3a241a5001d34b1b95edf4eec686845849c18a5135293005a8c7239326`。完整构建清单见[BUILD.json](BUILD.json)。
 
 思考状态后续调整：等级显示为低/中/高/极高/最大，替代token预算；进行中使用“正在思考”，耗时在旁显示。6项既有思考组件测试与构建通过，原始截图尚未补拍这一文案变化。
 
 思考图标底色修正：无时间线时图标遮罩透明，保留时间线场景原有遮挡。模拟器实测[折叠态](device/thinking-icon-transparent.png)与[展开态](device/thinking-icon-expanded.png)，方形色块消失。
 
 个人资料现可点击名字/铅笔编辑昵称，保存后资料页、首页头像、新聊天问候与聊天署名复用同一字段。已在模拟器验证空白不可保存、取消不写入、保存后杀进程重启及[已有聊天署名](device/nickname-chat-after-relaunch.png)保持一致；[资料页](device/nickname-profile-saved.png)中的Alex仅为模拟器测试昵称，不是产品默认值。
+
+SSH已补齐并更新小米手机上的两个版本，真实设备命令回环通过。稳定版的16个provider/18个model及模型选择也已导入实验版，并通过重启后逐字段核对。见[双版本交付](SSH_DELIVERY.md)。
