@@ -1,11 +1,11 @@
 {
-  "sourceCommit": "94a7b2f",
+  "sourceCommit": "2e1f6ce",
   "applicationId": "app.amber.agent.graphite",
-  "apkBytes": 107410739,
-  "sha256": "27e6b7bd5ef5e433469767173ee5b19370af2e3fe7869b9f66f496a18880159f",
+  "apkBytes": 108395990,
+  "sha256": "efa5250997dfb09ddedf77a40083ce70e91be3ce2243334d438b07669bb86d72",
   "abi": "arm64-v8a",
   "variant": "debug",
-  "verification": "Original 79 targeted JVM/Robolectric tests; reasoning label follow-up: 6 tests. Icon mask follow-up: assembleDebug passed, installed and cold-launched on API36 emulator; collapsed and expanded chat screenshots verified.",
+  "verification": "Original phased tests and prior follow-up checks in PROGRESS.md. Nickname follow-up: assembleDebug passed; API36 emulator blank-save, cancel, save, process restart, and existing chat signature verified; independent source review passed.",
   "nativeLibraries": [
     "lib/arm64-v8a/libandroidx.graphics.path.so",
     "lib/arm64-v8a/libbarhopper_v3.so",
