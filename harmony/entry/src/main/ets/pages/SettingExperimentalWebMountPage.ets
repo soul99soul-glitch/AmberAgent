@@ -8,9 +8,13 @@
 
 import { BG, INK, INK2, INK3, ERROR, ACCENT, BODY, BODY2, META, LABEL, SURFACE, SURFACE2, LINE, RADIUS } from '../design/tokens.ets';
 import { PageTitleBar, SectionHeader, PaperSeparator, PageSpacer, BtnFill } from '../components/PageTemplate.ets';
-import { getChatKvStore } from '../di/AppContainer.ets';
+import { getChatKvStore, getAppContainer } from '../di/AppContainer.ets';
 import { loadWebMountSites, saveWebMountSites, makeUserSite, hostOf, isSeedSite, restoreMissingSeedSites, SEED_SITES } from '../platform_impl/WebMountSites.ets';
 import type { UserSiteEntry } from '../platform_impl/WebMountSites.ets';
+import {
+  makeFeishuPkce, exchangeFeishuCode, createKvWebMountTokenStore, feishuTokenStatusText,
+} from '../platform_impl/WebMountOAuthSupport.ets';
+import { buildFeishuAuthorizationUrl, type WebMountPkce, type WebMountOAuthToken } from '@amber/chat-domain';
 
 @Entry
 @Component
@@ -25,9 +29,26 @@ struct SettingExperimentalWebMountPage {
   @State addName: string = '';
   @State addUrl: string = '';
   @State addError: string = '';
+  // 飞书 OAuth
+  @State feishuAppId: string = '';
+  @State feishuAppSecret: string = '';
+  @State feishuAuthCode: string = '';
+  @State feishuAuthUrl: string = '';
+  @State feishuStatus: string = '未登录';
+  @State feishuBusy: boolean = false;
+  private feishuPkce: WebMountPkce | null = null;
+  private feishuToken: WebMountOAuthToken | null = null;
 
   aboutToAppear(): void {
     this.refresh();
+    this.refreshFeishu();
+  }
+
+  private refreshFeishu(): void {
+    createKvWebMountTokenStore(getChatKvStore()).get().then((token: WebMountOAuthToken | null): void => {
+      this.feishuToken = token;
+      this.feishuStatus = feishuTokenStatusText(token);
+    }).catch((): void => { this.feishuStatus = '未登录'; });
   }
 
   private refresh(): void {
@@ -46,6 +67,63 @@ struct SettingExperimentalWebMountPage {
 
   private setToggle(key: string, value: boolean): void {
     getChatKvStore().put(key, value ? 'true' : 'false').catch((): void => {});
+  }
+
+  private async startFeishuAuth(): Promise<void> {
+    if (this.feishuAppId.trim().length === 0) {
+      this.feishuStatus = '请填写 App ID';
+      return;
+    }
+    this.feishuBusy = true;
+    try {
+      const pkce: WebMountPkce = await makeFeishuPkce();
+      this.feishuPkce = pkce;
+      this.feishuAuthUrl = buildFeishuAuthorizationUrl({
+        appId: this.feishuAppId.trim(),
+        state: pkce.state,
+        codeChallenge: pkce.codeChallenge,
+      });
+      this.feishuStatus = '已生成授权链接，浏览器打开后粘贴 code';
+    } catch (e) {
+      this.feishuStatus = `生成失败：${e instanceof Error ? e.message : String(e)}`;
+    } finally {
+      this.feishuBusy = false;
+    }
+  }
+
+  private async exchangeFeishu(): Promise<void> {
+    if (this.feishuBusy) return;
+    if (this.feishuPkce === null || this.feishuAuthCode.trim().length === 0) {
+      this.feishuStatus = '请先生成链接并填写 code';
+      return;
+    }
+    if (this.feishuAppSecret.trim().length === 0) {
+      this.feishuStatus = '请填写 App Secret';
+      return;
+    }
+    this.feishuBusy = true;
+    this.feishuStatus = '兑换中…';
+    try {
+      const token = await exchangeFeishuCode(getAppContainer().httpClient, {
+        appId: this.feishuAppId.trim(),
+        appSecret: this.feishuAppSecret.trim(),
+        code: this.feishuAuthCode.trim(),
+        codeVerifier: this.feishuPkce.codeVerifier,
+      });
+      await createKvWebMountTokenStore(getChatKvStore()).set(token);
+      this.feishuToken = token;
+      this.feishuStatus = feishuTokenStatusText(token);
+    } catch (e) {
+      this.feishuStatus = `兑换失败：${e instanceof Error ? e.message : String(e)}`;
+    } finally {
+      this.feishuBusy = false;
+    }
+  }
+
+  private async logoutFeishu(): Promise<void> {
+    await createKvWebMountTokenStore(getChatKvStore()).set(null);
+    this.feishuToken = null;
+    this.feishuStatus = '已退出';
   }
 
   // 添加站点:URL 合法性(host 可解析)与去重(host 不重复)
@@ -133,6 +211,56 @@ struct SettingExperimentalWebMountPage {
             }
             .width('100%').padding({ left: 16, right: 16, top: 14, bottom: 14 })
             .backgroundColor(SURFACE)
+
+            PaperSeparator()
+
+            SectionHeader({ label: '飞书账号（OAuth）' })
+            Text(this.feishuStatus).fontSize(LABEL).fontColor(INK3)
+              .width('100%').padding({ left: 16, right: 16, top: 8, bottom: 4 })
+            TextInput({ text: this.feishuAppId, placeholder: 'App ID' })
+              .height(44).fontSize(BODY).fontColor(INK).placeholderColor(INK3)
+              .backgroundColor(SURFACE2).borderRadius(RADIUS)
+              .padding({ left: 12, right: 12 })
+              .margin({ left: 16, right: 16, top: 8, bottom: 6 })
+              .onChange((v: string): void => { this.feishuAppId = v; })
+            TextInput({ text: this.feishuAppSecret, placeholder: 'App Secret' })
+              .type(InputType.Password)
+              .height(44).fontSize(BODY).fontColor(INK).placeholderColor(INK3)
+              .backgroundColor(SURFACE2).borderRadius(RADIUS)
+              .padding({ left: 12, right: 12 })
+              .margin({ left: 16, right: 16, bottom: 6 })
+              .onChange((v: string): void => { this.feishuAppSecret = v; })
+            if (this.feishuAuthUrl.length > 0) {
+              Text(this.feishuAuthUrl).fontSize(11).fontColor(INK3)
+                .maxLines(3).textOverflow({ overflow: TextOverflow.Ellipsis })
+                .width('100%').padding({ left: 16, right: 16, bottom: 6 })
+            }
+            TextInput({ text: this.feishuAuthCode, placeholder: '粘贴授权 code' })
+              .height(44).fontSize(BODY).fontColor(INK).placeholderColor(INK3)
+              .backgroundColor(SURFACE2).borderRadius(RADIUS)
+              .padding({ left: 12, right: 12 })
+              .margin({ left: 16, right: 16, bottom: 8 })
+              .onChange((v: string): void => { this.feishuAuthCode = v; })
+            Row() {
+              BtnFill({
+                label: '生成授权链接',
+                onTap: (): void => { this.startFeishuAuth(); },
+              })
+              BtnFill({
+                label: '兑换 Token',
+                onTap: (): void => { this.exchangeFeishu(); },
+              })
+              if (this.feishuToken !== null) {
+                BtnFill({
+                  label: '退出',
+                  onTap: (): void => { this.logoutFeishu(); },
+                })
+              }
+            }
+            .width('100%').padding({ left: 16, right: 16, bottom: 12 })
+            .justifyContent(FlexAlign.Start)
+
+            PaperSeparator()
 
             SectionHeader({ label: `已授权站点 · ${this.sites.length}` })
 
