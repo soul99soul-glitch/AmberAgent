@@ -1063,7 +1063,7 @@
   <string name="web_search_disabled">已禁用网页搜索</string>
   <string name="web_search_enabled">已启用网页搜索</string>
   <string name="setting_provider_page_import_service_account_json">导入服务账号 JSON</string>
-  <string name="reasoning_xhigh">超高</string>
+  <string name="reasoning_xhigh">极高</string>
   <string name="reasoning_picker_title">调整模型思考深度</string>
   <string name="reasoning_picker_hint">并非所有模型都支持深度调整。请参考模型和提供商文档。</string>
   <string name="setting_page_built_in_tools_image_generation">图像生成</string>
@@ -3310,4 +3310,5 @@
   <string name="novel_catalog_root_directory">根目录</string>
   <string name="novel_migration_failed_count">%1$d 本书迁移失败。原文件仍保留在磁盘上；请在设置中查看详情。</string>
   <string name="provider_user_agent_presets">User-Agent 预设</string>
+  <string name="chat_message_reasoning_in_progress">正在思考</string>
 </resources>

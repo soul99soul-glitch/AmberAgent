@@ -3297,4 +3297,5 @@
   <string name="novel_catalog_root_directory">ルートディレクトリ</string>
   <string name="novel_migration_failed_count">%1$d冊の移行に失敗しました。元のファイルはディスクに残っています。詳細は設定で確認してください。</string>
   <string name="provider_user_agent_presets">User-Agent プリセット</string>
+  <string name="chat_message_reasoning_in_progress">思考中</string>
 </resources>

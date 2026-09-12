@@ -3297,4 +3297,5 @@
   <string name="novel_catalog_root_directory">Корневой каталог</string>
   <string name="novel_migration_failed_count">Не удалось перенести книг: %1$d. Исходные файлы остались на диске; подробности см. в настройках.</string>
   <string name="provider_user_agent_presets">Предустановки User-Agent</string>
+  <string name="chat_message_reasoning_in_progress">Размышляю</string>
 </resources>

@@ -3310,4 +3310,5 @@ My task:</string>
   <string name="novel_catalog_root_directory">Root directory</string>
   <string name="novel_migration_failed_count">Migration failed for %1$d book(s). Original files remain on disk; check Settings for details.</string>
   <string name="provider_user_agent_presets">User-Agent presets</string>
+  <string name="chat_message_reasoning_in_progress">Thinking</string>
 </resources>

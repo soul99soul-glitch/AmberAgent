@@ -330,7 +330,7 @@ fun ChainOfThoughtScope.ChatMessageReasoningStep(
         settings.rememberedReasoningLevelsByModelId[selectedModel.id.toString()]
             ?: settings.resolveSessionDefaults(selectedModel).reasoningLevel
     }
-    val budgetLabel = reasoningLevel.reasoningBudgetLabel()
+    val levelLabel = reasoningLevel.reasoningLevelLabel()
 
     // V3 主题感知 + 设计稿对齐: brain 图标 (替代默认灰圆豆 dot, 让"小图标"代表思考 step) +
     //   flushContent=true 让 content 引用竖线 X 对齐 step icon center (12dp)
@@ -350,7 +350,9 @@ fun ChainOfThoughtScope.ChatMessageReasoningStep(
             if (thinkingTitle != null) {
                 ReasoningTitle(title = thinkingTitle)
             } else {
-                val baseText = if (showReasoningDuration) {
+                val baseText = if (reasoningLoading) {
+                    stringResource(R.string.chat_message_reasoning_in_progress)
+                } else if (showReasoningDuration) {
                     stringResource(
                         R.string.deep_thinking_seconds,
                         state.duration.toDouble(DurationUnit.SECONDS).toFloat()
@@ -358,8 +360,7 @@ fun ChainOfThoughtScope.ChatMessageReasoningStep(
                 } else {
                     stringResource(R.string.deep_thinking)
                 }
-                // V3 设计稿: "思考了 5.4 秒 · auto" 一体显示，不分 extra
-                val combinedText = if (budgetLabel != null) "$baseText · $budgetLabel" else baseText
+                val combinedText = if (levelLabel != null) "$baseText · $levelLabel" else baseText
                 // Graphite §6.2 ThinkingStrip: MONO header (.meta) — machine timing/mode line.
                 Text(
                     text = combinedText,
@@ -374,8 +375,8 @@ fun ChainOfThoughtScope.ChatMessageReasoningStep(
             }
         },
         extra = {
-            // V3 设计稿: 流式 title 时仅显示 duration 在右侧
-            val durationLabel = if (showThinkingTitle && state.duration > 0.seconds) {
+            // 进行中的状态/标题保持简短，耗时单独显示。
+            val durationLabel = if ((showThinkingTitle || reasoningLoading) && state.duration > 0.seconds) {
                 state.duration.toString(DurationUnit.SECONDS, 1)
             } else {
                 null
@@ -410,18 +411,15 @@ fun ChainOfThoughtScope.ChatMessageReasoningStep(
 }
 
 @Composable
-private fun ReasoningLevel?.reasoningBudgetLabel(): String? = when (this) {
+private fun ReasoningLevel?.reasoningLevelLabel(): String? = when (this) {
     null,
     ReasoningLevel.OFF -> null
     ReasoningLevel.AUTO -> stringResource(R.string.reasoning_auto)
-    else -> stringResource(
-        R.string.chat_message_reasoning_budget_tokens,
-        this.budgetTokens.formatReasoningBudget(),
-    )
-}
-
-private fun Int.formatReasoningBudget(): String {
-    return if (this >= 1_000) "${this / 1_000}K" else toString()
+    ReasoningLevel.LOW -> stringResource(R.string.reasoning_light)
+    ReasoningLevel.MEDIUM -> stringResource(R.string.reasoning_medium)
+    ReasoningLevel.HIGH -> stringResource(R.string.reasoning_heavy)
+    ReasoningLevel.XHIGH -> stringResource(R.string.reasoning_xhigh)
+    ReasoningLevel.MAX -> stringResource(R.string.reasoning_max)
 }
 
 internal fun String.toDisplayReasoningText(
