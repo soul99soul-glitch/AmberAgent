@@ -4,6 +4,7 @@ import com.composables.icons.lucide.Lucide
 import com.composables.icons.lucide.Trash2
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -49,7 +50,12 @@ import app.amber.core.settings.PreferencesKeys
 import app.amber.core.settings.settingsStore
 import app.amber.feature.ui.components.nav.BackButton
 import app.amber.feature.ui.components.ui.JsonTree
-import app.amber.feature.ui.theme.CustomColors
+import app.amber.feature.ui.components.ds.AmberCard
+import app.amber.feature.ui.components.ds.Hairline
+import app.amber.feature.ui.components.ds.SectionLabel
+import app.amber.feature.ui.components.ds.pressable
+import app.amber.feature.ui.theme.LocalAmberTokens
+import app.amber.feature.ui.theme.LocalAmberType
 import app.amber.feature.ui.theme.JetbrainsMono
 import app.amber.core.utils.JsonInstantPretty
 import app.amber.core.utils.appLocale
@@ -60,11 +66,13 @@ import java.util.Date
 fun LogPage() {
     var logs by remember { mutableStateOf(Logging.getRecentLogs()) }
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
+    val t = LocalAmberTokens.current
+    val type = LocalAmberType.current
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Logs") },
+                title = { Text("日志", style = type.screenTitle, color = t.ink) },
                 navigationIcon = { BackButton() },
                 actions = {
                     IconButton(
@@ -73,15 +81,21 @@ fun LogPage() {
                             logs = Logging.getRecentLogs()
                         }
                     ) {
-                        Icon(Lucide.Trash2, null)
+                        Icon(Lucide.Trash2, stringResource(R.string.delete), tint = t.ink2)
                     }
                 },
                 scrollBehavior = scrollBehavior,
-                colors = CustomColors.topBarColors,
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = t.bg,
+                    scrolledContainerColor = t.bg,
+                    titleContentColor = t.ink,
+                    navigationIconContentColor = t.ink2,
+                    actionIconContentColor = t.ink2,
+                ),
             )
         },
         modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
-        containerColor = CustomColors.topBarColors.containerColor,
+        containerColor = t.bg,
     ) { contentPadding ->
         UnifiedLogList(
             logs = logs,
@@ -100,12 +114,16 @@ private fun UnifiedLogList(logs: List<LogEntry>, modifier: Modifier = Modifier) 
     val sortedLogs = remember(logs) { logs.sortedByDescending { it.timestamp } }
 
     LazyColumn(
-        modifier = modifier,
+        modifier = modifier.background(LocalAmberTokens.current.bg),
         verticalArrangement = Arrangement.spacedBy(8.dp),
-        contentPadding = PaddingValues(16.dp)
+        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
     ) {
         item {
+            SectionLabel("网络请求")
             NetworkLoggingToggle()
+        }
+        item {
+            SectionLabel("请求 · ${sortedLogs.size}")
         }
         items(sortedLogs, key = { it.id }, contentType = { it.javaClass.simpleName }) { log ->
             when (log) {
@@ -142,12 +160,11 @@ private fun NetworkLoggingToggle() {
             enabled = p[PreferencesKeys.REQUEST_LOGGING_ENABLED] ?: true
         }
     }
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CustomColors.cardColorsOnSurfaceContainer,
-    ) {
+    val t = LocalAmberTokens.current
+    val type = LocalAmberType.current
+    AmberCard(modifier = Modifier.fillMaxWidth()) {
         Row(
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Column(
@@ -156,12 +173,13 @@ private fun NetworkLoggingToggle() {
             ) {
                 Text(
                     text = stringResource(R.string.log_page_network_logging_title),
-                    style = MaterialTheme.typography.titleSmall,
+                    style = type.body,
+                    color = t.ink,
                 )
                 Text(
                     text = stringResource(R.string.log_page_network_logging_desc),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = type.secondary,
+                    color = t.ink3,
                 )
             }
             Switch(
@@ -186,14 +204,15 @@ private fun RequestLogCard(log: LogEntry.RequestLog, onClick: () -> Unit) {
         SimpleDateFormat("HH:mm:ss", appLocale)
     }
 
-    Card(
+    AmberCard(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick),
-        colors = CustomColors.cardColorsOnSurfaceContainer,
+            .pressable(onClick = onClick),
     ) {
+        val t = LocalAmberTokens.current
+        val type = LocalAmberType.current
         Column(
-            modifier = Modifier.padding(12.dp),
+            modifier = Modifier.padding(14.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
             Row(
@@ -202,21 +221,21 @@ private fun RequestLogCard(log: LogEntry.RequestLog, onClick: () -> Unit) {
             ) {
                 Text(
                     text = log.method,
-                    style = MaterialTheme.typography.labelMedium,
+                    style = type.meta,
                     fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.primary
+                    color = t.accent,
                 )
                 Text(
                     text = dateFormat.format(Date(log.timestamp)),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    style = type.meta,
+                    color = t.ink3,
                 )
             }
 
             Text(
                 text = log.url,
-                style = MaterialTheme.typography.bodySmall,
-                fontFamily = JetbrainsMono,
+                style = type.meta,
+                color = t.ink,
                 maxLines = 2
             )
 
@@ -226,19 +245,15 @@ private fun RequestLogCard(log: LogEntry.RequestLog, onClick: () -> Unit) {
                 log.responseCode?.let { code ->
                     Text(
                         text = "Status: $code",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = if (code in 200..299) {
-                            MaterialTheme.colorScheme.primary
-                        } else {
-                            MaterialTheme.colorScheme.error
-                        }
+                        style = type.meta,
+                        color = if (code in 200..299) t.signal else MaterialTheme.colorScheme.error,
                     )
                 }
                 log.durationMs?.let { duration ->
                     Text(
                         text = "${duration}ms",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        style = type.meta,
+                        color = t.ink3,
                     )
                 }
             }
@@ -246,8 +261,8 @@ private fun RequestLogCard(log: LogEntry.RequestLog, onClick: () -> Unit) {
             log.error?.let { error ->
                 Text(
                     text = "Error: $error",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.error
+                    style = type.meta,
+                    color = MaterialTheme.colorScheme.error,
                 )
             }
         }
@@ -372,15 +387,18 @@ private fun RequestLogDetail(log: LogEntry.RequestLog) {
 
 @Composable
 private fun DetailSection(label: String, value: String) {
+    val t = LocalAmberTokens.current
+    val type = LocalAmberType.current
     Column {
         Text(
             text = label,
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
+            style = type.meta,
+            color = t.ink3,
         )
         Text(
             text = value,
-            style = MaterialTheme.typography.bodyMedium,
+            style = type.meta,
+            color = t.ink,
             fontFamily = JetbrainsMono
         )
     }
@@ -388,15 +406,18 @@ private fun DetailSection(label: String, value: String) {
 
 @Composable
 private fun HeaderItem(key: String, value: String) {
+    val t = LocalAmberTokens.current
+    val type = LocalAmberType.current
     Column(modifier = Modifier.padding(vertical = 2.dp)) {
         Text(
             text = key,
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.primary
+            style = type.meta,
+            color = t.accent,
         )
         Text(
             text = value,
-            style = MaterialTheme.typography.bodySmall,
+            style = type.meta,
+            color = t.ink,
             fontFamily = JetbrainsMono
         )
     }
@@ -409,31 +430,31 @@ private fun TextLogCard(log: LogEntry.TextLog) {
         SimpleDateFormat("HH:mm:ss", appLocale)
     }
 
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CustomColors.cardColorsOnSurfaceContainer,
-    ) {
+    val t = LocalAmberTokens.current
+    val type = LocalAmberType.current
+    AmberCard(modifier = Modifier.fillMaxWidth()) {
         SelectionContainer {
-            Column(modifier = Modifier.padding(12.dp)) {
+            Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Text(
                         text = log.tag,
-                        style = MaterialTheme.typography.labelSmall,
+                        style = type.meta,
                         fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.primary
+                        color = t.accent,
                     )
                     Text(
                         text = dateFormat.format(Date(log.timestamp)),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        style = type.meta,
+                        color = t.ink3,
                     )
                 }
                 Text(
                     text = log.message,
-                    style = MaterialTheme.typography.bodySmall,
+                    style = type.meta,
+                    color = t.ink,
                     fontFamily = JetbrainsMono
                 )
             }

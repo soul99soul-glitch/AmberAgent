@@ -1,5 +1,7 @@
 package app.amber.feature.ui.pages.board
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -7,10 +9,14 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
@@ -25,7 +31,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import app.amber.agent.R
 import app.amber.feature.board.hotlist.HotListProviderIds
 import app.amber.feature.board.hotlist.providers.CustomHotListFieldMapping
@@ -35,6 +43,10 @@ import app.amber.feature.board.hotlist.providers.NewsNowPresets
 import app.amber.agent.data.db.entity.HotListSourceEntity
 import app.amber.feature.ui.components.ui.Switch
 import app.amber.feature.ui.components.ui.workspaceColors
+import app.amber.feature.ui.theme.LocalAmberTokens
+import app.amber.feature.ui.theme.LocalAmberType
+import com.composables.icons.lucide.FileText
+import com.composables.icons.lucide.Lucide
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -56,54 +68,81 @@ fun HotListSourceSettings(
             .map { it.id.removePrefix(NewsNowPresets.ID_PREFIX) }
             .toSet()
     }
-    Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-            Text(stringResource(R.string.board_sources_title), style = MaterialTheme.typography.titleSmall)
-            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                TextButton(onClick = { showNewsNowDialog = true }) {
-                    Text("+ NewsNow")
+    val tokens = LocalAmberTokens.current
+    val cardShape = RoundedCornerShape(14.dp)
+    Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(20.dp)) {
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape = cardShape,
+            color = tokens.surface,
+            border = androidx.compose.foundation.BorderStroke(1.dp, tokens.line),
+        ) {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text(stringResource(R.string.board_sources_title), style = LocalAmberType.current.sessionTitle, color = tokens.ink)
                 }
-                TextButton(onClick = { showDialog = true }) {
-                    Text(stringResource(R.string.board_custom_source_add))
+                Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                    SourceQuietAction("+ NewsNow") { showNewsNowDialog = true }
+                    SourceQuietAction(stringResource(R.string.board_custom_source_add)) { showDialog = true }
                 }
             }
         }
-        HOT_LIST_SOURCE_OPTIONS.chunked(2).forEach { row ->
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                row.forEach { source ->
-                    Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
-                        Switch(checked = source.id in enabledBuiltIns, onCheckedChange = { onToggleBuiltIn(source.id) })
-                        Spacer(Modifier.width(6.dp))
-                        Column {
-                            Text(hotListSourceLabel(source.id), style = MaterialTheme.typography.bodyMedium)
-                            if (!source.verified) {
-                                Text(stringResource(R.string.board_source_default_off), style = MaterialTheme.typography.labelSmall, color = workspaceColors().muted)
-                            }
+
+        SourceSectionLabel(stringResource(R.string.board_hotlist_sources))
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape = cardShape,
+            color = tokens.surface,
+            border = androidx.compose.foundation.BorderStroke(1.dp, tokens.line),
+        ) {
+            Column {
+                HOT_LIST_SOURCE_OPTIONS.chunked(2).forEachIndexed { rowIndex, row ->
+                    Row(Modifier.fillMaxWidth()) {
+                        row.forEachIndexed { cellIndex, source ->
+                            SourceGridCell(
+                                modifier = Modifier.weight(1f),
+                                source = source,
+                                checked = source.id in enabledBuiltIns,
+                                onToggle = { onToggleBuiltIn(source.id) },
+                                rightBorder = cellIndex == 0 && row.size > 1,
+                                bottomBorder = rowIndex < (HOT_LIST_SOURCE_OPTIONS.size + 1) / 2 - 1,
+                            )
                         }
+                        if (row.size == 1) Spacer(Modifier.weight(1f))
                     }
                 }
             }
         }
-        if (customSources.isNotEmpty()) {
-            Text(stringResource(R.string.board_custom_sources), style = MaterialTheme.typography.labelMedium, color = workspaceColors().muted)
-            customSources.forEach { source ->
-                Row(
-                    Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    Switch(checked = source.enabled, onCheckedChange = { onToggleCustom(source) })
-                    Column(Modifier.weight(1f)) {
-                        Text(source.displayName, style = MaterialTheme.typography.bodyMedium)
-                        Text(
-                            "${source.sourceType.uppercase()} · ${source.url}",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = workspaceColors().muted,
-                            maxLines = 1,
+
+        SourceSectionLabel(stringResource(R.string.board_custom_sources))
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape = cardShape,
+            color = tokens.surface,
+            border = androidx.compose.foundation.BorderStroke(1.dp, tokens.line),
+        ) {
+            if (customSources.isEmpty()) {
+                Text(
+                    "还没有自定义来源",
+                    Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 18.dp),
+                    style = LocalAmberType.current.secondary,
+                    color = tokens.ink3,
+                )
+            } else {
+                Column {
+                    customSources.forEachIndexed { index, source ->
+                        CustomSourceRow(
+                            source = source,
+                            onToggle = { onToggleCustom(source) },
+                            onDelete = { onDeleteCustom(source) },
+                            showDivider = index != customSources.lastIndex,
                         )
-                    }
-                    TextButton(onClick = { onDeleteCustom(source) }) {
-                        Text(stringResource(R.string.delete))
                     }
                 }
             }
@@ -127,6 +166,134 @@ fun HotListSourceSettings(
                 showNewsNowDialog = false
             },
         )
+    }
+}
+
+@Composable
+private fun SourceSectionLabel(label: String) {
+    val tokens = LocalAmberTokens.current
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = 2.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text("//", style = LocalAmberType.current.eyebrow, color = tokens.accent)
+        Text(label, style = LocalAmberType.current.eyebrow, color = tokens.ink2)
+        androidx.compose.material3.HorizontalDivider(Modifier.weight(1f), color = tokens.line)
+    }
+}
+
+@Composable
+private fun SourceQuietAction(label: String, onClick: () -> Unit) {
+    val tokens = LocalAmberTokens.current
+    TextButton(
+        onClick = onClick,
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 5.dp, vertical = 0.dp),
+    ) {
+        Text(label, style = LocalAmberType.current.secondary, color = tokens.accent, maxLines = 1)
+    }
+}
+
+@Composable
+private fun SourceGridCell(
+    modifier: Modifier,
+    source: HotListSourceOption,
+    checked: Boolean,
+    onToggle: () -> Unit,
+    rightBorder: Boolean,
+    bottomBorder: Boolean,
+) {
+    val tokens = LocalAmberTokens.current
+    Row(
+        modifier
+            .height(if (source.verified) 52.dp else 64.dp)
+            .clickable(onClick = onToggle)
+            .then(if (rightBorder || bottomBorder) Modifier.border(0.5.dp, tokens.line) else Modifier)
+            .padding(horizontal = 12.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(
+                hotListSourceLabel(source.id),
+                style = LocalAmberType.current.body.copy(fontSize = 15.sp),
+                color = tokens.ink,
+                maxLines = 1,
+            )
+            if (!source.verified) {
+                Text(
+                    stringResource(R.string.board_source_default_off),
+                    style = LocalAmberType.current.meta.copy(fontSize = 11.sp),
+                    color = tokens.ink3,
+                    maxLines = 1,
+                )
+            }
+        }
+        Switch(
+            checked = checked,
+            onCheckedChange = { onToggle() },
+            trackColor = tokens.accent,
+            trackColorUnchecked = tokens.surface2,
+            thumbColor = tokens.accentInk,
+            thumbColorUnchecked = tokens.ink2,
+        )
+    }
+}
+
+@Composable
+private fun CustomSourceRow(
+    source: HotListSourceEntity,
+    onToggle: () -> Unit,
+    onDelete: () -> Unit,
+    showDivider: Boolean,
+) {
+    val tokens = LocalAmberTokens.current
+    Column {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .height(64.dp)
+                .clickable(onClick = onToggle)
+                .padding(horizontal = 14.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            androidx.compose.foundation.layout.Box(
+                Modifier
+                    .size(32.dp)
+                    .background(tokens.surface2, RoundedCornerShape(9.dp))
+                    .border(1.dp, tokens.line, RoundedCornerShape(9.dp)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(Lucide.FileText, contentDescription = null, modifier = Modifier.size(17.dp), tint = tokens.ink2)
+            }
+            Column(Modifier.weight(1f)) {
+                Text(source.displayName, style = LocalAmberType.current.body.copy(fontWeight = FontWeight.SemiBold), color = tokens.ink, maxLines = 1)
+                Text(
+                    "${source.sourceType.uppercase()} · ${source.url}",
+                    style = LocalAmberType.current.meta.copy(fontSize = 11.sp),
+                    color = tokens.ink3,
+                    maxLines = 1,
+                )
+            }
+            Switch(
+                checked = source.enabled,
+                onCheckedChange = { onToggle() },
+                trackColor = tokens.accent,
+                trackColorUnchecked = tokens.surface2,
+                thumbColor = tokens.accentInk,
+                thumbColorUnchecked = tokens.ink2,
+            )
+            TextButton(
+                onClick = onDelete,
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 3.dp, vertical = 0.dp),
+            ) {
+                Text(stringResource(R.string.delete), style = LocalAmberType.current.secondary, color = MaterialTheme.colorScheme.error)
+            }
+        }
+        if (showDivider) {
+            androidx.compose.material3.HorizontalDivider(Modifier.padding(start = 56.dp), color = tokens.line)
+        }
     }
 }
 

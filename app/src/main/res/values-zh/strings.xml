@@ -454,6 +454,15 @@
   <string name="setting_agent_memory_context_compaction_notify_title">仅提醒不压缩</string>
   <string name="setting_agent_memory_context_compaction_notify_desc">只提示上下文压力，不自动写入摘要。</string>
   <string name="setting_agent_memory_context_compaction_defaults">默认：70%% 预压缩，85%% 强制压缩，保护最近 8 轮 / 16 条消息。</string>
+  <string name="setting_agent_memory_context_mode_section">模式</string>
+  <string name="setting_agent_memory_context_threshold_section">阈值</string>
+  <string name="setting_agent_memory_context_protect_section">保护</string>
+  <string name="setting_agent_memory_context_precompact_threshold_title">预压缩阈值</string>
+  <string name="setting_agent_memory_context_force_threshold_title">强制压缩阈值</string>
+  <string name="setting_agent_memory_context_protect_turns_title">保护最近轮数</string>
+  <string name="setting_agent_memory_context_protect_turns_value">%1$d 轮</string>
+  <string name="setting_agent_memory_context_protect_messages_title">保护消息数</string>
+  <string name="setting_agent_memory_context_protect_messages_value">%1$d 条</string>
   <string name="setting_agent_memory_edit_title">编辑记忆</string>
   <string name="setting_agent_memory_content_label">记忆内容</string>
   <string name="setting_agent_memory_empty">还没有核心记忆。</string>
@@ -1290,6 +1299,10 @@
   <string name="chat_page_hero_greeting">今天想聊点什么？</string>
   <string name="chat_page_hero_greeting_with_name">Hi %1$s，
 今天想聊点什么？</string>
+  <string name="amber_redesign_suggestion_board">总结今日看板</string>
+  <string name="amber_redesign_suggestion_reply">起草一段回复</string>
+  <string name="amber_redesign_suggestion_concept">解释一个概念</string>
+  <string name="amber_redesign_conversations">会话</string>
   <string name="chat_page_loading_older_prefetching">正在预取更早消息 %1$d/%2$d</string>
   <string name="chat_page_loading_older_preparing">更早消息准备中 %1$d/%2$d</string>
   <string name="chat_page_new_session">新会话</string>
@@ -1416,6 +1429,15 @@
   <string name="session_home_feature_mini_apps">小应用</string>
   <string name="session_home_feature_novel">小说创作</string>
   <string name="session_home_feature_sites">站点</string>
+  <string name="session_home_deep_read_progress_analysis">正在分析关键观点</string>
+  <string name="session_home_deep_read_progress_collecting">正在收集资料</string>
+  <string name="session_home_deep_read_progress_extended_reading">正在整理扩展阅读</string>
+  <string name="session_home_deep_read_progress_finishing">正在收尾文章</string>
+  <string name="session_home_deep_read_progress_narrative">正在总结脉络</string>
+  <string name="session_home_deep_read_progress_overview">正在生成概览</string>
+  <string name="session_home_deep_read_progress_planning">正在规划结构</string>
+  <string name="session_home_deep_read_progress_preparing">正在准备深度阅读</string>
+  <string name="session_home_deep_read_progress_verifying">正在校验内容</string>
   <string name="session_home_hide_continue_candidate">暂时隐藏</string>
   <string name="session_home_status_draft">草稿</string>
   <string name="session_home_status_paused">已暂停</string>

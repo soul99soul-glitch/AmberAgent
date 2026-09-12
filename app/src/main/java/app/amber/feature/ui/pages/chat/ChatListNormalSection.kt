@@ -5,9 +5,7 @@ import androidx.compose.animation.AnimatedVisibilityScope
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.MutableTransitionState
-import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -100,7 +98,6 @@ import app.amber.feature.ui.components.richtext.prewarmMarkdownContent
 import app.amber.feature.ui.components.ui.ErrorCardsDisplay
 import app.amber.feature.ui.components.ui.ListSelectableItem
 import app.amber.feature.ui.components.ui.Tooltip
-import app.amber.feature.ui.components.ui.workspaceColors
 import app.amber.core.utils.ChatSendTransitionTracker
 import kotlin.math.abs
 import kotlin.math.roundToInt
@@ -167,7 +164,6 @@ internal fun ChatListNormal(
     val bottomPinBufferPx = with(density) { 24.dp.toPx().roundToInt() }
     val sendTransitionSlidePx = with(density) { SendTransitionSlideDistance.roundToPx() }
     val activity = LocalContext.current as? app.amber.agent.RouteActivity
-    val workspace = workspaceColors()
     val actionSuggestions = remember(conversation.messageNodes, conversation.chatSuggestions) {
         conversation.actionSuggestionTexts()
     }
@@ -447,19 +443,9 @@ internal fun ChatListNormal(
         )
     }
 
-    // V3 Whisper：空白态让 ChatPage 的 bloom 透上来；有消息则淡入纯白覆盖。
-    // 用 paper(#FFFFFF) 而非 canvas(#F7F7F5)，避免与 TopBar 之间出现灰白分界线。
-    // Paper/Midnight 主题 (showBloomInConvo=true) 对话态需要保留底层 bloom，
-    // 把 canvasAlpha 上限压到 0.85 让 0.25 强度的 convo bloom 透得出来
-    val hasContent = conversation.messageNodes.isNotEmpty()
-    val chatThemeForCanvas = app.amber.feature.ui.pages.chat.LocalChatTheme.current
-    val maxCanvasAlpha = if (chatThemeForCanvas.showBloomInConvo) 0.85f else 1f
-    val canvasAlpha by animateFloatAsState(
-        targetValue = if (hasContent) maxCanvasAlpha else 0f,
-        animationSpec = tween(durationMillis = 700, easing = FastOutSlowInEasing),
-        label = "canvasFade",
-    )
-    val backgroundColor = workspace.paper.copy(alpha = canvasAlpha)
+    // 原稿的消息区保持 base bg，只有消息卡片和工具卡使用 surface 层次；
+    // 这样深浅主题都能维持气泡与画布的对比，不会把整段时间线铺成一张卡片。
+    val backgroundColor = app.amber.feature.ui.theme.LocalAmberTokens.current.bg
     val tailIndicatorReserveVisible = showBottomFollowAnimation &&
         (
             timelineLoading ||

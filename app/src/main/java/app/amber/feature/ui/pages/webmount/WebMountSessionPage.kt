@@ -6,6 +6,7 @@ import android.view.ViewGroup
 import android.webkit.WebView
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -49,7 +50,12 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.amber.agent.R
 import app.amber.feature.ui.components.nav.BackButton
+import app.amber.feature.ui.components.ds.AmberCard
+import app.amber.feature.ui.components.ds.Hairline
+import app.amber.feature.ui.components.ds.SectionLabel
 import app.amber.feature.ui.context.LocalNavController
+import app.amber.feature.ui.theme.LocalAmberTokens
+import app.amber.feature.ui.theme.LocalAmberType
 import app.amber.feature.webmount.primitives.SessionHandle
 import app.amber.feature.webmount.primitives.WebMountLease
 import app.amber.feature.webmount.primitives.WebMountLeaseFailure
@@ -85,6 +91,8 @@ fun WebMountSessionPage(
     owner: WebMountSessionOwner = koinInject(),
 ) {
     val navController = LocalNavController.current
+    val t = LocalAmberTokens.current
+    val type = LocalAmberType.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val scope = rememberCoroutineScope()
     val sessions by owner.sessions.collectAsStateWithLifecycle()
@@ -270,6 +278,8 @@ fun WebMountSessionPage(
                             ?: stringResource(R.string.parity_webmount_page_title),
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
+                        style = type.screenTitle,
+                        color = t.ink,
                     )
                 },
                 navigationIcon = { BackButton() },
@@ -315,12 +325,21 @@ fun WebMountSessionPage(
                         )
                     }
                 },
+                colors = androidx.compose.material3.TopAppBarDefaults.topAppBarColors(
+                    containerColor = t.bg,
+                    scrolledContainerColor = t.bg,
+                    titleContentColor = t.ink,
+                    navigationIconContentColor = t.ink2,
+                    actionIconContentColor = t.ink2,
+                ),
             )
         },
+        containerColor = t.bg,
     ) { innerPadding ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
+                .background(t.bg)
                 .padding(innerPadding)
                 .imePadding(),
         ) {
@@ -397,6 +416,8 @@ private fun SessionHeader(
     onRelease: () -> Unit,
     onReopen: () -> Unit,
 ) {
+    val t = LocalAmberTokens.current
+    val type = LocalAmberType.current
     val popupFallback = stringResource(R.string.parity_webmount_popup)
     val ownerText = when {
         metadata == null -> stringResource(R.string.parity_webmount_session_missing)
@@ -424,76 +445,84 @@ private fun SessionHeader(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 8.dp),
-        verticalArrangement = Arrangement.spacedBy(4.dp),
+            .padding(horizontal = 16.dp, vertical = 10.dp),
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = ownerText,
-                    style = MaterialTheme.typography.labelLarge,
-                )
-                selectedPopup?.let { popup ->
+        SectionLabel("SESSION")
+        AmberCard(modifier = Modifier.fillMaxWidth()) {
+            Column(
+                modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = ownerText,
+                            style = type.body,
+                            color = t.ink,
+                        )
+                        selectedPopup?.let { popup ->
+                            Text(
+                                text = popup.title?.takeIf { it.isNotBlank() }
+                                    ?: popup.url.orEmpty()
+                                        .ifBlank { popupFallback },
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                style = type.secondary,
+                                color = t.ink3,
+                            )
+                        }
+                        metadata?.redactedUrl?.let { origin ->
+                            if (selectedPopup == null) {
+                                Text(
+                                    text = origin,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    style = type.meta,
+                                    color = t.ink3,
+                                )
+                            }
+                        }
+                    }
+                    if (lease != null) {
+                        TextButton(
+                            onClick = onRelease,
+                            enabled = !closing,
+                            modifier = Modifier.heightIn(min = 48.dp),
+                        ) {
+                            Text(stringResource(R.string.parity_webmount_release))
+                        }
+                    }
+                }
+                detail?.let { message ->
                     Text(
-                        text = popup.title?.takeIf { it.isNotBlank() }
-                            ?: popup.url.orEmpty()
-                            .ifBlank { popupFallback },
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        text = message,
+                        style = type.secondary,
+                        color = MaterialTheme.colorScheme.error,
                     )
                 }
-                metadata?.redactedUrl?.let { origin ->
-                    if (selectedPopup == null) {
-                        Text(
-                            text = origin,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                }
-            }
-            if (lease != null) {
-                TextButton(
-                    onClick = onRelease,
-                    enabled = !closing,
-                    modifier = Modifier.heightIn(min = 48.dp),
-                ) {
-                    Text(stringResource(R.string.parity_webmount_release))
-                }
-            }
-        }
-        detail?.let { message ->
-            Text(
-                text = message,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.error,
-            )
-        }
-        if (lease == null && metadata != null) {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (metadata.needsReopen || failure == WebMountLeaseFailure.NEEDS_REOPEN) {
-                    Button(
-                        onClick = onReopen,
-                        enabled = !acquiring && !closing,
-                        modifier = Modifier.heightIn(min = 48.dp),
-                    ) {
-                        Text(stringResource(R.string.parity_webmount_reopen_and_view))
-                    }
-                } else {
-                    OutlinedButton(
-                        onClick = onTakeover,
-                        enabled = !acquiring && !closing,
-                        modifier = Modifier.heightIn(min = 48.dp),
-                    ) {
-                        Text(stringResource(R.string.parity_webmount_takeover))
+                if (lease == null && metadata != null) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        if (metadata.needsReopen || failure == WebMountLeaseFailure.NEEDS_REOPEN) {
+                            Button(
+                                onClick = onReopen,
+                                enabled = !acquiring && !closing,
+                                modifier = Modifier.heightIn(min = 48.dp),
+                            ) {
+                                Text(stringResource(R.string.parity_webmount_reopen_and_view))
+                            }
+                        } else {
+                            OutlinedButton(
+                                onClick = onTakeover,
+                                enabled = !acquiring && !closing,
+                                modifier = Modifier.heightIn(min = 48.dp),
+                            ) {
+                                Text(stringResource(R.string.parity_webmount_takeover))
+                            }
+                        }
                     }
                 }
             }

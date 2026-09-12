@@ -52,6 +52,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LocalMinimumInteractiveComponentSize
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -67,7 +68,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
@@ -898,10 +901,19 @@ fun ChatInput(
 
     val tokens = LocalAmberTokens.current
     // Graphite §7.4 "immersive bottom": the composer sits on a full-bleed tray = `surface`
-    // fill that continues to the screen edges (and under the nav inset). Flat — no shadow,
-    // and no top divider: the surface/bg color difference alone separates it from content.
+    // fill that continues to the screen edges (and under the nav inset). Flat, with one
+    // hairline top rule that separates the tray from the timeline.
     Surface(
         color = tokens.surface,
+        modifier = Modifier.drawWithContent {
+            drawContent()
+            drawLine(
+                color = tokens.line,
+                start = Offset(0f, 0f),
+                end = Offset(size.width, 0f),
+                strokeWidth = 1.dp.toPx(),
+            )
+        },
     ) {
         Column(
             modifier = modifier
@@ -909,8 +921,7 @@ fun ChatInput(
                 .navigationBarsPadding()
                 // breathing room below the gesture/nav inset
                 .padding(bottom = 6.dp)
-                // 调整: composer 左右 8→12dp 离屏幕边线稍远一些 (不再"贴边")
-                .padding(horizontal = 12.dp)
+                .padding(horizontal = 16.dp)
                 .padding(top = 10.dp),
             // spacedBy 控制 SandboxPeekBar 与 composer pill 之间的间距。
             // 设计稿是预览卡紧贴输入框，2dp 足够留一条 hair 缝
@@ -955,7 +966,7 @@ fun ChatInput(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .heightIn(min = 48.dp),
+                    .heightIn(min = 44.dp),
                 verticalAlignment = Alignment.Bottom,
                 horizontalArrangement = Arrangement.spacedBy(9.dp),
             ) {
@@ -963,7 +974,7 @@ fun ChatInput(
                 //    capsule (animated width via animateContentSize; + rotates to ×).
                 Row(
                     modifier = Modifier
-                        .height(48.dp)
+                        .height(44.dp)
                         .clip(CircleShape)
                         .background(tokens.surface2)
                         .animateContentSize(animationSpec = tween(220, easing = FastOutSlowInEasing)),
@@ -971,7 +982,7 @@ fun ChatInput(
                 ) {
                     Box(
                         modifier = Modifier
-                            .size(48.dp)
+                            .size(44.dp)
                             .clip(CircleShape)
                             .clickable { expandToggle(ExpandState.Files) },
                         contentAlignment = Alignment.Center,
@@ -1020,7 +1031,7 @@ fun ChatInput(
                 Row(
                     modifier = Modifier
                         .weight(1f)
-                        .heightIn(min = 46.dp)
+                        .heightIn(min = 44.dp)
                         .clip(pillShape)
                         .background(tokens.surface2)
                         .border(BorderStroke(1.dp, pillBorder), pillShape)
@@ -1080,11 +1091,9 @@ fun ChatInput(
                     label = "sendButtonFill",
                 )
                 val sendIconTint by animateColorAsState(
-                    // 发送/停止图标落在 accent 实心圆上时一律用浅色。accentInk 在 sage-green 这类
-                    // "浅 accent" 上被 accentInkFor 定成近黑 → 箭头/停止 X 变黑（用户反馈）。发送键
-                    // 作为主操作按钮惯例是浅色字形，故固定白色（与其余 4 个 accent 的 accentInk=白
-                    // 一致）；空态仍用中性 ink3。
-                    targetValue = if (!sendEnabled || (sendEmpty && !loading)) tokens.ink3 else Color.White,
+                    // 有效发送键使用主题为当前 accent 计算的前景色，确保 terracotta 等
+                    // accent 仍保持原稿的 AA 对比；空态仍用中性 ink3。
+                    targetValue = if (!sendEnabled || (sendEmpty && !loading)) tokens.ink3 else tokens.accentInk,
                     label = "sendButtonIconTint",
                 )
                 val sendInteraction = remember { MutableInteractionSource() }
@@ -1095,13 +1104,8 @@ fun ChatInput(
                 )
                 Box(
                     modifier = Modifier
-                        .graphicsLayer {
-                            scaleX = sendScale
-                            scaleY = sendScale
-                        }
                         .size(48.dp)
-                        .clip(CircleShape)
-                        .background(sendFill)
+                        .minimumInteractiveComponentSize()
                         .combinedClickable(
                             interactionSource = sendInteraction,
                             indication = null,
@@ -1117,14 +1121,26 @@ fun ChatInput(
                         ),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Icon(
-                        imageVector = if (sendStopState) Lucide.X else Lucide.ArrowUp,
-                        contentDescription = stringResource(
-                            if (sendStopState) R.string.stop else R.string.send,
-                        ),
-                        tint = sendIconTint,
-                        modifier = Modifier.size(22.dp),
-                    )
+                    Box(
+                        modifier = Modifier
+                            .graphicsLayer {
+                                scaleX = sendScale
+                                scaleY = sendScale
+                            }
+                            .size(44.dp)
+                            .clip(CircleShape)
+                            .background(sendFill),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            imageVector = if (sendStopState) Lucide.X else Lucide.ArrowUp,
+                            contentDescription = stringResource(
+                                if (sendStopState) R.string.stop else R.string.send,
+                            ),
+                            tint = sendIconTint,
+                            modifier = Modifier.size(22.dp),
+                        )
+                    }
                 }
             }
 

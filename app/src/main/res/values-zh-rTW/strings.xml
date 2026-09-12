@@ -1297,6 +1297,10 @@
   <string name="chat_page_hero_greeting">今天想聊些什麼？</string>
   <string name="chat_page_hero_greeting_with_name">Hi %1$s，
 今天想聊些什麼？</string>
+  <string name="amber_redesign_suggestion_board">總結今日看板</string>
+  <string name="amber_redesign_suggestion_reply">起草一段回覆</string>
+  <string name="amber_redesign_suggestion_concept">解釋一個概念</string>
+  <string name="amber_redesign_conversations">會話</string>
   <string name="chat_page_loading_older_prefetching">正在預取較早訊息 %1$d/%2$d</string>
   <string name="chat_page_loading_older_preparing">較早訊息準備中 %1$d/%2$d</string>
   <string name="chat_page_new_session">新工作階段</string>
@@ -1423,6 +1427,15 @@
   <string name="session_home_feature_mini_apps">小應用</string>
   <string name="session_home_feature_novel">小說創作</string>
   <string name="session_home_feature_sites">網站</string>
+  <string name="session_home_deep_read_progress_analysis">正在分析關鍵觀點</string>
+  <string name="session_home_deep_read_progress_collecting">正在收集資料</string>
+  <string name="session_home_deep_read_progress_extended_reading">正在整理延伸閱讀</string>
+  <string name="session_home_deep_read_progress_finishing">正在收尾文章</string>
+  <string name="session_home_deep_read_progress_narrative">正在整理脈絡</string>
+  <string name="session_home_deep_read_progress_overview">正在產生概覽</string>
+  <string name="session_home_deep_read_progress_planning">正在規劃結構</string>
+  <string name="session_home_deep_read_progress_preparing">正在準備深度閱讀</string>
+  <string name="session_home_deep_read_progress_verifying">正在校驗內容</string>
   <string name="session_home_hide_continue_candidate">暫時隱藏</string>
   <string name="session_home_status_draft">草稿</string>
   <string name="session_home_status_paused">已暫停</string>

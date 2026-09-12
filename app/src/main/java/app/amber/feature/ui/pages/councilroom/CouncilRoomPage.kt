@@ -314,7 +314,7 @@ private fun CouncilRoomTopBar(
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    text = stringResource(R.string.council_room_chat_title),
+                    text = stringResource(R.string.setting_model_council_title),
                     color = chatTheme.ink,
                     fontWeight = FontWeight.SemiBold,
                     style = MaterialTheme.typography.titleMedium,
@@ -406,6 +406,11 @@ private fun CouncilRoomSubtitle(room: CouncilRoom) {
             style = MaterialTheme.typography.labelMedium,
             fontWeight = FontWeight.Medium,
             maxLines = 1,
+        )
+        Text(
+            text = "·",
+            color = workspace.faint,
+            style = MaterialTheme.typography.labelMedium,
         )
         Text(
             text = stringResource(R.string.council_room_subtitle, memberCount, round),

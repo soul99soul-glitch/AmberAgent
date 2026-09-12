@@ -8,6 +8,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
@@ -20,6 +21,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -77,16 +79,17 @@ import app.amber.feature.ui.components.ui.NotionSlider
 import app.amber.feature.ui.components.ui.Switch
 import app.amber.feature.ui.components.ui.workspaceColors
 import app.amber.feature.ui.context.LocalNavController
-import app.amber.feature.ui.pages.setting.ExperimentDivider
-import app.amber.feature.ui.pages.setting.ExperimentSectionCard
 import app.amber.feature.ui.pages.setting.ExperimentalSettingsScaffold
 import app.amber.feature.ui.pages.setting.SettingVM
 import app.amber.feature.ui.theme.LocalAmberType
+import app.amber.feature.ui.theme.LocalAmberTokens
 import app.amber.core.utils.plus
 import org.koin.androidx.compose.koinViewModel
 import org.koin.compose.koinInject
 import kotlin.math.roundToInt
 import kotlin.uuid.Uuid
+import com.composables.icons.lucide.ChevronRight
+import com.composables.icons.lucide.Lucide
 
 @Composable
 fun SettingTodayBoardPage(
@@ -243,11 +246,11 @@ fun SettingTodayBoardPage(
             when (pane) {
                 TodayBoardSettingsPane.ROOT -> {
                     item {
-                        ExperimentSectionCard(title = stringResource(R.string.board_settings_general)) {
+                        BoardSectionCard(title = stringResource(R.string.board_settings_general)) {
                             SourceSwitch(stringResource(R.string.board_enable_title), stringResource(R.string.board_enable_description), board.enabled) {
                                 update { it.copy(enabled = !it.enabled) }
                             }
-                            ExperimentDivider()
+                            BoardDivider()
                             DetailNavigationRow(
                                 title = stringResource(R.string.board_model_background),
                                 description = "${board.modelSummary(settings)} · ${board.backgroundStrategy.label()}",
@@ -259,15 +262,15 @@ fun SettingTodayBoardPage(
                     }
 
                     item {
-                        ExperimentSectionCard(title = stringResource(R.string.board_hotlist)) {
+                        BoardSectionCard(title = stringResource(R.string.board_hotlist)) {
                             IntervalRow(board.hotListRefreshIntervalMinutes) { value ->
                                 update { it.copy(hotListRefreshIntervalMinutes = value) }
                             }
-                            ExperimentDivider()
+                            BoardDivider()
                             SourceSwitch(stringResource(R.string.board_wifi_only), stringResource(R.string.board_wifi_only_description), board.hotListWifiOnly) {
                                 update { it.copy(hotListWifiOnly = !it.hotListWifiOnly) }
                             }
-                            ExperimentDivider()
+                            BoardDivider()
                             DetailNavigationRow(
                                 title = stringResource(R.string.board_sources_focus_deep_read),
                                 description = hotListSummary(board, customHotListSources, settings),
@@ -279,7 +282,7 @@ fun SettingTodayBoardPage(
                     }
 
                     item {
-                        ExperimentSectionCard(title = stringResource(R.string.board_daily_review)) {
+                        BoardSectionCard(title = stringResource(R.string.board_daily_review)) {
                             DetailNavigationRow(
                                 title = stringResource(R.string.board_signal_sources_focus),
                                 description = reviewSummary(board, focusRules),
@@ -293,9 +296,9 @@ fun SettingTodayBoardPage(
 
                 TodayBoardSettingsPane.GENERAL -> {
                     item {
-                        ExperimentSectionCard(title = stringResource(R.string.board_settings_general)) {
+                        BoardSectionCard(title = stringResource(R.string.board_settings_general)) {
                             BoardModelRow(board = board, settings = settings, update = ::update)
-                            ExperimentDivider()
+                            BoardDivider()
                             BackgroundStrategyRow(board.backgroundStrategy) { value ->
                                 update { it.copy(backgroundStrategy = value) }
                             }
@@ -305,7 +308,7 @@ fun SettingTodayBoardPage(
 
                 TodayBoardSettingsPane.HOT_LIST -> {
                     item {
-                        ExperimentSectionCard(title = stringResource(R.string.board_hotlist_sources)) {
+                        BoardSectionCard(title = stringResource(R.string.board_hotlist_sources)) {
                             HotListSourceSettings(
                                 enabledBuiltIns = board.hotListEnabledSources,
                                 customSources = customHotListSources,
@@ -326,7 +329,7 @@ fun SettingTodayBoardPage(
                                 onAddNewsNowPresets = ::addNewsNowPresets,
                                 onSaveCustom = ::saveCustomHotListSource,
                             )
-                            ExperimentDivider()
+                            BoardDivider()
                             SearchServiceSummary(
                                 enabledCount = settings.searchEnabledServiceIds.size,
                                 totalCount = settings.searchServices.size,
@@ -334,7 +337,7 @@ fun SettingTodayBoardPage(
                         }
                     }
                     item {
-                        ExperimentSectionCard(title = stringResource(R.string.board_focus_filter)) {
+                        BoardSectionCard(title = stringResource(R.string.board_focus_filter)) {
                             HotListFocusKeywordEditor(
                                 keywords = board.hotListFocusKeywords,
                                 mode = board.hotListFilterMode,
@@ -344,11 +347,11 @@ fun SettingTodayBoardPage(
                         }
                     }
                     item {
-                        ExperimentSectionCard(title = stringResource(R.string.deep_read_title)) {
+                        BoardSectionCard(title = stringResource(R.string.deep_read_title)) {
                             ReadingFontRow(board = board, fontStates = fontStates, update = ::update)
-                            ExperimentDivider()
+                            BoardDivider()
                             DeepReadCacheTtlRow(board = board, update = ::update)
-                            ExperimentDivider()
+                            BoardDivider()
                             DeepReadTemplateSettingsRow(
                                 board = board,
                                 customTemplates = customDeepReadTemplates,
@@ -376,7 +379,7 @@ fun SettingTodayBoardPage(
 
                 TodayBoardSettingsPane.REVIEW -> {
                     item {
-                        ExperimentSectionCard(title = stringResource(R.string.board_signal_sources)) {
+                        BoardSectionCard(title = stringResource(R.string.board_signal_sources)) {
                             val notifPermissionOk = remember {
                                 runCatching {
                                     android.provider.Settings.Secure.getString(
@@ -395,33 +398,33 @@ fun SettingTodayBoardPage(
                                 else stringResource(R.string.board_signal_notification_permission),
                                 BoardSignalSourceType.NOTIFICATION in board.enabledSources,
                             ) { toggleSignalSource(BoardSignalSourceType.NOTIFICATION, ::update) }
-                            ExperimentDivider()
+                            BoardDivider()
                             SourceSwitch(
                                 stringResource(R.string.board_signal_calendar),
                                 if (calendarPermissionOk) stringResource(R.string.board_signal_calendar_description)
                                 else stringResource(R.string.board_signal_calendar_permission),
                                 BoardSignalSourceType.CALENDAR in board.enabledSources,
                             ) { toggleSignalSource(BoardSignalSourceType.CALENDAR, ::update) }
-                            ExperimentDivider()
+                            BoardDivider()
                             SourceSwitch(stringResource(R.string.board_signal_feishu_messages), stringResource(R.string.board_signal_feishu_messages_description), BoardSignalSourceType.FEISHU_MSG in board.enabledSources) {
                                 toggleSignalSource(BoardSignalSourceType.FEISHU_MSG, ::update)
                             }
-                            ExperimentDivider()
+                            BoardDivider()
                             SourceSwitch(stringResource(R.string.board_signal_feishu_docs), stringResource(R.string.board_signal_feishu_docs_description), BoardSignalSourceType.FEISHU_DOC in board.enabledSources) {
                                 toggleSignalSource(BoardSignalSourceType.FEISHU_DOC, ::update)
                             }
-                            ExperimentDivider()
+                            BoardDivider()
                             SourceSwitch(stringResource(R.string.board_signal_chat_history), stringResource(R.string.board_signal_chat_history_description), BoardSignalSourceType.CHAT_HISTORY in board.enabledSources) {
                                 toggleSignalSource(BoardSignalSourceType.CHAT_HISTORY, ::update)
                             }
                         }
                     }
                     item {
-                        ExperimentSectionCard(title = stringResource(R.string.board_generation_rules)) {
+                        BoardSectionCard(title = stringResource(R.string.board_generation_rules)) {
                             IncrementalSlider(board.incrementalSignalThreshold) { value ->
                                 update { it.copy(incrementalSignalThreshold = value) }
                             }
-                            ExperimentDivider()
+                            BoardDivider()
                             FocusRulesEditor(
                                 rules = focusRules,
                                 onAdd = ::addFocusRule,
@@ -431,7 +434,7 @@ fun SettingTodayBoardPage(
                         }
                     }
                     item {
-                        ExperimentSectionCard(title = stringResource(R.string.board_source_weights)) {
+                        BoardSectionCard(title = stringResource(R.string.board_source_weights)) {
                             SourceWeightsEditor(weights = sourceWeights, onChange = ::updateSourceWeight)
                         }
                     }
@@ -463,11 +466,56 @@ private fun TodayBoardSettingsPane.localizedTitle(): String = when (this) {
 }
 
 @Composable
+private fun BoardSectionCard(
+    title: String,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    val tokens = LocalAmberTokens.current
+    Column(
+        Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 2.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text("//", style = LocalAmberType.current.eyebrow, color = tokens.accent)
+            Text(title, style = LocalAmberType.current.eyebrow, color = tokens.ink2)
+            androidx.compose.material3.HorizontalDivider(Modifier.weight(1f), color = tokens.line)
+        }
+        Surface(
+            Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(14.dp),
+            color = tokens.surface,
+            contentColor = tokens.ink,
+            border = androidx.compose.foundation.BorderStroke(1.dp, tokens.line),
+        ) {
+            Column(
+                Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+                content = content,
+            )
+        }
+    }
+}
+
+@Composable
+private fun BoardDivider() {
+    val tokens = LocalAmberTokens.current
+    androidx.compose.material3.HorizontalDivider(
+        Modifier.padding(start = 48.dp),
+        color = tokens.line,
+    )
+}
+
+@Composable
 private fun DetailNavigationRow(
     title: String,
     description: String,
     onClick: () -> Unit,
 ) {
+    val tokens = LocalAmberTokens.current
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -482,20 +530,25 @@ private fun DetailNavigationRow(
         ) {
             Text(
                 text = title,
-                style = MaterialTheme.typography.titleSmall,
-                color = workspaceColors().ink,
+                style = LocalAmberType.current.body.copy(fontWeight = FontWeight.SemiBold),
+                color = tokens.ink,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
                 text = description,
-                style = MaterialTheme.typography.bodySmall,
-                color = workspaceColors().muted,
+                style = LocalAmberType.current.secondary,
+                color = tokens.ink3,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
         }
-        Text("›", style = MaterialTheme.typography.titleMedium, color = workspaceColors().muted)
+        Icon(
+            Lucide.ChevronRight,
+            contentDescription = null,
+            modifier = Modifier.size(20.dp),
+            tint = tokens.ink3,
+        )
     }
 }
 

@@ -47,6 +47,7 @@ import app.amber.feature.terminal.TerminalRuntimeKind
 import app.amber.feature.terminal.TermuxRuntimeStatus
 import app.amber.feature.workspace.WorkspaceManager
 import app.amber.feature.ui.components.nav.BackButton
+import app.amber.feature.ui.components.ds.SectionLabel
 import app.amber.feature.ui.components.ui.CardGroup
 import app.amber.feature.ui.components.ui.WorkspaceTopBar
 import app.amber.feature.ui.components.ui.workspaceColors
@@ -124,15 +125,15 @@ fun SettingSandboxPage(
     ) { innerPadding ->
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
-            contentPadding = innerPadding + PaddingValues(16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
+            contentPadding = innerPadding + PaddingValues(horizontal = SettingPageHorizontalInset, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(22.dp),
         ) {
             item {
                 CardGroup(
-                    title = { Text(stringResource(R.string.setting_sandbox_workspace_section)) },
+                    title = { SectionLabel(stringResource(R.string.setting_sandbox_workspace_section)) },
                 ) {
                     item(
-                        leadingContent = { Icon(Lucide.DatabaseZap, contentDescription = null) },
+                        leadingContent = { SettingTileIcon(Lucide.DatabaseZap) },
                         headlineContent = { Text(stringResource(R.string.setting_files_page_workspace_title)) },
                         supportingContent = {
                             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -210,11 +211,7 @@ fun SettingSandboxPage(
                 // don't need to know about PTY plumbing).
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Box(modifier = Modifier.padding(start = 2.dp, top = 8.dp, bottom = 4.dp)) {
-                        Text(
-                            text = stringResource(R.string.setting_sandbox_runtime_section),
-                            style = MaterialTheme.typography.titleSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
+                        SettingSectionTitle(stringResource(R.string.setting_sandbox_runtime_section))
                     }
                     RuntimeStatusBlock(
                         installStatus = installStatus,
@@ -237,7 +234,7 @@ fun SettingSandboxPage(
                     )
                     CardGroup {
                         item(
-                        leadingContent = { Icon(Lucide.CodeXml, contentDescription = null) },
+                        leadingContent = { SettingTileIcon(Lucide.CodeXml) },
                         headlineContent = { Text(stringResource(R.string.setting_sandbox_terminal_runtime_title)) },
                         supportingContent = { Text(stringResource(R.string.setting_sandbox_terminal_runtime_desc)) },
                         trailingContent = {
@@ -273,7 +270,7 @@ fun SettingSandboxPage(
                         },
                     )
                     item(
-                        leadingContent = { Icon(Lucide.Server, contentDescription = null) },
+                        leadingContent = { SettingTileIcon(Lucide.Server) },
                         headlineContent = { Text(stringResource(R.string.setting_sandbox_terminal_jobs_title)) },
                         supportingContent = { Text(stringResource(R.string.setting_sandbox_terminal_jobs_desc)) },
                         trailingContent = {
@@ -295,7 +292,7 @@ fun SettingSandboxPage(
                         },
                     )
                     item(
-                        leadingContent = { Icon(Lucide.CodeXml, contentDescription = null) },
+                        leadingContent = { SettingTileIcon(Lucide.CodeXml) },
                         headlineContent = { Text(stringResource(R.string.setting_sandbox_terminal_output_title)) },
                         supportingContent = { Text(stringResource(R.string.setting_sandbox_terminal_output_desc)) },
                         trailingContent = {
@@ -319,7 +316,7 @@ fun SettingSandboxPage(
                         },
                     )
                     item(
-                        leadingContent = { Icon(Lucide.CodeXml, contentDescription = null) },
+                        leadingContent = { SettingTileIcon(Lucide.CodeXml) },
                         headlineContent = { Text(stringResource(R.string.setting_sandbox_terminal_install_timeout_title)) },
                         supportingContent = { Text(stringResource(R.string.setting_sandbox_terminal_install_timeout_desc)) },
                         trailingContent = {
@@ -343,7 +340,7 @@ fun SettingSandboxPage(
                         },
                     )
                     item(
-                        leadingContent = { Icon(Lucide.Server, contentDescription = null) },
+                        leadingContent = { SettingTileIcon(Lucide.Server) },
                         headlineContent = { Text(stringResource(R.string.setting_sandbox_termux_title)) },
                         supportingContent = {
                             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {

@@ -5,6 +5,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -38,8 +39,8 @@ import app.amber.feature.ui.components.richtext.MarkdownBlock
 import app.amber.feature.ui.components.richtext.MarkdownTopLevelBlock
 import app.amber.feature.ui.components.richtext.StreamingSingleTextMarkdown
 import app.amber.feature.ui.components.richtext.topLevelBlockCount
-import app.amber.feature.ui.components.ui.workspaceColors
 import app.amber.feature.ui.context.LocalSettings
+import app.amber.feature.ui.theme.LocalAmberTokens
 import app.amber.feature.ui.theme.JetbrainsMono
 
 @Composable
@@ -53,7 +54,6 @@ internal fun VirtualizedAssistantText(
     onGenerativeWidgetAction: (String) -> Unit,
 ) {
     val handleClickCitation = rememberClickCitationHandler(fullMessageParts)
-    val workspace = workspaceColors()
     MessageSelectionContainer {
         if (markdownChild != null) {
             val blockContent: @Composable () -> Unit = {
@@ -77,26 +77,38 @@ internal fun VirtualizedAssistantText(
             }
         } else {
             if (showAssistantBubble) {
-                Surface(
-                    modifier = Modifier.widthIn(max = 640.dp),
-                    shape = RoundedCornerShape(8.dp),
-                    color = workspace.paper,
-                    contentColor = workspace.ink,
-                    tonalElevation = 0.dp,
-                    shadowElevation = 0.dp,
-                    border = BorderStroke(1.dp, workspace.hairline),
+                BoxWithConstraints(
+                    modifier = Modifier.fillMaxWidth(),
+                    contentAlignment = androidx.compose.ui.Alignment.TopStart,
                 ) {
-                    Column(modifier = Modifier.padding(horizontal = 13.dp, vertical = 9.dp)) {
-                        AssistantMarkdownBlockOrWidgets(
-                            content = MessageRenderCache.visualRegexText(
-                                text = part.text,
-                                regexes = regexes,
-                                scope = AssistantAffectScope.ASSISTANT,
-                            ),
-                            streaming = false,
-                            onClickCitation = handleClickCitation,
-                            onGenerativeWidgetAction = onGenerativeWidgetAction,
-                        )
+                    val amberTokens = LocalAmberTokens.current
+                    val assistantBubbleShape = RoundedCornerShape(
+                        topStart = 14.dp,
+                        topEnd = 14.dp,
+                        bottomStart = 5.dp,
+                        bottomEnd = 14.dp,
+                    )
+                    Surface(
+                        modifier = Modifier.widthIn(max = maxWidth * 0.86f),
+                        shape = assistantBubbleShape,
+                        color = amberTokens.surface,
+                        contentColor = amberTokens.ink,
+                        tonalElevation = 0.dp,
+                        shadowElevation = 0.dp,
+                        border = BorderStroke(1.dp, amberTokens.line),
+                    ) {
+                        Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
+                            AssistantMarkdownBlockOrWidgets(
+                                content = MessageRenderCache.visualRegexText(
+                                    text = part.text,
+                                    regexes = regexes,
+                                    scope = AssistantAffectScope.ASSISTANT,
+                                ),
+                                streaming = false,
+                                onClickCitation = handleClickCitation,
+                                onGenerativeWidgetAction = onGenerativeWidgetAction,
+                            )
+                        }
                     }
                 }
             } else {
@@ -376,49 +388,53 @@ private fun AssistantBubbleSegment(
     last: Boolean,
     content: @Composable () -> Unit,
 ) {
-    val workspace = workspaceColors()
+    val amberTokens = LocalAmberTokens.current
     val shape = RoundedCornerShape(
-        topStart = if (first) 8.dp else 0.dp,
-        topEnd = if (first) 8.dp else 0.dp,
-        bottomStart = if (last) 8.dp else 0.dp,
-        bottomEnd = if (last) 8.dp else 0.dp,
+        topStart = if (first) 14.dp else 0.dp,
+        topEnd = if (first) 14.dp else 0.dp,
+        bottomStart = if (last) 5.dp else 0.dp,
+        bottomEnd = if (last) 14.dp else 0.dp,
     )
-    Box(
-        modifier = Modifier
-            .widthIn(max = 640.dp)
-            .clip(shape)
-            .background(workspace.paper)
+    BoxWithConstraints(
+        modifier = Modifier.fillMaxWidth(),
+        contentAlignment = androidx.compose.ui.Alignment.TopStart,
+    ) {
+        Box(
+            modifier = Modifier
+                .widthIn(max = maxWidth * 0.86f)
+                .clip(shape)
+                .background(amberTokens.surface)
             .drawWithContent {
                 drawContent()
                 val stroke = 1.dp.toPx()
                 val half = stroke / 2f
-                val radius = 8.dp.toPx()
+                val radius = 14.dp.toPx()
                 val right = size.width - half
                 val bottom = size.height - half
                 val topInset = if (first) radius else 0f
                 val bottomInset = if (last) radius else 0f
 
                 drawLine(
-                    color = workspace.hairline,
+                    color = amberTokens.line,
                     start = Offset(half, topInset),
                     end = Offset(half, size.height - bottomInset),
                     strokeWidth = stroke,
                 )
                 drawLine(
-                    color = workspace.hairline,
+                    color = amberTokens.line,
                     start = Offset(right, topInset),
                     end = Offset(right, size.height - bottomInset),
                     strokeWidth = stroke,
                 )
                 if (first) {
                     drawLine(
-                        color = workspace.hairline,
+                        color = amberTokens.line,
                         start = Offset(radius, half),
                         end = Offset(size.width - radius, half),
                         strokeWidth = stroke,
                     )
                     drawArc(
-                        color = workspace.hairline,
+                        color = amberTokens.line,
                         startAngle = 180f,
                         sweepAngle = 90f,
                         useCenter = false,
@@ -427,7 +443,7 @@ private fun AssistantBubbleSegment(
                         style = Stroke(stroke),
                     )
                     drawArc(
-                        color = workspace.hairline,
+                        color = amberTokens.line,
                         startAngle = 270f,
                         sweepAngle = 90f,
                         useCenter = false,
@@ -438,13 +454,13 @@ private fun AssistantBubbleSegment(
                 }
                 if (last) {
                     drawLine(
-                        color = workspace.hairline,
+                        color = amberTokens.line,
                         start = Offset(radius, bottom),
                         end = Offset(size.width - radius, bottom),
                         strokeWidth = stroke,
                     )
                     drawArc(
-                        color = workspace.hairline,
+                        color = amberTokens.line,
                         startAngle = 90f,
                         sweepAngle = 90f,
                         useCenter = false,
@@ -453,7 +469,7 @@ private fun AssistantBubbleSegment(
                         style = Stroke(stroke),
                     )
                     drawArc(
-                        color = workspace.hairline,
+                        color = amberTokens.line,
                         startAngle = 0f,
                         sweepAngle = 90f,
                         useCenter = false,
@@ -463,13 +479,14 @@ private fun AssistantBubbleSegment(
                     )
                 }
             }
-            .padding(
-                start = 13.dp,
-                end = 13.dp,
-                top = if (first) 9.dp else 0.dp,
-                bottom = if (last) 9.dp else 0.dp,
-            )
-    ) {
-        content()
+                .padding(
+                    start = 14.dp,
+                    end = 14.dp,
+                    top = if (first) 10.dp else 0.dp,
+                    bottom = if (last) 10.dp else 0.dp,
+                )
+        ) {
+            content()
+        }
     }
 }

@@ -20,6 +20,7 @@ import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.text.font.FontWeight
@@ -41,25 +42,25 @@ val LocalDarkMode = compositionLocalOf { false }
 val LocalAmoledDarkMode = compositionLocalOf { false }
 
 private val AMOLED_DARK_BACKGROUND = Color(0xFF000000)
-private val NotionShapes = Shapes(
-    extraSmall = RoundedCornerShape(3.dp),
-    small = RoundedCornerShape(4.dp),
-    medium = RoundedCornerShape(6.dp),
-    large = RoundedCornerShape(8.dp),
-    extraLarge = RoundedCornerShape(10.dp),
+internal val AmberShapes = Shapes(
+    extraSmall = RoundedCornerShape(6.dp),
+    small = RoundedCornerShape(12.dp),
+    medium = RoundedCornerShape(14.dp),
+    large = RoundedCornerShape(18.dp),
+    extraLarge = RoundedCornerShape(22.dp),
 )
-private val NotionTypography = Typography.copy(
+internal val AmberTypography = Typography.copy(
     displayLarge = Typography.displayLarge.copy(fontFamily = HankenGrotesk, fontSize = 30.sp, lineHeight = 38.sp, fontWeight = FontWeight.SemiBold),
     displayMedium = Typography.displayMedium.copy(fontFamily = HankenGrotesk, fontSize = 27.sp, lineHeight = 34.sp, fontWeight = FontWeight.SemiBold),
     displaySmall = Typography.displaySmall.copy(fontFamily = HankenGrotesk, fontSize = 24.sp, lineHeight = 31.sp, fontWeight = FontWeight.SemiBold),
     headlineLarge = Typography.headlineLarge.copy(fontFamily = HankenGrotesk, fontSize = 22.sp, lineHeight = 29.sp, fontWeight = FontWeight.SemiBold),
     headlineMedium = Typography.headlineMedium.copy(fontFamily = HankenGrotesk, fontSize = 20.sp, lineHeight = 27.sp, fontWeight = FontWeight.SemiBold),
     headlineSmall = Typography.headlineSmall.copy(fontFamily = HankenGrotesk, fontSize = 18.sp, lineHeight = 24.sp, fontWeight = FontWeight.SemiBold),
-    titleLarge = Typography.titleLarge.copy(fontFamily = HankenGrotesk, fontSize = 18.sp, lineHeight = 24.sp, fontWeight = FontWeight.SemiBold),
+    titleLarge = Typography.titleLarge.copy(fontFamily = HankenGrotesk, fontSize = 19.sp, lineHeight = 25.sp, fontWeight = FontWeight.Bold),
     titleMedium = Typography.titleMedium.copy(fontFamily = HankenGrotesk, fontSize = 15.sp, lineHeight = 21.sp, fontWeight = FontWeight.Medium),
     titleSmall = Typography.titleSmall.copy(fontFamily = HankenGrotesk, fontSize = 13.sp, lineHeight = 18.sp, fontWeight = FontWeight.Medium),
-    bodyLarge = Typography.bodyLarge.copy(fontFamily = HankenGrotesk, fontSize = 14.sp, lineHeight = 21.sp),
-    bodyMedium = Typography.bodyMedium.copy(fontFamily = HankenGrotesk, fontSize = 13.sp, lineHeight = 20.sp),
+    bodyLarge = Typography.bodyLarge.copy(fontFamily = HankenGrotesk, fontSize = 15.sp, lineHeight = 22.sp),
+    bodyMedium = Typography.bodyMedium.copy(fontFamily = HankenGrotesk, fontSize = 14.sp, lineHeight = 21.sp),
     bodySmall = Typography.bodySmall.copy(fontFamily = HankenGrotesk, fontSize = 12.sp, lineHeight = 18.sp),
     labelLarge = Typography.labelLarge.copy(fontFamily = HankenGrotesk, fontSize = 12.sp, lineHeight = 17.sp, fontWeight = FontWeight.Medium),
     labelMedium = Typography.labelMedium.copy(fontFamily = HankenGrotesk, fontSize = 11.sp, lineHeight = 15.sp, fontWeight = FontWeight.Medium),
@@ -221,7 +222,16 @@ fun AmberAgentTheme(
         else -> AmberBase.LIGHT
     }
     val amberAccent = parseAccent(settings.displaySetting.accentColor)
-    val amberTokens = remember(amberBase, amberAccent) { buildAmberTokens(amberBase, amberAccent) }
+    val amberTokens = remember(amberBase, amberAccent, amoledDarkMode, darkTheme) {
+        val tokens = buildAmberTokens(amberBase, amberAccent)
+        if (amoledDarkMode && darkTheme) tokens.copy(
+            bg = AMOLED_DARK_BACKGROUND,
+            surface = Color(0xFF050505),
+            surface2 = Color(0xFF101010),
+            raised = Color(0xFF141414),
+            codeBg = Color(0xFF101010),
+        ) else tokens
+    }
     val chatTheme = remember(amberTokens) { amberTokens.toChatTheme() }
 
     val themedColorScheme = remember(colorSchemeConverted, chatTheme, amoledDarkMode, darkTheme) {
@@ -235,7 +245,7 @@ fun AmberAgentTheme(
                 onSurface = chatTheme.ink,
                 surfaceVariant = if (useAmoledBlack) colorSchemeConverted.surfaceVariant else chatTheme.toolPillBg,
                 onSurfaceVariant = chatTheme.inkSoft,
-                // Subagent #6: 5 级 hierarchy 让 NavDrawer / Card / BottomSheet 有深度
+                // Keep the five surface levels aligned with the active Amber tokens.
                 surfaceContainerLowest = chatTheme.containerLowest,
                 surfaceContainerLow = chatTheme.containerLow,
                 surfaceContainer = chatTheme.containerMid,
@@ -247,28 +257,41 @@ fun AmberAgentTheme(
                 surfaceDim = chatTheme.containerLowest,
                 surfaceTint = chatTheme.accent,
                 primary = chatTheme.accent,
-                // Subagent #3: Midnight 用深字反白 (chatTheme.onAccent)；其他主题仍是白字
+                // The token carries the readable foreground for the active accent.
                 onPrimary = chatTheme.onAccent,
-                primaryContainer = chatTheme.accentSoft,
+                primaryContainer = chatTheme.accentSoft.compositeOver(chatTheme.paper),
                 onPrimaryContainer = chatTheme.accentDeep,
+                primaryFixed = chatTheme.accentSoft.compositeOver(chatTheme.paper),
+                primaryFixedDim = chatTheme.accentSoft.compositeOver(chatTheme.paper),
+                onPrimaryFixed = chatTheme.accentDeep,
+                onPrimaryFixedVariant = chatTheme.accentDeep,
                 secondary = chatTheme.accent,
-                secondaryContainer = chatTheme.accentSoft,
+                onSecondary = chatTheme.onAccent,
+                secondaryContainer = chatTheme.accentSoft.compositeOver(chatTheme.paper),
                 onSecondaryContainer = chatTheme.accentDeep,
-                // Subagent #8 补齐 tertiary 用同主题 accent 体系。深色主题的 accentTint 是浅色提示色，
-                // 直接当 container 会在标签/搜索高亮/预览浮层里冒出亮块；深色下用透明 accentSoft。
+                secondaryFixed = chatTheme.accentSoft.compositeOver(chatTheme.paper),
+                secondaryFixedDim = chatTheme.accentSoft.compositeOver(chatTheme.paper),
+                onSecondaryFixed = chatTheme.accentDeep,
+                onSecondaryFixedVariant = chatTheme.accentDeep,
+                // Keep tertiary surfaces in the same accent family; dark themes use the softer fill.
                 tertiary = chatTheme.accentDeep,
                 onTertiary = chatTheme.onAccent,
                 tertiaryContainer = if (chatTheme.isDark) chatTheme.accentSoft else chatTheme.accentTint,
                 onTertiaryContainer = if (chatTheme.isDark) chatTheme.accent else chatTheme.accentDeep,
-                // Subagent #9 / 终审 #1：Snackbar 用 inverseSurface 应为"反相"色——
-                // 深色主题给亮底 + 深字; 浅色主题给深底 + 亮字。当前 chatTheme.ink/paper
-                // 在浅色 = 深字/白底 (正确)；在深色 = 浅字/深底 (反了)。所以深色下交换。
-                inverseSurface = if (darkTheme) chatTheme.paper else chatTheme.ink,
-                inverseOnSurface = if (darkTheme) chatTheme.ink else chatTheme.paper,
+                tertiaryFixed = if (chatTheme.isDark) chatTheme.accentSoft else chatTheme.accentTint,
+                tertiaryFixedDim = if (chatTheme.isDark) chatTheme.accentSoft else chatTheme.accentTint,
+                onTertiaryFixed = if (chatTheme.isDark) chatTheme.accent else chatTheme.accentDeep,
+                onTertiaryFixedVariant = if (chatTheme.isDark) chatTheme.accent else chatTheme.accentDeep,
+                // Snackbar inverse colors use the active ink/paper pair in both base modes.
+                inverseSurface = chatTheme.ink,
+                inverseOnSurface = chatTheme.paper,
                 inversePrimary = chatTheme.accentTint,
-                // Subagent #4
                 outline = chatTheme.outlineStrong,
                 outlineVariant = chatTheme.outlineSoft,
+                error = Color(0xFFC2554E),
+                onError = Color.Black,
+                errorContainer = Color(0xFFC2554E).copy(alpha = 0.12f).compositeOver(chatTheme.paper),
+                onErrorContainer = chatTheme.ink,
             )
         }
     }
@@ -288,8 +311,8 @@ fun AmberAgentTheme(
     ) {
         MaterialTheme(
             colorScheme = themedColorScheme,
-            typography = NotionTypography,
-            shapes = NotionShapes,
+            typography = AmberTypography,
+            shapes = AmberShapes,
             content = content,
         )
     }

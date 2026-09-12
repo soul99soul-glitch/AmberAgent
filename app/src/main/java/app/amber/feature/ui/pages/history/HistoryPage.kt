@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -35,7 +36,6 @@ import androidx.compose.material3.SwipeToDismissBoxState
 import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -45,6 +45,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -57,10 +58,11 @@ import app.amber.agent.R
 import app.amber.agent.Screen
 import app.amber.core.model.Conversation
 import app.amber.feature.ui.components.nav.BackButton
+import app.amber.feature.ui.components.ds.SectionLabel
 import app.amber.feature.ui.components.ui.workspaceBorder
 import app.amber.feature.ui.components.ui.workspaceColors
+import app.amber.feature.ui.components.ui.WorkspaceTopBar
 import app.amber.feature.ui.context.LocalNavController
-import app.amber.feature.ui.theme.CustomColors
 import app.amber.feature.ui.theme.LocalAmberTokens
 import app.amber.feature.ui.theme.LocalAmberType
 import app.amber.core.utils.navigateToChatPage
@@ -72,6 +74,7 @@ import org.koin.androidx.compose.koinViewModel
 fun HistoryPage(vm: HistoryVM = koinViewModel()) {
     val navController = LocalNavController.current
     val scope = rememberCoroutineScope()
+    val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     val snackbarHostState = remember { SnackbarHostState() }
     var showDeleteAllDialog by remember { mutableStateOf(false) }
 
@@ -85,14 +88,10 @@ fun HistoryPage(vm: HistoryVM = koinViewModel()) {
     Scaffold(
         containerColor = workspace.canvas,
         topBar = {
-            TopAppBar(
-                title = {
-                    Text(stringResource(R.string.history_page_title))
-                },
-                navigationIcon = {
-                    BackButton()
-                },
-                colors = CustomColors.topBarColors,
+            WorkspaceTopBar(
+                title = stringResource(R.string.history_page_title),
+                navigationIcon = { BackButton() },
+                scrollBehavior = scrollBehavior,
                 actions = {
                     IconButton(
                         onClick = {
@@ -114,6 +113,7 @@ fun HistoryPage(vm: HistoryVM = koinViewModel()) {
                 }
             )
         },
+        modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
         snackbarHost = {
             SnackbarHost(hostState = snackbarHostState)
         }
@@ -124,6 +124,12 @@ fun HistoryPage(vm: HistoryVM = koinViewModel()) {
             contentPadding = contentPadding + PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
+            item(key = "history_section_label") {
+                SectionLabel(
+                    text = stringResource(R.string.history_page_title),
+                    modifier = Modifier.padding(top = 8.dp),
+                )
+            }
             when {
                 hasUpstreamError && conversations.itemCount == 0 -> {
                     item(key = "history_upstream_error") {
@@ -356,7 +362,7 @@ private fun SwipeableConversationItem(
                     .fillMaxSize()
                     .background(
                         workspace.redContainer,
-                        RoundedCornerShape(8.dp)
+                        RoundedCornerShape(14.dp)
                     )
                     .padding(horizontal = 20.dp),
                 contentAlignment = Alignment.CenterEnd
@@ -392,7 +398,7 @@ private fun ConversationItem(
         onClick = onClick,
         color = workspace.paper,
         border = workspaceBorder(),
-        shape = RoundedCornerShape(8.dp),
+        shape = RoundedCornerShape(14.dp),
         modifier = modifier
     ) {
         ListItem(

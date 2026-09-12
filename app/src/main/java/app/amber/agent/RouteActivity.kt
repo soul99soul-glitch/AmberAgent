@@ -19,11 +19,13 @@ import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.AnimatedContentTransitionScope
+import androidx.compose.animation.ContentTransform
 import androidx.compose.animation.SharedTransitionLayout
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.scaleIn
-import androidx.compose.animation.scaleOut
+import androidx.compose.animation.core.CubicBezierEasing
+import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
@@ -51,6 +53,7 @@ import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.UriHandler
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.IntOffset
 import androidx.core.net.toUri
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.navigation3.rememberViewModelStoreNavEntryDecorator
@@ -166,6 +169,28 @@ import org.koin.compose.koinInject
 import kotlin.uuid.Uuid
 
 private const val TAG = "RouteActivity"
+private const val ROUTE_TRANSITION_DURATION_MILLIS = 320
+private val RouteTransitionEasing = CubicBezierEasing(0.25f, 0.1f, 0.25f, 1f)
+private val RouteTransitionSpec = tween<IntOffset>(
+    durationMillis = ROUTE_TRANSITION_DURATION_MILLIS,
+    easing = RouteTransitionEasing,
+)
+private val PredictiveRouteTransitionSpec = tween<IntOffset>(
+    durationMillis = ROUTE_TRANSITION_DURATION_MILLIS,
+    easing = LinearEasing,
+)
+
+internal fun <S> AnimatedContentTransitionScope<S>.routePushTransition(): ContentTransform =
+    slideInHorizontally(animationSpec = RouteTransitionSpec) { it } togetherWith
+        slideOutHorizontally(animationSpec = RouteTransitionSpec) { -it }
+
+internal fun <S> AnimatedContentTransitionScope<S>.routePopTransition(
+    predictive: Boolean = false,
+): ContentTransform {
+    val animationSpec = if (predictive) PredictiveRouteTransitionSpec else RouteTransitionSpec
+    return slideInHorizontally(animationSpec = animationSpec) { -it } togetherWith
+        slideOutHorizontally(animationSpec = animationSpec) { it }
+}
 
 class RouteActivity : ComponentActivity() {
     private val highlighter by inject<Highlighter>()
@@ -574,38 +599,12 @@ class RouteActivity : ComponentActivity() {
                         onBack = { backStack.removeLastOrNull() },
                         transitionSpec = {
                             if (backStack.size == 1) fadeIn() togetherWith fadeOut()
-                            else {
-                                // Standard push: previous page slides FULLY off-screen so the
-                                // two pages don't visually overlap mid-transition. The old
-                                // `-it / 2` (half-out) + scaleOut + fadeOut combo had the
-                                // outgoing page sit in the left half of the screen during the
-                                // transition (visible "torn" frame the user complained about),
-                                // and the three simultaneous animation properties (offset +
-                                // scale + alpha) were heavy enough to drop frames on
-                                // expensive entry pages like Stats.
-                                slideInHorizontally { it } togetherWith slideOutHorizontally { -it }
-                            }
+                            else routePushTransition()
                         },
-                        popTransitionSpec = {
-                            slideInHorizontally { -it / 2 } + scaleIn(initialScale = 0.7f) + fadeIn() togetherWith
-                                slideOutHorizontally { it }
-                        },
-                        predictivePopTransitionSpec = {
-                            slideInHorizontally { -it / 2 } + scaleIn(initialScale = 0.7f) + fadeIn() togetherWith
-                                slideOutHorizontally { it }
-                        },
+                        popTransitionSpec = { routePopTransition() },
+                        predictivePopTransitionSpec = { routePopTransition(predictive = true) },
                         entryProvider = entryProvider {
-                            entry<Screen.Chat>(
-                                metadata = NavDisplay.transitionSpec {
-                                    // 从首页 FAB / 列表进入 Chat：缩放+淡入，模拟从按钮位置展开的自然过渡
-                                    // （比纯 fadeIn 更有空间感；scale 起点贴近 FAB 视觉大小）
-                                    fadeIn(tween(280)) + scaleIn(initialScale = 0.92f, animationSpec = tween(280)) togetherWith
-                                        fadeOut(tween(180)) + scaleOut(targetScale = 1.04f, animationSpec = tween(180))
-                                } + NavDisplay.popTransitionSpec {
-                                    fadeIn(tween(220)) + scaleIn(initialScale = 1.04f, animationSpec = tween(220)) togetherWith
-                                        fadeOut(tween(220)) + scaleOut(targetScale = 0.92f, animationSpec = tween(220))
-                                }
-                            ) { key ->
+                            entry<Screen.Chat> { key ->
                                 ChatPage(
                                     id = Uuid.parse(key.id),
                                     text = key.text,

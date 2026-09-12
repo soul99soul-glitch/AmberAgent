@@ -188,7 +188,7 @@ fun ModelSelector(
             }
         } else if (inline) {
             // settings-models.jsx 设计稿：22dp logo + 14.5sp accent W500 model name + 12dp chevron-down
-            val theme = app.amber.feature.ui.pages.chat.LocalChatTheme.current
+            val inlineTokens = LocalAmberTokens.current
             Row(
                 modifier = modifier
                     .heightIn(min = 48.dp)
@@ -206,13 +206,13 @@ fun ModelSelector(
                     fontSize = 14.5.sp,
                     fontWeight = FontWeight.Medium,
                     letterSpacing = 0.2.sp,
-                    color = theme.accent,
+                    color = inlineTokens.accent,
                     modifier = Modifier.weight(1f, fill = false),
                 )
                 Icon(
                     imageVector = Lucide.ArrowDown,
                     contentDescription = null,
-                    tint = theme.accent,
+                    tint = inlineTokens.accent,
                     modifier = Modifier.size(12.dp),
                 )
                 if (allowClear && model != null) {
@@ -224,7 +224,7 @@ fun ModelSelector(
                         Icon(
                             imageVector = Lucide.X,
                             contentDescription = clearContentDescription ?: stringResource(R.string.clear),
-                            tint = theme.inkFaint,
+                            tint = inlineTokens.ink4,
                             modifier = Modifier.size(14.dp),
                         )
                     }
@@ -353,7 +353,7 @@ fun ModelSelector(
                 bottomStart = 0.dp,
                 bottomEnd = 0.dp,
             ),
-            containerColor = chatTheme.surface,
+            containerColor = tokens.raised,
             scrimColor = chatTheme.sheetBackdrop,
             dragHandle = {
                 Box(
@@ -361,7 +361,7 @@ fun ModelSelector(
                         .padding(top = 10.dp, bottom = 4.dp)
                         .width(36.dp)
                         .height(4.dp)
-                        .background(chatTheme.dragHandle),
+                        .background(tokens.line2),
                 )
             },
         ) {
@@ -385,7 +385,7 @@ fun ModelSelector(
                             fontSize = 17.sp,
                             fontWeight = FontWeight.Bold,
                         ),
-                        color = chatTheme.accent,
+                        color = tokens.accent,
                     )
                     Text(
                         text = stringResource(R.string.model_list_select_model),
@@ -393,7 +393,7 @@ fun ModelSelector(
                             fontWeight = FontWeight.Bold,
                             fontSize = 18.sp,
                         ),
-                        color = chatTheme.ink,
+                        color = tokens.ink,
                     )
                     Spacer(Modifier.weight(1f))
                     Text(
@@ -631,13 +631,13 @@ private fun ColumnScope.ModelList(
         }.toMap()
     }
 
-    val chatTheme = app.amber.feature.ui.pages.chat.LocalChatTheme.current
+    val tokens = LocalAmberTokens.current
     // Amber Redesign §2: search field 12dp radius, surface bg, hairline border.
     // §6: input field is a control → 12dp, NOT the 50% pill the old code used.
     Surface(
         shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
-        color = chatTheme.surface,
-        border = androidx.compose.foundation.BorderStroke(1.dp, chatTheme.hair),
+        color = tokens.surface,
+        border = androidx.compose.foundation.BorderStroke(1.dp, tokens.line),
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 22.dp)
@@ -653,21 +653,21 @@ private fun ColumnScope.ModelList(
             Icon(
                 imageVector = Lucide.Search,
                 contentDescription = null,
-                tint = chatTheme.inkFaint,
+                tint = tokens.ink3,
                 modifier = Modifier.size(18.dp),
             )
             BasicTextField(
                 value = searchKeywords,
                 onValueChange = { searchKeywords = it },
                 singleLine = true,
-                textStyle = MaterialTheme.typography.bodyMedium.copy(color = chatTheme.ink),
-                cursorBrush = SolidColor(chatTheme.accent),
+                textStyle = MaterialTheme.typography.bodyMedium.copy(color = tokens.ink),
+                cursorBrush = SolidColor(tokens.accent),
                 decorationBox = { inner ->
                     if (searchKeywords.isEmpty()) {
                         Text(
                             text = stringResource(R.string.model_list_search_placeholder),
                             style = MaterialTheme.typography.bodyMedium,
-                            color = chatTheme.inkFaint,
+                            color = tokens.ink3,
                         )
                     }
                     inner()
@@ -684,7 +684,7 @@ private fun ColumnScope.ModelList(
                     Icon(
                         imageVector = Lucide.X,
                         contentDescription = stringResource(R.string.cancel),
-                        tint = chatTheme.inkFaint,
+                        tint = tokens.ink3,
                         modifier = Modifier.size(18.dp),
                     )
                 }
@@ -791,7 +791,6 @@ private fun ColumnScope.ModelList(
             val providerActive = groupModels.fastAny { it.id == currentModel }
 
             item(key = "group:${providerSetting.id}") {
-                val chatTheme = app.amber.feature.ui.pages.chat.LocalChatTheme.current
                 val tokens = LocalAmberTokens.current
                 // Default-expand a provider while searching, or the one holding the active
                 // model; collapsed otherwise. Re-keyed by search term so a query opens matches.
@@ -806,7 +805,7 @@ private fun ColumnScope.ModelList(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .height(1.dp)
-                                .background(chatTheme.hair),
+                                .background(tokens.line),
                         )
                     }
                     // Accordion header: cn provider name (accent when active) +
@@ -825,7 +824,7 @@ private fun ColumnScope.ModelList(
                                 fontSize = 14.5.sp,
                                 fontWeight = if (providerActive) FontWeight.SemiBold else FontWeight.Medium,
                             ),
-                            color = if (providerActive) chatTheme.accent else chatTheme.ink,
+                            color = if (providerActive) tokens.accent else tokens.ink,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.weight(1f),
@@ -860,7 +859,7 @@ private fun ColumnScope.ModelList(
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .height(1.dp)
-                                        .background(chatTheme.hair),
+                                        .background(tokens.line),
                                 )
                                 val favorite = settings.value.favoriteModels.contains(model.id)
                                 ModelItemRow(
@@ -918,7 +917,6 @@ private fun ColumnScope.ModelList(
             }
     }
     if (providers.isNotEmpty()) {
-        val chatTheme = app.amber.feature.ui.pages.chat.LocalChatTheme.current
         val tokens = LocalAmberTokens.current
         // Amber Redesign §2: chips are small controls → 12dp radius (NOT 999 pill).
         // §3: no top hairline separator (that would be a double border with the
@@ -937,7 +935,7 @@ private fun ColumnScope.ModelList(
                     Row(
                         modifier = Modifier
                             .clip(androidx.compose.foundation.shape.RoundedCornerShape(12.dp))
-                            .background(chatTheme.surfaceEdge.copy(alpha = 0.4f))
+                            .background(tokens.surface2)
                             .clickable {
                                 val position = providerPositions[provider.id] ?: 0
                                 coroutineScope.launch {

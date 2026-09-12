@@ -205,8 +205,8 @@ fun SettingMcpPage(vm: SettingVM = koinViewModel()) {
             LazyColumn(
                 modifier = Modifier
                     .fillMaxSize(),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp)
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+                contentPadding = PaddingValues(horizontal = SettingPageHorizontalInset, vertical = 8.dp)
             ) {
                 items(mcpConfigs, key = { it.id }) { mcpConfig ->
                     McpServerItem(
@@ -313,7 +313,7 @@ private fun McpServerItem(
         modifier = modifier
     ) {
         Surface(
-            shape = RoundedCornerShape(10.dp),
+            shape = RoundedCornerShape(14.dp),
             color = workspace.paper,
             contentColor = workspace.ink,
             border = BorderStroke(1.dp, workspace.hairline),
@@ -322,7 +322,7 @@ private fun McpServerItem(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 14.dp, vertical = 12.dp),
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {

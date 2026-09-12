@@ -16,7 +16,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
-import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -41,13 +40,14 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
 import app.amber.agent.R
 import app.amber.feature.ui.components.nav.BackButton
+import app.amber.feature.ui.components.ds.SectionLabel
 import app.amber.feature.ui.components.ui.WorkspaceLeadingIcon
 import app.amber.feature.ui.components.ui.WorkspaceStatusPill
 import app.amber.feature.ui.components.ui.WorkspaceTone
 import app.amber.feature.ui.components.ui.workspaceBorder
 import app.amber.feature.ui.components.ui.workspaceColors
+import app.amber.feature.ui.components.ui.WorkspaceTopBar
 import app.amber.feature.ui.context.LocalNavController
-import app.amber.feature.ui.theme.CustomColors
 import app.amber.feature.ui.theme.LocalAmberType
 import app.amber.core.utils.navigateToChatPage
 import app.amber.core.utils.plus
@@ -68,15 +68,10 @@ fun FavoritePage(vm: FavoriteVM = koinViewModel()) {
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                navigationIcon = {
-                    BackButton()
-                },
-                title = {
-                    Text(stringResource(R.string.favorite_page_title))
-                },
+            WorkspaceTopBar(
+                title = stringResource(R.string.favorite_page_title),
+                navigationIcon = { BackButton() },
                 scrollBehavior = scrollBehavior,
-                colors = CustomColors.topBarColors,
             )
         },
         snackbarHost = {
@@ -85,16 +80,6 @@ fun FavoritePage(vm: FavoriteVM = koinViewModel()) {
         modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
         containerColor = workspace.canvas,
     ) { innerPadding ->
-        if (favorites.isEmpty()) {
-            LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = innerPadding + PaddingValues(16.dp),
-            ) {
-                item { FavoriteEmptyState() }
-            }
-            return@Scaffold
-        }
-
         LazyColumn(
             contentPadding = innerPadding + PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -103,28 +88,38 @@ fun FavoritePage(vm: FavoriteVM = koinViewModel()) {
             item {
                 FavoriteHeader(count = favorites.size)
             }
-            items(favorites, key = { it.id }) { item ->
-                SwipeableFavoriteCard(
-                    item = item,
-                    onClick = { navigateToChatPage(navController, item.conversationId, nodeId = item.nodeId) },
-                    onDelete = {
-                        scope.launch {
-                            val entity = vm.getEntityByRefKey(item.refKey) ?: return@launch
-                            vm.removeFavorite(item.refKey)
-                            val result = snackbarHostState.showSnackbar(
-                                message = favoriteRemovedText,
-                                actionLabel = undoText,
-                                withDismissAction = true,
-                            )
-                            if (result == SnackbarResult.ActionPerformed) {
-                                vm.restoreFavorite(entity)
-                            }
-                        }
-                    },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .animateItem(),
+            item {
+                SectionLabel(
+                    text = stringResource(R.string.favorite_page_title),
+                    modifier = Modifier.padding(top = 8.dp),
                 )
+            }
+            if (favorites.isEmpty()) {
+                item { FavoriteEmptyState() }
+            } else {
+                items(favorites, key = { it.id }) { item ->
+                    SwipeableFavoriteCard(
+                        item = item,
+                        onClick = { navigateToChatPage(navController, item.conversationId, nodeId = item.nodeId) },
+                        onDelete = {
+                            scope.launch {
+                                val entity = vm.getEntityByRefKey(item.refKey) ?: return@launch
+                                vm.removeFavorite(item.refKey)
+                                val result = snackbarHostState.showSnackbar(
+                                    message = favoriteRemovedText,
+                                    actionLabel = undoText,
+                                    withDismissAction = true,
+                                )
+                                if (result == SnackbarResult.ActionPerformed) {
+                                    vm.restoreFavorite(entity)
+                                }
+                            }
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .animateItem(),
+                    )
+                }
             }
         }
     }
@@ -135,7 +130,7 @@ private fun FavoriteHeader(count: Int) {
     val workspace = workspaceColors()
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(8.dp),
+        shape = RoundedCornerShape(14.dp),
         color = workspace.paper,
         border = workspaceBorder(),
     ) {
@@ -170,7 +165,7 @@ private fun FavoriteEmptyState() {
     val workspace = workspaceColors()
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(8.dp),
+        shape = RoundedCornerShape(14.dp),
         color = workspace.paper,
         border = workspaceBorder(),
     ) {
@@ -226,7 +221,7 @@ private fun SwipeableFavoriteCard(
                     .fillMaxSize()
                     .background(
                         workspace.redContainer,
-                        RoundedCornerShape(8.dp)
+                        RoundedCornerShape(14.dp)
                     )
                     .padding(horizontal = 20.dp),
                 contentAlignment = Alignment.CenterEnd,
@@ -260,7 +255,7 @@ private fun FavoriteCard(
     Surface(
         onClick = onClick,
         modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(8.dp),
+        shape = RoundedCornerShape(14.dp),
         color = workspace.paper,
         border = workspaceBorder(),
     ) {

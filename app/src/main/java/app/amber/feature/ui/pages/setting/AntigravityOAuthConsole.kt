@@ -1,6 +1,8 @@
 package app.amber.feature.ui.pages.setting
 
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -11,6 +13,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
 import app.amber.ai.provider.GoogleAuthMode
 import app.amber.ai.provider.ProviderSetting
 import app.amber.ai.provider.providers.google.AntigravityAuthStore
@@ -19,7 +22,9 @@ import app.amber.ai.provider.providers.google.AntigravityOAuthTokens
 import app.amber.ai.provider.providers.google.defaultAntigravityModels
 import app.amber.feature.ui.context.LocalToaster
 import app.amber.feature.ui.pages.setting.components.ProviderCommandButton
+import app.amber.feature.ui.pages.setting.components.ProviderCard
 import app.amber.feature.ui.pages.setting.components.ProviderLabeledField
+import app.amber.feature.ui.pages.setting.components.ProviderSectionLabel
 import app.amber.ai.provider.fixedBaseUrl
 import app.amber.feature.ui.pages.setting.components.ProviderTextField
 import com.dokar.sonner.ToastType
@@ -74,13 +79,34 @@ internal fun AntigravityOAuthConsole(
             onAutoStartConsumed(); login()
         }
     }
-    ProviderLabeledField("API Base URL") {
-        ProviderTextField(value = checkNotNull(GoogleAuthMode.ANTIGRAVITY_OAUTH.fixedBaseUrl()), onValueChange = {}, mono = true, readOnly = true)
+    ProviderSectionLabel("会话")
+    ProviderCard(modifier = Modifier.fillMaxWidth()) {
+        ProviderLabeledField("Antigravity OAuth") {
+            ProviderMonoNote(
+                tokens?.email?.let { "已登录：$it" } ?: "尚未登录 Antigravity",
+            )
+        }
     }
-    val account = tokens?.email?.let { "已登录 Antigravity：$it" } ?: if (tokens == null) "尚未登录 Antigravity" else "已登录 Antigravity"
-    ProviderMonoNote(account)
-    ProviderCommandButton(text = if (tokens == null) "用 Google 账号登录 Antigravity" else "重新登录 Antigravity", accent = tokens == null, onClick = { scope.launch { login() } }, modifier = Modifier.fillMaxWidth())
-    if (tokens != null) {
-        ProviderCommandButton(text = "退出 Antigravity", onClick = { client.logout(provider.id); tokens = null; toaster.show("已退出 Antigravity", type = ToastType.Success) }, modifier = Modifier.fillMaxWidth())
+    ProviderSectionLabel("端点")
+    ProviderCard(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(10.dp),
+        ) {
+            ProviderLabeledField("API Base URL") {
+                ProviderTextField(value = checkNotNull(GoogleAuthMode.ANTIGRAVITY_OAUTH.fixedBaseUrl()), onValueChange = {}, mono = true, readOnly = true)
+            }
+            ProviderCommandButton(text = if (tokens == null) "用 Google 账号登录 Antigravity" else "重新登录 Antigravity", accent = tokens == null, onClick = { scope.launch { login() } }, modifier = Modifier.fillMaxWidth())
+            if (tokens != null) {
+                ProviderCommandButton(text = "退出 Antigravity", onClick = { client.logout(provider.id); tokens = null; toaster.show("已退出 Antigravity", type = ToastType.Success) }, modifier = Modifier.fillMaxWidth())
+            }
+            androidx.compose.material3.Text(
+                "登录后会自动刷新模型列表并保存到该服务商。",
+                style = app.amber.feature.ui.theme.LocalAmberType.current.secondary,
+                color = app.amber.feature.ui.theme.LocalAmberTokens.current.ink3,
+            )
+        }
     }
 }

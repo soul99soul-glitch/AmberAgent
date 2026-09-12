@@ -18,9 +18,12 @@ import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.background
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -80,6 +83,9 @@ import app.amber.feature.runtime.CapabilityPermissionStore
 import app.amber.core.settings.prefs.SettingsAggregator
 import app.amber.agent.data.db.entity.MiniAppEntity
 import app.amber.feature.ui.context.LocalNavController
+import app.amber.feature.ui.components.nav.BackButton
+import app.amber.feature.ui.components.ui.WorkspaceTopBar
+import app.amber.feature.ui.components.ui.workspaceColors
 import app.amber.core.utils.writeClipboardText
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import org.koin.compose.koinInject
@@ -111,48 +117,82 @@ fun MiniAppRunnerPage(
 
     Box(modifier = Modifier.fillMaxSize()) {
         when (val current = state) {
-            MiniAppRunnerState.Loading -> Box(
-                modifier = Modifier.fillMaxSize(),
-                contentAlignment = Alignment.Center,
+            MiniAppRunnerState.Loading -> MiniAppRunnerChrome(
+                title = stringResource(R.string.miniapp_title),
             ) {
-                CircularProgressIndicator()
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator()
+                }
             }
 
-            MiniAppRunnerState.Missing -> MiniAppRunnerError(
-                message = stringResource(R.string.miniapp_not_found),
-                modifier = Modifier.fillMaxSize(),
-            )
-
-            is MiniAppRunnerState.Error -> MiniAppRunnerError(
-                message = current.message,
-                modifier = Modifier.fillMaxSize(),
-                onRetry = {
-                    state = MiniAppRunnerState.Loading
-                    scope.launch {
-                        when (val loaded = loadMiniAppRunnerState { repository.getById(appId) }) {
-                            MiniAppRunnerLoadState.Missing -> state = MiniAppRunnerState.Missing
-                            is MiniAppRunnerLoadState.Error -> state = MiniAppRunnerState.Error(loaded.message)
-                            is MiniAppRunnerLoadState.Ready -> {
-                                reloadKey++
-                                state = MiniAppRunnerState.Ready(loaded.app)
-                                markRunnerVisit(repository, appId)
-                            }
-                        }
-                    }
-                },
-            )
-
-            is MiniAppRunnerState.Ready -> key(current.app.id) {
-                MiniAppWebView(
-                    app = current.app,
-                    reloadKey = reloadKey,
-                    onError = { message -> state = MiniAppRunnerState.Error(message) },
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .statusBarsPadding(),
+            MiniAppRunnerState.Missing -> MiniAppRunnerChrome(
+                title = stringResource(R.string.miniapp_title),
+            ) {
+                MiniAppRunnerError(
+                    message = stringResource(R.string.miniapp_not_found),
+                    modifier = Modifier.fillMaxSize(),
                 )
             }
+
+            is MiniAppRunnerState.Error -> MiniAppRunnerChrome(
+                title = stringResource(R.string.miniapp_title),
+            ) {
+                MiniAppRunnerError(
+                    message = current.message,
+                    modifier = Modifier.fillMaxSize(),
+                    onRetry = {
+                        state = MiniAppRunnerState.Loading
+                        scope.launch {
+                            when (val loaded = loadMiniAppRunnerState { repository.getById(appId) }) {
+                                MiniAppRunnerLoadState.Missing -> state = MiniAppRunnerState.Missing
+                                is MiniAppRunnerLoadState.Error -> state = MiniAppRunnerState.Error(loaded.message)
+                                is MiniAppRunnerLoadState.Ready -> {
+                                    reloadKey++
+                                    state = MiniAppRunnerState.Ready(loaded.app)
+                                    markRunnerVisit(repository, appId)
+                                }
+                            }
+                        }
+                    },
+                )
+            }
+
+            is MiniAppRunnerState.Ready -> key(current.app.id) {
+                MiniAppRunnerChrome(title = current.app.title) {
+                    MiniAppWebView(
+                        app = current.app,
+                        reloadKey = reloadKey,
+                        onError = { message -> state = MiniAppRunnerState.Error(message) },
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                }
+            }
         }
+    }
+}
+
+@Composable
+private fun MiniAppRunnerChrome(
+    title: String,
+    content: @Composable BoxScope.() -> Unit,
+) {
+    val colors = workspaceColors()
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .statusBarsPadding()
+            .background(colors.canvas),
+    ) {
+        WorkspaceTopBar(
+            title = title,
+            navigationIcon = { BackButton() },
+        )
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f),
+            content = content,
+        )
     }
 }
 

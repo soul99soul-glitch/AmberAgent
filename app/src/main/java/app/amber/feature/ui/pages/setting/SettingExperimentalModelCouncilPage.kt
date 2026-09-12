@@ -1,15 +1,18 @@
 package app.amber.feature.ui.pages.setting
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
@@ -32,9 +35,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
 import app.amber.ai.core.ReasoningLevel
 import app.amber.ai.provider.ModelType
-import app.amber.ai.provider.ProviderSetting
 import com.composables.icons.lucide.Lucide
-import com.composables.icons.lucide.FileText
 import app.amber.agent.R
 import app.amber.feature.modelcouncil.DEFAULT_MODEL_COUNCIL_MAX_ROUNDS
 import app.amber.feature.modelcouncil.DEFAULT_MODEL_COUNCIL_OUTPUT_BUDGET_CHARS
@@ -54,6 +55,8 @@ import app.amber.feature.prompts.AgentPromptConfigRepository
 import app.amber.feature.ui.components.ai.ModelSelector
 import app.amber.feature.ui.components.ui.Select
 import app.amber.feature.ui.components.ui.workspaceColors
+import app.amber.feature.ui.theme.LocalAmberTokens
+import app.amber.feature.ui.theme.LocalAmberType
 import app.amber.core.utils.plus
 import org.koin.androidx.compose.koinViewModel
 import org.koin.compose.koinInject
@@ -156,12 +159,11 @@ fun SettingExperimentalModelCouncilPage(
     ) { innerPadding ->
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
-            contentPadding = innerPadding + PaddingValues(horizontal = 12.dp, vertical = 10.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
+            contentPadding = innerPadding + PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(18.dp),
         ) {
             item {
-                ExperimentHeroCard(
-                    icon = { Icon(Lucide.FileText, contentDescription = null) },
+                CouncilHeroCard(
                     title = stringResource(R.string.setting_model_council_title),
                     description = stringResource(R.string.setting_model_council_desc),
                     trailing = {
@@ -173,7 +175,7 @@ fun SettingExperimentalModelCouncilPage(
                 )
             }
             item {
-                ExperimentSectionCard(title = stringResource(R.string.setting_model_council_runtime_section)) {
+                CouncilSectionCard(title = stringResource(R.string.setting_model_council_runtime_section)) {
                     Text(
                         text = stringResource(R.string.setting_model_council_runtime_note),
                         style = MaterialTheme.typography.bodySmall,
@@ -241,7 +243,7 @@ fun SettingExperimentalModelCouncilPage(
                 }
             }
             item {
-                ExperimentSectionCard(title = stringResource(R.string.setting_model_council_seats_section)) {
+                CouncilSectionCard(title = stringResource(R.string.setting_model_council_seats_section)) {
                     ExperimentNote(text = stringResource(R.string.setting_model_council_seats_explainer))
                     if (chatModels.isEmpty()) {
                         ExperimentNote(text = stringResource(R.string.setting_model_council_no_models), error = true)
@@ -291,7 +293,7 @@ fun SettingExperimentalModelCouncilPage(
                 }
             }
             item {
-                ExperimentSectionCard(title = stringResource(R.string.setting_model_council_limits_section)) {
+                CouncilSectionCard(title = stringResource(R.string.setting_model_council_limits_section)) {
                     ModelCouncilSelectRow(
                         label = stringResource(R.string.setting_model_council_max_seats),
                         options = maxSeatOptions,
@@ -366,6 +368,95 @@ fun SettingExperimentalModelCouncilPage(
                     )
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun CouncilHeroCard(
+    title: String,
+    description: String,
+    trailing: @Composable () -> Unit,
+) {
+    val tokens = LocalAmberTokens.current
+    val type = LocalAmberType.current
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(14.dp),
+        color = tokens.surface,
+        contentColor = tokens.ink,
+        border = BorderStroke(1.dp, tokens.line),
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Text(
+                    text = title,
+                    style = type.body.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold),
+                    color = tokens.ink,
+                )
+                Text(
+                    text = description,
+                    style = type.secondary,
+                    color = tokens.ink2,
+                )
+            }
+            trailing()
+        }
+    }
+}
+
+@Composable
+private fun CouncilSectionCard(
+    title: String,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    val tokens = LocalAmberTokens.current
+    val type = LocalAmberType.current
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(
+                text = "//",
+                style = type.eyebrow,
+                color = tokens.accent,
+            )
+            Text(
+                text = title,
+                style = type.eyebrow,
+                color = tokens.ink2,
+            )
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .height(1.dp)
+                    .background(tokens.line),
+            )
+        }
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(14.dp),
+            color = tokens.surface,
+            contentColor = tokens.ink,
+            border = BorderStroke(1.dp, tokens.line),
+        ) {
+            Column(
+                modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+                content = content,
+            )
         }
     }
 }

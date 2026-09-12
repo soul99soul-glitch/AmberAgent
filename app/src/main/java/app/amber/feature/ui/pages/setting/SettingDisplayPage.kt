@@ -1,11 +1,9 @@
 package app.amber.feature.ui.pages.setting
 
 import android.os.Build
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.border
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -13,18 +11,18 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.ListItem
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.LocalContentColor
+import androidx.compose.material3.Icon
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ProvideTextStyle
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -45,6 +43,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.verticalScroll
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.amber.agent.R
 import app.amber.agent.LAUNCH_START_MODE_PREF
@@ -63,15 +62,15 @@ import app.amber.feature.ui.components.ui.permission.PermissionNotification
 import app.amber.feature.ui.components.ui.permission.rememberPermissionState
 import app.amber.feature.ui.components.ui.WorkspaceTopBar
 import app.amber.feature.ui.components.ui.workspaceColors
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.ChevronRight
 import app.amber.feature.ui.hooks.rememberAmoledDarkMode
 import app.amber.feature.ui.hooks.rememberSharedPreferenceBoolean
 import app.amber.feature.ui.hooks.rememberSharedPreferenceString
 import app.amber.feature.ui.components.ui.IntLabel
 import app.amber.feature.ui.components.ui.NotionSlider
 import app.amber.feature.ui.components.ui.PercentLabel
-import app.amber.feature.ui.theme.CustomColors
 import app.amber.feature.ui.theme.JetbrainsMono
-import app.amber.feature.ui.theme.LocalDarkMode
 import app.amber.feature.ui.theme.NotoSerifSC
 import app.amber.core.utils.plus
 import org.koin.androidx.compose.koinViewModel
@@ -124,6 +123,7 @@ private fun <T> WorkspaceSegmentedChoice(
             }
         }
     }
+
 }
 
 @Composable
@@ -131,6 +131,7 @@ fun SettingDisplayPage(vm: SettingVM = koinViewModel()) {
     val settings by vm.settings.collectAsStateWithLifecycle()
     var displaySetting by remember(settings) { mutableStateOf(settings.displaySetting) }
     var amoledDarkMode by rememberAmoledDarkMode()
+    var showThemeLibrary by remember { mutableStateOf(false) }
 
     fun updateDisplaySetting(setting: DisplaySetting) {
         displaySetting = setting
@@ -160,130 +161,78 @@ fun SettingDisplayPage(vm: SettingVM = koinViewModel()) {
     ) { contentPadding ->
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
-            contentPadding = contentPadding + PaddingValues(horizontal = 12.dp, vertical = 10.dp),
-            verticalArrangement = Arrangement.spacedBy(18.dp)
+            contentPadding = contentPadding + PaddingValues(horizontal = SettingPageHorizontalInset, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(22.dp)
         ) {
             item {
-                Column(
-                    modifier = Modifier.padding(horizontal = 2.dp),
-                    verticalArrangement = Arrangement.spacedBy(2.dp)
-                ) {
-                    Text(
-                        text = stringResource(R.string.setting_page_theme_setting),
-                        style = MaterialTheme.typography.titleSmall,
-                        color = workspace.faint,
-                        modifier = Modifier.padding(start = 4.dp, top = 8.dp, bottom = 8.dp)
-                    )
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    SettingSectionTitle(stringResource(R.string.setting_page_theme_setting))
                     // Graphite (D2/D3): base family (Warm/Sage) + independent accent. Light/dark
                     // follows the global color mode; the 9 legacy themes are replaced.
                     val baseFamily = displaySetting.amberBaseFamily
-                    ListItem(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(
-                                RoundedCornerShape(
-                                    topStart = 16.dp,
-                                    topEnd = 16.dp,
-                                    bottomStart = 2.dp,
-                                    bottomEnd = 2.dp
-                                )
-                            ),
-                        headlineContent = { Text(stringResource(R.string.setting_display_page_base_family_title)) },
-                        supportingContent = {
-                            Column(
-                                verticalArrangement = Arrangement.spacedBy(8.dp),
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Text(stringResource(R.string.setting_display_page_base_family_desc))
+                    CardGroup {
+                        item(
+                            headlineContent = { Text(stringResource(R.string.setting_display_page_base_family_title)) },
+                            trailingContent = {
                                 WorkspaceSegmentedChoice(
                                     options = listOf("WARM", "SAGE"),
                                     selected = baseFamily,
-                                    modifier = Modifier.fillMaxWidth(),
-                                    onSelected = { fam ->
-                                        updateDisplaySetting(displaySetting.copy(amberBaseFamily = fam))
-                                    },
+                                    modifier = Modifier.widthIn(max = 190.dp),
+                                    onSelected = { fam -> updateDisplaySetting(displaySetting.copy(amberBaseFamily = fam)) },
                                     label = { fam ->
                                         Text(
-                                            text = stringResource(
-                                                if (fam == "SAGE") {
-                                                    R.string.setting_display_page_base_family_sage
-                                                } else {
-                                                    R.string.setting_display_page_base_family_warm
-                                                },
-                                            ),
+                                            text = stringResource(if (fam == "SAGE") R.string.setting_display_page_base_family_sage else R.string.setting_display_page_base_family_warm),
                                             maxLines = 1,
                                             textAlign = TextAlign.Center,
                                             modifier = Modifier.fillMaxWidth(),
                                         )
                                     },
                                 )
-                            }
-                        },
-                        colors = CustomColors.listItemColors,
-                    )
-                    ListItem(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(2.dp)),
-                        headlineContent = { Text(stringResource(R.string.setting_display_page_accent_color_title)) },
-                        supportingContent = {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(top = 4.dp),
-                                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                app.amber.feature.ui.theme.AmberAccents.forEach { acc ->
-                                    val hex = "#%06X".format(acc.hex.toArgb() and 0xFFFFFF)
-                                    val selected =
-                                        displaySetting.accentColor.equals(hex, ignoreCase = true)
-                                    Box(
-                                        modifier = Modifier
-                                            .size(32.dp)
-                                            .clip(androidx.compose.foundation.shape.CircleShape)
-                                            .background(acc.hex)
-                                            .border(
-                                                width = if (selected) 2.dp else 1.dp,
-                                                color = if (selected) workspace.ink else workspace.hairline,
-                                                shape = androidx.compose.foundation.shape.CircleShape,
-                                            )
-                                            .clickable {
-                                                updateDisplaySetting(displaySetting.copy(accentColor = hex))
-                                            },
-                                    )
+                            },
+                        )
+                        item(
+                            headlineContent = { Text(stringResource(R.string.setting_display_page_accent_color_title)) },
+                            trailingContent = {
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(9.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    app.amber.feature.ui.theme.AmberAccents.forEach { acc ->
+                                        val hex = "#%06X".format(acc.hex.toArgb() and 0xFFFFFF)
+                                        val selected = displaySetting.accentColor.equals(hex, ignoreCase = true)
+                                        Box(
+                                            modifier = Modifier
+                                                .size(26.dp)
+                                                .clip(androidx.compose.foundation.shape.CircleShape)
+                                                .background(acc.hex)
+                                                .border(
+                                                    width = if (selected) 2.dp else 1.dp,
+                                                    color = if (selected) workspace.ink else workspace.hairline,
+                                                    shape = androidx.compose.foundation.shape.CircleShape,
+                                                )
+                                                .clickable { updateDisplaySetting(displaySetting.copy(accentColor = hex)) },
+                                        )
+                                    }
                                 }
-                            }
-                        },
-                        colors = CustomColors.listItemColors,
-                    )
-                    ListItem(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(
-                                RoundedCornerShape(
-                                    topStart = 2.dp,
-                                    topEnd = 2.dp,
-                                    bottomStart = 16.dp,
-                                    bottomEnd = 16.dp
+                            },
+                        )
+                        item(
+                            headlineContent = { Text(stringResource(R.string.setting_display_page_amoled_dark_mode_title)) },
+                            trailingContent = { Switch(checked = amoledDarkMode, onCheckedChange = { amoledDarkMode = it }) },
+                        )
+                        item(
+                            onClick = { showThemeLibrary = true },
+                            headlineContent = { Text(stringResource(R.string.setting_theme_library_title)) },
+                            trailingContent = {
+                                Icon(
+                                    imageVector = Lucide.ChevronRight,
+                                    contentDescription = null,
+                                    tint = workspace.muted,
                                 )
-                            ),
-                        headlineContent = { Text(stringResource(R.string.setting_display_page_amoled_dark_mode_title)) },
-                        supportingContent = { Text(stringResource(R.string.setting_display_page_amoled_dark_mode_desc)) },
-                        trailingContent = {
-                            Switch(
-                                checked = amoledDarkMode,
-                                onCheckedChange = { amoledDarkMode = it }
-                            )
-                        },
-                        colors = CustomColors.listItemColors,
-                    )
+                            },
+                        )
+                    }
                 }
-            }
-
-            item {
-                // P8-09 主题库：导出 / 导入主题包 / 内置主题与导入包 apply/remove
-                ThemeLibrarySection(displaySetting = displaySetting)
             }
 
             item {
@@ -300,7 +249,6 @@ fun SettingDisplayPage(vm: SettingVM = koinViewModel()) {
                     legacyCreateNewConversationOnStart = legacyCreateNewConversationOnStart,
                 )
                 CardGroup(
-                    modifier = Modifier.padding(horizontal = 2.dp),
                     title = { SectionLabel(stringResource(R.string.setting_page_general_settings)) },
                 ) {
                     item(
@@ -354,7 +302,6 @@ fun SettingDisplayPage(vm: SettingVM = koinViewModel()) {
                     verticalArrangement = Arrangement.spacedBy(2.dp)
                 ) {
                     CardGroup(
-                        modifier = Modifier.padding(horizontal = 8.dp),
                         title = { SectionLabel(stringResource(R.string.setting_page_message_display_settings)) },
                     ) {
                         // V3: 聊天主题切换器已移到顶部 (替代旧 "Notion style" 项), 这里去除重复
@@ -521,7 +468,6 @@ fun SettingDisplayPage(vm: SettingVM = koinViewModel()) {
 
             item {
                 CardGroup(
-                    modifier = Modifier.padding(horizontal = 8.dp),
                     title = { SectionLabel(stringResource(R.string.setting_page_code_display_settings)) },
                 ) {
                     item(
@@ -568,7 +514,6 @@ fun SettingDisplayPage(vm: SettingVM = koinViewModel()) {
                     verticalArrangement = Arrangement.spacedBy(2.dp)
                 ) {
                     CardGroup(
-                        modifier = Modifier.padding(horizontal = 8.dp),
                         title = { SectionLabel(stringResource(R.string.setting_page_interaction_notification_settings)) },
                     ) {
                         item(
@@ -721,6 +666,22 @@ fun SettingDisplayPage(vm: SettingVM = koinViewModel()) {
                 }
             }
 
+        }
+    }
+
+    if (showThemeLibrary) {
+        ModalBottomSheet(
+            onDismissRequest = { showThemeLibrary = false },
+            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = SettingPageHorizontalInset, vertical = 8.dp),
+            ) {
+                ThemeLibrarySection(displaySetting = displaySetting)
+            }
         }
     }
 }

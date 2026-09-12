@@ -833,6 +833,15 @@
   <string name="setting_agent_memory_context_compaction_notify_title">Only remind first</string>
   <string name="setting_agent_memory_context_compaction_notify_desc">Show context pressure but do not compact automatically.</string>
   <string name="setting_agent_memory_context_compaction_defaults">Defaults: 70%% precompact, 85%% force, protect 8 recent turns / 16 messages.</string>
+  <string name="setting_agent_memory_context_mode_section">Mode</string>
+  <string name="setting_agent_memory_context_threshold_section">Threshold</string>
+  <string name="setting_agent_memory_context_protect_section">Protection</string>
+  <string name="setting_agent_memory_context_precompact_threshold_title">Pre-compression threshold</string>
+  <string name="setting_agent_memory_context_force_threshold_title">Force-compression threshold</string>
+  <string name="setting_agent_memory_context_protect_turns_title">Protect recent turns</string>
+  <string name="setting_agent_memory_context_protect_turns_value">%1$d turns</string>
+  <string name="setting_agent_memory_context_protect_messages_title">Protect messages</string>
+  <string name="setting_agent_memory_context_protect_messages_value">%1$d messages</string>
   <string name="setting_agent_memory_edit_title">Edit Memory</string>
   <string name="setting_agent_memory_content_label">Memory content</string>
   <string name="setting_agent_memory_empty">No core memories yet.</string>
@@ -1292,6 +1301,10 @@
   <string name="chat_page_hero_greeting">What would you like to talk about today?</string>
   <string name="chat_page_hero_greeting_with_name">Hi %1$s,
 What would you like to talk about today?</string>
+  <string name="amber_redesign_suggestion_board">Summarize today\'s board</string>
+  <string name="amber_redesign_suggestion_reply">Draft a reply</string>
+  <string name="amber_redesign_suggestion_concept">Explain a concept</string>
+  <string name="amber_redesign_conversations">Conversations</string>
   <string name="chat_page_loading_older_prefetching">Prefetching older messages %1$d/%2$d</string>
   <string name="chat_page_loading_older_preparing">Preparing older messages %1$d/%2$d</string>
   <string name="chat_page_new_session">New session</string>
@@ -1418,6 +1431,15 @@ What would you like to talk about today?</string>
   <string name="session_home_feature_mini_apps">Mini Apps</string>
   <string name="session_home_feature_novel">Novel</string>
   <string name="session_home_feature_sites">Sites</string>
+  <string name="session_home_deep_read_progress_analysis">Analyzing key viewpoints</string>
+  <string name="session_home_deep_read_progress_collecting">Collecting sources</string>
+  <string name="session_home_deep_read_progress_extended_reading">Organizing further reading</string>
+  <string name="session_home_deep_read_progress_finishing">Finishing the article</string>
+  <string name="session_home_deep_read_progress_narrative">Summarizing the story</string>
+  <string name="session_home_deep_read_progress_overview">Generating the overview</string>
+  <string name="session_home_deep_read_progress_planning">Planning the structure</string>
+  <string name="session_home_deep_read_progress_preparing">Preparing the reading</string>
+  <string name="session_home_deep_read_progress_verifying">Checking the article</string>
   <string name="session_home_hide_continue_candidate">Hide for now</string>
   <string name="session_home_status_draft">Draft</string>
   <string name="session_home_status_paused">Paused</string>

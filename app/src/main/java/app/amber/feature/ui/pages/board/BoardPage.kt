@@ -3,6 +3,7 @@ package app.amber.feature.ui.pages.board
 import android.content.Intent
 import android.widget.Toast
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -106,6 +107,7 @@ fun TodayBoardPage() {
     val uriHandler = LocalUriHandler.current
     val shareChooserTitle = stringResource(R.string.board_share_chooser)
     val sharePanelError = stringResource(R.string.board_share_panel_error)
+    val tokens = LocalAmberTokens.current
     var pendingDeepRead by remember { mutableStateOf<PendingDeepReadRequest?>(null) }
     var selectedTopic by remember { mutableStateOf<HotTopic?>(null) }
 
@@ -160,7 +162,13 @@ fun TodayBoardPage() {
                         Icon(Lucide.Settings, contentDescription = stringResource(R.string.settings))
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface),
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = tokens.bg,
+                    scrolledContainerColor = tokens.bg,
+                    titleContentColor = tokens.ink,
+                    navigationIconContentColor = tokens.ink2,
+                    actionIconContentColor = tokens.ink2,
+                ),
             )
         }
     ) { innerPadding ->
@@ -263,12 +271,26 @@ private fun HotListActionSheet(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        shape = RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp),
+        containerColor = LocalAmberTokens.current.raised,
+        contentColor = LocalAmberTokens.current.ink,
+        tonalElevation = 0.dp,
+        dragHandle = {
+            Box(
+                Modifier
+                    .padding(top = 10.dp, bottom = 4.dp)
+                    .width(42.dp)
+                    .height(4.dp)
+                    .clip(RoundedCornerShape(2.dp))
+                    .background(LocalAmberTokens.current.line2),
+            )
+        },
     ) {
         Column(
             Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 20.dp, vertical = 10.dp),
-            verticalArrangement = Arrangement.spacedBy(2.dp),
+                .padding(horizontal = 24.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             Text(
                 topic.title,
@@ -289,11 +311,12 @@ private fun HotListActionSheet(
                     overflow = TextOverflow.Ellipsis,
                 )
             }
-            Spacer(Modifier.height(10.dp))
+            Spacer(Modifier.height(8.dp))
             Hairline()
             TopicActionRow(
                 label = stringResource(R.string.deep_read_title),
                 icon = Lucide.NotebookTabs,
+                highlight = true,
                 onClick = onDeepRead,
             )
             TopicActionRow(
@@ -322,19 +345,34 @@ private fun TopicActionRow(
     label: String,
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     enabled: Boolean = true,
+    highlight: Boolean = false,
     onClick: () -> Unit,
 ) {
-    val color = if (enabled) MaterialTheme.colorScheme.onSurface else workspaceColors().muted
+    val tokens = LocalAmberTokens.current
+    val color = when {
+        !enabled -> tokens.ink3
+        highlight -> tokens.accent
+        else -> tokens.ink
+    }
     Row(
         Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(8.dp))
+            .clip(RoundedCornerShape(10.dp))
             .clickable(enabled = enabled, onClick = onClick)
-            .padding(vertical = 14.dp),
+            .padding(vertical = 8.dp),
         horizontalArrangement = Arrangement.spacedBy(14.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(icon, contentDescription = null, modifier = Modifier.size(22.dp), tint = color)
+        Box(
+            Modifier
+                .size(32.dp)
+                .clip(RoundedCornerShape(9.dp))
+                .background(if (highlight) tokens.accent.copy(alpha = 0.12f) else tokens.surface2)
+                .border(1.dp, if (highlight) tokens.accent.copy(alpha = 0.32f) else tokens.line, RoundedCornerShape(9.dp)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(icon, contentDescription = null, modifier = Modifier.size(17.dp), tint = color)
+        }
         Text(label, style = LocalAmberType.current.body, color = color)
     }
 }
@@ -383,6 +421,28 @@ private fun HotListTab(
             LazyColumn(
                 contentPadding = PaddingValues(horizontal = 18.dp, vertical = 0.dp),
             ) {
+                item {
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(top = 10.dp, bottom = 2.dp),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(
+                            Lucide.RotateCw,
+                            contentDescription = null,
+                            modifier = Modifier.size(14.dp),
+                            tint = LocalAmberTokens.current.ink3,
+                        )
+                        Spacer(Modifier.width(7.dp))
+                        Text(
+                            "下拉刷新",
+                            style = LocalAmberType.current.meta.copy(fontSize = 11.sp),
+                            color = LocalAmberTokens.current.ink2,
+                        )
+                    }
+                }
                 item {
                     RubricHead(
                         label = stringResource(R.string.board_combined_topics),

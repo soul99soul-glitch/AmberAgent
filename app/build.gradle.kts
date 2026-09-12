@@ -110,7 +110,11 @@ android {
         versionCode = 396
         versionName = "2.6.8"
 
-        testInstrumentationRunner = "app.amber.agent.AmberAgentAndroidTestRunner"
+        testInstrumentationRunner = if (project.findProperty("uiSmokeTest")?.toString()?.toBoolean() == true) {
+            "app.amber.agent.AmberAgentUiSmokeTestRunner"
+        } else {
+            "app.amber.agent.AmberAgentAndroidTestRunner"
+        }
         manifestPlaceholders["xiaomiXmsAppId"] = xiaomiXmsAppId
         manifestPlaceholders["xiaomiXmsBuildTypeDebug"] = "false"
 

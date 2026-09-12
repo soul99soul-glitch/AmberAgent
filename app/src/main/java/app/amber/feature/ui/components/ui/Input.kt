@@ -4,7 +4,6 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -27,12 +26,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.amber.feature.ui.pages.chat.LocalChatTheme
+import app.amber.feature.ui.theme.AmberSans
 import app.amber.feature.ui.theme.JetbrainsMono
 
 @Composable
@@ -76,7 +75,7 @@ private val NumberRegex = Regex("^[+-]?\\d+(\\.\\d+)?$")
 private fun String.isValidNumberInput() = this.isNotEmpty() && NumberRegex.matches(this)
 
 /**
- * V3 平卡输入 —— provider-screens.jsx Field 设计稿：
+ * Flat input field matching the redesign provider forms:
  *   - label 在上：12sp inkFaint letterSpacing 0.4 + paddingStart 2dp + marginBottom 8dp
  *   - 输入卡：padding 12/14 + 12dp 圆角 + chatTheme.surface + 1dp hair border + 14.5sp ink
  *   - error: border 走 error 色
@@ -118,8 +117,8 @@ fun FlatTextField(
             letterSpacing = 0.4.sp,
             modifier = Modifier.padding(start = 2.dp, bottom = 8.dp),
         )
-        // V3 review P3 #5: singleLine 时默认 ImeAction.Done (BasicTextField 不像 M3 TextField 自动配)
-        // V3 review P3 #6: BasicTextField 默认按内容宽度, 加 fillMaxWidth 让整个 surface 都可点击聚焦
+        // BasicTextField does not infer Done for single-line fields; use it as the form default.
+        // Fill the surface so tapping the whole field can focus the editor.
         val effectiveKeyboardOptions = if (singleLine && keyboardOptions == KeyboardOptions.Default) {
             KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Done)
         } else {
@@ -148,7 +147,7 @@ fun FlatTextField(
                     color = textColor,
                     letterSpacing = 0.2.sp,
                     lineHeight = 21.sp,
-                    fontFamily = if (mono) JetbrainsMono else FontFamily.Default,
+                    fontFamily = if (mono) JetbrainsMono else AmberSans,
                 ),
             )
         }

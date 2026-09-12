@@ -119,7 +119,6 @@ fun ThemeLibrarySection(
 
     Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(2.dp)) {
         CardGroup(
-            modifier = Modifier.padding(horizontal = 2.dp),
             title = { SectionLabel(stringResource(R.string.setting_theme_library_title)) },
         ) {
             item(

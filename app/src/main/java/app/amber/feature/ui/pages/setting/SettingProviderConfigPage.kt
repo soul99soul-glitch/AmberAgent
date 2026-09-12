@@ -226,10 +226,12 @@ internal fun ProviderConsole(
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         item("identity") {
-            ProviderConsoleIdentity(
-                provider = provider,
-                onEdit = onEdit,
-            )
+            ProviderCard(modifier = Modifier.fillMaxWidth()) {
+                ProviderConsoleIdentity(
+                    provider = provider,
+                    onEdit = onEdit,
+                )
+            }
         }
         item("protocol") {
             ProviderProtocolSection(
@@ -353,12 +355,15 @@ private fun ProviderProtocolSection(
     val options = ProviderSetting.Types.map { type ->
         ProviderSegOption(type, type.simpleName ?: "")
     }
-    ProviderPillSeg(
-        options = options,
-        selected = provider::class,
-        onSelected = { type -> onEdit(provider.convertTo(type)) },
-        mono = true,
-    )
+    ProviderCard(modifier = Modifier.fillMaxWidth()) {
+        ProviderPillSeg(
+            options = options,
+            selected = provider::class,
+            onSelected = { type -> onEdit(provider.convertTo(type)) },
+            mono = true,
+            modifier = Modifier.padding(10.dp),
+        )
+    }
 }
 
 @Composable
@@ -625,18 +630,23 @@ private fun ProviderEndpointSection(
     onEdit: (ProviderSetting) -> Unit,
 ) {
     ProviderSectionLabel(stringResource(R.string.setting_provider_page_endpoint))
-    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-        ProviderLabeledField(stringResource(R.string.setting_provider_page_display_name)) {
-            ProviderTextField(
-                value = provider.name,
-                onValueChange = { onEdit(provider.copyProvider(name = it.trim())) },
-                placeholder = "Provider",
-            )
-        }
-        when (provider) {
-            is ProviderSetting.OpenAI -> OpenAIEndpointFields(provider, onEdit)
-            is ProviderSetting.Google -> GoogleEndpointFields(provider, onEdit)
-            is ProviderSetting.Claude -> ClaudeEndpointFields(provider, onEdit)
+    ProviderCard(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 4.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            ProviderLabeledField(stringResource(R.string.setting_provider_page_display_name)) {
+                ProviderTextField(
+                    value = provider.name,
+                    onValueChange = { onEdit(provider.copyProvider(name = it.trim())) },
+                    placeholder = "Provider",
+                )
+            }
+            when (provider) {
+                is ProviderSetting.OpenAI -> OpenAIEndpointFields(provider, onEdit)
+                is ProviderSetting.Google -> GoogleEndpointFields(provider, onEdit)
+                is ProviderSetting.Claude -> ClaudeEndpointFields(provider, onEdit)
+            }
         }
     }
 }
@@ -776,42 +786,47 @@ private fun ProviderAccountSection(
     val t = LocalAmberTokens.current
     val type = LocalAmberType.current
     ProviderSectionLabel(stringResource(R.string.setting_provider_page_account))
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        ProviderSwitchRow(
-            title = stringResource(R.string.setting_provider_page_get_account_balance),
-            checked = provider.balanceOption.enabled,
-            onCheckedChange = {
-                onEdit(provider.copy(balanceOption = provider.balanceOption.copy(enabled = it)))
-            },
-        )
-        if (provider.balanceOption.enabled) {
-            Box(
-                modifier = Modifier.fillMaxWidth(),
-                contentAlignment = Alignment.CenterEnd,
-            ) {
-                ProviderBalanceText(
-                    providerSetting = provider,
-                    style = type.meta.copy(color = t.signal),
-                )
-            }
-            ProviderLabeledField("API Path") {
-                ProviderTextField(
-                    value = provider.balanceOption.apiPath,
-                    onValueChange = {
-                        onEdit(provider.copy(balanceOption = provider.balanceOption.copy(apiPath = it.trim())))
-                    },
-                    mono = true,
-                )
-            }
-            ProviderLabeledField("Result Path") {
-                ProviderTextField(
-                    value = provider.balanceOption.resultPath,
-                    onValueChange = {
-                        onEdit(provider.copy(balanceOption = provider.balanceOption.copy(resultPath = it.trim())))
-                    },
-                    isError = !BalanceResultPath.isValid(provider.balanceOption.resultPath),
-                    mono = true,
-                )
+    ProviderCard(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 4.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            ProviderSwitchRow(
+                title = stringResource(R.string.setting_provider_page_get_account_balance),
+                checked = provider.balanceOption.enabled,
+                onCheckedChange = {
+                    onEdit(provider.copy(balanceOption = provider.balanceOption.copy(enabled = it)))
+                },
+            )
+            if (provider.balanceOption.enabled) {
+                Box(
+                    modifier = Modifier.fillMaxWidth(),
+                    contentAlignment = Alignment.CenterEnd,
+                ) {
+                    ProviderBalanceText(
+                        providerSetting = provider,
+                        style = type.meta.copy(color = t.signal),
+                    )
+                }
+                ProviderLabeledField("API Path") {
+                    ProviderTextField(
+                        value = provider.balanceOption.apiPath,
+                        onValueChange = {
+                            onEdit(provider.copy(balanceOption = provider.balanceOption.copy(apiPath = it.trim())))
+                        },
+                        mono = true,
+                    )
+                }
+                ProviderLabeledField("Result Path") {
+                    ProviderTextField(
+                        value = provider.balanceOption.resultPath,
+                        onValueChange = {
+                            onEdit(provider.copy(balanceOption = provider.balanceOption.copy(resultPath = it.trim())))
+                        },
+                        isError = !BalanceResultPath.isValid(provider.balanceOption.resultPath),
+                        mono = true,
+                    )
+                }
             }
         }
     }

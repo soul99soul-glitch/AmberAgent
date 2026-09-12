@@ -32,6 +32,7 @@ import app.amber.core.settings.AgentOperationPreviewMode
 import app.amber.core.settings.MAX_AGENT_TOOL_LOOP_STEPS
 import app.amber.core.settings.MIN_AGENT_TOOL_LOOP_STEPS
 import app.amber.feature.ui.components.nav.BackButton
+import app.amber.feature.ui.components.ds.SectionLabel
 import app.amber.feature.ui.components.ui.CardGroup
 import app.amber.feature.ui.components.ui.WorkspaceTopBar
 import app.amber.feature.ui.components.ui.workspaceColors
@@ -66,17 +67,16 @@ fun SettingAgentExecutionPage(vm: SettingVM = koinViewModel()) {
     ) { innerPadding ->
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
-            contentPadding = innerPadding + PaddingValues(16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
+            contentPadding = innerPadding + PaddingValues(horizontal = SettingPageHorizontalInset, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(22.dp),
         ) {
             item {
                 CardGroup(
-                    modifier = Modifier.padding(horizontal = 8.dp),
-                    title = { Text(stringResource(R.string.setting_agent_execution_environment_section)) },
+                    title = { SectionLabel(stringResource(R.string.setting_agent_execution_environment_section)) },
                 ) {
                     item(
                         onClick = { navController.navigate(Screen.SettingSandbox) },
-                        leadingContent = { Icon(Lucide.CodeXml, null) },
+                        leadingContent = { SettingTileIcon(Lucide.CodeXml) },
                         supportingContent = { Text(stringResource(R.string.setting_page_agent_sandbox_desc)) },
                         headlineContent = { Text(stringResource(R.string.setting_page_agent_sandbox)) },
                         trailingContent = {
@@ -92,11 +92,10 @@ fun SettingAgentExecutionPage(vm: SettingVM = koinViewModel()) {
             }
             item {
                 CardGroup(
-                    modifier = Modifier.padding(horizontal = 8.dp),
-                    title = { Text(stringResource(R.string.setting_agent_execution_display_section)) },
+                    title = { SectionLabel(stringResource(R.string.setting_agent_execution_display_section)) },
                 ) {
                     item(
-                        leadingContent = { Icon(Lucide.SearchCheck, null) },
+                        leadingContent = { SettingTileIcon(Lucide.SearchCheck) },
                         supportingContent = { Text(stringResource(R.string.setting_page_agent_operation_preview_desc)) },
                         headlineContent = { Text(stringResource(R.string.setting_page_agent_operation_preview)) },
                         trailingContent = {
@@ -129,7 +128,7 @@ fun SettingAgentExecutionPage(vm: SettingVM = koinViewModel()) {
                         },
                     )
                     item(
-                        leadingContent = { Icon(Lucide.Sparkles, null) },
+                        leadingContent = { SettingTileIcon(Lucide.Sparkles) },
                         supportingContent = { Text(stringResource(R.string.setting_page_agent_generative_ui_desc)) },
                         headlineContent = { Text(stringResource(R.string.setting_page_agent_generative_ui)) },
                         trailingContent = {
@@ -148,7 +147,7 @@ fun SettingAgentExecutionPage(vm: SettingVM = koinViewModel()) {
                         },
                     )
                     item(
-                        leadingContent = { Icon(Lucide.CodeXml, null) },
+                        leadingContent = { SettingTileIcon(Lucide.CodeXml) },
                         supportingContent = { Text(stringResource(R.string.setting_page_agent_tool_loop_steps_desc)) },
                         headlineContent = { Text(stringResource(R.string.setting_page_agent_tool_loop_steps)) },
                         trailingContent = {
@@ -179,11 +178,10 @@ fun SettingAgentExecutionPage(vm: SettingVM = koinViewModel()) {
 
             item {
                 CardGroup(
-                    modifier = Modifier.padding(horizontal = 8.dp),
-                    title = { Text(stringResource(R.string.setting_agent_execution_live_status_section)) },
+                    title = { SectionLabel(stringResource(R.string.setting_agent_execution_live_status_section)) },
                 ) {
                     item(
-                        leadingContent = { Icon(Lucide.Megaphone, null) },
+                        leadingContent = { SettingTileIcon(Lucide.Megaphone) },
                         supportingContent = { Text(stringResource(R.string.setting_page_agent_live_status_desc)) },
                         headlineContent = { Text(stringResource(R.string.setting_page_agent_live_status)) },
                         trailingContent = {
@@ -202,7 +200,7 @@ fun SettingAgentExecutionPage(vm: SettingVM = koinViewModel()) {
                         },
                     )
                     item(
-                        leadingContent = { Icon(Lucide.SearchCheck, null) },
+                        leadingContent = { SettingTileIcon(Lucide.SearchCheck) },
                         supportingContent = { Text(stringResource(R.string.setting_page_agent_live_status_privacy_desc)) },
                         headlineContent = { Text(stringResource(R.string.setting_page_agent_live_status_privacy)) },
                         trailingContent = {
@@ -225,11 +223,10 @@ fun SettingAgentExecutionPage(vm: SettingVM = koinViewModel()) {
 
             item {
                 CardGroup(
-                    modifier = Modifier.padding(horizontal = 8.dp),
-                    title = { Text(stringResource(R.string.setting_agent_execution_live_mode_section)) },
+                    title = { SectionLabel(stringResource(R.string.setting_agent_execution_live_mode_section)) },
                 ) {
                     item(
-                        leadingContent = { Icon(Lucide.Sparkles, null) },
+                        leadingContent = { SettingTileIcon(Lucide.Sparkles) },
                         supportingContent = { Text(stringResource(R.string.setting_page_agent_live_mode_desc)) },
                         headlineContent = { Text(stringResource(R.string.setting_page_agent_live_mode)) },
                         trailingContent = {
@@ -248,7 +245,7 @@ fun SettingAgentExecutionPage(vm: SettingVM = koinViewModel()) {
                         },
                     )
                     item(
-                        leadingContent = { Icon(Lucide.RefreshCw, null) },
+                        leadingContent = { SettingTileIcon(Lucide.RefreshCw) },
                         supportingContent = { Text(stringResource(R.string.setting_page_agent_live_mode_auto_refresh_desc)) },
                         headlineContent = { Text(stringResource(R.string.setting_page_agent_live_mode_auto_refresh)) },
                         trailingContent = {
@@ -267,7 +264,7 @@ fun SettingAgentExecutionPage(vm: SettingVM = koinViewModel()) {
                         },
                     )
                     item(
-                        leadingContent = { Icon(Lucide.RefreshCw, null) },
+                        leadingContent = { SettingTileIcon(Lucide.RefreshCw) },
                         supportingContent = { Text(stringResource(R.string.setting_page_agent_live_mode_refresh_interval_desc)) },
                         headlineContent = { Text(stringResource(R.string.setting_page_agent_live_mode_refresh_interval)) },
                         trailingContent = {
@@ -294,7 +291,7 @@ fun SettingAgentExecutionPage(vm: SettingVM = koinViewModel()) {
                         },
                     )
                     item(
-                        leadingContent = { Icon(Lucide.CodeXml, null) },
+                        leadingContent = { SettingTileIcon(Lucide.CodeXml) },
                         supportingContent = { Text(stringResource(R.string.setting_page_agent_live_mode_max_nodes_desc)) },
                         headlineContent = { Text(stringResource(R.string.setting_page_agent_live_mode_max_nodes)) },
                         trailingContent = {
@@ -325,11 +322,10 @@ fun SettingAgentExecutionPage(vm: SettingVM = koinViewModel()) {
 
             item {
                 CardGroup(
-                    modifier = Modifier.padding(horizontal = 8.dp),
-                    title = { Text(stringResource(R.string.setting_agent_execution_stability_section)) },
+                    title = { SectionLabel(stringResource(R.string.setting_agent_execution_stability_section)) },
                 ) {
                     item(
-                        leadingContent = { Icon(Lucide.CodeXml, null) },
+                        leadingContent = { SettingTileIcon(Lucide.CodeXml) },
                         supportingContent = { Text(stringResource(R.string.setting_page_agent_generation_retry_desc)) },
                         headlineContent = { Text(stringResource(R.string.setting_page_agent_generation_retry)) },
                         trailingContent = {
@@ -350,7 +346,7 @@ fun SettingAgentExecutionPage(vm: SettingVM = koinViewModel()) {
                         },
                     )
                     item(
-                        leadingContent = { Icon(Lucide.CodeXml, null) },
+                        leadingContent = { SettingTileIcon(Lucide.CodeXml) },
                         supportingContent = { Text(stringResource(R.string.setting_page_agent_generation_retry_count_desc)) },
                         headlineContent = { Text(stringResource(R.string.setting_page_agent_generation_retry_count)) },
                         trailingContent = {
@@ -376,7 +372,7 @@ fun SettingAgentExecutionPage(vm: SettingVM = koinViewModel()) {
                         },
                     )
                     item(
-                        leadingContent = { Icon(Lucide.Megaphone, null) },
+                        leadingContent = { SettingTileIcon(Lucide.Megaphone) },
                         supportingContent = { Text(stringResource(R.string.setting_page_agent_generation_keepalive_desc)) },
                         headlineContent = { Text(stringResource(R.string.setting_page_agent_generation_keepalive)) },
                         trailingContent = {

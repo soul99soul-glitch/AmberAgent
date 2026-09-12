@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- 深色模式冷启动窗口背景 -->
+    <!-- Dark starting-window canvas. -->
     <color name="splash_bg">#FF161512</color>
+    <color name="amber_brand_ink">#ECE8DF</color>
 </resources>

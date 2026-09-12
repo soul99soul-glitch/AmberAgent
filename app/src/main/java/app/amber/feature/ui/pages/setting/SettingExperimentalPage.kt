@@ -44,6 +44,7 @@ import app.amber.agent.R
 import app.amber.agent.Screen
 import app.amber.feature.ui.components.nav.BackButton
 import app.amber.feature.ui.components.ui.CardGroup
+import app.amber.feature.ui.components.ui.WorkspaceTopBar
 import app.amber.feature.ui.components.ui.workspaceColors
 import app.amber.feature.ui.context.LocalNavController
 import app.amber.core.utils.base64Encode
@@ -59,8 +60,8 @@ fun SettingExperimentalPage() {
     ) { innerPadding ->
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
-            contentPadding = innerPadding + PaddingValues(horizontal = 12.dp, vertical = 10.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
+            contentPadding = innerPadding + PaddingValues(horizontal = SettingPageHorizontalInset, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             item {
                 ExperimentSectionCard(
@@ -134,15 +135,10 @@ internal fun ExperimentSectionCard(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Text(
-            text = title,
-            style = MaterialTheme.typography.titleSmall,
-            color = workspace.faint,
-            modifier = Modifier.padding(start = 4.dp),
-        )
+        SettingSectionTitle(title)
         Surface(
             modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(10.dp),
+            shape = RoundedCornerShape(14.dp),
             color = workspace.paper,
             contentColor = workspace.ink,
             border = BorderStroke(1.dp, workspace.hairline),
@@ -402,17 +398,10 @@ internal fun ExperimentalSettingsScaffold(
     val workspace = workspaceColors()
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = { Text(title) },
+            WorkspaceTopBar(
+                title = title,
                 navigationIcon = navigationIcon,
                 scrollBehavior = scrollBehavior,
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = workspace.paper,
-                    scrolledContainerColor = workspace.paper,
-                    titleContentColor = workspace.ink,
-                    navigationIconContentColor = workspace.muted,
-                    actionIconContentColor = workspace.blue,
-                ),
             )
         },
         modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),

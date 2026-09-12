@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -13,7 +14,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -33,6 +33,9 @@ import app.amber.agent.Screen
 import app.amber.feature.miniapp.MiniAppRepository
 import app.amber.agent.data.db.entity.MiniAppEntity
 import app.amber.feature.ui.components.nav.BackButton
+import app.amber.feature.ui.components.ds.SectionLabel
+import app.amber.feature.ui.components.ui.workspaceBorder
+import app.amber.feature.ui.components.ui.WorkspaceTopBar
 import app.amber.feature.ui.components.ui.workspaceColors
 import app.amber.feature.ui.context.LocalNavController
 import app.amber.feature.ui.pages.miniapp.components.MiniAppGridCard
@@ -55,8 +58,8 @@ fun MiniAppListPage(
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = { Text(stringResource(R.string.miniapp_title), fontWeight = androidx.compose.ui.text.font.FontWeight.Bold) },
+            WorkspaceTopBar(
+                title = stringResource(R.string.miniapp_title),
                 navigationIcon = { BackButton() },
                 actions = {
                     IconButton(onClick = { navController.navigate(Screen.MiniAppSettings) }) {
@@ -64,7 +67,8 @@ fun MiniAppListPage(
                     }
                 },
             )
-        }
+        },
+        containerColor = workspaceColors().canvas,
     ) { padding ->
         if (apps.isEmpty()) {
             Box(
@@ -73,11 +77,19 @@ fun MiniAppListPage(
                     .padding(padding),
                 contentAlignment = Alignment.Center
             ) {
-                Text(
-                    text = stringResource(R.string.miniapp_empty),
-                    style = LocalAmberType.current.secondary,
-                    color = workspaceColors().muted,
-                )
+                androidx.compose.material3.Surface(
+                    modifier = Modifier.padding(16.dp),
+                    shape = androidx.compose.foundation.shape.RoundedCornerShape(14.dp),
+                    color = workspaceColors().paper,
+                    border = workspaceBorder(),
+                ) {
+                    Text(
+                        text = stringResource(R.string.miniapp_empty),
+                        style = LocalAmberType.current.secondary,
+                        color = workspaceColors().muted,
+                        modifier = Modifier.padding(18.dp),
+                    )
+                }
             }
         } else {
             LazyVerticalGrid(
@@ -89,6 +101,12 @@ fun MiniAppListPage(
                 verticalArrangement = Arrangement.spacedBy(12.dp),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
+                item(span = { GridItemSpan(maxLineSpan) }) {
+                    SectionLabel(
+                        text = stringResource(R.string.miniapp_title),
+                        modifier = Modifier.padding(bottom = 4.dp),
+                    )
+                }
                 items(apps, key = { it.id }) { app ->
                     MiniAppGridCard(
                         app = app,

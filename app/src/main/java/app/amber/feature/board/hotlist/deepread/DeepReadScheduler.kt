@@ -54,6 +54,14 @@ class DeepReadScheduler(
                 }
             }
 
+    /**
+     * Active work keyed by its durable topic id. Finished work is deliberately
+     * omitted so a stale WRITING output cannot make Home look live after the
+     * worker has stopped.
+     */
+    fun observeActiveWorkStates(): Flow<Map<String, WorkInfo.State>> =
+        workManager.getWorkInfosByTagFlow(TAG).map(::activeDeepReadWorkStates)
+
     private fun request(
         topicId: String,
         title: String,
@@ -81,6 +89,28 @@ class DeepReadScheduler(
 
     companion object {
         const val TAG = "deep_read_generate"
-        fun workName(topicId: String): String = "deep_read_generate_$topicId"
+        fun workName(topicId: String): String = "$WORK_NAME_PREFIX$topicId"
     }
 }
+
+/** WorkInfo exposes tags, output and progress, but not the request input. */
+internal fun activeDeepReadWorkStates(infos: List<WorkInfo>): Map<String, WorkInfo.State> =
+    infos.mapNotNull { info ->
+        val topicId = info.tags
+            .firstOrNull { it.startsWith(WORK_NAME_PREFIX) }
+            ?.removePrefix(WORK_NAME_PREFIX)
+            ?.takeIf { it.isNotBlank() }
+            ?: return@mapNotNull null
+        topicId to info
+    }
+        .groupBy { it.first }
+        .mapNotNull { (topicId, topicInfos) ->
+            val state = topicInfos.firstOrNull { it.second.state == WorkInfo.State.RUNNING }?.second?.state
+                ?: topicInfos.firstOrNull { it.second.state == WorkInfo.State.ENQUEUED }?.second?.state
+                ?: topicInfos.firstOrNull { it.second.state == WorkInfo.State.BLOCKED }?.second?.state
+                ?: return@mapNotNull null
+            topicId to state
+        }
+        .toMap()
+
+private const val WORK_NAME_PREFIX = "deep_read_generate_"

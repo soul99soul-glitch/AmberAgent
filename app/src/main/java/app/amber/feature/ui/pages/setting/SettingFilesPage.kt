@@ -18,6 +18,8 @@ import androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridCells
 import androidx.compose.foundation.lazy.staggeredgrid.items
 import androidx.compose.foundation.lazy.staggeredgrid.rememberLazyStaggeredGridState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -54,7 +56,6 @@ import app.amber.feature.ui.components.nav.BackButton
 import app.amber.feature.ui.components.ui.WorkspaceTopBar
 import app.amber.feature.ui.components.ui.workspaceColors
 import app.amber.feature.ui.context.LocalToaster
-import app.amber.feature.ui.theme.CustomColors
 import org.koin.compose.koinInject
 import java.io.File
 
@@ -122,7 +123,9 @@ fun SettingFilesPage(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
+                .padding(horizontal = SettingPageHorizontalInset, vertical = 8.dp)
         ) {
+            SettingSectionTitle("${stringResource(R.string.setting_files_page_title)} · ${files.size}")
             FolderRow(
                 folders = folders,
                 selectedFolder = selectedFolder,
@@ -140,7 +143,7 @@ fun SettingFilesPage(
             } else {
                 LazyVerticalStaggeredGrid(
                     modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(16.dp),
+                    contentPadding = PaddingValues(bottom = 16.dp),
                     verticalItemSpacing = 8.dp,
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     state = gridState,
@@ -168,7 +171,7 @@ private fun FolderRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 8.dp)
+            .padding(vertical = 8.dp)
             .horizontalScroll(rememberScrollState()),
         horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
@@ -196,7 +199,9 @@ private fun FileItem(
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = CustomColors.listItemColors.containerColor)
+        shape = RoundedCornerShape(14.dp),
+        border = BorderStroke(1.dp, workspaceColors().hairline),
+        colors = CardDefaults.cardColors(containerColor = workspaceColors().paper),
     ) {
         Column {
             Box(

@@ -3,6 +3,7 @@ package app.amber.feature.home
 import android.app.Application
 import android.content.Context
 import androidx.room.Room
+import androidx.work.WorkInfo
 import app.amber.agent.data.db.AppDatabase
 import app.amber.agent.data.db.entity.ConversationDraftEntity
 import app.amber.agent.data.db.entity.ConversationEntity
@@ -21,6 +22,7 @@ import app.amber.feature.modelcouncil.CouncilRoom
 import app.amber.feature.modelcouncil.CouncilRoomStatus
 import app.amber.feature.tools.ToolEffectClass
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -190,7 +192,84 @@ class ContinueCandidateRoomSourcesTest {
             ),
             candidate.route,
         )
-        assertTrue(candidate.summary.contains("1/4"))
+        assertEquals("话题 t1", candidate.title)
+        assertTrue(!candidate.isRunning)
+        assertTrue(!candidate.summary.contains("1/4"))
+    }
+
+    @Test
+    fun `running deep read reports the active stage instead of durable section count`() = runTest {
+        insertDeepRead(
+            topicId = "running",
+            title = "一篇正在生成的文章",
+            output = DeepReadOutput(
+                generationPhase = DeepReadGenerationPhase.WRITING,
+                sectionStates = mapOf(
+                    DeepReadGenerationStage.OVERVIEW to DeepReadSectionState(DeepReadSectionStatus.RUNNING),
+                ),
+            ),
+        )
+        val source = DeepReadContinueSource(
+            hotListDao = db.hotListDao(),
+            context = context,
+            now = { now },
+            observeActiveWorkStates = {
+                flowOf(mapOf("running" to WorkInfo.State.RUNNING))
+            },
+        )
+
+        val candidate = source.observe().first().single()
+
+        assertEquals("一篇正在生成的文章", candidate.title)
+        assertTrue(candidate.isRunning)
+        assertTrue(candidate.summary.contains("overview", ignoreCase = true))
+        assertTrue(!candidate.summary.contains("/4"))
+    }
+
+    @Test
+    fun `stopped deep read with stale writing output is resumable but not running`() = runTest {
+        insertDeepRead(
+            topicId = "stopped",
+            output = DeepReadOutput(
+                generationPhase = DeepReadGenerationPhase.WRITING,
+                sectionStates = mapOf(
+                    DeepReadGenerationStage.NARRATIVE to DeepReadSectionState(DeepReadSectionStatus.RUNNING),
+                ),
+            ),
+        )
+        val source = DeepReadContinueSource(
+            hotListDao = db.hotListDao(),
+            context = context,
+            now = { now },
+            observeActiveWorkStates = { flowOf(emptyMap()) },
+        )
+
+        val candidate = source.observe().first().single()
+
+        assertTrue(!candidate.isRunning)
+        assertEquals(context.getString(app.amber.agent.R.string.session_home_status_resumable), candidate.summary)
+        assertTrue(!candidate.summary.contains("正在", ignoreCase = true))
+    }
+
+    @Test
+    fun `queued or blocked deep read does not masquerade as actively running`() = runTest {
+        insertDeepRead(
+            topicId = "queued",
+            output = DeepReadOutput(generationPhase = DeepReadGenerationPhase.PLANNING),
+        )
+        val source = DeepReadContinueSource(
+            hotListDao = db.hotListDao(),
+            context = context,
+            now = { now },
+            observeActiveWorkStates = {
+                flowOf(mapOf("queued" to WorkInfo.State.ENQUEUED))
+            },
+        )
+
+        val candidate = source.observe().first().single()
+
+        assertTrue(!candidate.isRunning)
+        assertEquals(context.getString(app.amber.agent.R.string.session_home_status_resumable), candidate.summary)
     }
 
     @Test

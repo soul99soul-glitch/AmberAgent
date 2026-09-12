@@ -7,10 +7,12 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.background
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ButtonDefaults
@@ -48,6 +50,7 @@ import com.composables.icons.lucide.Zap
 import app.amber.agent.R
 import app.amber.core.model.QuickMessage
 import app.amber.feature.ui.components.nav.BackButton
+import app.amber.feature.ui.components.ds.SectionLabel
 import app.amber.feature.ui.components.ui.ConfirmDialog
 import app.amber.feature.ui.components.ui.WorkspaceIconButton
 import app.amber.feature.ui.components.ui.WorkspaceLeadingIcon
@@ -91,26 +94,42 @@ fun QuickMessagesPage(vm: QuickMessagesVM = koinViewModel()) {
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
             contentPadding = innerPadding + PaddingValues(16.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
+            verticalArrangement = Arrangement.spacedBy(0.dp),
         ) {
             item {
-                QuickMessagesHeader(
-                    count = settings.quickMessages.size,
-                    onAdd = { showAddDialog = true },
-                )
+                Column {
+                    QuickMessagesHeader(
+                        count = settings.quickMessages.size,
+                        onAdd = { showAddDialog = true },
+                    )
+                    androidx.compose.foundation.layout.Spacer(Modifier.height(10.dp))
+                }
             }
             if (settings.quickMessages.isEmpty()) {
                 item {
-                    QuickMessagesEmptyState(onAdd = { showAddDialog = true })
+                    Column {
+                        QuickMessagesEmptyState(onAdd = { showAddDialog = true })
+                        androidx.compose.foundation.layout.Spacer(Modifier.height(10.dp))
+                    }
                 }
-            }
-
-            items(settings.quickMessages, key = { it.id }) { quickMessage ->
-                QuickMessageCard(
-                    quickMessage = quickMessage,
-                    onEdit = { editTarget = quickMessage },
-                    onDelete = { deleteTarget = quickMessage },
-                )
+            } else {
+                item {
+                    SectionLabel(
+                        text = stringResource(R.string.quick_messages_page_count, settings.quickMessages.size),
+                        modifier = Modifier.padding(top = 8.dp, bottom = 10.dp),
+                    )
+                }
+                itemsIndexed(settings.quickMessages, key = { _, item -> item.id }) { index, quickMessage ->
+                    QuickMessageCard(
+                        quickMessage = quickMessage,
+                        onEdit = { editTarget = quickMessage },
+                        onDelete = { deleteTarget = quickMessage },
+                        grouped = true,
+                        showDivider = index > 0,
+                        groupedFirst = index == 0,
+                        groupedLast = index == settings.quickMessages.lastIndex,
+                    )
+                }
             }
         }
     }
@@ -167,7 +186,7 @@ private fun QuickMessagesHeader(
     val workspace = workspaceColors()
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(8.dp),
+        shape = RoundedCornerShape(14.dp),
         color = workspace.paper,
         border = workspaceBorder(),
     ) {
@@ -208,7 +227,7 @@ private fun QuickMessagesEmptyState(
     val workspace = workspaceColors()
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(8.dp),
+        shape = RoundedCornerShape(14.dp),
         color = workspace.paper,
         border = workspaceBorder(),
     ) {
@@ -244,17 +263,37 @@ private fun QuickMessageCard(
     quickMessage: QuickMessage,
     onEdit: () -> Unit,
     onDelete: () -> Unit,
+    grouped: Boolean = false,
+    showDivider: Boolean = false,
+    groupedFirst: Boolean = false,
+    groupedLast: Boolean = false,
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
     val workspace = workspaceColors()
 
-    Surface(
-        onClick = onEdit,
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(8.dp),
-        color = workspace.paper,
-        border = workspaceBorder(),
-    ) {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        if (showDivider) {
+            androidx.compose.foundation.layout.Spacer(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(1.dp)
+                    .background(workspace.hairline),
+            )
+        }
+        Surface(
+            onClick = onEdit,
+            modifier = Modifier.fillMaxWidth(),
+            shape = if (grouped) {
+                RoundedCornerShape(
+                    topStart = if (groupedFirst) 14.dp else 0.dp,
+                    topEnd = if (groupedFirst) 14.dp else 0.dp,
+                    bottomStart = if (groupedLast) 14.dp else 0.dp,
+                    bottomEnd = if (groupedLast) 14.dp else 0.dp,
+                )
+            } else RoundedCornerShape(14.dp),
+            color = workspace.paper,
+            border = workspaceBorder(),
+        ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -328,6 +367,7 @@ private fun QuickMessageCard(
                     )
                 }
             }
+        }
         }
     }
 }

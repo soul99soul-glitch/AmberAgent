@@ -18,6 +18,9 @@ import app.amber.core.settings.secret.SecretReference
 import app.amber.core.settings.secret.SecretStore
 import app.amber.core.settings.secret.SettingsSecretMigrator
 import app.amber.core.settings.secret.fakeSecretStore
+import app.amber.core.settings.ssh.SshProfileStore
+import app.amber.feature.terminal.SshAuthMethod
+import app.amber.feature.terminal.SshProfile
 import androidx.datastore.core.DataStore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -157,6 +160,36 @@ class SecretPrefsChainRoundTripTest {
         // 用户清空 key → 保存 → secret 无引用 → 回收
         aggregator.update(Settings(providers = listOf(provider.copy(apiKey = ""))))
         assertNull("orphan secret must be reclaimed after ref removal", secretStore.read(descriptor))
+    }
+
+    @Test
+    fun `settings update preserves SSH profile credentials while reclaiming settings orphans`() = runBlocking {
+        val aggregator = buildAggregator()
+        aggregator.settingsFlow.awaitUntil { !it.init }
+        val sshStore = SshProfileStore(dataStore, secretStore)
+        val sshProfile = SshProfile(
+            id = "server-1",
+            name = "Server 1",
+            host = "example.com",
+            username = "alice",
+            authMethod = SshAuthMethod.PASSWORD,
+            createdAtMs = 1L,
+            updatedAtMs = 1L,
+        )
+        sshStore.save(sshProfile, password = "ssh-password")
+        val storedSshProfile = sshStore.snapshot().profiles.single()
+        val provider = ProviderSetting.OpenAI(apiKey = "sk-settings-orphan-66")
+        val providerSecret = SecretDescriptor("provider", provider.id.toString(), "apiKey")
+
+        aggregator.update(Settings(providers = listOf(provider)))
+        assertEquals("ssh-password", sshStore.readCredentials(storedSshProfile).password)
+        assertEquals("sk-settings-orphan-66", secretStore.read(providerSecret))
+
+        aggregator.update(Settings(providers = listOf(provider.copy(apiKey = ""))))
+
+        assertNull("settings-owned orphan must be reclaimed", secretStore.read(providerSecret))
+        assertEquals("ssh-password", sshStore.readCredentials(sshStore.snapshot().profiles.single()).password)
+        assertEquals("server-1", sshStore.snapshot().defaultProfileId)
     }
 
     @Test

@@ -9,6 +9,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ListItem
@@ -17,6 +19,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
@@ -26,12 +29,15 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import app.amber.agent.R
+import app.amber.core.utils.plus
 import app.amber.feature.miniapp.MiniAppSpeechEngine
 import app.amber.feature.ui.components.nav.BackButton
+import app.amber.feature.ui.components.ui.WorkspaceTopBar
 import app.amber.feature.ui.components.ui.workspaceColors
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
@@ -54,6 +60,7 @@ fun SettingTtsPage() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val colors = workspaceColors()
+    val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
 
     // 页面展示 Android 语义的倍率；MiniAppSpeechEngine 接收 iOS 对齐的
     // 0..1 语速（0.5 = 正常），所以发送时除以 2。
@@ -82,31 +89,42 @@ fun SettingTtsPage() {
 
     Scaffold(
         topBar = {
-            androidx.compose.material3.TopAppBar(
-                title = { Text("语音合成") },
+            WorkspaceTopBar(
+                title = stringResource(R.string.setting_page_tts),
                 navigationIcon = { BackButton() },
+                scrollBehavior = scrollBehavior,
             )
         },
+        modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
+        containerColor = colors.canvas,
     ) { padding ->
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(
-                start = 16.dp,
-                top = padding.calculateTopPadding() + 12.dp,
-                end = 16.dp,
-                bottom = padding.calculateBottomPadding() + 20.dp,
-            ),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
+            contentPadding = padding + PaddingValues(horizontal = SettingPageHorizontalInset, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             item {
-                Text(
-                    "Android 当前使用系统语音合成（TextToSpeech）。本页仅提供试听，不参与聊天朗读或录音转写。",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = colors.muted,
-                )
+                Surface(
+                    shape = RoundedCornerShape(14.dp),
+                    color = colors.paper,
+                    border = BorderStroke(1.dp, colors.hairline),
+                ) {
+                    Text(
+                        "Android 当前使用系统语音合成（TextToSpeech）。本页仅提供试听，不参与聊天朗读或录音转写。",
+                        modifier = Modifier.padding(14.dp),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = colors.muted,
+                    )
+                }
             }
             item {
-                Surface(shape = MaterialTheme.shapes.large, color = colors.paper) {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    SettingSectionTitle("试听")
+                    Surface(
+                        shape = RoundedCornerShape(14.dp),
+                        color = colors.paper,
+                        border = BorderStroke(1.dp, colors.hairline),
+                    ) {
                     ListItem(
                         headlineContent = { Text("系统 TTS") },
                         supportingContent = {
@@ -138,10 +156,15 @@ fun SettingTtsPage() {
                             }
                         },
                     )
+                    }
                 }
             }
             item {
-                Surface(shape = MaterialTheme.shapes.large, color = colors.paper) {
+                Surface(
+                    shape = RoundedCornerShape(14.dp),
+                    color = colors.paper,
+                    border = BorderStroke(1.dp, colors.hairline),
+                ) {
                     Column {
                         ListItem(
                             headlineContent = { Text("语速") },

@@ -17,7 +17,6 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
@@ -27,12 +26,14 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Box
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.runtime.mutableStateOf
 import com.composables.icons.lucide.EllipsisVertical
 import androidx.compose.runtime.remember
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -52,6 +53,8 @@ import com.composables.icons.lucide.Plus
 import com.composables.icons.lucide.TriangleAlert
 import com.composables.icons.lucide.Trash2
 import com.composables.icons.lucide.Download
+import com.composables.icons.lucide.ChevronRight
+import com.composables.icons.lucide.FileText
 import com.composables.icons.lucide.WandSparkles
 import com.composables.icons.lucide.Puzzle
 import com.composables.icons.lucide.RefreshCw
@@ -59,9 +62,9 @@ import app.amber.core.files.SkillFrontmatterParser
 import app.amber.core.files.SkillMetadata
 import app.amber.core.files.SkillScanIssue
 import app.amber.agent.Screen
+import app.amber.feature.ui.components.ds.SectionLabel
 import app.amber.feature.ui.components.nav.BackButton
 import app.amber.feature.ui.components.ui.ConfirmDialog
-import app.amber.feature.ui.components.ui.WorkspaceIconButton
 import app.amber.feature.ui.components.ui.WorkspaceLeadingIcon
 import app.amber.feature.ui.components.ui.WorkspaceStatusPill
 import app.amber.feature.ui.components.ui.WorkspaceTextButton
@@ -128,6 +131,15 @@ fun SkillsPage() {
                 SkillIssueCard(issue = issue)
             }
 
+            if (skills.isNotEmpty()) {
+                item {
+                    SectionLabel(
+                        text = stringResource(R.string.skills_page_installed_count, skills.size),
+                        modifier = Modifier.padding(top = 8.dp),
+                    )
+                }
+            }
+
             if (skills.isEmpty()) {
                 item {
                     Column(
@@ -180,6 +192,10 @@ fun SkillsPage() {
     if (showAddDialog) {
         AddSkillDialog(
             onDismiss = { showAddDialog = false },
+            onImportGitHub = {
+                showAddDialog = false
+                showImportDialog = true
+            },
             onConfirm = { name, content ->
                 vm.saveSkill(name, content) { success ->
                     showAddDialog = false
@@ -297,29 +313,25 @@ private fun SkillLibraryStatusCard(
                 )
             }
             Row(
+                modifier = Modifier.horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                WorkspaceIconButton(
-                    onClick = onAdd,
-                    modifier = Modifier.minimumInteractiveComponentSize(),
+                SkillActionButton(
                     icon = Lucide.Plus,
-                    contentDescription = stringResource(R.string.skills_page_add_title),
-                    tone = WorkspaceTone.Neutral,
+                    label = stringResource(R.string.skills_page_add_title),
+                    onClick = onAdd,
+                    accent = true,
                 )
-                WorkspaceIconButton(
-                    onClick = onImport,
-                    modifier = Modifier.minimumInteractiveComponentSize(),
+                SkillActionButton(
                     icon = Lucide.Download,
-                    contentDescription = stringResource(R.string.skills_page_import_from_github),
-                    tone = WorkspaceTone.Neutral,
+                    label = stringResource(R.string.skills_page_import_from_github),
+                    onClick = onImport,
                 )
-                WorkspaceIconButton(
-                    onClick = onRefresh,
-                    modifier = Modifier.minimumInteractiveComponentSize(),
+                SkillActionButton(
                     icon = Lucide.RefreshCw,
-                    contentDescription = stringResource(R.string.skills_page_refresh),
-                    tone = WorkspaceTone.Neutral,
+                    label = stringResource(R.string.skills_page_refresh),
+                    onClick = onRefresh,
                 )
                 if (installedCount > 0) {
                     WorkspaceTextButton(
@@ -330,6 +342,32 @@ private fun SkillLibraryStatusCard(
                     )
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun SkillActionButton(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    onClick: () -> Unit,
+    accent: Boolean = false,
+) {
+    val colors = workspaceColors()
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(999.dp),
+        color = if (accent) MaterialTheme.colorScheme.primaryContainer else colors.row,
+        contentColor = if (accent) MaterialTheme.colorScheme.primary else colors.muted,
+        border = workspaceBorder(),
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(icon, contentDescription = null, modifier = Modifier.size(15.dp))
+            Text(label, style = MaterialTheme.typography.labelSmall, maxLines = 1)
         }
     }
 }
@@ -568,8 +606,10 @@ $list
 @Composable
 private fun AddSkillDialog(
     onDismiss: () -> Unit,
+    onImportGitHub: () -> Unit,
     onConfirm: (name: String, content: String) -> Unit,
 ) {
+    var manualMode by rememberSaveable { mutableStateOf(false) }
     var content by rememberSaveable { mutableStateOf("") }
 
     val name = remember(content) {
@@ -581,43 +621,105 @@ private fun AddSkillDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.skills_page_add_title)) },
         text = {
-            OutlinedTextField(
-                value = content,
-                onValueChange = { content = it },
-                label = { Text(stringResource(R.string.skills_page_skill_content_label)) },
-                placeholder = {
+            if (manualMode) {
+                OutlinedTextField(
+                    value = content,
+                    onValueChange = { content = it },
+                    label = { Text(stringResource(R.string.skills_page_skill_content_label)) },
+                    placeholder = {
+                        Text(
+                            "---\nname: my-skill\ndescription: \"...\"\n---\n\n指令内容...",
+                            fontFamily = FontFamily.Monospace,
+                        )
+                    },
+                    supportingText = {
+                        if (nameError) Text(
+                            stringResource(R.string.skills_page_name_error),
+                            color = MaterialTheme.colorScheme.error
+                        )
+                        else if (name.isNotBlank()) Text(stringResource(R.string.skills_page_skill_name, name))
+                        else Text(stringResource(R.string.skills_page_paste_hint))
+                    },
+                    isError = nameError,
+                    minLines = 8,
+                    maxLines = 14,
+                    textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            } else {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text(
-                        "---\nname: my-skill\ndescription: \"...\"\n---\n\n指令内容...",
-                        fontFamily = FontFamily.Monospace,
+                        text = stringResource(R.string.skills_page_paste_hint),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                },
-                supportingText = {
-                    if (nameError) Text(
-                        stringResource(R.string.skills_page_name_error),
-                        color = MaterialTheme.colorScheme.error
+                    SkillAddOptionRow(
+                        icon = Lucide.Download,
+                        title = stringResource(R.string.skills_page_import_from_github),
+                        description = stringResource(R.string.skills_page_import_description),
+                        onClick = onImportGitHub,
                     )
-                    else if (name.isNotBlank()) Text(stringResource(R.string.skills_page_skill_name, name))
-                    else Text(stringResource(R.string.skills_page_paste_hint))
-                },
-                isError = nameError,
-                minLines = 8,
-                maxLines = 14,
-                textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
-                modifier = Modifier.fillMaxWidth(),
-            )
+                    SkillAddOptionRow(
+                        icon = Lucide.FileText,
+                        title = stringResource(R.string.skills_page_add_title),
+                        description = stringResource(R.string.skills_page_skill_content_label),
+                        onClick = { manualMode = true },
+                    )
+                }
+            }
         },
         confirmButton = {
-            TextButton(
-                onClick = { onConfirm(name, content) },
-                enabled = name.isNotBlank() && !nameError,
-            ) {
-                Text(stringResource(R.string.skills_page_save))
+            if (manualMode) {
+                TextButton(
+                    onClick = { onConfirm(name, content) },
+                    enabled = name.isNotBlank() && !nameError,
+                ) {
+                    Text(stringResource(R.string.skills_page_save))
+                }
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) }
+            TextButton(onClick = { if (manualMode) manualMode = false else onDismiss() }) {
+                Text(if (manualMode) stringResource(R.string.back) else stringResource(R.string.cancel))
+            }
         },
     )
+}
+
+@Composable
+private fun SkillAddOptionRow(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    title: String,
+    description: String,
+    onClick: () -> Unit,
+) {
+    val colors = workspaceColors()
+    Surface(
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(14.dp),
+        color = colors.paper,
+        border = workspaceBorder(),
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            WorkspaceLeadingIcon(icon = icon, tone = WorkspaceTone.Accent)
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(title, style = MaterialTheme.typography.titleSmall)
+                Text(
+                    description,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = colors.muted,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            Icon(Lucide.ChevronRight, contentDescription = null, tint = colors.faint)
+        }
+    }
 }
 
 @Composable

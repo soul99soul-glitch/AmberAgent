@@ -1,18 +1,22 @@
 package app.amber.feature.ui.pages.councilroom
 
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Surface
@@ -39,6 +43,7 @@ import app.amber.feature.ui.components.ui.workspaceColors
 import app.amber.feature.ui.pages.chat.LocalChatTheme
 import com.composables.icons.lucide.Lucide
 import com.composables.icons.lucide.RefreshCw
+import com.composables.icons.lucide.X
 
 /**
  * Council members & synthesis as a bottom sheet (opened from the room top bar's
@@ -79,37 +84,66 @@ fun CouncilMembersSheet(
                 .padding(bottom = 24.dp),
         ) {
             item(key = "header") {
-                Column(modifier = Modifier.padding(bottom = 6.dp)) {
+                Column(modifier = Modifier.padding(bottom = 8.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Text(
+                            text = stringResource(R.string.council_room_topic_author)
+                                .substringBefore("·")
+                                .trim(),
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = workspace.muted,
+                        )
+                        Spacer(modifier = Modifier.weight(1f))
+                        IconButton(onClick = onDismiss) {
+                            Icon(
+                                imageVector = Lucide.X,
+                                contentDescription = stringResource(R.string.cancel),
+                                tint = workspace.muted,
+                            )
+                        }
+                    }
                     Text(
                         text = room.objective.ifBlank { defaultObjective },
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.SemiBold,
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
                         color = chatTheme.ink,
                     )
                     Text(
                         text = membersSubtitle(room),
-                        style = MaterialTheme.typography.labelMedium,
-                        color = workspace.muted,
-                        modifier = Modifier.padding(top = 2.dp),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = workspace.faint,
+                        modifier = Modifier.padding(top = 8.dp),
                     )
                 }
             }
 
-            item(key = "roster-eyebrow") {
-                Text(
-                    text = stringResource(R.string.council_room_members_heading),
-                    modifier = Modifier.padding(top = 10.dp, bottom = 8.dp),
-                    style = MaterialTheme.typography.labelMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    color = workspace.muted,
-                )
+            item(key = "members-eyebrow") {
+                CouncilSheetEyebrow(text = stringResource(R.string.council_room_members_heading))
             }
-
-            items(members, key = { it.id }) { participant ->
-                MemberRow(
-                    participant = participant,
-                    isHost = participant.kind == CouncilParticipantKind.HOST,
-                )
+            item(key = "members-card") {
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(14.dp),
+                    color = chatTheme.surface,
+                    border = androidx.compose.foundation.BorderStroke(1.dp, chatTheme.surfaceEdge),
+                ) {
+                    Column {
+                        members.forEachIndexed { index, participant ->
+                            if (index > 0) {
+                                HorizontalDivider(color = workspace.hairline)
+                            }
+                            MemberRow(
+                                participant = participant,
+                                isHost = participant.kind == CouncilParticipantKind.HOST,
+                            )
+                        }
+                    }
+                }
             }
 
             // Restart action sits BETWEEN the member roster and the synthesis block,
@@ -151,46 +185,76 @@ fun CouncilMembersSheet(
             }
 
             item(key = "synthesis") {
-                HorizontalDivider(
-                    color = workspace.hairline,
-                    modifier = Modifier.padding(vertical = 14.dp),
-                )
-                Text(
-                    text = stringResource(R.string.council_room_synthesis_heading),
-                    modifier = Modifier.padding(bottom = 9.dp),
-                    style = MaterialTheme.typography.labelMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    color = workspace.muted,
-                )
-                when {
-                    room.synthesis.isNotBlank() -> {
-                        MarkdownBlock(
-                            content = room.synthesis,
-                            style = MaterialTheme.typography.bodyMedium.copy(color = workspace.ink),
-                        )
-                    }
+                CouncilSheetEyebrow(text = stringResource(R.string.council_room_synthesis_heading))
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(14.dp),
+                    color = chatTheme.surface,
+                    border = androidx.compose.foundation.BorderStroke(1.dp, chatTheme.surfaceEdge),
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        when {
+                            room.synthesis.isNotBlank() -> {
+                                MarkdownBlock(
+                                    content = room.synthesis,
+                                    style = MaterialTheme.typography.bodyMedium.copy(color = workspace.ink),
+                                )
+                            }
 
-                    room.status == CouncilRoomStatus.FINALIZING -> {
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                            CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp, color = chatTheme.accent)
-                            Text(
-                                text = stringResource(R.string.council_room_synthesizing),
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = workspace.muted,
-                            )
+                            room.status == CouncilRoomStatus.FINALIZING -> {
+                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                    CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp, color = chatTheme.accent)
+                                    Text(
+                                        text = stringResource(R.string.council_room_synthesizing),
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = workspace.muted,
+                                    )
+                                }
+                            }
+
+                            else -> {
+                                Text(
+                                    text = stringResource(R.string.council_room_synthesis_in_progress),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = workspace.muted,
+                                )
+                            }
                         }
-                    }
-
-                    else -> {
-                        Text(
-                            text = stringResource(R.string.council_room_synthesis_in_progress),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = workspace.muted,
-                        )
                     }
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun CouncilSheetEyebrow(text: String) {
+    val chatTheme = LocalChatTheme.current
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 16.dp, bottom = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text(
+            text = "//",
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.SemiBold,
+            color = chatTheme.accent,
+        )
+        Text(
+            text = text,
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.SemiBold,
+            color = chatTheme.inkFaint,
+        )
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .height(1.dp)
+                .background(chatTheme.surfaceEdge),
+        )
     }
 }
 

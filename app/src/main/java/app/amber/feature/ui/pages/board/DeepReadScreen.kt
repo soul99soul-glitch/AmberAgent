@@ -7,6 +7,7 @@ import android.os.Build
 import android.view.WindowManager
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.material3.ripple
@@ -24,6 +25,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.width
@@ -31,7 +33,10 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Button
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -108,12 +113,16 @@ import app.amber.core.settings.prefs.SettingsAggregator
 import app.amber.core.font.SlidesFontRepository
 import app.amber.feature.ui.components.richtext.MarkdownNew
 import app.amber.feature.ui.theme.LocalDarkMode
+import app.amber.feature.ui.theme.LocalAmberTokens
+import app.amber.feature.ui.context.LocalNavController
 import app.amber.core.utils.appLocale
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import org.koin.compose.koinInject
+import com.composables.icons.lucide.ArrowLeft
+import com.composables.icons.lucide.Lucide
 
 @Composable
 fun DeepReadScreen(
@@ -185,6 +194,7 @@ fun DeepReadScreen(
     var runError by remember(topicId) { mutableStateOf<String?>(null) }
     var initialForceConsumed by rememberSaveable(topicId, sourceUrl) { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
+    val navController = LocalNavController.current
     val listState = rememberLazyListState()
     val darkTheme = LocalDarkMode.current
     DeepReadImmersiveWindowEffect(darkTheme = darkTheme)
@@ -340,6 +350,13 @@ fun DeepReadScreen(
                             modifier = noticeModifier,
                         )
                     }
+                    DeepReadBackButton(
+                        onClick = { navController.popBackStack() },
+                        modifier = Modifier
+                            .align(Alignment.TopStart)
+                            .statusBarsPadding()
+                            .padding(start = 18.dp, top = 10.dp),
+                    )
                 }
             }
 
@@ -374,6 +391,13 @@ fun DeepReadScreen(
                                 .align(Alignment.TopCenter)
                                 .statusBarsPadding()
                                 .padding(horizontal = 18.dp, vertical = 10.dp),
+                        )
+                        DeepReadBackButton(
+                            onClick = { navController.popBackStack() },
+                            modifier = Modifier
+                                .align(Alignment.TopStart)
+                                .statusBarsPadding()
+                                .padding(start = 18.dp, top = 10.dp),
                         )
                     }
                 }
@@ -449,6 +473,13 @@ fun DeepReadScreen(
                             modifier = noticeModifier,
                         )
                     }
+                    DeepReadBackButton(
+                        onClick = { navController.popBackStack() },
+                        modifier = Modifier
+                            .align(Alignment.TopStart)
+                            .statusBarsPadding()
+                            .padding(start = 18.dp, top = 10.dp),
+                    )
                 }
             }
         }
@@ -488,6 +519,28 @@ private fun DeepReadGenerationPhase.isActiveDeepReadPhase(): Boolean =
         this == DeepReadGenerationPhase.PLANNING ||
         this == DeepReadGenerationPhase.WRITING ||
         this == DeepReadGenerationPhase.VERIFYING
+
+@Composable
+private fun DeepReadBackButton(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val tokens = LocalAmberTokens.current
+    IconButton(
+        onClick = onClick,
+        modifier = modifier
+            .size(38.dp)
+            .background(tokens.surface.copy(alpha = 0.72f), CircleShape)
+            .border(1.dp, tokens.line2, CircleShape),
+    ) {
+        Icon(
+            Lucide.ArrowLeft,
+            contentDescription = stringResource(R.string.back),
+            modifier = Modifier.size(18.dp),
+            tint = tokens.ink,
+        )
+    }
+}
 
 @Composable
 private fun RunningStageNotice(
@@ -768,7 +821,6 @@ private fun DeepReadArticle(
             modifier = Modifier
                 .fillMaxSize()
                 .background(palette.background)
-                .statusBarsPadding()
                 .navigationBarsPadding(),
             contentPadding = PaddingValues(
                 top = 8.dp,
@@ -1084,9 +1136,10 @@ private fun HeroSkeleton(
         )
         Text(
             title,
-            style = MaterialTheme.typography.displayMedium.copy(
-                fontWeight = FontWeight.Light,
-                lineHeight = 52.sp,
+            style = MaterialTheme.typography.titleLarge.copy(
+                fontSize = 32.sp,
+                lineHeight = 38.sp,
+                fontWeight = FontWeight.Bold,
                 color = palette.ink,
             ).withReadingFont(fontFamily),
         )
@@ -1384,16 +1437,18 @@ private fun HeroTextBlock(
         }
         Text(
             title,
-            style = MaterialTheme.typography.displayMedium.copy(
-                fontWeight = FontWeight.Light,
-                lineHeight = 52.sp,
+            style = MaterialTheme.typography.titleLarge.copy(
+                fontSize = 32.sp,
+                lineHeight = 38.sp,
+                fontWeight = FontWeight.Bold,
                 color = palette.ink,
             ).withReadingFont(fontFamily),
         )
         DeepReadMarkdownText(
             text = output.summary,
             style = MaterialTheme.typography.bodyLarge.copy(
-                lineHeight = 31.sp,
+                fontSize = 15.sp,
+                lineHeight = 23.sp,
                 color = palette.ink,
             ).withReadingFont(fontFamily),
         )
@@ -1983,26 +2038,17 @@ private fun TextStyle.withReadingFont(fontFamily: FontFamily?): TextStyle =
 
 @Composable
 private fun magazinePalette(): MagazinePalette {
-    val dark = LocalDarkMode.current
-    return if (dark) {
-        MagazinePalette(
-            background = Color(0xFF0B0A09),
-            surface = Color(0xFF181410),
-            ink = Color(0xFFF1ECE3),
-            muted = Color(0xFFA89D90),
-            line = Color(0xFF3A332B),
-            accent = Color(0xFFD18752),
-        )
-    } else {
-        MagazinePalette(
-            background = Color(0xFFFAFAF8),
-            surface = Color(0xFFF0F0EC),
-            ink = Color(0xFF1A1A1A),
-            muted = Color(0xFF6B7280),
-            line = Color(0xFFD1D5DB),
-            accent = Color(0xFFEF4444),
-        )
-    }
+    val tokens = LocalAmberTokens.current
+    // The reading surface follows the redesign: paper stays light in both themes,
+    // while the surrounding app chrome keeps the active Amber base.
+    return MagazinePalette(
+        background = Color(0xFFFAFAF8),
+        surface = Color(0xFFF0EEE8),
+        ink = Color(0xFF1E1C18),
+        muted = Color(0xFF57534B),
+        line = Color(0xFFE9E5DC),
+        accent = tokens.accent,
+    )
 }
 
 private data class MagazinePalette(

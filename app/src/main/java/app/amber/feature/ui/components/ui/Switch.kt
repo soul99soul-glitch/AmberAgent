@@ -3,6 +3,7 @@ package app.amber.feature.ui.components.ui
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -45,29 +46,29 @@ fun Switch(
     enabled: Boolean = true,
     trackColor: Color = MaterialTheme.colorScheme.primary,
     trackColorUnchecked: Color = MaterialTheme.colorScheme.surfaceContainer,
-    thumbColor: Color = MaterialTheme.colorScheme.surface,
-    thumbColorUnchecked: Color = MaterialTheme.colorScheme.outline,
+    thumbColor: Color = MaterialTheme.colorScheme.onPrimary,
+    thumbColorUnchecked: Color = MaterialTheme.colorScheme.onSurfaceVariant,
 ) {
     val dimensions = when (size) {
         SwitchSize.Small -> SwitchDimensions(
-            trackWidth = 34.dp,
-            trackHeight = 18.dp,
-            thumbSize = 14.dp,
-            thumbPadding = 2.dp
+            trackWidth = 44.dp,
+            trackHeight = 26.dp,
+            thumbSize = 18.dp,
+            thumbPadding = 4.dp
         )
 
         SwitchSize.Medium -> SwitchDimensions(
-            trackWidth = 38.dp,
-            trackHeight = 20.dp,
-            thumbSize = 16.dp,
-            thumbPadding = 2.dp
+            trackWidth = 48.dp,
+            trackHeight = 28.dp,
+            thumbSize = 20.dp,
+            thumbPadding = 4.dp
         )
 
         SwitchSize.Large -> SwitchDimensions(
-            trackWidth = 42.dp,
-            trackHeight = 22.dp,
-            thumbSize = 18.dp,
-            thumbPadding = 2.dp
+            trackWidth = 52.dp,
+            trackHeight = 32.dp,
+            thumbSize = 24.dp,
+            thumbPadding = 4.dp
         )
     }
 
@@ -108,7 +109,8 @@ fun Switch(
             modifier = Modifier
                 .size(width = dimensions.trackWidth, height = dimensions.trackHeight)
                 .clip(RoundedCornerShape(50))
-                .background(currentTrackColor),
+                .background(currentTrackColor)
+                .border(1.dp, if (checked) currentTrackColor else MaterialTheme.colorScheme.outline, CircleShape),
             contentAlignment = Alignment.CenterStart,
         ) {
             Box(

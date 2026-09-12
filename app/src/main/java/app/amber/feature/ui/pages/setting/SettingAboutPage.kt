@@ -7,12 +7,15 @@ import com.composables.icons.lucide.FileText
 import com.composables.icons.lucide.Github
 import com.composables.icons.lucide.Smartphone
 import androidx.compose.foundation.LocalIndication
+import androidx.compose.foundation.background
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -22,6 +25,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -39,7 +43,6 @@ import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
-import coil3.compose.AsyncImage
 import app.amber.agent.BuildConfig
 import app.amber.agent.R
 import app.amber.agent.Screen
@@ -48,8 +51,9 @@ import app.amber.feature.ui.components.easteregg.EmojiBurstHost
 import app.amber.feature.ui.components.ui.CardGroup
 import app.amber.feature.ui.components.ui.WorkspaceTopBar
 import app.amber.feature.ui.components.ui.workspaceColors
+import app.amber.feature.ui.theme.LocalAmberTokens
+import app.amber.feature.ui.theme.LocalAmberType
 import app.amber.feature.ui.context.LocalNavController
-import app.amber.feature.ui.theme.CustomColors
 import app.amber.core.utils.openUrl
 import app.amber.core.utils.plus
 
@@ -88,23 +92,22 @@ fun SettingAboutPage() {
         ) { onBurst ->
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
-                contentPadding = innerPadding + PaddingValues(8.dp),
+                contentPadding = innerPadding + PaddingValues(horizontal = SettingPageHorizontalInset, vertical = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
                 item {
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(8.dp),
+                            .padding(top = 16.dp, bottom = 16.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        AsyncImage(
-                            model = R.mipmap.ic_launcher,
-                            contentDescription = stringResource(R.string.about_page_logo_content_description),
-                            modifier = Modifier
-                                .clip(CircleShape)
+                        val tokens = LocalAmberTokens.current
+                        Surface(
+                                modifier = Modifier
                                 .size(150.dp)
+                                .clip(CircleShape)
                                 .onGloballyPositioned { coordinates ->
                                     val position = coordinates.positionInParent()
                                     val size = coordinates.size
@@ -113,10 +116,27 @@ fun SettingAboutPage() {
                                         position.y + size.height / 2f
                                     )
                                 }
-                                .clickable {
-                                    onBurst(logoCenterPx)
-                                }
-                        )
+                                .clickable { onBurst(logoCenterPx) },
+                            shape = CircleShape,
+                            color = tokens.surface2,
+                            border = BorderStroke(1.dp, tokens.line2),
+                        ) {
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(
+                                    text = "amber",
+                                    style = LocalAmberType.current.meta.copy(fontSize = MaterialTheme.typography.titleLarge.fontSize),
+                                    color = tokens.ink,
+                                )
+                                androidx.compose.foundation.layout.Box(
+                                    modifier = Modifier
+                                        .size(width = 8.dp, height = 18.dp)
+                                        .background(tokens.accent),
+                                )
+                            }
+                        }
 
                         Text(
                             text = "AmberAgent",
@@ -127,7 +147,7 @@ fun SettingAboutPage() {
 
                 item {
                     CardGroup(
-                        modifier = Modifier.padding(horizontal = 8.dp),
+                        modifier = Modifier,
                     ) {
                         item(
                             modifier = Modifier.combinedClickable(
@@ -136,14 +156,14 @@ fun SettingAboutPage() {
                                 interactionSource = remember { MutableInteractionSource() },
                                 indication = LocalIndication.current,
                             ),
-                            leadingContent = { Icon(Lucide.CodeXml, null) },
+                            leadingContent = { SettingTileIcon(Lucide.CodeXml) },
                             supportingContent = {
                                 Text("${BuildConfig.VERSION_NAME} / ${BuildConfig.VERSION_CODE}")
                             },
                             headlineContent = { Text(stringResource(R.string.about_page_version)) },
                         )
                         item(
-                            leadingContent = { Icon(Lucide.Smartphone, null) },
+                            leadingContent = { SettingTileIcon(Lucide.Smartphone) },
                             supportingContent = {
                                 Text("${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL} / Android ${android.os.Build.VERSION.RELEASE} / SDK ${android.os.Build.VERSION.SDK_INT}")
                             },
@@ -154,10 +174,10 @@ fun SettingAboutPage() {
 
                 item {
                     CardGroup(
-                        modifier = Modifier.padding(horizontal = 8.dp),
+                        modifier = Modifier,
                     ) {
                         item(
-                            leadingContent = { Icon(Lucide.Earth, null) },
+                            leadingContent = { SettingTileIcon(Lucide.Earth) },
                             supportingContent = {
                                 Text(stringResource(R.string.about_page_website_description))
                             },
@@ -165,7 +185,7 @@ fun SettingAboutPage() {
                         )
                         item(
                             onClick = { context.openUrl("https://github.com/soul99soul-glitch/AmberAgent") },
-                            leadingContent = { Icon(Lucide.Github, null) },
+                            leadingContent = { SettingTileIcon(Lucide.Github) },
                             supportingContent = {
                                 Text(stringResource(R.string.about_page_github_description))
                             },
@@ -173,7 +193,7 @@ fun SettingAboutPage() {
                         )
                         item(
                             onClick = { context.openUrl("https://github.com/soul99soul-glitch/AmberAgent/blob/main/LICENSE") },
-                            leadingContent = { Icon(Lucide.FileText, null) },
+                            leadingContent = { SettingTileIcon(Lucide.FileText) },
                             supportingContent = {
                                 Text(stringResource(R.string.about_page_license_description))
                             },

@@ -173,7 +173,11 @@ fun SettingProviderPage(vm: SettingVM = koinViewModel()) {
                         )
                     }
                     item("online_group") {
-                        Column(Modifier.fillMaxWidth().padding(bottom = 4.dp)) {
+                        ProviderCard(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(bottom = 4.dp),
+                        ) {
                             onlineProviders.forEachIndexed { index, provider ->
                                 if (index > 0) ProviderHairline()
                                 ProviderItem(
@@ -195,7 +199,7 @@ fun SettingProviderPage(vm: SettingVM = koinViewModel()) {
                         )
                     }
                     item("disabled_group") {
-                        Column(
+                        ProviderCard(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(bottom = 18.dp)

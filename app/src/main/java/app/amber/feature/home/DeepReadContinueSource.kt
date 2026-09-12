@@ -1,6 +1,7 @@
 package app.amber.feature.home
 
 import android.content.Context
+import androidx.work.WorkInfo
 import app.amber.agent.R
 import app.amber.agent.data.db.dao.HotListDAO
 import app.amber.core.utils.JsonInstant
@@ -9,11 +10,12 @@ import app.amber.feature.board.hotlist.deepread.DeepReadGenerationPhase
 import app.amber.feature.board.hotlist.deepread.DeepReadGenerationStage
 import app.amber.feature.board.hotlist.deepread.DeepReadOutput
 import app.amber.feature.board.hotlist.deepread.DeepReadSectionStatus
-import app.amber.feature.board.hotlist.deepread.hasAnyReadySection
 import app.amber.feature.board.hotlist.deepread.isComplete
 import app.amber.feature.board.hotlist.deepread.statusOf
+import app.amber.feature.board.hotlist.deepread.withInferredSectionStates
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flowOf
 import java.time.Instant
 
 /**
@@ -24,11 +26,12 @@ import java.time.Instant
 class DeepReadContinueSource(
     private val hotListDao: HotListDAO,
     private val context: Context,
+    private val observeActiveWorkStates: () -> Flow<Map<String, WorkInfo.State>> = { flowOf(emptyMap()) },
     private val now: () -> Instant = Instant::now,
 ) : ContinueCandidateSource {
 
     override fun observe(): Flow<List<ContinueCandidate>> =
-        hotListDao.observeAllDeepReads().map { entities ->
+        combine(hotListDao.observeAllDeepReads(), observeActiveWorkStates()) { entities, workStates ->
             val nowMs = now().toEpochMilli()
             entities.mapNotNull { entity ->
                 if (!DeepReadCachePolicy.isFresh(entity.expiresAt, nowMs, entity.pinned)) {
@@ -36,19 +39,17 @@ class DeepReadContinueSource(
                 }
                 val output = runCatching {
                     JsonInstant.decodeFromString<DeepReadOutput>(entity.outputJson)
-                }.getOrNull() ?: return@mapNotNull null
+                }.getOrNull()?.withInferredSectionStates() ?: return@mapNotNull null
                 if (output.isComplete()) return@mapNotNull null
                 val readyCount = DeepReadGenerationStageAll.count { stage ->
                     output.statusOf(stage) == DeepReadSectionStatus.READY
                 }
-                if (readyCount == 0 && output.generationPhase == DeepReadGenerationPhase.IDLE) {
+                val workState = workStates[entity.topicId]
+                val isRunning = workState == WorkInfo.State.RUNNING
+                val hasActiveWork = workState != null
+                if (readyCount == 0 && output.generationPhase == DeepReadGenerationPhase.IDLE && !hasActiveWork) {
                     return@mapNotNull null
                 }
-                val progress = context.getString(
-                    R.string.deep_read_notification_running_content,
-                    context.getString(R.string.session_home_feature_deep_read),
-                    "$readyCount/${DeepReadGenerationStageAll.size}",
-                )
                 ContinueCandidate(
                     sourceKind = ContinueSourceKind.DEEP_READ,
                     sourceId = entity.topicId,
@@ -58,12 +59,54 @@ class DeepReadContinueSource(
                         sourceUrl = entity.sourceUrl,
                     ),
                     title = entity.title,
-                    summary = progress,
+                    summary = if (isRunning) {
+                        output.homeProgressSummary()
+                    } else {
+                        context.getString(R.string.session_home_status_resumable)
+                    },
                     lastUpdatedAt = Instant.ofEpochMilli(entity.updatedAt),
                     status = ContinueStatus.FAILED_RESUMABLE,
+                    isRunning = isRunning,
                 )
             }
         }
+
+    private fun DeepReadOutput.homeProgressSummary(): String = when {
+        verificationState.status == DeepReadSectionStatus.RUNNING ||
+            generationPhase == DeepReadGenerationPhase.VERIFYING ->
+            context.getString(R.string.session_home_deep_read_progress_verifying)
+
+        generationPhase == DeepReadGenerationPhase.COLLECTING ->
+            context.getString(R.string.session_home_deep_read_progress_collecting)
+
+        generationPhase == DeepReadGenerationPhase.PLANNING ->
+            context.getString(R.string.session_home_deep_read_progress_planning)
+
+        generationPhase == DeepReadGenerationPhase.WRITING -> {
+            val stage = DeepReadGenerationStageAll.firstOrNull {
+                statusOf(it) == DeepReadSectionStatus.RUNNING
+            } ?: DeepReadGenerationStageAll.firstOrNull {
+                statusOf(it) != DeepReadSectionStatus.READY
+            }
+            when (stage) {
+                DeepReadGenerationStage.OVERVIEW -> context.getString(
+                    R.string.session_home_deep_read_progress_overview,
+                )
+                DeepReadGenerationStage.NARRATIVE -> context.getString(
+                    R.string.session_home_deep_read_progress_narrative,
+                )
+                DeepReadGenerationStage.ANALYSIS -> context.getString(
+                    R.string.session_home_deep_read_progress_analysis,
+                )
+                DeepReadGenerationStage.EXTENDED_READING -> context.getString(
+                    R.string.session_home_deep_read_progress_extended_reading,
+                )
+                null -> context.getString(R.string.session_home_deep_read_progress_finishing)
+            }
+        }
+
+        else -> context.getString(R.string.session_home_deep_read_progress_preparing)
+    }
 
     companion object {
         /** 与 DeepReadGenerationStage.entries 同序，作为「总部分数」。 */

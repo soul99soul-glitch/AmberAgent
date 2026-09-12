@@ -280,10 +280,10 @@ fun SettingAgentMemoryPage(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
-                .padding(16.dp)
+                .padding(horizontal = SettingPageHorizontalInset, vertical = 8.dp)
                 .verticalScroll(rememberScrollState())
                 .imePadding(),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             when (subpage) {
                 MemorySettingsSubpage.Overview -> {
@@ -1038,7 +1038,8 @@ private fun MemoryCompactionSubpage(
     settings: Settings,
     onUpdate: ((AgentRuntimeSetting) -> AgentRuntimeSetting) -> Unit,
 ) {
-    CardGroup {
+    val compaction = settings.agentRuntime.contextCompaction
+    CardGroup(title = { SectionLabel(stringResource(R.string.setting_agent_memory_context_mode_section)) }) {
         item(
             headlineContent = { Text(stringResource(R.string.setting_agent_memory_context_compaction_title)) },
             supportingContent = {
@@ -1073,6 +1074,56 @@ private fun MemoryCompactionSubpage(
             },
         )
     }
+    CardGroup(title = { SectionLabel(stringResource(R.string.setting_agent_memory_context_threshold_section)) }) {
+        item(
+            headlineContent = { Text(stringResource(R.string.setting_agent_memory_context_precompact_threshold_title)) },
+            trailingContent = {
+                Text(
+                    text = "${(compaction.precompactRatio * 100f).toInt()}%",
+                    style = LocalAmberType.current.meta,
+                    color = workspaceColors().muted,
+                )
+            },
+        )
+        item(
+            headlineContent = { Text(stringResource(R.string.setting_agent_memory_context_force_threshold_title)) },
+            trailingContent = {
+                Text(
+                    text = "${(compaction.forceRatio * 100f).toInt()}%",
+                    style = LocalAmberType.current.meta,
+                    color = workspaceColors().muted,
+                )
+            },
+        )
+    }
+    CardGroup(title = { SectionLabel(stringResource(R.string.setting_agent_memory_context_protect_section)) }) {
+        item(
+            headlineContent = { Text(stringResource(R.string.setting_agent_memory_context_protect_turns_title)) },
+            trailingContent = {
+                Text(
+                    text = stringResource(
+                        R.string.setting_agent_memory_context_protect_turns_value,
+                        compaction.keepRecentTurns,
+                    ),
+                    style = LocalAmberType.current.meta,
+                    color = workspaceColors().muted,
+                )
+            },
+        )
+        item(
+            headlineContent = { Text(stringResource(R.string.setting_agent_memory_context_protect_messages_title)) },
+            trailingContent = {
+                Text(
+                    text = stringResource(
+                        R.string.setting_agent_memory_context_protect_messages_value,
+                        compaction.keepRecentTurns * 2,
+                    ),
+                    style = LocalAmberType.current.meta,
+                    color = workspaceColors().muted,
+                )
+            },
+        )
+    }
 }
 
 @Composable
@@ -1095,7 +1146,8 @@ private fun MemoryLibrarySubpage(
 ) {
     var showPortabilityDialog by remember { mutableStateOf(false) }
     var showEventsDialog by remember { mutableStateOf(false) }
-    var showCandidates by remember { mutableStateOf(false) }
+    // 设计稿默认展示候选审核区，真实候选仍由仓库状态决定；空列表时继续显示空态。
+    var showCandidates by remember { mutableStateOf(true) }
 
     MemorySummarySection(
         coreMemories = memories,

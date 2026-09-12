@@ -52,6 +52,7 @@ import app.amber.feature.system.AgentPermissionRisk
 import app.amber.feature.system.AgentPermissionStatus
 import app.amber.core.settings.prefs.SettingsAggregator
 import app.amber.feature.ui.components.nav.BackButton
+import app.amber.feature.ui.components.ds.SectionLabel
 import app.amber.feature.ui.components.ui.CardGroup
 import app.amber.feature.ui.components.ui.WorkspaceTopBar
 import app.amber.feature.ui.components.ui.workspaceColors
@@ -128,13 +129,13 @@ fun SettingSystemAccessPage(
     ) { innerPadding ->
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
-            contentPadding = innerPadding + PaddingValues(16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
+            contentPadding = innerPadding + PaddingValues(horizontal = SettingPageHorizontalInset, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(22.dp),
         ) {
             item("summary") {
-                CardGroup(title = { Text(stringResource(R.string.setting_system_access_center)) }) {
+                CardGroup(title = { SectionLabel(stringResource(R.string.setting_system_access_center)) }) {
                     item(
-                        leadingContent = { Icon(Lucide.Settings, contentDescription = null) },
+                        leadingContent = { SettingTileIcon(Lucide.Settings) },
                         headlineContent = { Text(stringResource(R.string.setting_system_access_core_runtime_title)) },
                         supportingContent = {
                             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -168,7 +169,7 @@ fun SettingSystemAccessPage(
             }
 
             item("runtime") {
-                CardGroup(title = { Text(stringResource(R.string.setting_system_access_runtime_section)) }) {
+                CardGroup(title = { SectionLabel(stringResource(R.string.setting_system_access_runtime_section)) }) {
                     capabilities
                         .filter { (capability, _) -> capability.specialAccess == null }
                         .forEach { (capability, status) ->
@@ -193,7 +194,7 @@ fun SettingSystemAccessPage(
             }
 
             item("special") {
-                CardGroup(title = { Text(stringResource(R.string.setting_system_access_special_section)) }) {
+                CardGroup(title = { SectionLabel(stringResource(R.string.setting_system_access_special_section)) }) {
                     capabilities
                         .filter { (capability, _) -> capability.specialAccess != null }
                         .forEach { (capability, status) ->
@@ -218,9 +219,9 @@ fun SettingSystemAccessPage(
             }
 
             item("external_file_access") {
-                CardGroup(title = { Text(stringResource(R.string.setting_system_access_external_section)) }) {
+                CardGroup(title = { SectionLabel(stringResource(R.string.setting_system_access_external_section)) }) {
                     item(
-                        leadingContent = { Icon(Lucide.FileText, contentDescription = null) },
+                        leadingContent = { SettingTileIcon(Lucide.FileText) },
                         headlineContent = { Text(stringResource(R.string.setting_system_access_external_title)) },
                         supportingContent = {
                             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {

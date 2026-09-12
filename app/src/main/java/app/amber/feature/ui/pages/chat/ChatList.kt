@@ -1,10 +1,9 @@
 package app.amber.feature.ui.pages.chat
 
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.scaleIn
-import androidx.compose.animation.scaleOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.lazy.LazyListState
@@ -83,14 +82,14 @@ private fun String.compactSummaryPreview(maxLength: Int = 1_000): String {
     val collapsed = COMPACT_SUMMARY_WHITESPACE_RE.replace(this, " ").trim()
     return if (collapsed.length > maxLength) collapsed.take(maxLength) + "…" else collapsed
 }
-internal val TimelineTopPadding = 12.dp
+internal val TimelineTopPadding = 16.dp
 internal val TimelineBottomSafetyPadding = 28.dp
 // Breathing room under the waiting dot before the first token arrives. Was
 // 156dp — stacked with the other tail reserves it opened a >1000px blank band
 // between the sent bubble and the input bar through the whole TTFT window.
 internal val PostSendWaitingBottomReserve = 40.dp
 internal val AgentWorkingIndicatorReserveHeight = 56.dp
-internal val TimelineItemSpacing = 14.dp
+internal val TimelineItemSpacing = 8.dp
 // ScrollBottomSpacerHeight keeps a small scroll-over zone below the newest
 // message; the dot itself is top-aligned against the content (no lift).
 internal val ScrollBottomSpacerHeight = 5.dp
@@ -194,7 +193,9 @@ internal fun ChatList(
         targetState = previewMode,
         label = "ChatListMode",
         transitionSpec = {
-            (fadeIn() + scaleIn(initialScale = 0.8f) togetherWith fadeOut() + scaleOut(targetScale = 0.8f))
+            (fadeIn(animationSpec = tween(durationMillis = 160)) togetherWith
+                fadeOut(animationSpec = tween(durationMillis = 100)))
+                .using(null)
         }
     ) { target ->
         if (target) {

@@ -46,13 +46,15 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.amber.agent.R
 import app.amber.feature.ui.components.ds.AmberCard
+import app.amber.feature.ui.components.ds.Hairline
 import app.amber.feature.ui.components.ds.SectionLabel
 import app.amber.feature.ui.components.nav.BackButton
 import app.amber.feature.ui.theme.AmberMono
-import app.amber.feature.ui.theme.CustomColors
+import app.amber.feature.ui.theme.LocalAmberTokens
 import app.amber.feature.ui.theme.LocalAmberType
 import app.amber.core.utils.plus
 import app.amber.core.utils.appLocale
@@ -66,6 +68,8 @@ import java.util.Locale
 @Composable
 fun StatsPage(vm: StatsVM = koinViewModel()) {
     val stats by vm.stats.collectAsStateWithLifecycle()
+    val t = LocalAmberTokens.current
+    val type = LocalAmberType.current
 
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
 
@@ -73,13 +77,18 @@ fun StatsPage(vm: StatsVM = koinViewModel()) {
         modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
         topBar = {
             TopAppBar(
-                title = { Text(stringResource(R.string.stats_page_title)) },
+                title = { Text(stringResource(R.string.stats_page_title), style = type.screenTitle, color = t.ink) },
                 navigationIcon = { BackButton() },
                 scrollBehavior = scrollBehavior,
-                colors = CustomColors.topBarColors,
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = t.bg,
+                    scrolledContainerColor = t.bg,
+                    titleContentColor = t.ink,
+                    navigationIconContentColor = t.ink2,
+                ),
             )
         },
-        containerColor = CustomColors.topBarColors.containerColor,
+        containerColor = t.bg,
     ) { padding ->
         if (stats.isLoading) {
             Box(
@@ -93,19 +102,17 @@ fun StatsPage(vm: StatsVM = koinViewModel()) {
         } else {
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
-                contentPadding = padding + PaddingValues(8.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
+                contentPadding = padding + PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
                 item {
                     HeatmapCard(
                         conversationsPerDay = stats.conversationsPerDay,
-                        modifier = Modifier.padding(horizontal = 8.dp),
                     )
                 }
                 item {
                     StatsGrid(
                         stats = stats,
-                        modifier = Modifier.padding(horizontal = 8.dp),
                     )
                 }
             }
@@ -115,6 +122,8 @@ fun StatsPage(vm: StatsVM = koinViewModel()) {
 
 @Composable
 private fun HeatmapCard(conversationsPerDay: Map<LocalDate, Int>, modifier: Modifier = Modifier) {
+    val t = LocalAmberTokens.current
+    val type = LocalAmberType.current
     AmberCard(
         modifier = modifier.fillMaxWidth(),
     ) {
@@ -133,8 +142,8 @@ private fun HeatmapCard(conversationsPerDay: Map<LocalDate, Int>, modifier: Modi
             ) {
                 Text(
                     text = stringResource(R.string.stats_page_heatmap_less),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = type.meta,
+                    color = t.ink3,
                 )
                 Spacer(Modifier.width(2.dp))
                 listOf(0f, 0.25f, 0.5f, 0.75f, 1f).forEach { alpha ->
@@ -143,8 +152,8 @@ private fun HeatmapCard(conversationsPerDay: Map<LocalDate, Int>, modifier: Modi
                 Spacer(Modifier.width(2.dp))
                 Text(
                     text = stringResource(R.string.stats_page_heatmap_more),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = type.meta,
+                    color = t.ink3,
                 )
             }
         }
@@ -154,6 +163,8 @@ private fun HeatmapCard(conversationsPerDay: Map<LocalDate, Int>, modifier: Modi
 @Composable
 private fun ChatHeatmap(conversationsPerDay: Map<LocalDate, Int>) {
     val appLocale = LocalContext.current.appLocale()
+    val t = LocalAmberTokens.current
+    val type = LocalAmberType.current
     val today = LocalDate.now()
     val startSunday = today
         .with(TemporalAdjusters.previousOrSame(DayOfWeek.SUNDAY))
@@ -198,9 +209,8 @@ private fun ChatHeatmap(conversationsPerDay: Map<LocalDate, Int>) {
                     if (label.isNotEmpty()) {
                         Text(
                             text = label,
-                            style = MaterialTheme.typography.labelSmall,
-                            fontSize = MaterialTheme.typography.labelSmall.fontSize * 0.7,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = type.meta.copy(fontSize = (type.meta.fontSize.value * 0.7f).sp),
+                            color = t.ink3,
                         )
                     }
                 }
@@ -237,15 +247,15 @@ private fun ChatHeatmap(conversationsPerDay: Map<LocalDate, Int>) {
                                 },
                                 modifier = Modifier.wrapContentWidth(unbounded = true),
                                 style = if (isYearLabel) {
-                                    MaterialTheme.typography.labelSmall.copy(
+                                    type.meta.copy(
                                         fontFamily = AmberMono,
                                         fontFeatureSettings = "tnum, zero",
                                     )
                                 } else {
-                                    MaterialTheme.typography.labelSmall
+                                    type.meta
                                 },
-                                fontSize = MaterialTheme.typography.labelSmall.fontSize * 0.75,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                fontSize = (type.meta.fontSize.value * 0.75f).sp,
+                                color = t.ink3,
                                 softWrap = false,
                                 maxLines = 1,
                             )
@@ -292,11 +302,10 @@ private fun HeatmapGridCanvas(
     cellSize: androidx.compose.ui.unit.Dp,
     cellSpacing: androidx.compose.ui.unit.Dp,
 ) {
-    // V3: heatmap 强制跟 chatTheme (即使 dynamicColor 开了 Material You, heatmap 也跟主题).
-    val chatTheme = app.amber.feature.ui.pages.chat.LocalChatTheme.current
-    val futureColor = chatTheme.toolPillBg.copy(alpha = 0.3f)
-    val emptyColor = chatTheme.toolPillBg
-    val baseColor = chatTheme.accent
+    val tokens = LocalAmberTokens.current
+    val futureColor = tokens.surface2.copy(alpha = 0.45f)
+    val emptyColor = tokens.surface2
+    val baseColor = tokens.accent
     val density = LocalDensity.current
     val cellPx = with(density) { cellSize.toPx() }
     val spacingPx = with(density) { cellSpacing.toPx() }
@@ -337,11 +346,11 @@ private fun HeatmapGridCanvas(
 
 @Composable
 private fun HeatmapCell(alpha: Float, sizeDp: Int) {
-    val chatTheme = app.amber.feature.ui.pages.chat.LocalChatTheme.current
+    val tokens = LocalAmberTokens.current
     val color = when {
-        alpha < 0f -> chatTheme.toolPillBg.copy(alpha = 0.3f) // future
-        alpha == 0f -> chatTheme.toolPillBg
-        else -> chatTheme.accent.copy(alpha = alpha)
+        alpha < 0f -> tokens.surface2.copy(alpha = 0.45f) // future
+        alpha == 0f -> tokens.surface2
+        else -> tokens.accent.copy(alpha = alpha)
     }
     Box(
         modifier = Modifier
@@ -354,58 +363,60 @@ private fun HeatmapCell(alpha: Float, sizeDp: Int) {
 @Composable
 private fun StatsGrid(stats: AppStats, modifier: Modifier = Modifier) {
     val appLocale = LocalContext.current.appLocale()
-    Column(
-        modifier = modifier,
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            StatCard(
-                modifier = Modifier.weight(1f),
-                icon = Lucide.ChartColumn,
-                label = stringResource(R.string.stats_page_total_conversations),
-                value = formatCount(stats.totalConversations.toLong(), appLocale),
-            )
-            StatCard(
-                modifier = Modifier.weight(1f),
-                icon = Lucide.MessageCircle,
-                label = stringResource(R.string.stats_page_total_messages),
-                value = formatCount(stats.totalMessages.toLong(), appLocale),
-            )
-        }
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            StatCard(
-                modifier = Modifier.weight(1f),
-                icon = Lucide.Cpu,
-                label = stringResource(R.string.stats_page_input_tokens),
-                value = formatTokens(stats.totalPromptTokens, appLocale),
-            )
-            StatCard(
-                modifier = Modifier.weight(1f),
-                icon = Lucide.Cpu,
-                label = stringResource(R.string.stats_page_output_tokens),
-                value = formatTokens(stats.totalCompletionTokens, appLocale),
-            )
-        }
-        if (stats.totalCachedTokens > 0) {
+    AmberCard(modifier = modifier.fillMaxWidth()) {
+        Column {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                StatCard(
+                    modifier = Modifier.weight(1f),
+                    icon = Lucide.ChartColumn,
+                    label = stringResource(R.string.stats_page_total_conversations),
+                    value = formatCount(stats.totalConversations.toLong(), appLocale),
+                )
+                StatCard(
+                    modifier = Modifier.weight(1f),
+                    icon = Lucide.MessageCircle,
+                    label = stringResource(R.string.stats_page_total_messages),
+                    value = formatCount(stats.totalMessages.toLong(), appLocale),
+                )
+            }
+            Hairline()
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                StatCard(
+                    modifier = Modifier.weight(1f),
+                    icon = Lucide.Cpu,
+                    label = stringResource(R.string.stats_page_input_tokens),
+                    value = formatTokens(stats.totalPromptTokens, appLocale),
+                )
+                StatCard(
+                    modifier = Modifier.weight(1f),
+                    icon = Lucide.Cpu,
+                    label = stringResource(R.string.stats_page_output_tokens),
+                    value = formatTokens(stats.totalCompletionTokens, appLocale),
+                )
+            }
+            if (stats.totalCachedTokens > 0) {
+                Hairline()
+                StatCard(
+                    modifier = Modifier.fillMaxWidth(),
+                    icon = Lucide.Zap,
+                    label = stringResource(R.string.stats_page_cached_tokens),
+                    value = formatTokens(stats.totalCachedTokens, appLocale),
+                )
+            }
+            Hairline()
             StatCard(
                 modifier = Modifier.fillMaxWidth(),
-                icon = Lucide.Zap,
-                label = stringResource(R.string.stats_page_cached_tokens),
-                value = formatTokens(stats.totalCachedTokens, appLocale),
+                icon = Lucide.Rocket,
+                label = stringResource(R.string.stats_page_launch_count),
+                value = formatCount(stats.launchCount.toLong(), appLocale),
             )
         }
-        StatCard(
-            modifier = Modifier.fillMaxWidth(),
-            icon = Lucide.Rocket,
-            label = stringResource(R.string.stats_page_launch_count),
-            value = formatCount(stats.launchCount.toLong(), appLocale),
-        )
     }
 }
 
@@ -416,33 +427,35 @@ private fun StatCard(
     label: String,
     value: String,
 ) {
-    AmberCard(modifier = modifier) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
+    val t = LocalAmberTokens.current
+    val type = LocalAmberType.current
+    Column(
+        modifier = modifier.padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
             Icon(
                 imageVector = icon,
                 contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary,
+                tint = t.accent,
                 modifier = Modifier.size(20.dp),
             )
             // Graphite §3: the stat number is a machine-fact → MONO with tabular + slashed-zero.
             // Keep headline size/weight so the visual hierarchy is unchanged; only the font swaps.
             Text(
                 text = value,
-                style = MaterialTheme.typography.headlineSmall.copy(
+                style = type.screenTitle.copy(
+                    fontSize = 20.sp,
                     fontFamily = AmberMono,
                     fontFeatureSettings = "tnum, zero",
                 ),
+                color = t.ink,
             )
             // Human label stays sans.
             Text(
                 text = label,
-                style = LocalAmberType.current.secondary,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = type.secondary,
+                color = t.ink3,
             )
-        }
     }
 }
 

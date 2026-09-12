@@ -79,6 +79,7 @@ import android.provider.OpenableColumns
 import app.amber.feature.ui.components.ds.Hairline
 import app.amber.feature.ui.components.ds.SectionLabel
 import app.amber.feature.ui.components.nav.BackButton
+import app.amber.feature.ui.pages.setting.SettingTileIcon
 import app.amber.feature.ui.components.ui.CardGroup
 import app.amber.feature.ui.components.ui.WorkspaceTopBar
 import app.amber.feature.ui.components.ui.workspaceColors
@@ -392,8 +393,8 @@ fun BackupPage(vm: BackupVM = koinViewModel()) {
                 .padding(innerPadding)
                 .verticalScroll(rememberScrollState())
                 .imePadding()
-                .padding(horizontal = 16.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             CardGroup(title = { SectionLabel("Google Drive") }) {
                 item(
@@ -402,7 +403,7 @@ fun BackupPage(vm: BackupVM = koinViewModel()) {
                     } else {
                         null
                     },
-                    leadingContent = { Icon(Lucide.DatabaseZap, contentDescription = null) },
+                    leadingContent = { SettingTileIcon(Lucide.DatabaseZap) },
                     headlineContent = { Text(stringResource(R.string.backup_google_account)) },
                     supportingContent = {
                         val supportingText = when {
@@ -445,7 +446,7 @@ fun BackupPage(vm: BackupVM = koinViewModel()) {
                     }
                 )
                 item(
-                    leadingContent = { Icon(Lucide.Cloud, contentDescription = null) },
+                    leadingContent = { SettingTileIcon(Lucide.Cloud) },
                     headlineContent = { Text(stringResource(R.string.backup_status_title)) },
                     supportingContent = {
                         BackupStatusContent(
@@ -485,7 +486,7 @@ fun BackupPage(vm: BackupVM = koinViewModel()) {
                     } else {
                         null
                     },
-                    leadingContent = { Icon(Lucide.Upload, contentDescription = null) },
+                    leadingContent = { SettingTileIcon(Lucide.Upload) },
                     headlineContent = { Text(stringResource(R.string.backup_upload)) },
                     supportingContent = {
                         Text(
@@ -510,7 +511,7 @@ fun BackupPage(vm: BackupVM = koinViewModel()) {
                     } else {
                         null
                     },
-                    leadingContent = { Icon(Lucide.CloudDownload, contentDescription = null) },
+                    leadingContent = { SettingTileIcon(Lucide.CloudDownload) },
                     headlineContent = { Text(stringResource(R.string.backup_download)) },
                     supportingContent = {
                         Text(
@@ -527,7 +528,7 @@ fun BackupPage(vm: BackupVM = koinViewModel()) {
             if (providerV2Enabled) {
                 CardGroup(title = { SectionLabel("WebDAV") }) {
                     item(
-                        leadingContent = { Icon(Lucide.DatabaseZap, contentDescription = null) },
+                        leadingContent = { SettingTileIcon(Lucide.DatabaseZap) },
                         headlineContent = { Text(stringResource(R.string.backup_server_config)) },
                         supportingContent = {
                             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -598,7 +599,7 @@ fun BackupPage(vm: BackupVM = koinViewModel()) {
                     )
                     item(
                         onClick = { vm.requestExport(ExportSource.WebDav) },
-                        leadingContent = { Icon(Lucide.Upload, contentDescription = null) },
+                        leadingContent = { SettingTileIcon(Lucide.Upload) },
                         headlineContent = { Text(stringResource(R.string.backup_upload)) },
                         supportingContent = { Text(stringResource(R.string.backup_webdav_upload_desc)) },
                     )
@@ -621,7 +622,7 @@ fun BackupPage(vm: BackupVM = koinViewModel()) {
                 CardGroup(title = { SectionLabel(stringResource(R.string.backup_local_folder)) }) {
                     item(
                         onClick = { folderPickerLauncher.launch(null) },
-                        leadingContent = { Icon(Lucide.FolderOpen, contentDescription = null) },
+                        leadingContent = { SettingTileIcon(Lucide.FolderOpen) },
                         headlineContent = {
                             Text(
                                 if (folderInfo != null) {
@@ -640,13 +641,13 @@ fun BackupPage(vm: BackupVM = koinViewModel()) {
                     )
                     item(
                         onClick = { vm.refreshLocalFolderSnapshots() },
-                        leadingContent = { Icon(Lucide.DatabaseZap, contentDescription = null) },
+                        leadingContent = { SettingTileIcon(Lucide.DatabaseZap) },
                         headlineContent = { Text(stringResource(R.string.backup_read_snapshots)) },
                         supportingContent = { Text(stringResource(R.string.backup_folder_list_desc)) },
                     )
                     item(
                         onClick = { vm.requestExport(ExportSource.LocalFolder) },
-                        leadingContent = { Icon(Lucide.Upload, contentDescription = null) },
+                        leadingContent = { SettingTileIcon(Lucide.Upload) },
                         headlineContent = { Text(stringResource(R.string.backup_upload)) },
                         supportingContent = { Text(stringResource(R.string.backup_folder_upload_desc)) },
                     )
@@ -672,7 +673,7 @@ fun BackupPage(vm: BackupVM = koinViewModel()) {
                     onClick = {
                         createDocumentLauncher.launch(LocalBackupRepository.suggestedFileName())
                     },
-                    leadingContent = { Icon(Lucide.Upload, contentDescription = null) },
+                    leadingContent = { SettingTileIcon(Lucide.Upload) },
                     headlineContent = { Text(stringResource(R.string.backup_export)) },
                     supportingContent = {
                         Text(
@@ -685,7 +686,7 @@ fun BackupPage(vm: BackupVM = koinViewModel()) {
                         vm.clearPendingImport()
                         openDocumentLauncher.launch(arrayOf(SYNC_ARCHIVE_MIME, "application/zip", "*/*"))
                     },
-                    leadingContent = { Icon(Lucide.FileInput, contentDescription = null) },
+                    leadingContent = { SettingTileIcon(Lucide.FileInput) },
                     headlineContent = { Text(stringResource(R.string.backup_import)) },
                     supportingContent = {
                         Text(stringResource(R.string.backup_local_import_desc))

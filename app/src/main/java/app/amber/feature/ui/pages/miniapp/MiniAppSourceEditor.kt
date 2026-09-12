@@ -11,7 +11,9 @@ import android.webkit.WebViewClient
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -19,16 +21,20 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -40,11 +46,24 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.layout.FirstBaseline
+import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.text.input.OffsetMapping
+import androidx.compose.ui.text.input.TransformedText
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.viewinterop.AndroidView
 import kotlinx.coroutines.CancellationException
@@ -59,8 +78,11 @@ import app.amber.feature.miniapp.MiniAppSandbox
 import app.amber.feature.miniapp.MiniAppShell
 import app.amber.feature.miniapp.MiniAppSourceChecks
 import app.amber.feature.ui.theme.JetbrainsMono
+import app.amber.feature.ui.theme.AmberTokens
+import app.amber.feature.ui.theme.LocalAmberTokens
 import org.koin.compose.koinInject
 import java.io.ByteArrayInputStream
+import kotlin.math.roundToInt
 import kotlin.uuid.Uuid
 
 /**
@@ -86,6 +108,8 @@ fun MiniAppSourceEditorDialog(
     val context = LocalContext.current
     var showDiscardConfirmation by remember { mutableStateOf(false) }
     val saveFailedMessage = stringResource(R.string.miniapp_save_failed)
+    val tokens = LocalAmberTokens.current
+    val codeScrollState = remember(app.id) { ScrollState(0) }
 
     fun requestDismiss() {
         when (miniAppEditorDismissAction(unsaved = unsaved, saving = saving)) {
@@ -105,6 +129,8 @@ fun MiniAppSourceEditorDialog(
 
     AlertDialog(
         onDismissRequest = ::requestDismiss,
+        shape = RoundedCornerShape(18.dp),
+        containerColor = tokens.raised,
         title = {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
@@ -143,16 +169,13 @@ fun MiniAppSourceEditorDialog(
             ) {
                 when (mode) {
                     MODE_VIEW -> {
-                        SelectionContainer {
-                            Text(
-                                text = editorText,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .heightIn(max = 380.dp)
-                                    .verticalScroll(rememberScrollState()),
-                                style = MaterialTheme.typography.bodySmall.copy(fontFamily = JetbrainsMono),
-                            )
-                        }
+                        MiniAppCodeEditor(
+                            source = editorText,
+                            editable = false,
+                            onSourceChange = {},
+                            enabled = false,
+                            scrollState = codeScrollState,
+                        )
                         Text(
                             text = stringResource(R.string.miniapp_source_view_only_description),
                             style = MaterialTheme.typography.labelSmall,
@@ -161,18 +184,15 @@ fun MiniAppSourceEditorDialog(
                     }
 
                     MODE_EDIT -> {
-                        OutlinedTextField(
-                            value = editorText,
-                            onValueChange = {
+                        MiniAppCodeEditor(
+                            source = editorText,
+                            editable = true,
+                            onSourceChange = {
                                 editorText = it
                                 issues = null
                             },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .heightIn(max = 380.dp),
                             enabled = !saving,
-                            textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = JetbrainsMono),
-                            minLines = 14,
+                            scrollState = codeScrollState,
                         )
                         issues?.let { found ->
                             Text(
@@ -334,6 +354,168 @@ internal fun miniAppEditorDismissAction(
     unsaved -> MiniAppEditorDismissAction.CONFIRM
     else -> MiniAppEditorDismissAction.DISMISS
 }
+
+/**
+ * The source well keeps the gutter and source in one scroll container. That
+ * makes line numbers follow the editor during long HTML files while leaving
+ * the saved source as the original plain string.
+ */
+@Composable
+internal fun MiniAppCodeEditor(
+    source: String,
+    editable: Boolean,
+    onSourceChange: (String) -> Unit,
+    enabled: Boolean,
+    scrollState: ScrollState,
+) {
+    val tokens = LocalAmberTokens.current
+    val lineHeight = 19.sp
+    var sourceTextLayout by remember(source, editable) { mutableStateOf<TextLayoutResult?>(null) }
+    val onSourceTextLayout: (TextLayoutResult) -> Unit = { sourceTextLayout = it }
+    val horizontalScrollState = rememberScrollState()
+    val editorStyle = TextStyle(
+        fontFamily = JetbrainsMono,
+        fontSize = 12.sp,
+        lineHeight = lineHeight,
+        color = tokens.ink,
+    )
+
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 260.dp, max = 380.dp),
+        shape = RoundedCornerShape(14.dp),
+        color = tokens.surface2,
+        border = androidx.compose.foundation.BorderStroke(1.dp, tokens.line),
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = 260.dp, max = 380.dp)
+                .verticalScroll(scrollState),
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 10.dp),
+                verticalAlignment = Alignment.Top,
+            ) {
+                MiniAppLineNumberGutter(
+                    style = editorStyle,
+                    color = tokens.ink4,
+                    sourceLayout = sourceTextLayout,
+                )
+
+                if (editable) {
+                    BasicTextField(
+                        value = source,
+                        onValueChange = onSourceChange,
+                        enabled = enabled,
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(start = 8.dp, end = 12.dp)
+                            .horizontalScroll(horizontalScrollState),
+                        textStyle = editorStyle,
+                        cursorBrush = SolidColor(tokens.accent),
+                        visualTransformation = MiniAppSyntaxTransformation(tokens),
+                        onTextLayout = onSourceTextLayout,
+                    )
+                } else {
+                    SelectionContainer {
+                        Text(
+                            text = syntaxHighlightedSource(source, tokens),
+                            modifier = Modifier
+                                .weight(1f)
+                                .padding(start = 8.dp, end = 12.dp)
+                                .horizontalScroll(horizontalScrollState),
+                            style = editorStyle,
+                            softWrap = false,
+                            onTextLayout = onSourceTextLayout,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun MiniAppLineNumberGutter(
+    style: TextStyle,
+    color: androidx.compose.ui.graphics.Color,
+    sourceLayout: TextLayoutResult?,
+) {
+    Layout(
+        modifier = Modifier.width(38.dp),
+        content = {
+            repeat(sourceLayout?.lineCount ?: 0) { index ->
+                Text(
+                    text = (index + 1).toString(),
+                    modifier = Modifier.fillMaxWidth(),
+                    textAlign = TextAlign.End,
+                    style = style.copy(color = color),
+                    maxLines = 1,
+                    softWrap = false,
+                )
+            }
+        },
+    ) { measurables, constraints ->
+        if (sourceLayout == null) {
+            layout(constraints.maxWidth, 0) {}
+        } else {
+            val childConstraints = constraints.copy(minWidth = constraints.maxWidth, minHeight = 0)
+            val placeables = measurables.map { it.measure(childConstraints) }
+            layout(constraints.maxWidth, sourceLayout.size.height) {
+                placeables.forEachIndexed { index, placeable ->
+                    val y = sourceLayout.getLineBaseline(index).roundToInt() - placeable[FirstBaseline]
+                    placeable.placeRelative(0, y)
+                }
+            }
+        }
+    }
+}
+
+internal class MiniAppSyntaxTransformation(
+    private val tokens: AmberTokens,
+) : VisualTransformation {
+    override fun filter(text: AnnotatedString): TransformedText = TransformedText(
+        text = syntaxHighlightedSource(text.text, tokens),
+        offsetMapping = OffsetMapping.Identity,
+    )
+}
+
+private val miniAppSyntaxPattern = Regex(
+    """<!--.*?-->|</?[\w:-]+[^>]*>|"(?:\\.|[^"])*"|'(?:\\.|[^'])*'|//.*|\b(?:const|let|var|function|return|if|else|for|while|class|new|style|script)\b|\b\d+(?:\.\d+)?\b"""
+)
+
+private fun syntaxHighlightedSource(source: String, tokens: AmberTokens): AnnotatedString =
+    buildAnnotatedString {
+        source.split('\n').forEachIndexed { lineIndex, line ->
+            var cursor = 0
+            val trimmed = line.trimStart()
+            if (trimmed.startsWith("//") || trimmed.startsWith("<!--")) {
+                withStyle(SpanStyle(color = tokens.ink3)) { append(line) }
+            } else {
+                miniAppSyntaxPattern.findAll(line).forEach { match ->
+                    if (match.range.first > cursor) {
+                        append(line.substring(cursor, match.range.first))
+                    }
+                    val token = match.value
+                    val color = when {
+                        token.startsWith("<") -> tokens.ink3
+                        token.startsWith("\"") || token.startsWith("'") -> tokens.signal
+                        token.firstOrNull()?.isDigit() == true -> tokens.ink2
+                        token in setOf("const", "let", "var", "function", "return", "if", "else", "for", "while", "class", "new", "style", "script") -> tokens.accent
+                        else -> tokens.ink2
+                    }
+                    withStyle(SpanStyle(color = color)) { append(token) }
+                    cursor = match.range.last + 1
+                }
+                if (cursor < line.length) append(line.substring(cursor))
+            }
+            if (lineIndex < source.count { it == '\n' }) append('\n')
+        }
+    }
 
 /**
  * Sandboxed preview of the (possibly unsaved) source: same MiniAppShell CSP

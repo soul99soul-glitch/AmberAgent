@@ -57,6 +57,7 @@ import com.composables.icons.lucide.Lucide
 import com.composables.icons.lucide.Plus
 import com.composables.icons.lucide.Trash2
 import app.amber.feature.ui.components.nav.BackButton
+import app.amber.feature.ui.components.ds.SectionLabel
 import app.amber.feature.ui.components.ui.ConfirmDialog
 import app.amber.feature.ui.components.ui.WorkspaceIconButton
 import app.amber.feature.ui.components.ui.WorkspaceLeadingIcon
@@ -106,6 +107,9 @@ fun SkillDetailPage(skillName: String) {
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
             mcpConfig?.let { state ->
+                SectionLabel(
+                    text = stringResource(R.string.skill_detail_page_mcp_config_title),
+                )
                 SkillMcpConfigCard(
                     state = state,
                     onImport = {
@@ -115,6 +119,9 @@ fun SkillDetailPage(skillName: String) {
                     },
                 )
             }
+            SectionLabel(
+                text = stringResource(R.string.setting_skill_detail_files_title),
+            )
             SkillFilesPanel(
                 nodes = tree,
                 fileCount = remember(tree) { tree.countFiles() },
@@ -193,7 +200,7 @@ private fun SkillMcpConfigCard(
     val colors = workspaceColors()
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(8.dp),
+        shape = RoundedCornerShape(14.dp),
         color = colors.paper,
         border = workspaceBorder(),
     ) {
@@ -252,7 +259,7 @@ private fun SkillFilesPanel(
     val colors = workspaceColors()
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(8.dp),
+        shape = RoundedCornerShape(14.dp),
         color = colors.paper,
         border = workspaceBorder(),
     ) {

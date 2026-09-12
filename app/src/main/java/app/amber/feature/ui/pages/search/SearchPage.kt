@@ -14,13 +14,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -29,22 +25,17 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
-import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -53,17 +44,19 @@ import app.amber.agent.R
 import app.amber.agent.data.db.fts.MessageSearchResult
 import app.amber.agent.data.db.fts.SearchHitSource
 import app.amber.core.model.Conversation
+import app.amber.feature.ui.components.ds.SectionLabel
 import app.amber.feature.ui.components.nav.BackButton
+import app.amber.feature.ui.components.ui.WorkspaceSearchField
+import app.amber.feature.ui.components.ui.WorkspaceTopBar
+import app.amber.feature.ui.components.ui.workspaceBorder
+import app.amber.feature.ui.components.ui.workspaceColors
 import app.amber.feature.ui.context.LocalNavController
-import app.amber.feature.ui.theme.CustomColors
 import app.amber.feature.ui.theme.LocalAmberTokens
 import app.amber.feature.ui.theme.LocalAmberType
 import app.amber.core.utils.navigateToChatPage
 import app.amber.core.utils.plus
 import app.amber.core.utils.toLocalDateTime
 import org.koin.androidx.compose.koinViewModel
-import java.time.ZoneId
-import java.time.format.DateTimeFormatter
 import kotlin.uuid.Uuid
 
 private fun SearchFilter.labelRes(): Int = when (this) {
@@ -75,13 +68,8 @@ private fun SearchFilter.labelRes(): Int = when (this) {
 @Composable
 fun SearchPage(vm: SearchVM = koinViewModel()) {
     val navController = LocalNavController.current
-    val focusRequester = remember { FocusRequester() }
     var showRebuildDialog by remember { mutableStateOf(false) }
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
-
-    LaunchedEffect(Unit) {
-        focusRequester.requestFocus()
-    }
 
     if (showRebuildDialog) {
         AlertDialog(
@@ -108,9 +96,9 @@ fun SearchPage(vm: SearchVM = koinViewModel()) {
 
     Scaffold(
         topBar = {
-            TopAppBar(
+            WorkspaceTopBar(
                 navigationIcon = { BackButton() },
-                title = { Text(stringResource(R.string.search_page_title)) },
+                title = stringResource(R.string.search_page_title),
                 actions = {
                     IconButton(
                         onClick = { showRebuildDialog = true },
@@ -123,31 +111,24 @@ fun SearchPage(vm: SearchVM = koinViewModel()) {
                     }
                 },
                 scrollBehavior = scrollBehavior,
-                colors = CustomColors.topBarColors,
             )
         },
         modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
-        containerColor = CustomColors.topBarColors.containerColor,
+        containerColor = workspaceColors().canvas,
     ) { contentPadding ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(contentPadding)
         ) {
-            OutlinedTextField(
+            WorkspaceSearchField(
                 value = vm.searchQuery,
                 onValueChange = { vm.onQueryChange(it) },
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 8.dp)
-                    .focusRequester(focusRequester),
-                placeholder = { Text(stringResource(R.string.search_page_placeholder)) },
-                shape = RoundedCornerShape(50),
-                singleLine = true,
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                keyboardActions = KeyboardActions(
-                    onSearch = { vm.search() }
-                ),
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                placeholder = stringResource(R.string.search_page_placeholder),
+                onSubmit = { vm.search() },
             )
 
             Row(
@@ -215,10 +196,8 @@ fun SearchPage(vm: SearchVM = koinViewModel()) {
                                     modifier = Modifier.weight(1f),
                                 ) {
                                     item {
-                                        Text(
+                                        SectionLabel(
                                             text = stringResource(R.string.search_page_recent_conversations),
-                                            style = MaterialTheme.typography.titleSmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         )
                                     }
                                     items(
@@ -279,6 +258,9 @@ fun SearchPage(vm: SearchVM = koinViewModel()) {
                                 verticalArrangement = Arrangement.spacedBy(8.dp),
                                 modifier = Modifier.weight(1f),
                             ) {
+                                item {
+                                    SectionLabel(text = stringResource(R.string.search_page_title))
+                                }
                                 items(vm.visibleResults) { result ->
                                     SearchResultItem(
                                         result = result,
@@ -377,8 +359,9 @@ private fun RecentConversationItem(
     }
     Surface(
         onClick = onClick,
-        color = CustomColors.listItemColors.containerColor,
-        shape = MaterialTheme.shapes.large,
+        color = workspaceColors().paper,
+        border = workspaceBorder(),
+        shape = RoundedCornerShape(14.dp),
     ) {
         Column(
             modifier = Modifier
@@ -414,7 +397,7 @@ private fun SearchResultItem(
     result: MessageSearchResult,
     onClick: () -> Unit,
 ) {
-    val highlightColor = MaterialTheme.colorScheme.tertiaryContainer
+    val highlightColor = LocalAmberTokens.current.accent.copy(alpha = 0.22f)
     val untitled = stringResource(R.string.search_page_untitled)
     val snippetText = buildAnnotatedString {
         val snippet = result.snippet
@@ -446,8 +429,9 @@ private fun SearchResultItem(
 
     Surface(
         onClick = onClick,
-        color = CustomColors.listItemColors.containerColor,
-        shape = MaterialTheme.shapes.large,
+        color = workspaceColors().paper,
+        border = workspaceBorder(),
+        shape = RoundedCornerShape(14.dp),
     ) {
         Column(
             modifier = Modifier

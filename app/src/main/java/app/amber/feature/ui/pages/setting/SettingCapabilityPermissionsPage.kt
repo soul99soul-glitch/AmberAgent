@@ -67,20 +67,19 @@ fun SettingCapabilityPermissionsPage(vm: SettingCapabilityPermissionsVM = koinVi
     ) { innerPadding ->
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
-            contentPadding = innerPadding + PaddingValues(16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
+            contentPadding = innerPadding + PaddingValues(horizontal = SettingPageHorizontalInset, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(22.dp),
         ) {
             item {
                 Text(
                     stringResource(R.string.setting_capability_permissions_high_risk_note),
                     style = MaterialTheme.typography.bodySmall,
-                    modifier = Modifier.padding(horizontal = 8.dp),
+                    modifier = Modifier,
                 )
             }
 
             item {
                 CardGroup(
-                    modifier = Modifier.padding(horizontal = 8.dp),
                     title = { SectionLabel(stringResource(R.string.setting_capability_permissions_policy_section)) },
                 ) {
                     Capability.entries.forEach { capability ->
@@ -122,7 +121,6 @@ fun SettingCapabilityPermissionsPage(vm: SettingCapabilityPermissionsVM = koinVi
 
             item {
                 CardGroup(
-                    modifier = Modifier.padding(horizontal = 8.dp),
                     title = { SectionLabel(stringResource(R.string.setting_capability_permissions_recent_approval_section)) },
                 ) {
                     if (history.isEmpty()) {

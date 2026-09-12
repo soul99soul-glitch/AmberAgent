@@ -105,7 +105,7 @@ fun SettingSearchPage(vm: SettingVM = koinViewModel()) {
             modifier = Modifier
                 .fillMaxSize()
                 .imePadding(),
-            contentPadding = contentPadding + PaddingValues(16.dp),
+            contentPadding = contentPadding + PaddingValues(horizontal = SettingPageHorizontalInset, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(22.dp),
             state = lazyListState,
         ) {

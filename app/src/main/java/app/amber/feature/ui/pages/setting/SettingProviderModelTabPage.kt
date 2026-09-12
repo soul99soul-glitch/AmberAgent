@@ -261,7 +261,6 @@ private fun ModelList(
                                         }
                                     },
                             )
-                            ProviderHairline()
                         }
                     }
                 }
@@ -518,15 +517,15 @@ private fun ModelRow(
         val type = LocalAmberType.current
         val contextLabel = model.contextWindowTokens.toContextLabel()
         val openEditor = onOpenEditor
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(t.bg)
-                .pressable(onClick = openEditor)
-                .padding(horizontal = 4.dp, vertical = 11.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
+        ProviderCard(modifier = Modifier.fillMaxWidth()) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .pressable(onClick = openEditor)
+                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
             ProviderMonogram(
                 text = model.modelId.toProviderMonogram(),
                 size = 36.dp,
@@ -596,6 +595,7 @@ private fun ModelRow(
                     tint = t.ink3,
                     modifier = Modifier.size(16.dp),
                 )
+            }
             }
         }
     }

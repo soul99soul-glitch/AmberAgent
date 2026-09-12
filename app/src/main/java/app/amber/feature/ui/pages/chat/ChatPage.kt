@@ -8,6 +8,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.background
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -24,6 +25,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -64,6 +66,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.text.font.FontWeight
@@ -543,12 +546,16 @@ private fun ChatPageContent(
         messageActivities = messageSandboxActivities,
         liveActivity = scopedLiveSandboxActivity?.withStepProgress(conversation),
     )
-    val sandboxTimeline = when (setting.agentRuntime.operationPreviewMode) {
-        AgentOperationPreviewMode.ALWAYS -> rawSandboxTimeline.ifEmpty {
+    val sandboxTimeline = when {
+        // The design's empty chat keeps the composer single-line and leaves the
+        // hero unobstructed. The ALWAYS preview mode still shows real activity;
+        // only the synthetic idle placeholder is suppressed until a task exists.
+        conversation.messageNodes.isEmpty() && rawSandboxTimeline.isEmpty() -> emptyList()
+        setting.agentRuntime.operationPreviewMode == AgentOperationPreviewMode.ALWAYS -> rawSandboxTimeline.ifEmpty {
             listOf(conversation.idleSandboxActivity(resourceContext))
         }
-        AgentOperationPreviewMode.AUTO -> rawSandboxTimeline.filter { it.isActiveOperation() }
-        AgentOperationPreviewMode.HIDDEN -> emptyList()
+        setting.agentRuntime.operationPreviewMode == AgentOperationPreviewMode.AUTO -> rawSandboxTimeline.filter { it.isActiveOperation() }
+        else -> emptyList()
     }
     val latestSandboxIndex = sandboxTimeline.lastIndex
     val currentSandboxIndex = selectedSandboxIndex
@@ -1020,7 +1027,6 @@ private fun ChatPageContent(
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(innerPadding),
-                    contentAlignment = Alignment.Center,
                 ) {
                     val nick = setting.displaySetting.userNickname.trim()
                     val heroText = if (nick.isNotEmpty()) {
@@ -1030,39 +1036,53 @@ private fun ChatPageContent(
                     }
                     val chatTheme = LocalChatTheme.current
                     val amberTokens = LocalAmberTokens.current
-                    val amberType = LocalAmberType.current
                     val heroDim = if (loadingJob != null) 0.45f else 1f
-                    // Graphite §6.2 Wordmark + §1: terminal wordmark replaces any gem/orb/halo
-                    // hero mark — `amber` in MONO 700 (ink) + an accent block BlinkingCursor,
-                    // then the existing restrained greeting beneath it.
                     Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(bottom = 48.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(14.dp),
+                        verticalArrangement = Arrangement.Center,
                     ) {
-                        Row(verticalAlignment = Alignment.Bottom) {
-                            Text(
-                                text = "amber",
-                                style = amberType.meta.copy(
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 24.sp,
-                                    letterSpacing = (-0.5).sp,
-                                ),
-                                color = amberTokens.ink.copy(alpha = heroDim),
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            Icon(
+                                painter = painterResource(R.drawable.amber_wordmark),
+                                contentDescription = "Amber",
+                                modifier = Modifier.size(width = 118.dp, height = 30.dp),
+                                tint = amberTokens.ink.copy(alpha = heroDim),
                             )
                             BlinkingCursor(
-                                modifier = Modifier.padding(start = 2.dp, bottom = 2.dp),
-                                width = 9.dp,
-                                height = 20.dp,
+                                width = 8.dp,
+                                height = 18.dp,
+                                modifier = Modifier,
                             )
                         }
                         Text(
                             text = heroText,
+                            modifier = Modifier
+                                .padding(top = 16.dp)
+                                .widthIn(max = 288.dp),
                             color = chatTheme.ink.copy(alpha = heroDim),
-                            fontSize = chatTheme.heroSize.sp,
-                            fontWeight = FontWeight(chatTheme.heroWeight),
-                            letterSpacing = chatTheme.heroLetter.sp,
-                            lineHeight = (chatTheme.heroSize * 1.4f).sp,
+                            fontSize = 20.sp,
+                            fontWeight = FontWeight.Medium,
+                            letterSpacing = (-0.24).sp,
+                            lineHeight = 29.sp,
                             textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                        )
+                    }
+                    if (loadingJob == null) {
+                        EmptyChatSuggestions(
+                            modifier = Modifier
+                                .align(Alignment.BottomCenter)
+                                .padding(horizontal = 16.dp)
+                                .padding(bottom = 16.dp),
+                            onSelect = { suggestion ->
+                                inputState.setMessageText(suggestion)
+                                suggestionFillPulseKey += 1
+                            },
                         )
                     }
                     if (loadingJob != null) {
@@ -1071,8 +1091,9 @@ private fun ChatPageContent(
                             color = chatTheme.accent,
                             strokeWidth = 2.dp,
                             modifier = Modifier
-                                .size(28.dp)
-                                .padding(top = (chatTheme.heroSize * 2.5f).dp.coerceAtMost(80.dp)),
+                                .align(Alignment.Center)
+                                .padding(top = 120.dp)
+                                .size(28.dp),
                         )
                     }
                 }
@@ -1136,6 +1157,49 @@ private fun ChatPageContent(
                 onResumeQueue = { vm.resumePendingQueue() },
                 onMoveToInput = { vm.moveFirstPendingMessageToInput() },
             )
+        }
+    }
+}
+
+@Composable
+private fun EmptyChatSuggestions(
+    modifier: Modifier = Modifier,
+    onSelect: (String) -> Unit,
+) {
+    val tokens = LocalAmberTokens.current
+    val suggestions = listOf(
+        stringResource(R.string.amber_redesign_suggestion_board),
+        stringResource(R.string.amber_redesign_suggestion_reply),
+        stringResource(R.string.amber_redesign_suggestion_concept),
+    )
+    Column(
+        modifier = modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        suggestions.forEach { suggestion ->
+            Surface(
+                onClick = { onSelect(suggestion) },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(32.dp),
+                shape = RoundedCornerShape(14.dp),
+                color = Color.Transparent,
+                contentColor = tokens.ink2,
+                border = BorderStroke(1.dp, tokens.line),
+                tonalElevation = 0.dp,
+            ) {
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = suggestion,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = tokens.ink2,
+                    )
+                }
+            }
         }
     }
 }
@@ -1744,38 +1808,34 @@ private fun TopBar(
         // Graphite §6.2 two-line ChatHeader: title block over the mono model-id trigger,
         // closed by a bottom hairline (line token).
         Column(modifier = Modifier.fillMaxWidth()) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(56.dp)
-                .padding(start = 20.dp, end = 20.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
             Row(
-                modifier = Modifier.weight(1f),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(56.dp)
+                    .padding(horizontal = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(14.dp),
             ) {
                 if (!bigScreen) {
                     Box(
                         modifier = Modifier
                             .size(48.dp)
-                            // V3: ripple 改圆形 (默认矩形 ripple 跟 36dp 方块大小一致, 看着丑)
                             .clip(androidx.compose.foundation.shape.CircleShape)
                             .clickable { onBack() },
                         contentAlignment = Alignment.Center,
                     ) {
                         AmberHeaderBackArrow()
                     }
+                } else {
+                    Spacer(Modifier.size(48.dp))
                 }
+
                 Column(
                     modifier = Modifier
-                        .weight(1f, fill = false)
+                        .weight(1f)
                         .fillMaxHeight()
                         .clip(androidx.compose.foundation.shape.CircleShape)
                         .clickable { onToggleModelMenu() },
-                    horizontalAlignment = Alignment.Start,
+                    horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center,
                 ) {
                     val amberTokens = LocalAmberTokens.current
@@ -1787,8 +1847,6 @@ private fun TopBar(
                         color = amberTokens.ink,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
-                        // 左内距 12→4，与下方 model 左对齐、整组向左靠
-                        modifier = Modifier.padding(start = 4.dp),
                     )
                     // Graphite §6.2 ChatHeader model-id trigger: mono model-id + a chevron that
                     // rotates 180° while the TopModelMenu dropdown is open. Tapping toggles it
@@ -1800,8 +1858,7 @@ private fun TopBar(
                     )
                     Row(
                         modifier = Modifier
-                            // 上下内距 3 收紧标题↔model；左内距 12→4，整组向左靠
-                            .padding(start = 4.dp, top = 3.dp, end = 12.dp, bottom = 3.dp),
+                            .padding(top = 2.dp, bottom = 2.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                     ) {
@@ -1812,7 +1869,7 @@ private fun TopBar(
                             overflow = TextOverflow.Ellipsis,
                             // 字号收到 10.5：进一步弱化 model、强化标题层级
                             style = amberType.meta.copy(
-                                fontSize = 10.5.sp,
+                                fontSize = 12.sp,
                                 fontWeight = FontWeight.Medium,
                             ),
                             // ink3↔ink2 中点：ink3 偏淡、ink2 偏深，取中间的暖中灰
@@ -1830,12 +1887,12 @@ private fun TopBar(
                         )
                     }
                 }
-            }
 
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-            ) {
+                Row(
+                    modifier = Modifier.widthIn(min = 48.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.End,
+                ) {
                 // V3 Whisper：进入对话后顶栏右侧多出 22dp Context Ring（仅有消息时）。
                 // 真实 used/total —— 取最后一条 assistant 消息的 usage
                 // V3 review P2 #2: 之前用 totalTokens (= 该轮 prompt+completion 加起来), 跟 ring
@@ -1878,7 +1935,7 @@ private fun TopBar(
                         (finishedInstant.toEpochMilliseconds() - createdInstant.toEpochMilliseconds())
                             .takeIf { it > 0 }
                     } else null
-                    ContextRing(
+                        ContextRing(
                         used = usedK,
                         total = totalK,
                         lastTurnTotalTokens = lastUsage?.totalTokens,
@@ -1902,8 +1959,8 @@ private fun TopBar(
                     AmberHeaderPlus()
                 }
             }
-        }
-        Hairline()
+            }
+            Hairline()
         }
     }
 }

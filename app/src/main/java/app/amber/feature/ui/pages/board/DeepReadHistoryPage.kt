@@ -1,5 +1,6 @@
 package app.amber.feature.ui.pages.board
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -8,13 +9,20 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import app.amber.feature.ui.theme.LocalAmberType
+import app.amber.feature.ui.theme.LocalAmberTokens
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -27,6 +35,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.res.stringResource
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.rememberCoroutineScope
@@ -36,8 +45,6 @@ import app.amber.agent.R
 import app.amber.feature.board.hotlist.DeepReadHistoryItem
 import app.amber.feature.board.hotlist.HotListRepository
 import app.amber.feature.ui.components.nav.BackButton
-import app.amber.feature.ui.components.ui.WorkspaceStatusPill
-import app.amber.feature.ui.components.ui.WorkspaceTone
 import app.amber.feature.ui.components.ui.workspaceColors
 import app.amber.feature.ui.context.LocalNavController
 import app.amber.core.utils.plus
@@ -54,6 +61,7 @@ fun DeepReadHistoryPage(
     val navController = LocalNavController.current
     val history by repository.observeDeepReadHistory().collectAsStateWithLifecycle(initialValue = emptyList())
     val colors = workspaceColors()
+    val tokens = LocalAmberTokens.current
     val scope = rememberCoroutineScope()
 
     Scaffold(
@@ -61,10 +69,15 @@ fun DeepReadHistoryPage(
             TopAppBar(
                 title = { Text(stringResource(R.string.deep_read_history_title)) },
                 navigationIcon = { BackButton() },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface),
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = tokens.bg,
+                    scrolledContainerColor = tokens.bg,
+                    titleContentColor = tokens.ink,
+                    navigationIconContentColor = tokens.ink2,
+                ),
             )
         },
-        containerColor = colors.canvas,
+        containerColor = tokens.bg,
     ) { innerPadding ->
         if (history.isEmpty()) {
             Box(
@@ -80,8 +93,22 @@ fun DeepReadHistoryPage(
 
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
-            contentPadding = innerPadding + PaddingValues(horizontal = 20.dp, vertical = 8.dp),
+            contentPadding = innerPadding + PaddingValues(horizontal = 16.dp, vertical = 8.dp),
         ) {
+            item {
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(top = 8.dp, bottom = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text("//", style = LocalAmberType.current.eyebrow, color = tokens.accent)
+                    Text(stringResource(R.string.deep_read_history_title), style = LocalAmberType.current.eyebrow, color = tokens.ink2)
+                    Text(history.size.toString(), style = LocalAmberType.current.eyebrow, color = tokens.ink3)
+                    HorizontalDivider(Modifier.weight(1f), color = tokens.line)
+                }
+            }
             itemsIndexed(history, key = { _, item -> item.topicId }) { index, item ->
                 DeepReadHistoryRow(
                     item = item,
@@ -101,7 +128,7 @@ fun DeepReadHistoryPage(
                     },
                 )
                 if (index != history.lastIndex) {
-                    HorizontalDivider(color = colors.hairline)
+                    HorizontalDivider(color = tokens.line)
                 }
             }
         }
@@ -114,62 +141,94 @@ private fun DeepReadHistoryRow(
     onClick: () -> Unit,
     onTogglePin: (Boolean) -> Unit,
 ) {
-    val colors = workspaceColors()
+    val tokens = LocalAmberTokens.current
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick)
-            .padding(vertical = 14.dp),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
+            .padding(vertical = 0.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        Box(
+            Modifier
+                .width(2.dp)
+                .height(22.dp)
+                .background(if (item.pinned) tokens.accent else androidx.compose.ui.graphics.Color.Transparent, RoundedCornerShape(1.dp)),
+        )
         Column(
             modifier = Modifier.weight(1f),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {
             Text(
                 text = item.title,
-                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
-                color = colors.ink,
+                style = LocalAmberType.current.sessionTitle.copy(fontWeight = FontWeight.Bold, fontSize = 15.sp),
+                color = tokens.ink,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
                 text = formatHistoryTime(item.updatedAt),
                 style = LocalAmberType.current.meta,
-                color = colors.muted,
+                color = tokens.ink3,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
         }
-        TextButton(
-            onClick = { onTogglePin(!item.pinned) },
-            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+        Column(
+            modifier = Modifier.width(74.dp),
+            horizontalAlignment = Alignment.End,
+            verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {
-            Text(
-                if (item.pinned) {
-                    stringResource(R.string.deep_read_unfavorite)
-                } else {
-                    stringResource(R.string.deep_read_favorite)
+            DeepReadHistoryStatus(
+                text = when {
+                    item.pinned -> stringResource(R.string.deep_read_pinned)
+                    item.expired -> stringResource(R.string.deep_read_expired)
+                    else -> stringResource(R.string.deep_read_active)
                 },
-                style = MaterialTheme.typography.labelSmall,
+                tone = when {
+                    item.pinned -> HistoryTone.Accent
+                    item.expired -> HistoryTone.Warning
+                    else -> HistoryTone.Success
+                },
             )
+            TextButton(
+                onClick = { onTogglePin(!item.pinned) },
+                contentPadding = PaddingValues(horizontal = 3.dp, vertical = 0.dp),
+            ) {
+                Text(
+                    if (item.pinned) stringResource(R.string.deep_read_unfavorite)
+                    else stringResource(R.string.deep_read_favorite),
+                    style = LocalAmberType.current.secondary,
+                    color = tokens.ink2,
+                )
+            }
         }
-        // Pinned items are always fresh; only show expired/valid for unpinned ones.
-        if (!item.pinned) {
-            WorkspaceStatusPill(
-                text = if (item.expired) {
-                    stringResource(R.string.deep_read_expired)
-                } else {
-                    stringResource(R.string.deep_read_active)
-                },
-                tone = if (item.expired) WorkspaceTone.Warning else WorkspaceTone.Success,
-            )
-        } else {
-            WorkspaceStatusPill(
-                text = stringResource(R.string.deep_read_pinned),
-                tone = WorkspaceTone.Accent,
-            )
+    }
+}
+
+private enum class HistoryTone { Accent, Success, Warning }
+
+@Composable
+private fun DeepReadHistoryStatus(text: String, tone: HistoryTone) {
+    val tokens = LocalAmberTokens.current
+    val base = when (tone) {
+        HistoryTone.Accent -> tokens.accent
+        HistoryTone.Success -> tokens.signal
+        HistoryTone.Warning -> MaterialTheme.colorScheme.tertiary
+    }
+    Surface(
+        shape = CircleShape,
+        color = base.copy(alpha = 0.14f),
+        border = androidx.compose.foundation.BorderStroke(1.dp, base.copy(alpha = 0.38f)),
+    ) {
+        Row(
+            Modifier.padding(horizontal = 7.dp, vertical = 3.dp),
+            horizontalArrangement = Arrangement.spacedBy(5.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(Modifier.size(5.dp).background(base, CircleShape))
+            Text(text, style = LocalAmberType.current.tinyTag, color = base, maxLines = 1)
         }
     }
 }

@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.Text
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
@@ -15,6 +16,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
@@ -23,8 +25,12 @@ import app.amber.feature.ui.theme.AmberBase
 import app.amber.feature.ui.theme.LocalAmberTokens
 import app.amber.feature.ui.theme.LocalAmberType
 import app.amber.feature.ui.theme.AmberAccents
+import app.amber.feature.ui.theme.AmberShapes
+import app.amber.feature.ui.theme.AmberTypography
 import app.amber.feature.ui.theme.buildAmberTokens
 import app.amber.feature.ui.theme.defaultAmberTextStyles
+import app.amber.feature.ui.pages.chat.LocalChatTheme
+import app.amber.feature.ui.pages.chat.toChatTheme
 
 /**
  * Lightweight preview harness for the Graphite design system — provides [LocalAmberTokens] /
@@ -39,19 +45,67 @@ fun AmberPreviewScaffold(
     content: @Composable () -> Unit,
 ) {
     val tokens = buildAmberTokens(base, accent)
+    val chatTheme = tokens.toChatTheme()
     val scheme = (if (tokens.isDark) darkColorScheme() else lightColorScheme()).copy(
         background = tokens.bg,
-        surface = tokens.surface,
         onBackground = tokens.ink,
+        surface = tokens.surface,
         onSurface = tokens.ink,
+        surfaceVariant = tokens.codeBg,
+        onSurfaceVariant = tokens.ink2,
+        surfaceContainerLowest = tokens.bg,
+        surfaceContainerLow = tokens.surface,
+        surfaceContainer = tokens.surface2,
+        surfaceContainerHigh = tokens.surface2,
+        surfaceContainerHighest = tokens.raised,
+        surfaceBright = tokens.raised,
+        surfaceDim = tokens.bg,
+        surfaceTint = tokens.accent,
         primary = tokens.accent,
         onPrimary = tokens.accentInk,
+        primaryContainer = chatTheme.accentSoft.compositeOver(chatTheme.paper),
+        onPrimaryContainer = chatTheme.accentDeep,
+        primaryFixed = chatTheme.accentSoft.compositeOver(chatTheme.paper),
+        primaryFixedDim = chatTheme.accentSoft.compositeOver(chatTheme.paper),
+        onPrimaryFixed = chatTheme.accentDeep,
+        onPrimaryFixedVariant = chatTheme.accentDeep,
+        secondary = tokens.accent,
+        onSecondary = tokens.accentInk,
+        secondaryContainer = chatTheme.accentSoft.compositeOver(chatTheme.paper),
+        onSecondaryContainer = chatTheme.accentDeep,
+        secondaryFixed = chatTheme.accentSoft.compositeOver(chatTheme.paper),
+        secondaryFixedDim = chatTheme.accentSoft.compositeOver(chatTheme.paper),
+        onSecondaryFixed = chatTheme.accentDeep,
+        onSecondaryFixedVariant = chatTheme.accentDeep,
+        tertiary = chatTheme.accentDeep,
+        onTertiary = chatTheme.onAccent,
+        tertiaryContainer = if (tokens.isDark) chatTheme.accentSoft else chatTheme.accentTint,
+        onTertiaryContainer = if (tokens.isDark) chatTheme.accent else chatTheme.accentDeep,
+        tertiaryFixed = if (tokens.isDark) chatTheme.accentSoft else chatTheme.accentTint,
+        tertiaryFixedDim = if (tokens.isDark) chatTheme.accentSoft else chatTheme.accentTint,
+        onTertiaryFixed = if (tokens.isDark) chatTheme.accent else chatTheme.accentDeep,
+        onTertiaryFixedVariant = if (tokens.isDark) chatTheme.accent else chatTheme.accentDeep,
+        inverseSurface = chatTheme.ink,
+        inverseOnSurface = chatTheme.paper,
+        inversePrimary = chatTheme.accentTint,
+        outline = chatTheme.outlineStrong,
+        outlineVariant = chatTheme.outlineSoft,
+        error = Color(0xFFC2554E),
+        onError = Color.Black,
+        errorContainer = Color(0xFFC2554E).copy(alpha = 0.12f).compositeOver(chatTheme.paper),
+        onErrorContainer = chatTheme.ink,
     )
     CompositionLocalProvider(
         LocalAmberTokens provides tokens,
         LocalAmberType provides defaultAmberTextStyles(),
+        LocalChatTheme provides chatTheme,
+        LocalContentColor provides tokens.ink,
     ) {
-        MaterialTheme(colorScheme = scheme) {
+        MaterialTheme(
+            colorScheme = scheme,
+            typography = AmberTypography,
+            shapes = AmberShapes,
+        ) {
             Column(
                 modifier = Modifier
                     .background(tokens.bg)

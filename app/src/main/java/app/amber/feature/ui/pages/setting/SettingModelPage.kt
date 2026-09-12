@@ -1,6 +1,7 @@
 package app.amber.feature.ui.pages.setting
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -18,6 +19,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.Button
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import app.amber.feature.ui.components.ui.Switch
@@ -79,12 +81,15 @@ import app.amber.feature.prompts.DEFAULT_IMAGE_NEGATIVE_PROMPT_INJECTION
 import app.amber.feature.prompts.DEFAULT_IMAGE_PROMPT_INJECTION
 import app.amber.feature.prompts.ImagePromptInjectionConfig
 import app.amber.core.settings.DEFAULT_AUTO_MODEL_ID
+import app.amber.core.settings.DEFAULT_AMBER_SYSTEM_PROMPT
 import app.amber.core.settings.ModelGroupSessionDefault
 import app.amber.core.settings.Settings
 import app.amber.core.settings.findModelById
 import app.amber.core.settings.resolveTaskChatModel
 import app.amber.feature.ui.components.ai.ModelSelector
 import app.amber.ai.provider.hasUsableAuth
+import app.amber.feature.ui.components.ds.AmberCard
+import app.amber.feature.ui.components.ds.Hairline
 import app.amber.feature.ui.components.ds.SectionLabel
 import app.amber.feature.ui.components.nav.BackButton
 import app.amber.feature.ui.components.ui.WorkspaceDivider
@@ -95,6 +100,7 @@ import app.amber.feature.ui.components.ui.WorkspaceTone
 import app.amber.feature.ui.components.ui.WorkspaceTopBar
 import app.amber.feature.ui.components.ui.workspaceColors
 import app.amber.feature.ui.theme.LocalAmberType
+import app.amber.feature.ui.theme.LocalAmberTokens
 import app.amber.core.utils.plus
 import org.koin.androidx.compose.koinViewModel
 import org.koin.compose.koinInject
@@ -103,7 +109,7 @@ import org.koin.compose.koinInject
 fun SettingModelPage(vm: SettingVM = koinViewModel()) {
     val settings by vm.settings.collectAsStateWithLifecycle()
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
-    val workspace = workspaceColors()
+    val tokens = LocalAmberTokens.current
     var showGroupDefaults by remember { mutableStateOf(false) }
 
     Scaffold(
@@ -115,12 +121,12 @@ fun SettingModelPage(vm: SettingVM = koinViewModel()) {
             )
         },
         modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
-        containerColor = workspace.canvas,
+        containerColor = tokens.bg,
     ) { contentPadding ->
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
-            contentPadding = contentPadding + PaddingValues(horizontal = 14.dp, vertical = 10.dp),
-            verticalArrangement = Arrangement.spacedBy(18.dp),
+            contentPadding = contentPadding + PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             item("chat") {
                 ModelSection(
@@ -179,56 +185,53 @@ private fun DefaultChatModelSetting(
     settings: Settings,
     vm: SettingVM,
 ) {
-    // V3 设计稿 (settings-models.jsx): hero card 36/20 accent leadingIcon + 15sp W500 title
-    // + 12.5sp inkFaint desc + 12dp 间距 + paddingLeft 50 + inline 22dp logo + 14.5sp accent model
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 14.dp, vertical = 14.dp),
-    ) {
-        Row(
-            verticalAlignment = Alignment.Top,
-            horizontalArrangement = Arrangement.spacedBy(14.dp),
-        ) {
-            WorkspaceLeadingIcon(
-                icon = Lucide.MessageCircle,
-                size = 36.dp,
-                iconSize = 20.dp,
+    var showParams by remember { mutableStateOf(false) }
+    var draftPrompt by remember { mutableStateOf(settings.systemPrompt) }
+    var draftReasoningLevel by remember { mutableStateOf(settings.reasoningLevel) }
+    SettingModelRow(
+        title = stringResource(R.string.setting_model_page_chat_model),
+        description = stringResource(R.string.setting_model_page_chat_model_desc),
+        icon = Lucide.MessageCircle,
+        trailing = {
+            WorkspaceTextButton(
+                text = stringResource(R.string.setting_model_page_parameters),
+                onClick = {
+                    draftPrompt = settings.systemPrompt
+                    draftReasoningLevel = settings.reasoningLevel
+                    showParams = true
+                },
                 tone = WorkspaceTone.Accent,
             )
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = stringResource(R.string.setting_model_page_chat_model),
-                    style = MaterialTheme.typography.titleMedium.copy(
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.Medium,
-                        letterSpacing = 0.2.sp,
-                    ),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Text(
-                    text = stringResource(R.string.setting_model_page_chat_model_desc),
-                    style = MaterialTheme.typography.bodySmall.copy(
-                        fontSize = 12.5.sp,
-                        letterSpacing = 0.2.sp,
-                    ),
-                    color = workspaceColors().muted,
-                    modifier = Modifier.padding(top = 3.dp),
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-        }
-        ModelSelector(
+        },
+    ) {
+        ModelPickerRow(
+            description = null,
             modelId = settings.chatModelId,
-            type = ModelType.CHAT,
             providers = settings.providers,
-            inline = true,
             onSelect = { vm.updateSettings(settings.copy(chatModelId = it.id)) },
-            modifier = Modifier
-                .padding(top = 12.dp, start = 50.dp)
-                .fillMaxWidth(),
+        )
+    }
+    if (showParams) {
+        ModelPromptSheet(
+            title = "${stringResource(R.string.setting_model_page_parameters)} · ${stringResource(R.string.setting_model_page_chat_model)}",
+            variableHint = settings.findModelById(settings.chatModelId)?.modelId
+                ?: stringResource(R.string.model_list_select_model),
+            prompt = draftPrompt,
+            onPromptChange = { draftPrompt = it },
+            onReset = {
+                draftPrompt = DEFAULT_AMBER_SYSTEM_PROMPT
+                draftReasoningLevel = ReasoningLevel.AUTO
+            },
+            onDismissRequest = { showParams = false },
+            onSave = {
+                val draft = ChatModelParamsDraft(
+                    systemPrompt = draftPrompt,
+                    reasoningLevel = draftReasoningLevel,
+                )
+                vm.updateSettings { current -> current.applyChatModelParams(draft) }
+            },
+            reasoningLevel = draftReasoningLevel,
+            onReasoningChange = { draftReasoningLevel = it },
         )
     }
 }
@@ -788,35 +791,28 @@ private fun SettingModelRow(
     trailing: (@Composable () -> Unit)? = null,
     content: @Composable () -> Unit,
 ) {
-    Column(
+    val t = LocalAmberTokens.current
+    val type = LocalAmberType.current
+    Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+            .heightIn(min = 52.dp)
+            .padding(horizontal = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            SettingModelLeadingIcon(icon = icon, tone = tone)
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = title,
-                    style = MaterialTheme.typography.titleMedium,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Text(
-                    text = description,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = workspaceColors().muted,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-            trailing?.invoke()
+        Text(
+            text = title,
+            style = type.body,
+            color = t.ink,
+            modifier = Modifier.weight(0.82f),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Box(modifier = Modifier.weight(1.18f)) {
+            content()
         }
-        content()
+        trailing?.invoke()
     }
 }
 
@@ -836,19 +832,12 @@ private fun ModelPickerRow(
     onSelect: (Model) -> Unit,
     onClear: (() -> Unit)? = null,
 ) {
-    // V3 settings-models.jsx 辅助任务 row：inline ModelSelector + paddingLeft 42dp 对齐 leadingIcon 右边
+    // Compact single-line trigger from models-prompts.html. Descriptions remain
+    // available to callers for fallback states but do not inflate the row.
     Column(
         modifier = Modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(6.dp),
+        verticalArrangement = Arrangement.Center,
     ) {
-        if (description != null) {
-            Text(
-                text = description,
-                modifier = Modifier.padding(start = 42.dp),
-                style = MaterialTheme.typography.bodySmall,
-                color = workspaceColors().muted,
-            )
-        }
         ModelSelector(
             modelId = modelId,
             type = modelType,
@@ -861,11 +850,22 @@ private fun ModelPickerRow(
             preferredInputModality = preferredInputModality,
             onClear = onClear,
             modifier = Modifier
-                .padding(start = 42.dp)
                 .fillMaxWidth(),
         )
     }
 }
+
+/** Draft boundary for the chat-model parameter sheet. The UI edits this value locally and
+ * writes both fields together only from the explicit Save action. */
+internal data class ChatModelParamsDraft(
+    val systemPrompt: String,
+    val reasoningLevel: ReasoningLevel,
+)
+
+internal fun Settings.applyChatModelParams(draft: ChatModelParamsDraft): Settings = copy(
+    systemPrompt = draft.systemPrompt,
+    reasoningLevel = draft.reasoningLevel,
+)
 
 @Composable
 private fun ModelPromptSheet(
@@ -875,15 +875,17 @@ private fun ModelPromptSheet(
     onPromptChange: (String) -> Unit,
     onReset: () -> Unit,
     onDismissRequest: () -> Unit,
+    onSave: (() -> Unit)? = null,
     reasoningLevel: ReasoningLevel? = null,
     onReasoningChange: ((ReasoningLevel) -> Unit)? = null,
 ) {
-    val workspace = workspaceColors()
+    val t = LocalAmberTokens.current
+    val type = LocalAmberType.current
     ModalBottomSheet(
         onDismissRequest = onDismissRequest,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        containerColor = workspace.paper,
-        contentColor = workspace.ink,
+        containerColor = t.raised,
+        contentColor = t.ink,
     ) {
         Column(
             modifier = Modifier
@@ -892,70 +894,92 @@ private fun ModelPromptSheet(
                 .padding(bottom = 28.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(
-                    text = title,
-                    style = MaterialTheme.typography.titleLarge,
-                )
-                Text(
-                    text = variableHint,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = workspace.muted,
-                )
-            }
+            Column(
+                modifier = Modifier
+                    .weight(1f, fill = false)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(14.dp),
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(
+                        text = title,
+                        style = type.screenTitle,
+                        color = t.ink,
+                    )
+                    Text(
+                        text = variableHint,
+                        style = type.secondary,
+                        color = t.ink3,
+                    )
+                }
 
-            if (reasoningLevel != null && onReasoningChange != null) {
-                Surface(
-                    shape = RoundedCornerShape(10.dp),
-                    color = workspace.note,
-                    border = BorderStroke(1.dp, workspace.hairline),
-                ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(12.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                if (reasoningLevel != null && onReasoningChange != null) {
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = t.surface2,
+                        border = BorderStroke(1.dp, t.line),
                     ) {
-                        Text(
-                            text = stringResource(R.string.model_settings_thinking_budget),
-                            style = MaterialTheme.typography.titleSmall,
-                        )
-                        NotionReasoningSelector(
-                            reasoningLevel = reasoningLevel,
-                            onReasoningLevelChange = onReasoningChange,
-                        )
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            Text(
+                                text = stringResource(R.string.model_settings_thinking_budget),
+                                style = type.body,
+                                color = t.ink,
+                            )
+                            NotionReasoningSelector(
+                                reasoningLevel = reasoningLevel,
+                                onReasoningLevelChange = onReasoningChange,
+                            )
+                        }
                     }
                 }
-            }
 
-            TextField(
-                value = prompt,
-                onValueChange = onPromptChange,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(min = 140.dp),
-                minLines = 5,
-                maxLines = 10,
-                shape = RoundedCornerShape(10.dp),
-                label = {
-                    Text(stringResource(R.string.setting_model_page_prompt))
-                },
-                colors = TextFieldDefaults.colors(
-                    focusedContainerColor = workspace.note,
-                    unfocusedContainerColor = workspace.note,
-                    focusedIndicatorColor = workspace.hairline,
-                    unfocusedIndicatorColor = workspace.hairline,
-                    focusedTextColor = workspace.ink,
-                    unfocusedTextColor = workspace.ink,
-                    focusedLabelColor = workspace.blue,
-                    unfocusedLabelColor = workspace.muted,
-                ),
-            )
-            TextButton(
-                onClick = onReset,
-                modifier = Modifier.align(Alignment.End),
+                TextField(
+                    value = prompt,
+                    onValueChange = onPromptChange,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 140.dp),
+                    minLines = 5,
+                    maxLines = 10,
+                    shape = RoundedCornerShape(10.dp),
+                    label = {
+                        Text(stringResource(R.string.setting_model_page_prompt))
+                    },
+                    colors = TextFieldDefaults.colors(
+                        focusedContainerColor = t.surface2,
+                        unfocusedContainerColor = t.surface2,
+                        focusedIndicatorColor = t.line2,
+                        unfocusedIndicatorColor = t.line,
+                        focusedTextColor = t.ink,
+                        unfocusedTextColor = t.ink,
+                        focusedLabelColor = t.accent,
+                        unfocusedLabelColor = t.ink3,
+                    ),
+                )
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End,
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(stringResource(R.string.setting_model_page_reset_to_default))
+                TextButton(onClick = onReset) {
+                    Text(stringResource(R.string.setting_model_page_reset_to_default))
+                }
+                Button(
+                    onClick = {
+                        onSave?.invoke()
+                        onDismissRequest()
+                    },
+                ) {
+                    Text(
+                        if (onSave == null) "完成" else stringResource(R.string.common_save),
+                    )
+                }
             }
         }
     }
@@ -1085,25 +1109,14 @@ private fun ModelSection(
     title: @Composable () -> Unit,
     content: @Composable ColumnScope.() -> Unit,
 ) {
-    val workspace = workspaceColors()
+    val t = LocalAmberTokens.current
     Column {
-        androidx.compose.runtime.CompositionLocalProvider(
-            androidx.compose.material3.LocalContentColor provides workspace.muted,
-        ) {
-            androidx.compose.material3.ProvideTextStyle(MaterialTheme.typography.titleSmall) {
-                Box(modifier = Modifier.padding(start = 2.dp, top = 8.dp, bottom = 8.dp)) {
-                    title()
-                }
-            }
+        Box(modifier = Modifier.padding(start = 2.dp, top = 2.dp, bottom = 8.dp)) {
+            title()
         }
-        Surface(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(12.dp),
-            color = workspace.paper,
-            border = BorderStroke(1.dp, workspace.hairline),
-        ) {
+        AmberCard(modifier = Modifier.fillMaxWidth()) {
             Column(
-                modifier = Modifier.padding(vertical = 4.dp),
+                modifier = Modifier.background(t.surface),
                 content = content,
             )
         }
@@ -1112,7 +1125,7 @@ private fun ModelSection(
 
 @Composable
 private fun ModelSectionDivider() {
-    WorkspaceDivider(modifier = Modifier.padding(start = 56.dp))
+    Hairline(modifier = Modifier.padding(start = 14.dp))
 }
 
 @Composable

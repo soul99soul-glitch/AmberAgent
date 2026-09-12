@@ -70,6 +70,7 @@ import app.amber.feature.terminal.TerminalJobStatus
 import app.amber.feature.terminal.TerminalRuntime
 import app.amber.feature.terminal.TerminalRuntimeKind
 import app.amber.feature.ui.components.ui.CardGroup
+import app.amber.feature.ui.components.ds.SectionLabel
 import app.amber.feature.ui.components.ui.Select
 import app.amber.feature.ui.context.LocalToaster
 import app.amber.feature.ui.theme.CustomColors
@@ -157,7 +158,7 @@ fun SettingSshProfilesSection(
         loadError?.let { showError(it) }
     }
 
-    CardGroup(title = { Text(stringResource(R.string.setting_sandbox_ssh_section)) }) {
+    CardGroup(title = { SectionLabel(stringResource(R.string.setting_sandbox_ssh_section)) }) {
         rawItem {
             Column(
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
@@ -539,7 +540,7 @@ private fun SshCommandPanel(
     onRun: () -> Unit,
     onStop: () -> Unit,
 ) {
-    CardGroup(title = { Text(stringResource(R.string.setting_sandbox_ssh_command_title)) }) {
+    CardGroup(title = { SectionLabel(stringResource(R.string.setting_sandbox_ssh_command_title)) }) {
         rawItem {
             Column(
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),

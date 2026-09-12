@@ -17,7 +17,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import app.amber.feature.ui.components.ui.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberCoroutineScope
@@ -34,7 +34,12 @@ import app.amber.agent.Screen
 import app.amber.core.settings.MiniAppSetting
 import app.amber.core.settings.prefs.SettingsAggregator
 import app.amber.feature.ui.components.nav.BackButton
+import app.amber.feature.ui.components.ds.SectionLabel
+import app.amber.feature.ui.components.ui.WorkspaceTopBar
+import app.amber.feature.ui.components.ui.workspaceBorder
 import app.amber.feature.ui.components.ui.workspaceColors
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.ChevronRight
 import app.amber.feature.ui.context.LocalNavController
 import org.koin.compose.koinInject
 
@@ -64,19 +69,16 @@ fun MiniAppSettingsPage(
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = {
-                    Text(
-                        if (group == null) {
-                            stringResource(R.string.miniapp_settings)
-                        } else {
-                            stringResource(group.titleRes)
-                        }
-                    )
+            WorkspaceTopBar(
+                title = if (group == null) {
+                    stringResource(R.string.miniapp_settings)
+                } else {
+                    stringResource(group.titleRes)
                 },
                 navigationIcon = { BackButton() },
             )
         },
+        containerColor = workspaceColors().canvas,
     ) { padding ->
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
@@ -96,6 +98,12 @@ fun MiniAppSettingsPage(
                         checked = miniApp.enabled,
                         onCheckedChange = { enabled -> updateMiniApp { it.copy(enabled = enabled) } },
                         prominent = true,
+                    )
+                }
+                item {
+                    SectionLabel(
+                        text = stringResource(R.string.miniapp_settings),
+                        modifier = Modifier.padding(top = 8.dp),
                     )
                 }
                 item {
@@ -300,8 +308,9 @@ private fun MiniAppGroupCard(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick),
-        shape = RoundedCornerShape(16.dp),
+        shape = RoundedCornerShape(14.dp),
         color = colors.paper,
+        border = workspaceBorder(),
         tonalElevation = 0.dp,
         shadowElevation = 0.dp,
     ) {
@@ -320,6 +329,11 @@ private fun MiniAppGroupCard(
                     overflow = TextOverflow.Ellipsis,
                 )
             }
+            Icon(
+                imageVector = Lucide.ChevronRight,
+                contentDescription = null,
+                tint = colors.faint,
+            )
         }
     }
 }
@@ -352,6 +366,7 @@ private fun MiniAppSwitchRow(
             .clickable(enabled = enabled) { onCheckedChange(!checked) },
         shape = RoundedCornerShape(if (prominent) 18.dp else 14.dp),
         color = colors.paper,
+        border = workspaceBorder(),
     ) {
         ListItem(
             headlineContent = {

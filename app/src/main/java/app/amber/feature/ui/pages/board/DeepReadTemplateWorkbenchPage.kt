@@ -16,7 +16,10 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -56,11 +59,15 @@ import app.amber.feature.ui.components.ui.workspaceColors
 import app.amber.feature.ui.context.LocalNavController
 import app.amber.feature.ui.pages.setting.SettingVM
 import app.amber.feature.ui.theme.LocalDarkMode
+import app.amber.feature.ui.theme.LocalAmberTokens
+import app.amber.feature.ui.theme.LocalAmberType
 import app.amber.core.utils.appLocale
 import org.koin.androidx.compose.koinViewModel
 import org.koin.compose.koinInject
 import java.net.URI
 import kotlin.uuid.Uuid
+import com.composables.icons.lucide.ArrowLeft
+import com.composables.icons.lucide.Lucide
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -88,6 +95,7 @@ fun DeepReadTemplateWorkbenchPage(
     val demoTitleFallback = stringResource(R.string.deep_read_demo_title_fallback)
     val sampleOutput = remember(appLocale) { DeepReadTemplateRenderer.sampleOutput(appLocale) }
     val darkTheme = LocalDarkMode.current
+    val tokens = LocalAmberTokens.current
     val fontCss = rememberDeepReadTemplateFontCss(
         mode = board.boardReadingFontMode,
         fontPackId = board.boardReadingFontPackId,
@@ -214,10 +222,10 @@ fun DeepReadTemplateWorkbenchPage(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(stringResource(R.string.deep_read_workbench_title)) },
+                title = { Text(stringResource(R.string.deep_read_workbench_title), style = LocalAmberType.current.screenTitle, color = tokens.ink) },
                 navigationIcon = {
-                    TextButton(onClick = ::requestExit) {
-                        Text(stringResource(R.string.back))
+                    IconButton(onClick = ::requestExit) {
+                        Icon(Lucide.ArrowLeft, contentDescription = stringResource(R.string.back), tint = tokens.ink2)
                     }
                 },
                 actions = {
@@ -227,11 +235,19 @@ fun DeepReadTemplateWorkbenchPage(
                     ) {
                         Text(
                             if (saving) stringResource(R.string.deep_read_workbench_saving)
-                            else stringResource(R.string.common_save)
+                            else stringResource(R.string.common_save),
+                            style = LocalAmberType.current.secondary,
+                            color = tokens.accent,
                         )
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface),
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = tokens.bg,
+                    scrolledContainerColor = tokens.bg,
+                    titleContentColor = tokens.ink,
+                    navigationIconContentColor = tokens.ink2,
+                    actionIconContentColor = tokens.accent,
+                ),
             )
         },
         bottomBar = {
@@ -249,7 +265,7 @@ fun DeepReadTemplateWorkbenchPage(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
-                .background(MaterialTheme.colorScheme.surface),
+                .background(tokens.bg),
         ) {
             if (busy || saving) {
                 LinearProgressIndicator(Modifier.fillMaxWidth())
@@ -263,7 +279,7 @@ fun DeepReadTemplateWorkbenchPage(
                         allowedImageUrls = if (demoPreviewUrl != null) template.allowedImageUrls else emptySet(),
                         fontRepository = fontRepository,
                         textScale = board.deepReadFontScale,
-                        backgroundColor = MaterialTheme.colorScheme.surface,
+                        backgroundColor = tokens.surface,
                     )
                 } ?: Text(
                     stringResource(R.string.deep_read_template_preview_unavailable),
@@ -362,7 +378,13 @@ private fun TemplateWorkbenchComposer(
     onSend: () -> Unit,
 ) {
     val previewUrl = remember(instruction) { instruction.extractTemplateDemoUrl() }
-    Surface(tonalElevation = 3.dp) {
+    val tokens = LocalAmberTokens.current
+    Surface(
+        color = tokens.surface,
+        contentColor = tokens.ink,
+        border = androidx.compose.foundation.BorderStroke(1.dp, tokens.line),
+        tonalElevation = 0.dp,
+    ) {
         Column(
             Modifier
                 .fillMaxWidth()
@@ -372,7 +394,7 @@ private fun TemplateWorkbenchComposer(
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             error?.takeIf { it.isNotBlank() }?.let {
-                Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                Text(it, style = LocalAmberType.current.secondary, color = MaterialTheme.colorScheme.error)
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.Bottom) {
                 OutlinedTextField(
@@ -383,6 +405,15 @@ private fun TemplateWorkbenchComposer(
                     maxLines = 5,
                     enabled = !busy,
                     shape = RoundedCornerShape(28.dp),
+                    colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = tokens.line2,
+                        unfocusedBorderColor = tokens.line,
+                        focusedContainerColor = tokens.raised,
+                        unfocusedContainerColor = tokens.surface2,
+                        focusedLabelColor = tokens.accent,
+                        unfocusedLabelColor = tokens.ink3,
+                        cursorColor = tokens.accent,
+                    ),
                     label = {
                         Text(
                             when {
@@ -397,6 +428,10 @@ private fun TemplateWorkbenchComposer(
                     enabled = instruction.trim().isNotEmpty() && !busy,
                     onClick = onSend,
                     shape = RoundedCornerShape(28.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = tokens.accent,
+                        contentColor = tokens.accentInk,
+                    ),
                     contentPadding = PaddingValues(horizontal = 14.dp, vertical = 12.dp),
                 ) {
                     Text(
@@ -422,24 +457,32 @@ private fun SourcePanel(
     onToggle: () -> Unit,
     onTextChange: (String) -> Unit,
 ) {
-    Surface(tonalElevation = 1.dp) {
-        Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)) {
+    val tokens = LocalAmberTokens.current
+    Surface(
+        color = tokens.surface,
+        contentColor = tokens.ink,
+        border = androidx.compose.foundation.BorderStroke(1.dp, tokens.line),
+        tonalElevation = 0.dp,
+    ) {
+        Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Text(stringResource(R.string.deep_read_workbench_source), style = MaterialTheme.typography.titleSmall)
+                Text(stringResource(R.string.deep_read_workbench_source), style = LocalAmberType.current.body.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold), color = tokens.ink)
                 TextButton(enabled = editorText.isNotBlank(), onClick = onToggle) {
                     Text(
                         if (expanded) stringResource(R.string.deep_read_workbench_collapse)
-                        else stringResource(R.string.deep_read_workbench_view_tune)
+                        else stringResource(R.string.deep_read_workbench_view_tune),
+                        style = LocalAmberType.current.secondary,
+                        color = tokens.ink2,
                     )
                 }
             }
             if (expanded) {
                 validationError?.takeIf { it.isNotBlank() }?.let {
-                    Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                    Text(it, style = LocalAmberType.current.secondary, color = MaterialTheme.colorScheme.error)
                 } ?: Text(
                     stringResource(R.string.deep_read_workbench_validation_hint),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = workspaceColors().muted,
+                    style = LocalAmberType.current.secondary,
+                    color = tokens.ink3,
                 )
                 OutlinedTextField(
                     value = editorText,
@@ -448,7 +491,14 @@ private fun SourcePanel(
                         .fillMaxWidth()
                         .heightIn(min = 160.dp, max = 260.dp),
                     enabled = enabled,
-                    textStyle = MaterialTheme.typography.bodySmall,
+                    textStyle = LocalAmberType.current.meta,
+                    colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = tokens.line2,
+                        unfocusedBorderColor = tokens.line,
+                        focusedContainerColor = tokens.raised,
+                        unfocusedContainerColor = tokens.surface2,
+                        cursorColor = tokens.accent,
+                    ),
                 )
             }
         }

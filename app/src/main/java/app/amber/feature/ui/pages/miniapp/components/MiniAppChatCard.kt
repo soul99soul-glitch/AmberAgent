@@ -9,8 +9,11 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
@@ -48,6 +51,9 @@ import app.amber.agent.data.db.entity.MiniAppEntity
 import app.amber.feature.ui.pages.miniapp.MiniAppSourceEditorDialog
 import app.amber.feature.ui.pages.miniapp.MiniAppVersionHistoryDialog
 import app.amber.feature.ui.pages.miniapp.rememberMiniAppHtmlExporter
+import app.amber.feature.ui.components.ui.workspaceBorder
+import app.amber.feature.ui.components.ui.workspaceColors
+import app.amber.feature.ui.theme.LocalAmberTokens
 import org.koin.compose.koinInject
 
 @Composable
@@ -65,6 +71,8 @@ fun MiniAppChatCard(
     val appSettings by settingsStore.settingsFlow.collectAsStateWithLifecycle()
     val showSourceButton = appSettings.agentRuntime.miniApp.showSourceButton
     val exportMiniApp = rememberMiniAppHtmlExporter()
+    val workspace = workspaceColors()
+    val tokens = LocalAmberTokens.current
     var menuExpanded by remember { mutableStateOf(false) }
     var sourceTarget by remember { mutableStateOf<MiniAppEntity?>(null) }
     var versionTarget by remember { mutableStateOf<MiniAppEntity?>(null) }
@@ -84,8 +92,10 @@ fun MiniAppChatCard(
 
     Surface(
         modifier = modifier.fillMaxWidth(),
-        shape = MaterialTheme.shapes.small,
-        tonalElevation = 1.dp,
+        shape = RoundedCornerShape(14.dp),
+        color = workspace.paper,
+        border = workspaceBorder(),
+        tonalElevation = 0.dp,
     ) {
         Column(
             modifier = Modifier.padding(14.dp),
@@ -108,10 +118,17 @@ fun MiniAppChatCard(
                 overflow = TextOverflow.Ellipsis,
             )
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = onRun) {
+                Button(
+                    onClick = onRun,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = tokens.accent,
+                        contentColor = tokens.accentInk,
+                    ),
+                ) {
                     Text(stringResource(R.string.miniapp_run))
                 }
                 OutlinedButton(
+                    border = BorderStroke(1.dp, workspace.hairline),
                     onClick = {
                         withCurrentApp {
                             modifyTarget = it

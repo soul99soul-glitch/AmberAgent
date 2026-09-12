@@ -68,7 +68,7 @@ import app.amber.search.SearchServiceOptions
 import sh.calvin.reorderable.ReorderableColumn
 import kotlin.uuid.Uuid
 
-private val SearchCardShape = RoundedCornerShape(18.dp)
+private val SearchCardShape = RoundedCornerShape(14.dp)
 private const val MAX_SEARCH_RESULT_SIZE = 30
 
 private data class SearchV2Colors(
@@ -115,7 +115,7 @@ internal fun SearchHeroCard(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 18.dp, vertical = 18.dp),
+                    .padding(horizontal = 16.dp, vertical = 16.dp),
                 horizontalArrangement = Arrangement.spacedBy(16.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -155,7 +155,7 @@ internal fun SearchHeroCard(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 18.dp, vertical = 12.dp),
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {

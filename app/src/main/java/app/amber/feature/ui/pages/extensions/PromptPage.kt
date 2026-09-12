@@ -13,6 +13,7 @@ import com.composables.icons.lucide.Trash2
 import com.composables.icons.lucide.WandSparkles
 import com.composables.icons.lucide.X
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -29,12 +30,15 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.background
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
@@ -50,10 +54,9 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.InputChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.SwipeToDismissBox
 import app.amber.feature.ui.components.ui.Switch
 import androidx.compose.material3.Text
@@ -71,6 +74,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.res.stringResource
@@ -88,6 +92,7 @@ import app.amber.core.export.rememberImporter
 import app.amber.core.model.InjectionPosition
 import app.amber.core.model.Lorebook
 import app.amber.core.model.PromptInjection
+import app.amber.feature.ui.components.ds.SectionLabel
 import app.amber.feature.ui.components.nav.BackButton
 import app.amber.feature.ui.components.ui.ExportDialog
 import app.amber.feature.ui.components.ui.FormItem
@@ -99,6 +104,8 @@ import app.amber.feature.ui.components.ui.workspaceColors
 import app.amber.feature.ui.context.LocalToaster
 import app.amber.feature.ui.hooks.useEditState
 import app.amber.feature.ui.theme.CustomColors
+import app.amber.feature.ui.theme.LocalAmberTokens
+import app.amber.feature.ui.theme.LocalAmberType
 import app.amber.core.utils.plus
 import org.koin.androidx.compose.koinViewModel
 import sh.calvin.reorderable.ReorderableItem
@@ -119,45 +126,72 @@ fun PromptPage(vm: PromptVM = koinViewModel()) {
                 scrollBehavior = scrollBehavior,
             )
         },
-        bottomBar = {
-            NavigationBar {
-                NavigationBarItem(
-                    selected = pagerState.currentPage == 0,
-                    label = { Text(stringResource(R.string.prompt_page_mode_injection_tab)) },
-                    icon = { Icon(Lucide.WandSparkles, null) },
-                    onClick = {
-                        scope.launch { pagerState.animateScrollToPage(0) }
-                    }
-                )
-                NavigationBarItem(
-                    selected = pagerState.currentPage == 1,
-                    label = { Text(stringResource(R.string.prompt_page_lorebook_tab)) },
-                    icon = { Icon(Lucide.Book, null) },
-                    onClick = {
-                        scope.launch { pagerState.animateScrollToPage(1) }
-                    }
-                )
-            }
-        },
         modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
         containerColor = workspaceColors().canvas,
     ) { innerPadding ->
-        HorizontalPager(
-            state = pagerState,
+        Column(
             modifier = Modifier
                 .padding(innerPadding)
-                .fillMaxSize()
-        ) { page ->
-            when (page) {
-                0 -> ModeInjectionTab(
-                    modeInjections = settings.modeInjections,
-                    onUpdate = { vm.updateSettings(settings.copy(modeInjections = it)) }
-                )
+                .fillMaxSize(),
+        ) {
+            PromptTabs(
+                selected = pagerState.currentPage,
+                onSelect = { page -> scope.launch { pagerState.animateScrollToPage(page) } },
+            )
+            HorizontalPager(
+                state = pagerState,
+                modifier = Modifier.fillMaxSize(),
+            ) { page ->
+                when (page) {
+                    0 -> ModeInjectionTab(
+                        modeInjections = settings.modeInjections,
+                        onUpdate = { vm.updateSettings(settings.copy(modeInjections = it)) }
+                    )
 
-                1 -> LorebookTab(
-                    lorebooks = settings.lorebooks,
-                    onUpdate = { vm.updateSettings(settings.copy(lorebooks = it)) }
-                )
+                    1 -> LorebookTab(
+                        lorebooks = settings.lorebooks,
+                        onUpdate = { vm.updateSettings(settings.copy(lorebooks = it)) }
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PromptTabs(
+    selected: Int,
+    onSelect: (Int) -> Unit,
+) {
+    val tokens = LocalAmberTokens.current
+    val labels = listOf(
+        stringResource(R.string.prompt_page_mode_injection_tab),
+        stringResource(R.string.prompt_page_lorebook_tab),
+    )
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        shape = RoundedCornerShape(12.dp),
+        color = tokens.surface2,
+    ) {
+        Row(modifier = Modifier.padding(3.dp)) {
+            labels.forEachIndexed { index, label ->
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(9.dp))
+                        .background(if (selected == index) tokens.raised else androidx.compose.ui.graphics.Color.Transparent)
+                        .clickable { onSelect(index) }
+                        .padding(vertical = 9.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = label,
+                        style = LocalAmberType.current.eyebrow,
+                        color = if (selected == index) tokens.ink else tokens.ink3,
+                    )
+                }
             }
         }
     }
@@ -210,6 +244,12 @@ private fun ModeInjectionTab(
             verticalArrangement = Arrangement.spacedBy(8.dp),
             state = lazyListState
         ) {
+            item {
+                SectionLabel(
+                    text = stringResource(R.string.prompt_page_mode_injection_tab),
+                    modifier = Modifier.padding(top = 8.dp),
+                )
+            }
             if (modeInjections.isEmpty()) {
                 item {
                     Column(
@@ -334,6 +374,8 @@ private fun ModeInjectionCard(
         modifier = modifier
     ) {
         Card(
+            shape = RoundedCornerShape(14.dp),
+            border = BorderStroke(1.dp, LocalAmberTokens.current.line),
             colors = CardDefaults.cardColors(
                 containerColor = CustomColors.listItemColors.containerColor
             )
@@ -609,6 +651,12 @@ private fun LorebookTab(
             verticalArrangement = Arrangement.spacedBy(8.dp),
             state = lazyListState
         ) {
+            item {
+                SectionLabel(
+                    text = stringResource(R.string.prompt_page_lorebook_tab),
+                    modifier = Modifier.padding(top = 8.dp),
+                )
+            }
             if (lorebooks.isEmpty()) {
                 item {
                     Column(
@@ -733,6 +781,8 @@ private fun LorebookCard(
         modifier = modifier
     ) {
         Card(
+            shape = RoundedCornerShape(14.dp),
+            border = BorderStroke(1.dp, LocalAmberTokens.current.line),
             colors = CardDefaults.cardColors(
                 containerColor = CustomColors.listItemColors.containerColor
             )
@@ -935,7 +985,12 @@ private fun RegexInjectionEntryCard(
     onEdit: () -> Unit,
     onDelete: () -> Unit
 ) {
-    Card(modifier = Modifier.fillMaxWidth()) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(14.dp),
+        border = BorderStroke(1.dp, LocalAmberTokens.current.line),
+        colors = CardDefaults.cardColors(containerColor = CustomColors.listItemColors.containerColor),
+    ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()

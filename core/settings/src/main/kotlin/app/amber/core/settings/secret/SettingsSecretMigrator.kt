@@ -169,7 +169,7 @@ class SettingsSecretMigrator(
                 Log.e(TAG, "Secret migration aborted; committed refs are malformed", error)
                 return MIGRATION_FAILED
             }
-            deleteSettingsOrphans(refs.values.map { it.descriptor() }.toSet())
+            redactor.deleteOrphans(refs.values.map { it.descriptor() }.toSet())
             secretStore.markMigrated(MIGRATION_VERSION)
             Log.i(TAG, "Secret migration to version $MIGRATION_VERSION completed")
         } else {
@@ -296,7 +296,7 @@ class SettingsSecretMigrator(
                 Log.e(TAG, "Amber settings migration aborted; committed refs are malformed", error)
                 return false
             }
-            deleteSettingsOrphans(active.values.map { it.descriptor() }.toSet())
+            redactor.deleteOrphans(active.values.map { it.descriptor() }.toSet())
         }
         return succeeded
     }
@@ -410,7 +410,7 @@ class SettingsSecretMigrator(
                 Log.e(TAG, "Retired search cleanup aborted; committed refs are malformed", error)
                 return false
             }
-            deleteSettingsOrphans(active.values.map { it.descriptor() }.toSet())
+            redactor.deleteOrphans(active.values.map { it.descriptor() }.toSet())
             Log.i(TAG, "Removed retired amber_agent search configuration; a new service must be configured")
         }
         return true
@@ -459,35 +459,14 @@ class SettingsSecretMigrator(
                 Log.e(TAG, "Retired TTS cleanup aborted; committed refs are malformed", error)
                 return false
             }
-            deleteSettingsOrphans(active.values.map { it.descriptor() }.toSet())
+            redactor.deleteOrphans(active.values.map { it.descriptor() }.toSet())
             Log.i(TAG, "Removed retired TTS settings and secrets")
         }
         return true
     }
 
-    /**
-     * Settings migration owns only the scopes that it redacts. SSH profiles
-     * have their own metadata store and deliberately do not participate in the
-     * settings reference map, so preserve every independent scope while
-     * reclaiming settings-owned orphans.
-     */
-    private fun deleteSettingsOrphans(active: Set<SecretDescriptor>) {
-        secretStore.listOrphans(active)
-            .filter { it.scope in SETTINGS_SECRET_SCOPES }
-            .forEach { secretStore.delete(it) }
-    }
-
     companion object {
         const val MIGRATION_VERSION = 1
         const val MIGRATION_FAILED = -1
-        private val SETTINGS_SECRET_SCOPES = setOf(
-            "provider",
-            "assistant",
-            "search",
-            "mcp",
-            "webdav",
-            "s3",
-            "tts",
-        )
     }
 }

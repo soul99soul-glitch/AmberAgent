@@ -1,14 +1,17 @@
 package app.amber.feature.ui.components.ui
 
 import androidx.compose.foundation.LocalIndication
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ListItem
@@ -21,18 +24,17 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import app.amber.feature.ui.theme.CustomColors
+import app.amber.feature.ui.theme.LocalAmberType
 
-// V3 settings-screen.jsx:79 borderRadius: 18 —— 之前 12dp 偏紧、不像 editorial 卡
-private val CardGroupCorner = 18.dp
+private val CardGroupCorner = 14.dp
 private val CardGroupItemSpacing = 1.dp
-private val CardGroupInnerCorner = 2.dp
 
 data class CardGroupItem(
     val onClick: (() -> Unit)?,
@@ -103,22 +105,10 @@ private fun CardGroupListItem(
     defaultColors: ListItemColors?,
 ) {
     val interactionSource = remember { MutableInteractionSource() }
-    val isPressed by interactionSource.collectIsPressedAsState()
-
-    val corner = if (isPressed) CardGroupCorner else CardGroupInnerCorner
-
     ListItem(
         headlineContent = item.headlineContent,
         modifier = item.modifier
             .fillMaxWidth()
-            .clip(
-                RoundedCornerShape(
-                    topStart = corner,
-                    topEnd = corner,
-                    bottomStart = corner,
-                    bottomEnd = corner,
-                )
-            )
             .then(
                 if (item.onClick != null) {
                     Modifier.clickable(
@@ -149,9 +139,16 @@ fun CardGroup(
     Column(modifier = modifier) {
         if (title != null) {
             CompositionLocalProvider(LocalContentColor provides MaterialTheme.colorScheme.onSurfaceVariant) {
-                ProvideTextStyle(MaterialTheme.typography.titleSmall) {
-                    Box(modifier = Modifier.padding(start = 2.dp, top = 8.dp, bottom = 8.dp)) {
+                ProvideTextStyle(LocalAmberType.current.eyebrow) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(start = 2.dp, top = 8.dp, bottom = 10.dp),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
                         title()
+                        Box(Modifier.weight(1f).height(1.dp).background(MaterialTheme.colorScheme.outlineVariant))
                     }
                 }
             }
@@ -159,7 +156,9 @@ fun CardGroup(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(CardGroupCorner)),
+                .clip(RoundedCornerShape(CardGroupCorner))
+                .background(MaterialTheme.colorScheme.outlineVariant)
+                .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(CardGroupCorner)),
             verticalArrangement = Arrangement.spacedBy(CardGroupItemSpacing),
         ) {
             scope.content()

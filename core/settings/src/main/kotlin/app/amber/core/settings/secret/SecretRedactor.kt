@@ -98,9 +98,11 @@ class SecretRedactor(private val secretStore: SecretStore) {
         }
     }
 
-    /** orphan 回收：只删确认不再被任何设置引用的项（委托 SecretStore）。 */
+    /** orphan 回收：只删设置拥有且确认不再被任何设置引用的项。 */
     fun deleteOrphans(active: Set<SecretDescriptor>) {
-        secretStore.deleteOrphans(active)
+        secretStore.listOrphans(active)
+            .filter { it.scope in SETTINGS_SECRET_SCOPES }
+            .forEach { secretStore.delete(it) }
     }
 
     /**
@@ -807,6 +809,15 @@ class SecretRedactor(private val secretStore: SecretStore) {
     companion object {
         const val MASK_STRING = "••••"
         const val EXPORT_SECRET_REFS_KEY = "secretRefs"
+        private val SETTINGS_SECRET_SCOPES = setOf(
+            "provider",
+            "assistant",
+            "search",
+            "mcp",
+            "webdav",
+            "s3",
+            "tts",
+        )
     }
 }
 

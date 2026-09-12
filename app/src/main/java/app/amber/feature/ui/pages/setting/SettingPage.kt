@@ -4,6 +4,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -61,7 +62,6 @@ import app.amber.agent.R
 import app.amber.agent.Screen
 import app.amber.core.settings.isNotConfigured
 import app.amber.core.files.FilesManager
-import app.amber.feature.ui.components.ds.SectionLabel
 import app.amber.feature.ui.components.nav.BackButton
 import app.amber.feature.ui.components.ui.CardGroup
 import app.amber.feature.ui.components.ui.Select
@@ -130,8 +130,8 @@ fun SettingPage(vm: SettingVM = koinViewModel()) {
     ) { innerPadding ->
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
-            contentPadding = innerPadding + PaddingValues(horizontal = 12.dp, vertical = 10.dp),
-            verticalArrangement = Arrangement.spacedBy(18.dp),
+            contentPadding = innerPadding + PaddingValues(horizontal = SettingPageHorizontalInset, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(22.dp),
         ) {
             if (settings.isNotConfigured()) {
                 item {
@@ -141,12 +141,8 @@ fun SettingPage(vm: SettingVM = koinViewModel()) {
 
             item("generalSettings") {
                 var colorMode by rememberColorMode()
-                SectionLabel(
-                    text = stringResource(R.string.setting_page_general_settings),
-                    modifier = Modifier.padding(start = 6.dp, bottom = 10.dp),
-                )
+                SettingSectionTitle(stringResource(R.string.setting_page_general_settings))
                 CardGroup(
-                    modifier = Modifier.padding(horizontal = 2.dp),
                     colors = settingListColors,
                 ) {
                     item(
@@ -177,7 +173,6 @@ fun SettingPage(vm: SettingVM = koinViewModel()) {
                     item(
                         onClick = { navController.navigate(Screen.SettingDisplay) },
                         leadingContent = { SettingLeadingIcon(Lucide.Settings) },
-                        supportingContent = { SettingSupporting(stringResource(R.string.setting_page_display_setting_desc)) },
                         headlineContent = { Text(stringResource(R.string.setting_page_display_setting)) },
                         trailingContent = { SettingChevron() },
                     )
@@ -185,46 +180,37 @@ fun SettingPage(vm: SettingVM = koinViewModel()) {
             }
 
             item("agentRuntimeSettings") {
-                SectionLabel(
-                    text = stringResource(R.string.setting_page_agent_runtime),
-                    modifier = Modifier.padding(start = 6.dp, bottom = 10.dp),
-                )
+                SettingSectionTitle(stringResource(R.string.setting_page_agent_runtime))
                 CardGroup(
-                    modifier = Modifier.padding(horizontal = 2.dp),
                     colors = settingListColors,
                 ) {
                     item(
                         onClick = { navController.navigate(Screen.SettingAgentMemory) },
                         leadingContent = { SettingLeadingIcon(Lucide.Brain) },
-                        supportingContent = { SettingSupporting(stringResource(R.string.setting_page_agent_memory_desc)) },
                         headlineContent = { Text(stringResource(R.string.setting_page_agent_memory)) },
                         trailingContent = { SettingChevron() },
                     )
                     item(
                         onClick = { navController.navigate(Screen.SettingAgentExecution) },
                         leadingContent = { SettingLeadingIcon(Lucide.CodeXml) },
-                        supportingContent = { SettingSupporting(stringResource(R.string.setting_page_agent_execution_desc)) },
                         headlineContent = { Text(stringResource(R.string.setting_page_agent_execution)) },
                         trailingContent = { SettingChevron() },
                     )
                     item(
                         onClick = { navController.navigate(Screen.SettingTts) },
                         leadingContent = { SettingLeadingIcon(Lucide.AudioLines) },
-                        supportingContent = { SettingSupporting(stringResource(R.string.setting_page_tts_desc)) },
                         headlineContent = { Text(stringResource(R.string.setting_page_tts)) },
                         trailingContent = { SettingChevron() },
                     )
                     item(
                         onClick = { navController.navigate(Screen.SettingAgentExtensions) },
                         leadingContent = { SettingLeadingIcon(Lucide.Wrench) },
-                        supportingContent = { SettingSupporting(stringResource(R.string.setting_page_agent_extensions_desc)) },
                         headlineContent = { Text(stringResource(R.string.setting_page_agent_extensions)) },
                         trailingContent = { SettingChevron() },
                     )
                     item(
                         onClick = { navController.navigate(Screen.SettingAgentPermissions) },
                         leadingContent = { SettingLeadingIcon(Lucide.TriangleAlert) },
-                        supportingContent = { SettingSupporting(stringResource(R.string.setting_page_agent_permissions_desc)) },
                         headlineContent = { Text(stringResource(R.string.setting_page_agent_permissions)) },
                         trailingContent = { SettingChevron() },
                     )
@@ -232,32 +218,25 @@ fun SettingPage(vm: SettingVM = koinViewModel()) {
             }
 
             item("modelServices") {
-                SectionLabel(
-                    text = stringResource(R.string.setting_page_model_and_services),
-                    modifier = Modifier.padding(start = 6.dp, bottom = 10.dp),
-                )
+                SettingSectionTitle(stringResource(R.string.setting_page_model_and_services))
                 CardGroup(
-                    modifier = Modifier.padding(horizontal = 2.dp),
                     colors = settingListColors,
                 ) {
                     item(
                         onClick = { navController.navigate(Screen.SettingProvider) },
                         leadingContent = { SettingLeadingIcon(Lucide.Cpu) },
-                        supportingContent = { SettingSupporting(stringResource(R.string.setting_page_providers_desc)) },
                         headlineContent = { Text(stringResource(R.string.setting_page_providers)) },
                         trailingContent = { SettingChevron() },
                     )
                     item(
                         onClick = { navController.navigate(Screen.SettingModels) },
                         leadingContent = { SettingLeadingIcon(Lucide.WandSparkles) },
-                        supportingContent = { SettingSupporting(stringResource(R.string.setting_page_default_model_desc)) },
                         headlineContent = { Text(stringResource(R.string.setting_page_default_model)) },
                         trailingContent = { SettingChevron() },
                     )
                     item(
                         onClick = { navController.navigate(Screen.SettingSearch) },
                         leadingContent = { SettingLeadingIcon(Lucide.ScanSearch) },
-                        supportingContent = { SettingSupporting(stringResource(R.string.setting_page_search_service_desc)) },
                         headlineContent = { Text(stringResource(R.string.setting_page_search_service)) },
                         trailingContent = { SettingChevron() },
                     )
@@ -265,74 +244,61 @@ fun SettingPage(vm: SettingVM = koinViewModel()) {
             }
 
             item("advancedFeatures") {
-                SectionLabel(
-                    text = stringResource(R.string.setting_page_advanced_features),
-                    modifier = Modifier.padding(start = 6.dp, bottom = 10.dp),
-                )
+                SettingSectionTitle(stringResource(R.string.setting_page_advanced_features))
                 CardGroup(
-                    modifier = Modifier.padding(horizontal = 2.dp),
                     colors = settingListColors,
                 ) {
                     item(
                         onClick = { navController.navigate(Screen.SettingExperimentalWebMount) },
                         leadingContent = { SettingLeadingIcon(Lucide.Globe) },
-                        supportingContent = { SettingSupporting(stringResource(R.string.setting_page_webmount_desc)) },
                         headlineContent = { Text(stringResource(R.string.setting_page_webmount)) },
                         trailingContent = { SettingChevron() },
                     )
                     item(
                         onClick = { navController.navigate(Screen.SettingExperimentalSubAgent) },
                         leadingContent = { SettingLeadingIcon(Lucide.Users) },
-                        supportingContent = { SettingSupporting(stringResource(R.string.setting_page_subagent_desc)) },
                         headlineContent = { Text(stringResource(R.string.setting_subagent_title)) },
                         trailingContent = { SettingChevron() },
                     )
                     item(
                         onClick = { navController.navigate(Screen.SettingExperimentalModelCouncil) },
                         leadingContent = { SettingLeadingIcon(Lucide.MessageCircle) },
-                        supportingContent = { SettingSupporting(stringResource(R.string.setting_page_model_council_desc)) },
                         headlineContent = { Text(stringResource(R.string.setting_page_model_council)) },
                         trailingContent = { SettingChevron() },
                     )
                     item(
                         onClick = { navController.navigate(Screen.MiniAppList) },
                         leadingContent = { SettingLeadingIcon(Lucide.Grid2x2) },
-                        supportingContent = { SettingSupporting(stringResource(R.string.setting_page_miniapp_desc)) },
                         headlineContent = { Text(stringResource(R.string.setting_page_miniapp)) },
                         trailingContent = { SettingChevron() },
                     )
                     item(
                         onClick = { navController.navigate(Screen.NovelProjects) },
                         leadingContent = { SettingLeadingIcon(Lucide.Pen) },
-                        supportingContent = { SettingSupporting(stringResource(R.string.setting_page_novel_desc)) },
                         headlineContent = { Text(stringResource(R.string.setting_page_novel)) },
                         trailingContent = { SettingChevron() },
                     )
                     item(
                         onClick = { navController.navigate(Screen.TodayBoard) },
                         leadingContent = { SettingLeadingIcon(Lucide.BookOpenText) },
-                        supportingContent = { SettingSupporting(stringResource(R.string.setting_page_deep_read_desc)) },
                         headlineContent = { Text(stringResource(R.string.setting_page_deep_read)) },
                         trailingContent = { SettingChevron() },
                     )
                     item(
                         onClick = { navController.navigate(Screen.SettingExperimentalICloud) },
                         leadingContent = { SettingLeadingIcon(Lucide.Cloud) },
-                        supportingContent = { SettingSupporting(stringResource(R.string.setting_page_icloud_desc)) },
                         headlineContent = { Text(stringResource(R.string.setting_icloud_title)) },
                         trailingContent = { SettingChevron() },
                     )
                     item(
                         onClick = { navController.navigate(Screen.SynaraCompanion) },
                         leadingContent = { SettingLeadingIcon(Lucide.Server) },
-                        supportingContent = { SettingSupporting(stringResource(R.string.setting_page_synara_desc)) },
                         headlineContent = { Text(stringResource(R.string.setting_page_synara)) },
                         trailingContent = { SettingChevron() },
                     )
                     item(
                         onClick = { navController.navigate(Screen.ZCode) },
                         leadingContent = { SettingLeadingIcon(Lucide.Braces) },
-                        supportingContent = { SettingSupporting(stringResource(R.string.setting_page_zcode_desc)) },
                         headlineContent = { Text(stringResource(R.string.setting_page_zcode)) },
                         trailingContent = { SettingChevron() },
                     )
@@ -343,25 +309,19 @@ fun SettingPage(vm: SettingVM = koinViewModel()) {
                 val storageState by produceState(-1 to 0L) {
                     value = filesManager.countChatFiles()
                 }
-                SectionLabel(
-                    text = stringResource(R.string.setting_page_data_settings),
-                    modifier = Modifier.padding(start = 6.dp, bottom = 10.dp),
-                )
+                SettingSectionTitle(stringResource(R.string.setting_page_data_settings))
                 CardGroup(
-                    modifier = Modifier.padding(horizontal = 2.dp),
                     colors = settingListColors,
                 ) {
                     item(
                         onClick = { navController.navigate(Screen.Backup) },
                         leadingContent = { SettingLeadingIcon(Lucide.DatabaseZap) },
-                        supportingContent = { SettingSupporting(stringResource(R.string.setting_page_backup_desc)) },
                         headlineContent = { Text(stringResource(R.string.setting_page_backup)) },
                         trailingContent = { SettingChevron() },
                     )
                     item(
                         onClick = { navController.navigate(Screen.SettingStorage) },
                         leadingContent = { SettingLeadingIcon(Lucide.ChartNoAxesColumnIncreasing) },
-                        supportingContent = { SettingSupporting(stringResource(R.string.setting_page_storage_cleanup_desc)) },
                         headlineContent = { Text(stringResource(R.string.setting_page_storage_cleanup)) },
                         trailingContent = { SettingChevron() },
                     )
@@ -385,14 +345,6 @@ fun SettingPage(vm: SettingVM = koinViewModel()) {
                             }
                         },
                         headlineContent = { Text(stringResource(R.string.setting_page_chat_storage)) },
-                        trailingContent = { SettingChevron() },
-                    )
-                    item(
-                        // P7-03：存储占用与按时间清理会话。
-                        onClick = { navController.navigate(Screen.SettingStorage) },
-                        leadingContent = { SettingLeadingIcon(Lucide.ChartNoAxesColumnIncreasing) },
-                        supportingContent = { SettingSupporting(stringResource(R.string.setting_page_storage_cleanup_desc)) },
-                        headlineContent = { Text(stringResource(R.string.setting_page_storage_cleanup)) },
                         trailingContent = { SettingChevron() },
                     )
                 }
@@ -425,13 +377,7 @@ private fun SettingLeadingIcon(
     icon: ImageVector,
     tone: WorkspaceTone = WorkspaceTone.Neutral,
 ) {
-    // V3 settings-screen.jsx: stroke icon 21dp 无底色容器
-    WorkspaceLeadingIcon(
-        icon = icon,
-        size = 32.dp,
-        iconSize = 21.dp,
-        tone = tone,
-    )
+    WorkspaceLeadingIcon(icon = icon, size = 32.dp, iconSize = 17.dp, tone = tone)
 }
 
 @Composable
@@ -445,34 +391,20 @@ private fun ProviderConfigWarningCard(navController: Navigator) {
         ),
         border = BorderStroke(1.dp, workspace.amber.copy(alpha = 0.18f)),
     ) {
-        Column(
+        Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(12.dp),
-            horizontalAlignment = Alignment.End
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(11.dp),
         ) {
-            ListItem(
-                headlineContent = {
-                    Text(stringResource(R.string.setting_page_config_api_title))
-                },
-                supportingContent = {
-                    Text(stringResource(R.string.setting_page_config_api_desc))
-                },
-                leadingContent = {
-                    SettingLeadingIcon(Lucide.TriangleAlert, tone = WorkspaceTone.Warning)
-                },
-                colors = ListItemDefaults.colors(
-                    containerColor = Color.Transparent,
-                    headlineColor = workspace.ink,
-                    supportingColor = workspace.muted,
-                )
+            SettingLeadingIcon(Lucide.TriangleAlert, tone = WorkspaceTone.Warning)
+            Text(
+                text = stringResource(R.string.setting_page_config_api_title),
+                modifier = Modifier.weight(1f),
+                color = workspace.ink,
             )
-
-            TextButton(
-                onClick = {
-                    navController.navigate(Screen.SettingProvider)
-                }
-            ) {
+            TextButton(onClick = { navController.navigate(Screen.SettingProvider) }) {
                 Text(stringResource(R.string.setting_page_config))
             }
         }

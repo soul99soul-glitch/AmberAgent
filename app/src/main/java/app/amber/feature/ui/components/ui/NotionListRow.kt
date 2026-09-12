@@ -1,5 +1,6 @@
 package app.amber.feature.ui.components.ui
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -25,11 +26,11 @@ import androidx.compose.ui.unit.dp
  * actions row — that produced ~80-100dp tall items dense with empty space.
  *
  * Visual shape:
- *  - one row, default min-height 56dp (touch-target friendly, but smaller than the prior
+ *  - one row, default min-height 52dp (matching the redesign row rhythm, while preserving
  *    two-row cards)
- *  - 12dp horizontal / 10dp vertical padding around the row content
+ *  - 14dp horizontal / 10dp vertical padding around the row content
  *  - rounded `MaterialTheme.shapes.medium` corners
- *  - background: `surfaceContainerHigh` when not selected, `primaryContainer @ 0.5α`
+ *  - background: `surface` when not selected, `primaryContainer @ 0.5α`
  *    when selected (subtle tint, the title also flips to `onPrimaryContainer`)
  *  - clickable when [onClick] is non-null, with the standard Material indication
  *
@@ -54,13 +55,13 @@ fun NotionListRow(
     selected: Boolean = false,
     onClick: (() -> Unit)? = null,
     enabled: Boolean = true,
-    minHeight: Dp = 56.dp,
-    contentPadding: PaddingValues = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
+    minHeight: Dp = 52.dp,
+    contentPadding: PaddingValues = PaddingValues(horizontal = 14.dp, vertical = 10.dp),
 ) {
     val containerColor = if (selected) {
         MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
     } else {
-        MaterialTheme.colorScheme.surfaceContainerHigh
+        MaterialTheme.colorScheme.surface
     }
     val titleColor = if (selected) {
         MaterialTheme.colorScheme.onPrimaryContainer
@@ -79,7 +80,7 @@ fun NotionListRow(
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = title,
-                    style = MaterialTheme.typography.titleSmall,
+                    style = MaterialTheme.typography.titleMedium,
                     color = titleColor,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -109,6 +110,7 @@ fun NotionListRow(
             modifier = baseModifier,
             shape = MaterialTheme.shapes.medium,
             color = containerColor,
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
             onClick = onClick,
             enabled = enabled,
             content = rowContent,
@@ -118,6 +120,7 @@ fun NotionListRow(
             modifier = baseModifier,
             shape = MaterialTheme.shapes.medium,
             color = containerColor,
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
             content = rowContent,
         )
     }

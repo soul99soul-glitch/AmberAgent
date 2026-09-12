@@ -3,6 +3,7 @@ package app.amber.feature.ui.pages.profile
 import android.graphics.Paint
 import android.graphics.Typeface
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -20,30 +21,26 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
-import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.CornerRadius
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.amber.feature.ui.components.nav.BackButton
+import app.amber.feature.ui.components.ds.SectionLabel
 import app.amber.feature.ui.components.ui.UIAvatar
+import app.amber.feature.ui.components.ui.WorkspaceTopBar
 import app.amber.feature.ui.context.LocalSettings
 import app.amber.feature.ui.theme.JetBrainsMonoFamily
 import app.amber.feature.ui.theme.LocalAmberTokens
@@ -77,10 +74,9 @@ fun ProfilePage(
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = { Text(stringResource(R.string.profile_title), fontWeight = FontWeight.Bold) },
+            WorkspaceTopBar(
+                title = stringResource(R.string.profile_title),
                 navigationIcon = { BackButton() },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = tokens.bg),
             )
         },
         containerColor = tokens.bg,
@@ -90,9 +86,9 @@ fun ProfilePage(
                 .fillMaxSize()
                 .padding(innerPadding)
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = 20.dp),
+                .padding(horizontal = 16.dp),
         ) {
-            Spacer(Modifier.height(24.dp))
+            Spacer(Modifier.height(16.dp))
 
             // 头像 + 昵称 + 徽章
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -148,24 +144,40 @@ fun ProfilePage(
             Spacer(Modifier.height(32.dp))
 
             // 聊天活动热力图
-            Text(
-                text = stringResource(R.string.profile_chat_activity),
-                fontSize = 16.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = tokens.ink,
-            )
-            Spacer(Modifier.height(12.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                SectionLabel(text = stringResource(R.string.profile_chat_activity))
+                Spacer(Modifier.weight(1f))
+                Text(
+                    text = "53 W",
+                    style = app.amber.feature.ui.theme.LocalAmberType.current.meta,
+                    color = tokens.ink3,
+                )
+            }
+            Spacer(Modifier.height(10.dp))
             // 加载中先占位，避免首帧闪现全空热力图
             if (stats.isLoading) {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(120.dp)
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(tokens.surface),
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(tokens.surface)
+                        .border(1.dp, tokens.line, RoundedCornerShape(14.dp)),
                 )
             } else {
-                ActivityHeatmap(days = stats.conversationsPerDay)
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(14.dp),
+                    color = tokens.surface,
+                    border = androidx.compose.foundation.BorderStroke(1.dp, tokens.line),
+                ) {
+                    Box(Modifier.padding(16.dp)) {
+                        ActivityHeatmap(days = stats.conversationsPerDay)
+                    }
+                }
             }
 
             Spacer(Modifier.height(32.dp))
@@ -193,8 +205,8 @@ private fun ProfileStatsCard(stats: app.amber.feature.ui.pages.stats.AppStats) {
             .fillMaxWidth()
             .clip(RoundedCornerShape(14.dp))
             .background(tokens.surface)
-            .padding(vertical = 16.dp)
-            .horizontalScroll(rememberScrollState()),
+            .border(1.dp, tokens.line, RoundedCornerShape(14.dp))
+            .padding(vertical = 16.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         items.forEachIndexed { index, (value, label) ->
@@ -206,9 +218,8 @@ private fun ProfileStatsCard(stats: app.amber.feature.ui.pages.stats.AppStats) {
                         .background(tokens.line),
                 )
             }
-            // 固定列宽，不再 weight 等分挤压；窄屏可左右滑动
             Column(
-                modifier = Modifier.width(72.dp),
+                modifier = Modifier.weight(1f),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {

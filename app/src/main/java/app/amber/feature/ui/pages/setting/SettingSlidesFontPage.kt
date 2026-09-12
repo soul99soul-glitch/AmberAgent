@@ -48,6 +48,7 @@ import app.amber.core.font.FontPackCategory
 import app.amber.core.font.FontPackState
 import app.amber.core.font.SlidesFontRepository
 import app.amber.feature.ui.components.nav.BackButton
+import app.amber.feature.ui.components.ds.SectionLabel
 import app.amber.feature.ui.components.ui.CardGroup
 import app.amber.feature.ui.components.ui.WorkspaceTopBar
 import app.amber.feature.ui.components.ui.workspaceColors
@@ -87,13 +88,12 @@ fun SettingSlidesFontPage(
     ) { innerPadding ->
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
-            contentPadding = innerPadding + PaddingValues(16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
+            contentPadding = innerPadding + PaddingValues(horizontal = SettingPageHorizontalInset, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(22.dp),
         ) {
             item {
                 CardGroup(
-                    modifier = Modifier.padding(horizontal = 8.dp),
-                    title = { Text(stringResource(R.string.setting_slides_font_downloadable_fonts)) },
+                    title = { SectionLabel(stringResource(R.string.setting_slides_font_downloadable_fonts)) },
                 ) {
                     fonts.forEach { state ->
                         key(state.pack.id) {

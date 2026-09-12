@@ -46,6 +46,7 @@ import app.amber.feature.cron.AgentCronTask
 import app.amber.feature.task.AgentTaskScheduler
 import app.amber.feature.task.AgentTaskSnapshot
 import app.amber.feature.ui.components.nav.BackButton
+import app.amber.feature.ui.components.ds.SectionLabel
 import app.amber.feature.ui.components.ui.CardGroup
 import app.amber.feature.ui.components.ui.WorkspaceTopBar
 import app.amber.feature.ui.components.ui.workspaceColors
@@ -76,41 +77,40 @@ fun SettingAgentExtensionsPage() {
     ) { innerPadding ->
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
-            contentPadding = innerPadding + PaddingValues(16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
+            contentPadding = innerPadding + PaddingValues(horizontal = SettingPageHorizontalInset, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(22.dp),
         ) {
             item {
                 CardGroup(
-                    modifier = Modifier.padding(horizontal = 8.dp),
-                    title = { Text(stringResource(R.string.setting_agent_extensions_page_title)) },
+                    title = { SectionLabel(stringResource(R.string.setting_agent_extensions_page_title)) },
                 ) {
                     item(
                         onClick = { navController.navigate(Screen.Skills) },
-                        leadingContent = { Icon(Lucide.Package, null) },
+                        leadingContent = { SettingTileIcon(Lucide.Package) },
                         supportingContent = { Text(stringResource(R.string.setting_page_agent_skills_desc)) },
                         headlineContent = { Text(stringResource(R.string.setting_page_agent_skills)) },
                     )
                     item(
                         onClick = { navController.navigate(Screen.Extensions) },
-                        leadingContent = { Icon(Lucide.Package, null) },
+                        leadingContent = { SettingTileIcon(Lucide.Package) },
                         supportingContent = { Text(stringResource(R.string.setting_page_extensions_desc)) },
                         headlineContent = { Text(stringResource(R.string.setting_page_extensions)) },
                     )
                     item(
                         onClick = { navController.navigate(Screen.SettingMcp) },
-                        leadingContent = { Icon(Lucide.ServerCog, null) },
+                        leadingContent = { SettingTileIcon(Lucide.ServerCog) },
                         supportingContent = { Text(stringResource(R.string.setting_page_mcp_desc)) },
                         headlineContent = { Text(stringResource(R.string.setting_page_mcp)) },
                     )
                     item(
                         onClick = { navController.navigate(Screen.SettingCronTasks) },
-                        leadingContent = { Icon(Lucide.AlarmClock, null) },
+                        leadingContent = { SettingTileIcon(Lucide.AlarmClock) },
                         supportingContent = { Text(stringResource(R.string.setting_page_cron_tasks_desc)) },
                         headlineContent = { Text(stringResource(R.string.setting_page_cron_tasks)) },
                     )
                     item(
                         onClick = { navController.navigate(Screen.SettingSlidesFonts) },
-                        leadingContent = { Icon(Lucide.Package, null) },
+                        leadingContent = { SettingTileIcon(Lucide.Package) },
                         supportingContent = { Text(stringResource(R.string.setting_slides_fonts_desc)) },
                         headlineContent = { Text(stringResource(R.string.setting_slides_fonts_title)) },
                     )
@@ -148,13 +148,12 @@ fun SettingAgentRuntimeTasksPage(
     ) { innerPadding ->
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
-            contentPadding = innerPadding + PaddingValues(16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
+            contentPadding = innerPadding + PaddingValues(horizontal = SettingPageHorizontalInset, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(22.dp),
         ) {
             item {
                 CardGroup(
-                    modifier = Modifier.padding(horizontal = 8.dp),
-                    title = { Text(stringResource(R.string.setting_agent_runtime_tasks_page_title)) },
+                    title = { SectionLabel(stringResource(R.string.setting_agent_runtime_tasks_page_title)) },
                 ) {
                     item(
                         headlineContent = { Text(stringResource(R.string.setting_agent_runtime_tasks_scope_title)) },
@@ -236,9 +235,9 @@ fun SettingAgentRuntimeTasksPage(
             }
             if (tasks.isEmpty()) {
                 item {
-                    CardGroup(modifier = Modifier.padding(horizontal = 8.dp)) {
+                    CardGroup {
                         item(
-                            leadingContent = { Icon(Lucide.AlarmClock, null) },
+                            leadingContent = { SettingTileIcon(Lucide.AlarmClock) },
                             headlineContent = { Text(stringResource(R.string.setting_agent_runtime_tasks_empty_title)) },
                             supportingContent = { Text(stringResource(R.string.setting_agent_runtime_tasks_empty_desc)) },
                         )
@@ -246,9 +245,9 @@ fun SettingAgentRuntimeTasksPage(
                 }
             } else {
                 items(tasks, key = { it.taskId }) { task ->
-                    CardGroup(modifier = Modifier.padding(horizontal = 8.dp)) {
+                    CardGroup {
                         item(
-                            leadingContent = { Icon(Lucide.AlarmClock, null) },
+                            leadingContent = { SettingTileIcon(Lucide.AlarmClock) },
                             headlineContent = { Text(task.title) },
                             supportingContent = { AgentTaskSummary(task) },
                         )
@@ -342,13 +341,12 @@ fun SettingCronTasksPage(
     ) { innerPadding ->
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
-            contentPadding = innerPadding + PaddingValues(16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
+            contentPadding = innerPadding + PaddingValues(horizontal = SettingPageHorizontalInset, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(22.dp),
         ) {
             item {
                 CardGroup(
-                    modifier = Modifier.padding(horizontal = 8.dp),
-                    title = { Text(stringResource(R.string.setting_cron_tasks_page_title)) },
+                    title = { SectionLabel(stringResource(R.string.setting_cron_tasks_page_title)) },
                 ) {
                     item(
                         headlineContent = { Text(stringResource(R.string.setting_cron_tasks_scope_title)) },
@@ -358,9 +356,9 @@ fun SettingCronTasksPage(
             }
             if (tasks.isEmpty()) {
                 item {
-                    CardGroup(modifier = Modifier.padding(horizontal = 8.dp)) {
+                    CardGroup {
                         item(
-                            leadingContent = { Icon(Lucide.AlarmClock, null) },
+                            leadingContent = { SettingTileIcon(Lucide.AlarmClock) },
                             headlineContent = { Text(stringResource(R.string.setting_cron_tasks_empty_title)) },
                             supportingContent = { Text(stringResource(R.string.setting_cron_tasks_empty_desc)) },
                         )
@@ -368,10 +366,10 @@ fun SettingCronTasksPage(
                 }
             } else {
                 items(tasks, key = { it.id }) { task ->
-                    CardGroup(modifier = Modifier.padding(horizontal = 8.dp)) {
+                    CardGroup {
                         item(
                             onClick = { selectedTask = task },
-                            leadingContent = { Icon(Lucide.AlarmClock, null) },
+                            leadingContent = { SettingTileIcon(Lucide.AlarmClock) },
                             headlineContent = { Text(task.title) },
                             supportingContent = { CronTaskSummary(task) },
                             trailingContent = {

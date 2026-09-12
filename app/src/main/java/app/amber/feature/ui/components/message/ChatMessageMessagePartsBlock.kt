@@ -73,6 +73,7 @@ import app.amber.feature.ui.components.ui.workspaceColors
 import app.amber.feature.ui.modifier.shimmer
 import app.amber.feature.ui.context.LocalNavController
 import app.amber.feature.ui.context.LocalSettings
+import app.amber.feature.ui.theme.LocalAmberTokens
 import app.amber.feature.ui.pages.miniapp.components.MiniAppChatCard
 import kotlin.time.Duration.Companion.milliseconds
 
@@ -252,7 +253,7 @@ internal fun MessagePartsBlock(
                                         modifier = Modifier.fillMaxWidth(),
                                         contentAlignment = Alignment.TopEnd,
                                     ) {
-                                    val userBubbleMaxWidth = maxWidth * 0.82f
+                                    val userBubbleMaxWidth = maxWidth * 0.92f
                                     Surface(
                                         modifier = Modifier
                                             .wrapContentWidth(Alignment.End)
@@ -271,7 +272,7 @@ internal fun MessagePartsBlock(
                                     ) {
                                         Column(
                                             modifier = Modifier
-                                                .padding(horizontal = 18.dp, vertical = 10.dp)
+                                                .padding(horizontal = 14.dp, vertical = 10.dp)
                                         ) {
                                             MarkdownBlock(
                                                 content = GenerativeUiPlanner.stripVisualRouteTagsForDisplay(
@@ -331,37 +332,48 @@ internal fun MessagePartsBlock(
                                         // Streaming text height animation is intentionally disabled:
                                         // assistant markdown should grow by natural layout only, without
                                         // a restarted spring/tween on every accumulator flush.
-                                        Surface(
-                                            modifier = Modifier
-                                                .widthIn(max = 640.dp),
-                                            shape = RoundedCornerShape(8.dp),
-                                            color = workspace.paper,
-                                            contentColor = workspace.ink,
-                                            tonalElevation = 0.dp,
-                                            shadowElevation = 0.dp,
-                                            border = BorderStroke(1.dp, workspace.hairline),
+                                        BoxWithConstraints(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            contentAlignment = Alignment.TopStart,
                                         ) {
-                                            Column(modifier = Modifier.padding(horizontal = 13.dp, vertical = 9.dp)) {
-                                                AssistantMarkdownBlockOrWidgets(
-                                                    content = assistantDisplayText,
-                                                    streaming = isStreamingText,
-                                                    deferStreamingParse = deferStreamingParse && isStreamingText,
-                                                    streamingMarkdownContent = streamingMarkdownContent,
-                                                    onClickCitation = handleClickCitation,
-                                                    onGenerativeWidgetAction = onGenerativeWidgetAction,
-                                                    onStreamingVisibleFrame = if (isStreamingText) {
-                                                        onStreamingVisibleFrame
-                                                    } else {
-                                                        null
-                                                    },
-                                                    onStreamingVisualActiveChange = if (
-                                                        isStreamingText || onStreamingVisibleFrame != null
-                                                    ) {
-                                                        onStreamingVisualActiveChange
-                                                    } else {
-                                                        null
-                                                    },
-                                                )
+                                            val amberTokens = LocalAmberTokens.current
+                                            val assistantBubbleShape = RoundedCornerShape(
+                                                topStart = 14.dp,
+                                                topEnd = 14.dp,
+                                                bottomStart = 5.dp,
+                                                bottomEnd = 14.dp,
+                                            )
+                                            Surface(
+                                                modifier = Modifier.widthIn(max = maxWidth * 0.86f),
+                                                shape = assistantBubbleShape,
+                                                color = amberTokens.surface,
+                                                contentColor = amberTokens.ink,
+                                                tonalElevation = 0.dp,
+                                                shadowElevation = 0.dp,
+                                                border = BorderStroke(1.dp, amberTokens.line),
+                                            ) {
+                                                Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
+                                                    AssistantMarkdownBlockOrWidgets(
+                                                        content = assistantDisplayText,
+                                                        streaming = isStreamingText,
+                                                        deferStreamingParse = deferStreamingParse && isStreamingText,
+                                                        streamingMarkdownContent = streamingMarkdownContent,
+                                                        onClickCitation = handleClickCitation,
+                                                        onGenerativeWidgetAction = onGenerativeWidgetAction,
+                                                        onStreamingVisibleFrame = if (isStreamingText) {
+                                                            onStreamingVisibleFrame
+                                                        } else {
+                                                            null
+                                                        },
+                                                        onStreamingVisualActiveChange = if (
+                                                            isStreamingText || onStreamingVisibleFrame != null
+                                                        ) {
+                                                            onStreamingVisualActiveChange
+                                                        } else {
+                                                            null
+                                                        },
+                                                    )
+                                                }
                                             }
                                         }
                                     } else {

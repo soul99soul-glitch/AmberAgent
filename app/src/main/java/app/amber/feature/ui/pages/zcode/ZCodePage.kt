@@ -3,6 +3,7 @@ package app.amber.feature.ui.pages.zcode
 import androidx.annotation.StringRes
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
@@ -34,10 +35,13 @@ import app.amber.agent.R
 import app.amber.agent.Screen
 import app.amber.core.utils.plus
 import app.amber.feature.ui.components.nav.BackButton
+import app.amber.feature.ui.components.ds.AmberCard
+import app.amber.feature.ui.components.ds.SectionLabel
 import app.amber.feature.ui.components.ui.WorkspaceTopBar
-import app.amber.feature.ui.components.ui.workspaceColors
 import app.amber.feature.ui.context.LocalNavController
 import app.amber.feature.ui.context.LocalToaster
+import app.amber.feature.ui.theme.LocalAmberTokens
+import app.amber.feature.ui.theme.LocalAmberType
 import com.dokar.sonner.ToastType
 import io.github.g00fy2.quickie.QRResult
 import io.github.g00fy2.quickie.ScanQRCode
@@ -56,7 +60,8 @@ fun ZCodePage(
 ) {
     val navController = LocalNavController.current
     val toaster = LocalToaster.current
-    val workspace = workspaceColors()
+    val t = LocalAmberTokens.current
+    val type = LocalAmberType.current
     val scope = rememberCoroutineScope()
     val scanNotUrlMessage = stringResource(R.string.zcode_scan_not_url)
     val cameraPermissionMessage = stringResource(R.string.zcode_camera_permission_required)
@@ -126,61 +131,57 @@ fun ZCodePage(
                 navigationIcon = { BackButton() },
             )
         },
-        containerColor = workspace.canvas,
+        containerColor = t.bg,
     ) { innerPadding ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
+                .background(t.bg)
                 .verticalScroll(rememberScrollState())
                 .padding(innerPadding + PaddingValues(horizontal = 16.dp, vertical = 12.dp)),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            Text(
-                text = stringResource(R.string.zcode_page_title),
-                style = MaterialTheme.typography.titleMedium,
-                color = workspace.ink,
-            )
-            Text(
-                text = stringResource(R.string.zcode_page_description),
-                style = MaterialTheme.typography.bodyMedium,
-                color = workspace.muted,
-            )
-
-            OutlinedTextField(
-                value = draft,
-                onValueChange = {
-                    draft = it
-                    error = null
-                },
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text(stringResource(R.string.zcode_url_label)) },
-                placeholder = { Text("https://…") },
-                singleLine = true,
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
-                trailingIcon = {
-                    IconButton(onClick = { scanQrCodeLauncher.launch(null) }) {
-                        Icon(
-                            imageVector = Lucide.ScanQrCode,
-                            contentDescription = stringResource(R.string.zcode_scan_qr),
+            SectionLabel("ZCODE")
+            AmberCard {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Text(stringResource(R.string.zcode_page_title), style = type.sessionTitle, color = t.ink)
+                    Text(stringResource(R.string.zcode_page_description), style = type.secondary, color = t.ink3)
+                    OutlinedTextField(
+                        value = draft,
+                        onValueChange = {
+                            draft = it
+                            error = null
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text(stringResource(R.string.zcode_url_label)) },
+                        placeholder = { Text("https://…") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+                        trailingIcon = {
+                            IconButton(onClick = { scanQrCodeLauncher.launch(null) }) {
+                                Icon(
+                                    imageVector = Lucide.ScanQrCode,
+                                    contentDescription = stringResource(R.string.zcode_scan_qr),
+                                )
+                            }
+                        },
+                    )
+                    error?.let {
+                        Text(
+                            text = stringResource(it.resourceId, *it.formatArgs.toTypedArray()),
+                            style = type.secondary,
+                            color = MaterialTheme.colorScheme.error,
                         )
                     }
-                },
-            )
-
-            error?.let {
-                Text(
-                    text = stringResource(it.resourceId, *it.formatArgs.toTypedArray()),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.error,
-                )
-            }
-
-            Button(
-                onClick = { openZCodeUrl(draft) },
-                enabled = draft.isNotBlank(),
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Text(stringResource(R.string.zcode_open))
+                    Button(
+                        onClick = { openZCodeUrl(draft) },
+                        enabled = draft.isNotBlank(),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text(stringResource(R.string.zcode_open)) }
+                }
             }
         }
     }

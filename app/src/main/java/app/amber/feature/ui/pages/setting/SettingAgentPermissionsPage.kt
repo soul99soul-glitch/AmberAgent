@@ -32,6 +32,7 @@ import app.amber.agent.Screen
 import app.amber.core.settings.Capability
 import app.amber.core.settings.CapabilityFlags
 import app.amber.feature.ui.components.nav.BackButton
+import app.amber.feature.ui.components.ds.SectionLabel
 import app.amber.feature.ui.components.ui.CardGroup
 import app.amber.feature.ui.components.ui.WorkspaceTopBar
 import app.amber.feature.ui.components.ui.workspaceColors
@@ -99,24 +100,23 @@ fun SettingAgentPermissionsPage(vm: SettingVM = koinViewModel()) {
     ) { innerPadding ->
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
-            contentPadding = innerPadding + PaddingValues(16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
+            contentPadding = innerPadding + PaddingValues(horizontal = SettingPageHorizontalInset, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(22.dp),
         ) {
             item {
                 CardGroup(
-                    modifier = Modifier.padding(horizontal = 8.dp),
-                    title = { Text(stringResource(R.string.setting_agent_permissions_access_section)) },
+                    title = { SectionLabel(stringResource(R.string.setting_agent_permissions_access_section)) },
                 ) {
                     item(
                         onClick = { navController.navigate(Screen.SettingSystemAccess) },
-                        leadingContent = { Icon(Lucide.Settings, null) },
+                        leadingContent = { SettingTileIcon(Lucide.Settings) },
                         supportingContent = { Text(stringResource(R.string.setting_page_system_access_desc)) },
                         headlineContent = { Text(stringResource(R.string.setting_page_system_access)) },
                     )
                     if (capabilityPermissionsEnabled) {
                         item(
                             onClick = { navController.navigate(Screen.SettingCapabilityPermissions) },
-                            leadingContent = { Icon(Lucide.Layers, null) },
+                            leadingContent = { SettingTileIcon(Lucide.Layers) },
                             supportingContent = { Text(stringResource(R.string.setting_agent_permissions_capability_desc)) },
                             headlineContent = { Text(stringResource(R.string.setting_agent_permissions_capability_title)) },
                         )
@@ -126,11 +126,10 @@ fun SettingAgentPermissionsPage(vm: SettingVM = koinViewModel()) {
 
             item {
                 CardGroup(
-                    modifier = Modifier.padding(horizontal = 8.dp),
-                    title = { Text(stringResource(R.string.setting_agent_permissions_approval_section)) },
+                    title = { SectionLabel(stringResource(R.string.setting_agent_permissions_approval_section)) },
                 ) {
                     item(
-                        leadingContent = { Icon(Lucide.Zap, null) },
+                        leadingContent = { SettingTileIcon(Lucide.Zap) },
                         supportingContent = { Text(stringResource(R.string.setting_page_agent_auto_approve_desc)) },
                         headlineContent = { Text(stringResource(R.string.setting_page_agent_auto_approve)) },
                         trailingContent = {
@@ -149,7 +148,7 @@ fun SettingAgentPermissionsPage(vm: SettingVM = koinViewModel()) {
                         },
                     )
                     item(
-                        leadingContent = { Icon(Lucide.TriangleAlert, null) },
+                        leadingContent = { SettingTileIcon(Lucide.TriangleAlert) },
                         supportingContent = { Text(stringResource(R.string.setting_page_agent_high_risk_auto_approve_desc)) },
                         headlineContent = { Text(stringResource(R.string.setting_page_agent_high_risk_auto_approve)) },
                         trailingContent = {

@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- 冷启动窗口背景：消除系统 splash 闪屏，直接显示应用底色 -->
+    <!-- Opaque starting-window canvas; the night resource follows system dark mode. -->
     <color name="splash_bg">#FFF4F2EC</color>
+    <color name="amber_brand_ink">#1B1A17</color>
 </resources>
