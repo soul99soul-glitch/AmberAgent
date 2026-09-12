@@ -8,6 +8,7 @@
 
 import { BG, INK, INK2, INK3, ERROR, ACCENT, BODY, BODY2, META, LABEL, SURFACE, SURFACE2, LINE, RADIUS } from '../design/tokens.ets';
 import { PageTitleBar, SectionHeader, PaperSeparator, PageSpacer, BtnFill } from '../components/PageTemplate.ets';
+import { common } from '@kit.AbilityKit';
 import { getChatKvStore, getAppContainer } from '../di/AppContainer.ets';
 import { loadWebMountSites, saveWebMountSites, makeUserSite, hostOf, isSeedSite, restoreMissingSeedSites, SEED_SITES } from '../platform_impl/WebMountSites.ets';
 import type { UserSiteEntry } from '../platform_impl/WebMountSites.ets';
@@ -83,11 +84,27 @@ struct SettingExperimentalWebMountPage {
         state: pkce.state,
         codeChallenge: pkce.codeChallenge,
       });
-      this.feishuStatus = '已生成授权链接，浏览器打开后粘贴 code';
+      this.feishuStatus = '已打开浏览器；登录后粘贴 code';
+      this.openExternalUrl(this.feishuAuthUrl);
     } catch (e) {
       this.feishuStatus = `生成失败：${e instanceof Error ? e.message : String(e)}`;
     } finally {
       this.feishuBusy = false;
+    }
+  }
+
+  private openExternalUrl(url: string): void {
+    try {
+      const ctx = getContext(this) as common.UIAbilityContext;
+      ctx.startAbility({
+        action: 'ohos.want.action.viewData',
+        entities: ['entity.system.browsable'],
+        uri: url,
+      }).catch((): void => {
+        this.feishuStatus = '无法打开浏览器，请手动复制链接';
+      });
+    } catch (_e) {
+      this.feishuStatus = '无法打开浏览器，请手动复制链接';
     }
   }
 

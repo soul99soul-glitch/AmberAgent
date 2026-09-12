@@ -7,7 +7,7 @@ import { router, window } from '@kit.ArkUI';
 import { Icon } from '../components/ui/Icon.ets';
 import type { ConversationSummary, ContinueCandidate } from '@amber/chat-domain';
 import { mergeContinueCandidates, continueStatusText, SOURCE_LABEL } from '@amber/chat-domain';
-import { getChatRepository, describeChatModel, getNovelCreation, getAgentCronManager, getRepository } from '../di/AppContainer.ets';
+import { getChatRepository, describeChatModel, getNovelCreation, getAgentCronManager, getRepository, getMiniAppRepositorySync } from '../di/AppContainer.ets';
 import {
   INK, INK2, INK3, INK4, SURFACE, LINE, BG, ACCENT, ACCENT_INK, TINY, TEXT_STYLES,
 } from '../design/tokens.ets';
@@ -245,7 +245,20 @@ struct Index {
           isRunning: e.phase !== 'COMPLETE' && e.phase !== 'FAILED',
         })))
       .catch((): ContinueCandidate[] => []);
-    Promise.all([novelList, cronList, deepList]).then((lists): void => {
+    const miniList: Promise<ContinueCandidate[]> = getMiniAppRepositorySync().listAll()
+      .then((apps): ContinueCandidate[] => apps.slice(0, 2).map((app): ContinueCandidate => ({
+        sourceKind: 'miniapp',
+        sourceId: app.appId,
+        route: { kind: 'miniapp', appId: app.appId },
+        title: app.title,
+        summary: '可打开运行',
+        lastUpdatedAt: app.updatedAt,
+        status: 'draft',
+        priority: 0,
+        isRunning: false,
+      })))
+      .catch((): ContinueCandidate[] => []);
+    Promise.all([novelList, cronList, deepList, miniList]).then((lists): void => {
       if (!this.pageAlive || !this.pageVisible) return;
       this.continueItems = mergeContinueCandidates(lists, 6);
     }).catch((): void => {
@@ -262,6 +275,16 @@ struct Index {
       });
     } else if (item.route.kind === 'cron') {
       router.pushUrl({ url: 'pages/SettingCronTasksPage' });
+    } else if (item.route.kind === 'miniapp') {
+      router.pushUrl({
+        url: 'pages/MiniAppRunnerPage',
+        params: { appId: item.route.appId },
+      });
+    } else if (item.route.kind === 'deepread') {
+      router.pushUrl({
+        url: 'pages/DeepReadArticlePage',
+        params: { topicId: item.route.topicId, title: item.route.title },
+      });
     }
   }
 
