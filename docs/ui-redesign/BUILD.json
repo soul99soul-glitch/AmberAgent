@@ -1,11 +1,11 @@
 {
-  "sourceCommit": "ee22ffc",
+  "sourceCommit": "e863706",
   "applicationId": "app.amber.agent.graphite",
-  "apkBytes": 107022947,
-  "sha256": "3a312a3a241a5001d34b1b95edf4eec686845849c18a5135293005a8c7239326",
+  "apkBytes": 109108310,
+  "sha256": "c0458aa2ff9f0d982f31cedd85edc2490ba186529b0661d45e68ec555d1305a1",
   "abi": "arm64-v8a",
   "variant": "debug",
-  "verification": "SSH backport: 65 targeted JVM tests plus 8 loopback tests passed. Both app packages installed on Xiaomi M610BB and executed an actual SSH command through TerminalRuntime, Keystore and pinned host key. Provider/model import and cold-start equality verification passed.",
+  "verification": "Both variants: 45 credential-related JVM tests passed after a regression reproduced independent SSH secret deletion. Xiaomi: Japan SSH, Moli 24-tool discovery/read-only call, and Mac mini SSH each independently verified after restart in both packages.",
   "nativeLibraries": [
     "lib/arm64-v8a/libandroidx.graphics.path.so",
     "lib/arm64-v8a/libbarhopper_v3.so",
@@ -30,9 +30,10 @@
   "apkPath": "/Users/arquiel/Downloads/AI/AmberAgent/android-ui-refinement/app/build/outputs/apk/debug/app-universal-debug.apk",
   "workspacePath": "/Users/arquiel/Downloads/AI/AmberAgent/android-ui-refinement",
   "stableBuild": {
-    "sourceCommit": "e771914",
-    "apkPath": "/Users/arquiel/Downloads/AI/AmberAgent/android/app/build/outputs/apk/graphite/app-universal-graphite.apk",
-    "sha256": "06483d6edc90ae5a04d82dc65df6ac35ccf2567ef46f4ffff035aff508f9b53e",
+    "sourceCommit": "6b3026f",
+    "mainFixCommit": "a7d0ada",
+    "apkPath": "/Users/arquiel/Downloads/AI/AmberAgent/android-ui-refinement/app/build/outputs/apk/stable-hotfix/Amber-stable-ssh-fixed.apk",
+    "sha256": "99271ddb994410d25339f95f9c70e6702f40b0425f7a502807d0bc1db79207b4",
     "applicationId": "app.amber.agent"
   }
 }

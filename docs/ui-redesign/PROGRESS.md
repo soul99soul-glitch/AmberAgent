@@ -90,3 +90,7 @@
 ## 后续 · 双版本SSH与配置迁移
 
 见[SSH_DELIVERY.md](SSH_DELIVERY.md)：已有SSH精准移植、65项定点与8项回环、独立review及ModelCouncil HOME修复、两版本真机命令回执、16provider/18model迁移与重启核对均闭合。main源码未修改；实验分支源码提交ee22ffc。
+
+## 后续 · SSH凭据回收边界
+
+普通设置保存触发SSH密钥误删，最小回归先失败后通过；两版本45项凭据测试与手机六次独立重启验证完成。详见SSH_CREDENTIAL_FIX.md。main仅落3文件修复，未覆盖其他WIP；稳定包由隔离树构建。
