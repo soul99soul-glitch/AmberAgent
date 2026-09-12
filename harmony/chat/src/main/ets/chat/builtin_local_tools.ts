@@ -24,6 +24,8 @@ import type { JsonObject, JsonValue } from './json.ts';
 import type { UIMessagePart, UIMessagePartText } from './message.ts';
 import type { AgentTool } from './tool.ts';
 import { makeAgentTool, makeInputSchemaObj } from './tool.ts';
+import type { HealthMetricRecord } from './health_summary.ts';
+import { buildHealthSummary, healthSummaryToolJson } from './health_summary.ts';
 
 // ===== 输入解析(jsonPrimitive contentOrNull 语义) =====
 
@@ -379,3 +381,32 @@ export const parseDeepReadSlashCommand = (
     return null;
   }
 };
+
+// ===== health_summary（只读聚合；Port 由 entry 注入） =====
+
+export interface HealthReadPort {
+  /** 聚合窗口内的原始指标；不可用返回空数组并带 available=false */
+  readRecent(nowMs: number): Promise<{ available: boolean; records: HealthMetricRecord[]; note: string }>;
+}
+
+export const createHealthSummaryTool = (port: HealthReadPort): AgentTool => makeAgentTool({
+  name: 'health_summary',
+  description: 'Read-only 7-day local health summary (steps, heart rate, sleep, weight) when the user granted access. Never fabricates numbers; unavailable sources return ok=false with a reason.',
+  parameters: () => makeInputSchemaObj({}, []),
+  execute: async (): Promise<UIMessagePart[]> => {
+    const result = await port.readRecent(Date.now());
+    if (!result.available) {
+      return [{
+        type: 'text',
+        text: JSON.stringify({
+          ok: false,
+          tool: 'health_summary',
+          error: result.note.length > 0 ? result.note : 'health data unavailable',
+        }),
+        metadata: null,
+      }];
+    }
+    const summary = buildHealthSummary(result.records);
+    return [{ type: 'text', text: healthSummaryToolJson(summary), metadata: null }];
+  },
+});

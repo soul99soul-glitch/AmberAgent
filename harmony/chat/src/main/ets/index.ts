@@ -230,6 +230,8 @@ export {
   cancelToolForNewUserMessage, skipStaleToolForContinuation, resolveIdleToolBlocker,
 } from './chat/tool_approval.ts';
 export { createTimeTool } from './chat/builtin_time_tool.ts';
+export { createHealthSummaryTool } from './chat/builtin_local_tools.ts';
+export type { HealthReadPort } from './chat/builtin_local_tools.ts';
 
 // ===== D-058:内置工具首批 + ToolRegistry 包装层 =====
 export type { ToolMetadata, ToolRegistry } from './chat/tool_registry.ts';

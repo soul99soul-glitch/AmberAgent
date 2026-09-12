@@ -56,6 +56,7 @@ import {
   createConversationQueueTools, createToolRegistry,
   createToolSearchTool, createRegistryIntrospectionTools, filterToolProfile,
   createRunPlanUpdateTool, createClipboardTool, createDeepReadOpenTool,
+  createHealthSummaryTool,
   parseDeepReadSlashCommand,
   applyToolApprovalToConversation, conversationHasPendingTools,
   conversationHasPendingOrUnexecutedTools, resolveIdleToolBlocker,
@@ -3066,7 +3067,7 @@ struct ChatPage {
         // D-061:本地工具三件(LocalTools runPlanUpdateTool/clipboardTool/
         //   deepReadOpenTool);deep_read bus 收集器 = router 打开深读页
         //   (Index.startDeepRead:120-127 同路由;页面存活即有收集者)
-        createRunPlanUpdateTool(),
+        createRunPlanUpdateTool(), createHealthSummaryTool(createEntryHealthReadPort()),
         ...(localOpts.indexOf('clipboard') >= 0
           ? [createClipboardTool(createEntryClipboardPort())] : []),
         // D-128:agent_prompt_config(LocalTools.kt:183 无条件,
