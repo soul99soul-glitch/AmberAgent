@@ -29,6 +29,7 @@ import app.amber.feature.task.toQueueState
 import app.amber.feature.workspace.WorkspaceManager
 import app.amber.feature.workspace.WorkspaceMirrorLease
 import app.amber.core.settings.prefs.SettingsAggregator
+import app.amber.core.settings.ssh.SshProfileStore
 import java.io.BufferedWriter
 import java.io.File
 import java.io.OutputStreamWriter
@@ -49,6 +50,8 @@ class TerminalRuntime(
     private val activityStore: AgentToolActivityStore,
     private val settingsStore: SettingsAggregator,
     private val agentTaskStore: AgentTaskStore,
+    private val sshProfileStore: SshProfileStore,
+    private val sshClient: SshClient,
 ) {
     private val jobs = ConcurrentHashMap<String, TerminalJob>()
     private val sessions = ConcurrentHashMap<String, TerminalSession>()
@@ -61,15 +64,20 @@ class TerminalRuntime(
         timeoutMillis: Long = DEFAULT_TIMEOUT_MS,
         syncWorkspace: Boolean = false,
         onOutputLine: ((String) -> Unit)? = null,
+        runtime: TerminalRuntimeKind? = null,
+        sshProfileId: String? = null,
     ): TerminalResult {
+        val selectedRuntime = runtime ?: if (sshProfileId != null) TerminalRuntimeKind.REMOTE_SSH
+            else TerminalRuntimeKind.BUILTIN_ALPINE
         val shouldDetach = timeoutMillis > SHORT_EXECUTE_TIMEOUT_MS || command.looksLikeLongRunningCommand()
         val started = startJob(
             command = command,
             timeoutMillis = timeoutMillis,
-            runtime = TerminalRuntimeKind.BUILTIN_ALPINE,
+            runtime = selectedRuntime,
+            sshProfileId = sshProfileId,
             toolName = "terminal_execute",
-            title = "执行 Alpine 命令",
-            syncWorkspace = !shouldDetach || syncWorkspace,
+            title = if (selectedRuntime == TerminalRuntimeKind.REMOTE_SSH) "执行 SSH 命令" else "执行终端命令",
+            syncWorkspace = syncWorkspace || (!shouldDetach && selectedRuntime.supportsWorkspaceSync),
             flushWorkspace = shouldDetach && syncWorkspace,
             outputCallback = onOutputLine,
         )
@@ -89,12 +97,21 @@ class TerminalRuntime(
                 status = started.status.wireName,
                 running = started.running,
                 outputLogPath = started.outputLogPath,
+                sshProfileId = started.sshProfileId,
             )
         }
 
-        val final = waitJob(started.jobId, timeoutMillis + WAIT_AFTER_EXECUTE_MS)
+        val final = try {
+            waitJob(started.jobId, timeoutMillis + WAIT_AFTER_EXECUTE_MS)
+        } catch (error: CancellationException) {
+            if (selectedRuntime == TerminalRuntimeKind.REMOTE_SSH) {
+                withContext(NonCancellable) { stopJob(started.jobId) }
+            }
+            throw error
+        }
         return TerminalResult(
-            exitCode = final.exitCode ?: if (final.status == TerminalJobStatus.COMPLETED) 0 else 1,
+            exitCode = if (final.runtime == TerminalRuntimeKind.REMOTE_SSH) final.exitCode
+                else final.exitCode ?: if (final.status == TerminalJobStatus.COMPLETED) 0 else 1,
             output = final.outputTail,
             runtime = final.runtime.wireName,
             workspace = final.workspace,
@@ -103,6 +120,7 @@ class TerminalRuntime(
             status = final.status.wireName,
             running = final.running,
             outputLogPath = final.outputLogPath,
+            sshProfileId = final.sshProfileId,
         )
     }
 
@@ -116,8 +134,21 @@ class TerminalRuntime(
         syncWorkspace: Boolean = false,
         flushWorkspace: Boolean = false,
         outputCallback: ((String) -> Unit)? = null,
+        sshProfileId: String? = null,
     ): TerminalJobSnapshot = withContext(Dispatchers.IO) {
-        val selectedRuntime = runtime ?: settingsStore.settingsFlow.value.agentRuntime.terminalDefaultRuntime
+        val selectedRuntime = runtime ?: if (sshProfileId != null) TerminalRuntimeKind.REMOTE_SSH
+            else settingsStore.settingsFlow.value.agentRuntime.terminalDefaultRuntime
+        require(sshProfileId == null || selectedRuntime == TerminalRuntimeKind.REMOTE_SSH) {
+            "ssh_profile_id requires remote_ssh runtime."
+        }
+        // Resolve once: switching the default or editing a profile cannot retarget an admitted job.
+        val sshProfile = if (selectedRuntime == TerminalRuntimeKind.REMOTE_SSH) {
+            sshProfileStore.resolve(sshProfileId).also {
+                require(it.acceptedHostKeyFingerprint != null) {
+                    "Confirm this SSH server's host key in Settings > Agent Runtime > SSH profiles before running commands."
+                }
+            }
+        } else null
         val job = admissionMutex.withLock {
             pruneFinishedJobsLocked()
             val maxJobs = settingsStore.settingsFlow.value.agentRuntime.terminalMaxConcurrentJobs
@@ -161,6 +192,7 @@ class TerminalRuntime(
                 syncWorkspace = syncWorkspace,
                 flushWorkspace = flushWorkspace,
                 outputCallback = outputCallback,
+                sshProfile = sshProfile,
             ).also { jobs[it.id] = it }
         }
         agentTaskStore.register(job.toAgentTaskSnapshot(AgentTaskStatus.QUEUED), cancel = {
@@ -180,10 +212,17 @@ class TerminalRuntime(
             TerminalRuntimeKind.TERMUX_EXTERNAL -> {
                 startTermuxJob(job)
             }
+
+            TerminalRuntimeKind.REMOTE_SSH -> {
+                job.worker = appScope.launch(Dispatchers.IO) { runSshJob(job) }
+            }
         }
 
         job.snapshot()
     }
+
+    suspend fun probeSshHostKey(profileId: String): SshHostKeyProbe =
+        sshClient.probe(sshProfileStore.resolve(profileId))
 
     suspend fun installPackages(
         packages: List<String>,
@@ -459,6 +498,7 @@ class TerminalRuntime(
         syncWorkspace: Boolean,
         flushWorkspace: Boolean,
         outputCallback: ((String) -> Unit)?,
+        sshProfile: SshProfile? = null,
     ): TerminalJob {
         val id = Uuid.random().toString()
         val logDir = context.filesDir.resolve("amberagent/terminal-jobs").apply { mkdirs() }
@@ -470,6 +510,7 @@ class TerminalRuntime(
                 TerminalRuntimeKind.BUILTIN_ALPINE -> "/workspace"
                 TerminalRuntimeKind.ANDROID_SHELL -> workspaceManager.mirrorDir.absolutePath
                 TerminalRuntimeKind.TERMUX_EXTERNAL -> TERMUX_HOME
+                TerminalRuntimeKind.REMOTE_SSH -> sshProfile?.let { "${it.username}@${it.host}:${it.port}" }.orEmpty()
             },
             timeoutMillis = timeoutMillis,
             output = TerminalOutputBuffer(
@@ -481,11 +522,12 @@ class TerminalRuntime(
             startedAtMs = System.currentTimeMillis(),
             updatedAtMs = System.currentTimeMillis(),
             toolName = toolName,
-            title = title,
+            title = sshProfile?.let { "$title · ${it.name}" } ?: title,
             isInstall = isInstall,
             syncWorkspace = syncWorkspace,
             flushWorkspace = flushWorkspace,
             outputCallback = outputCallback,
+            sshProfile = sshProfile,
             log = TerminalJobLog(
                 file = logDir.resolve("$id.log"),
                 maxBytes = MAX_JOB_LOG_BYTES,
@@ -547,6 +589,45 @@ class TerminalRuntime(
             ProcessBuilder("/system/bin/sh", "-lc", job.command)
                 .directory(workingDir)
                 .redirectErrorStream(true)
+        }
+    }
+
+    private suspend fun runSshJob(job: TerminalJob) {
+        val connection = sshClient.command()
+        job.sshConnection = connection
+        try {
+            if (!job.status.compareAndSet(TerminalJobStatus.QUEUED, TerminalJobStatus.RUNNING)) return
+            agentTaskStore.update(job.id, status = AgentTaskStatus.RUNNING)
+            val profile = requireNotNull(job.sshProfile)
+            val credentials = sshProfileStore.credentialsFor(profile)
+            val outcome = connection.execute(
+                profile = profile,
+                credentials = { credentials },
+                command = job.command,
+                timeoutMillis = job.timeoutMillis,
+                onOutput = { appendJobOutput(job, it) },
+            )
+            val status = when (outcome.exitCode) {
+                null -> TerminalJobStatus.INTERRUPTED
+                0 -> TerminalJobStatus.COMPLETED
+                else -> TerminalJobStatus.FAILED
+            }
+            outcome.error?.let { appendJobOutput(job, "$it\n") }
+            finishJob(job, status, outcome.exitCode, outcome.error)
+        } catch (error: CancellationException) {
+            stopJobInternal(job, "SSH connection closed; the remote process may still be running.")
+            finishJob(job, TerminalJobStatus.INTERRUPTED, null, job.error)
+            throw error
+        } catch (error: Throwable) {
+            // Persist only the backend's fixed safe messages; library/store exceptions
+            // can quote authentication material.
+            val message = (error as? SshClientException)?.message
+                ?: "SSH connection or authentication failed. Check the profile, credentials and accepted host key in Settings > Agent Runtime > SSH profiles."
+            appendJobOutput(job, "$message\n")
+            finishJob(job, TerminalJobStatus.FAILED, null, message)
+        } finally {
+            connection.close()
+            job.sshConnection = null
         }
     }
 
@@ -726,7 +807,7 @@ class TerminalRuntime(
     }
 
     private fun stopJobInternal(job: TerminalJob, reason: String) {
-        val stoppedStatus = if (job.runtime == TerminalRuntimeKind.TERMUX_EXTERNAL) {
+        val stoppedStatus = if (job.runtime in setOf(TerminalRuntimeKind.TERMUX_EXTERNAL, TerminalRuntimeKind.REMOTE_SSH)) {
             TerminalJobStatus.INTERRUPTED
         } else {
             TerminalJobStatus.CANCELLED
@@ -737,14 +818,18 @@ class TerminalRuntime(
             if (!previousStatus.running) return
             if (job.status.compareAndSet(previousStatus, stoppedStatus)) break
         }
-        job.error = reason
-        appendJobOutput(job, "$reason\n")
+        val stoppedReason = if (job.runtime == TerminalRuntimeKind.REMOTE_SSH) {
+            "$reason SSH connection closed; the remote process may still be running."
+        } else reason
+        job.error = stoppedReason
+        appendJobOutput(job, "$stoppedReason\n")
         job.process?.let { terminateProcess(job, it) }
+        job.sshConnection?.close()
         if (job.runtime == TerminalRuntimeKind.TERMUX_EXTERNAL) {
             appendJobOutput(job, "Termux external jobs cannot be force-killed from AmberAgent; check Termux if work continues.\n")
         }
         if (job.runtime == TerminalRuntimeKind.TERMUX_EXTERNAL || previousStatus == TerminalJobStatus.QUEUED) {
-            finishJob(job, stoppedStatus, job.exitCode, reason)
+            finishJob(job, stoppedStatus, job.exitCode, stoppedReason)
         }
     }
 
@@ -812,6 +897,7 @@ class TerminalRuntime(
     }
 
     private fun appendJobOutput(job: TerminalJob, text: String) {
+        if (job.runtime == TerminalRuntimeKind.REMOTE_SSH && job.completionNotified.get()) return
         job.output.append(text)
         job.updatedAtMs = System.currentTimeMillis()
         runCatching { job.log.append(text) }
@@ -974,6 +1060,7 @@ class TerminalRuntime(
             startedAtMs = startedAtMs,
             updatedAtMs = updatedAtMs,
             error = error,
+            sshProfileId = sshProfile?.id,
         )
     }
 
@@ -1038,6 +1125,7 @@ data class TerminalResult(
     val status: String? = null,
     val running: Boolean = false,
     val outputLogPath: String = "",
+    val sshProfileId: String? = null,
 )
 
 data class TerminalSessionInfo(
@@ -1068,12 +1156,14 @@ private data class TerminalJob(
     val flushWorkspace: Boolean,
     @Volatile var outputCallback: ((String) -> Unit)?,
     val log: TerminalJobLog,
+    val sshProfile: SshProfile? = null,
     val status: AtomicReference<TerminalJobStatus> = AtomicReference(TerminalJobStatus.QUEUED),
     val completionNotified: AtomicBoolean = AtomicBoolean(false),
     @Volatile var process: Process? = null,
     @Volatile var exitCode: Int? = null,
     @Volatile var error: String? = null,
     @Volatile var worker: Job? = null,
+    @Volatile var sshConnection: SshCommandConnection? = null,
 )
 
 private data class TerminalSession(

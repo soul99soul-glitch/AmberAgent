@@ -100,10 +100,17 @@ class TerminalRuntimeModelsTest {
         assertEquals(TerminalRuntimeKind.TERMUX_EXTERNAL, TerminalRuntimeKind.fromWire("TERMUX_EXTERNAL"))
         assertTrue(TerminalRuntimeKind.BUILTIN_ALPINE.supportsWorkspaceSync)
         assertFalse(TerminalRuntimeKind.TERMUX_EXTERNAL.supportsWorkspaceSync)
+        assertEquals(TerminalRuntimeKind.REMOTE_SSH, TerminalRuntimeKind.fromWire("remote_ssh"))
+        assertFalse(TerminalRuntimeKind.REMOTE_SSH.supportsWorkspaceSync)
         assertTrue(TerminalJobStatus.QUEUED.running)
         assertTrue(TerminalJobStatus.RUNNING.running)
         assertFalse(TerminalJobStatus.COMPLETED.running)
         assertFalse(TerminalJobStatus.TIMED_OUT.running)
         assertFalse(TerminalJobStatus.INTERRUPTED.running)
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun sshInstallDoesNotAssumeTheRemotePackageManager() {
+        TerminalInstallPlanner.build(listOf("ffmpeg"), TerminalRuntimeKind.REMOTE_SSH)
     }
 }

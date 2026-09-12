@@ -679,4 +679,19 @@ class SettingsSecretMigrationTest {
         assertEquals("sk-orphan-b-22", store.read(remaining.descriptor()))
         assertTrue("still-referenced secret must survive the sweep", store.listOrphans(emptySet()).isNotEmpty())
     }
+
+    @Test
+    fun `settings migration orphan sweep preserves independent ssh secrets`() = runBlocking {
+        val provider: ProviderSetting = ProviderSetting.OpenAI(apiKey = "sk-settings-sweep-33")
+        val sshSecret = SecretDescriptor("ssh", "profile-1", "password")
+        store.update(sshSecret, "ssh-password-must-survive")
+        dataStore.edit {
+            it[PreferencesKeys.PROVIDERS] = JsonInstant.encodeToString(listOf(provider))
+        }
+
+        assertEquals(1, migrator.migrateIfNeeded())
+
+        assertEquals("ssh-password-must-survive", store.read(sshSecret))
+        assertEquals("sk-settings-sweep-33", store.read(redactor.readRefs(dataStore.data.first()).values.single().descriptor()))
+    }
 }

@@ -15,7 +15,10 @@ enum class TerminalRuntimeKind(
     ANDROID_SHELL("android_shell", supportsWorkspaceSync = true),
 
     @SerialName("termux_external")
-    TERMUX_EXTERNAL("termux_external", supportsWorkspaceSync = false);
+    TERMUX_EXTERNAL("termux_external", supportsWorkspaceSync = false),
+
+    @SerialName("remote_ssh")
+    REMOTE_SSH("remote_ssh", supportsWorkspaceSync = false);
 
     companion object {
         fun fromWire(value: String?): TerminalRuntimeKind? =
@@ -62,6 +65,14 @@ data class TerminalJobSnapshot(
     val startedAtMs: Long,
     val updatedAtMs: Long,
     val error: String?,
+    val sshProfileId: String? = null,
+)
+
+/** A probe observes the server key without sending authentication credentials. */
+data class SshHostKeyProbe(
+    val profile: SshProfile,
+    val fingerprint: String,
+    val algorithm: String,
 )
 
 data class TermuxRuntimeStatus(
