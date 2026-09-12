@@ -88,12 +88,11 @@ fun <T> ChainOfThought(
     val canCollapse = steps.size > collapsedVisibleCount
     val shouldFillCollapseControlWidth = expanded || !collapsedAdaptiveWidth
 
-    // V3: cardColors 透明时, icon 后面用 scheme.background 遮挡, 避免 wrapper timeline
-    // 竖线穿过 icon center. (LocalCardColor 之前是 cardColors.containerColor, 透明时遮挡失效)
-    val maskColor = if (cardColors.containerColor == Color.Transparent) {
-        MaterialTheme.colorScheme.background
-    } else {
-        cardColors.containerColor
+    // 只有绘制时间线时才需要图标遮罩；无时间线时保持透明，避免与页面背景形成色块。
+    val maskColor = when {
+        !drawTimeline -> Color.Transparent
+        cardColors.containerColor == Color.Transparent -> MaterialTheme.colorScheme.background
+        else -> cardColors.containerColor
     }
     CompositionLocalProvider(
         LocalCardColor provides maskColor
