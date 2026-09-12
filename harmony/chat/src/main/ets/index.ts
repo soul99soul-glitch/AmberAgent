@@ -401,6 +401,13 @@ export {
 } from './chat/sync_webdav.ts';
 export type { WebDavConfig, WebDavClient, WebDavRemoteFile } from './chat/sync_webdav.ts';
 export {
+  createWebMountPkce, buildFeishuAuthorizationUrl, buildFeishuTokenBody,
+  parseFeishuTokenResponse, webMountTokenUsable, defaultFeishuRedirectUri,
+} from './chat/webmount_oauth.ts';
+export type {
+  WebMountCryptoPort, WebMountPkce, WebMountOAuthToken, WebMountOAuthTokenStore,
+} from './chat/webmount_oauth.ts';
+export {
   mergeContinueCandidates, continueStatusText, STATUS_RANK, SOURCE_LABEL,
 } from './chat/continue_candidate.ts';
 export type { ContinueCandidate, ContinueRoute, ContinueSourceKind, ContinueStatus } from './chat/continue_candidate.ts';
