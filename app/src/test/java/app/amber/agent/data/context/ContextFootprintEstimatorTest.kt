@@ -124,4 +124,114 @@ class ContextFootprintEstimatorTest {
         assertEquals(expected, estimate)
         assertTrue(estimate < ContextFootprintEstimator.estimateMessages(messages))
     }
+
+    @Test
+    fun conversationCacheReusesOldMessagesAndUpdatesTextAndCompacts() {
+        val oldParts = CountingPartList(
+            listOf(UIMessagePart.Text("old " + "x".repeat(2_000)))
+        )
+        val oldMessage = UIMessage(role = MessageRole.USER, parts = oldParts)
+        val tailMessage = UIMessage.assistant("tail")
+        val conversation = Conversation(
+            assistantId = Uuid.random(),
+            messageNodes = listOf(
+                MessageNode.of(oldMessage),
+                MessageNode.of(tailMessage),
+            ),
+        )
+        val cache = ContextFootprintEstimator.ConversationInputTokenCache()
+
+        val initial = cache.estimateConversationInputTokens(conversation)
+        val oldPartReadsAfterInitialEstimate = oldParts.getCalls
+        assertTrue("initial message should be weighted", oldPartReadsAfterInitialEstimate > 0)
+
+        val changedTail = tailMessage.copy(
+            parts = listOf(UIMessagePart.Text("tail " + "y".repeat(2_000))),
+        )
+        val changedConversation = conversation.copy(
+            messageNodes = listOf(
+                MessageNode.of(oldMessage),
+                MessageNode.of(changedTail),
+            ),
+        )
+        val changedText = cache.estimateConversationInputTokens(changedConversation)
+        assertEquals(
+            "unchanged history parts should stay cached",
+            oldPartReadsAfterInitialEstimate,
+            oldParts.getCalls,
+        )
+        assertTrue("changed tail should update the estimate", changedText > initial)
+
+        val compact = ConversationCompact(
+            id = "cache-compact",
+            conversationId = conversation.id.toString(),
+            summary = CompactSummaryNormalizer.fallbackPlainTextSummaryJson(
+                summary = "short summary",
+                sourceMessageIds = listOf(oldMessage.id.toString()),
+            ),
+            level = 1,
+            sourceStartIndex = 0,
+            sourceEndIndex = 0,
+            sourceMessageIds = listOf(oldMessage.id.toString()),
+            tokenEstimate = 20,
+            createdAt = 1,
+            updatedAt = 1,
+            status = "completed",
+        )
+        val compacted = cache.estimateConversationInputTokens(changedConversation, listOf(compact))
+        val expectedCompacted = ContextFootprintEstimator.estimateMessages(
+            listOf(UIMessage.system(CompactSummaryPayloads.injectionText(compact)))
+        ) + ContextFootprintEstimator.estimateMessages(listOf(changedTail))
+        assertEquals(
+            "compact substitution must keep its existing semantics",
+            expectedCompacted,
+            compacted,
+        )
+        assertEquals(
+            "compact calculation must reuse current message weights",
+            oldPartReadsAfterInitialEstimate,
+            oldParts.getCalls,
+        )
+
+        val changedOldParts = CountingPartList(
+            listOf(UIMessagePart.Text("changed old " + "q".repeat(2_000)))
+        )
+        val changedOld = oldMessage.copy(parts = changedOldParts)
+        val changedOldConversation = changedConversation.copy(
+            messageNodes = listOf(
+                MessageNode.of(changedOld),
+                MessageNode.of(changedTail),
+            ),
+        )
+        val changedOldEstimate = cache.estimateConversationInputTokens(changedOldConversation)
+        assertTrue("changed message content should be reweighted", changedOldParts.getCalls > 0)
+        assertTrue("changed message should update the estimate", changedOldEstimate != changedText)
+
+        val changedCompact = compact.copy(
+            summary = CompactSummaryNormalizer.fallbackPlainTextSummaryJson(
+                summary = "updated summary " + "z".repeat(500),
+                sourceMessageIds = listOf(oldMessage.id.toString()),
+            ),
+            updatedAt = 2,
+        )
+        val changedCompactEstimate = cache.estimateConversationInputTokens(
+            changedConversation,
+            listOf(changedCompact),
+        )
+        assertNotEquals("changing the compact must refresh the estimate", compacted, changedCompactEstimate)
+    }
+
+    private class CountingPartList(
+        private val delegate: List<UIMessagePart>,
+    ) : AbstractList<UIMessagePart>() {
+        var getCalls: Int = 0
+            private set
+
+        override val size: Int get() = delegate.size
+
+        override fun get(index: Int): UIMessagePart {
+            getCalls++
+            return delegate[index]
+        }
+    }
 }

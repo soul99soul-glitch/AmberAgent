@@ -6,12 +6,15 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.withContext
 import app.amber.ai.provider.OpenAIBrand
 import app.amber.ai.provider.ProviderSetting
 import app.amber.core.infra.AppScope
@@ -72,6 +75,7 @@ class SettingsAggregator(
         .map { applyBackfillAndSeed(it) }
         .map { applyCrossDomainConsistency(it) }
         .distinctUntilChanged()
+        .flowOn(Dispatchers.Default)
         .toMutableStateFlow(scope, Settings.dummy())
 
     val settingsFlow: StateFlow<Settings> get() = _settingsFlow
@@ -80,7 +84,9 @@ class SettingsAggregator(
 
     /** Atomic write: all settings keys are updated in one [dataStore.edit] block. */
     suspend fun update(settings: Settings) = writeMutex.withLock {
-        writeSettings(settings)
+        withContext(Dispatchers.IO) {
+            writeSettings(settings)
+        }
     }
 
     private suspend fun writeSettings(settings: Settings) {
@@ -210,9 +216,10 @@ class SettingsAggregator(
                 p[PreferencesKeys.SEEDED_ROUTING_QUICK_MESSAGES_V1] = true
             }
         }
-        // Publish only after the redacted DataStore edit succeeds. Security-sensitive MCP
-        // URL/OAuth redaction fails closed and must not expose a rejected plaintext value
-        // through the in-memory settings flow.
+        // Publish only after the redacted DataStore edit succeeds. The
+        // persisted snapshot is the source of truth; update { } reads it
+        // directly before applying its transform, so a delayed raw-flow
+        // emission cannot make a consecutive update lose fields.
         _settingsFlow.value = settingsForWrite
         // Do not sweep while the legacy profile/list still signals a migration retry.
         if (!legacyMigrationPending) {
@@ -221,31 +228,56 @@ class SettingsAggregator(
         }
     }
 
+    private suspend fun readCurrentSettings(): Settings {
+        val preferences = dataStore.data.first()
+        return applyCrossDomainConsistency(
+            applyBackfillAndSeed(
+                composeRawSettings(
+                    ui = uiPrefs.readFrom(preferences),
+                    search = searchPrefs.readFrom(preferences),
+                    agent = agentPrefs.readFrom(preferences),
+                    provider = providerPrefs.readFrom(preferences),
+                    chat = chatPrefs.readFrom(preferences),
+                    ext = extensionPrefs.readFrom(preferences),
+                )
+            )
+        )
+    }
+
     /**
      * 恢复路径专用：把备份携带的 reference 写回 DataStore，
      * 使恢复出的掩码值能通过 redact keep 规则找回本机 secret（备份不含明文）。
      */
     suspend fun restoreSecretRefs(refs: List<SecretReference>) = writeMutex.withLock {
         if (refs.isEmpty()) return@withLock
-        dataStore.edit { p ->
-            val merged = secretRedactor.readRefsStrict(p) + refs.associateBy { it.descriptor().key }
-            secretRedactor.writeRefs(p, merged)
+        withContext(Dispatchers.IO) {
+            dataStore.edit { p ->
+                val merged = secretRedactor.readRefsStrict(p) + refs.associateBy { it.descriptor().key }
+                secretRedactor.writeRefs(p, merged)
+            }
         }
     }
 
-    suspend fun update(fn: (Settings) -> Settings) {
-        writeMutex.withLock {
-            writeSettings(fn(settingsFlow.value))
+    suspend fun update(fn: (Settings) -> Settings) = writeMutex.withLock {
+        withContext(Dispatchers.IO) {
+            // Keep the original dummy gate during cold start. Once the
+            // canonical flow is initialized, read the persisted Preferences
+            // directly so a delayed raw-flow projection cannot drop fields.
+            val current = settingsFlow.value
+            val persisted = if (current.init) current else readCurrentSettings()
+            writeSettings(fn(persisted))
         }
     }
 
     suspend fun updateLaunchCount(launchCount: Int) = writeMutex.withLock {
-        dataStore.edit { p ->
-            p[PreferencesKeys.LAUNCH_COUNT] = launchCount
-        }
-        val current = _settingsFlow.value
-        if (!current.init) {
-            _settingsFlow.value = current.copy(launchCount = launchCount)
+        withContext(Dispatchers.IO) {
+            dataStore.edit { p ->
+                p[PreferencesKeys.LAUNCH_COUNT] = launchCount
+            }
+            val current = _settingsFlow.value
+            if (!current.init) {
+                _settingsFlow.value = current.copy(launchCount = launchCount)
+            }
         }
     }
 

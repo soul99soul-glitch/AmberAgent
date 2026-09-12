@@ -182,6 +182,7 @@ class MemoryCasTest {
     private class EmptyCandidateDAO : MemoryCandidateDAO {
         override fun getCandidatesFlow(): Flow<List<MemoryCandidateEntity>> = emptyFlow()
         override fun getCandidatesByStatusFlow(status: String): Flow<List<MemoryCandidateEntity>> = emptyFlow()
+        override fun countCandidatesByStatusFlow(status: String): Flow<Int> = emptyFlow()
         override suspend fun getCandidatesByStatus(status: String): List<MemoryCandidateEntity> = emptyList()
         override suspend fun getAllCandidates(): List<MemoryCandidateEntity> = emptyList()
         override suspend fun getCandidateById(id: String): MemoryCandidateEntity? = null

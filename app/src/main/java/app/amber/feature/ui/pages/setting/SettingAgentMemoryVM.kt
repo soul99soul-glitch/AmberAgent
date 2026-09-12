@@ -91,6 +91,8 @@ class SettingAgentMemoryVM(
     private val memoryDreamScheduler: MemoryDreamScheduler,
     private val memoryImportExportManager: MemoryImportExportManager,
 ) : ViewModel() {
+    private val memoryFlowSharing = SharingStarted.WhileSubscribed(stopTimeoutMillis = 5_000)
+
     private val _memoryTaskRunning = MutableStateFlow(false)
     val memoryTaskRunning: StateFlow<Boolean> = _memoryTaskRunning.asStateFlow()
 
@@ -101,25 +103,30 @@ class SettingAgentMemoryVM(
     internal val memoryMutation: StateFlow<MemoryMutationState> = _memoryMutation.asStateFlow()
 
     val settings: StateFlow<Settings> = settingsStore.settingsFlow
-        .stateIn(viewModelScope, SharingStarted.Lazily, Settings.dummy())
 
     val memories: StateFlow<List<AssistantMemory>> = memoryRepository.getGlobalMemoriesFlow()
-        .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
+        .stateIn(viewModelScope, memoryFlowSharing, emptyList())
 
     val shortTermMemories: StateFlow<List<AssistantMemory>> = memoryRepository.getShortTermMemoriesFlow()
-        .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
+        .stateIn(viewModelScope, memoryFlowSharing, emptyList())
 
     val longTermMemories: StateFlow<List<AssistantMemory>> = memoryRepository.getLongTermMemoriesFlow()
-        .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
+        .stateIn(viewModelScope, memoryFlowSharing, emptyList())
+
+    val memoryCounts: StateFlow<Map<String, Int>> = memoryRepository.getMemoryCountsFlow()
+        .stateIn(viewModelScope, memoryFlowSharing, emptyMap())
+
+    val pendingCandidateCount: StateFlow<Int> = memoryRepository.getPendingCandidateCountFlow()
+        .stateIn(viewModelScope, memoryFlowSharing, 0)
 
     val pendingCandidates = memoryRepository.getPendingCandidatesFlow()
-        .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
+        .stateIn(viewModelScope, memoryFlowSharing, emptyList())
 
     val recentMemoryEvents = memoryRepository.getRecentEventsFlow()
-        .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
+        .stateIn(viewModelScope, memoryFlowSharing, emptyList())
 
     val dreamPlan: StateFlow<PersistedMemoryDreamPlan?> = memoryDreamPlanStore.pendingPlanFlow
-        .stateIn(viewModelScope, SharingStarted.Lazily, null)
+        .stateIn(viewModelScope, memoryFlowSharing, null)
 
     fun updateAgentRuntime(update: (AgentRuntimeSetting) -> AgentRuntimeSetting) {
         viewModelScope.launch {

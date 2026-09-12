@@ -6,7 +6,7 @@ import androidx.datastore.preferences.core.MutablePreferences
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.emptyPreferences
-import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -15,6 +15,7 @@ import app.amber.core.infra.AppScope
 import app.amber.core.settings.AgentRuntimeSetting
 import app.amber.core.settings.PreferencesKeys
 import app.amber.core.agent.utils.JsonInstant
+import app.amber.core.settings.shareSettingsRawFlow
 import app.amber.core.settings.toMutableStateFlow
 
 data class AgentPrefsData(
@@ -25,12 +26,13 @@ class AgentPrefs(
     private val dataStore: DataStore<Preferences>,
     scope: AppScope,
 ) {
-    internal val rawFlow: Flow<AgentPrefsData> = dataStore.data
+    internal val rawFlow: SharedFlow<AgentPrefsData> = dataStore.data
         .catch { e ->
             if (e is IOException) emit(emptyPreferences()) else throw e
         }
         .map { readFrom(it) }
         .distinctUntilChanged()
+        .shareSettingsRawFlow(scope)
 
     val flow: StateFlow<AgentPrefsData> = rawFlow
         .toMutableStateFlow(scope, AgentPrefsData())
@@ -44,7 +46,7 @@ class AgentPrefs(
         }
     }
 
-    private fun readFrom(p: Preferences): AgentPrefsData = AgentPrefsData(
+    internal fun readFrom(p: Preferences): AgentPrefsData = AgentPrefsData(
         agentRuntime = p[PreferencesKeys.AGENT_RUNTIME]?.let {
             it.decodeJsonOrNull<AgentRuntimeSetting>()
         } ?: AgentRuntimeSetting(),

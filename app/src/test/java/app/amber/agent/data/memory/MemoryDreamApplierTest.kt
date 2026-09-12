@@ -344,6 +344,9 @@ private class FakeMemoryCandidateDao : MemoryCandidateDAO {
     override fun getCandidatesByStatusFlow(status: String): Flow<List<MemoryCandidateEntity>> =
         flowOf(candidates.filter { it.status == status })
 
+    override fun countCandidatesByStatusFlow(status: String): Flow<Int> =
+        flowOf(candidates.count { it.status == status })
+
     override suspend fun getCandidatesByStatus(status: String): List<MemoryCandidateEntity> =
         candidates.filter { it.status == status }
 

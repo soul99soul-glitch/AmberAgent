@@ -59,6 +59,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -679,13 +680,13 @@ private fun MarkdownGhostwriteSheet(
     onDismissFailure: () -> Unit,
     onInjectionChange: (app.amber.feature.novelworkspace.NovelWorkspaceInjectionFlags) -> Unit,
     onGeneratePlan: () -> Unit,
-    readChapterPlan: () -> String,
+    readChapterPlan: suspend () -> String,
     saveChapterPlan: (String) -> Boolean,
-    readUpcomingArc: () -> String,
+    readUpcomingArc: suspend () -> String,
     saveUpcomingArc: (String) -> Boolean,
-    readWritingPreference: () -> String,
+    readWritingPreference: suspend () -> String,
     saveWritingPreference: (String, () -> Unit) -> Unit,
-    briefPreview: () -> String,
+    briefPreview: suspend () -> String,
     onDismiss: () -> Unit,
     errorMessage: String? = null,
     injection: app.amber.feature.novelworkspace.NovelWorkspaceInjectionFlags =
@@ -701,9 +702,14 @@ private fun MarkdownGhostwriteSheet(
         job?.status == "failed"
     val ghostwriteLabel = stringResource(R.string.novel_ghostwrite)
     val polishLabel = stringResource(R.string.novel_polish)
-    val chapterPlanInitial = remember(planAutoTick) { readChapterPlan() }
-    var chapterPlanText by remember(planAutoTick) { mutableStateOf(chapterPlanInitial) }
-    var chapterPlanDirty by remember(planAutoTick) { mutableStateOf(false) }
+    val chapterPlanInitial by produceState<String?>(initialValue = null, planAutoTick) {
+        value = readChapterPlan()
+    }
+    val loadedChapterPlan = chapterPlanInitial
+    var chapterPlanText by remember(planAutoTick, chapterPlanInitial) {
+        mutableStateOf(chapterPlanInitial.orEmpty())
+    }
+    var chapterPlanDirty by remember(planAutoTick, chapterPlanInitial) { mutableStateOf(false) }
 
     ModalBottomSheet(onDismissRequest = onDismiss, containerColor = workspace.canvas) {
         Column(
@@ -798,7 +804,7 @@ private fun MarkdownGhostwriteSheet(
                     }
                     PanelCtaButton(
                         text = stringResource(R.string.novel_start_ghostwrite),
-                        enabled = !busy,
+                        enabled = !busy && loadedChapterPlan != null,
                         onClick = {
                             if (!chapterPlanDirty || saveChapterPlan(chapterPlanText)) {
                                 onStart(target)
@@ -981,16 +987,20 @@ private fun MarkdownGhostwriteSheet(
                     style = type.meta,
                     color = workspace.muted,
                 )
-                PanelEditor(
-                    placeholder = stringResource(R.string.novel_chapter_plan_placeholder),
-                    initial = chapterPlanInitial,
-                    enabled = !busy && !branchOwned,
-                    onTextChange = { chapterPlanText = it },
-                    onDirtyChange = { chapterPlanDirty = it },
-                    onSave = { body, onSaved ->
-                        if (saveChapterPlan(body)) onSaved()
-                    },
-                )
+                if (loadedChapterPlan == null) {
+                    PanelLoading()
+                } else {
+                    PanelEditor(
+                        placeholder = stringResource(R.string.novel_chapter_plan_placeholder),
+                        initial = loadedChapterPlan,
+                        enabled = !busy && !branchOwned,
+                        onTextChange = { chapterPlanText = it },
+                        onDirtyChange = { chapterPlanDirty = it },
+                        onSave = { body, onSaved ->
+                            if (saveChapterPlan(body)) onSaved()
+                        },
+                    )
+                }
             }
 
             PanelSection(title = stringResource(R.string.novel_future_arc)) {
@@ -999,14 +1009,22 @@ private fun MarkdownGhostwriteSheet(
                     style = type.meta,
                     color = workspace.muted,
                 )
-                PanelEditor(
-                    placeholder = stringResource(R.string.novel_future_arc_placeholder),
-                    initial = remember(planAutoTick) { readUpcomingArc() },
-                    enabled = !busy && !branchOwned,
-                    onSave = { body, onSaved ->
-                        if (saveUpcomingArc(body)) onSaved()
-                    },
-                )
+                val futureArcInitial by produceState<String?>(initialValue = null, planAutoTick) {
+                    value = readUpcomingArc()
+                }
+                val loadedFutureArc = futureArcInitial
+                if (loadedFutureArc == null) {
+                    PanelLoading()
+                } else {
+                    PanelEditor(
+                        placeholder = stringResource(R.string.novel_future_arc_placeholder),
+                        initial = loadedFutureArc,
+                        enabled = !busy && !branchOwned,
+                        onSave = { body, onSaved ->
+                            if (saveUpcomingArc(body)) onSaved()
+                        },
+                    )
+                }
             }
 
             PanelSection(title = stringResource(R.string.novel_writing_preferences)) {
@@ -1015,12 +1033,20 @@ private fun MarkdownGhostwriteSheet(
                     style = type.meta,
                     color = workspace.muted,
                 )
-                PanelEditor(
-                    placeholder = stringResource(R.string.novel_writing_preferences_placeholder),
-                    initial = remember { readWritingPreference() },
-                    enabled = !busy && !branchOwned,
-                    onSave = saveWritingPreference,
-                )
+                val writingPreferenceInitial by produceState<String?>(initialValue = null, key1 = Unit) {
+                    value = readWritingPreference()
+                }
+                val loadedWritingPreference = writingPreferenceInitial
+                if (loadedWritingPreference == null) {
+                    PanelLoading()
+                } else {
+                    PanelEditor(
+                        placeholder = stringResource(R.string.novel_writing_preferences_placeholder),
+                        initial = loadedWritingPreference,
+                        enabled = !busy && !branchOwned,
+                        onSave = saveWritingPreference,
+                    )
+                }
             }
 
             // ── injection selection (hairline rows, no nested fills) ────────
@@ -1101,20 +1127,26 @@ private fun MarkdownGhostwriteSheet(
 
             // ── injected-brief preview (flat text, no inner box) ────────────
             PanelSection(title = stringResource(R.string.novel_injected_brief_title)) {
-                val brief = remember(injection, planAutoTick) { briefPreview() }
-                Text(
-                    if (brief.isBlank()) {
-                        stringResource(R.string.novel_injected_brief_empty)
-                    } else {
-                        brief
-                    },
-                    style = type.meta,
-                    color = workspace.muted,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(max = 220.dp)
-                        .verticalScroll(rememberScrollState()),
-                )
+                val brief by produceState<String?>(initialValue = null, injection, planAutoTick) {
+                    value = briefPreview()
+                }
+                if (brief == null) {
+                    PanelLoading()
+                } else {
+                    Text(
+                        if (brief.orEmpty().isBlank()) {
+                            stringResource(R.string.novel_injected_brief_empty)
+                        } else {
+                            brief.orEmpty()
+                        },
+                        style = type.meta,
+                        color = workspace.muted,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 220.dp)
+                            .verticalScroll(rememberScrollState()),
+                    )
+                }
             }
         }
     }
@@ -1576,6 +1608,23 @@ private fun PanelRoundIcon(
 }
 
 /** Flat multi-line editor: no inner frame — the card is the only box (device feedback). */
+@Composable
+private fun PanelLoading() {
+    val workspace = workspaceColors()
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .heightIn(min = 72.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        CircularProgressIndicator(
+            modifier = Modifier.size(18.dp),
+            strokeWidth = 2.dp,
+            color = workspace.ink,
+        )
+    }
+}
+
 @Composable
 private fun PanelEditor(
     placeholder: String,
@@ -2403,60 +2452,74 @@ private fun MarkdownWorkspaceManuscript(
     val chapter = openChapter
     if (chapter != null) {
         if (editingChapter) {
-            val body = remember(chapter.path, contentTick) { viewModel.readChapter(chapter.path).orEmpty() }
-            MarkdownChapterEditor(
-                chapter = chapter,
-                initialBody = body,
-                busy = state.busy,
-                writeLocked = branchLocked,
-                onSave = { title, text ->
-                    viewModel.saveChapterEdit(chapter.path, title, text) {
-                        contentTick++
-                        editingChapter = false
-                    }
-                },
-                onCancel = { editingChapter = false },
-            )
+            val body by produceState<String?>(initialValue = null, chapter.path, contentTick) {
+                value = viewModel.readChapter(chapter.path).orEmpty()
+            }
+            val loadedBody = body
+            if (loadedBody == null) {
+                ChapterBodyLoading()
+            } else {
+                MarkdownChapterEditor(
+                    chapter = chapter,
+                    initialBody = loadedBody,
+                    busy = state.busy,
+                    writeLocked = branchLocked,
+                    onSave = { title, text ->
+                        viewModel.saveChapterEdit(chapter.path, title, text) {
+                            contentTick++
+                            editingChapter = false
+                        }
+                    },
+                    onCancel = { editingChapter = false },
+                )
+            }
         } else {
-            val body = remember(chapter.path, contentTick) { viewModel.readChapter(chapter.path).orEmpty() }
-            Column(Modifier.fillMaxSize()) {
-                Row(
-                    Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    TextButton(onClick = { openChapter = null }) {
-                        Text(stringResource(R.string.novel_return_to_directory), color = workspace.ink)
+            val body by produceState<String?>(initialValue = null, chapter.path, contentTick) {
+                value = viewModel.readChapter(chapter.path).orEmpty()
+            }
+            val loadedBody = body
+            if (loadedBody == null) {
+                ChapterBodyLoading()
+            } else {
+                    Column(Modifier.fillMaxSize()) {
+                    Row(
+                        Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        TextButton(onClick = { openChapter = null }) {
+                            Text(stringResource(R.string.novel_return_to_directory), color = workspace.ink)
+                        }
+                        Spacer(Modifier.weight(1f))
+                        Text(
+                            chapter.title,
+                            style = type.body.copy(fontWeight = FontWeight.SemiBold),
+                            color = workspace.ink,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Spacer(Modifier.weight(1f))
+                        TextButton(onClick = { editingChapter = true }, enabled = !branchLocked) {
+                            Text(stringResource(R.string.edit), color = workspace.ink)
+                        }
                     }
-                    Spacer(Modifier.weight(1f))
-                    Text(
-                        chapter.title,
-                        style = type.body.copy(fontWeight = FontWeight.SemiBold),
-                        color = workspace.ink,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    Spacer(Modifier.weight(1f))
-                    TextButton(onClick = { editingChapter = true }, enabled = !branchLocked) {
-                        Text(stringResource(R.string.edit), color = workspace.ink)
+                    Column(
+                        Modifier
+                            .fillMaxSize()
+                            .verticalScroll(rememberScrollState())
+                            .navigationBarsPadding()
+                            .padding(horizontal = 20.dp, vertical = 12.dp),
+                    ) {
+                        Text(
+                            if (loadedBody.isBlank()) {
+                                stringResource(R.string.novel_empty_chapter)
+                            } else {
+                                loadedBody
+                            },
+                            style = type.body,
+                            color = workspace.ink,
+                        )
+                        Spacer(Modifier.size(48.dp))
                     }
-                }
-                Column(
-                    Modifier
-                        .fillMaxSize()
-                        .verticalScroll(rememberScrollState())
-                        .navigationBarsPadding()
-                        .padding(horizontal = 20.dp, vertical = 12.dp),
-                ) {
-                    Text(
-                        if (body.isBlank()) {
-                            stringResource(R.string.novel_empty_chapter)
-                        } else {
-                            body
-                        },
-                        style = type.body,
-                        color = workspace.ink,
-                    )
-                    Spacer(Modifier.size(48.dp))
                 }
             }
         }
@@ -2796,6 +2859,21 @@ private fun NewBranchDialog(
     )
 }
 
+@Composable
+private fun ChapterBodyLoading() {
+    val workspace = workspaceColors()
+    Box(
+        Modifier.fillMaxSize(),
+        contentAlignment = Alignment.Center,
+    ) {
+        CircularProgressIndicator(
+            modifier = Modifier.size(22.dp),
+            strokeWidth = 2.dp,
+            color = workspace.ink,
+        )
+    }
+}
+
 /**
  * 设定 tab：设定文件区（setting/ 按目录分组，显示最近提交时间）、伏笔区（未回收/已回收，
  * 点击进入该文件编辑）、决定区（只读）。数据来自 [NovelWorkspaceCatalog]（feature 层
@@ -2823,20 +2901,27 @@ private fun MarkdownWorkspaceCatalog(
 
     val path = openPath
     if (path != null) {
-        val body = remember(path, contentTick) { viewModel.readFileBody(path).orEmpty() }
-        WorkspaceFileEditor(
-            title = openTitle,
-            initialBody = body,
-            busy = state.busy,
-            writeLocked = branchLocked,
-            onSave = { text ->
-                viewModel.saveFileEdit(path, text) {
-                    contentTick++
-                    openPath = null
-                }
-            },
-            onCancel = { openPath = null },
-        )
+        val body by produceState<String?>(initialValue = null, path, contentTick) {
+            value = viewModel.readFileBody(path).orEmpty()
+        }
+        val loadedBody = body
+        if (loadedBody == null) {
+            ChapterBodyLoading()
+        } else {
+            WorkspaceFileEditor(
+                title = openTitle,
+                initialBody = loadedBody,
+                busy = state.busy,
+                writeLocked = branchLocked,
+                onSave = { text ->
+                    viewModel.saveFileEdit(path, text) {
+                        contentTick++
+                        openPath = null
+                    }
+                },
+                onCancel = { openPath = null },
+            )
+        }
         return
     }
 

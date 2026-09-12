@@ -7,11 +7,13 @@ import android.util.Log
 import androidx.browser.customtabs.CustomTabsIntent
 import io.ktor.client.HttpClient
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.withContext
 import app.amber.common.oauth.LoopbackOAuthCallbackServer
 import app.amber.agent.AppScope
 import app.amber.core.localization.OAuthDisplayLocalizer
@@ -45,12 +47,14 @@ import java.util.concurrent.ConcurrentHashMap
  */
 class WebMountOAuthClient(
     private val context: Context,
-    private val store: WebMountOAuthTokenStore,
-    private val pendingStore: PendingOAuthStore,
+    storeProvider: () -> WebMountOAuthTokenStore,
+    pendingStoreProvider: () -> PendingOAuthStore,
     private val dispatcher: OAuthCallbackDispatcher,
     private val http: HttpClient,
     private val appScope: AppScope,
 ) {
+    private val store by lazy(storeProvider)
+    private val pendingStore by lazy(pendingStoreProvider)
 
     private val providers = ConcurrentHashMap<String, OAuthProvider>()
     private val refreshLocks = ConcurrentHashMap<String, Mutex>()
@@ -71,10 +75,16 @@ class WebMountOAuthClient(
         // Pair with the encrypted [pendingStore] so we still have the
         // code_verifier for the exchange.
         appScope.launch {
-            dispatcher.events.collect { callback -> handleEventForResume(callback) }
+            dispatcher.events.collect { callback ->
+                withContext(Dispatchers.IO) { handleEventForResume(callback) }
+            }
         }
-        // Drop pending entries that have outlived the OAuth user-action window.
-        appScope.launch { pendingStore.purgeStale(PENDING_TTL_MS) }
+        // Keep the callback subscription eager, but resolve encrypted stores and
+        // purge expired entries off the Application's synchronous startup path.
+        appScope.launch(Dispatchers.IO) {
+            store
+            pendingStore.purgeStale(PENDING_TTL_MS)
+        }
     }
 
     fun register(provider: OAuthProvider) {

@@ -6,7 +6,7 @@ import androidx.datastore.preferences.core.MutablePreferences
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.emptyPreferences
-import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -18,6 +18,7 @@ import app.amber.core.settings.PreferencesKeys
 import app.amber.core.settings.secret.SecretRedactor
 import app.amber.core.settings.secret.SecretStore
 import app.amber.core.agent.utils.JsonInstant
+import app.amber.core.settings.shareSettingsRawFlow
 import app.amber.core.settings.toMutableStateFlow
 
 data class ProviderPrefsData(
@@ -32,12 +33,13 @@ class ProviderPrefs(
 ) {
     private val redactor = SecretRedactor(secretStore)
 
-    internal val rawFlow: Flow<ProviderPrefsData> = dataStore.data
+    internal val rawFlow: SharedFlow<ProviderPrefsData> = dataStore.data
         .catch { e ->
             if (e is IOException) emit(emptyPreferences()) else throw e
         }
         .map { readFrom(it) }
         .distinctUntilChanged()
+        .shareSettingsRawFlow(scope)
 
     val flow: StateFlow<ProviderPrefsData> = rawFlow
         .toMutableStateFlow(scope, ProviderPrefsData())
@@ -51,7 +53,7 @@ class ProviderPrefs(
         }
     }
 
-    private fun readFrom(p: Preferences): ProviderPrefsData {
+    internal fun readFrom(p: Preferences): ProviderPrefsData {
         val refs = redactor.readRefs(p)
         return ProviderPrefsData(
             providers = p[PreferencesKeys.PROVIDERS]?.let { raw ->

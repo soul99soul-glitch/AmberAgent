@@ -7,8 +7,10 @@ import androidx.paging.PagingConfig
 import androidx.paging.PagingData
 import androidx.paging.map
 import androidx.room.withTransaction
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import app.amber.ai.core.MessageRole
 import app.amber.ai.ui.UIMessage
@@ -78,6 +80,7 @@ class ConversationRepository(
         return conversationDAO
             .getAllSummaries()
             .map { summaries -> summaries.map(::conversationSummaryToConversation) }
+            .flowOn(Dispatchers.Default)
     }
 
     fun getConversationsPaging(): Flow<PagingData<Conversation>> = Pager(

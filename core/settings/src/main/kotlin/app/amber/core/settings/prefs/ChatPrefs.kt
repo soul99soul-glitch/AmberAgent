@@ -6,7 +6,7 @@ import androidx.datastore.preferences.core.MutablePreferences
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.emptyPreferences
-import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -29,6 +29,7 @@ import app.amber.core.settings.toMutableStateFlow
 import app.amber.core.model.AssistantRegex
 import app.amber.core.settings.secret.SecretRedactor
 import app.amber.core.settings.secret.SecretStore
+import app.amber.core.settings.shareSettingsRawFlow
 import kotlin.uuid.Uuid
 
 data class ChatPrefsData(
@@ -66,12 +67,13 @@ class ChatPrefs(
     secretStore: SecretStore? = null,
 ) {
     private val redactor = secretStore?.let(::SecretRedactor)
-    internal val rawFlow: Flow<ChatPrefsData> = dataStore.data
+    internal val rawFlow: SharedFlow<ChatPrefsData> = dataStore.data
         .catch { e ->
             if (e is IOException) emit(emptyPreferences()) else throw e
         }
         .map { readFrom(it) }
         .distinctUntilChanged()
+        .shareSettingsRawFlow(scope)
 
     val flow: StateFlow<ChatPrefsData> = rawFlow
         .toMutableStateFlow(scope, ChatPrefsData())
@@ -85,7 +87,7 @@ class ChatPrefs(
         }
     }
 
-    private fun readFrom(p: Preferences): ChatPrefsData {
+    internal fun readFrom(p: Preferences): ChatPrefsData {
         val refs = redactor?.readRefs(p).orEmpty()
         val customHeaders = p[PreferencesKeys.AMBER_CUSTOM_HEADERS]?.let {
             it.decodeJsonOrNull<List<CustomHeader>>()

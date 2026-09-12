@@ -387,6 +387,9 @@ open class MemoryRepository(
             list.map { it.toCandidate() }
         }
 
+    fun getPendingCandidateCountFlow(): Flow<Int> =
+        candidateDAO.countCandidatesByStatusFlow(MemoryCandidateStatus.PENDING.wireName)
+
     suspend fun getPendingCandidates(): List<MemoryCandidate> =
         candidateDAO.getCandidatesByStatus(MemoryCandidateStatus.PENDING.wireName).map { it.toCandidate() }
 

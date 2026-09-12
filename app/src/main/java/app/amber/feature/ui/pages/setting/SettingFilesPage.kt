@@ -74,7 +74,10 @@ fun SettingFilesPage(
 
     var selectedFolder by remember { mutableStateOf(FileFolders.UPLOAD) }
     var pendingDelete by remember { mutableStateOf<ManagedFileEntity?>(null) }
-    val files by filesManager.observe(selectedFolder).collectAsState(initial = emptyList())
+    val filesFlow = remember(filesManager, selectedFolder) {
+        filesManager.observe(selectedFolder)
+    }
+    val files by filesFlow.collectAsState(initial = emptyList())
 
     if (pendingDelete != null) {
         val target = pendingDelete!!

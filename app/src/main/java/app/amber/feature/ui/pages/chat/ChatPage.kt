@@ -49,10 +49,12 @@ import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -77,8 +79,10 @@ import com.dokar.sonner.ToastType
 import dev.chrisbanes.haze.rememberHazeState
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toInstant
 import kotlinx.serialization.json.JsonElement
@@ -142,6 +146,7 @@ import app.amber.agent.data.workspace.ArtifactRepository
 import app.amber.core.settings.Capability
 import app.amber.core.settings.CapabilityFlags
 import app.amber.feature.workspace.WorkspaceManager
+import app.amber.feature.ui.components.message.MessageRenderCache
 import app.amber.feature.ui.context.LocalNavController
 import app.amber.agent.Screen
 import app.amber.feature.ui.context.LocalToaster
@@ -150,7 +155,6 @@ import app.amber.feature.ui.hooks.ChatInputState
 import app.amber.feature.ui.hooks.EditStateContent
 import app.amber.feature.ui.hooks.useEditState
 import app.amber.feature.webmount.primitives.WebMountSessionOwner
-import app.amber.core.utils.JsonInstant
 import app.amber.core.utils.base64Decode
 import app.amber.core.utils.jsonPrimitiveOrNull
 import app.amber.core.utils.navigateToChatPage
@@ -523,17 +527,30 @@ private fun ChatPageContent(
         it.conversationId == conversation.id.toString()
     }
     val conversationIdText = conversation.id.toString()
-    val messageSandboxActivities = remember(
-        conversation.messageNodes,
-        loadingJob,
-        processingStatus,
-        localeTag,
+    val latestSandboxConversation by rememberUpdatedState(conversation)
+    val latestSandboxLoading by rememberUpdatedState(loadingJob != null)
+    val latestSandboxProcessingStatus by rememberUpdatedState(processingStatus)
+    val latestSandboxLocaleTag by rememberUpdatedState(localeTag)
+    val messageSandboxActivities by produceState(
+        initialValue = emptyList<SandboxActivityUiState>(),
+        key1 = conversation.id,
     ) {
-        conversation.deriveSandboxActivities(
-            loading = loadingJob != null,
-            processingStatus = processingStatus,
-            context = resourceContext,
-        )
+        snapshotFlow {
+            SandboxActivityInput(
+                conversation = latestSandboxConversation,
+                loading = latestSandboxLoading,
+                processingStatus = latestSandboxProcessingStatus,
+                localeTag = latestSandboxLocaleTag,
+            )
+        }.collectLatest { input ->
+            value = withContext(Dispatchers.Default) {
+                input.conversation.deriveSandboxActivities(
+                    loading = input.loading,
+                    processingStatus = input.processingStatus,
+                    context = resourceContext,
+                )
+            }
+        }
     }
     val scopedLiveSandboxActivity = liveSandboxActivity?.takeIf { live ->
         live.conversationId == conversationIdText ||
@@ -1340,6 +1357,13 @@ private const val MAX_SANDBOX_TIMELINE_ITEMS = 24
 private const val MAX_SANDBOX_OUTPUT_TAIL_CHARS = 1_600
 private const val MAX_SANDBOX_JSON_PARSE_CHARS = 3_200_000
 
+private data class SandboxActivityInput(
+    val conversation: Conversation,
+    val loading: Boolean,
+    val processingStatus: String?,
+    val localeTag: String,
+)
+
 private fun mergeSandboxTimeline(
     messageActivities: List<SandboxActivityUiState>,
     liveActivity: SandboxActivityUiState?,
@@ -1681,11 +1705,20 @@ private fun UIMessagePart.Tool.outputTail(outputJson: JsonObject): String {
 }
 
 private fun UIMessagePart.Tool.outputJson(): JsonObject {
-    val output = outputText(MAX_SANDBOX_JSON_PARSE_CHARS + 1)
-    if (output.isBlank()) return JsonObject(emptyMap())
-    if (output.length > MAX_SANDBOX_JSON_PARSE_CHARS) return JsonObject(emptyMap())
+    var textChars = 0L
+    var textParts = 0
+    output.forEach { part ->
+        if (part is UIMessagePart.Text) {
+            if (textParts > 0) textChars++ // `textOutputForJson` joins text parts with '\n'.
+            textChars += part.text.length.toLong()
+            textParts++
+        }
+    }
+    if (textChars == 0L || textChars > MAX_SANDBOX_JSON_PARSE_CHARS.toLong()) {
+        return JsonObject(emptyMap())
+    }
     return runCatching {
-        JsonInstant.parseToJsonElement(output) as? JsonObject
+        MessageRenderCache.toolOutputJson(output) as? JsonObject
     }.getOrNull() ?: JsonObject(emptyMap())
 }
 
@@ -1851,24 +1884,48 @@ private fun TopBar(
                 // 的"上下文占用"语义不符 (短问题 totalTokens 小 → ring 缩水, 反而误导). 改用
                 // promptTokens (下一轮 LLM 实际加载的上下文长度), 也是用户最直观的"已占用".
                 if (conversation.messageNodes.isNotEmpty()) {
-                    val currentMessages = remember(conversation.messageNodes) {
-                        conversation.currentMessages
+                    val contextInputTokenCache = remember(conversation.id) {
+                        ContextFootprintEstimator.ConversationInputTokenCache()
                     }
-                    val lastAssistant = currentMessages
-                        .lastOrNull { it.role == app.amber.ai.core.MessageRole.ASSISTANT }
+                    val lastAssistant = remember(conversation.messageNodes) {
+                        conversation.messageNodes
+                            .asReversed()
+                            .asSequence()
+                            .map { it.currentMessage }
+                            .firstOrNull { it.role == app.amber.ai.core.MessageRole.ASSISTANT }
+                    }
                     val lastUsage = lastAssistant?.usage
-                    val messagesFingerprint = remember(currentMessages) {
-                        ContextFootprintEstimator.inputFingerprint(currentMessages)
-                    }
-                    val compactsFingerprint = remember(contextCompacts) {
-                        contextCompacts.fold(0L) { acc, compact ->
-                            (acc * 31) xor compact.id.hashCode().toLong() xor compact.tokenEstimate.toLong()
+                    val measuredPromptTokens = lastUsage?.promptTokens?.takeIf { it > 0 }
+                    // The estimate is only a fallback. Once the latest assistant message has
+                    // real prompt usage, calculating a full-history estimate here adds work but
+                    // can never affect the displayed value.
+                    val latestConversation by rememberUpdatedState(conversation)
+                    val latestContextCompacts by rememberUpdatedState(contextCompacts)
+                    val latestMeasuredPromptTokens by rememberUpdatedState(measuredPromptTokens)
+                    val estimatedInputTokens by produceState(
+                        initialValue = 0,
+                        key1 = conversation.id,
+                    ) {
+                        snapshotFlow {
+                            Triple(
+                                latestConversation,
+                                latestContextCompacts,
+                                latestMeasuredPromptTokens,
+                            )
+                        }.collectLatest { (snapshotConversation, snapshotCompacts, measured) ->
+                            if (measured != null) {
+                                value = 0
+                            } else {
+                                value = withContext(Dispatchers.Default) {
+                                    contextInputTokenCache.estimateConversationInputTokens(
+                                        snapshotConversation,
+                                        snapshotCompacts,
+                                    )
+                                }
+                            }
                         }
                     }
-                    val estimatedInputTokens = remember(messagesFingerprint, compactsFingerprint) {
-                        ContextFootprintEstimator.estimateConversationInputTokens(conversation, contextCompacts)
-                    }
-                    val usedTokens = lastUsage?.promptTokens?.takeIf { it > 0 } ?: estimatedInputTokens
+                    val usedTokens = measuredPromptTokens ?: estimatedInputTokens
                     val usedK = ((usedTokens + 999) / 1000).coerceAtLeast(0)
                     // total: 优先使用持续维护的 registry，未知/自定义模型再退回 provider 配置。
                     val contextWindowTokens = currentChatModel?.let { model ->

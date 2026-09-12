@@ -93,6 +93,9 @@ import java.time.ZoneId
 import kotlin.uuid.Uuid
 import kotlinx.coroutines.launch
 import androidx.compose.material3.Text
+import androidx.paging.LoadState
+import androidx.paging.compose.collectAsLazyPagingItems
+import androidx.paging.compose.itemKey
 import com.composables.icons.lucide.Lucide
 import com.composables.icons.lucide.BookOpenText
 import com.composables.icons.lucide.MessageCircle
@@ -130,17 +133,15 @@ fun SessionHomePage() {
     val tokens = LocalAmberTokens.current
     val toaster = LocalToaster.current
     val vm: SessionHomeVM = koinViewModel()
-    val conversations = vm.conversations.collectAsStateWithLifecycle().value
-    val conversationsLoaded = vm.conversationsLoaded.collectAsStateWithLifecycle().value
+    val conversations = vm.conversations.collectAsLazyPagingItems()
     val hasConversationError = vm.hasConversationError.collectAsStateWithLifecycle().value
     var homeSearchQuery by rememberSaveable { mutableStateOf("") }
     var homeSearchExpanded by rememberSaveable { mutableStateOf(false) }
     val homeSearchFocusRequester = remember { FocusRequester() }
-    val visibleConversations = filterHomeConversations(
-        conversations = conversations,
-        query = homeSearchQuery,
-        untitledLabel = stringResource(R.string.parity_home_new_conversation),
-    )
+    val untitledConversationLabel = stringResource(R.string.parity_home_new_conversation)
+    val refreshError = conversations.loadState.refresh as? LoadState.Error
+    val appendError = conversations.loadState.append as? LoadState.Error
+    val isRefreshLoading = conversations.loadState.refresh is LoadState.Loading
     val continueCandidates = vm.continueCandidates.collectAsStateWithLifecycle().value
     val hasContinueError = vm.hasContinueError.collectAsStateWithLifecycle().value
     val listState = rememberLazyListState()
@@ -151,6 +152,10 @@ fun SessionHomePage() {
         if (homeSearchExpanded) {
             homeSearchFocusRequester.requestFocus()
         }
+    }
+
+    LaunchedEffect(homeSearchQuery, untitledConversationLabel) {
+        vm.setHomeSearchQuery(homeSearchQuery, untitledConversationLabel)
     }
 
     // Council Room: 首页没有「当前会话」，每次点议会现开一个新会话承载（council_state
@@ -327,7 +332,7 @@ fun SessionHomePage() {
                     }
                 }
 
-                if (hasConversationError && conversations.isEmpty()) {
+                if (hasConversationError && conversations.itemCount == 0) {
                     item(key = "home_conversations_error") {
                         HomeConversationErrorState(onRetry = vm::retryConversations)
                     }
@@ -337,20 +342,33 @@ fun SessionHomePage() {
                             HomeConversationInlineError(onRetry = vm::retryConversations)
                         }
                     }
-                    if (conversationsLoaded && visibleConversations.isEmpty() && homeSearchQuery.isNotBlank()) {
+                    if (refreshError != null && conversations.itemCount > 0) {
+                        item(key = "home_conversations_refresh_error_inline") {
+                            HomeConversationInlineError(onRetry = { conversations.retry() })
+                        }
+                    }
+                    if (refreshError != null && conversations.itemCount == 0) {
+                        item(key = "home_conversations_refresh_error") {
+                            HomeConversationErrorState(onRetry = { conversations.retry() })
+                        }
+                    }
+                    if (!isRefreshLoading && refreshError == null && conversations.itemCount == 0 &&
+                        homeSearchQuery.isNotBlank()
+                    ) {
                         item(key = "home_search_empty") {
                             HomeSearchEmptyState()
                         }
-                    } else if (conversationsLoaded && conversations.isEmpty()) {
+                    } else if (!isRefreshLoading && refreshError == null && conversations.itemCount == 0) {
                         item(key = "home_empty") {
                             HomeEmptyState(modifier = Modifier.padding(vertical = 56.dp))
                         }
                     }
 
                     items(
-                        items = visibleConversations,
-                        key = { it.id.toString() },
-                    ) { conversation ->
+                        count = conversations.itemCount,
+                        key = conversations.itemKey { it.id.toString() },
+                    ) { index ->
+                        val conversation = conversations[index] ?: return@items
                         HomeSessionRow(
                             conversation = conversation,
                             // 首页是 hub：用 push（保留 SessionHome 在栈底），返回能回到首页；
@@ -363,6 +381,12 @@ fun SessionHomePage() {
                             onDelete = { vm.deleteConversation(conversation) },
                             onTogglePin = { vm.updatePinnedStatus(conversation) },
                         )
+                    }
+
+                    if (appendError != null) {
+                        item(key = "home_conversations_append_error") {
+                            HomeConversationInlineError(onRetry = { conversations.retry() })
+                        }
                     }
                 }
             }
@@ -566,7 +590,7 @@ internal fun filterHomeConversations(
     val trimmedQuery = query.trim()
     if (trimmedQuery.isEmpty()) return conversations
     return conversations.filter { conversation ->
-        (conversation.title.ifBlank { untitledLabel })
+        conversation.title.ifBlank { untitledLabel }
             .contains(trimmedQuery, ignoreCase = true)
     }
 }

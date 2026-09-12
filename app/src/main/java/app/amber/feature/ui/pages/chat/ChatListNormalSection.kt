@@ -168,8 +168,15 @@ internal fun ChatListNormal(
     val sendTransitionSlidePx = with(density) { SendTransitionSlideDistance.roundToPx() }
     val activity = LocalContext.current as? app.amber.agent.RouteActivity
     val workspace = workspaceColors()
-    val actionSuggestions = remember(conversation.messageNodes, conversation.chatSuggestions) {
-        conversation.actionSuggestionTexts()
+    val actionSuggestions = if (activeGeneration) {
+        // Suggestions are hidden for the whole generation. Avoid joining and
+        // rescanning the growing assistant tail on every stream snapshot; the
+        // settled branch below recomputes them when they can become visible.
+        emptyList()
+    } else {
+        remember(conversation.messageNodes, conversation.chatSuggestions) {
+            conversation.actionSuggestionTexts()
+        }
     }
     val visibleSuggestions = if (
         actionSuggestions.isNotEmpty() &&

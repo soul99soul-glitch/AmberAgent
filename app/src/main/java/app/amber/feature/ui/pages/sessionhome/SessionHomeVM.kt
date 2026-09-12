@@ -1,6 +1,8 @@
 package app.amber.feature.ui.pages.sessionhome
 
 import android.util.Log
+import androidx.paging.PagingData
+import androidx.paging.cachedIn
 import androidx.core.net.toUri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -17,18 +19,24 @@ import app.amber.feature.home.ContinueDismissStore
 import app.amber.feature.home.DEFAULT_DISMISS_DURATION
 import java.time.Instant
 import kotlin.uuid.Uuid
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.emptyFlow
+import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.launch
 
 /**
@@ -36,7 +44,7 @@ import kotlinx.coroutines.launch
  * （运行中任务、删除/置顶/重命名会话、更新设置），以及 P8-08 首页
  * 「继续」聚合（[continueCandidates] + [dismissContinueCandidate]）。
  *
- * 会话摘要由本页直接观察；首页的快速筛选只在这些摘要上运行。
+ * 会话摘要由本页分页观察；首页的快速筛选只在这些摘要上运行。
  */
 class SessionHomeVM(
     private val settingsStore: SettingsAggregator,
@@ -48,31 +56,57 @@ class SessionHomeVM(
 ) : ViewModel() {
 
     private val reloadRequests = MutableStateFlow(0)
-    private val _conversationsLoaded = MutableStateFlow(false)
     private val _hasConversationError = MutableStateFlow(false)
-    val conversationsLoaded: StateFlow<Boolean> = _conversationsLoaded
     val hasConversationError: StateFlow<Boolean> = _hasConversationError
+
+    private val homeSearchRequest = MutableStateFlow(HomeSearchRequest())
 
     private val continueReloadRequests = MutableStateFlow(0)
     private val _hasContinueError = MutableStateFlow(false)
     val hasContinueError: StateFlow<Boolean> = _hasContinueError
 
-    /** Home uses the already persisted conversation summaries for instant local title filtering. */
-    val conversations: StateFlow<List<Conversation>> = reloadRequests
-        .flatMapLatest {
-            observeConversationStream(
-                source = { conversationRepo.getConversationSummaries() },
-                onValue = {
-                    _hasConversationError.value = false
-                    _conversationsLoaded.value = true
-                },
-                onError = { error ->
-                    Log.e(TAG, "Home conversation stream failed", error)
-                    _hasConversationError.value = true
-                },
-            )
+    /**
+     * Home's default list is paged. A non-empty quick search deliberately reads
+     * the complete lightweight summary flow before applying the local predicate:
+     * [filterHomeConversations] must see every row so a match after the first
+     * page (or a no-match query) is not mistaken for an empty result.
+     */
+    val conversations: Flow<PagingData<Conversation>> =
+        combine(reloadRequests, homeSearchRequest) { _, search -> search }
+            .flatMapLatest { search ->
+                observeConversationPaging(
+                    source = {
+                        val trimmedQuery = search.query.trim()
+                        if (trimmedQuery.isEmpty()) {
+                            conversationRepo.getConversationsPaging()
+                        } else {
+                            conversationRepo.getConversationSummaries()
+                                .map { summaries ->
+                                    PagingData.from(
+                                        filterHomeConversations(
+                                            conversations = summaries,
+                                            query = trimmedQuery,
+                                            untitledLabel = search.untitledLabel,
+                                        )
+                                    )
+                                }
+                                .flowOn(Dispatchers.Default)
+                        }
+                    },
+                    onError = { error ->
+                        Log.e(TAG, "Home conversation stream failed", error)
+                        _hasConversationError.value = true
+                    },
+                ).onEach { _hasConversationError.value = false }
+            }
+            .cachedIn(viewModelScope)
+
+    fun setHomeSearchQuery(query: String, untitledLabel: String) {
+        val request = HomeSearchRequest(query = query, untitledLabel = untitledLabel)
+        if (homeSearchRequest.value != request) {
+            homeSearchRequest.value = request
         }
-        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+    }
 
     fun retryConversations() {
         _hasConversationError.value = false
@@ -95,7 +129,13 @@ class SessionHomeVM(
                 },
             )
         }
-        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+        .stateIn(
+            viewModelScope,
+            SharingStarted.WhileSubscribed(
+                stopTimeoutMillis = 0,
+            ),
+            emptyList(),
+        )
 
     fun retryContinueCandidates() {
         _hasContinueError.value = false
@@ -152,27 +192,25 @@ class SessionHomeVM(
 
 private const val TAG = "SessionHomeVM"
 
+private data class HomeSearchRequest(
+    val query: String = "",
+    val untitledLabel: String = "",
+)
+
 /**
- * Keeps stream construction failures and collection failures observable without
- * emitting an empty replacement that would erase the last rendered list.
+ * Keeps Pager construction failures and collection failures observable without
+ * emitting an empty replacement that would erase the last rendered page.
  */
-internal fun observeConversationStream(
-    source: () -> Flow<List<Conversation>>,
-    onValue: (List<Conversation>) -> Unit,
+internal fun observeConversationPaging(
+    source: () -> Flow<PagingData<Conversation>>,
     onError: (Throwable) -> Unit,
-): Flow<List<Conversation>> {
-    return try {
-        source()
-            .onEach { value -> onValue(value) }
-            .catch { error ->
-                if (error is CancellationException) throw error
-                onError(error)
-            }
+): Flow<PagingData<Conversation>> = flow {
+    try {
+        emitAll(source())
     } catch (error: CancellationException) {
         throw error
     } catch (error: Throwable) {
         onError(error)
-        emptyFlow()
     }
 }
 

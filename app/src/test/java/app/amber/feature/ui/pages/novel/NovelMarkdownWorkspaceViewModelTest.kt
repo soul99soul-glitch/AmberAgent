@@ -51,6 +51,7 @@ import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
@@ -119,6 +120,23 @@ class NovelMarkdownWorkspaceViewModelTest {
         viewModel.stopTurn()
         awaitState(viewModel) { !it.busy }
         Unit
+    }
+
+    @Test
+    fun `send stop keeps the accepted user message visible`() = runBlocking {
+        val scripted = ScriptedKernel(ScriptedKernel.Behavior.Hang)
+        val fixture = createFixture(scripted)
+        val viewModel = fixture.viewModel
+
+        assertTrue(viewModel.send("accepted user message"))
+        awaitState(viewModel) {
+            it.busy && it.messages.any { message -> message.content == "accepted user message" } &&
+                scripted.calls.get() == 1
+        }
+
+        viewModel.stopTurn()
+        awaitState(viewModel) { !it.busy }
+        assertTrue(viewModel.state.value.messages.any { it.content == "accepted user message" })
     }
 
     @Test

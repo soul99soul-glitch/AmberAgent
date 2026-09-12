@@ -29,6 +29,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.ui.draw.alpha
 import androidx.compose.material3.Icon
@@ -180,18 +181,23 @@ fun SettingProviderPage(vm: SettingVM = koinViewModel()) {
                             count = onlineProviders.size,
                         )
                     }
-                    item("online_group") {
-                        Column(Modifier.fillMaxWidth().padding(bottom = 4.dp)) {
-                            onlineProviders.forEachIndexed { index, provider ->
-                                if (index > 0) ProviderHairline()
-                                ProviderItem(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    provider = provider,
-                                    onEdit = {
-                                        navController.navigate(Screen.SettingProviderDetail(providerId = provider.id.toString()))
-                                    },
-                                )
-                            }
+                    itemsIndexed(
+                        items = onlineProviders,
+                        key = { _, provider -> "online_provider_${provider.id}" },
+                    ) { index, provider ->
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(bottom = if (index == onlineProviders.lastIndex) 4.dp else 0.dp),
+                        ) {
+                            if (index > 0) ProviderHairline()
+                            ProviderItem(
+                                modifier = Modifier.fillMaxWidth(),
+                                provider = provider,
+                                onEdit = {
+                                    navController.navigate(Screen.SettingProviderDetail(providerId = provider.id.toString()))
+                                },
+                            )
                         }
                     }
                 }
@@ -202,23 +208,24 @@ fun SettingProviderPage(vm: SettingVM = koinViewModel()) {
                             count = disabledProviders.size,
                         )
                     }
-                    item("disabled_group") {
+                    itemsIndexed(
+                        items = disabledProviders,
+                        key = { _, provider -> "disabled_provider_${provider.id}" },
+                    ) { index, provider ->
                         Column(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(bottom = 18.dp)
+                                .padding(bottom = if (index == disabledProviders.lastIndex) 18.dp else 0.dp)
                                 .alpha(0.62f),
                         ) {
-                            disabledProviders.forEachIndexed { index, provider ->
-                                if (index > 0) ProviderHairline()
-                                ProviderItem(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    provider = provider,
-                                    onEdit = {
-                                        navController.navigate(Screen.SettingProviderDetail(providerId = provider.id.toString()))
-                                    },
-                                )
-                            }
+                            if (index > 0) ProviderHairline()
+                            ProviderItem(
+                                modifier = Modifier.fillMaxWidth(),
+                                provider = provider,
+                                onEdit = {
+                                    navController.navigate(Screen.SettingProviderDetail(providerId = provider.id.toString()))
+                                },
+                            )
                         }
                     }
                 }

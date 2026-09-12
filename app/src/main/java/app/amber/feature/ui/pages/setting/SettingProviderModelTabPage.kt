@@ -309,8 +309,7 @@ private fun ModelList(
             models = modelList,
             selectedModels = providerSetting.models,
             parentProvider = providerSetting,
-            onAddModel = { onUpdateProvider(providerSetting.addModel(it)) },
-            onRemoveModel = { onUpdateProvider(providerSetting.delModel(it)) },
+            onApplyModels = { models -> onUpdateProvider(providerSetting.copyProvider(models = models)) },
             onCreateBlank = {
                 showPicker = false
                 blankState.open(Model())
@@ -603,12 +602,11 @@ private fun ModelRow(
 
 /* v5 ledger: available-models sheet — staged draft selection, confirm applies the diff */
 @Composable
-private fun ModelPickerSheet(
+internal fun ModelPickerSheet(
     models: List<Model>,
     selectedModels: List<Model>,
     parentProvider: ProviderSetting,
-    onAddModel: (Model) -> Unit,
-    onRemoveModel: (Model) -> Unit,
+    onApplyModels: (List<Model>) -> Unit,
     onCreateBlank: () -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -818,13 +816,15 @@ private fun ModelPickerSheet(
                 onConfirm = {
                     val isCodex = parentProvider is ProviderSetting.OpenAI &&
                         parentProvider.authMode == OpenAIAuthMode.CODEX_OAUTH
-                    models
+                    val addedModels = models
                         .filter { it.modelId in draftIds && it.modelId !in initialIds }
                         .filterNot { isCodex && it.isCodexOAuthReviewModel() }
-                        .forEach { onAddModel(it.withRegistryMetadata()) }
-                    selectedModels
-                        .filter { it.modelId !in draftIds }
-                        .forEach(onRemoveModel)
+                        .map { it.withRegistryMetadata() }
+                    val finalModels = buildList {
+                        addAll(selectedModels.filter { it.modelId in draftIds })
+                        addAll(addedModels)
+                    }
+                    onApplyModels(finalModels)
                     onDismiss()
                 },
             )
