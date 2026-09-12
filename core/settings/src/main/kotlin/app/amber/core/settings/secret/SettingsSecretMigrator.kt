@@ -480,14 +480,5 @@ class SettingsSecretMigrator(
     companion object {
         const val MIGRATION_VERSION = 1
         const val MIGRATION_FAILED = -1
-        private val SETTINGS_SECRET_SCOPES = setOf(
-            "provider",
-            "assistant",
-            "search",
-            "mcp",
-            "webdav",
-            "s3",
-            "tts",
-        )
     }
 }

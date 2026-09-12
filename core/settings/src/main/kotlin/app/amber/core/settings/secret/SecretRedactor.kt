@@ -98,9 +98,11 @@ class SecretRedactor(private val secretStore: SecretStore) {
         }
     }
 
-    /** orphan 回收：只删确认不再被任何设置引用的项（委托 SecretStore）。 */
+    /** 设置引用不包含 SSH 等独立存储，只回收设置自身拥有的凭据。 */
     fun deleteOrphans(active: Set<SecretDescriptor>) {
-        secretStore.deleteOrphans(active)
+        secretStore.listOrphans(active)
+            .filter { it.scope in SETTINGS_SECRET_SCOPES }
+            .forEach { secretStore.delete(it) }
     }
 
     /**
@@ -819,4 +821,8 @@ data class RedactedSettings(
     val webDavConfig: WebDavConfig,
     val s3Config: S3Config,
     val refs: Map<String, SecretReference>,
+)
+
+internal val SETTINGS_SECRET_SCOPES = setOf(
+    "provider", "assistant", "search", "mcp", "webdav", "s3", "tts",
 )

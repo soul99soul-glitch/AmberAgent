@@ -17,6 +17,23 @@ import org.junit.Test
 
 class SecretRedactorTest {
 
+    @Test
+    fun `settings orphan cleanup preserves independent SSH credentials`() {
+        val store = fakeSecretStore()
+        val active = SecretDescriptor("provider", "p1", "apiKey")
+        val orphan = SecretDescriptor("mcp", "m1", "authorization")
+        val ssh = SecretDescriptor("ssh", "host1", "private_key.v1")
+        store.create(active, "active-provider-key")
+        store.create(orphan, "unused-mcp-key")
+        store.create(ssh, "independent-ssh-key")
+
+        SecretRedactor(store).deleteOrphans(setOf(active))
+
+        assertEquals("active-provider-key", store.read(active))
+        assertEquals(null, store.read(orphan))
+        assertEquals("independent-ssh-key", store.read(ssh))
+    }
+
     // ---------------- Provider round-trip ----------------
 
     @Test
