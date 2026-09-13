@@ -17,11 +17,12 @@ import { Icon } from '../components/ui/Icon.ets';
 import { router } from '@kit.ArkUI';
 import type { SkillMetadata } from '@amber/chat-domain';
 import {
-  loadAssistants, saveAssistants, patchAssistant,
+  loadAssistants, patchAssistant,
 } from '@amber/chat-domain';
 import type { Assistant, Lorebook, PromptInjection } from '@amber/chat-domain';
 import { getChatKvStore, getSkillManager } from '../di/AppContainer.ets';
 import { loadLorebooks, loadModeInjections } from '../platform_impl/ExtensionPrefs.ets';
+import { mutateAssistant } from '../platform_impl/AssistantMutation.ets';
 
 // 全局快捷消息 KV(与 QuickMessagesPage 同键同形;此处只读)
 const QUICK_MESSAGES_KEY: string = 'quick_messages';
@@ -81,57 +82,55 @@ struct ChatAssistantExtensionsPage {
   }
 
   // onToggle(:140-145/:182-187):checked → ids + id;否则 ids - id → vm.update
+  // F35:整段 RMW 进 assistants 键的共享锁;ids 由锁内最新助手算出,不写旧快照
   private async toggleModeInjection(id: string, checked: boolean): Promise<void> {
-    if (this.assistant === null) return;
-    const cur: Assistant = this.assistant;
-    const ids: string[] = checked
-      ? (cur.modeInjectionIds.indexOf(id) >= 0
-        ? cur.modeInjectionIds.slice() : [...cur.modeInjectionIds, id])
-      : cur.modeInjectionIds.filter((x: string): boolean => x !== id);
-    await this.saveAssistant(patchAssistant(cur, { modeInjectionIds: ids }));
+    const next: Assistant | null = await mutateAssistant(this.assistantId,
+      (cur: Assistant): Assistant => {
+        const ids: string[] = checked
+          ? (cur.modeInjectionIds.indexOf(id) >= 0
+            ? cur.modeInjectionIds : cur.modeInjectionIds.concat([id]))
+          : cur.modeInjectionIds.filter((x: string): boolean => x !== id);
+        return patchAssistant(cur, { modeInjectionIds: ids });
+      });
+    if (next !== null) this.assistant = next;
   }
 
   private async toggleLorebook(id: string, checked: boolean): Promise<void> {
-    if (this.assistant === null) return;
-    const cur: Assistant = this.assistant;
-    const ids: string[] = checked
-      ? (cur.lorebookIds.indexOf(id) >= 0
-        ? cur.lorebookIds.slice() : [...cur.lorebookIds, id])
-      : cur.lorebookIds.filter((x: string): boolean => x !== id);
-    await this.saveAssistant(patchAssistant(cur, { lorebookIds: ids }));
+    const next: Assistant | null = await mutateAssistant(this.assistantId,
+      (cur: Assistant): Assistant => {
+        const ids: string[] = checked
+          ? (cur.lorebookIds.indexOf(id) >= 0
+            ? cur.lorebookIds : cur.lorebookIds.concat([id]))
+          : cur.lorebookIds.filter((x: string): boolean => x !== id);
+        return patchAssistant(cur, { lorebookIds: ids });
+      });
+    if (next !== null) this.assistant = next;
   }
 
   // :103-109 同构 — quickMessageIds ± id
   private async toggleQuickMessage(id: string, checked: boolean): Promise<void> {
-    if (this.assistant === null) return;
-    const cur: Assistant = this.assistant;
-    const ids: string[] = checked
-      ? (cur.quickMessageIds.indexOf(id) >= 0
-        ? cur.quickMessageIds.slice() : [...cur.quickMessageIds, id])
-      : cur.quickMessageIds.filter((x: string): boolean => x !== id);
-    await this.saveAssistant(patchAssistant(cur, { quickMessageIds: ids }));
+    const next: Assistant | null = await mutateAssistant(this.assistantId,
+      (cur: Assistant): Assistant => {
+        const ids: string[] = checked
+          ? (cur.quickMessageIds.indexOf(id) >= 0
+            ? cur.quickMessageIds : cur.quickMessageIds.concat([id]))
+          : cur.quickMessageIds.filter((x: string): boolean => x !== id);
+        return patchAssistant(cur, { quickMessageIds: ids });
+      });
+    if (next !== null) this.assistant = next;
   }
 
   // :193-217 同构 — enabledSkills ± name(技能以 name 为键,对齐 createSkillTools)
   private async toggleSkill(name: string, checked: boolean): Promise<void> {
-    if (this.assistant === null) return;
-    const cur: Assistant = this.assistant;
-    const ids: string[] = checked
-      ? (cur.enabledSkills.indexOf(name) >= 0
-        ? cur.enabledSkills.slice() : [...cur.enabledSkills, name])
-      : cur.enabledSkills.filter((x: string): boolean => x !== name);
-    await this.saveAssistant(patchAssistant(cur, { enabledSkills: ids }));
-  }
-
-  private async saveAssistant(next: Assistant): Promise<void> {
-    const kv = getChatKvStore();
-    const assistants: Assistant[] | null = await loadAssistants(kv);
-    const list: Assistant[] = assistants === null ? [] : assistants.slice();
-    const index: number = list.findIndex((a: Assistant): boolean => a.id === next.id);
-    if (index >= 0) list[index] = next;
-    else list.push(next);
-    await saveAssistants(kv, list);
-    this.assistant = next;
+    const next: Assistant | null = await mutateAssistant(this.assistantId,
+      (cur: Assistant): Assistant => {
+        const ids: string[] = checked
+          ? (cur.enabledSkills.indexOf(name) >= 0
+            ? cur.enabledSkills : cur.enabledSkills.concat([name]))
+          : cur.enabledSkills.filter((x: string): boolean => x !== name);
+        return patchAssistant(cur, { enabledSkills: ids });
+      });
+    if (next !== null) this.assistant = next;
   }
 
   private gotoPrompts(): void {
@@ -223,7 +222,7 @@ struct ChatAssistantExtensionsPage {
                     })
                       .selectedColor(ACCENT)
                       .onChange((v: boolean): void => {
-                        this.toggleQuickMessage(qm.id, v);
+                        this.toggleQuickMessage(qm.id, v).catch((): void => {});
                       })
                   }
                   .width('100%')
@@ -253,7 +252,7 @@ struct ChatAssistantExtensionsPage {
                     })
                       .selectedColor(ACCENT)
                       .onChange((v: boolean): void => {
-                        this.toggleModeInjection(mi.id, v);
+                        this.toggleModeInjection(mi.id, v).catch((): void => {});
                       })
                   }
                   .width('100%')
@@ -292,7 +291,7 @@ struct ChatAssistantExtensionsPage {
                     })
                       .selectedColor(ACCENT)
                       .onChange((v: boolean): void => {
-                        this.toggleLorebook(lb.id, v);
+                        this.toggleLorebook(lb.id, v).catch((): void => {});
                       })
                   }
                   .width('100%')
@@ -332,7 +331,7 @@ struct ChatAssistantExtensionsPage {
                     })
                       .selectedColor(ACCENT)
                       .onChange((v: boolean): void => {
-                        this.toggleSkill(sk.name, v);
+                        this.toggleSkill(sk.name, v).catch((): void => {});
                       })
                   }
                   .width('100%')

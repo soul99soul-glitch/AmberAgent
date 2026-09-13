@@ -3,7 +3,8 @@
 // ArkUI: 复用既有 design tokens(INK/INK2/INK3/INK4/SURFACE/SURFACE2/LINE/ACCENT/SIGNAL/ERROR);
 //   WorkspaceTone → 颜色映射函数;组件用 ArkUI Row/Column/Surface 构建
 import {
-  INK3, SURFACE2, LINE, ACCENT, ACCENT_LIGHT, SIGNAL, ERROR, LABEL,
+  INK3, SURFACE2, LINE, ACCENT, ACCENT_LIGHT, SIGNAL, ERROR,
+  ERROR_BG, SUCCESS_BG, SUCCESS_FG, WARNING_BG, WARNING_FG, LABEL,
 } from '../../design/tokens.ets';
 
 export type WorkspaceTone = 'Neutral' | 'Accent' | 'Success' | 'Warning' | 'Danger';
@@ -12,9 +13,9 @@ export type WorkspaceTone = 'Neutral' | 'Accent' | 'Success' | 'Warning' | 'Dang
 export const toneColors = (tone: WorkspaceTone): { container: string; content: string } => {
   switch (tone) {
     case 'Accent': return { container: ACCENT_LIGHT, content: ACCENT };
-    case 'Success': return { container: '#E8F5E9', content: SIGNAL };
-    case 'Warning': return { container: '#FFF8E1', content: '#F57C00' };
-    case 'Danger': return { container: '#FFEBEE', content: ERROR };
+    case 'Success': return { container: SUCCESS_BG, content: SUCCESS_FG };
+    case 'Warning': return { container: WARNING_BG, content: WARNING_FG };
+    case 'Danger': return { container: ERROR_BG, content: ERROR };
     default: return { container: SURFACE2, content: INK3 };
   }
 };

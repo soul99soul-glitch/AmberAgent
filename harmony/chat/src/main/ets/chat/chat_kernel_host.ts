@@ -7,7 +7,7 @@
 // 不拥有 provider/tool loop 本体;只包装一次 InteractiveTurnOperation 并发 phase 事件。
 
 import type { Conversation } from './conversation.ts';
-import type { ChatTurnDeps } from './chat_turn.ts';
+import type { ChatTurnDeps, ConversationStore } from './chat_turn.ts';
 import type { InteractiveTurnRunResult, InteractiveTurnOperation } from './interactive_turn_runtime.ts';
 import { runInteractiveTurn } from './interactive_turn_runtime.ts';
 import type { StreamTransportState, UIMessage } from './message.ts';
@@ -116,9 +116,25 @@ export const createChatKernelHost = (hostDeps: ChatKernelHostDeps): ChatKernelHo
       ctx = makeContext(runId, nowMs());
       emit('preparing');
 
+      // R05:取消只由「宿主显式 cancel」或「真实 abort signal」决定,禁止按错误
+      //   message 子串/name 猜测取消 —— 上游网关错误正文含 "abort" 或普通
+      //   AbortError(name 而无 signal.aborted)曾被误判取消并返回入参旧会话,
+      //   把引擎已持久化的新 user 消息覆盖回退。
+      //   同时跟踪引擎实际落库的最新会话:取消收口也绝不返回早于该快照的入参。
+      const externalSignal = deps.abortSignal;
+      const isGenuineCancellation = (): boolean =>
+        cancelled || (externalSignal !== undefined && externalSignal.aborted);
+      let lastPersistedConversation: Conversation = conversation;
+      const trackingStore: ConversationStore = {
+        save: (conv: Conversation): Promise<void> => {
+          lastPersistedConversation = conv;
+          return deps.store.save(conv);
+        },
+      };
+
       // 审批钩子:若宿主提供 requestApproval,在 onRetryStatus 旁路挂一个可选暂停点
       // (完整 tool-loop 审批由 dispatcher 决策;此处仅暴露 phase 协调接口)
-      const wrappedDeps: ChatTurnDeps = { ...deps };
+      const wrappedDeps: ChatTurnDeps = { ...deps, store: trackingStore };
 
       if (cancelled) {
         emit('cancelled', { finishedAtMs: nowMs(), cause: cancelCause === 'none' ? 'user' : cancelCause });
@@ -131,7 +147,7 @@ export const createChatKernelHost = (hostDeps: ChatKernelHostDeps): ChatKernelHo
           throw new Error('ChatKernelHost.run requires an InteractiveTurnOperation');
         }
         const result = await runInteractiveTurn(conversation, wrappedDeps, operation);
-        if (cancelled) {
+        if (isGenuineCancellation()) {
           emit('cancelled', {
             finishedAtMs: nowMs(),
             cause: cancelCause === 'none' ? 'user' : cancelCause,
@@ -147,13 +163,14 @@ export const createChatKernelHost = (hostDeps: ChatKernelHostDeps): ChatKernelHo
         return { conversation: result.conversation, result };
       } catch (e) {
         const error = e instanceof Error ? e : new Error(String(e));
-        if (cancelled || isAbortError(error)) {
+        if (isGenuineCancellation()) {
           emit('cancelled', {
             finishedAtMs: nowMs(),
             cause: cancelCause === 'none' ? 'user' : cancelCause,
             error,
           });
-          return { conversation, result: null };
+          // 返回引擎已落库的最新快照(通常含新 user 消息),而非入参旧会话
+          return { conversation: lastPersistedConversation, result: null };
         }
         emit('failed', { finishedAtMs: nowMs(), cause: 'error', error });
         throw error;
@@ -161,9 +178,6 @@ export const createChatKernelHost = (hostDeps: ChatKernelHostDeps): ChatKernelHo
     },
   };
 };
-
-const isAbortError = (e: Error): boolean =>
-  e.name === 'AbortError' || e.message.indexOf('abort') >= 0;
 
 /** 诊断:phase 是否终态 */
 export const isKernelTerminalPhase = (phase: KernelPhase): boolean =>

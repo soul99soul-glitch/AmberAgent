@@ -3,7 +3,7 @@
 // 升级: 真模态(遮罩层) + SURFACE2 导入修复 + 警告文本 + 全宽 TextArea
 //   + loading 态保留标题/取消按钮(只替换 body)
 // 降级(跳过): SingleChoiceSegmentedButtonRow(用 pill 替代) / Promise 异步(用同步 onConfirm)
-import { INK, INK2, INK3, SURFACE, SURFACE2, LINE, ACCENT, ERROR, BODY, LABEL, OVERLAY } from '../../design/tokens.ets';
+import { INK, INK2, INK3, SURFACE, SURFACE2, LINE, ACCENT, ACCENT_INK, ERROR, BODY, LABEL, OVERLAY } from '../../design/tokens.ets';
 import { RabbitLoading } from './RabbitLoading.ets';
 
 const TOKEN_OPTIONS: number[] = [500, 1000, 2000, 4000];
@@ -67,7 +67,7 @@ export struct CompressContextDialog {
               ForEach(TOKEN_OPTIONS, (opt: number, i: number): void => {
                 Text(`${opt}`)
                   .fontSize(LABEL)
-                  .fontColor(this.selectedTokens === opt ? '#FFFFFF' : INK3)
+                  .fontColor(this.selectedTokens === opt ? ACCENT_INK : INK3)
                   .padding({ left: 10, right: 10, top: 4, bottom: 4 })
                   .backgroundColor(this.selectedTokens === opt ? ACCENT : SURFACE2)
                   .borderRadius(8)
@@ -88,7 +88,7 @@ export struct CompressContextDialog {
               ForEach(KEEP_RECENT_OPTIONS, (opt: number, i: number): void => {
                 Text(`${opt}`)
                   .fontSize(LABEL)
-                  .fontColor(this.selectedKeepRecent === opt ? '#FFFFFF' : INK3)
+                  .fontColor(this.selectedKeepRecent === opt ? ACCENT_INK : INK3)
                   .padding({ left: 10, right: 10, top: 4, bottom: 4 })
                   .backgroundColor(this.selectedKeepRecent === opt ? ACCENT : SURFACE2)
                   .borderRadius(8)

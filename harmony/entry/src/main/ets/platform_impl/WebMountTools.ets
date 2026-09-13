@@ -5,15 +5,27 @@
 //   wm_screenshot / wm_eval。未移植件(tap/keys/select/find/wait/back/forward/
 //   tab_*/visual_*/signed_fetch/network_inspect/stations/site_*)后续梯队;
 //   session_id 参数在单会话下接受并回显为 'main'。
+//
+// 本批安全收口:
+//   L01 — 所有动态值只经 JSON 字符串编码注入,不再拼入脚本文本(error 文案里的
+//         target 二次拼接已删除);wm_click 恢复 mandatoryApproval=true /
+//         allowsAutoApproval=false(与 wm_eval 同合同),关闭 wm_eval 也不能借
+//         click 执行任意表达式。
+//   L02 — 所有 URL 走 WebMountSites 官方标准解析(http(s)/拒 userinfo);
+//         每次 open/页面工具前刷新站点 gate,onLoadIntercept 逐导航(含重定向)
+//         拦截;revoke 站点后立即复位当前页面。
 
 import type { AbortSignalLike } from '@amber/deepread-domain';
-import type { AgentTool, JsonValue, JsonObject, UIMessagePart, InputSchemaObj } from '@amber/chat-domain';
+import type {
+  AgentTool, JsonValue, JsonObject, UIMessagePart, InputSchemaObj, KeyValueStore,
+} from '@amber/chat-domain';
 import { makeAgentTool, makeInputSchemaObj } from '@amber/chat-domain';
 import type { WebMountSession } from './WebMountSession.ets';
 import {
   loadWebMountSites, saveWebMountSites, makeUserSite, siteAllowsUrl, sitesDeniedMessage,
+  checkWebMountUrl, makeSiteGate,
 } from './WebMountSites.ets';
-import type { UserSiteEntry } from './WebMountSites.ets';
+import type { UserSiteEntry, WebMountUrlCheck } from './WebMountSites.ets';
 import { getChatKvStore } from '../di/AppContainer.ets';
 
 const SESSION_ID: string = 'main';
@@ -39,10 +51,60 @@ const textPart = (payload: JsonObject): UIMessagePart[] => [
   { type: 'text', text: JSON.stringify(payload), metadata: null },
 ];
 
+const errorPart = (message: string): UIMessagePart[] =>
+  textPart({ ok: false, error: message } as JsonObject);
+
+// L01:唯一允许的动态注入方式 — JSON 字符串字面量(并转义 U+2028/2029,防脚本换行)
+const jsonString = (value: string): string => JSON.stringify(value)
+  .replace(/\u2028/g, '\\u2028')
+  .replace(/\u2029/g, '\\u2029');
+
 // 统一:evalJson 结果字符串 → text part(ok/error 两形态)
 const evalToPart = async (session: WebMountSession, expr: string): Promise<UIMessagePart[]> => {
   const raw: string = await session.evalJson(expr);
   return [{ type: 'text', text: raw, metadata: null }];
+};
+
+// 全局开关值(P2-1):从 KV 读取
+const loadWebMountGlobalEnabled = async (kv: KeyValueStore): Promise<boolean> => {
+  try {
+    const raw: string | null = await kv.get('webmount_global_enabled');
+    return raw === 'true';
+  } catch (_e) {
+    return false;
+  }
+};
+
+// OR 语义(LocalTools.kt:161-166):global || assistant 勾选 webmount。
+//   设置页显式关闭全局只终止**当前**会话;下一次合法建 tools / 页面操作时重新按 OR
+//   求值,助手单独勾选时仍可继续。
+const syncEnabled = async (
+  session: WebMountSession, kv: KeyValueStore, assistantEnabled: boolean,
+): Promise<boolean> => {
+  const global: boolean = await loadWebMountGlobalEnabled(kv);
+  const effective: boolean = global || assistantEnabled;
+  session.setEnabled(effective);
+  return effective;
+};
+
+// L02:页面操作前重新载入站点并刷新 gate;返回 null 表示当前页面仍被授权。
+//   P2-1:按 OR 语义同步 enabled;仅当 global||assistant 都为假才拒绝
+//   (覆盖生成中途用户关闭全局、且助手未单独勾选)。
+//   revoke 之后再次调用也会拒绝并复位页面(即便实时通知已复位,这里仍兜底)。
+const guardPage = async (
+  session: WebMountSession, kv: KeyValueStore, assistantEnabled: boolean,
+): Promise<string | null> => {
+  const enabled: boolean = await syncEnabled(session, kv, assistantEnabled);
+  if (!enabled) return 'WebMount is disabled for this conversation';
+  const sites: UserSiteEntry[] = await loadWebMountSites(kv);
+  session.setUrlGate(makeSiteGate(sites));
+  const current: string = session.getUrl();
+  if (current.length === 0 || !session.isReady()) return 'no page loaded; call wm_open first';
+  if (!siteAllowsUrl(sites, current)) {
+    session.resetToBlank();
+    return `current page is no longer allowed by WebMount Stations: ${current}`;
+  }
+  return null;
 };
 
 // 页面 outline + 交互元素 ref 标注(click 以 [data-wm-ref=N] 命中)
@@ -73,7 +135,35 @@ const EXTRACT_JS: string = `(function(){
   return { url: location.href, title: document.title, text: bodyText, elements: els };
 })()`;
 
-export const createWebMountTools = (session: WebMountSession, includeEval: boolean): AgentTool[] => {
+// click:selector 只作为 JSON 字符串字面量进入 script;错误文案为静态常量,
+//   不再把 target 二次拼进单引号字符串(L01)。
+const clickScript = (selector: string): string => `(function(){
+  const sel = ${jsonString(selector)};
+  const el = document.querySelector(sel);
+  if (el === null) return { clicked: false, error: 'element not found' };
+  el.scrollIntoView({ block: 'center' });
+  el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+  el.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+  el.click();
+  return { clicked: true, url: location.href };
+})()`;
+
+const typeScript = (selector: string, text: string): string => `(function(){
+  const sel = ${jsonString(selector)};
+  const el = document.querySelector(sel);
+  if (el === null) return { typed: false, error: 'element not found' };
+  el.focus();
+  el.value = ${jsonString(text)};
+  el.dispatchEvent(new Event('input', { bubbles: true }));
+  el.dispatchEvent(new Event('change', { bubbles: true }));
+  return { typed: true };
+})()`;
+
+// assistantEnabled:助手自身是否勾选 webmount(rt.assistant.localTools 含 'webmount');
+//   OR 语义 = global || assistantEnabled。参数尾置且默认 false,既有调用不受影响。
+export const createWebMountTools = (
+  session: WebMountSession, includeEval: boolean, assistantEnabled: boolean = false,
+): AgentTool[] => {
   const openTool: AgentTool = makeAgentTool({
     name: 'wm_open',
     description: 'Open a URL in the WebMount browser session and wait for the page to load. '
@@ -81,15 +171,21 @@ export const createWebMountTools = (session: WebMountSession, includeEval: boole
     parameters: (): InputSchemaObj | null => makeInputSchemaObj({
       'url': { type: 'string', description: 'Absolute http(s) URL to open.' },
     } as JsonObject, ['url']),
-    execute: async (input: JsonValue): Promise<UIMessagePart[]> => {
-      const url: string = strOf(input, 'url', '');
-      if (url.length === 0) throw new Error('url is required');
-      // 授权边界:仅允许 WebMount Stations 已注册站点(域/子域匹配)
-      const sites: UserSiteEntry[] = await loadWebMountSites(getChatKvStore());
-      if (!siteAllowsUrl(sites, url)) {
-        return [{ type: 'text', text: sitesDeniedMessage(sites, url), metadata: null }];
+    execute: async (input: JsonValue, signal?: AbortSignalLike): Promise<UIMessagePart[]> => {
+      const raw: string = strOf(input, 'url', '');
+      if (raw.length === 0) throw new Error('url is required');
+      const kv: KeyValueStore = getChatKvStore();
+      // OR 语义:global || assistant 勾选;两者皆假才拒绝
+      const enabled: boolean = await syncEnabled(session, kv, assistantEnabled);
+      if (!enabled) return errorPart('WebMount is disabled for this conversation');
+      // 授权边界:标准解析(http(s)/拒 userinfo)+ 仅允许已注册站点
+      const check: WebMountUrlCheck = checkWebMountUrl(raw);
+      const sites: UserSiteEntry[] = await loadWebMountSites(kv);
+      if (!check.ok || !siteAllowsUrl(sites, check.url)) {
+        return [{ type: 'text', text: sitesDeniedMessage(sites, raw), metadata: null }];
       }
-      await session.open(url);
+      session.setUrlGate(makeSiteGate(sites));
+      await session.open(check.url, signal);
       return evalToPart(session, EXTRACT_JS);
     },
   });
@@ -112,33 +208,34 @@ export const createWebMountTools = (session: WebMountSession, includeEval: boole
     description: 'Extract current page outline: title, visible text (up to 5000 chars) and '
       + 'interactive elements with refs; wm_click accepts the returned ref.',
     execute: async (_input: JsonValue): Promise<UIMessagePart[]> => {
-      if (!session.isReady()) throw new Error('no page loaded; call wm_open first');
+      const blocked: string | null = await guardPage(session, getChatKvStore(), assistantEnabled);
+      if (blocked !== null) return errorPart(blocked);
       return evalToPart(session, EXTRACT_JS);
     },
   });
 
+  // wm_click:脚本注入边界(executes same-origin DOM actions)→ 强制逐次人工确认,
+  //   不参与自动批准(L01;对齐 wm_eval 的审批合同)
   const clickTool: AgentTool = makeAgentTool({
     name: 'wm_click',
     description: 'Click an element in the WebMount session. Prefer target = ref returned by '
-      + 'wm_extract; a CSS selector fallback is also accepted.',
+      + 'wm_extract; a CSS selector fallback is also accepted. Every call requires '
+      + 'explicit human approval.',
     parameters: (): InputSchemaObj | null => makeInputSchemaObj({
       'target': { type: 'string', description: 'Element ref from wm_extract (e.g. wm-3) or CSS selector.' },
     } as JsonObject, ['target']),
     needsApproval: true,
-    execute: async (input: JsonValue): Promise<UIMessagePart[]> => {
+    allowsAutoApproval: false,
+    mandatoryApproval: true,
+    execute: async (input: JsonValue, signal?: AbortSignalLike): Promise<UIMessagePart[]> => {
       const target: string = strOf(input, 'target', '');
       if (target.length === 0) throw new Error('target is required');
+      if (signal !== undefined && signal.aborted) throw new Error('WebMount cancelled');
+      const blocked: string | null = await guardPage(session, getChatKvStore(), assistantEnabled);
+      if (blocked !== null) return errorPart(blocked);
       const selector: string = target.startsWith('wm-')
         ? `[data-wm-ref="${target}"]` : target;
-      return evalToPart(session, `(function(){
-        const el = document.querySelector(${JSON.stringify(selector)});
-        if (el === null) return { clicked: false, error: 'element not found: ${target}' };
-        el.scrollIntoView({ block: 'center' });
-        el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
-        el.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
-        el.click();
-        return { clicked: true, url: location.href };
-      })()`);
+      return evalToPart(session, clickScript(selector));
     },
   });
 
@@ -153,15 +250,9 @@ export const createWebMountTools = (session: WebMountSession, includeEval: boole
       const selector: string = strOf(input, 'selector', '');
       const text: string = strOf(input, 'text', '');
       if (selector.length === 0) throw new Error('selector is required');
-      return evalToPart(session, `(function(){
-        const el = document.querySelector(${JSON.stringify(selector)});
-        if (el === null) return { typed: false, error: 'element not found' };
-        el.focus();
-        el.value = ${JSON.stringify(text)};
-        el.dispatchEvent(new Event('input', { bubbles: true }));
-        el.dispatchEvent(new Event('change', { bubbles: true }));
-        return { typed: true };
-      })()`);
+      const blocked: string | null = await guardPage(session, getChatKvStore(), assistantEnabled);
+      if (blocked !== null) return errorPart(blocked);
+      return evalToPart(session, typeScript(selector, text));
     },
   });
 
@@ -175,6 +266,8 @@ export const createWebMountTools = (session: WebMountSession, includeEval: boole
     execute: async (input: JsonValue): Promise<UIMessagePart[]> => {
       const dx: number = numOf(input, 'dx', 0);
       const dy: number = numOf(input, 'dy', 600);
+      const blocked: string | null = await guardPage(session, getChatKvStore(), assistantEnabled);
+      if (blocked !== null) return errorPart(blocked);
       return evalToPart(session, `(function(){
         window.scrollBy(${dx}, ${dy});
         return { scrolled: true, x: window.scrollX, y: window.scrollY };
@@ -186,7 +279,8 @@ export const createWebMountTools = (session: WebMountSession, includeEval: boole
     name: 'wm_screenshot',
     description: 'Capture a PNG screenshot of the WebMount session viewport (base64 data URL image).',
     execute: async (_input: JsonValue): Promise<UIMessagePart[]> => {
-      if (!session.isReady()) throw new Error('no page loaded; call wm_open first');
+      const blocked: string | null = await guardPage(session, getChatKvStore(), assistantEnabled);
+      if (blocked !== null) return errorPart(blocked);
       const dataUrl: string = await session.screenshotDataUrl();
       return [{ type: 'image', url: dataUrl, metadata: null }];
     },
@@ -204,9 +298,12 @@ export const createWebMountTools = (session: WebMountSession, includeEval: boole
     needsApproval: true,
     allowsAutoApproval: false,
     mandatoryApproval: true,
-    execute: async (input: JsonValue, _signal?: AbortSignalLike): Promise<UIMessagePart[]> => {
+    execute: async (input: JsonValue, signal?: AbortSignalLike): Promise<UIMessagePart[]> => {
       const code: string = strOf(input, 'code', '');
       if (code.length === 0) throw new Error('code is required');
+      if (signal !== undefined && signal.aborted) throw new Error('WebMount cancelled');
+      const blocked: string | null = await guardPage(session, getChatKvStore(), assistantEnabled);
+      if (blocked !== null) return errorPart(blocked);
       return evalToPart(session, code);
     },
   });
@@ -238,10 +335,14 @@ export const createWebMountTools = (session: WebMountSession, includeEval: boole
       const name: string = strOf(input, 'name', '');
       const url: string = strOf(input, 'url', '');
       if (name.length === 0 || url.length === 0) throw new Error('name and url are required');
+      const check: WebMountUrlCheck = checkWebMountUrl(url);
+      if (!check.ok) return errorPart(`invalid site url: ${check.error}`);
       const kv = getChatKvStore();
       const sites: UserSiteEntry[] = await loadWebMountSites(kv);
-      const entry: UserSiteEntry = makeUserSite(name, url);
-      await saveWebMountSites(kv, [...sites, entry]);
+      const entry: UserSiteEntry = makeUserSite(name, check.url);
+      const next: UserSiteEntry[] = [...sites, entry];
+      // saveWebMountSites 成功后经单槽回调刷新 session gate(P2-1),无需显式 setUrlGate
+      await saveWebMountSites(kv, next);
       return textPart({ added: true, id: entry.id, name: entry.name, url: entry.url });
     },
   });
@@ -261,8 +362,12 @@ export const createWebMountTools = (session: WebMountSession, includeEval: boole
       const sites: UserSiteEntry[] = await loadWebMountSites(kv);
       const next: UserSiteEntry[] = sites.filter((s: UserSiteEntry): boolean => s.id !== id);
       if (next.length === sites.length) return textPart({ removed: false, error: 'site not found' });
+      // 先判定当前页面是否将失权(save 成功后的回调会立即 reset,故先算)
+      const current: string = session.getUrl();
+      const pageReset: boolean = current.length > 0 && !siteAllowsUrl(next, current);
+      // saveWebMountSites 成功后经单槽回调 applySitesSnapshot:换 gate + 失权即 resetToBlank
       await saveWebMountSites(kv, next);
-      return textPart({ removed: true, id: id });
+      return textPart({ removed: true, id: id, page_reset: pageReset });
     },
   });
 
@@ -270,10 +375,10 @@ export const createWebMountTools = (session: WebMountSession, includeEval: boole
   const waitProbeJs = (
     urlIncludes: string, titleIncludes: string, selector: string, textIncludes: string,
   ): string => `(function(){
-    const u = ${JSON.stringify(urlIncludes)};
-    const t = ${JSON.stringify(titleIncludes)};
-    const s = ${JSON.stringify(selector)};
-    const x = ${JSON.stringify(textIncludes)};
+    const u = ${jsonString(urlIncludes)};
+    const t = ${jsonString(titleIncludes)};
+    const s = ${jsonString(selector)};
+    const x = ${jsonString(textIncludes)};
     if (u.length > 0 && location.href.indexOf(u) < 0) return { matched: false, reason: 'url' };
     if (t.length > 0 && document.title.indexOf(t) < 0) return { matched: false, reason: 'title' };
     if (s.length > 0 && document.querySelector(s) === null) return { matched: false, reason: 'selector' };
@@ -294,8 +399,9 @@ export const createWebMountTools = (session: WebMountSession, includeEval: boole
       'text_includes': { type: 'string', description: 'Substring expected in body text.' },
       'timeout_ms': { type: 'number', description: 'Max wait in ms (default 10000, max 60000).' },
     } as JsonObject, null),
-    execute: async (input: JsonValue): Promise<UIMessagePart[]> => {
-      if (!session.isReady()) throw new Error('no page loaded; call wm_open first');
+    execute: async (input: JsonValue, signal?: AbortSignalLike): Promise<UIMessagePart[]> => {
+      const blocked: string | null = await guardPage(session, getChatKvStore(), assistantEnabled);
+      if (blocked !== null) return errorPart(blocked);
       const urlIncludes: string = strOf(input, 'url_includes', '');
       const titleIncludes: string = strOf(input, 'title_includes', '');
       const selector: string = strOf(input, 'selector', '');
@@ -308,6 +414,8 @@ export const createWebMountTools = (session: WebMountSession, includeEval: boole
       const probe: string = waitProbeJs(urlIncludes, titleIncludes, selector, textIncludes);
       const started: number = Date.now();
       for (;;) {
+        // 取消信号贯穿轮询等待(最小):Stop 后立即终止并清理由此产生的挂起
+        if (signal !== undefined && signal.aborted) throw new Error('WebMount cancelled');
         const raw: string = await session.evalJson(probe);
         let matched: boolean = false;
         try {
@@ -338,6 +446,8 @@ export const createWebMountTools = (session: WebMountSession, includeEval: boole
     name: 'wm_back',
     description: 'Navigate back in the WebMount session history.',
     execute: async (): Promise<UIMessagePart[]> => {
+      const blocked: string | null = await guardPage(session, getChatKvStore(), assistantEnabled);
+      if (blocked !== null) return errorPart(blocked);
       const ok: boolean = session.back();
       return textPart({ went_back: ok, url: session.getUrl() });
     },
@@ -347,6 +457,8 @@ export const createWebMountTools = (session: WebMountSession, includeEval: boole
     name: 'wm_forward',
     description: 'Navigate forward in the WebMount session history.',
     execute: async (): Promise<UIMessagePart[]> => {
+      const blocked: string | null = await guardPage(session, getChatKvStore(), assistantEnabled);
+      if (blocked !== null) return errorPart(blocked);
       const ok: boolean = session.forward();
       return textPart({ went_forward: ok, url: session.getUrl() });
     },
@@ -355,8 +467,10 @@ export const createWebMountTools = (session: WebMountSession, includeEval: boole
   const reloadTool: AgentTool = makeAgentTool({
     name: 'wm_reload',
     description: 'Reload the current WebMount page and wait for load end.',
-    execute: async (): Promise<UIMessagePart[]> => {
-      await session.reload();
+    execute: async (_input: JsonValue, signal?: AbortSignalLike): Promise<UIMessagePart[]> => {
+      const blocked: string | null = await guardPage(session, getChatKvStore(), assistantEnabled);
+      if (blocked !== null) return errorPart(blocked);
+      await session.reload(signal);
       return textPart({ reloaded: true, url: session.getUrl() });
     },
   });
@@ -394,16 +508,18 @@ export const createWebMountTools = (session: WebMountSession, includeEval: boole
     parameters: (): InputSchemaObj | null => makeInputSchemaObj({
       'tab_id': { type: 'string', description: 'Tab id from wm_tab_list.' },
     } as JsonObject, ['tab_id']),
-    execute: async (input: JsonValue): Promise<UIMessagePart[]> => {
+    execute: async (input: JsonValue, signal?: AbortSignalLike): Promise<UIMessagePart[]> => {
       const tabId: string = strOf(input, 'tab_id', '');
       if (tabId.length === 0) throw new Error('tab_id is required');
       const tab = session.selectTab(tabId);
       if (tab.url.length > 0) {
+        const check: WebMountUrlCheck = checkWebMountUrl(tab.url);
         const sites: UserSiteEntry[] = await loadWebMountSites(getChatKvStore());
-        if (!siteAllowsUrl(sites, tab.url)) {
+        if (!check.ok || !siteAllowsUrl(sites, check.url)) {
           return textPart({ selected: true, tab_id: tabId, warning: 'tab url no longer allowed' });
         }
-        await session.open(tab.url);
+        session.setUrlGate(makeSiteGate(sites));
+        await session.open(check.url, signal);
       }
       return textPart({ selected: true, tab_id: tabId, url: session.getUrl() });
     },
@@ -430,7 +546,8 @@ export const createWebMountTools = (session: WebMountSession, includeEval: boole
     description: 'Read the current page: returns DOM outline (wm_extract) plus a screenshot '
       + 'image part for vision/OCR models. Use when text is canvas-rendered or extract is insufficient.',
     execute: async (): Promise<UIMessagePart[]> => {
-      if (!session.isReady()) throw new Error('no page loaded; call wm_open first');
+      const blocked: string | null = await guardPage(session, getChatKvStore(), assistantEnabled);
+      if (blocked !== null) return errorPart(blocked);
       const outline: UIMessagePart[] = await evalToPart(session, EXTRACT_JS);
       let shot: UIMessagePart | null = null;
       try {

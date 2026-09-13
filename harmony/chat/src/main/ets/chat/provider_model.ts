@@ -16,6 +16,7 @@ import type { JsonObject, JsonValue } from './json.ts';
 
 export type ModelAbility = 'tool' | 'reasoning';
 export type Modality = 'text' | 'image' | 'audio';  // Android Modality(TEXT/IMAGE/AUDIO)
+export type BuiltInTools = 'search' | 'url_context' | 'image_generation';
 
 export interface ChatModel {
   modelId: string;
@@ -23,6 +24,7 @@ export interface ChatModel {
   abilities: ModelAbility[];
   inputModalities: Modality[];
   outputModalities: Modality[];
+  tools: BuiltInTools[];
 }
 
 export interface ChatModelOpts {
@@ -31,6 +33,7 @@ export interface ChatModelOpts {
   abilities?: ModelAbility[];
   inputModalities?: Modality[];
   outputModalities?: Modality[];
+  tools?: BuiltInTools[];
 }
 
 export const makeChatModel = (opts: ChatModelOpts = {}): ChatModel => ({
@@ -39,6 +42,7 @@ export const makeChatModel = (opts: ChatModelOpts = {}): ChatModel => ({
   abilities: opts.abilities ?? [],
   inputModalities: opts.inputModalities ?? ['text'],
   outputModalities: opts.outputModalities ?? ['text'],
+  tools: opts.tools ?? [],
 });
 
 // ===== ReasoningLevel(Reasoning.kt) =====

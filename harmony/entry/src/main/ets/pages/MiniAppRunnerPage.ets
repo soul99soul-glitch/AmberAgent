@@ -28,6 +28,7 @@ import {
 } from '@amber/chat-domain';
 import type { MiniAppRecord } from '@amber/chat-domain';
 import { ACCENT, BG, BODY, ERROR, INK, INK2, INK3, LINE, OVERLAY, SURFACE, TITLE } from '../design/tokens.ets';
+import { FONT_MONO } from '../design/fonts.ets';
 import { getMiniAppPlatform } from '../platform_impl/MiniAppPlatform.ets';
 import type { MiniAppPlatform } from '../platform_impl/MiniAppPlatform.ets';
 import { MiniAppBridgeImpl } from '../platform_impl/MiniAppBridgeImpl.ets';
@@ -576,7 +577,7 @@ struct MiniAppRunnerPage {
             Text(this.sourceTarget)
               .fontSize(11)
               .fontColor(INK2)
-              .fontFamily('JetBrainsMono')
+              .fontFamily(FONT_MONO)
               .width('100%')
           }
           .layoutWeight(1)

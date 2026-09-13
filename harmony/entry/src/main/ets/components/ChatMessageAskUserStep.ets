@@ -47,9 +47,12 @@ export struct ChatMessageAskUserStep {
           if (qi > 0) {
             Divider().color(LINE).strokeWidth(1).margin({ top: 6, bottom: 2 })
           }
-          Text(q.question)
-            .fontSize(12).fontColor(INK)
-            .width('100%').margin({ top: qi > 0 ? 0 : 4 })
+          // F17:单问题时 heading 已渲染该问题,正文不再重复同一文本
+          if (!this.headingShowsQuestion(qi)) {
+            Text(q.question)
+              .fontSize(12).fontColor(INK)
+              .width('100%').margin({ top: qi > 0 ? 0 : 4 })
+          }
 
           if (this.part.approvalState.type === 'pending') {
             // 选项 chips
@@ -171,6 +174,11 @@ export struct ChatMessageAskUserStep {
     if (qs.length === 0) return '...';
     if (qs.length === 1) return qs[0].question;
     return `询问 ${qs.length} 个问题`;
+  }
+
+  // F17:多问题 heading 只显示计数,故正文需逐个渲染;单问题 heading 即正文,跳过
+  private headingShowsQuestion(qi: number): boolean {
+    return this.getQuestions().length === 1 && qi === 0;
   }
 
   private isOptionSelected(q: AskUserQuestion, opt: string): boolean {

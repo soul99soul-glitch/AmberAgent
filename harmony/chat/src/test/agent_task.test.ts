@@ -318,6 +318,31 @@ test('store: cleanup — 私有输出门(isPathInside)', async () => {
   assert.equal(await store.cleanup('nope'), false);
 });
 
+test('R25 cleanup — 非终态(QUEUED/RUNNING)拒绝,终态可清', async () => {
+  const files = new MemFiles();
+  const store: AgentTaskStore = await AgentTaskStore.create(makeStoreDeps(files));
+  await store.register(makeAgentTaskSnapshot({
+    taskId: 'run', type: 'x', title: 't', status: 'RUNNING', createdAtMs: 1,
+    cancelCapability: true,
+  }));
+  await store.register(makeAgentTaskSnapshot({
+    taskId: 'queued', type: 'x', title: 't', status: 'QUEUED', createdAtMs: 1,
+    cancelCapability: true,
+  }));
+  // 非终态:cleanup 拒绝,看板记录与取消回调都保留
+  assert.equal(await store.cleanup('run'), false);
+  assert.equal(await store.cleanup('queued'), false);
+  assert.notEqual(store.read('run'), null);
+  const stillRunning: AgentTaskSnapshot | null = store.read('run');
+  assert.equal(stillRunning?.cancelCapability, true);
+  // 终态(四类)才可清
+  for (const status of ['COMPLETED', 'FAILED', 'CANCELLED', 'TIMED_OUT'] as const) {
+    await store.register(sampleSnapshot(`term-${status}`, status));
+    assert.equal(await store.cleanup(`term-${status}`), true);
+    assert.equal(store.read(`term-${status}`), null);
+  }
+});
+
 test('store: reconcileOnStartup — running 中断恢复 + 排序', async () => {
   const files = new MemFiles();
   const store: AgentTaskStore = await AgentTaskStore.create(makeStoreDeps(files));

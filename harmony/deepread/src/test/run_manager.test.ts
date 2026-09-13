@@ -106,6 +106,31 @@ test('createRunContext: non-empty prefetch → ok=true with writer + pack + plan
   }
 });
 
+// ===== R20:预抓窗口取消贯穿(不落中断态、返回 aborted) =====
+
+test('R20: cancel during prefetch → aborted result and no RUNNING state persisted', async () => {
+  const repo = makeMemoryRepo();
+  const controller = new AbortController();
+  let sawSignal = false;
+  const prefetcher: SourcePrefetcher = {
+    collect: async (_topicId, _title, _seedUrl, _force, signal) => {
+      sawSignal = signal !== undefined;
+      controller.abort();   // 模拟用户在预抓窗口取消
+      return sources;
+    },
+    cacheSize: () => 0,
+  };
+  const deps: RunManagerDeps = {
+    prefetcher, collectRun: async (m) => m, aiClient: mockAi,
+    model: 'm', playbookMarkdown: '', nowIso: () => '2026-06-23', repository: repo,
+  };
+  const result = await run(deps, 'tc', '标题', { force: true, signal: controller.signal });
+  assert.equal(sawSignal, true, 'prefetch.collect must receive the cancel signal');
+  assert.equal(result.ok, false);
+  assert.equal(result.error, 'aborted', 'cancel must normalize to aborted result');
+  assert.equal(repo.get('tc'), null, 'cancel must not persist COLLECTING/WRITING RUNNING state');
+});
+
 // ===== 全流程:run() 产出 complete DeepReadOutput(核心验收) =====
 
 test('run(): full pipeline → complete DeepReadOutput (all 4 stages READY)', async () => {
@@ -285,6 +310,60 @@ test('scheduler: run() drives full pipeline via runManager', async () => {
   const result = await scheduler.run('t1', '量子计算', { force: true });
   assert.equal(result.ok, true);
   assert.equal(isComplete(result.output), true);
+});
+
+// ===== P2-2:续跑只补非 READY 段,不重跑已 READY =====
+
+test('P2-2: continue reuses READY sections and only generates non-READY stages', async () => {
+  // 预置部分缓存:OVERVIEW READY,其余未完成
+  const repo = makeMemoryRepo();
+  const partial: DeepReadOutput = {
+    ...makeEmptyDeepReadOutput(),
+    generationPhase: 'WRITING',
+    sectionStates: { OVERVIEW: { status: 'READY', errorMessage: null } },
+  };
+  repo.save('tp', '标题', partial);
+  const writerRef: { w: SectionWriterTools | null } = { w: null };
+  // 记录每段 collectRun 被调用的 prompt 标签
+  const labels: string[] = [];
+  const collectRun: CollectRunFn = async (messages, label) => {
+    labels.push(label);
+    return makeWritingCollectRun(writerRef)(messages, label);
+  };
+  const deps: RunManagerDeps = {
+    prefetcher: mockPrefetcher, collectRun, aiClient: mockAi,
+    model: 'm', playbookMarkdown: '', nowIso: () => '2026-06-23',
+    repository: repo, onWriterCreated: (w) => { writerRef.w = w; },
+  };
+  const result = await run(deps, 'tp', '标题', { force: false });
+  // 未触发任何段:collectRun 只应被非 READY 的 3 段调用(不含 OVERVIEW)
+  assert.equal(labels.some(l => l.includes('概览')), false, `OVERVIEW must not rerun: ${labels}`);
+  assert.ok(labels.some(l => l.includes('时间轴') || l.includes('NARRATIVE')), 'missing stages still generated');
+  assert.equal(result.ok, true);
+});
+
+test('P2-2: force still regenerates all four stages', async () => {
+  const repo = makeMemoryRepo();
+  const partial: DeepReadOutput = {
+    ...makeEmptyDeepReadOutput(),
+    generationPhase: 'WRITING',
+    sectionStates: { OVERVIEW: { status: 'READY', errorMessage: null } },
+  };
+  repo.save('tf', '标题', partial);
+  const writerRef: { w: SectionWriterTools | null } = { w: null };
+  const calls = { n: 0 };
+  const collectRun: CollectRunFn = async (messages, label) => {
+    calls.n++;
+    return makeWritingCollectRun(writerRef)(messages, label);
+  };
+  const deps: RunManagerDeps = {
+    prefetcher: mockPrefetcher, collectRun, aiClient: mockAi,
+    model: 'm', playbookMarkdown: '', nowIso: () => '2026-06-23',
+    repository: repo, onWriterCreated: (w) => { writerRef.w = w; },
+  };
+  const result = await run(deps, 'tf', '标题', { force: true });
+  assert.ok(calls.n >= 4, `force must run all stages: ${calls.n}`);
+  assert.equal(result.ok, true);
 });
 
 // ===== helpers =====

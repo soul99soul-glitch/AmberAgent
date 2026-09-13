@@ -107,3 +107,61 @@ test('缺省 roulette → DefaultKeyRoulette 随机取一(不抛错,取到的在
   await api.generateText([makeUserMessage('hi')], params);
   assert.ok(['A1', 'A2'].includes(seen[0].headers['x-api-key']));
 });
+
+// ===== R06 / R18:Claude/Google 流式协议收口(chat provider 装配层)=====
+
+const enc = new TextEncoder();
+
+// 按脚本投递 SSE 段;记录消费方是否在事件后请求停止底层流
+const streamingHttp = (
+  chunks: string[],
+  status: number,
+  finalBody: string,
+  onStop: () => void,
+): HttpClient => ({
+  fetch: async () => ({ status, headers: {}, body: finalBody }),
+  fetchStream: async (_req, opts): Promise<HttpResponse> => {
+    for (let i = 0; i < chunks.length; i++) {
+      opts.onChunk(enc.encode(chunks[i]).buffer as ArrayBuffer, i === chunks.length - 1);
+      if (opts.shouldStop !== undefined && opts.shouldStop()) onStop();
+    }
+    return { status, headers: {}, body: finalBody };
+  },
+});
+
+test('R06/R18 provider: Claude/Google 200 非 SSE → 抛错;消息终止/流内错误 → 请求收口', async () => {
+  // R06:200 回普通 JSON(非 SSE)必须报错,不再静默空回复
+  const jsonBody = JSON.stringify({ error: { message: 'proxy json error' } });
+  const claudeNonSse = createClaudeChatApi({
+    http: streamingHttp([jsonBody], 200, jsonBody, (): void => {}),
+    setting: makeProviderSettingClaude({ id: 'c', apiKey: 'K' }),
+  });
+  await assert.rejects(() => claudeNonSse.streamText([makeUserMessage('hi')], params, (): void => {}),
+    /proxy json error/);
+  const googleNonSse = createGoogleChatApi({
+    http: streamingHttp([jsonBody], 200, jsonBody, (): void => {}),
+    setting: makeProviderSettingGoogle({ id: 'g', apiKey: 'K' }),
+  });
+  await assert.rejects(() => googleNonSse.streamText([makeUserMessage('hi')], params, (): void => {}),
+    /proxy json error/);
+
+  // R18:协议终止帧后必须请求立即关闭底层流
+  let claudeStopped = false;
+  const claude = createClaudeChatApi({
+    http: streamingHttp(['event: message_stop\ndata: {"type":"message_stop"}\n\n'], 200, '',
+      (): void => { claudeStopped = true; }),
+    setting: makeProviderSettingClaude({ id: 'c', apiKey: 'K' }),
+  });
+  await claude.streamText([makeUserMessage('hi')], params, (): void => {});
+  assert.equal(claudeStopped, true, 'Claude message_stop 后必须请求关闭底层流');
+
+  let googleStopped = false;
+  const google = createGoogleChatApi({
+    http: streamingHttp(['data: {"error":{"message":"google stream boom"}}\n\n'], 200, '',
+      (): void => { googleStopped = true; }),
+    setting: makeProviderSettingGoogle({ id: 'g', apiKey: 'K' }),
+  });
+  await assert.rejects(() => google.streamText([makeUserMessage('hi')], params, (): void => {}),
+    /google stream boom/);
+  assert.equal(googleStopped, true, 'Google 流内 error 后必须有收口路径');
+});

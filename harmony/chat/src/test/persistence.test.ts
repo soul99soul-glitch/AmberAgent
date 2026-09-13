@@ -204,3 +204,25 @@ test('repository: 分支节点(messages 数组 + selectIndex)持久化不丢分�
   assert.equal(got?.messageNodes[0].selectIndex, 1);
   assert.deepEqual(got?.messageNodes[0].messages[1], v2);
 });
+
+// R03:批量恢复(备份还原)在内存实现同样先整体 staging 再落库，且保留分支/元数据
+test('repository: restoreConversations 批量写入并保留分支/元数据', async () => {
+  const repo = createMemoryConversationRepository(fixedNow);
+  const a = convWithNodes();
+  const b = convWithNodes();
+  b.id = 'conv2';
+  b.messageNodes = [
+    a.messageNodes[0],
+    { id: 'bn', selectIndex: 1, messages: [a.messageNodes[1].messages[0], a.messageNodes[0].messages[0]] },
+  ];
+  await repo.restoreConversations([a, b]);
+  const gotA = await repo.getById('conv1');
+  const gotB = await repo.getById('conv2');
+  assert.deepEqual(gotA, a);
+  assert.equal(gotB?.messageNodes.length, 2);
+  assert.equal(gotB?.messageNodes[1].selectIndex, 1);
+  assert.equal(gotB?.isPinned, true, '元数据(isPinned)一并还原');
+  // 覆盖更新:同 id 再次批量恢复替换原数据
+  await repo.restoreConversations([makeConversation('conv1', [], { title: '覆盖' })]);
+  assert.equal((await repo.getById('conv1'))?.title, '覆盖');
+});

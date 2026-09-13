@@ -1,6 +1,6 @@
 // 设计系统组件 — 杂志风排版原语 + 聊天交互原语
 // 基准: Android ds/AmberPrimitives.kt(186 行) + 杂志风既有组件
-import { INK, INK2, INK3, INK4, LINE, ACCENT, SURFACE, SURFACE2, BG, SIGNAL, ERROR, TITLE, BODY, META, LABEL, PAD_CARD, PAD_ITEM, RADIUS, OVERLAY, SHADOW_OVERLAY } from './tokens.ets';
+import { INK, INK2, INK3, INK4, LINE, ACCENT, ACCENT_INK, SURFACE, SURFACE2, BG, SIGNAL, ERROR, TITLE, BODY, META, LABEL, PAD_CARD, PAD_ITEM, RADIUS, OVERLAY, SHADOW_OVERLAY } from './tokens.ets';
 
 // ===== 聊天交互原语(Android AmberPrimitives.kt 对齐) =====
 
@@ -67,7 +67,7 @@ export struct BtnAccent {
   build(): void {
     Text(this.text)
       .fontSize(BODY).fontWeight(FontWeight.Medium)
-      .fontColor(this.fieldEnabled ? SURFACE : INK4)
+      .fontColor(this.fieldEnabled ? ACCENT_INK : INK4)
       .padding({ left: 16, right: 16, top: 8, bottom: 8 })
       .borderRadius(15)
       .backgroundColor(this.fieldEnabled ? ACCENT : SURFACE2)

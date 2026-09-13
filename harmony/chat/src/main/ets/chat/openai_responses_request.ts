@@ -240,10 +240,12 @@ export const buildResponsesRequestBody = (opts: BuildResponsesRequestOpts): Json
     stream,
   };
 
-  // store 门控:resume → true;否则 false(image_generation built-in 强制 true 由上层 tools 决定)
+  // store 门控:resume → true;image_generation 无 resume 时省略(服务端拒绝
+  // store=false);其余 → false(与 Android ResponseAPI.buildRequestBody 一致)
+  const hasImageGeneration = model.tools.indexOf('image_generation') >= 0;
   if (resume !== null) {
     body['store'] = true;
-  } else {
+  } else if (!hasImageGeneration) {
     body['store'] = false;
   }
 
@@ -285,6 +287,13 @@ export const buildResponsesRequestBody = (opts: BuildResponsesRequestOpts): Json
         description: tool.description,
         parameters: tool.parameters,
       });
+    }
+  }
+  for (const builtIn of model.tools) {
+    if (builtIn === 'search') {
+      toolDefinitions.push({ type: 'web_search' });
+    } else if (builtIn === 'image_generation') {
+      toolDefinitions.push({ type: 'image_generation', model: 'gpt-image-2' });
     }
   }
   if (toolDefinitions.length > 0) {

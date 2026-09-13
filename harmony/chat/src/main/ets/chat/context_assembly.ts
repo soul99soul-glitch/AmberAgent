@@ -163,6 +163,7 @@ export const toChatModel = (m: ProviderModel): ChatModel => ({
   abilities: m.abilities.slice(),
   inputModalities: m.inputModalities.slice() as Modality[],
   outputModalities: m.outputModalities.slice() as Modality[],
+  tools: m.tools.slice(),
 });
 
 // ===== 预设消息播种(ChatService.kt:567-572:新会话创建时 presets 成初始节点) =====

@@ -1,0 +1,11 @@
+[E-05] readText threw during addMemory -> addMemory resolved: true | returned id: 1
+[E-05] persisted records after the failed-read write: 1 contents: ["gamma"]
+[E-05] CONFIRMED: one transient readText failure => next write persists only the new record; alpha/beta permanently lost, no error surfaced.
+[E-05b] readText threw during insert -> insert resolved: true | returned: {"id":1,"folder":"upload","relativePath":"upload/c.txt","displayName":"c","mimeType":"text/plain","sizeBytes":1,"createdAt":3,"updatedAt":3} | persisted rows: 1 ["upload/c.txt"]
+[E-05b] CONFIRMED: same pattern as MemoryStore; a/b tracking rows silently replaced by the single new row.
+[E-07] stored favorites after corrupt-value + addFavorite: 1 ids: ["new-1"]
+[E-07] CONFIRMED: parse-level read failure => decode returns [] => next addFavorite overwrites the whole favorites blob; no error surfaced.
+
+Note: E-07 is parse-level swallow (decode catch). A KV get() that itself throws is
+NOT swallowed (no try/catch around get), so that variant would surface an error instead.
+All probes import/transpile current source; no real user files, device, or network used.

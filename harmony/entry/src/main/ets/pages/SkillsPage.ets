@@ -167,10 +167,10 @@ struct SkillsPage {
           SectionHeader({ label: '服务与任务' })
           NavRow({ label: 'MCP 服务器', desc: '管理外部 MCP 工具', iconName: 'plug',
             onRowClick: (): void => { this.go('pages/ChatMcpSettingsPage'); } })
-          NavRow({ label: '定时任务', valueText: 'Beta', desc: '查看 Agent 的定时任务和计划运行状态', iconName: 'clock',
+          // F19:移除「Slides 字体资源」入口 —— 该页为私有常量占位,
+          //   无存储/无消费者(生成式幻灯片在鸿蒙端未实现),保留入口属误导。
+          NavRow({ label: '定时任务', valueText: 'Beta', desc: '查看 Agent 的定时任务和计划运行状态', iconName: 'clock', isLast: true,
             onRowClick: (): void => { this.go('pages/SettingCronTasksPage'); } })
-          NavRow({ label: 'Slides 字体资源', desc: '下载中文字体包，提高生成式幻灯片的还原度', iconName: 'doc', isLast: true,
-            onRowClick: (): void => { this.go('pages/SettingSlidesFontPage'); } })
 
           SectionHeader({ label: '技能' })
           if (this.loaded && this.skills.length === 0) {

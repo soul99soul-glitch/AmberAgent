@@ -12,8 +12,8 @@ struct SettingSearchServiceEditorSheet {
 
   build(): void {
     Column() {
-      Text('该设置已迁移').fontSize(TITLE).fontColor(INK)
-      Text('正在跳转到新页面…').fontSize(BODY).fontColor(INK3).margin({ top: 8 })
+      // 兼容壳:仅 replaceUrl,不渲染占位文案避免闪屏
+      Blank()
     }
     .width('100%').height('100%').backgroundColor(BG)
     .justifyContent(FlexAlign.Center)

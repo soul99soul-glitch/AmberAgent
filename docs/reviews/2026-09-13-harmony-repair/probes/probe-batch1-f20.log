@@ -1,0 +1,12 @@
+[F20-T1] corrupt registry -> scan.error: managed_files.json 损坏已被隔离,拒绝覆盖(需先恢复或显式清除 .quarantined) | delete threw: true | uploads: ["upload/a.png","upload/b.png"]
+[F20-T2] missing registry -> scan.error: 登记库不存在 | uploads: ["upload/a.png","upload/b.png"]
+[F20-T3] transient read failure -> scan.error: managed_files.json 读取失败,拒绝覆盖 | uploads: ["upload/a.png","upload/b.png","upload/c.png"]
+[F20-T4] healthy registry -> candidates: ["upload/orphan.png"]
+[F20-T4] after delete -> removed: 1 | uploads: ["upload/referenced.png","upload/tracked.png"]
+[F20-T4] PASS: reference check protects unregistered but referenced files.
+[F20-T5] all files tracked -> candidates: []
+[F20-T6] isSafeOrphanPath: {"upload/a.png":true,"../escape.png":false,"upload/../a.png":false,"upload/sub/a.png":false,"../upload/a.png":false,"downloads/a.png":false,"upload/..":false,"":false}
+[F20-T6] hostile planned "../outside.png" -> removed: 0 | outside.png kept: true
+[F20-T7] degraded storage -> scan.error: 会话存储处于降级(内存回退)状态,引用核验不可信,已拒绝清理 | delete threw: true | z.png kept: true
+
+All batch-1 F20 assertions passed. Mock FS + mock repository only; no real files.

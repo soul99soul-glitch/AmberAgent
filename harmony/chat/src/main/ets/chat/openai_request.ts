@@ -468,5 +468,8 @@ export const buildChatCompletionRequest = (input: BuildChatCompletionRequestInpu
     delete out['temperature'];
     delete out['top_p'];
   }
-  return out;
+  // R06/C04:stream 为调用模式强约束(对齐 ChatCompletionsAPI.kt:473-474
+  //   withForcedStream)—— customBody 不允许把流式请求改成非流式,否则服务端回
+  //   普通 JSON 会被流式解析器静默吞成空回复
+  return { ...out, stream };
 };

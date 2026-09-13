@@ -1,0 +1,15 @@
+{
+  "checkedAt": "2026-09-13T16:11:19.200706+08:00",
+  "trackedFilesCompared": 2923,
+  "trackedDifferences": [],
+  "originalReportDifferences": [],
+  "confirmedCounts": {
+    "P1": 10,
+    "P2": 27,
+    "P3": 11
+  },
+  "confirmedTotal": 48,
+  "latentCount": 2,
+  "brokenLinks": [],
+  "mergedReportSha256": "42c5f08968ead242fb1ad1cc4949df8c2e5b8ea8703e9e069c1e4da34d24719e"
+}

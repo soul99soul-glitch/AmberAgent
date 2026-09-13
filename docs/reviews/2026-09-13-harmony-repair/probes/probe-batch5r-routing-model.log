@@ -1,0 +1,12 @@
+[F34] (1) explicit missing assistant -> throw, no global write
+[F34] (2) unbound assistant -> global write (accepted)
+[F34] (3) bound assistant -> chatModelId=uuid-A, no global write
+[F34] (4) empty-UUID model -> reject, no bind / no global
+[F34] (5) disabled provider -> reject
+[F34] (6) lock-time deletion -> throw, no global write
+[R23] (A) valid topic -> dispatch, cleared on nav success
+[R23] (B) incomplete intent -> invalidate old pending, no late mis-route
+[R23] (C) no-field activation -> pending preserved
+[R23] (D) nav failure -> pending retained for retry
+[R23] (E) valid novel target -> NovelWorkspacePage
+PROBE OK: batch 5R (F34 effective model + R23 want routing)

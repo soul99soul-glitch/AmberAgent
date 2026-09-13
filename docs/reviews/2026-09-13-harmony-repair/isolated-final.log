@@ -1,0 +1,178 @@
+
+COMMAND node docs/reviews/2026-09-13-harmony-repair/probes/probe-batch1-f20.cjs
+[F20-T1] corrupt registry -> scan.error: managed_files.json 损坏已被隔离,拒绝覆盖(需先恢复或显式清除 .quarantined) | delete threw: true | uploads: ["upload/a.png","upload/b.png"]
+[F20-T2] missing registry -> scan.error: 登记库不存在 | uploads: ["upload/a.png","upload/b.png"]
+[F20-T3] transient read failure -> scan.error: managed_files.json 读取失败,拒绝覆盖 | uploads: ["upload/a.png","upload/b.png","upload/c.png"]
+[F20-T4] healthy registry -> candidates: ["upload/orphan.png"]
+[F20-T4] after delete -> removed: 1 | uploads: ["upload/referenced.png","upload/tracked.png"]
+[F20-T4] PASS: reference check protects unregistered but referenced files.
+[F20-T5] all files tracked -> candidates: []
+[F20-T6] isSafeOrphanPath: {"upload/a.png":true,"../escape.png":false,"upload/../a.png":false,"upload/sub/a.png":false,"../upload/a.png":false,"downloads/a.png":false,"upload/..":false,"":false}
+[F20-T6] hostile planned "../outside.png" -> removed: 0 | outside.png kept: true
+[F20-T7] degraded storage -> scan.error: 会话存储处于降级(内存回退)状态,引用核验不可信,已拒绝清理 | delete threw: true | z.png kept: true
+
+All batch-1 F20 assertions passed. Mock FS + mock repository only; no real files.
+
+EXIT 0
+
+COMMAND node docs/reviews/2026-09-13-harmony-repair/probes/probe-batch1-r10-r11.cjs
+[R10-T1] transient readText during addMemory -> rejected: true | persisted contents: ["alpha","beta"]
+[R10-T1] PASS: error read is rejected, no empty-snapshot overwrite.
+[R10-T2] corrupt registry -> addMemory rejected: true | quarantine marker: true
+[R10-T2] PASS: quarantine is sticky; next write is not a first-init overwrite.
+[R10-T3] missing file (true first init) -> addMemory ok, id: 1 | contents: ["first"]
+[R10-T4] managed insert with transient read failure -> rejected: true | rows: ["upload/a.txt","upload/b.txt"]
+[R10-T5] managed listByFolder on corrupt registry -> error: managed_files.json 损坏已被隔离,拒绝覆盖(需先恢复或显式清除 .quarantined)
+[R10-T6] managed first init insert ok, id: 1
+[R10-T7] FavoriteStore addFavorite on corrupt blob -> rejected: true | stored blob unchanged: { not valid json
+[R11-T1] deleteConversationCompactData -> compacts: false | events: false | marker: true
+[R11-T2] late insertCompact/recordEvent after delete -> compacts: [] | events key: false
+[R11-T3] cleanupDeletedConversation -> compact: false | events: false | marker: true | favorites: []
+[R11-T4] cleanup with corrupt favorites -> threw: false | compact removed: true | corrupt blob kept: { corrupt
+[R11-T4] PASS: compact cleanup independent of the favorites cascade.
+[R11-T5] racing delete during insert -> raw compact key present: false
+[R11-T5] PASS: post-write generation re-check prevents residual summary data.
+
+All batch-1 R10/R11 assertions passed. Real .ets sources, mocked FS/KV only.
+
+EXIT 0
+
+COMMAND node docs/reviews/2026-09-13-harmony-repair/probes/probe-batch3-cron.cjs
+PASS CT1a inFlight collapses second manual run (executor once)
+PASS CT1b prepare allowed exactly once
+PASS CT1c completed + rearmed after release
+PASS CT2a long delay clamped to 2^31-1
+PASS CT2b early timer does NOT execute (now << due)
+PASS CT2c early timer only re-arms (no prepare/started)
+PASS CT2d re-armed timer is again clamped (chain), due unchanged
+PASS CT2e near task delay not clamped
+PASS CT2f near task executes on due
+PASS CT3a executor started with a signal
+PASS CT3b cancel aborts the in-flight signal
+PASS CT3c cancelled run is NOT recorded as Succeeded
+PASS CT3d next cycle is explicitly kept (rearm after cancel)
+PASS CT4a delete aborts the in-flight generation
+PASS CT4b deleted task is not completed/resurrected
+PASS CT5a disabled mid-run stops run as Suspend (not Succeeded)
+PASS CT5b disabled mid-run does not re-arm
+
+17/17 assertions PASS
+
+EXIT 0
+
+COMMAND node docs/reviews/2026-09-13-harmony-repair/probes/probe-batch4-notifier.mjs
+PASS  notifyCompleted stays pending until platform publish settles (awaits real publish)
+PASS  completed notification is visible after publish
+PASS  no stray cancel queued by notifyCompleted
+PASS  stale old-run token cancel must not queue a cancel
+PASS  new run notification survives stale cancel
+PASS  matching token cancel is queued
+PASS  matching token cancel removes notification
+PASS  notifyCompleted rejects when platform publish fails
+PASS  failed completion publish does not mark notification visible
+
+ALL PASS
+
+EXIT 0
+
+COMMAND node docs/reviews/2026-09-13-harmony-repair/probes/probe-batch4-template.mjs
+PASS  default keeps --ds:1.000
+PASS  default html uses calc() font sizing
+PASS  default has no serif body class
+PASS  fontScale 1.25 -> --ds:1.250
+PASS  fontSerif true -> body.ds-serif
+PASS  fontScale clamped to 1.3
+PASS  fontScale clamped to 0.8
+PASS  no javascript: URL emitted
+PASS  js style untouched (css only)
+
+ALL PASS
+
+EXIT 0
+
+COMMAND node docs/reviews/2026-09-13-harmony-repair/probes/probe-batch4-webmount-mount.cjs
+[R07-T1] open: mount-needed -> controller-attached -> loadUrl -> page-end resolve
+[R07-T2] mount timeout rejects and clears waiter/timer
+[R07-T3] page timeout rejects and clears waiter/timer (no silent success)
+[R07-T4] onDetach fails pending nav waiters and resets ready
+[R07-T5] AbortSignalLike cancels a pending open
+[R07-T6] navigation/redirect recheck fails open on non-allowed host
+[R07-T7] bindHooks unbind is owner-scoped (older page cannot unbind newer hooks)
+[P2-1-T2] revoke via saveWebMountSites listener immediately resets the live session
+[P2-1-T3] global switch off synchronously disables the live session
+
+All batch-4 R07 assertions passed. Mock controller + fake clock only; no SDK/UI/network.
+
+EXIT 0
+
+COMMAND node docs/reviews/2026-09-13-harmony-repair/probes/probe-batch4-webmount-sites.cjs
+[L02-T1] userinfo URL -> siteAllowsUrl=false, hostOf="" (old gate accepted it as github.com)
+[L02-T2] non-http(s) schemes rejected
+[L02-T3] case/port/subdomain/trailing-dot normalize and match
+[L02-T4] lookalike hosts rejected
+[L02-T5] IPv6 host normalized with brackets
+[L02-T6] hostname equals standard URL.hostname for all parsable candidates
+[L02-T7] makeSiteGate mirrors siteAllowsUrl for sync navigation interception
+
+All batch-4 L02 assertions passed. Standard WHATWG URL shim only; no network/browser/user data.
+
+EXIT 0
+
+COMMAND node docs/reviews/2026-09-13-harmony-repair/probes/probe-batch4-webmount-tools.cjs
+[L01-T1] wm_click = needsApproval/!auto/mandatory; includeEval=false hides wm_eval
+[L01-T2] 7 hostile targets: window.__audit stayed 0 (no injected expression executed)
+[L01-T3] wm_type / wm_wait hostile values: no extra expression
+[L01-T4] aborted signal aborts wm_click / wm_eval
+[L01-T5] revoke site: extra extract refused, page reset (gate refreshed per page op)
+[L01-T6] wm_open javascript: URL denied by standard parser before any navigation
+[P2-1-T1] global off + assistant not opted: page tools refuse, wm_open denied
+[P2-1-T2] global off + assistant opted: OR semantics keep WebMount usable
+[P2-1-T3] global on + assistant not opted: OR semantics keep WebMount usable
+
+All batch-4 L01 assertions passed. Fake session + vm sandbox only; no browser/network/user data.
+
+EXIT 0
+
+COMMAND node docs/reviews/2026-09-13-harmony-repair/probes/probe-batch5-settings.cjs
+[F35] loaded real mutateAssistant + sharedKvMutex: true true
+[F35] real mutateAssistant: 20/20 concurrent toggles preserved
+[F35] control (removed pattern): stale snapshot dropped A → ["B"]
+[F35] missing target: returned null, table untouched
+[R26] single failure: rolled back to dark | error: "主题设置保存失败,已恢复原设置"
+[R26] race guard: late failure left newer selection = dark | error empty
+PROBE OK: batch 5B (F35 + R26)
+
+EXIT 0
+
+COMMAND node docs/reviews/2026-09-13-harmony-repair/probes/probe-batch5r-routing-model.cjs
+[F34] (1) explicit missing assistant -> throw, no global write
+[F34] (2) unbound assistant -> global write (accepted)
+[F34] (3) bound assistant -> chatModelId=uuid-A, no global write
+[F34] (4) empty-UUID model -> reject, no bind / no global
+[F34] (5) disabled provider -> reject
+[F34] (6) lock-time deletion -> throw, no global write
+[R23] (A) valid topic -> dispatch, cleared on nav success
+[R23] (B) incomplete intent -> invalidate old pending, no late mis-route
+[R23] (C) no-field activation -> pending preserved
+[R23] (D) nav failure -> pending retained for retry
+[R23] (E) valid novel target -> NovelWorkspacePage
+PROBE OK: batch 5R (F34 effective model + R23 want routing)
+
+EXIT 0
+
+COMMAND node docs/reviews/2026-09-13-harmony-repair/probes/probe-f44-document-preview.cjs
+[provenance] DocumentSupport.ets sha256/16 = 76c69bbdec0c48dd
+  ok - pdf 明确不支持(含扩展名归一)
+  ok - 非 data:/file:// 一律拒绝(不外网)
+  ok - data:text/*;base64 文本直出
+  ok - data 二进制非文本非 office → 明确不支持(不读占位)
+  ok - file:// 文本经 stat/read 预览
+  ok - file:// 超 10MiB → 先 check 后拒绝(不 open/read)
+  ok - data 超 10MiB → 先估长度再拒绝(不分配解码)
+  ok - 预览截断 100KiB + 标记
+  ok - DOCX 路由到真实 zip+docx 解析(无 document.xml → 域层文案)
+  ok - PPTX 路由到真实 zip+pptx 解析(无 slides → 域层文案)
+  ok - EPUB 路由到真实 zip+epub 解析(无 container → 域层文案)
+all F44 preview smoke assertions passed
+
+EXIT 0

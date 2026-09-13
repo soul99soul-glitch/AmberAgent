@@ -1,0 +1,143 @@
+{
+  "contract": "UI-F34 effective chat model + R23 want routing",
+  "source": {
+    "read": "ChatModelSelectionSupport.resolveEffectiveChatChoice(assistantId?)",
+    "write": "ChatModelSelectionSupport.saveEffectiveChatChoice(selection, assistantId?)",
+    "clear": "ChatModelSelectionSupport.clearEffectiveChatChoice(assistantId?)",
+    "delegate": "AppContainer.resolveChatProviderChoice(assistant) (same resolver as resolveChatRuntime send path)",
+    "role": "UI display (TopModelMenu selected / modelLabel / context window / reasoning) and send path must resolve the same model."
+  },
+  "effectiveChoiceCases": [
+    {
+      "id": "assistant-bound-hit",
+      "assistantId": "a1",
+      "assistantChatModelId": "model-uuid-A",
+      "providerModels": [{ "provider": "p1", "modelUuid": "model-uuid-A", "apiName": "gpt-x", "type": "chat" }],
+      "expected": { "providerId": "p1", "modelId": "gpt-x", "from": "assistant" },
+      "note": "runtime precedence: assistant.chatModelId, short-circuits global"
+    },
+    {
+      "id": "assistant-bound-stale-falls-back-global",
+      "assistantId": "a1",
+      "assistantChatModelId": "deleted-uuid",
+      "providerModels": [{ "provider": "p2", "modelUuid": "u2", "apiName": "gpt-y", "type": "chat" }],
+      "globalSelection": { "providerId": "p2", "modelId": "gpt-y" },
+      "expected": { "providerId": "p2", "modelId": "gpt-y", "from": "global" },
+      "note": "bound uuid not found -> resolveChatProviderChoice falls through to global selection"
+    },
+    {
+      "id": "no-assistant-id-uses-global",
+      "assistantId": "",
+      "globalSelection": { "providerId": "p1", "modelId": "gpt-x" },
+      "expected": { "providerId": "p1", "modelId": "gpt-x", "from": "global" }
+    },
+    {
+      "id": "unknown-assistant-uses-global",
+      "assistantId": "missing",
+      "globalSelection": { "providerId": "p1", "modelId": "gpt-x" },
+      "expected": { "providerId": "p1", "modelId": "gpt-x", "from": "global" }
+    }
+  ],
+  "saveCases": [
+    {
+      "id": "reject-missing-model",
+      "assistantChatModelId": null,
+      "selection": { "providerId": "p1", "modelId": "nope" },
+      "expected": "reject (model does not exist)"
+    },
+    {
+      "id": "reject-empty-internal-uuid",
+      "selection": { "providerId": "p1", "modelId": "gpt-broken" },
+      "matchedModelUuid": "   ",
+      "expected": "reject (broken model, no id); never mint a new id"
+    },
+    {
+      "id": "reject-explicit-missing-assistant-no-global-fallback",
+      "assistantId": "ghost",
+      "assistantFound": false,
+      "selection": { "providerId": "p1", "modelId": "gpt-x" },
+      "expected": "throw '助手不存在'; must NOT write global"
+    },
+    {
+      "id": "reject-lock-time-deletion-no-global-fallback",
+      "assistantId": "a4",
+      "assistantChatModelId": "old-uuid",
+      "mutateReturnsNull": true,
+      "expected": "throw '助手已删除'; must NOT write global"
+    },
+    {
+      "id": "reject-disabled-provider",
+      "selection": { "providerId": "p-off", "modelId": "gpt-x" },
+      "providerEnabled": false,
+      "expected": "reject (hasUsableAuth false)"
+    },
+    {
+      "id": "reject-empty-auth",
+      "selection": { "providerId": "p-noauth", "modelId": "gpt-x" },
+      "providerApiKey": "",
+      "expected": "reject (hasUsableAuth false)"
+    },
+    {
+      "id": "reject-non-chat-type",
+      "selection": { "providerId": "p1", "modelId": "embed-1" },
+      "modelType": "embedding",
+      "expected": "reject (type=chat required)"
+    },
+    {
+      "id": "bound-assistant-writes-internal-uuid",
+      "assistantChatModelId": "old-uuid",
+      "selection": { "providerId": "p1", "modelId": "gpt-x" },
+      "matchedModelUuid": "model-uuid-A",
+      "expected": "assistant.chatModelId = 'model-uuid-A' via mutateAssistant lock; global keys untouched",
+      "note": "must persist ProviderModel.id (uuid), never the human-readable modelId string"
+    },
+    {
+      "id": "unbound-assistant-writes-global",
+      "assistantChatModelId": null,
+      "selection": { "providerId": "p1", "modelId": "gpt-x" },
+      "expected": "global chat_selected_provider_id/model_id written"
+    },
+    {
+      "id": "clear-binding",
+      "assistantChatModelId": "model-uuid-A",
+      "expected": "assistant.chatModelId = null -> follows global again"
+    }
+  ],
+  "wantRoutingInvariants": [
+    {
+      "id": "cold-start-pending",
+      "given": "onCreate Want topic=t1 before loadContent",
+      "expected": "stored, not dispatched; dispatched once by markWantRoutingReady after loadContent success"
+    },
+    {
+      "id": "foreground-over-any-stack-top",
+      "given": "top is ChatPage or a settings page; onNewWant topic=t2",
+      "expected": "routePendingWant pushes DeepReadArticlePage immediately; ChatListPage is not required to be visible"
+    },
+    {
+      "id": "clear-only-after-nav-success",
+      "given": "router.pushUrl rejects",
+      "expected": "pending params retained for retry"
+    },
+    {
+      "id": "sequence-guard",
+      "given": "Want seq=1 in flight, Want seq=2 arrives before push(1) resolves",
+      "expected": "push(1) success must not clear seq=2 pending; re-dispatch seq=2"
+    },
+    {
+      "id": "no-double-navigation",
+      "given": "onNewWant dispatch plus ChatListPage onPageShow consumption",
+      "expected": "single push: ChatListPage.consumeDeepLink delegates to routePendingWant, guarded by in-flight/cleared state"
+    },
+    {
+      "id": "incomplete-intent-invalidates-pending",
+      "given": "pending topic=t1 in flight, then a new Want with only novelProjectId (incomplete)",
+      "expected": "invalidate old pending (seq=0, fields cleared) to avoid mis-routing the user to t1; seq guard stops the late old push from clearing/routing"
+    },
+    {
+      "id": "ordinary-activation-preserves-pending",
+      "given": "pending topic=t1, then a Want with no topic/novel fields (plain icon tap / unrelated params only)",
+      "expected": "preserve pending (do not mechanically clear)"
+    }
+  ]
+}

@@ -18,6 +18,7 @@ import { compressImageAsDataUrl } from '../platform_impl/ImageCompress.ets';
 import { PageTitleBar, SectionHeader, PageSpacer } from '../components/PageTemplate.ets';
 import { UIAvatar } from '../components/UIAvatar.ets';
 import { Icon } from '../components/ui/Icon.ets';
+import { FONT_MONO } from '../design/fonts.ets';
 import {
   INK, INK2, INK3, INK4, SURFACE, SURFACE2, LINE, BG,
   BODY, BODY2, META, LABEL, ACCENT, RADIUS,
@@ -105,6 +106,22 @@ const EMPTY_STATS: StatsResult = {
   dayCounts: new Map<string, number>(),
 };
 
+// F07:热力图渲染模型 — 日期矩阵与四分位阈值在 loadStats 后一次算好,build 只读取,
+//   避免每次 build 重建 53×7 Date 并对活跃日重复 sort。
+interface HeatmapModel {
+  dates: string[][];
+  q1: number;
+  q2: number;
+  q3: number;
+}
+
+const EMPTY_HEATMAP: HeatmapModel = {
+  dates: [],
+  q1: 1,
+  q2: 2,
+  q3: 3,
+};
+
 // 格式化数字(K/M 后缀,对齐 Android formatCount)
 const formatCount = (n: number): string => {
   if (n >= 1000000) return `${(n / 1000000).toFixed(1)}M`;
@@ -159,6 +176,7 @@ struct ProfilePage {
   @StorageProp('statusBarHeight') statusBarHeight: number = 44;
   @State setting: DisplaySetting = makeDisplaySetting();
   @State stats: StatsResult = EMPTY_STATS;
+  @State heatmap: HeatmapModel = EMPTY_HEATMAP;
   @State statsLoaded: boolean = false;
   @State versionLabel: string = '';
   private dialogController: CustomDialogController | null = null;
@@ -216,10 +234,27 @@ struct ProfilePage {
         cachedTokens,
         dayCounts,
       };
+      // F07:日期矩阵与阈值一次性算好(build 不再重建/排序)
+      this.heatmap = this.buildHeatmap(dayCounts);
       this.statsLoaded = true;
     }).catch((): void => {
       this.statsLoaded = true;
     });
+  }
+
+  // F07:在 loadStats 完成后一次计算 53×7 日期矩阵与活跃日四分位阈值
+  private buildHeatmap(dayCounts: Map<string, number>): HeatmapModel {
+    const dates: string[][] = this.computeHeatmapDates();
+    const counts: number[] = Array.from(dayCounts.values())
+      .filter((v: number): boolean => v > 0)
+      .sort((a: number, b: number): number => a - b);
+    if (counts.length === 0) return { dates, q1: 1, q2: 2, q3: 3 };
+    return {
+      dates,
+      q1: counts[Math.floor(counts.length * 0.25)] ?? 1,
+      q2: counts[Math.floor(counts.length * 0.50)] ?? 2,
+      q3: counts[Math.floor(counts.length * 0.75)] ?? 3,
+    };
   }
 
   private openNicknameEditor(): void {
@@ -379,7 +414,7 @@ struct ProfilePage {
         .fontSize(22)
         .fontWeight(FontWeight.Bold)
         .fontColor(INK)
-        .fontFamily('JetBrainsMono')
+        .fontFamily(FONT_MONO)
       Text(label)
         .fontSize(LABEL)
         .fontColor(INK3)
@@ -444,7 +479,7 @@ struct ProfilePage {
                 .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
 
               .fontColor(INK3)
-              .fontFamily('JetBrainsMono')
+              .fontFamily(FONT_MONO)
               .margin({ top: 4 })
           }
           .width('100%')
@@ -521,8 +556,8 @@ struct ProfilePage {
 
           // 版本信息
           Row() {
-            Text('$').fontColor(this.accentColorStore).fontSize(LABEL).fontFamily('JetBrainsMono')
-            Text(` amber v${this.versionLabel}`).fontColor(INK3).fontSize(LABEL).fontFamily('JetBrainsMono')
+            Text('$').fontColor(this.accentColorStore).fontSize(LABEL).fontFamily(FONT_MONO)
+            Text(` amber v${this.versionLabel}`).fontColor(INK3).fontSize(LABEL).fontFamily(FONT_MONO)
               .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
           }
           .width('100%').justifyContent(FlexAlign.Center).margin({ top: 22 })
@@ -586,7 +621,7 @@ struct ProfilePage {
     // 横向可滚动(53 周 × 13px ≈ 689px,超屏宽)
     Scroll() {
       Grid() {
-        ForEach(this.heatmapDates(), (weekArr: string[]): void => {
+        ForEach(this.heatmap.dates, (weekArr: string[]): void => {
           GridItem() {
             Column({ space: 2 }) {
               ForEach(weekArr, (dayKeyStr: string): void => {
@@ -610,8 +645,8 @@ struct ProfilePage {
     .width('100%')
   }
 
-  // 生成 53 周 × 7 天的 dayKey 矩阵
-  private heatmapDates(): string[][] {
+  // 生成 53 周 × 7 天的 dayKey 矩阵(仅 loadStats 后调用一次)
+  private computeHeatmapDates(): string[][] {
     const start: Date = heatmapStartDate();
     const weeks: string[][] = [];
     for (let w = 0; w < 53; w++) {
@@ -626,17 +661,11 @@ struct ProfilePage {
     return weeks;
   }
 
-  // 获取某天的消息数 → alpha
+  // 获取某天的消息数 → alpha(F07:阈值来自缓存,不再按活跃日重复排序)
   private heatAlphaForDay(key: string): number {
     const count: number = this.stats.dayCounts.get(key) ?? 0;
     if (count === 0) return 0;
-    // 动态四分位(对齐 Android)
-    const counts: number[] = Array.from(this.stats.dayCounts.values()).filter((v: number): boolean => v > 0).sort((a: number, b: number): number => a - b);
-    if (counts.length === 0) return 0.5;
-    const q1: number = counts[Math.floor(counts.length * 0.25)] ?? 1;
-    const q2: number = counts[Math.floor(counts.length * 0.50)] ?? 2;
-    const q3: number = counts[Math.floor(counts.length * 0.75)] ?? 3;
-    return heatmapAlpha(count, q1, q2, q3);
+    return heatmapAlpha(count, this.heatmap.q1, this.heatmap.q2, this.heatmap.q3);
   }
 
   // alpha → 实际颜色(0 = 空格底色)

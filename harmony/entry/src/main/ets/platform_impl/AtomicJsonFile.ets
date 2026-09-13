@@ -33,8 +33,31 @@ export const writeTextFileAtomic = async (path: string, text: string): Promise<v
   }
 };
 
+const quarantineMarkerPath = (path: string): string => `${path}.quarantined`;
+
+// 隔离标记:损坏文件被改名 .bad 后,原路径会「文件消失」。
+// 若没有持久标记,下一次读会把它当「首次初始化(空库)」,随后的写就以空快照覆盖。
+export const quarantineMarkerExists = async (path: string): Promise<boolean> => {
+  try {
+    return await fileIo.access(quarantineMarkerPath(path));
+  } catch {
+    return false;
+  }
+};
+
+// 仅显式恢复(用户确认丢弃/重新导入)时清除;读路径绝不自动清除
+export const clearQuarantineMarker = async (path: string): Promise<void> => {
+  try {
+    fileIo.unlinkSync(quarantineMarkerPath(path));
+  } catch {
+    // 不存在视为已清除
+  }
+};
+
 // 二次确认后隔离:调用方解析失败 ≠ 文件此刻仍损坏(写队列可能刚完成原子替换)。
 // 重读并用调用方的校验器复核,仍无效才改名,避免把刚写好的有效文件误隔离。
+// 顺序:先落隔离标记,再改名。标记写入失败则保持原文件不动——否则文件消失后
+// 下次读会当「无文件=空库」,以空快照覆盖旧数据。
 export const quarantineIfStillInvalid = async (
   path: string, isInvalid: (text: string) => boolean,
 ): Promise<void> => {
@@ -46,11 +69,75 @@ export const quarantineIfStillInvalid = async (
     return;
   }
   try {
+    await writeTextFileAtomic(
+      quarantineMarkerPath(path), JSON.stringify({ at: Date.now(), path }));
+  } catch {
+    // 标记落盘失败:保留原文件(仍是损坏态),下次读会再次判定为损坏而非空库
+    return;
+  }
+  try {
     fileIo.renameSync(path, `${path}.${Date.now()}.bad`);
     hilog.warn(DOMAIN, TAG, 'quarantined corrupt json: %{public}s', path);
   } catch {
-    // 隔离失败不阻塞空库回退(原文件保留,下次读取会再次尝试)
+    // 改名失败:原文件保留 + 标记已在 → 读侧仍按「损坏/隔离」处理,不会误当首次
   }
+};
+
+// ===== 读三态(缺失 / 读失败 / 损坏隔离)+ 校验 =====
+// 调用方据此区分「真首次初始化」与「不可作为写基准的错误态」:
+//   missing  — 文件从未存在,可作首次初始化基准
+//   io_error — access/readText 抛错,基准不可信
+//   blocked  — 解析/结构校验失败(已隔离)或隔离标记仍在,禁止以空快照覆盖
+export type JsonReadStatus = 'ok' | 'missing' | 'io_error' | 'blocked';
+
+export interface GuardedJsonRead<T> {
+  status: JsonReadStatus;
+  value: T | null;
+}
+
+export const readGuardedJson = async <T>(
+  path: string, validate: (text: string) => T | null,
+): Promise<GuardedJsonRead<T>> => {
+  let exists: boolean = false;
+  try {
+    exists = await fileIo.access(path);
+  } catch {
+    const ioFailure: GuardedJsonRead<T> = { status: 'io_error', value: null };
+    return ioFailure;
+  }
+  if (!exists) {
+    const quarantined: boolean = await quarantineMarkerExists(path);
+    const absent: GuardedJsonRead<T> = {
+      status: quarantined ? 'blocked' : 'missing', value: null,
+    };
+    return absent;
+  }
+  let text: string = '';
+  try {
+    text = await fileIo.readText(path);
+  } catch {
+    const ioFailure: GuardedJsonRead<T> = { status: 'io_error', value: null };
+    return ioFailure;
+  }
+  const parsed: T | null = validate(text);
+  if (parsed !== null) {
+    const ok: GuardedJsonRead<T> = { status: 'ok', value: parsed };
+    return ok;
+  }
+  // 损坏:二次确认 + 落隔离标记(内部会重读复核并发写是否已修复)
+  await quarantineIfStillInvalid(path, (t: string): boolean => validate(t) === null);
+  try {
+    const again: string = await fileIo.readText(path);
+    const reparsed: T | null = validate(again);
+    if (reparsed !== null) {
+      const fixed: GuardedJsonRead<T> = { status: 'ok', value: reparsed };
+      return fixed;
+    }
+  } catch {
+    // 重读失败 → 保守按 blocked 处理(绝不回退成 missing)
+  }
+  const blocked: GuardedJsonRead<T> = { status: 'blocked', value: null };
+  return blocked;
 };
 
 

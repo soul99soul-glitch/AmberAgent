@@ -1,7 +1,7 @@
 // SettingAppearancePage — 外观(iOS AppearanceSettingsView 对位)
 // 颜色模式(浅色/深色/跟随系统)+ 强调色五选一。自设置主页迁入。
 import {
-  BG, INK, ACCENT, ACCENT_OPTIONS, setAccentColor, applyTheme,
+  BG, INK, ACCENT, ACCENT_OPTIONS, setAccentColor, applyTheme, ERROR, TEXT_STYLES,
 } from '../design/tokens.ets';
 import { PageTitleBar, SectionHeader, PageSpacer, Seg } from '../components/PageTemplate.ets';
 import { getChatKvStore } from '../di/AppContainer.ets';
@@ -20,6 +20,11 @@ struct SettingAppearancePage {
   @StorageProp('accentColor') accentColorStore: string = ACCENT;
   @State themeMode: string = 'system';
   @State accentColor: string = ACCENT;
+  // R26:主题模式落盘失败可见回滚
+  @State themeError: string = '';
+  // R26:最近一次成功落盘的模式(回滚目标);竞态 guard 序号只让最新操作回滚/报错
+  private persistedThemeMode: string = 'system';
+  private themeSeq: number = 0;
 
   aboutToAppear(): void {
     loadDisplaySetting(getChatKvStore()).then((s: DisplaySetting): void => {
@@ -30,18 +35,39 @@ struct SettingAppearancePage {
       }
     }).catch((): void => {});
     getChatKvStore().get(UI_COLOR_MODE_KEY).then((raw: string | null): void => {
-      if (raw === 'dark' || raw === 'light' || raw === 'system') this.themeMode = raw;
+      if (raw === 'dark' || raw === 'light' || raw === 'system') {
+        this.themeMode = raw;
+        this.persistedThemeMode = raw;
+      }
     }).catch((): void => {});
   }
 
-  private setTheme(mode: string): void {
-    this.themeMode = mode;
-    getChatKvStore().put(UI_COLOR_MODE_KEY, mode);
+  // R26:应用模式到主题 + 窗口 + AppStorage(单一入口,回滚复用)
+  private applyThemeMode(mode: string): void {
     const resolvedDark: boolean = mode === 'dark' || (mode === 'system' && this.systemDarkMode);
     applyTheme(resolvedDark);
     applyWindowTheme(resolvedDark);
     AppStorage.setOrCreate<string>('uiColorMode', mode);
     AppStorage.setOrCreate<boolean>('darkMode', resolvedDark);
+  }
+
+  // R26:主题模式保存。乐观应用后 await 落盘;失败则可见回滚到最近成功值。
+  //   竞态 guard:仅当本次仍是最新操作(seq 未被后操作超越)才回滚/报错,
+  //   避免较早失败覆盖用户之后的选择。
+  private async setTheme(mode: string): Promise<void> {
+    const seq: number = ++this.themeSeq;
+    this.themeMode = mode;
+    this.themeError = '';
+    this.applyThemeMode(mode);
+    try {
+      await getChatKvStore().put(UI_COLOR_MODE_KEY, mode);
+      this.persistedThemeMode = mode;
+    } catch (_e) {
+      if (seq !== this.themeSeq) return;
+      this.themeMode = this.persistedThemeMode;
+      this.applyThemeMode(this.persistedThemeMode);
+      this.themeError = '主题设置保存失败,已恢复原设置';
+    }
   }
 
   private setAccent(color: string): void {
@@ -71,9 +97,22 @@ struct SettingAppearancePage {
             options: THEME_MODE_OPTIONS,
             selected: this.themeModeIndex(),
             onSelect: (idx: number): void => {
-              this.setTheme(idx === 0 ? 'light' : idx === 1 ? 'dark' : 'system');
+              this.setTheme(idx === 0 ? 'light' : idx === 1 ? 'dark' : 'system')
+                .catch((): void => {});
             },
           }).margin({ top: 12 })
+          if (this.themeError.length > 0) {
+            // R26:失败可见反馈(与设置页错误条同款式)
+            Text(this.themeError)
+              .fontSize(TEXT_STYLES.secondary.size)
+              .fontWeight(TEXT_STYLES.secondary.weight)
+              .lineHeight(TEXT_STYLES.secondary.lineHeight)
+              .fontFamily(TEXT_STYLES.secondary.family)
+              .fontColor(ERROR)
+              .width('100%').maxLines(2)
+              .textOverflow({ overflow: TextOverflow.Ellipsis })
+              .margin({ top: 8 })
+          }
           SectionHeader({ label: '强调色' })
           Row() {
             ForEach(ACCENT_OPTIONS, (color: string, idx: number): void => {

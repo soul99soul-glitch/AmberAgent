@@ -30,6 +30,14 @@ export let ACCENT_INK: string = '#FFFFFF'; // accent 填充上的文字(亮 acce
 export let ACCENT_LIGHT: string = '#FFF5F0'; // accent 淡背景
 export let SIGNAL: string = '#5E9C6E';   // 活跃/在线指示(Android 2026-06-10 起别名 accent)
 export let ERROR: string = '#C2553F';    // 危险红(深浅主题分档)
+// 状态色淡底/前景(Tag / StatusPill / ErrorCard;随 applyTheme 切换)
+export let ERROR_BG: string = '#FFF0EE';
+export let SUCCESS_BG: string = '#E8F5E9';
+export let SUCCESS_FG: string = '#2E7D32';
+export let WARNING_BG: string = '#FFF8E1';
+export let WARNING_FG: string = '#A64500';
+export let INFO_BG: string = '#E8F0FE';
+export let INFO_FG: string = '#114BA3';
 export const ACCENT_OPTIONS: string[] = ['#B8623A', '#5E9C6E', '#4F86D6', '#9277C4', '#C2607A'];
 
 // Android AmberTokens.accentInkFor:亮色 accent(如 Sage)上用深字,否则白
@@ -81,6 +89,9 @@ export const applyTheme = (dark: boolean): void => {
     STATUS_BLUE_LIGHT = '#1B2638';
     SHADOW_KEY = '#99000000'; SHADOW_OVERLAY = '#B3000000';
     ERROR = '#FF8F86'; // Material dark error(原固定 #C2553F 在深色下过暗)
+    ERROR_BG = '#2A1F1D'; SUCCESS_BG = '#1D2B22'; SUCCESS_FG = '#8FCC9A';
+    WARNING_BG = '#2A2418'; WARNING_FG = '#D19A66';
+    INFO_BG = '#1B2638'; INFO_FG = '#8BB4E8';
   } else {
     BG = '#F4F2EC'; SURFACE = '#FAF9F5'; SURFACE2 = '#EFECE4'; RAISED = '#FFFFFF';
     INK = '#1B1A17'; INK2 = '#57544C'; INK3 = '#8F8B80'; INK4 = '#B6B1A4';
@@ -90,6 +101,9 @@ export const applyTheme = (dark: boolean): void => {
     STATUS_BLUE_LIGHT = '#E8F0FE';
     SHADOW_KEY = '#261B1A17'; SHADOW_OVERLAY = '#381B1A17';
     ERROR = '#C93A2F'; // Material light error
+    ERROR_BG = '#FFF0EE'; SUCCESS_BG = '#E8F5E9'; SUCCESS_FG = '#2E7D32';
+    WARNING_BG = '#FFF8E1'; WARNING_FG = '#A64500';
+    INFO_BG = '#E8F0FE'; INFO_FG = '#114BA3';
   }
   ACCENT_LIGHT = accentLightFor(ACCENT, darkTheme);
   // signal 随 accent(Android 别名决策);accentInk 按 accent 亮度
@@ -172,7 +186,8 @@ export const PAD_CARD: number = 16;
 export const PAD_ITEM: number = 13;
 export const RADIUS: number = 14;            // 卡片/字段圆角
 export const RADIUS_PILL: number = 999;      // 药丸/开关
-export const GUTTER: number = 18;            // 屏幕边距
+export const GUTTER: number = 16;            // 页面内容边距(对齐 NavRow/SectionHeader)
+export const CHAT_GUTTER: number = 20;       // 会话页(列表/聊天/输入)专用
 
 // ── 动效(统一时长,精装打磨;曲线统一 EaseOut) ──
 export const MOTION_PRESS: number = 140;     // 按压反馈

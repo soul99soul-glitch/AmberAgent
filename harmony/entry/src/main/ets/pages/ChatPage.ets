@@ -21,11 +21,11 @@ import { pasteboard } from '@kit.BasicServicesKit';
 import { systemShare } from '@kit.ShareKit';
 import { uniformTypeDescriptor as utd } from '@kit.ArkData';
 import type {
-  Conversation, MessageNode, UIMessage, UIMessagePart, UIMessagePartText, Assistant, TransformerContext,
+  Conversation, MessageNode, UIMessage, UIMessagePart, UIMessagePartText, UIMessagePartDocument, Assistant,
   PendingUserMessage, PendingUserMessageMode, DequeueNextResult,
   CompactPolicy, CompactResult, PreparedContext, DisplaySetting, MessageSearchHit,
   UIMessagePartTool, ToolLoopOptions, IdleToolBlockerResult, ChatToolDefinition,
-  TextGenerationParams, ChatStreamProvider, ToolApprovalVerdict, ChatTurnDeps,
+  TextGenerationParams, ChatStreamProvider, ToolApprovalVerdict, ToolApprovalPartLocator, ChatTurnDeps,
   ToolRegistry, DeepReadOpenEvent, MessageTransformer, AgentTool, LocalToolOption,
   MessageChunk, OpenAIChatApi, AskedAnswers, ConversationCompact,
   ImageGuardSettings, VisionModelHealth, VisionProbeDeps, ProviderModel, ProviderSetting,
@@ -42,7 +42,6 @@ import {
   applyStopGeneration, streamContentLength, shouldCheckpoint, checkpointConversationTail,
   checkpointRegenerateConversation,
   runAutoTitle, runSuggestion, makeUserMessage, toText, makeTextGenerationParams,
-  applyVisualTransformersStreamingTail,
   makePendingUserMessage, enqueuePendingUserMessage, dequeueNextPendingUserMessage,
   cancelPendingUserMessage, preparePendingMessageForDispatch, pendingPreviewText,
   convertSteerToFollowup, runAppendUserMessage,
@@ -75,13 +74,13 @@ import {
   probeVisionModelHealth,
   createMcpManagementTools, createMcpServerTools, makeAgentTool, createSkillTools,
   createWorkspaceTools, createWorkspaceArtifactTools, createDeepReadPlaybookTools,
-  loadAssistants, saveAssistants, patchAssistant,
+  patchAssistant,
   reasoningLevelForModel, withReasoningLevelForModel,
   defaultReasoningLevelForModel, reasoningLevelsForModel,
   deriveSandboxActivities, mergeSandboxTimeline, idleSandboxActivity,
   withStepProgress, isActiveOperation,
   buildTopModelMenuGroups,
-  loadProviders, loadDisplaySetting, isCloseEnoughToBottom, FOLLOW_BOTTOM_TOLERANCE_VP,
+  loadProviders, loadDisplaySetting, makeDisplaySetting, isCloseEnoughToBottom, FOLLOW_BOTTOM_TOLERANCE_VP,
   createMiniAppPromptTransformer, createMiniAppOutputTransformer,
   makeMiniAppSetting, loadMiniAppSetting,
   runInteractiveTurn,
@@ -94,10 +93,9 @@ import type {
 } from '@amber/chat-domain';
 import type { TopModelMenuGroup, ReasoningLevelOption, ReasoningLevel } from '@amber/chat-domain';
 import {
-  getChatRepository, getChatAssistants, resolveChatRuntime, describeChatModel, ChatRuntime,
+  getChatRepository, getChatAssistants, resolveChatRuntime, ChatRuntime,
   getChatKvStore, getCompactStore, getSessionGrantStore,
-  getChatModelSelection, saveChatModelSelection,
-  resolveChatProviderChoice, ChatProviderChoice, ChatModelSelection,
+  ChatProviderChoice,
   buildProviderApi, currentChatModelUuid, loadTaskModelIds, resolveTaskChatModelChoice,
   resolveTaskModelChain, loadTaskPrompts, TaskPrompts,
   getMcpManager, initMcpManager, getToolActivityStore, getSkillManager,
@@ -131,11 +129,15 @@ import {
 import { compressImageAsDataUrl } from '../platform_impl/ImageCompress.ets';
 import type { TokenUsage } from '@amber/chat-domain';
 import { EntryAbortController } from '../platform_impl/EntryAbortController.ets';
+import { beginConversationRun, conversationRestoreVersion } from '../platform_impl/ConversationRunGuard.ets';
+import { resolveEffectiveChatChoice, saveEffectiveChatChoice } from '../platform_impl/ChatModelSelectionSupport.ets';
+import { mutateAssistant } from '../platform_impl/AssistantMutation.ets';
 import { Icon } from '../components/ui/Icon.ets';
 import { DotText, DotGround } from '../components/ui/DotMatrix.ets';
 import { addFavorite } from '../platform_impl/FavoriteStore.ets';
 import { notifyGenerationDone } from '../platform_impl/NotificationNotifier.ets';
 import { WebMountHost, getWebMountSession } from '../platform_impl/WebMountSession.ets';
+import type { WebMountHookBinding } from '../platform_impl/WebMountSession.ets';
 import { createWebMountTools } from '../platform_impl/WebMountTools.ets';
 import { ChatInput } from '../components/ChatInput.ets';
 import type { QuickMessage } from '../components/SlashCommandPanel.ets';
@@ -158,7 +160,7 @@ import {
   AgentRuntimeSnapshot, defaultAgentRuntimeSnapshot, loadAgentRuntimeSnapshot, systemLanguage,
 } from '../platform_impl/AgentRuntimePrefs.ets';
 import { createEntryPlaceholderValues } from '../platform_impl/PlaceholderSupport.ets';
-import { createEntryDocumentReader } from '../platform_impl/DocumentSupport.ets';
+import { createEntryDocumentReader, readDocumentPreview } from '../platform_impl/DocumentSupport.ets';
 import { loadLorebooks, loadModeInjections } from '../platform_impl/ExtensionPrefs.ets';
 import { createEntryBase64ImageTransformer } from '../platform_impl/Base64ImageSupport.ets';
 import {
@@ -186,6 +188,7 @@ const CHAT_MESSAGE_ROW_CAPABILITIES: AgentMessageRowHostCapabilities = {
   runMiniApp: true,
   modifyMiniApp: true,
   openMiniAppList: true,
+  openDocument: true,
 };
 
 // accent rgba 混色(建议 chips 描边等;与 tokens 令牌 #RRGGBB 配合)
@@ -347,6 +350,15 @@ struct ChatPage {
   // 主题切换时触发整页重建(build 重读可变令牌)
   @StorageProp('darkMode') darkMode: boolean = false;
   @StorageProp('accentColor') accentColorStore: string = ACCENT;
+  @StorageProp('chatStorageDegraded') storageDegraded: boolean = false;
+  @State conversationLoaded: boolean = false;
+  @State restoreReloadFailed: boolean = false;
+  private loadedRestoreVersion: number = 0;
+  @State documentPreviewOpen: boolean = false;
+  @State documentPreviewTitle: string = '';
+  @State documentPreviewText: string = '';
+  private documentPreviewSeq: number = 0;
+  @State displaySettings: DisplaySetting = makeDisplaySetting();
   // Return-to-page forces rebuild, reads latest theme tokens (background pages in stack don't receive StorageProp updates)
   @State themeTick: number = 0;
   // 1:1 原型 slideInR .28s ease-out:整页入场
@@ -409,6 +421,8 @@ struct ChatPage {
   @State errorMsg: string = '';
   // D-108:拒绝理由弹窗态(ToolDenyReasonDialog;空 = 关闭)
   @State denyDialogToolCallId: string = '';
+  @State denyDialogOpen: boolean = false;
+  private denyDialogLocator: ToolApprovalPartLocator | undefined = undefined;
   @State denyReasonText: string = '';
   // D-110:上下文用量指示(ContextUsageIndicator)— compacts/窗口快照 + 压缩活动计数
   @State contextCompacts: ConversationCompact[] = [];
@@ -655,6 +669,8 @@ struct ChatPage {
   //   不虚假后台继续,也不在 checkpoint 完成前清 tail(计划 §3.6)。
   aboutToDisappear(): void {
     this.pageAlive = false;
+    this.webmountHookBinding?.unbind();
+    this.webmountHookBinding = null;
     this.pageVisible = false;
     this.generationToken++;
     // P4:离页注销 IME 键盘高度监听(防跨页回调泄漏)
@@ -719,8 +735,30 @@ struct ChatPage {
     }).catch((): void => {});
   }
 
+  private stopGreetTimer(): void {
+    if (this.greetTimer !== -1) clearInterval(this.greetTimer);
+    this.greetTimer = -1;
+    this.greetOpacity = 1;
+  }
+
+  private startGreetTimer(): void {
+    if (!this.pageAlive || !this.pageVisible || this.greetTimer !== -1) return;
+    this.greetTimer = setInterval((): void => {
+      if (!this.pageAlive || !this.pageVisible) return;
+      animateTo({ duration: 260, curve: Curve.EaseOut, onFinish: (): void => {
+        if (!this.pageAlive || !this.pageVisible) return;
+        this.greetIdx = (this.greetIdx + 1) % GREETINGS.length;
+        animateTo({ duration: 260, curve: Curve.EaseOut }, (): void => { this.greetOpacity = 1; });
+      } }, (): void => { this.greetOpacity = 0; });
+    }, 3200);
+  }
+
   onPageShow(): void {
     this.pageVisible = true;
+    this.startGreetTimer();
+    this.refreshRestoredConversation().catch((e: Error): void => {
+      if (this.pageAlive) this.errorMsg = e.message;
+    });
     this.themeTick = Date.now();
     if (this.cursorTimer === -1) {
       this.cursorTimer = setInterval((): void => {
@@ -736,10 +774,10 @@ struct ChatPage {
     }
     // P4:页面回到前台/从子页返回时刷新模型/上下文/显示设置快照
     //   (onPageShow 每次入页触发,与 aboutToAppear 同异步 helper;pageAlive 守卫防离页写 UI)
-    describeChatModel().then((label: string): void => {
+    this.describeEffectiveModel().then((label: string): void => {
       if (this.pageAlive) this.modelLabel = label;
     });
-    resolveChatProviderChoice().then((choice: ChatProviderChoice | null): void => {
+    resolveEffectiveChatChoice(this.conversation?.assistantId).then((choice: ChatProviderChoice | null): void => {
       if (!this.pageAlive) return;
       // 模型切换后刷新当前会话 context 窗口(计划 §5.6)+ ReasoningPicker 段集/档位
       this.contextWindowTokens = choice !== null ? choice.model.contextWindowTokens : null;
@@ -747,6 +785,7 @@ struct ChatPage {
     });
     loadDisplaySetting(getChatKvStore()).then((setting: DisplaySetting): void => {
       if (!this.pageAlive) return;
+      this.displaySettings = setting;
       this.userNickname = setting.userNickname;
       this.userAvatar = setting.userAvatar;
       this.enableAutoScroll = setting.enableAutoScroll;
@@ -766,6 +805,7 @@ struct ChatPage {
 
   onPageHide(): void {
     this.pageVisible = false;
+    this.stopGreetTimer();
     if (this.cursorTimer !== -1) {
       clearInterval(this.cursorTimer);
       this.cursorTimer = -1;
@@ -775,9 +815,16 @@ struct ChatPage {
   }
 
   onBackPress(): boolean {
-    if (!this.drawerOpen) return false;
-    this.closeDrawer();
-    return true;
+    if (this.documentPreviewOpen) { this.documentPreviewOpen = false; return true; }
+    if (this.denyDialogOpen) { this.dismissDenyDialog(); return true; }
+    if (this.modelMenuOpen) { this.modelMenuOpen = false; return true; }
+    if (this.contextMeterOpen) { this.contextMeterOpen = false; return true; }
+    if (this.drawerOpen) { this.closeDrawer(); return true; }
+    return false;
+  }
+
+  private navigateBack(): void {
+    if (!this.onBackPress()) router.back();
   }
 
   // ===== P4:IME 键盘跟随(ImeAutoScroller 语义) =====
@@ -872,8 +919,9 @@ struct ChatPage {
     this.initialJumpSuppressedUntilUserScroll = false;
     this.lastRawSnapshot = [];
     // WebMount 会话宿主:首次 open 时按需挂载(避免常驻隐藏 Web)
-    getWebMountSession().bindHooks({
-      onMountNeeded: (): void => { this.webmountHostVisible = true; },
+    this.webmountHookBinding?.unbind();
+    this.webmountHookBinding = getWebMountSession().bindHooks({
+      onMountNeeded: (): void => { if (this.pageAlive) this.webmountHostVisible = true; },
     });
     this.loadWebMountGlobalToggles();
     // 空状态问候名(读 KV user_nickname, 缺省空)
@@ -886,20 +934,15 @@ struct ChatPage {
       if (this.pageAlive) this.cursorOn = !this.cursorOn;
     }, 525);
     // 1:1 原型空态 hero:问候句 3.2s 淡入淡出轮换
-    this.greetTimer = setInterval((): void => {
-      animateTo({ duration: 260, curve: Curve.EaseOut, onFinish: (): void => {
-        this.greetIdx = (this.greetIdx + 1) % GREETINGS.length;
-        animateTo({ duration: 260, curve: Curve.EaseOut }, (): void => { this.greetOpacity = 1; });
-      } }, (): void => { this.greetOpacity = 0; });
-    }, 3200);
+    this.startGreetTimer();
     // 每次进入(含从选择器返回)刷新模型标签
     this.refreshQuickMessages();
-    describeChatModel().then((label: string): void => {
+    this.describeEffectiveModel().then((label: string): void => {
       if (this.pageAlive && this.pageVisible) this.modelLabel = label;
     });    // D-110:上下文窗口快照(ModelRegistry.MODEL_CONTEXT_WINDOW 注册表查询
     //   = P1 登记;取持久化 model.contextWindowTokens = Android 未知模型
     //   回退路径 :110-111)
-    resolveChatProviderChoice().then((choice: ChatProviderChoice | null): void => {
+    resolveEffectiveChatChoice(this.conversation?.assistantId).then((choice: ChatProviderChoice | null): void => {
       if (!this.pageAlive || !this.pageVisible) return;
       this.contextWindowTokens = choice !== null ? choice.model.contextWindowTokens : null;
       // M2.1:同步装配 ReasoningPicker 段集 + 当前档位
@@ -964,6 +1007,7 @@ struct ChatPage {
     // D-073:display_setting 快照(placeholder nickname/user + Phase 1 滚动偏好)
     loadDisplaySetting(getChatKvStore()).then((setting: DisplaySetting): void => {
       if (!this.pageAlive || !this.pageVisible) return;
+      this.displaySettings = setting;
       this.userNickname = setting.userNickname;
       this.userAvatar = setting.userAvatar;
       this.enableAutoScroll = setting.enableAutoScroll;
@@ -984,6 +1028,7 @@ struct ChatPage {
     });
     const params = router.getParams() as Record<string, string>;
     const convId: string = params ? (params['conversationId'] ?? '') : '';
+    this.loadedRestoreVersion = conversationRestoreVersion(convId);
     // Phase 1:首屏定位参数(最小兼容:initialMessageIndex 数字 index;nodeId 定位行)
     const initialIndexParam: string = params ? (params['initialMessageIndex'] ?? '') : '';
     const initialNodeIdParam: string = params ? (params['nodeId'] ?? '') : '';
@@ -998,6 +1043,7 @@ struct ChatPage {
             this.timelineLoadState,
             window.oldestLoadedIndex, window.nodes.length, window.totalNodeCount);
           this.rows = buildRowsFromNodes(window.nodes);
+          this.conversationLoaded = true;
         })
         .catch((e: Error): void => {
           hilog.warn(HILOG_DOMAIN, HILOG_TAG, 'load tail window failed: %{public}s', e.message);
@@ -1005,11 +1051,13 @@ struct ChatPage {
         .then((): Promise<Conversation | null> => this.ensureFullConversationLoaded(convId))
         .then((full: Conversation | null): void => {
           if (!this.pageAlive) return;
+          this.conversationLoaded = true;
           if (full === null) {
             if (this.rows.length === 0) this.errorMsg = '会话不存在';
             return;
           }
           this.conversation = full;
+          this.refreshEffectiveModelState();
           if (this.rows.length === 0 && full.messageNodes.length > 0) {
             this.rows = buildRows(full);
             this.timelineLoadState = applyTailWindow(
@@ -1068,6 +1116,8 @@ struct ChatPage {
         }
         const fresh = makeConversation(newId(), [], { assistantId: picked.id });
         this.conversation = seedConversationWithPresets(fresh, picked);
+        this.conversationLoaded = true;
+        this.refreshEffectiveModelState();
         // Phase 5:新会话空窗口 = fullyLoaded(rows 直接全量展示)
         this.rows = buildRows(this.conversation);
         this.timelineLoadState = applyTailWindow(
@@ -1267,7 +1317,38 @@ struct ChatPage {
 
   // 待生成/checkpoint/上下文前,确认窗口已全量(生成只能发生在窗口覆盖全部节点后 —
   //   首屏默认尾窗 50,加载更早历史期间进入生成 → 先补全再开跑)
-  private ensureFullConversationForMutation(): Promise<void> {
+  private async refreshRestoredConversation(): Promise<void> {
+    const current: Conversation | null = this.conversation;
+    if (current === null) return;
+    const version: number = conversationRestoreVersion(current.id);
+    if (version === this.loadedRestoreVersion) return;
+    this.conversationLoaded = false;
+    this.restoreReloadFailed = false;
+    let restored: Conversation | null;
+    try {
+      restored = await getChatRepository().getById(current.id);
+    } catch (e) {
+      this.restoreReloadFailed = true;
+      throw e instanceof Error ? e : new Error(String(e));
+    }
+    if (!this.pageAlive || this.conversation?.id !== current.id) return;
+    if (restored === null) {
+      this.restoreReloadFailed = true;
+      throw new Error('恢复后的会话无法读取');
+    }
+    this.conversation = restored;
+    this.rows = buildRows(restored);
+    this.timelineLoadState = applyTailWindow(
+      this.timelineLoadState, 0, restored.messageNodes.length, restored.messageNodes.length);
+    this.suggestions = restored.chatSuggestions;
+    this.title = restored.title || '对话';
+    this.loadedRestoreVersion = version;
+    this.conversationLoaded = true;
+    this.refreshEffectiveModelState();
+  }
+
+  private async ensureFullConversationForMutation(): Promise<void> {
+    await this.refreshRestoredConversation();
     const st: ConversationTimelineLoadState = this.timelineLoadState;
     if (st.initialized && st.fullyLoaded) return Promise.resolve();
     if (this.conversation === null) return Promise.resolve();
@@ -1669,7 +1750,7 @@ struct ChatPage {
       getChatRepository().save(updated)
         .then((): Promise<void> => this.invalidateConvCompacts(updated.id, 'message_branch_changed'))
         .catch((e: Error): void => { this.errorMsg = e.message; });
-    });
+    }).catch((e: Error): void => { if (this.pageAlive) this.errorMsg = e.message; });
   }
 
   // Phase 5 全量 invariant:生成必须基于完整会话(窗口未全量时先补全再开跑;
@@ -1679,11 +1760,13 @@ struct ChatPage {
     this.ensureFullConversationForMutation().then((): void => {
       if (this.conversation === null || this.sending) return;
       this.runRegenerate(nodeId);
-    });
+    }).catch((e: Error): void => { if (this.pageAlive) this.errorMsg = e.message; });
   }
 
   private runRegenerate(nodeId: string): void {
-    if (this.conversation === null || this.sending) return;
+    if (!this.pageAlive || this.conversation === null || this.sending) return;
+    const releaseRun: (() => void) | null = this.reserveConversationRun(this.conversation.id);
+    if (releaseRun === null) return;
     this.sending = true;
     this.errorMsg = '';
     const operationAbort: EntryAbortController = new EntryAbortController();
@@ -1743,11 +1826,8 @@ struct ChatPage {
               onUpdate: (msgs: UIMessage[]): void => {
                 if (!this.isGenerationOperationActive(operationToken)
                   || msgs.length === 0 || holder.rt === null) return;
-                const ctx: TransformerContext = { assistant: holder.rt.assistant };
-                const transformed: UIMessage[] = applyVisualTransformersStreamingTail(
-                  msgs, [thinkTagTransformer, regexOutputTransformer], ctx); // MiniApp:仅 ThinkTag/Regex 实现 visualTransformTail(Android 同);MiniAppOutput 无 visual 变换,流式期恒等 → 不加
                 this.regenNodeId = nodeId;
-                this.regenTail = transformed[transformed.length - 1];
+                this.regenTail = msgs[msgs.length - 1];
                 this.followStreamingUpdate();
               },
           // Phase 2:raw 快照捕获(与 send 路径同接线)
@@ -1804,7 +1884,7 @@ struct ChatPage {
           hilog.warn(HILOG_DOMAIN, HILOG_TAG, 'regenerate reload failed: %{public}s', reloadError.message);
           this.drainPendingQueue();
         });
-      });
+      }).finally((): Promise<void> => this.releaseConversationRunAfterSaves(releaseRun));
   }
 
   // 生成完成通知(Android ChatService.kt:1396-1401 三条件:成功收尾 + 应用后台 + 开关开;
@@ -1815,6 +1895,7 @@ struct ChatPage {
   private webmountGlobalEnabled: boolean = false;
   private webmountEvalEnabled: boolean = false;
   @State webmountHostVisible: boolean = false;
+  private webmountHookBinding: WebMountHookBinding | null = null;
   private maybeGenerationDoneNotification(rt: ChatRuntime): void {
     if (!this.enableGenerationNotification) return;
     const backgrounded: boolean = AppStorage.get<boolean>('appBackgrounded') ?? false;
@@ -1900,11 +1981,14 @@ struct ChatPage {
   // 生成使用快照；落库前重载最新会话，只合并 title，避免覆盖新消息。
   private async maybeAutoTitle(conv: Conversation, force: boolean = false): Promise<void> {
     if (!force && conv.title.trim().length > 0) return;
+    let releaseRun: () => void;
+    try { releaseRun = beginConversationRun(conv.id); } catch { return; }
+    try {
     // D-094:settings.titlePrompt(ChatPrefs.kt:81)→ runAutoTitle deps.template
     //   (auto_title.ts:60;调用时新取 = settingsFlow.value 语义)
     const prompts: TaskPrompts = await loadTaskPrompts();
     const snapshot: Conversation = conv;
-    return runAutoTitle(snapshot, {
+    await runAutoTitle(snapshot, {
       // D-087:title 任务模型(AiAuxiliaryGenerator.kt:41)—
       //   resolveTaskChatModel(titleModelId) ?: return(无模型静默跳过);
       //   params = model + reasoning OFF + model.customHeaders/customBodies(:55-59,
@@ -1951,16 +2035,22 @@ struct ChatPage {
       .catch((e: Error): void => {
         if (this.pageAlive) this.errorMsg = `自动命名失败:${e.message}`;
       });
+    } finally {
+      releaseRun();
+    }
   }
 
   // 会话建议(D-026):每轮生成完成后非阻塞刷新;失败 hilog 记录(非静默,
   // 不上浮 UI — Android 对建议失败也不打扰用户,仅 printStackTrace)
   private async maybeSuggestions(conv: Conversation, rt: ChatRuntime): Promise<void> {
+    let releaseRun: () => void;
+    try { releaseRun = beginConversationRun(conv.id); } catch { return; }
+    try {
     const snapshot: Conversation = conv;
     // D-094:settings.suggestionPrompt(ChatPrefs.kt:82)→ runSuggestion deps.template
     //   (suggestion.ts:57;调用时新取)
     const prompts: TaskPrompts = await loadTaskPrompts();
-    runSuggestion(conv, {
+    await runSuggestion(conv, {
       // D-087:suggestion 任务模型(AiAuxiliaryGenerator.kt:87)— 同 title 链
       generateText: async (prompt: string): Promise<string> => {
         const ids = await loadTaskModelIds();
@@ -2004,6 +2094,9 @@ struct ChatPage {
       .catch((e: Error): void => {
         hilog.warn(HILOG_DOMAIN, HILOG_TAG, 'suggestion failed: %{public}s', e.message);
       });
+    } finally {
+      releaseRun();
+    }
   }
 
   // 手动改名(D-034):Android ChatVM.updateTitle 语义(copy title + save)
@@ -2014,13 +2107,15 @@ struct ChatPage {
   }
 
   private saveTitle(): void {
-    if (this.conversation === null) return;
+    if (!this.pageAlive || this.conversation === null) return;
+    const release: (() => void) | null = this.reserveConversationRun(this.conversation.id);
+    if (release === null) return;
     const updated: Conversation = patchConversation(this.conversation, { title: this.titleInput.trim() });
     this.conversation = updated;
     this.title = updated.title.length > 0 ? updated.title : '对话';
     this.editingTitle = false;
     getChatRepository().save(updated)
-      .catch((e: Error): void => { this.errorMsg = e.message; });
+      .catch((e: Error): void => { this.errorMsg = e.message; }).finally(release);
   }
 
   // 会话分叉(D-033):复制 0..目标节点为新会话并跳转
@@ -2151,6 +2246,37 @@ struct ChatPage {
     } catch (_e) {
       // 用户取消选择
     }
+  }
+
+  private openDocumentPreview(part: UIMessagePartDocument): void {
+    const seq: number = ++this.documentPreviewSeq;
+    this.documentPreviewTitle = part.fileName;
+    this.documentPreviewText = '正在读取附件…';
+    this.documentPreviewOpen = true;
+    readDocumentPreview(part).then((text: string): void => {
+      if (this.pageAlive && this.documentPreviewOpen && seq === this.documentPreviewSeq) {
+        this.documentPreviewText = text;
+      }
+    }).catch((e: Error): void => {
+      if (this.pageAlive && this.documentPreviewOpen && seq === this.documentPreviewSeq) {
+        this.documentPreviewText = `无法预览：${e.message}`;
+      }
+    });
+  }
+
+  @Builder
+  private documentPreviewSheet() {
+    Column() {
+      Row() {
+        Text(this.documentPreviewTitle).fontSize(18).fontColor(INK).layoutWeight(1).maxLines(2)
+        Text('关闭').fontSize(14).fontColor(ACCENT).padding(12)
+          .onClick((): void => { this.documentPreviewOpen = false; })
+      }.width('100%')
+      Scroll() {
+        Text(this.documentPreviewText).fontSize(15).fontColor(INK)
+          .copyOption(CopyOptions.InApp).width('100%')
+      }.layoutWeight(1).width('100%').align(Alignment.TopStart)
+    }.width('100%').height('100%').padding(20).backgroundColor(BG)
   }
 
   private readUriBytes(uri: string): Uint8Array {
@@ -2299,18 +2425,24 @@ struct ChatPage {
 
   // 编辑并重发:editMessage(新分支)→ 持久化 → runRegenerateAt(user 节点截断续跑)
   private sendEdit(text: string): void {
-    if (this.conversation === null || this.sending) return;
+    if (!this.pageAlive || this.conversation === null || this.sending) return;
+    const operationToken: number = this.generationToken;
+    const conversationId: string = this.conversation.id;
     // Phase 5 全量 invariant:编辑前确保完整会话(窗口未全量先补全)
     this.ensureFullConversationForMutation().then((): void => {
-      if (this.conversation === null || this.sending) return;
+      if (!this.isGenerationOperationActive(operationToken)
+        || this.conversation === null || this.conversation.id !== conversationId || this.sending) return;
       this.runSendEdit(text);
     }).catch((e: Error): void => {
-      this.errorMsg = e.message;
+      if (this.isGenerationOperationActive(operationToken)) this.errorMsg = e.message;
     });
   }
 
   private runSendEdit(text: string): void {
-    if (this.conversation === null || this.sending) return;
+    if (!this.pageAlive || this.conversation === null || this.sending) return;
+    const releaseRun: (() => void) | null = this.reserveConversationRun(this.conversation.id);
+    if (releaseRun === null) return;
+    const operationToken: number = ++this.generationToken;
     const conv: Conversation = this.conversation;
     const nodeId: string = this.editingNodeId;
     const updated: Conversation = editMessage(conv, this.editingMessageId, makeUserMessage(text).parts);
@@ -2323,13 +2455,15 @@ struct ChatPage {
     this.invalidateConvCompacts(updated.id, 'message_edited')
       .then((): Promise<void> => getChatRepository().save(updated))
       .then((): void => {
+        if (!this.isGenerationOperationActive(operationToken)) return;
         this.sending = false;
         this.regenerate(nodeId);
       })
       .catch((e: Error): void => {
+        if (!this.isGenerationOperationActive(operationToken)) return;
         this.sending = false;
         this.errorMsg = this.compactErrorText(e);
-      });
+      }).finally(releaseRun);
   }
 
   // 删除消息(D-029):长按 → 确认弹窗;生成中不提供入口(Android 同语义:
@@ -2802,6 +2936,22 @@ struct ChatPage {
     });
   }
 
+  private refreshEffectiveModelState(): void {
+    const assistantId: string | undefined = this.conversation?.assistantId;
+    resolveEffectiveChatChoice(assistantId).then((choice: ChatProviderChoice | null): void => {
+      if (!this.pageAlive || this.conversation?.assistantId !== assistantId) return;
+      this.modelLabel = choice !== null ? `${choice.provider.name} / ${choice.model.modelId}` : '';
+      this.contextWindowTokens = choice !== null ? choice.model.contextWindowTokens : null;
+      this.refreshReasoningPicker(choice);
+    }).catch((e: Error): void => { if (this.pageAlive) this.errorMsg = e.message; });
+  }
+
+  private async describeEffectiveModel(): Promise<string> {
+    const choice: ChatProviderChoice | null =
+      await resolveEffectiveChatChoice(this.conversation?.assistantId);
+    return choice !== null ? `${choice.provider.name} / ${choice.model.modelId}` : '';
+  }
+
   private toggleModelMenu(): void {
     if (this.modelMenuOpen) {
       this.closeModelMenu();
@@ -2812,9 +2962,10 @@ struct ChatPage {
     this.modelMenuLoading = true;
     // 读取失败也必须复位 loading — 否则菜单从此点不开
     loadProviders(getChatKvStore()).then((providers: ProviderSetting[] | null): void => {
-      getChatModelSelection().then((sel: ChatModelSelection | null): void => {
-        const currentProvider: string = sel !== null ? sel.providerId : '';
-        const currentModel: string = sel !== null ? sel.modelId : '';
+      resolveEffectiveChatChoice(this.conversation?.assistantId).then((choice: ChatProviderChoice | null): void => {
+        if (!this.pageAlive) { this.modelMenuLoading = false; return; }
+        const currentProvider: string = choice !== null ? choice.provider.id : '';
+        const currentModel: string = choice !== null ? choice.model.modelId : '';
         this.modelMenuGroups = buildTopModelMenuGroups(
           providers, 'chat', currentProvider, currentModel,
         );
@@ -2838,15 +2989,16 @@ struct ChatPage {
   //   对齐 Android onSelect → vm.setChatModel;Harmony 选择层 = Preferences 键
   //   (chat_selected_provider_id/model_id),resolveChatRuntime 消费。
   private selectModelFromMenu(providerId: string, modelId: string): void {
-    saveChatModelSelection({ providerId, modelId }).then((): void => {
-      describeChatModel().then((label: string): void => { this.modelLabel = label; });
+    saveEffectiveChatChoice({ providerId, modelId }, this.conversation?.assistantId).then((): void => {
+      if (!this.pageAlive) return;
+      this.describeEffectiveModel().then((label: string): void => { if (this.pageAlive) this.modelLabel = label; });
       // contextWindowTokens + ReasoningPicker 段集也随之刷新(模型变了,档位段集 + 当前档位变)
-      resolveChatProviderChoice().then((choice: ChatProviderChoice | null): void => {
+      resolveEffectiveChatChoice(this.conversation?.assistantId).then((choice: ChatProviderChoice | null): void => {
         this.contextWindowTokens = choice !== null ? choice.model.contextWindowTokens : null;
         this.refreshReasoningPicker(choice);
       });
       this.closeModelMenu();
-    });
+    }).catch((e: Error): void => { if (this.pageAlive) this.errorMsg = e.message; });
   }
 
   // M2.1:ReasoningPicker 装配 — 按当前 model 的段集 + assistant 记忆的当前档位。
@@ -2889,22 +3041,12 @@ struct ChatPage {
     const assistantId: string = this.conversation.assistantId;
     const modelId: string = this.currentModelId;
     const rl: ReasoningLevel = level as ReasoningLevel;
-    getChatAssistants().then((assistants: Assistant[]): void => {
-      let changed: Assistant | null = null;
-      const next: Assistant[] = [];
-      for (const a of assistants) {
-        if (a.id === assistantId) {
-          changed = withReasoningLevelForModel(a, modelId, rl);
-          next.push(changed);
-        } else {
-          next.push(a);
-        }
-      }
-      if (changed === null) return;
-      saveAssistants(getChatKvStore(), next).then((): void => {
+    mutateAssistant(assistantId, (a: Assistant): Assistant =>
+      withReasoningLevelForModel(a, modelId, rl)).then((changed: Assistant | null): void => {
+      if (changed !== null && this.pageAlive && this.currentModelId === modelId) {
         this.currentReasoningLevel = level;
-      });
-    });
+      }
+    }).catch((e: Error): void => { if (this.pageAlive) this.errorMsg = e.message; });
   }
 
   // 斜杠命令 /compact:手动触发上下文压缩(失效 compacts,下次发送时重新压缩)
@@ -2969,7 +3111,8 @@ struct ChatPage {
         //   wm_eval 另有独立 eval 门;宿主按需挂载,工具闭包全局单会话)
         ...((this.webmountGlobalEnabled || localOpts.indexOf('webmount') >= 0)
           ? createWebMountTools(getWebMountSession(),
-            this.webmountEvalEnabled || localOpts.indexOf('webmount_eval') >= 0)
+            this.webmountEvalEnabled || localOpts.indexOf('webmount_eval') >= 0,
+            localOpts.indexOf('webmount') >= 0)
           : []),
         // D-123:skills 工具组(ChatService.kt:2239-2246 — createSkillTools 五/六件,
         //   位置 = localTools 之后/MCP 管理之前);enabledSkills/allSkills =
@@ -3265,16 +3408,35 @@ struct ChatPage {
   //   当前 assistant enabledSkills 做 +name/-name RMW;entry = assistants KV
   //   读改写(rt.assistant.id = 本次发送解析的当前助手 = getCurrentAssistant 同义)
   private async setSkillEnabled(rt: ChatRuntime, name: string, enable: boolean): Promise<void> {
-    const kv = getChatKvStore();
-    const list: Assistant[] = await loadAssistants(kv) ?? [];
-    const next: Assistant[] = list.map((a: Assistant): Assistant => {
-      if (a.id !== rt.assistant.id) return a;
+    await mutateAssistant(rt.assistant.id, (a: Assistant): Assistant => {
       const skills: string[] = enable
         ? (a.enabledSkills.indexOf(name) >= 0 ? a.enabledSkills : a.enabledSkills.concat([name]))
         : a.enabledSkills.filter((n: string): boolean => n !== name);
       return patchAssistant(a, { enabledSkills: skills });
     });
-    await saveAssistants(kv, next);
+  }
+
+  private reserveConversationRun(conversationId: string): (() => void) | null {
+    if (this.conversation?.id === conversationId
+      && conversationRestoreVersion(conversationId) !== this.loadedRestoreVersion) {
+      this.refreshRestoredConversation().catch((e: Error): void => { this.errorMsg = e.message; });
+      this.errorMsg = '会话已恢复，正在刷新，请稍后重试';
+      return null;
+    }
+    try {
+      return beginConversationRun(conversationId);
+    } catch (e) {
+      this.errorMsg = e instanceof Error ? e.message : String(e);
+      return null;
+    }
+  }
+
+  private async releaseConversationRunAfterSaves(release: () => void): Promise<void> {
+    try {
+      await this.checkpointTail;
+    } finally {
+      release();
+    }
   }
 
   // Kernel façade:统一 phase 生命周期(对齐 iOS ChatKernelRunHost 可观察语义)
@@ -3333,63 +3495,83 @@ struct ChatPage {
 
   // 工具审批(ChatService.kt:1122-1188):改写 approvalState → 持久化 →
   //   无 pending 残留 → 续跑生成(handleMessageComplete)
-  private handleToolApproval(toolCallId: string, approved: boolean, reason: string = ''): void {
+  private handleToolApproval(toolCallId: string, approved: boolean, reason: string = '',
+    locator?: ToolApprovalPartLocator): void {
     const verdict: ToolApprovalVerdict = approved
       ? { kind: 'approved' }
       : { kind: 'denied', reason };
-    this.applyToolVerdict(toolCallId, verdict);
+    this.applyToolVerdict(toolCallId, verdict, locator);
   }
 
   // ===== D-108:拒绝理由弹窗(ToolDenyReasonDialog :428-461 + 调用点 :966-974) =====
   //   拒绝按钮 → showDenyDialog;confirm(reason) → onToolApproval(id,false,reason)
-  private openDenyDialog(toolCallId: string): void {
+  private openDenyDialog(toolCallId: string, locator?: ToolApprovalPartLocator): void {
     this.denyReasonText = '';
     this.denyDialogToolCallId = toolCallId;
+    this.denyDialogLocator = locator;
+    this.denyDialogOpen = true;
   }
 
   private dismissDenyDialog(): void {
+    this.denyDialogOpen = false;
     this.denyDialogToolCallId = '';
+    this.denyDialogLocator = undefined;
     this.denyReasonText = '';
   }
 
   private confirmDenyDialog(): void {
     const id: string = this.denyDialogToolCallId;
     const reason: string = this.denyReasonText;
-    this.denyDialogToolCallId = '';
-    this.denyReasonText = '';
-    if (id.length > 0) {
-      this.handleToolApproval(id, false, reason);
+    const locator: ToolApprovalPartLocator | undefined = this.denyDialogLocator;
+    this.dismissDenyDialog();
+    if (id.length > 0 || locator !== undefined) {
+      this.handleToolApproval(id, false, reason, locator);
     }
   }
 
   // D-105:ask_user 应答(ChatService.handleToolApproval answer 分支,:1136-1140
   //   answer 优先 → answered 态;落库 + 无 pending 则续跑,同审批路径)
-  private handleToolAnswer(toolCallId: string, answer: string): void {
-    this.applyToolVerdict(toolCallId, { kind: 'answered', answer });
+  private handleToolAnswer(toolCallId: string, answer: string, locator?: ToolApprovalPartLocator): void {
+    this.applyToolVerdict(toolCallId, { kind: 'answered', answer }, locator);
   }
 
-  private applyToolVerdict(toolCallId: string, verdict: ToolApprovalVerdict): void {
-    if (this.conversation === null || this.sending) return;
+  private applyToolVerdict(toolCallId: string, verdict: ToolApprovalVerdict,
+    locator?: ToolApprovalPartLocator): void {
+    if (!this.pageAlive || this.conversation === null || this.sending) return;
     const previous: Conversation = this.conversation;
+    const releaseRun: (() => void) | null = this.reserveConversationRun(previous.id);
+    if (releaseRun === null) return;
+    const operationToken: number = this.generationToken;
     const out: Conversation = applyToolApprovalToConversation(
-      previous, toolCallId, verdict);
+      previous, toolCallId, verdict, locator);
+    if (out === previous) {
+      releaseRun();
+      this.errorMsg = '工具调用已变化或无法唯一定位，请重新打开工具卡片';
+      return;
+    }
     this.conversation = out;
     this.refreshRowsAfterConversationChange(previous, out);
     getChatRepository().save(out)
       .then((): void => {
-        if (!conversationHasPendingTools(out)) {
+        if (this.isGenerationOperationActive(operationToken) && !conversationHasPendingTools(out)) {
           this.resumeToolLoop(out);
         }
       })
       .catch((e: Error): void => {
-        this.errorMsg = e.message;
-      });
+        if (this.isGenerationOperationActive(operationToken)) {
+          this.conversation = previous;
+          this.refreshRowsAfterConversationChange(out, previous);
+          this.errorMsg = e.message;
+        }
+      }).finally(releaseRun);
   }
 
   // 审批后续跑:不追加 user 消息,直接进工具循环;流式预览复用 D-041
   //   regenTail 机制(末条 assistant 行下渲染 — 写回的就是末条消息)
   private resumeToolLoop(conv: Conversation): void {
-    if (this.sending) return;
+    if (!this.pageAlive || this.sending) return;
+    const releaseRun: (() => void) | null = this.reserveConversationRun(conv.id);
+    if (releaseRun === null) return;
     this.sending = true;
     this.errorMsg = '';
     const operationAbort: EntryAbortController = new EntryAbortController();
@@ -3441,11 +3623,8 @@ struct ChatPage {
           onUpdate: (msgs: UIMessage[]): void => {
             if (!this.isGenerationOperationActive(operationToken)
               || msgs.length === 0 || holder.rt === null) return;
-            const ctx: TransformerContext = { assistant: holder.rt.assistant };
-            const transformed: UIMessage[] = applyVisualTransformersStreamingTail(
-              msgs, [thinkTagTransformer, regexOutputTransformer], ctx); // MiniApp:仅 ThinkTag/Regex 实现 visualTransformTail(Android 同);MiniAppOutput 无 visual 变换,流式期恒等 → 不加
             this.regenNodeId = lastNodeId;
-            this.regenTail = transformed[transformed.length - 1];
+            this.regenTail = msgs[msgs.length - 1];
             this.followStreamingUpdate();
           },
           // Phase 2:raw 快照捕获(与 send 路径同接线)
@@ -3501,7 +3680,7 @@ struct ChatPage {
               'regenerate reload failed: %{public}s', reloadError.message);
           })
           .then((): void => { this.drainPendingQueue(); });
-      });
+      }).finally((): Promise<void> => this.releaseConversationRunAfterSaves(releaseRun));
   }
 
   // 生成中发送 → 入队;满 20 拒绝(Android 文案逐字)。
@@ -3554,9 +3733,19 @@ struct ChatPage {
       .catch((e: Error): void => { this.errorMsg = e.message; });
   }
 
+  private async appendUserParts(parts: UIMessagePart[]): Promise<Conversation> {
+    if (!this.pageAlive || this.conversation === null) throw new Error('会话页面已关闭');
+    const release: () => void = beginConversationRun(this.conversation.id);
+    try {
+      return await runAppendUserMessage(this.conversation, parts, getChatRepository());
+    } finally {
+      release();
+    }
+  }
+
   // 生成完成(成功/失败/中断)后出队下一条继续派发(Android 循环逐条 catch 后继续)
   private drainPendingQueue(): void {
-    if (this.pendingDrainActive || this.sending || this.appendActive || this.conversation === null) return;
+    if (!this.pageAlive || this.pendingDrainActive || this.sending || this.appendActive || this.conversation === null) return;
     if (conversationHasPendingOrUnexecutedTools(this.conversation)) return;
     const dq: DequeueNextResult = dequeueNextPendingUserMessage(this.pendingQueue);
     if (dq.next === null) return;
@@ -3580,8 +3769,7 @@ struct ChatPage {
               this.requeueDispatchAtHead(prep.dispatch);
               return;
             }
-            runAppendUserMessage(this.conversation as Conversation, prep.dispatch.parts,
-              getChatRepository())
+            this.appendUserParts(prep.dispatch.parts)
               .then((out: Conversation): void => {
                 const previous: Conversation | null = this.conversation;
                 this.conversation = out;
@@ -3696,7 +3884,7 @@ struct ChatPage {
             this.appendActive = false;
             return;
           }
-          runAppendUserMessage(this.conversation as Conversation, inputParts, getChatRepository())
+          this.appendUserParts(inputParts)
             .then((out: Conversation): void => {
               const previous: Conversation | null = this.conversation;
               this.conversation = out;
@@ -3724,7 +3912,7 @@ struct ChatPage {
   //   输入保留,不入队/不生成/不编辑。斜杠路由已在各路径前置拦截,无需在此判断。
   // D-111:choice 透传(图片守卫需要 chat 模型 inputModalities)
   private gateModelConfigured(onConfigured: (choice: ChatProviderChoice) => void): void {
-    resolveChatProviderChoice().then((choice: ChatProviderChoice | null): void => {
+    resolveEffectiveChatChoice(this.conversation?.assistantId).then((choice: ChatProviderChoice | null): void => {
       if (choice === null) {
         this.errorMsg = '请先选择模型';
         return;
@@ -3773,7 +3961,7 @@ struct ChatPage {
 
   // 附件点按(ChatInputAttachments.kt:onStatusClick)— blocked 才 toast 错误,其余静默
   private inspectPendingImage(url: string): void {
-    resolveChatProviderChoice().then((choice: ChatProviderChoice | null): void => {
+    resolveEffectiveChatChoice(this.conversation?.assistantId).then((choice: ChatProviderChoice | null): void => {
       const seed: OcrSeed | null = this.ocrSeed;
       const settings: ImageGuardSettings = {
         chatModel: choice !== null ? choice.model : null,
@@ -3862,7 +4050,12 @@ struct ChatPage {
   }
 
   private runSendParts(inputParts: UIMessagePart[], dispatchMessageId: string = ''): void {
-    if (this.conversation === null) return;
+    if (!this.pageAlive || this.conversation === null) return;
+    const releaseRun: (() => void) | null = this.reserveConversationRun(this.conversation.id);
+    if (releaseRun === null) {
+      this.sending = false;
+      return;
+    }
     // 单文本 part → 退化为 string(与既有 send 路径行为一致)
     let userInput: string | UIMessagePart[] = inputParts;
     if (inputParts.length === 1 && inputParts[0].type === 'text') {
@@ -4035,7 +4228,7 @@ struct ChatPage {
             // D-048:失败也继续出队(Android 循环逐条 catch → addError 后继续)
             this.drainPendingQueue();
           });
-      });
+      }).finally((): Promise<void> => this.releaseConversationRunAfterSaves(releaseRun));
   }
 
   // 当前索引(:523-527 — selected coerceIn(0,latest) ?: latest;-1 = 未选)
@@ -4317,7 +4510,7 @@ struct ChatPage {
             if (a === null) return '';
             return a.inputPreview.trim().length > 0 ? a.inputPreview : a.title;
           })())
-            .fontSize(12).fontColor(INK).fontFamily('JetBrainsMono')
+            .fontSize(12).fontColor(INK).fontFamily(FONT_MONO)
             .width('100%').margin({ top: 4 })
             .padding(10).backgroundColor(ROW).borderRadius(10)
           Text('调用结果')
@@ -4331,7 +4524,7 @@ struct ChatPage {
             }
             return '无输出';
           })())
-            .fontSize(12).fontColor(INK).fontFamily('JetBrainsMono')
+            .fontSize(12).fontColor(INK).fontFamily(FONT_MONO)
             .width('100%').margin({ top: 4 })
             .padding(10).backgroundColor(ROW).borderRadius(10)
         }
@@ -4350,6 +4543,13 @@ struct ChatPage {
         AgentMessageRow({
           message: row.message,
           capabilities: CHAT_MESSAGE_ROW_CAPABILITIES,
+          showAssistantBubble: this.displaySettings.showAssistantBubble,
+          showModelName: this.displaySettings.showModelName,
+          showModelIcon: this.displaySettings.showModelIcon,
+          fontSizeRatio: this.displaySettings.fontSizeRatio,
+          codeBlockAutoCollapse: this.displaySettings.codeBlockAutoCollapse,
+          showLineNumbers: this.displaySettings.showLineNumbers,
+          onOpenDocument: (part: UIMessagePartDocument): void => { this.openDocumentPreview(part); },
           hostHeader: (): void => {},
           hostFooter: (): void => {},
           autoCloseThinking: this.autoCloseThinking,
@@ -4361,10 +4561,12 @@ struct ChatPage {
           onEdit: (): void => this.startEditMessage(row),
           onOpenActions: (): void => this.openActionsSheet(row),
           onFork: (): void => this.forkAt(row),
-          onApproveTool: (toolCallId: string): void => this.handleToolApproval(toolCallId, true),
-          onDenyTool: (toolCallId: string): void => this.openDenyDialog(toolCallId),
-          onAnswerTool: (toolCallId: string, answer: string): void =>
-            this.handleToolAnswer(toolCallId, answer),
+          onApproveTool: (toolCallId: string, locator?: ToolApprovalPartLocator): void =>
+            this.handleToolApproval(toolCallId, true, '', locator),
+          onDenyTool: (toolCallId: string, locator?: ToolApprovalPartLocator): void =>
+            this.openDenyDialog(toolCallId, locator),
+          onAnswerTool: (toolCallId: string, answer: string, locator?: ToolApprovalPartLocator): void =>
+            this.handleToolAnswer(toolCallId, answer, locator),
           onOpenSubAgentRun: (rid: string, tools: UIMessagePartTool[]): void => {
             this.openSubAgentSheet(rid, tools);
           },
@@ -4384,16 +4586,25 @@ struct ChatPage {
           AgentMessageRow({
             message: this.regenTail as UIMessage,
             capabilities: CHAT_MESSAGE_ROW_CAPABILITIES,
+          showAssistantBubble: this.displaySettings.showAssistantBubble,
+          showModelName: this.displaySettings.showModelName,
+          showModelIcon: this.displaySettings.showModelIcon,
+          fontSizeRatio: this.displaySettings.fontSizeRatio,
+          codeBlockAutoCollapse: this.displaySettings.codeBlockAutoCollapse,
+          showLineNumbers: this.displaySettings.showLineNumbers,
+          onOpenDocument: (part: UIMessagePartDocument): void => { this.openDocumentPreview(part); },
             hostHeader: (): void => {},
             hostFooter: (): void => {},
             autoCloseThinking: this.autoCloseThinking,
             streaming: true,
             streamKeyTag: 'regen:',
             isLastAssistant: true,
-            onApproveTool: (toolCallId: string): void => this.handleToolApproval(toolCallId, true),
-            onDenyTool: (toolCallId: string): void => this.openDenyDialog(toolCallId),
-            onAnswerTool: (toolCallId: string, answer: string): void =>
-              this.handleToolAnswer(toolCallId, answer),
+            onApproveTool: (toolCallId: string, locator?: ToolApprovalPartLocator): void =>
+            this.handleToolApproval(toolCallId, true, '', locator),
+            onDenyTool: (toolCallId: string, locator?: ToolApprovalPartLocator): void =>
+            this.openDenyDialog(toolCallId, locator),
+            onAnswerTool: (toolCallId: string, answer: string, locator?: ToolApprovalPartLocator): void =>
+              this.handleToolAnswer(toolCallId, answer, locator),
             onOpenSubAgentRun: (rid: string, tools: UIMessagePartTool[]): void => {
               this.openSubAgentSheet(rid, tools);
             },
@@ -4417,15 +4628,24 @@ struct ChatPage {
         AgentMessageRow({
           message,
           capabilities: CHAT_MESSAGE_ROW_CAPABILITIES,
+          showAssistantBubble: this.displaySettings.showAssistantBubble,
+          showModelName: this.displaySettings.showModelName,
+          showModelIcon: this.displaySettings.showModelIcon,
+          fontSizeRatio: this.displaySettings.fontSizeRatio,
+          codeBlockAutoCollapse: this.displaySettings.codeBlockAutoCollapse,
+          showLineNumbers: this.displaySettings.showLineNumbers,
+          onOpenDocument: (part: UIMessagePartDocument): void => { this.openDocumentPreview(part); },
           hostHeader: (): void => {},
           hostFooter: (): void => {},
           autoCloseThinking: this.autoCloseThinking,
           streaming: true,
           isLastAssistant: true,
-          onApproveTool: (toolCallId: string): void => this.handleToolApproval(toolCallId, true),
-          onDenyTool: (toolCallId: string): void => this.openDenyDialog(toolCallId),
-          onAnswerTool: (toolCallId: string, answer: string): void =>
-            this.handleToolAnswer(toolCallId, answer),
+          onApproveTool: (toolCallId: string, locator?: ToolApprovalPartLocator): void =>
+            this.handleToolApproval(toolCallId, true, '', locator),
+          onDenyTool: (toolCallId: string, locator?: ToolApprovalPartLocator): void =>
+            this.openDenyDialog(toolCallId, locator),
+          onAnswerTool: (toolCallId: string, answer: string, locator?: ToolApprovalPartLocator): void =>
+            this.handleToolAnswer(toolCallId, answer, locator),
           onOpenSubAgentRun: (rid: string, tools: UIMessagePartTool[]): void => {
             this.openSubAgentSheet(rid, tools);
           },
@@ -4519,7 +4739,7 @@ struct ChatPage {
         .justifyContent(FlexAlign.Center)
         .alignItems(VerticalAlign.Center)
         .margin({ left: -10 })
-        .onClick((): void => { router.back(); })
+        .onClick((): void => { this.navigateBack(); })
         .accessibilityText('返回')
 
         // Center:标题 + 模型行(flex 1, margin-left 2)
@@ -4796,7 +5016,22 @@ struct ChatPage {
       //   Android ChatInput 沉浸式基准 = 安全区底部 + 10vp 呼吸
       Column() {
         // 第二梯队 E:ChatInput 组件替换内联输入行
+        if (this.restoreReloadFailed) {
+          Text('恢复后的会话读取失败，点击重试')
+            .fontSize(13).fontColor(ERROR).width('100%').padding(12)
+            .onClick((): void => {
+              this.refreshRestoredConversation().catch((e: Error): void => { this.errorMsg = e.message; });
+            })
+        }
+        if (this.storageDegraded) {
+          Text('本地数据库暂不可用，无法保存新消息。点击重试。')
+            .fontSize(13).fontColor(ERROR).width('100%').padding(12)
+            .onClick((): void => {
+              getChatRepository().list().catch((e: Error): void => { this.errorMsg = e.message; });
+            })
+        }
         ChatInput({
+          disabled: this.storageDegraded || !this.conversationLoaded,
           text: this.inputText,
           sending: this.sending,
           editing: this.editingNodeId.length > 0,
@@ -4833,7 +5068,7 @@ struct ChatPage {
 
     // 空状态 hero(1:1 原型): 居中 Amber▌ 词标 36px 陶土光标闪烁 +
     //   问候句 3.2s 淡入淡出轮换;光学中心上移(margin bottom 128)
-    if (this.rows.length === 0 && !this.sending) {
+    if (this.conversationLoaded && this.conversation !== null && this.rows.length === 0 && !this.sending) {
       Column() {
         Row() {
           DotText({ text: 'AMBER', dotScale: 3.6, color: INK, glow: true })
@@ -4869,7 +5104,8 @@ struct ChatPage {
         onClose: (): void => { this.closeModelMenu(); },
         onOpenFullPicker: (): void => {
           this.closeModelMenu();
-          router.pushUrl({ url: 'pages/ChatModelPickerPage' });
+          router.pushUrl({ url: 'pages/ChatModelPickerPage',
+            params: { assistantId: this.conversation?.assistantId ?? '' } });
         },
         onOpenProviderSettings: (): void => {
           this.closeModelMenu();
@@ -4897,7 +5133,7 @@ struct ChatPage {
     // ===== D-108:拒绝理由弹窗(ToolDenyReasonDialog :428-461 逐字) =====
     //   title '拒绝工具执行'/hint '原因（可选）'/confirm '拒绝'/dismiss '取消'
     //   (strings.xml:204/:203/:202);AlertDialog → Stack overlay(同 D-101 先例)
-    if (this.denyDialogToolCallId.length > 0) {
+    if (this.denyDialogOpen) {
       Column() {
         Column() {
           Text('拒绝工具执行')
@@ -4936,6 +5172,9 @@ struct ChatPage {
     }
     }
     .width('100%').height('100%')
+    .bindSheet($$this.documentPreviewOpen, this.documentPreviewSheet(), {
+      height: '85%', showClose: false,
+    })
     // 1:1 原型 slideInR .28s ease-out:整页入场 translateX 20→0 + opacity 0→1
     //   乘 themeTick 读取建依赖:主题变更 onPageShow 后 build 重读令牌
     .opacity(this.pageEnterOpacity * (this.themeTick >= 0 ? 1 : 1))

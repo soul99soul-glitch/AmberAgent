@@ -4,7 +4,7 @@ import { loadDisplaySetting, saveDisplaySetting, makeDisplaySetting } from '@amb
 import type { DisplaySetting } from '@amber/chat-domain';
 import { getChatKvStore } from '../di/AppContainer.ets';
 import {
-  PageTitleBar, SectionHeader, ToggleRow, Seg,
+  PageTitleBar, SectionHeader, ToggleRow, NavRow, Seg,
 } from '../components/PageTemplate.ets';
 import { INK3, BG, ACCENT, GUTTER, TEXT_STYLES } from '../design/tokens.ets';
 import { FONT_MONO_MEDIUM } from '../design/fonts.ets';
@@ -104,7 +104,8 @@ struct SettingDisplayPage {
               onToggle: (): void => { this.update({ showModelName: !this.setting.showModelName }); },
             })
             ToggleRow({
-              label: '显示用户头像', desc: '在用户消息旁显示头像',
+              // F16:原「显示用户头像」错绑 showModelIcon;该字段实际控制模型图标
+              label: '显示模型图标', desc: '在助手消息头部显示模型首字母标识',
               checked: this.setting.showModelIcon,
               onToggle: (): void => { this.update({ showModelIcon: !this.setting.showModelIcon }); },
             })
@@ -115,15 +116,15 @@ struct SettingDisplayPage {
             })
 
             SectionHeader({ label: '输入' })
-            ToggleRow({
-              label: '回车发送', desc: '按 Enter 键发送消息(而非换行)',
-              checked: this.setting.sendOnEnter,
-              onToggle: (): void => { this.update({ sendOnEnter: !this.setting.sendOnEnter }); },
+            // F16:回车发送 / 长文本粘贴为文件 —— 鸿蒙输入层无对应管线,
+            //   显式标记「未支持」且不可编辑(不写盘、不制造已保存的错觉)。
+            NavRow({
+              label: '回车发送', desc: '当前版本未支持,输入层暂无此行为开关',
+              valueText: '未支持', showChevron: false,
             })
-            ToggleRow({
-              label: '长文本粘贴为文件', desc: '粘贴超长文本时自动转为文件附件',
-              checked: this.setting.pasteLongTextAsFile, isLast: true,
-              onToggle: (): void => { this.update({ pasteLongTextAsFile: !this.setting.pasteLongTextAsFile }); },
+            NavRow({
+              label: '长文本粘贴为文件', desc: '当前版本未支持,输入层暂无此行为开关',
+              valueText: '未支持', showChevron: false, isLast: true,
             })
 
             SectionHeader({ label: '代码块' })

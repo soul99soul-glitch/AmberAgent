@@ -432,3 +432,28 @@ test('mergeCustomBody: 同键 JsonObject 递归合并,否则替换', () => {
   assert.deepEqual(out['a'], { x: 1, y: 3, z: 4 });
   assert.deepEqual(out['b'], { nested: true });
 });
+
+// R06/C04:customBody 不得覆写 stream(对齐 ChatCompletionsAPI.kt withForcedStream)
+test('request R06: customBody stream 覆写被强制回写为调用模式', () => {
+  const streaming = buildChatCompletionRequest({
+    messages: [makeUserMessage('hi')],
+    params: makeTextGenerationParams({
+      model: makeChatModel({ modelId: 'gpt-4o' }),
+      customBody: [{ key: 'stream', value: false }],
+    }),
+    setting: makeProviderSettingOpenAI({}),
+    stream: true,
+  });
+  assert.equal(streaming['stream'], true, '调用 stream=true 时 customBody stream=false 无效');
+
+  const nonStream = buildChatCompletionRequest({
+    messages: [makeUserMessage('hi')],
+    params: makeTextGenerationParams({
+      model: makeChatModel({ modelId: 'gpt-4o' }),
+      customBody: [{ key: 'stream', value: true }],
+    }),
+    setting: makeProviderSettingOpenAI({}),
+    stream: false,
+  });
+  assert.equal(nonStream['stream'], false, '调用 stream=false 时 customBody stream=true 无效');
+});

@@ -17,7 +17,23 @@ const COUNCIL_TOOL_NAMES: ReadonlySet<string> = new Set<string>([
   'model_council_cancel', 'model_council_make_report',
 ]);
 
-const COUNCIL_PHASES: string[] = ['听证', '辩论', '权衡', '裁决'];
+// F12:阶段只在工具 output 提供结构化字段时显示;缺失 → 不伪造轮播。
+const COUNCIL_PHASE_KEYS: string[] = ['phase_label', 'phase', 'stage_label', 'stage', 'round'];
+
+const parseLatestCouncilPhase = (tools: UIMessagePartTool[]): string => {
+  for (let i: number = tools.length - 1; i >= 0; i--) {
+    const t: UIMessagePartTool = tools[i];
+    if (!COUNCIL_TOOL_NAMES.has(t.toolName)) continue;
+    if (t.output.length === 0) continue;
+    const json: JsonObject = toolOutputJson(t);
+    for (const key of COUNCIL_PHASE_KEYS) {
+      const v: JsonValue = json[key];
+      if (typeof v === 'string' && v.trim().length > 0) return v.trim();
+      if (typeof v === 'number') return `第 ${v} 轮`;
+    }
+  }
+  return '';
+};
 
 const parseLatestCouncilStatus = (tools: UIMessagePartTool[]): string => {
   for (let i: number = tools.length - 1; i >= 0; i--) {
@@ -80,33 +96,27 @@ export struct ChatMessageCouncilStep {
   @Prop runId: string = '';
   @Prop canOpenRun: boolean = true;
   onOpenRun: (runId: string) => void = (_id: string): void => {};
-  @State phaseIndex: number = 0;
   @State objectiveExpanded: boolean = false;
 
-  aboutToAppear(): void {
-    // phase 轮播(running 时每 5s 切换)
-    if (this.currentStatus() === 'running') {
-      this.startPhaseRotation();
-    }
-  }
-
-  private startPhaseRotation(): void {
-    // ArkUI 不支持 setInterval,用 @State + 定时器模拟
-    // 简化:每次 build 时根据时间戳取模
-  }
-
+  // F12:真实阶段(结构化 output 字段);无则空,不按墙钟轮播
   private currentPhase(): string {
-    if (this.currentStatus() !== 'running') return COUNCIL_PHASES[COUNCIL_PHASES.length - 1];
-    const elapsed: number = Date.now() / 5000;
-    return COUNCIL_PHASES[Math.floor(elapsed) % COUNCIL_PHASES.length];
+    return parseLatestCouncilPhase(this.tools);
+  }
+
+  private titleText(): string {
+    const status: string = councilStatusVerb(this.currentStatus());
+    const phase: string = this.currentPhase();
+    return phase.length > 0
+      ? `@Council ${status} · ${phase}`
+      : `@Council ${status}`;
   }
 
   build(): void {
     Column() {
-      // capsule: @Council + status + phase
+      // capsule: @Council + status + phase(仅在真实阶段存在时附加)
       AgentToolCallCapsule({
         toolName: 'model_council',
-        title: `@Council ${councilStatusVerb(this.currentStatus())} · ${this.currentPhase()}`,
+        title: this.titleText(),
         status: councilStatusToToolStatus(this.currentStatus()),
         showApproval: false,
         canOpen: this.canOpenRun,

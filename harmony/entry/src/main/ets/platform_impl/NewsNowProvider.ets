@@ -4,12 +4,16 @@
 //   1. fetchAllSources() → 按源分组的完整热榜(知乎/微博/抖音… 各自 12 条)
 //   2. search(queries) → SearchProvider 接口,用关键词匹配热榜条目(供 prefetcher 用)
 
-import type { HttpClient, HttpRequest, HttpResponse, SearchProvider, SearchHit } from '@amber/deepread-domain';
+import type { AbortSignalLike, HttpClient, HttpRequest, HttpResponse, SearchProvider, SearchHit } from '@amber/deepread-domain';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 
 const DOMAIN: number = 0x0001;
 const TAG: string = 'DeepRead.NewsNow';
 const ENDPOINT: string = 'https://newsnow.busiyi.world/api/s';
+
+// R20:取消已发生时不再发起下一路 HTTP;真实中止底层外呼
+const isAborted = (signal?: AbortSignalLike): boolean =>
+  signal !== undefined && signal.aborted;
 
 // 热榜预设(对照 Android NewsNowPresets.ALL)
 interface NewsNowPreset {
@@ -67,8 +71,8 @@ export class NewsNowProvider implements SearchProvider {
     this.http = http;
   }
 
-  // 抓取单个源的热榜
-  async fetchSource(preset: NewsNowPreset): Promise<SourceSection> {
+  // 抓取单个源的热榜(signal 可选:取消时真实中止该 HTTP)
+  async fetchSource(preset: NewsNowPreset, signal?: AbortSignalLike): Promise<SourceSection> {
     const result: SourceSection = {
       fetchedAt: Date.now(),
       sourceId: preset.id,
@@ -86,7 +90,7 @@ export class NewsNowProvider implements SearchProvider {
           'Referer': 'https://newsnow.busiyi.world/',
         },
       };
-      const resp: HttpResponse = await this.http.fetch(req);
+      const resp: HttpResponse = await this.http.fetch(req, signal === undefined ? undefined : { signal: signal });
       if (resp.status !== 200) {
         result.error = `HTTP ${resp.status}`;
         hilog.warn(DOMAIN, TAG, '%{public}s: HTTP %{public}d', preset.id, resp.status);
@@ -122,11 +126,11 @@ export class NewsNowProvider implements SearchProvider {
     return result;
   }
 
-  // 抓取所有源(并行)
-  async fetchAllSources(): Promise<SourceSection[]> {
+  // 抓取所有源(并行;signal 可选)
+  async fetchAllSources(signal?: AbortSignalLike): Promise<SourceSection[]> {
     const promises: Promise<SourceSection>[] = [];
     for (let i = 0; i < PRESETS.length; i++) {
-      promises.push(this.fetchSource(PRESETS[i]));
+      promises.push(this.fetchSource(PRESETS[i], signal));
     }
     const results: SourceSection[] = await Promise.all(promises);
     return results;
@@ -151,11 +155,13 @@ export class NewsNowProvider implements SearchProvider {
     return combined;
   }
 
-  // SearchProvider 接口:用关键词匹配热榜条目
-  async search(queries: string[]): Promise<SearchHit[]> {
-    const allSections: SourceSection[] = await this.fetchAllSources();
+  // SearchProvider 接口:用关键词匹配热榜条目(signal 可选:R20 取消贯穿)
+  async search(queries: string[], signal?: AbortSignalLike): Promise<SearchHit[]> {
+    if (isAborted(signal)) return [];
+    const allSections: SourceSection[] = await this.fetchAllSources(signal);
     const hits: SearchHit[] = [];
     for (let si = 0; si < allSections.length; si++) {
+      if (isAborted(signal)) break;
       const section: SourceSection = allSections[si];
       for (let qi = 0; qi < queries.length; qi++) {
         const q: string = queries[qi].toLowerCase();

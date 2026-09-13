@@ -1,6 +1,8 @@
 // SettingSlidesFontPage — 幻灯片字体设置页
-// 字体族选择(PillSelect) + 字号滑块(NotionSlider) + 预览文本
-import { router } from '@kit.ArkUI';
+// F19:当前版本未支持 —— 生成式幻灯片在鸿蒙端无实现,本页字体族/字号
+//   既无持久化(KV)也无任何消费者,原“完成”仅返回、私有常量每次重置属伪保存。
+//   处置:入口已从 SkillsPage 移除;本页显式标记未支持并禁用全部编辑,
+//   不再接受修改、不再提供“完成”动作(仅可返回),避免制造已保存的错觉。
 import {
   INK, INK2, INK3, BG, BODY, META, TEXT_STYLES, lineHeightForSize,
 } from '../design/tokens.ets';
@@ -22,6 +24,9 @@ function placeholderLoadFontSettings(): Promise<SlidesFontSettings> {
   return Promise.resolve(makeFontSettings(0, 18));
 }
 
+// F19:硬编码未支持;无真实配置源时不得假装可编辑/可保存
+const SLIDES_FONT_SUPPORTED: boolean = false;
+
 @Entry
 @Component
 struct SettingSlidesFontPage {
@@ -30,6 +35,11 @@ struct SettingSlidesFontPage {
   private fonts: string[] = ['系统默认', '思源黑体', '思源宋体', '等距更纱黑体', 'JetBrains Mono'];
 
   aboutToAppear(): void {
+    if (!SLIDES_FONT_SUPPORTED) {
+      // 未支持:不加载伪配置、不接受编辑
+      this.loaded = true;
+      return;
+    }
     placeholderLoadFontSettings().then((v: SlidesFontSettings): void => {
       this.s = v;
       this.loaded = true;
@@ -37,17 +47,15 @@ struct SettingSlidesFontPage {
   }
 
   private setFamily(i: number): void {
+    if (!SLIDES_FONT_SUPPORTED) return;
     const c: SlidesFontSettings = this.s;
     this.s = makeFontSettings(i, c.fontSize);
   }
 
   private setSize(v: number): void {
+    if (!SLIDES_FONT_SUPPORTED) return;
     const c: SlidesFontSettings = this.s;
     this.s = makeFontSettings(c.fontFamilyIndex, v);
-  }
-
-  private done(): void {
-    router.back();
   }
 
   private currentFontFamily(): string {
@@ -114,9 +122,23 @@ struct SettingSlidesFontPage {
 
   build(): void {
     Column() {
-      PageTitleBar({ title: '幻灯片字体', actionText: '完成', onAction: (): void => { this.done(); } })
+      PageTitleBar({ title: '幻灯片字体' })
 
-      if (!this.loaded) {
+      if (!SLIDES_FONT_SUPPORTED) {
+        // F19:显式未支持,禁编辑、无“完成”动作(仅可返回)
+        Column() {
+          Text('此功能在当前版本未支持')
+            .fontSize(BODY).fontWeight(600).lineHeight(TEXT_STYLES.body.lineHeight)
+            .fontFamily(FONT_SANS_SEMIBOLD).fontColor(INK)
+          Text('生成式幻灯片尚未在鸿蒙端实现,字体资源设置暂无存储与消费者,故不提供修改。')
+            .fontSize(TEXT_STYLES.secondary.size).fontWeight(TEXT_STYLES.secondary.weight)
+            .lineHeight(TEXT_STYLES.secondary.lineHeight).fontFamily(FONT_SANS)
+            .fontColor(INK3).margin({ top: 8 })
+        }
+        .width('100%').alignItems(HorizontalAlign.Start)
+        .padding({ left: 16, right: 16, top: 40 })
+        .layoutWeight(1)
+      } else if (!this.loaded) {
         Text('加载中…')
           .fontSize(TEXT_STYLES.body.size)
           .fontWeight(TEXT_STYLES.body.weight)

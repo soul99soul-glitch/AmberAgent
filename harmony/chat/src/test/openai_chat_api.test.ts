@@ -30,7 +30,7 @@ interface FakeScript {
   chunks: string[];      // 每段一次 onChunk 投递
   finalBody?: string;    // fetchStream 返回的 HttpResponse.body(错误路径用)
 }
-interface FakeCapture { req: HttpRequest | null }
+interface FakeCapture { req: HttpRequest | null; stopRequested?: boolean }
 const fakeHttp = (script: FakeScript, capture: FakeCapture): HttpClient => ({
   fetch: (req: HttpRequest): Promise<HttpResponse> => {
     capture.req = req;
@@ -41,11 +41,13 @@ const fakeHttp = (script: FakeScript, capture: FakeCapture): HttpClient => ({
   fetchStream: (req: HttpRequest, opts: {
     onChunk: (c: ArrayBuffer, end: boolean) => void;
     onDataEnd?: () => void;
+    shouldStop?: () => boolean;
   }): Promise<HttpResponse> => {
     capture.req = req;
     for (let i = 0; i < script.chunks.length; i++) {
       const isLast = i === script.chunks.length - 1;
       opts.onChunk(enc.encode(script.chunks[i]).buffer as ArrayBuffer, isLast);
+      if (opts.shouldStop !== undefined && opts.shouldStop()) capture.stopRequested = true;
     }
     if (script.chunks.length === 0) {
       opts.onChunk(new ArrayBuffer(0), true);
@@ -238,4 +240,33 @@ test('openAIAuthHeaders: mimo_coding_plan/token-plan 主机用 api-key,其余 Be
     { 'api-key': 'T' });
   assert.deepEqual(openAIAuthHeaders('api_key', 'https://token-plan-cn.xiaomimimo.com/v1', 'T'),
     { 'api-key': 'T' }, 'token-plan-* xiaomimimo.com 主机即使 api_key 模式也用 api-key 头');
+});
+
+// ===== R06:200 但非 SSE / 零有效事件不得静默成功;R18:[DONE] 后立即收口 =====
+
+test('R06/R18 openai streamText: 200 非 SSE/空流 → 抛错;解析到 [DONE] → 请求收口底层流', async () => {
+  const body = '{"error":{"message":"bad gateway proxy","type":"proxy_error"}}';
+  const nonSse = createOpenAIChatApi({
+    http: fakeHttp({ status: 200, chunks: [body], finalBody: body }, { req: null }),
+    setting,
+  });
+  await assert.rejects(
+    nonSse.streamText([makeUserMessage('hi')], params, (): void => {}),
+    /bad gateway proxy/, '200 + 普通 JSON 必须报错');
+
+  const empty = createOpenAIChatApi({
+    http: fakeHttp({ status: 200, chunks: [], finalBody: '' }, { req: null }),
+    setting,
+  });
+  await assert.rejects(
+    empty.streamText([makeUserMessage('hi')], params, (): void => {}),
+    /Failed to get response: 200/, '200 零 SSE 事件必须失败');
+
+  const capture: FakeCapture = { req: null };
+  const ok = createOpenAIChatApi({
+    http: fakeHttp({ status: 200, chunks: [SSE_TEXT] }, capture),
+    setting,
+  });
+  await ok.streamText([makeUserMessage('hi')], params, (): void => {});
+  assert.equal(capture.stopRequested, true, '[DONE] 后必须请求关闭底层流');
 });

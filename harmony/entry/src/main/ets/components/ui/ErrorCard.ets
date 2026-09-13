@@ -1,6 +1,6 @@
 // ErrorCard — 错误卡片(对齐 Android ErrorCard.kt)
 // 单条错误: 标题 + 消息 + 复制/关闭按钮
-import { INK, INK2, INK3, SURFACE, SURFACE2, ERROR, LINE, BODY, META, LABEL } from '../../design/tokens.ets';
+import { INK3, ERROR, ERROR_BG, LINE, LABEL, META } from '../../design/tokens.ets';
 
 @Component
 export struct ErrorCard {
@@ -47,7 +47,7 @@ export struct ErrorCard {
         .onClick((): void => { this.onDismiss(); })
     }
     .width('100%')
-    .backgroundColor('#FFF0EE')
+    .backgroundColor(ERROR_BG)
     .borderRadius(12)
     .border({ width: 0.5, color: ERROR })
     .padding({ left: 12, right: 12, top: 10, bottom: 10 })

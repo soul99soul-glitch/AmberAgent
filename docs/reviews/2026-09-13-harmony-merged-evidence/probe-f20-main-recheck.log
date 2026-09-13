@@ -1,0 +1,14 @@
+[extract] SettingFilesPage members from AST; cleanOrphans sha256/16: 8fb8c79007222e6b len 1354 | reload sha256/16: d2b12c3eeeddb40b len 617
+[T0] real reload -> rows: 2 | loaded: true
+[T1] real reload on corrupt registry -> rows: 0 | loaded: true
+[T1] mock FS after real cleanOrphans -> remaining mock upload entries: []
+[T1] CONFIRMED: corrupt registry -> empty snapshot -> real cleanOrphans removes still-referenced files (mock FS).
+[T2] missing registry -> remaining mock upload entries: []
+[T2] CONFIRMED: access=false -> emptyShape (no quarantine) -> same destructive result.
+[T3] transient readText failure -> rows at clean: 0 | remaining mock upload entries: []
+[T3] CONFIRMED: same empty-snapshot root cause as R10.
+[T4] healthy registry -> remaining mock upload entries: ["/mock/files/upload/e.png"]
+[T4] CONFIRMED: destruction is specific to the empty/error snapshot.
+[T5] cleanOrphans reference source = this.rows only; slice contains conversationFileUris? false | .bad read? false
+
+All T0-T5 assertions passed. Real page methods, mocked in-memory FS only; no real files/device/network.

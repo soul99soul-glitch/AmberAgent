@@ -12,12 +12,18 @@ import {
 import { PageTitleBar, SectionHeader, NavRow, PageSpacer, ToggleRow } from '../components/PageTemplate.ets';
 import { getChatRepository, getChatKvStore, getAppContainer } from '../di/AppContainer.ets';
 import { createEntrySyncCryptoPort } from '../platform_impl/SyncCryptoPort.ets';
-import type { Conversation, ConversationSummary, JsonObject, JsonValue } from '@amber/chat-domain';
+import {
+  hasActiveConversationRuns, beginConversationRestore, markConversationsRestored,
+} from '../platform_impl/ConversationRunGuard.ets';
+import { clearConversationDeletedMarker } from '../platform_impl/EntryCompactStore.ets';
+import type { Conversation, ConversationSummary, JsonObject, KeyValueStore } from '@amber/chat-domain';
 import {
   createSyncBackup, restoreSyncBackup, inspectSyncArchive,
   createWebDavClient, webDavBackupFileName,
   loadAssistants, saveAssistants, loadProviders, saveProviders,
-  type SyncInspectPreview, type SyncRestoreResult, type WebDavConfig,
+  conversationFromSyncDto, settingsFromSyncPayload,
+  ASSISTANTS_KEY, PROVIDERS_KEY,
+  type SyncConversationDto, type SyncInspectPreview, type SyncRestoreResult, type SyncRestoreSettings, type WebDavConfig,
 } from '@amber/chat-domain';
 
 @Entry
@@ -96,14 +102,13 @@ struct SettingBackupPage {
       const fileName = `amber-backup-${new Date().toISOString().replace(/[:.]/g, '-').substring(0, 19)}.abin`;
       const docPicker = new picker.DocumentViewPicker(this.ctx());
       const uris: string[] = await docPicker.save({ newFileNames: [fileName] });
-      let target = '';
-      if (uris.length > 0) {
-        target = uris[0];
-      } else {
-        const dir = `${this.ctx().filesDir}/backups`;
-        try { fileIo.mkdirSync(dir, true); } catch { /* exists */ }
-        target = `${dir}/${fileName}`;
+      // UI-F25:选择器返回空 URI = 用户取消。取消不得私有落盘，也不得报成功。
+      if (uris.length === 0 || uris[0].length === 0) {
+        this.statusMsg = '已取消导出（未选择保存位置）';
+        this.toast('已取消导出');
+        return;
       }
+      const target: string = uris[0];
       const file = fileIo.openSync(
         target, fileIo.OpenMode.READ_WRITE | fileIo.OpenMode.CREATE | fileIo.OpenMode.TRUNC);
       fileIo.writeSync(file.fd, bytes.buffer as ArrayBuffer);
@@ -195,6 +200,49 @@ struct SettingBackupPage {
     }
   }
 
+  // settings 第二阶段:覆盖前先取原值；覆盖失败回滚原值，并返回准确反馈。
+  // 不与会话恢复假装跨 store 原子(会话已单事务提交，settings 独立报告)。
+  private async applyRestoreSettings(
+    settings: SyncRestoreSettings, kv: KeyValueStore,
+  ): Promise<string | null> {
+    const writeAssistants: boolean = settings.assistants !== null;
+    const writeProviders: boolean = settings.providers !== null;
+    if (!writeAssistants && !writeProviders) return null;
+    let prevAssistants: string | null = null;
+    let prevProviders: string | null = null;
+    if (writeAssistants) prevAssistants = await kv.get(ASSISTANTS_KEY);
+    if (writeProviders) prevProviders = await kv.get(PROVIDERS_KEY);
+    try {
+      if (writeAssistants) await saveAssistants(kv, settings.assistants as never);
+      if (writeProviders) await saveProviders(kv, settings.providers as never);
+      return '（已覆盖 settings）';
+    } catch (e) {
+      // 原值回滚(尽力而为；回滚自身失败需一并如实告知)
+      let rollbackNote: string = '';
+      try {
+        if (writeAssistants) {
+          if (prevAssistants === null) await kv.delete(ASSISTANTS_KEY);
+          else await kv.put(ASSISTANTS_KEY, prevAssistants);
+        }
+      } catch (re) {
+        rollbackNote += ` assistants 回滚失败：${re instanceof Error ? re.message : String(re)}`;
+      }
+      try {
+        if (writeProviders) {
+          if (prevProviders === null) await kv.delete(PROVIDERS_KEY);
+          else await kv.put(PROVIDERS_KEY, prevProviders);
+        }
+      } catch (re) {
+        rollbackNote += ` providers 回滚失败：${re instanceof Error ? re.message : String(re)}`;
+      }
+      const msg: string = e instanceof Error ? e.message : String(e);
+      if (rollbackNote.length > 0) {
+        return `（settings 覆盖失败，回滚未完成：${msg}${rollbackNote}）`;
+      }
+      return `（settings 覆盖失败，已回滚原设置：${msg}）`;
+    }
+  }
+
   async doRestore(): Promise<void> {
     if (this.busy || this.pendingArchivePath.length === 0) return;
     const needPass = this.preview !== null && this.preview.needsPassphrase;
@@ -205,6 +253,7 @@ struct SettingBackupPage {
     }
     this.busy = true;
     this.statusMsg = '恢复中…';
+    let release: (() => void) | null = null;
     try {
       const file = fileIo.openSync(this.pendingArchivePath, fileIo.OpenMode.READ_ONLY);
       const stat = fileIo.statSync(file.fd);
@@ -212,45 +261,61 @@ struct SettingBackupPage {
       fileIo.readSync(file.fd, buf);
       fileIo.closeSync(file.fd);
       const crypto = createEntrySyncCryptoPort();
+      // restoreSyncBackup 内部已用真实序列化器整体校验结构/ID/时间/selectIndex(R03)；
+      // 校验失败在此抛出，尚未写任何会话。
       const result: SyncRestoreResult = await restoreSyncBackup(crypto, new Uint8Array(buf), pass);
-      const repo = getChatRepository();
-      let count = 0;
-      for (const item of result.payload.conversations) {
-        const conv: Conversation = {
-          id: item.id,
-          assistantId: item.assistantId,
-          title: item.title,
-          createAt: item.createAt,
-          updateAt: item.updateAt,
-          chatSuggestions: [],
-          isPinned: false,
-          autoApproveToolCalls: false,
-          messageNodes: [],
-        };
-        await repo.save(conv);
-        count += 1;
+      const dtos: SyncConversationDto[] = result.payload.conversations;
+      const ids: string[] = dtos.map((d: SyncConversationDto): string => d.id);
+      // 活跃生成检查:目标会话正在生成时拒绝，避免恢复与生成尾写互相覆盖
+      if (hasActiveConversationRuns(ids)) {
+        this.statusMsg = '恢复失败：目标会话正在生成，请先停止该会话的生成后再恢复';
+        this.toast('目标会话正在生成');
+        return;
       }
-      let settingsNote = '（未勾选，settings 未覆盖）';
-      if (this.restoreSettings && result.payload.settings !== undefined) {
-        const blob: JsonObject = result.payload.settings as JsonObject;
-        const kv = getChatKvStore();
-        const assistantsJson: JsonValue | undefined = blob['assistants'];
-        if (Array.isArray(assistantsJson)) {
-          await saveAssistants(kv, assistantsJson as never);
+      // 同步占用恢复代际(覆盖预检后的新 run 竞态)；beginRun 在此期间会被拒
+      release = beginConversationRestore(ids);
+      // settings 第二阶段所需的解析在写会话前完成(预校验失败则整体不写)
+      const settings: SyncRestoreSettings = settingsFromSyncPayload(result.payload);
+      const kv = getChatKvStore();
+      const convs: Conversation[] = dtos.map(
+        (d: SyncConversationDto): Conversation => conversationFromSyncDto(d));
+      // 会话:单事务批量恢复(全有或全无)
+      await getChatRepository().restoreConversations(convs);
+      markConversationsRestored(ids);
+      // R09:恢复成功 → 清除 compact 删除标记(仅压缩状态标记；绝不触碰
+      // memory/managedfiles 的损坏隔离保护——恢复不携带这些 store 的数据)。
+      // 会话已落库，故此处失败不得泛报「恢复失败」隐去已写。
+      let compactFailed: boolean = false;
+      let compactErr: string = '';
+      try {
+        for (const id of ids) {
+          await clearConversationDeletedMarker(kv, id);
         }
-        const providersJson: JsonValue | undefined = blob['providers'];
-        if (Array.isArray(providersJson)) {
-          await saveProviders(kv, providersJson as never);
-        }
-        settingsNote = '（已覆盖 settings）';
+      } catch (e) {
+        compactFailed = true;
+        compactErr = e instanceof Error ? e.message : String(e);
       }
-      this.statusMsg = `已恢复 ${count} 个会话${settingsNote}`;
-      this.toast('恢复完成');
+      let settingsNote: string = '（未勾选，settings 未覆盖）';
+      if (this.restoreSettings) {
+        const note: string | null = await this.applyRestoreSettings(settings, kv);
+        if (note !== null) settingsNote = note;
+      }
+      if (compactFailed) {
+        this.statusMsg = `已恢复 ${convs.length} 个会话，但压缩状态恢复失败：${compactErr}${settingsNote}`;
+        this.toast('会话已恢复，压缩状态恢复失败');
+      } else if (settingsNote.indexOf('失败') >= 0) {
+        this.statusMsg = `已恢复 ${convs.length} 个会话${settingsNote}`;
+        this.toast('会话已恢复，settings 覆盖失败');
+      } else {
+        this.statusMsg = `已恢复 ${convs.length} 个会话${settingsNote}`;
+        this.toast('恢复完成');
+      }
       this.preview = null;
       this.pendingArchivePath = '';
     } catch (e) {
       this.statusMsg = `恢复失败：${e instanceof Error ? e.message : String(e)}`;
     } finally {
+      if (release !== null) release();
       this.busy = false;
     }
   }

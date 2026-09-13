@@ -290,5 +290,7 @@ export const buildClaudeMessageRequest = (input: BuildClaudeMessageRequestInput)
     req['tools'] = tools as unknown as JsonValue;
   }
 
-  return mergeCustomBody(req, params.customBody);
+  // R06/C04:stream 为调用模式强约束 —— customBody 不得覆盖(与 R06 口径一致;
+  //   非流式请求回普通 JSON 被流式解析器静默吞掉是用户可见空回复的根因)
+  return { ...mergeCustomBody(req, params.customBody), stream };
 };

@@ -10,6 +10,7 @@ import type { Context } from '@kit.AbilityKit';
 import type { Conversation, ConversationSummary, UIMessage, DisplaySetting } from '@amber/chat-domain';
 import { loadDisplaySetting, exportConversationMarkdown, exportFileNameFor } from '@amber/chat-domain';
 import { getChatKvStore, getChatRepository } from '../di/AppContainer.ets';
+import { routePendingWant } from '../entryability/EntryAbility.ets';
 import { cleanupDeletedConversation } from '../platform_impl/ManagedFileStore.ets';
 import { Icon } from '../components/ui/Icon.ets';
 import { UIAvatar } from '../components/UIAvatar.ets';
@@ -33,14 +34,16 @@ const accentAlpha = (hex: string, alpha: number): string => {
   return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 };
 const SNACK_DURATION_MS: number = 4000;
+// F08:会话预览 getById 并发上限,避免 N 个无界并发
+const PREVIEW_CONCURRENCY: number = 8;
 
 @Entry
 @Component
 struct ChatListPage {
   @StorageProp('statusBarHeight') statusBarHeight: number = 44;
+  @StorageProp('navBarHeight') navBarHeight: number = 0;
   @StorageProp('darkMode') darkMode: boolean = false;
   @StorageProp('accentColor') accentColorStore: string = ACCENT;
-  @State themeTick: number = 0;
   @State items: ConversationSummary[] = [];
   @State loaded: boolean = false;
   @State snackVisible: boolean = false;
@@ -56,10 +59,16 @@ struct ChatListPage {
   private pageAlive: boolean = false;
   // refresh 请求序号:慢的旧搜索结果不得覆盖新输入的结果
   private refreshSeq: number = 0;
+  // F08:aboutToAppear 与首次 onPageShow 都会触发,首屏只加载一次
+  private firstShowDone: boolean = false;
 
   onPageShow(): void {
-    this.themeTick = Date.now();
-    this.refresh();
+    // F08:首次 onPageShow 紧随 aboutToAppear,跳过以避免双刷新;返回本页时才刷新
+    if (this.firstShowDone) {
+      this.refresh();
+    } else {
+      this.firstShowDone = true;
+    }
     loadDisplaySetting(getChatKvStore()).then((setting: DisplaySetting): void => {
       if (!this.pageAlive) return;
       this.userNickname = setting.userNickname;
@@ -82,33 +91,12 @@ struct ChatListPage {
     this.consumeDeepLink();
   }
 
-  // 深链消费:置空后跳转;消费过的 topic/title 不残留
+  // 深链消费(R23):不再在本页自行 push,统一委托 EntryAbility.routePendingWant。
+  // 唯一派发点避免「EntryAbility onNewWant + 本页 onPageShow」双导航,也覆盖栈顶
+  // 非本页时的前台 Want(只有 EntryAbility 能收到 onNewWant)。本页在 aboutToAppear/
+  // onPageShow 各触发一次,仅作冷启动 ready 前的兜底重试;无 pending 时为空操作。
   private consumeDeepLink(): void {
-    const novelProjectId: string = AppStorage.get<string>('wantNovelProjectId') ?? '';
-    const novelBranchId: string = AppStorage.get<string>('wantNovelBranchId') ?? '';
-    const novelJobId: string = AppStorage.get<string>('wantNovelJobId') ?? '';
-    if (novelProjectId.length > 0 && novelBranchId.length > 0 && novelJobId.length > 0) {
-      AppStorage.setOrCreate<string>('wantNovelProjectId', '');
-      AppStorage.setOrCreate<string>('wantNovelBranchId', '');
-      AppStorage.setOrCreate<string>('wantNovelJobId', '');
-      const novelParams: Record<string, string> = {};
-      novelParams['projectId'] = novelProjectId;
-      novelParams['branchId'] = novelBranchId;
-      novelParams['jobId'] = novelJobId;
-      novelParams['tab'] = 'chapters';
-      router.pushUrl({ url: 'pages/NovelWorkspacePage', params: novelParams });
-      return;
-    }
-    const wantTopicId: string = AppStorage.get<string>('wantTopicId') ?? '';
-    const wantTitle: string = AppStorage.get<string>('wantTitle') ?? '';
-    if (wantTopicId.length > 0) {
-      AppStorage.setOrCreate<string>('wantTopicId', '');
-      AppStorage.setOrCreate<string>('wantTitle', '');
-      const params: Record<string, string> = {};
-      params['topicId'] = wantTopicId;
-      params['title'] = wantTitle;
-      router.pushUrl({ url: 'pages/DeepReadArticlePage', params: params });
-    }
+    routePendingWant();
   }
 
   aboutToDisappear(): void {
@@ -137,50 +125,80 @@ struct ChatListPage {
       }
 
       // 会话行预览: 使用末条选中消息的第一行，并去除常见 Markdown 行内标记。
-      for (const summary of visible) {
-        repo.getById(summary.id).then((conversation: Conversation | null): void => {
-          if (conversation === null || seq !== this.refreshSeq || !this.pageAlive) return;
-          let count: number = 0;
-          let lastText: string = '';
-          for (const node of conversation.messageNodes) {
-            if (node.messages.length === 0) continue;
-            const index: number =
-              node.selectIndex >= 0 && node.selectIndex < node.messages.length ? node.selectIndex : 0;
-            const message: UIMessage = node.messages[index];
-            count++;
-            for (const part of message.parts) {
-              if (part.type === 'text') lastText = part.text;
-            }
-          }
-          const preview: string = lastText.split('\n')[0]
-            .replace(/\*\*([^*]+)\*\*/g, '$1')
-            .replace(/`([^`]+)`/g, '$1');
-          const nextPreviews: Record<string, string> = {};
-          for (const key of Object.keys(this.previews)) nextPreviews[key] = this.previews[key];
-          nextPreviews[summary.id] = preview;
-          this.previews = nextPreviews;
-
-          const nextCounts: Record<string, number> = {};
-          for (const key of Object.keys(this.msgCounts)) nextCounts[key] = this.msgCounts[key];
-          nextCounts[summary.id] = count;
-          this.msgCounts = nextCounts;
-        });
-      }
+      // F08:限并发 getById(8) + 聚合后一次批量提交,避免 N 次 setState 复制全部键(O(N²))。
+      this.loadPreviews(visible, seq);
     });
+  }
+
+  // F08:受限并发拉取预览;结果先聚合到局部 Record,全部完成后按 seq 校验一次提交。
+  private loadPreviews(list: ConversationSummary[], seq: number): void {
+    const repo = getChatRepository();
+    const nextPreviews: Record<string, string> = {};
+    const nextCounts: Record<string, number> = {};
+    for (const key of Object.keys(this.previews)) nextPreviews[key] = this.previews[key];
+    for (const key of Object.keys(this.msgCounts)) nextCounts[key] = this.msgCounts[key];
+    let cursor: number = 0;
+    const worker = async (): Promise<void> => {
+      while (cursor < list.length) {
+        if (seq !== this.refreshSeq || !this.pageAlive) return;
+        const summary: ConversationSummary = list[cursor];
+        cursor++;
+        let conversation: Conversation | null = null;
+        try {
+          conversation = await repo.getById(summary.id);
+        } catch (_e) {
+          continue;
+        }
+        if (conversation === null || seq !== this.refreshSeq) continue;
+        let count: number = 0;
+        let lastText: string = '';
+        for (const node of conversation.messageNodes) {
+          if (node.messages.length === 0) continue;
+          const index: number =
+            node.selectIndex >= 0 && node.selectIndex < node.messages.length ? node.selectIndex : 0;
+          const message: UIMessage = node.messages[index];
+          count++;
+          for (const part of message.parts) {
+            if (part.type === 'text') lastText = part.text;
+          }
+        }
+        nextPreviews[summary.id] = lastText.split('\n')[0]
+          .replace(/\*\*([^*]+)\*\*/g, '$1')
+          .replace(/`([^`]+)`/g, '$1');
+        nextCounts[summary.id] = count;
+      }
+    };
+    const workers: Promise<void>[] = [];
+    const workerCount: number = Math.min(PREVIEW_CONCURRENCY, list.length);
+    for (let w = 0; w < workerCount; w++) workers.push(worker());
+    Promise.all(workers).then((): void => {
+      if (seq !== this.refreshSeq || !this.pageAlive) return;
+      this.previews = nextPreviews;
+      this.msgCounts = nextCounts;
+    }).catch((): void => {});
   }
 
   private openConversation(id: string): void {
     const params: Record<string, string> = {};
     params['conversationId'] = id;
-    router.pushUrl({ url: 'pages/ChatPage', params: params });
+    this.pushOnce({ url: 'pages/ChatPage', params: params });
   }
 
   private openSearch(): void {
-    router.pushUrl({ url: 'pages/SearchPage' });
+    this.pushOnce({ url: 'pages/SearchPage' });
   }
 
   private newConversation(): void {
-    router.pushUrl({ url: 'pages/ChatPage' });
+    this.pushOnce({ url: 'pages/ChatPage' });
+  }
+
+  // 防连点叠页:300ms 冷却
+  private navCooldownUntil: number = 0;
+  private pushOnce(options: router.RouterOptions): void {
+    const now: number = Date.now();
+    if (now < this.navCooldownUntil) return;
+    this.navCooldownUntil = now + 300;
+    router.pushUrl(options).catch((): void => { this.navCooldownUntil = 0; });
   }
 
   private togglePin(item: ConversationSummary): void {
@@ -311,11 +329,11 @@ struct ChatListPage {
   }
 
   private onFeature(id: string): void {
-    if (id === 'reader') router.pushUrl({ url: 'pages/BoardPage' });
-    else if (id === 'novel') router.pushUrl({ url: 'pages/NovelProjectsPage' });
-    else if (id === 'council') router.pushUrl({ url: 'pages/CouncilPage' });
-    else if (id === 'apps') router.pushUrl({ url: 'pages/MiniAppListPage' });
-    else if (id === 'webmount') router.pushUrl({ url: 'pages/SettingExperimentalWebMountPage' });
+    if (id === 'reader') this.pushOnce({ url: 'pages/BoardPage' });
+    else if (id === 'novel') this.pushOnce({ url: 'pages/NovelProjectsPage' });
+    else if (id === 'council') this.pushOnce({ url: 'pages/CouncilPage' });
+    else if (id === 'apps') this.pushOnce({ url: 'pages/MiniAppListPage' });
+    else if (id === 'webmount') this.pushOnce({ url: 'pages/SettingExperimentalWebMountPage' });
     else promptAction.showToast({ message: '该功能即将上线', duration: 1500 });
   }
 
@@ -324,9 +342,9 @@ struct ChatListPage {
     Column() {
       Row() {
         Text(item.title.length > 0 ? item.title : '未命名对话')
-          .fontSize(17)
+          .fontSize(16)
           .fontWeight(FontWeight.Bold)
-          .lineHeight(23)
+          .lineHeight(21)
           .fontFamily(FONT_SANS_BOLD)
           .fontColor(INK)
           .maxLines(1)
@@ -757,7 +775,7 @@ struct ChatListPage {
               this.fabScale = down ? 0.96 : 1;
             });
           })
-          .margin({ right: 24, bottom: this.snackVisible ? 80 : 26 })
+          .margin({ right: 24, bottom: (this.snackVisible ? 80 : 26) + this.navBarHeight })
           .onClick((): void => { this.newConversation(); })
         }
         .layoutWeight(1)
@@ -781,7 +799,7 @@ struct ChatListPage {
         .backgroundColor(SNACK_BG)
         .borderRadius(8)
         .shadow({ radius: 12, color: '#33000000', offsetY: 4 })
-        .margin({ bottom: 24 })
+        .margin({ bottom: 24 + this.navBarHeight })
         .transition(TransitionEffect.OPACITY
           .combine(TransitionEffect.translate({ y: 14 }))
           .animation({ duration: 220, curve: Curve.EaseOut }))
@@ -790,8 +808,5 @@ struct ChatListPage {
     .width('100%')
     .height('100%')
     .backgroundColor(BG)
-    // 返回首页时确保重新读取可变主题令牌。
-    .opacity(this.themeTick >= 0 ? 1 : 1)
-    .opacity(this.accentColorStore.length >= 0 ? 1 : 1)
   }
 }

@@ -9,15 +9,16 @@
 //   - 领域枚举小写 union;线格式见 provider_settings_serialize.ts
 
 import { newId } from './ids.ts';
-import type { CustomBody, ModelAbility } from './provider_model.ts';
+import type { BuiltInTools, CustomBody, ModelAbility } from './provider_model.ts';
 import type { CustomHeader } from './assistant.ts';
 import type { OpenAIAuthMode, OpenAIBrand } from './provider_model.ts';
+
+export type { BuiltInTools };
 
 // ===== Model(Model.kt 全量) =====
 
 export type ModelType = 'chat' | 'image' | 'embedding';
 export type ModalityFull = 'text' | 'image' | 'audio';
-export type BuiltInTools = 'search' | 'url_context' | 'image_generation';
 
 export interface ProviderModel {
   modelId: string;

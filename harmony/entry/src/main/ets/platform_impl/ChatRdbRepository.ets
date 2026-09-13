@@ -2,9 +2,10 @@
 // @kit.ArkData relationalStore。schema + 行映射复用 chat-domain persistence.ts(D-013,
 // 已被 node 测试锁定);本层只做 relationalStore API 桥接,不含业务逻辑。
 //
-// 失败策略(非静默):getRdbStore 初始化抛错 → hilog.warn 记录错误信息(不含会话内容,
-// 宪章隐私条款) + 回退 memory 实现(重启丢失,与 D-019 过渡态一致)。spike B 真机验证
-// 后若 API 形态不符,仅改本文件桥接层。
+// 失败策略(R04:不再静默降级):getRdbStore 初始化/迁移抛错 → hilog.warn(不含会话内容,
+// 宪章隐私条款) + AppStorage('chatStorageDegraded', true)。降级期读取回退内存快照,
+// 但**持久化写(save/delete/restoreConversations)一律抛非持久化错误**,避免写进重启即丢的
+// 内存且用户无可见警告;下次操作重试初始化,成功时把内存回灌 RDB 后清除降级标志。
 
 import { relationalStore } from '@kit.ArkData';
 import { hilog } from '@kit.PerformanceAnalysisKit';
@@ -28,6 +29,8 @@ interface RawMessageHit {
 }
 
 const DB_NAME: string = 'amber_chat.db';
+// R04:D B 不可用时拒绝一切持久化写入(非静默降级);恢复/保存抛出此非持久化错误。
+const DEGRADED_WRITE_MSG: string = '数据库暂不可用，已取消写入以免数据丢失，请稍后重试';
 
 // 列序常量(查询投影顺序固定,避免逐列 getColumnIndex)
 const CONV_COLUMNS: string[] = [
@@ -91,6 +94,9 @@ class ChatRdbRepository implements ConversationRepository {
   // whole-node replacement cannot finish after a newer save/delete.
   private mutationTails: Map<string, Promise<void>> = new Map();
   private deletedIds: Set<string> = new Set();
+  // R09 代际:每次删除/授权恢复自增。排队中的旧 save 在调用时捕获 gen，
+  // 执行时 gen 不一致即判为「迟到旧写」拒绝；恢复清墓碑前先自增，故旧写仍被挡。
+  private deletedGen: Map<string, number> = new Map();
 
   private enqueueMutation(id: string, mutation: () => Promise<void>): Promise<void> {
     const previous: Promise<void> = this.mutationTails.get(id) ?? Promise.resolve();
@@ -101,21 +107,32 @@ class ChatRdbRepository implements ConversationRepository {
     });
   }
 
+  private isDeletedAt(id: string, gen: number): boolean {
+    return this.deletedIds.has(id) || (this.deletedGen.get(id) ?? 0) !== gen;
+  }
+
+  // 无事务写入体(供单会话事务与批量恢复的单事务复用；调用方负责事务边界)
+  private async writeConversationBody(
+    store: relationalStore.RdbStore, conv: Conversation,
+  ): Promise<void> {
+    await store.insert('conversation', convBucket(conversationToRow(conv)),
+      relationalStore.ConflictResolution.ON_CONFLICT_REPLACE);
+    const delPredicates = new relationalStore.RdbPredicates('message_node');
+    delPredicates.equalTo('conversation_id', conv.id);
+    await store.delete(delPredicates);
+    for (let i = 0; i < conv.messageNodes.length; i++) {
+      await store.insert('message_node', nodeBucket(
+        messageNodeToRow(conv.id, conv.messageNodes[i], i)));
+    }
+  }
+
   private async writeConversation(
     store: relationalStore.RdbStore, conv: Conversation,
   ): Promise<void> {
     let committed: boolean = false;
     store.beginTransaction();
     try {
-      await store.insert('conversation', convBucket(conversationToRow(conv)),
-        relationalStore.ConflictResolution.ON_CONFLICT_REPLACE);
-      const delPredicates = new relationalStore.RdbPredicates('message_node');
-      delPredicates.equalTo('conversation_id', conv.id);
-      await store.delete(delPredicates);
-      for (let i = 0; i < conv.messageNodes.length; i++) {
-        await store.insert('message_node', nodeBucket(
-          messageNodeToRow(conv.id, conv.messageNodes[i], i)));
-      }
+      await this.writeConversationBody(store, conv);
       store.commit();
       committed = true;
     } finally {
@@ -281,21 +298,63 @@ class ChatRdbRepository implements ConversationRepository {
   }
 
   async save(conv: Conversation): Promise<void> {
+    // 捕获调用时的删除代际:若入队后发生删除/授权恢复，代际不符即判迟到旧写
+    const gen: number = this.deletedGen.get(conv.id) ?? 0;
     return this.enqueueMutation(conv.id, async (): Promise<void> => {
-      if (this.deletedIds.has(conv.id)) {
+      if (this.isDeletedAt(conv.id, gen)) {
         throw new Error(`Conversation was deleted: ${conv.id}`);
       }
       return enqueueConversationFileMutation(async (): Promise<void> => {
-        if (this.deletedIds.has(conv.id)) {
+        if (this.isDeletedAt(conv.id, gen)) {
           throw new Error(`Conversation was deleted: ${conv.id}`);
         }
         const store = await this.ensureStore();
         if (store === null) {
-          await this.memory.save(conv);
-        } else {
-          await this.writeConversation(store, conv);
+          // R04:拒绝写入不可持久化的降级内存，避免退出即丢且无可见警告
+          throw new Error(DEGRADED_WRITE_MSG);
         }
+        await this.writeConversation(store, conv);
       });
+    });
+  }
+
+  // 批量恢复(备份还原):单 RDB 事务；先授权(清墓碑+代际自增挡排队旧写)，
+  // 再等涉及会话在途 mutation 落定，最后单事务写入全部会话(R03 全有或全无)。
+  async restoreConversations(convs: Conversation[]): Promise<void> {
+    if (convs.length === 0) return;
+    const ids: string[] = convs.map((c: Conversation): string => c.id);
+    // 授权恢复:清墓碑并自增代际；此刻起此前排队的旧 save 因代际不符被拒，
+    // 不会被恢复后的旧快照覆盖(R09「显式恢复」而非简单清墓碑放旧写)
+    for (const id of ids) {
+      this.deletedGen.set(id, (this.deletedGen.get(id) ?? 0) + 1);
+      this.deletedIds.delete(id);
+    }
+    // 等涉及会话的在途 mutation(含更早排队的旧 save/delete)全部落定
+    for (const id of ids) {
+      const tail: Promise<void> | undefined = this.mutationTails.get(id);
+      if (tail !== undefined) await tail.catch((): void => {});
+    }
+    return enqueueConversationFileMutation(async (): Promise<void> => {
+      const store = await this.ensureStore();
+      if (store === null) throw new Error(DEGRADED_WRITE_MSG);
+      // 进入事务前再次授权(覆盖等待期间可能的并发删除)，确保恢复结果不被墓碑阻断
+      for (const id of ids) {
+        this.deletedGen.set(id, (this.deletedGen.get(id) ?? 0) + 1);
+        this.deletedIds.delete(id);
+      }
+      let committed: boolean = false;
+      store.beginTransaction();
+      try {
+        for (const conv of convs) {
+          await this.writeConversationBody(store, conv);
+        }
+        store.commit();
+        committed = true;
+      } finally {
+        if (!committed) {
+          try { store.rollBack(); } catch { /* preserve original restore failure */ }
+        }
+      }
     });
   }
 
@@ -479,34 +538,39 @@ class ChatRdbRepository implements ConversationRepository {
   }
 
   async delete(id: string): Promise<void> {
+    // 代际自增 + 立墓碑:挡住此前已排队的旧 save(其捕获的 gen 已过期)
+    const gen: number = (this.deletedGen.get(id) ?? 0) + 1;
+    this.deletedGen.set(id, gen);
     this.deletedIds.add(id);
     return this.enqueueMutation(id, async (): Promise<void> =>
       enqueueConversationFileMutation(async (): Promise<void> => {
-        const old: Conversation | null = await this.getById(id);
-        if (old === null) return;
+        // R04:先判持久化可用性，再判存在性。降级时 getById 回退(通常为空)内存会使
+        // old===null 提前 return，从而绕过拒绝写并静默「删除成功」(重启复现)。
         const store = await this.ensureStore();
         if (store === null) {
-          await this.memory.delete(id);
-        } else {
-          let committed: boolean = false;
-          store.beginTransaction();
-          try {
-            const nodePredicates = new relationalStore.RdbPredicates('message_node');
-            nodePredicates.equalTo('conversation_id', id);
-            await store.delete(nodePredicates);
-            const convPredicates = new relationalStore.RdbPredicates('conversation');
-            convPredicates.equalTo('id', id);
-            await store.delete(convPredicates);
-            store.commit();
-            committed = true;
-          } finally {
-            if (!committed) {
-              try { store.rollBack(); } catch { /* preserve original delete failure */ }
-            }
+          throw new Error(DEGRADED_WRITE_MSG);
+        }
+        const old: Conversation | null = await this.getById(id);
+        if (old === null) return;
+        let committed: boolean = false;
+        store.beginTransaction();
+        try {
+          const nodePredicates = new relationalStore.RdbPredicates('message_node');
+          nodePredicates.equalTo('conversation_id', id);
+          await store.delete(nodePredicates);
+          const convPredicates = new relationalStore.RdbPredicates('conversation');
+          convPredicates.equalTo('id', id);
+          await store.delete(convPredicates);
+          store.commit();
+          committed = true;
+        } finally {
+          if (!committed) {
+            try { store.rollBack(); } catch { /* preserve original delete failure */ }
           }
         }
       }).catch((e: Error): void => {
-        this.deletedIds.delete(id);
+        // 仅当本次删除代际仍为最新时撤墓碑(旧代际的墓碑属更新的删除/恢复，不动)
+        if ((this.deletedGen.get(id) ?? 0) === gen) this.deletedIds.delete(id);
         throw e;
       }));
   }

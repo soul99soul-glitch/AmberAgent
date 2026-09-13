@@ -1,0 +1,13 @@
+[provenance] DocumentSupport.ets sha256/16 = 76c69bbdec0c48dd
+  ok - pdf 明确不支持(含扩展名归一)
+  ok - 非 data:/file:// 一律拒绝(不外网)
+  ok - data:text/*;base64 文本直出
+  ok - data 二进制非文本非 office → 明确不支持(不读占位)
+  ok - file:// 文本经 stat/read 预览
+  ok - file:// 超 10MiB → 先 check 后拒绝(不 open/read)
+  ok - data 超 10MiB → 先估长度再拒绝(不分配解码)
+  ok - 预览截断 100KiB + 标记
+  ok - DOCX 路由到真实 zip+docx 解析(无 document.xml → 域层文案)
+  ok - PPTX 路由到真实 zip+pptx 解析(无 slides → 域层文案)
+  ok - EPUB 路由到真实 zip+epub 解析(无 container → 域层文案)
+all F44 preview smoke assertions passed

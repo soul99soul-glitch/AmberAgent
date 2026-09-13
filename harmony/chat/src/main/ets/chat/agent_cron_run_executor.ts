@@ -1,19 +1,17 @@
 // agent_cron_run_executor — Cron 任务执行器 Port + 默认实现
 //
-// Android 基准: AgentCronWorker.doWork
-//   prepare → markStarted → ChatService 发送+等待 → markCompleted/Failed
-//   → 通知 → scheduleNextRun
+// 状态机归属: scheduler.fire(AgentCronStore.createEntryCronSchedulerPort)
+// 独占 prepare/markRunStarted/Completed/Failed + scheduleNextRun。
+// 本文件只做: notify + ChatTurn + save, 不再 mark*(避免双重登记)。
 //
-// 鸿蒙: 纯逻辑 executor 契约;entry 注入「发送到会话」与 Notifier。
-// 无头运行 = 调用 ChatTurnDeps 路径(runChatTurn),不依赖 ChatPage UI。
+// Android 基准: AgentCronWorker.doWork 控制流在 scheduler.fire, 执行体为 ChatTurn。
 
 import type { AgentCronTask, AgentCronManager } from './agent_cron.ts';
 import type { ChatTurnDeps } from './chat_turn.ts';
 import { runChatTurn } from './chat_turn.ts';
-import { currentMessages } from './conversation.ts';
 import type { Conversation } from './conversation.ts';
 import type { ConversationRepository } from './persistence.ts';
-import type { UIMessage } from './message.ts';
+import type { AbortSignalLike } from '@amber/deepread-domain';
 
 export interface CronNotifierPort {
   notifyRunning(task: AgentCronTask): void;
@@ -31,6 +29,9 @@ export interface CronRunExecutorDeps {
   nowMs?: () => number;
 }
 
+/** R17:entry 执行器形状——taskId + run 级 signal(scheduler 传入) */
+export type CronRunExecutor = (taskId: string, signal: AbortSignalLike) => Promise<void>;
+
 export interface CronRunResult {
   taskId: string;
   conversationId: string;
@@ -38,15 +39,16 @@ export interface CronRunResult {
   error: Error | null;
 }
 
-/** 执行一个 cron 任务:定位/创建会话 → runChatTurn(prompt) → 终态登记 */
+/** 执行一个 cron 任务:定位/创建会话 → runChatTurn(prompt) → save;不调用 mark*。
+ *  R17:signal 可选,透传 ChatTurnDeps.abortSignal 贯穿 Provider(工具循环继承)。 */
 export const runCronTaskOnce = async (
   deps: CronRunExecutorDeps,
   task: AgentCronTask,
+  signal?: AbortSignalLike,
 ): Promise<CronRunResult> => {
   const notifier = deps.notifier;
   try {
     notifier?.notifyRunning(task);
-    await deps.manager.markRunStarted(task.id);
 
     let conversation: Conversation | null = null;
     if (task.conversationId.length > 0) {
@@ -69,16 +71,15 @@ export const runCronTaskOnce = async (
     }
 
     const turnDeps: ChatTurnDeps = deps.buildTurnDeps(conversation, task);
-    const out: Conversation = await runChatTurn(conversation, task.prompt, turnDeps);
+    const out: Conversation = await runChatTurn(
+      conversation, task.prompt, signal !== undefined ? { ...turnDeps, abortSignal: signal } : turnDeps);
     await deps.repository.save(out);
 
-    await deps.manager.markRunCompleted(task.id);
     const doneTask: AgentCronTask = { ...task, lastStatus: 'Succeeded', lastError: null };
     notifier?.notifyCompleted(doneTask);
     return { taskId: task.id, conversationId: out.id, ok: true, error: null };
   } catch (e) {
     const error = e instanceof Error ? e : new Error(String(e));
-    await deps.manager.markRunFailed(task.id, error.message).catch((): void => {});
     notifier?.notifyFailed(task, error);
     return { taskId: task.id, conversationId: task.conversationId, ok: false, error };
   }

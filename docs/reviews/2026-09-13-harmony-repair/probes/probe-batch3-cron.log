@@ -1,0 +1,19 @@
+PASS CT1a inFlight collapses second manual run (executor once)
+PASS CT1b prepare allowed exactly once
+PASS CT1c completed + rearmed after release
+PASS CT2a long delay clamped to 2^31-1
+PASS CT2b early timer does NOT execute (now << due)
+PASS CT2c early timer only re-arms (no prepare/started)
+PASS CT2d re-armed timer is again clamped (chain), due unchanged
+PASS CT2e near task delay not clamped
+PASS CT2f near task executes on due
+PASS CT3a executor started with a signal
+PASS CT3b cancel aborts the in-flight signal
+PASS CT3c cancelled run is NOT recorded as Succeeded
+PASS CT3d next cycle is explicitly kept (rearm after cancel)
+PASS CT4a delete aborts the in-flight generation
+PASS CT4b deleted task is not completed/resurrected
+PASS CT5a disabled mid-run stops run as Suspend (not Succeeded)
+PASS CT5b disabled mid-run does not re-arm
+
+17/17 assertions PASS

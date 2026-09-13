@@ -1,0 +1,13 @@
+import { makeUIMessage } from '/Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/chat/src/main/ets/chat/message.ts';
+import { makeConversation, makeMessageNode, currentMessages } from '/Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/chat/src/main/ets/chat/conversation.ts';
+import { MessageStreamAccumulator } from '/Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/chat/src/main/ets/chat/stream_accumulator.ts';
+const mkTool = (id, name, approval) => ({ type:'tool', toolCallId:id, toolName:name, input:'{}', output:[], approvalState:approval, metadata:null });
+const asst = makeUIMessage('assistant', [mkTool('', 'file_list', { type:'auto' }), mkTool('', 'file_write', { type:'approved' })]);
+const node = makeMessageNode([asst], 0, 'node-1');
+console.log('node msg names =', JSON.stringify(node.messages[0].parts.map(p=>p.toolName)));
+const conv = makeConversation('conv-1', [node]);
+const base = currentMessages(conv);
+console.log('base names =', JSON.stringify(base[0].parts.map(p=>p.toolName)));
+const acc = new MessageStreamAccumulator(base);
+acc.append({ id:'c', model:'m', choices:[{ index:0, delta: makeUIMessage('assistant',[{type:'text',text:'done',metadata:null}]), message:null, finishReason:'stop'}], usage:null });
+console.log('after text delta =', JSON.stringify(acc.snapshot().at(-1).parts.map(p=>p.toolName ?? p.type)));

@@ -43,6 +43,8 @@ struct CouncilPage {
   @State models: ModelConfig[] = [];
   @State errorMsg: string = '';
   @State starting: boolean = false;
+  // F42:区分「尚未加载」与「已加载且为空」,加载前不再误报模型库为空
+  @State modelsLoaded: boolean = false;
   private pageAlive: boolean = false;
   private loadToken: number = 0;
 
@@ -67,7 +69,10 @@ struct CouncilPage {
 
   private async loadModels(token: number): Promise<void> {
     const models: ModelConfig[] = await getModelRegistry().list();
-    if (this.pageAlive && token === this.loadToken) this.models = models;
+    if (this.pageAlive && token === this.loadToken) {
+      this.models = models;
+      this.modelsLoaded = true;
+    }
   }
 
   toggleLens(id: string): void {
@@ -84,6 +89,10 @@ struct CouncilPage {
     if (this.starting) return;
     if (this.objective.trim().length === 0) {
       this.errorMsg = '请输入议题';
+      return;
+    }
+    if (!this.modelsLoaded) {
+      this.errorMsg = '模型库仍在加载，请稍候再试';
       return;
     }
     if (this.models.length === 0) {
@@ -232,7 +241,12 @@ struct CouncilPage {
           // 模型库状态
           Column() {
             this.sectionTitle('模型', '席位轮流使用')
-            if (this.models.length === 0) {
+            if (!this.modelsLoaded) {
+              Row() {
+                LoadingProgress().width(16).height(16).color(ACCENT).margin({ right: 8 })
+                Text('正在加载模型库…').fontSize(13).fontColor(INK3)
+              }
+            } else if (this.models.length === 0) {
               Text('模型库为空。请到 设置 → 模型库 添加模型。')
                 .fontSize(13).fontColor('#E53935')
             } else {

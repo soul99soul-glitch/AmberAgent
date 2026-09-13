@@ -205,10 +205,11 @@ test('cancel/retry: 委托 scheduler 并返回任务状态', async () => {
 });
 
 test('cleanup: delete_private_output 传递并只删除私有输出', async () => {
-  const { files, scheduler } = await makeStore();
+  const { files, store, scheduler } = await makeStore();
   files.files.set('/files/private.log', 'private');
   files.files.set('/workspace/public.md', 'public');
-  await scheduler.enqueue(snapshot('cleanup', 'COMPLETED', {
+  // R25:cleanup 仅终态可清 — 直接 upsert 保留 COMPLETED(enqueue 会强制回 QUEUED)
+  await store.upsert(snapshot('cleanup', 'COMPLETED', {
     outputPath: '/files/private.log',
   }));
   const tools = new AgentTaskTools(scheduler, { outputExists: files.exists.bind(files) }).getTools();

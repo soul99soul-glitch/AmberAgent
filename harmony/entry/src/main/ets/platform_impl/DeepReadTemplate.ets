@@ -38,47 +38,67 @@ const safeImageUrl = (raw: string): string =>
 
 // ---- editorial_slant 渲染 ----
 
+// 字号全部乘 var(--ds)(默认 1 → 与原样式逐字等价);fontScale 通过注入的
+// :root{--ds} 生效,纯 CSS、无需 JS(F29)。class ds-serif 切换正文字体族。
 const CSS_EDITORIAL: string = `
+  :root { --ds: 1; }
   body { margin:0; padding:24px 20px 40px; background:#F7F5EF; color:#1B1A17;
          font-family:-apple-system,'HarmonyOS Sans SC',sans-serif; line-height:1.7; }
-  .kicker { font-size:12px; letter-spacing:2px; color:#B8623A; font-weight:600;
+  body.ds-serif { font-family:Georgia,'Noto Serif SC',serif; }
+  .kicker { font-size:calc(12px * var(--ds)); letter-spacing:2px; color:#B8623A; font-weight:600;
             text-transform:uppercase; margin-bottom:8px; }
-  h1.title { font-size:30px; line-height:1.25; margin:0 0 6px; font-weight:700;
+  h1.title { font-size:calc(30px * var(--ds)); line-height:1.25; margin:0 0 6px; font-weight:700;
              font-family:Georgia,'Noto Serif SC',serif; }
-  .meta { font-size:12px; color:#8F8B80; margin-bottom:18px; }
+  .meta { font-size:calc(12px * var(--ds)); color:#8F8B80; margin-bottom:18px; }
   .hero { width:100%; border-radius:14px; margin:0 0 20px; display:block; }
-  .hero-cap { font-size:11px; color:#8F8B80; margin:-14px 0 20px; }
-  h2.sec { font-size:20px; font-weight:700; margin:30px 0 10px;
+  .hero-cap { font-size:calc(11px * var(--ds)); color:#8F8B80; margin:-14px 0 20px; }
+  h2.sec { font-size:calc(20px * var(--ds)); font-weight:700; margin:30px 0 10px;
            font-family:Georgia,'Noto Serif SC',serif; }
   h2.sec::before { content:''; display:inline-block; width:22px; height:3px;
                    background:#B8623A; margin-right:10px; vertical-align:middle; }
-  p { font-size:15.5px; margin:0 0 14px; }
-  .summary { font-size:17px; line-height:1.75; font-weight:500; color:#33312B;
+  p { font-size:calc(15.5px * var(--ds)); margin:0 0 14px; }
+  .summary { font-size:calc(17px * var(--ds)); line-height:1.75; font-weight:500; color:#33312B;
              border-left:3px solid #B8623A; padding-left:14px; margin:0 0 22px; }
   ul.entities { list-style:none; padding:0; margin:0 0 20px; }
   ul.entities li { display:inline-block; background:#fff; border:1px solid #E4E0D6;
-                   border-radius:14px; padding:4px 12px; font-size:13px; margin:0 6px 8px 0; }
+                   border-radius:14px; padding:4px 12px; font-size:calc(13px * var(--ds)); margin:0 6px 8px 0; }
   .timeline { border-left:2px solid #E4E0D6; margin:0 0 20px; padding-left:18px; }
   .timeline .ev { margin-bottom:14px; }
-  .timeline .d { font-size:12px; color:#B8623A; font-weight:600; }
-  .timeline .e { font-size:14.5px; color:#33312B; }
-  .points li { font-size:14.5px; margin-bottom:8px; }
+  .timeline .d { font-size:calc(12px * var(--ds)); color:#B8623A; font-weight:600; }
+  .timeline .e { font-size:calc(14.5px * var(--ds)); color:#33312B; }
+  .points li { font-size:calc(14.5px * var(--ds)); margin-bottom:8px; }
   .dispute { background:#fff; border:1px solid #E4E0D6; border-radius:12px;
-             padding:14px 16px; font-size:14.5px; margin-bottom:18px; }
+             padding:14px 16px; font-size:calc(14.5px * var(--ds)); margin-bottom:18px; }
   .persp { border-top:1px solid #E4E0D6; padding:12px 0; }
-  .persp .holder { font-size:12px; color:#B8623A; font-weight:600; }
-  .persp .view { font-size:14.5px; color:#33312B; }
+  .persp .holder { font-size:calc(12px * var(--ds)); color:#B8623A; font-weight:600; }
+  .persp .view { font-size:calc(14.5px * var(--ds)); color:#33312B; }
   blockquote { margin:14px 0; padding:10px 16px; background:#fff; border-radius:10px;
-               font-size:14.5px; font-style:italic; color:#33312B; }
-  blockquote .by { display:block; font-style:normal; font-size:12px; color:#8F8B80; margin-top:6px; }
-  .reading a { display:block; font-size:14px; color:#1B1A17; text-decoration:none;
+               font-size:calc(14.5px * var(--ds)); font-style:italic; color:#33312B; }
+  blockquote .by { display:block; font-style:normal; font-size:calc(12px * var(--ds)); color:#8F8B80; margin-top:6px; }
+  .reading a { display:block; font-size:calc(14px * var(--ds)); color:#1B1A17; text-decoration:none;
                padding:8px 0; border-bottom:1px solid #E4E0D6; }
-  .reading a .src { color:#8F8B80; font-size:12px; }
-  .implication { font-size:14.5px; color:#33312B; background:#FFF5F0; border-radius:10px;
+  .reading a .src { color:#8F8B80; font-size:calc(12px * var(--ds)); }
+  .implication { font-size:calc(14.5px * var(--ds)); color:#33312B; background:#FFF5F0; border-radius:10px;
                  padding:12px 14px; margin-bottom:12px; }
   img.inline { width:100%; border-radius:12px; margin:10px 0 6px; display:block; }
-  .cap { font-size:11px; color:#8F8B80; margin-bottom:14px; }
+  .cap { font-size:calc(11px * var(--ds)); color:#8F8B80; margin-bottom:14px; }
 `;
+
+// 显示偏好(字号倍率/字体模式)。fontScale 经安全夹取 + 定点格式化,只作为
+// 数值写进 :root{--ds};字体模式只切预定义 class。两者均无字符串注入面。
+export interface EditorialSlantOptions {
+  fontScale?: number;
+  fontSerif?: boolean;
+}
+
+const clampScale = (raw: number | undefined): number => {
+  if (raw === undefined || !Number.isFinite(raw)) return 1;
+  if (raw < 0.8) return 0.8;
+  if (raw > 1.3) return 1.3;
+  return raw;
+};
+
+const formatScale = (scale: number): string => scale.toFixed(3);
 
 const esc = escapeHtml;
 
@@ -148,7 +168,12 @@ const renderExtendedReading = (o: DeepReadOutput): string => {
 };
 
 // editorial_slant 完整 HTML(生成失败/空输出 → 仅标题壳,fallback 由调用方判定)
-export const renderEditorialSlantHtml = (title: string, o: DeepReadOutput | null): string => {
+// opts:显示偏好(fontScale → --ds;fontSerif → body.ds-serif)。无 JS,F29。
+export const renderEditorialSlantHtml = (
+  title: string,
+  o: DeepReadOutput | null,
+  opts?: EditorialSlantOptions,
+): string => {
   const safeTitle: string = esc(title);
   let body: string = '';
   if (o !== null) {
@@ -157,9 +182,11 @@ export const renderEditorialSlantHtml = (title: string, o: DeepReadOutput | null
     body += renderAnalysis(o);
     body += renderExtendedReading(o);
   }
+  const scale: string = formatScale(clampScale(opts?.fontScale));
+  const bodyClass: string = opts !== undefined && opts.fontSerif === true ? ' class="ds-serif"' : '';
   return `<!DOCTYPE html><html><head><meta charset="utf-8" />`
     + `<meta name="viewport" content="width=device-width, initial-scale=1" />`
-    + `<style>${CSS_EDITORIAL}</style></head><body>`
+    + `<style>${CSS_EDITORIAL}:root{--ds:${scale}}</style></head><body${bodyClass}>`
     + `<div class="kicker">DEEP READ · 深度阅读</div>`
     + `<h1 class="title">${safeTitle}</h1>`
     + body

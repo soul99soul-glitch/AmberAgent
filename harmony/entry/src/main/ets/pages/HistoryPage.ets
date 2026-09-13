@@ -38,8 +38,22 @@ struct HistoryPage {
   // 多选导出
   @State selecting: boolean = false;
   @State selectedIds: string[] = [];
+  // aboutToAppear 与首次 onPageShow 都会触发 reload,首屏只加载一次
+  private firstShowDone: boolean = false;
 
   aboutToAppear(): void {
+    this.reload();
+  }
+
+  onPageShow(): void {
+    if (this.firstShowDone) {
+      this.reload();
+    } else {
+      this.firstShowDone = true;
+    }
+  }
+
+  private reload(): void {
     getChatRepository().list().then((list: ConversationSummary[]): void => {
       const sorted: ConversationSummary[] = list.slice().sort(
         (a: ConversationSummary, b: ConversationSummary): number =>
@@ -93,6 +107,15 @@ struct HistoryPage {
   private exitSelecting(): void {
     this.selecting = false;
     this.selectedIds = [];
+  }
+
+  // F14:顶栏「选择」按钮此前恒调用 exitSelecting,导致选择模式不可达;按当前态切换。
+  private toggleSelecting(): void {
+    if (this.selecting) {
+      this.exitSelecting();
+      return;
+    }
+    this.selecting = true;
   }
 
   // ===== 导出(DocumentSavePicker;多会话单文件拼接) =====
@@ -158,7 +181,7 @@ struct HistoryPage {
       PageTitleBar({
         title: '历史记录',
         actionText: this.selecting ? '取消' : '选择',
-        onAction: (): void => { this.exitSelecting(); },
+        onAction: (): void => { this.toggleSelecting(); },
       })
 
       if (this.loaded && this.groups.length === 0) {

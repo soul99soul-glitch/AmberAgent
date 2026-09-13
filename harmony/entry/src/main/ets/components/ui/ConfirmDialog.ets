@@ -1,5 +1,5 @@
 // ConfirmDialog — 确认对话框(对齐 Android ConfirmDialog.kt)
-import { INK, INK2, INK3, SURFACE, ACCENT, LINE, BODY, META, OVERLAY } from '../../design/tokens.ets';
+import { INK, INK2, INK3, SURFACE, ACCENT, LINE, BODY, META, OVERLAY, MOTION_OVERLAY } from '../../design/tokens.ets';
 
 @Component
 export struct ConfirmDialog {
@@ -14,7 +14,7 @@ export struct ConfirmDialog {
 
   aboutToAppear(): void {
     this.entered = false;
-    animateTo({ duration: 180, curve: Curve.EaseOut }, (): void => { this.entered = true; });
+    animateTo({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }, (): void => { this.entered = true; });
   }
 
   build(): void {

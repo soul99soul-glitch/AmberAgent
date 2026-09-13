@@ -1,0 +1,41 @@
+── HarmonyOS HAP 本地签名 ──
+未签名 HAP : harmony/entry/build/default/outputs/default/entry-default-unsigned.hap
+输出目录   : harmony/entry/build/default/outputs/default/repair-signed-final
+签名工具   : /Users/mi/Library/Huawei/commandline/command-line-tools/sdk/default/openharmony/toolchains/lib/hap-sign-tool.jar
+
+[1/8] 生成根 CA
+09-13 17:56:13.840  INFO - generate-ca success
+[2/8] 生成应用子 CA
+09-13 17:56:14.254  INFO - generate-ca success
+[3/8] 生成 Profile 子 CA
+09-13 17:56:14.660  INFO - generate-ca success
+[4/8] 生成应用密钥对
+09-13 17:56:15.043  INFO - generate-keypair success
+[5/8] 签发应用调试证书
+09-13 17:56:15.471  INFO - generate-app-cert success
+[6/8] 签发 Profile 签名证书
+09-13 17:56:15.902  INFO - generate-profile-cert success
+[7/8] 签名 Profile (生成 .p7b)
+    bundle-name: app.amber.deepread
+    device-ids : []
+09-13 17:56:16.450  INFO - sign-profile success
+[8/8] 签名 HAP
+09-13 17:56:16.848  INFO - Create a sign info successfully.
+09-13 17:56:16.852  INFO - Create a sign info successfully.
+09-13 17:56:16.855  INFO - Sign successfully.
+09-13 17:56:16.871  INFO - Add sign data in sign info list success.
+09-13 17:56:16.873  INFO - Generate signing block success, begin write it to output file
+09-13 17:56:16.873  INFO - Sign Hap success!
+09-13 17:56:16.873  INFO - sign-app success
+
+── 验证 ──
+09-13 17:56:17.137  INFO - trying verify codesign block
+09-13 17:56:17.207  INFO - verify codesign success
+09-13 17:56:17.227  INFO - Digest verify result: true, DigestAlgorithm: SHA-256
+09-13 17:56:17.230  INFO - verify: Verify success
+09-13 17:56:17.230  INFO - verify-app success
+
+✓ 签名完成: harmony/entry/build/default/outputs/default/repair-signed-final/entry-default-signed.hap
+
+── 安装到设备 ──
+  hdc install "harmony/entry/build/default/outputs/default/repair-signed-final/entry-default-signed.hap"

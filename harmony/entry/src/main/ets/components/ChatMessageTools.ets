@@ -6,6 +6,7 @@
 // 降级(跳过): shimmer / FaviconRow / ZoomableAsyncImage / TTS replay / workspace-file 卡片
 
 import type { UIMessagePartTool, UIMessagePartText, UIMessagePartImage } from '@amber/chat-domain';
+import { toolActivityStatus, toolOutputJson } from '@amber/chat-domain';
 import { INK, INK2, INK3, INK4, SURFACE, SURFACE2, LINE, ACCENT, ERROR, META, LABEL } from '../design/tokens.ets';
 import { GeneratedImageCarousel } from './GeneratedImageCarousel.ets';
 import {
@@ -27,29 +28,20 @@ export struct ChatMessageTools {
   @Prop canApprove: boolean = true;
   @Prop canDeny: boolean = true;
   @Prop canOpenPreview: boolean = true;
+  // F15:结构化终态需要 loading(工具执行中 vs 已完成)
+  @Prop streaming: boolean = false;
   @State outputExpanded: boolean = false;
 
-  // 状态判定(对齐 Android toolHasFailure)
+  // F15:复用 chat-domain tool_activity 既有结构化判定
+  //   (toolActivityStatus → indicatesFailure:exit_code≠0 / error / failed /
+  //    status∈{failed,error,denied});不再扫描正文是否含 error/exception/failed
+  //   字样 —— 搜索/源码/日志正文可合法包含这些词(UI-F15 原始误报)。
   private resolveStatus(): ToolStatus {
-    const approvalType: string = this.part.approvalState.type;
-    if (approvalType === 'pending') return ToolStatus.WaitingApproval;
-    if (approvalType === 'denied') return ToolStatus.Cancelled;
-
-    // 检查 output 中是否有失败标志
-    if (this.part.output.length > 0) {
-      for (const p of this.part.output) {
-        if (p.type === 'text') {
-          const text: string = (p as UIMessagePartText).text.toLowerCase();
-          if (text.includes('error') || text.includes('exception') || text.includes('failed')) {
-            return ToolStatus.Failed;
-          }
-        }
-      }
-      return ToolStatus.Succeeded;
-    }
-
-    // 无 output:approved 但无结果 → running
-    if (approvalType === 'approved') return ToolStatus.Running;
+    const activity: string = toolActivityStatus(this.part, this.streaming, toolOutputJson(this.part));
+    if (activity === 'waiting_for_permission') return ToolStatus.WaitingApproval;
+    if (activity === 'cancelled') return ToolStatus.Cancelled;
+    if (activity === 'failed') return ToolStatus.Failed;
+    if (activity === 'succeeded') return ToolStatus.Succeeded;
     return ToolStatus.Running;
   }
 

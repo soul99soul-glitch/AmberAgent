@@ -9,8 +9,6 @@ import { SYNTHESIZER_SEAT_KEY, isRunningStatus } from '@amber/deepread-domain';
 import type { ModelCouncilRun, ModelCouncilTurn } from '@amber/deepread-domain';
 
 
-const PHASES: string[] = ['听证', '辩论', '权衡', '裁决'];
-
 const statusVerb = (s: string): string => {
   switch (s) {
     case 'running': return '进行中';
@@ -32,16 +30,15 @@ struct CouncilRunPage {
   @State liveTexts: string[] = [];
   @State currentIndex: number = 0;
   @State statusText: string = '进行中';
-  @State phase: string = '听证';
   @State objective: string = '';
   @State finished: boolean = false;
   @State errorMsg: string = '';
+  // F12:真实进度(由 snapshot.turns 推导),非墙钟伪阶段
+  @State progressText: string = '';
   private manager: ModelCouncilManager | null = null;
   private runId: string = '';
   private unsubs: Array<() => void> = [];
   private pollTimer: number = 0;
-  private phaseTimer: number = 0;
-  private phaseIdx: number = 0;
 
   aboutToAppear(): void {
     const params = router.getParams() as Record<string, string>;
@@ -59,7 +56,9 @@ struct CouncilRunPage {
       return;
     }
     this.objective = snap.task.objective;
-
+    this.statusText = statusVerb(snap.status);
+    this.progressText = this.deriveProgress(snap);
+    if (!isRunningStatus(snap.status)) this.finished = true;
     const keys: string[] = [SYNTHESIZER_SEAT_KEY];
     const labels: string[] = ['综合裁决'];
     for (let i = 0; i < snap.seats.length; i++) {
@@ -71,7 +70,8 @@ struct CouncilRunPage {
     const init: string[] = [];
     for (let i = 0; i < keys.length; i++) init.push('');
     this.liveTexts = init;
-    this.currentIndex = keys.length > 1 ? 1 : 0;
+    // 运行中默认看首个席位;已结束直接看综合裁决
+    this.currentIndex = this.finished ? 0 : (keys.length > 1 ? 1 : 0);
 
     for (let i = 0; i < keys.length; i++) {
       const idx: number = i;
@@ -85,7 +85,6 @@ struct CouncilRunPage {
     }
 
     this.startPolling();
-    this.startPhaseRotation();
   }
 
   aboutToDisappear(): void {
@@ -99,6 +98,7 @@ struct CouncilRunPage {
       const snap: ModelCouncilRun | null = mgr.snapshot(this.runId);
       if (snap === null) return;
       this.statusText = statusVerb(snap.status);
+      this.progressText = this.deriveProgress(snap);
       if (!isRunningStatus(snap.status)) {
         this.finished = true;
         this.currentIndex = 0;
@@ -107,17 +107,25 @@ struct CouncilRunPage {
     }, 400);
   }
 
-  startPhaseRotation(): void {
-    this.phaseTimer = setInterval(() => {
-      if (this.finished) return;
-      this.phaseIdx = (this.phaseIdx + 1) % PHASES.length;
-      this.phase = PHASES[this.phaseIdx];
-    }, 1200);
+  // F12:只用真实快照推导进度(已完成席位数 / 是否进入综合裁决),不仿造阶段轮播。
+  private deriveProgress(snap: ModelCouncilRun): string {
+    const seatCount: number = snap.seats.length;
+    if (seatCount === 0) return '';
+    const expected: number = snap.mode === 'debate'
+      ? seatCount * Math.max(snap.task.rounds, 1) : seatCount;
+    let completed: number = 0;
+    for (let i = 0; i < snap.turns.length; i++) {
+      if (snap.turns[i].status === 'completed') completed++;
+    }
+    if (isRunningStatus(snap.status)) {
+      if (completed >= expected) return '综合裁决中…';
+      return `已完成 ${completed}/${expected} 席`;
+    }
+    return '';
   }
 
   stopTimers(): void {
     if (this.pollTimer !== 0) { clearInterval(this.pollTimer); this.pollTimer = 0; }
-    if (this.phaseTimer !== 0) { clearInterval(this.phaseTimer); this.phaseTimer = 0; }
     for (let i = 0; i < this.unsubs.length; i++) this.unsubs[i]();
     this.unsubs = [];
   }
@@ -162,7 +170,8 @@ struct CouncilRunPage {
         Blank()
         if (!this.finished) {
           LoadingProgress().width(14).height(14).color(ACCENT).margin({ right: 6 })
-          Text(this.statusText + ' · ' + this.phase).fontSize(12).fontColor(INK3)
+          Text(this.progressText.length > 0 ? this.statusText + ' · ' + this.progressText : this.statusText)
+            .fontSize(12).fontColor(INK3)
         } else {
           Text(this.statusText).fontSize(12).fontColor(ACCENT)
         }

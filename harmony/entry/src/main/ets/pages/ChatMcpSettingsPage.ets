@@ -49,6 +49,8 @@ struct ChatMcpSettingsPage {
   @State draft: McpServerConfig | null = null;
   @State creating: boolean = false;
   @State draftTab: number = 0;
+  // F23:空名称「保存」原本静默 no-op;现在以行内错误反馈(清空即消失)
+  @State nameError: string = '';
   @State expandedTools: string[] = [];
   @State pressedServerId: string = '';
   // 导入态
@@ -101,7 +103,12 @@ struct ChatMcpSettingsPage {
   private confirmDraft(): void {
     const draft: McpServerConfig | null = this.draft;
     if (draft === null) return;
-    if (draft.commonOptions.name.trim().length === 0) return;
+    if (draft.commonOptions.name.trim().length === 0) {
+      // F23:拒绝原因可见,不再静默;sheet 停留供用户修正
+      this.nameError = '请填写服务器名称';
+      return;
+    }
+    this.nameError = '';
     if (this.creating) {
       getMcpSettingsStore().updateMcpServers(
         (old: McpServerConfig[]): McpServerConfig[] => [...old, draft]);
@@ -120,6 +127,7 @@ struct ChatMcpSettingsPage {
     this.creating = true;
     this.draftTab = 0;
     this.expandedTools = [];
+    this.nameError = '';
   }
 
   private openEdit(config: McpServerConfig): void {
@@ -127,6 +135,7 @@ struct ChatMcpSettingsPage {
     this.creating = false;
     this.draftTab = 0;
     this.expandedTools = [];
+    this.nameError = '';
   }
 
   // commonOptions 补丁(保 kind;copy 语义)
@@ -308,7 +317,24 @@ struct ChatMcpSettingsPage {
         TextInput({ text: draft.commonOptions.name, placeholder: '例如：My MCP Server' })
           .fontSize(14).fontWeight(400).lineHeight(lineHeightForSize(14)).fontFamily(FONT_SANS_SEMIBOLD)
           .backgroundColor(RAISED)
-          .onChange((v: string): void => { this.patchCommon({ name: v }); })
+          .border({
+            width: this.nameError.length > 0 ? 1 : 0,
+            color: this.nameError.length > 0 ? ERROR : LINE,
+          })
+          .onChange((v: string): void => {
+            this.patchCommon({ name: v });
+            if (this.nameError.length > 0 && v.trim().length > 0) this.nameError = '';
+          })
+        if (this.nameError.length > 0) {
+          // F23:行内反馈(与导入错误同款式)
+          Text(this.nameError)
+            .fontSize(TEXT_STYLES.meta.size)
+            .fontWeight(400)
+            .lineHeight(TEXT_STYLES.meta.lineHeight)
+            .fontFamily(TEXT_STYLES.meta.family)
+            .fontColor(ERROR).width('100%').maxLines(2)
+            .textOverflow({ overflow: TextOverflow.Ellipsis }).margin({ top: 6 })
+        }
         PaperSeparator()
 
         // 传输类型(:548-604)— 0=Streamable HTTP,1=SSE

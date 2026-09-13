@@ -1,0 +1,119 @@
+
+COMMAND node /Users/mi/Downloads/AI/AmberAgent-harmony-preview/docs/reviews/2026-09-13-harmony-deep-audit/probe-f-webmount.cjs
+F-02 CONFIRMED: gate accepts github.com userinfo while standard URL host is outside.invalid
+F-01 CONFIRMED: actual wm_click.execute runs injected expression with wm_eval omitted; no browser/network or user data used
+All probes import/transpile current source, not copied implementation. SDK/WebView dispatch remains unexecuted.
+
+EXIT 0
+
+COMMAND node /Users/mi/Downloads/AI/AmberAgent-harmony-preview/docs/reviews/2026-09-13-harmony-deep-audit/probe-f-mount.cjs
+F-03 CONFIRMED: actual session.open takes all 50 mount-wait ticks then rejects; loadUrl never invoked. Clock accelerated, no SDK/UI/network.
+Source call-site search separately confirms markHostMounted has definition only, including WebMountHost.
+
+EXIT 0
+
+COMMAND node /Users/mi/Downloads/AI/AmberAgent-harmony-preview/docs/reviews/2026-09-13-harmony-deep-audit/probes-e/probe-e-io.cjs
+[E-05] readText threw during addMemory -> addMemory resolved: true | returned id: 1
+[E-05] persisted records after the failed-read write: 1 contents: ["gamma"]
+[E-05] CONFIRMED: one transient readText failure => next write persists only the new record; alpha/beta permanently lost, no error surfaced.
+[E-05b] readText threw during insert -> insert resolved: true | returned: {"id":1,"folder":"upload","relativePath":"upload/c.txt","displayName":"c","mimeType":"text/plain","sizeBytes":1,"createdAt":3,"updatedAt":3} | persisted rows: 1 ["upload/c.txt"]
+[E-05b] CONFIRMED: same pattern as MemoryStore; a/b tracking rows silently replaced by the single new row.
+[E-07] stored favorites after corrupt-value + addFavorite: 1 ids: ["new-1"]
+[E-07] CONFIRMED: parse-level read failure => decode returns [] => next addFavorite overwrites the whole favorites blob; no error surfaced.
+
+Note: E-07 is parse-level swallow (decode catch). A KV get() that itself throws is
+NOT swallowed (no try/catch around get), so that variant would surface an error instead.
+All probes import/transpile current source; no real user files, device, or network used.
+
+EXIT 0
+
+COMMAND node /Users/mi/Downloads/AI/AmberAgent-harmony-preview/docs/reviews/2026-09-13-harmony-deep-audit/probes-xag/probe-h10-real.mjs
+transpiled require targets ok; exports = [
+  'notificationIdFor',
+  'buildNovelJobWantAgent',
+  'publishNovelJobNotification',
+  'publishBasicNotification',
+  'cancelNotification',
+  'notifyGenerationDone',
+  'notifyGenerationFailed',
+  'notifyCronRunning',
+  'notifyCronCompleted',
+  'notifyCronFailed',
+  'createNotificationNotifier'
+]
+
+=== A) normal successful run (scheduler.ts:141/150/159 order) ===
+  [notifyRunning] returned; queued now = ["publish:1882569218"]
+  [notifyCompleted] returned; queued now = ["publish:1882569218","publish:1882569218"]
+  [cancelRunning] returned; queued now = ["publish:1882569218","publish:1882569218","cancel:1882569218"]
+  -> publish + cancel both still pending when awaits returned (order NOT pinned)
+  platform settles [publish -> cancel] => visible = (none)
+  [notifyCompleted] returned; queued now = ["publish:1882569218"]
+  [cancelRunning] returned; queued now = ["publish:1882569218","cancel:1882569218"]
+  platform settles [cancel -> publish] => visible = 深度阅读完成
+
+=== B) REPLACE: old A finally cancel vs new B notifyRunning (same id) ===
+  B running publish + A cancel queued = ["cancel:1882569218","publish:1882569218"]
+  platform settles [publish -> cancel] => B running visible = (none)
+  platform settles [cancel -> publish] => B running visible = 正在深度阅读
+
+=== ids ===
+  notificationIdFor(topic-1) = 1882569218
+
+EXIT 0
+
+COMMAND /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/chat/node_modules/.bin/tsx --tsconfig /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/chat/tsconfig.json /Users/mi/Downloads/AI/AmberAgent-harmony-preview/docs/reviews/2026-09-13-harmony-deep-audit/probes-b/probe_b3_chain.mjs
+
+[network error msg contains "aborted"] err.name=OpenAiStreamError msg="Request was aborted by upstream gateway"
+  kernel RESOLVED, phase= cancelled result= null
+  persisted-before-return (engine saves user internally) store nodes= 2
+  out.conversation nodes= 1   (no user msg => data loss when saved)
+  AFTER ChatPage final save: store nodes= 1  texts= ["pre-existing"]
+
+[network error msg contains "abort"] err.name=Error msg="stream abort by transport"
+  kernel RESOLVED, phase= cancelled result= null
+  persisted-before-return (engine saves user internally) store nodes= 2
+  out.conversation nodes= 1   (no user msg => data loss when saved)
+  AFTER ChatPage final save: store nodes= 1  texts= ["pre-existing"]
+
+[generic 500] err.name=Error msg="500 server error"
+  kernel THREW, phase= failed message= 500 server error
+  -> ChatPage .catch reloads store (user msg preserved): nodes= 2
+
+[named AbortError (genuine user stop)] err.name=AbortError msg="aborted"
+  kernel RESOLVED, phase= cancelled result= null
+  persisted-before-return (engine saves user internally) store nodes= 2
+  out.conversation nodes= 1   (no user msg => data loss when saved)
+  AFTER ChatPage final save: store nodes= 1  texts= ["pre-existing"]
+
+EXIT 0
+
+COMMAND /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/chat/node_modules/.bin/tsx --tsconfig /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/chat/tsconfig.json /Users/mi/Downloads/AI/AmberAgent-harmony-preview/docs/reviews/2026-09-13-harmony-deep-audit/probes-b/probe_b1j_reachability.mjs
+state before answer = [{"id":"","name":"file_list","st":"auto"},{"id":"","name":"ask_user","st":"pending"}]
+resolveIdleToolBlocker: changed= true shouldResume= true blocking= [ 'file_list', 'ask_user' ]
+state after answer = [{"id":"","name":"file_list","st":"auto"},{"id":"","name":"ask_user","st":"answered"}]
+execLog = []
+final parts = [{"id":"","name":"ask_user","out":"请用中文回答，另外把清单给我","st":"answered"},{"id":"","name":"ask_user","out":"请用中文回答，另外把清单给我","st":"answered"}]
+
+EXPECT: file_list executed once (OUT_LIST), ask_user answered (answer text), no overwrite.
+
+EXIT 0
+
+COMMAND /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/chat/node_modules/.bin/tsx --tsconfig /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/chat/tsconfig.json /Users/mi/Downloads/AI/AmberAgent-harmony-preview/docs/reviews/2026-09-13-harmony-deep-audit/probes-df/probe-cron-longdelay.ts
+PASS  CL1 near delay (1h) is NOT clamped
+PASS  CL2 far delay (3e9) is clamped to 2^31-1
+PASS  CL3 negative delay clamped to 0
+PASS  CL4 lost time = raw - clamp = far early by ~9.6 天
+PASS  CL5 yearly task due > 2^31-1ms out (premise)
+PASS  CL6 createTask scheduled the far timer clamped to 2^31-1 (already early)
+PASS  CL7 at fire time still NOT due (now < dueAt)
+PASS  CL8 executor REALLY ran (early execution, not just rescheduled)
+PASS  CL9 task marked Succeeded with runCount=1 (early run treated as normal)
+PASS  CL10 after early run, next timer is clamped AGAIN (repeats every ~24.855d)
+PASS  CL11 prepareTriggeredRun executes a task whose now << dueAt (no due guard, enabler)
+PASS  CT1 near task delay NOT clamped (control)
+PASS  CT2 near task still executes normally at due
+
+=== probe-cron-longdelay summary: pass=13 fail=0 ===
+
+EXIT 0

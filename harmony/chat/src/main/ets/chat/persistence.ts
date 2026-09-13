@@ -166,6 +166,9 @@ export interface ConversationSummary {
 
 export interface ConversationRepository {
   save(conv: Conversation): Promise<void>;                    // upsert + 整体替换 nodes
+  // 批量恢复(备份还原):同一批次内先全部序列化/校验再落库，单事务语义——失败不落
+  // 任何覆盖，成功前不改变原数据(R03)。RDB 实现须在单事务内完成。
+  restoreConversations(convs: Conversation[]): Promise<void>;
   getById(id: string): Promise<Conversation | null>;
   getSummaryById(id: string): Promise<ConversationSummary | null>;
   list(assistantId?: string): Promise<ConversationSummary[]>;
@@ -282,6 +285,23 @@ export const createMemoryConversationRepository = (
         conv.messageNodes.map((n: MessageNode, i: number): MessageNodeRow =>
           messageNodeToRow(conv.id, n, i, now)),
       );
+      return Promise.resolve();
+    },
+
+    // 先整体序列化(staging)再落库：任一条序列化失败都不改变现有数据(原子批语义)
+    restoreConversations(convs: Conversation[]): Promise<void> {
+      const staged: Array<{ row: ConversationRow; nodes: MessageNodeRow[] }> = [];
+      for (const conv of convs) {
+        staged.push({
+          row: conversationToRow(conv),
+          nodes: conv.messageNodes.map((n: MessageNode, i: number): MessageNodeRow =>
+            messageNodeToRow(conv.id, n, i, now)),
+        });
+      }
+      for (const item of staged) {
+        convRows.set(item.row.id, item.row);
+        nodeRowsByConv.set(item.row.id, item.nodes);
+      }
       return Promise.resolve();
     },
 

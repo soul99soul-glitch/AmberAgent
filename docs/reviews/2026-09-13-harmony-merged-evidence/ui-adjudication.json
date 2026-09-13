@@ -1,0 +1,423 @@
+[
+  {
+    "ids": [
+      "F01"
+    ],
+    "status": "runtime",
+    "title": "小说 pane 百分比高度与剩余空间不匹配",
+    "reason": "结构约束已核，实际裁切/可滚达性需设备，不套用CSS祖先规则"
+  },
+  {
+    "ids": [
+      "F02"
+    ],
+    "status": "runtime",
+    "title": "分隔线100%宽叠加margin",
+    "reason": "占位约束与内缩目标矛盾，实际裁切/全出血需设备"
+  },
+  {
+    "ids": [
+      "F03"
+    ],
+    "status": "runtime",
+    "title": "附件展开挤压输入框",
+    "reason": "约束估算文本余宽W−320vp：320为0、360仍40；需设备检查ArkUI布局分配"
+  },
+  {
+    "ids": [
+      "F04"
+    ],
+    "status": "runtime",
+    "title": "分享锚点固定像素坐标",
+    "reason": "固定660/2200确实存在，屏外行为/SDK回退未知"
+  },
+  {
+    "ids": [
+      "F05"
+    ],
+    "status": "runtime",
+    "title": "多行时间轴固定54vp竖线",
+    "reason": "几何/样式风险保留，未实机截图确认断裂"
+  },
+  {
+    "ids": [
+      "F06"
+    ],
+    "status": "debt",
+    "title": "顶栏规格差异",
+    "reason": "水平基准不同是打磨，原总高差15vp推算未闭合"
+  },
+  {
+    "ids": [
+      "F07"
+    ],
+    "status": "confirmed",
+    "severity": "P3",
+    "title": "热力图渲染按活跃日期重复排序",
+    "anchor": "ProfilePage.ets:590-641",
+    "reason": "每build重建371个Date；只在非零天排序，次数≤min(371,activeDays)，不是恒371次；重复工作可证，掉帧未测",
+    "fix": "loadStats后一次计算日期和阈值，build只读；用稀疏/稠密计数比较sort次数"
+  },
+  {
+    "ids": [
+      "F08"
+    ],
+    "status": "confirmed",
+    "severity": "P2",
+    "title": "会话列表预览全量扇出并逐条复制全部结果键",
+    "anchor": "ChatListPage.ets:60-82,120-166",
+    "reason": "refreshSeq挡旧list回调，不能称必2N getById；获胜刷新仍N个无界并发getById和累计O(N²)键复制",
+    "fix": "批量/限并发加载预览，聚合后提交；N=100/1000合成库检查并发上限与复制量"
+  },
+  {
+    "ids": [
+      "F09"
+    ],
+    "status": "confirmed",
+    "severity": "P3",
+    "title": "静止助手头像仍各自启动525ms定时器",
+    "anchor": "ChatMessageAvatar.ets:19-46; AgentMessageRow.ets:433",
+    "reason": "启动只排除user，不判断streaming；约1.9N次/秒状态翻转，无实际帧率证据，销毁清理存在",
+    "fix": "随streaming和页面可见性启停，共享时间源；假时钟断言静止消息不调度"
+  },
+  {
+    "ids": [
+      "F10"
+    ],
+    "status": "runtime",
+    "title": "小说全量时间线与返回滚底",
+    "reason": "全量ForEach/强制scroll事实成立，规模卡顿和用户阅读位置损失需设备；不把产品跟随策略自动当Bug"
+  },
+  {
+    "ids": [
+      "F11"
+    ],
+    "status": "debt",
+    "title": "搜索输入即清旧结果",
+    "reason": "清空发生在debounce前，属体验取舍；可建议保留旧结果，不作数据/功能故障"
+  },
+  {
+    "ids": [
+      "F12"
+    ],
+    "status": "confirmed",
+    "severity": "P3",
+    "title": "子代理/议会阶段标签缺乏真实阶段驱动",
+    "anchor": "ChatMessageSubAgentStep.ets:77-81; ChatMessageCouncilStep.ets:86-102; CouncilRunPage.ets:110-116,165",
+    "reason": "子代理按墙钟算阶段但无tick，议会轮换为空或按固定时钟，不是实际任务phase；不称任务本身卡死",
+    "fix": "绑定真实状态；无阶段事件则显示运行状态，不伪造进度；测慢任务/无新输出时文案"
+  },
+  {
+    "ids": [
+      "F13"
+    ],
+    "status": "confirmed",
+    "severity": "P3",
+    "title": "ChatPage隐藏后问候动画计时器继续运行",
+    "anchor": "ChatPage.ets:687-690,767-775,889-894",
+    "reason": "onPageHide只停cursor，不停3.2秒greetTimer；destroy才停，回调无visible门",
+    "fix": "show/hide对称启停，保留destroy清理；假生命周期测试覆盖push子页与返回"
+  },
+  {
+    "ids": [
+      "F14"
+    ],
+    "status": "confirmed",
+    "severity": "P2",
+    "title": "历史页无法进入选择模式，批量导出不可达",
+    "anchor": "HistoryPage.ets:39,90,101-104,166-170,211",
+    "reason": "selecting初值false且只有置false写点；选择按钮调用exitSelecting，SettingPage有活入口",
+    "fix": "选择/取消分别置true/false；检查进入多选、勾选、导出、退出"
+  },
+  {
+    "ids": [
+      "F15"
+    ],
+    "status": "confirmed",
+    "severity": "P2",
+    "title": "工具正常输出包含error等词被标成失败",
+    "anchor": "ChatMessageTools.ets:33-54; AgentToolCapsule.ets:67-101",
+    "reason": "原始正文includes(error/exception/failed)判Failed，搜索/源码/日志正文可正常包含；与R05不同代码和后果",
+    "fix": "执行层提供结构化终态，不让任意正文决定状态；正常error handling正文与真实失败对照"
+  },
+  {
+    "ids": [
+      "F16",
+      "F16a"
+    ],
+    "status": "confirmed",
+    "severity": "P2",
+    "title": "八项显示/输入设置未接消费，用户头像开关还绑错字段",
+    "anchor": "SettingDisplayPage.ets:96-154; MarkdownText.ets:646-722; ChatInput.ets:197-258",
+    "reason": "showAssistantBubble/showModelName/showModelIcon/sendOnEnter/pasteLongTextAsFile/codeBlockAutoCollapse/showLineNumbers/fontSizeRatio有UI但无对应消费；F16a并入不另计",
+    "fix": "逐键接线或隐藏未支持设置；以render/input spy验证每个开关改变行为，其余有效显示设置不误伤"
+  },
+  {
+    "ids": [
+      "F17"
+    ],
+    "status": "confirmed",
+    "severity": "P3",
+    "title": "ask_user单问题重复显示标题和正文",
+    "anchor": "ChatMessageAskUserStep.ets:41-52,169-174",
+    "reason": "单问题heading返回问题，ForEach再次渲染同一问题，多问题对照不重复",
+    "fix": "单问题只渲染一次；测试1个及多个问题的文本树"
+  },
+  {
+    "ids": [
+      "F18"
+    ],
+    "status": "debt",
+    "title": "MiniApp更多菜单仅长按",
+    "reason": "LongPress为明确设计且菜单能用；点按可发现性改进保留，不当关键流程不可用",
+    "mergeOverride": "独立复核候选曾建议确认；主审按用户完成动作/产品取舍收窄为建议，不计Bug"
+  },
+  {
+    "ids": [
+      "F19"
+    ],
+    "status": "confirmed",
+    "severity": "P2",
+    "title": "Slides字体页面完成按钮不保存任何设置",
+    "anchor": "SettingSlidesFontPage.ets:21-23,32-51,117,144-148; SkillsPage.ets:173",
+    "reason": "私有常量加载、本地State setter、done仅back，无存储/消费者，字体族预览也固定",
+    "fix": "接真实配置并成功后返回，或下线占位入口；改字号字体→完成→重进持久化回归"
+  },
+  {
+    "ids": [
+      "F20"
+    ],
+    "status": "confirmed",
+    "severity": "P1",
+    "title": "清理孤立文件将损坏/缺失登记库当成删除全部附件的依据",
+    "anchor": "SettingFilesPage.ets:111-128,157-195,205-208; ManagedFileStore.ets:44-71",
+    "reason": "rows来自可能错误为空的登记快照，loaded=true不代表数据有效；known为空时对upload逐个unlink，不核对会话引用",
+    "fix": "错误状态禁止破坏性清理；重新核验引用并预览候选/可恢复隔离；损坏/缺失/EIO/健康库mock对照，不能仅加确认框"
+  },
+  {
+    "ids": [
+      "F21"
+    ],
+    "status": "confirmed",
+    "severity": "P2",
+    "title": "子代理和议会展开编辑直接返回会丢未提交配置",
+    "anchor": "SettingSubAgentPage.ets:237-245,304-316; SettingModelCouncilPage.ets:259-266,309-324",
+    "reason": "文本只改State，折叠/其它保存点才整份写盘；直接返回无dirty提示/flush；切行后再保存不会丢的反例保留",
+    "fix": "显式保存取消/自动保存并显示错误；编辑后直接返回与折叠后返回对照"
+  },
+  {
+    "ids": [
+      "F22"
+    ],
+    "status": "debt",
+    "title": "MCP删除缺撤销或二次确认",
+    "reason": "用户先滑出再明确点删除，属于授权删除；无额外确认不足以单独证明Bug，仍建议保护不可恢复配置",
+    "mergeOverride": "独立复核候选曾建议确认；主审按用户完成动作/产品取舍收窄为建议，不计Bug"
+  },
+  {
+    "ids": [
+      "F23"
+    ],
+    "status": "confirmed",
+    "severity": "P3",
+    "title": "MCP空名称保存按钮静默无反馈",
+    "anchor": "ChatMcpSettingsPage.ets:101-115,485-488",
+    "reason": "空名称return是正确拒绝，但按钮仍可点且无错误状态/文案；不称应用实际卡死",
+    "fix": "禁用无效提交或行内提示；空/空白/合法名称三种输入测试"
+  },
+  {
+    "ids": [
+      "F24"
+    ],
+    "status": "runtime",
+    "title": "MCP输入中trim可能吞掉Bearer空格",
+    "reason": "onChange trim回写为事实，ArkUI光标/选区及尾空格行为待设备；草稿应保留raw"
+  },
+  {
+    "ids": [
+      "F25"
+    ],
+    "status": "runtime",
+    "title": "导出选择器返回空URI仍私有落盘并报成功",
+    "reason": "代码分支已证，取消在当前SDK返回[]还是reject需设备；不将真实取消必报成功当已实测，部分恢复子项并R03"
+  },
+  {
+    "ids": [
+      "F26"
+    ],
+    "status": "debt",
+    "title": "循环选择器可发现性与滑块多次落盘",
+    "reason": "无chevron/轮转选择本身是设计取舍；落盘放大已定位，但覆盖更新/卡顿未证，建议提交结束防抖",
+    "mergeOverride": "独立复核候选曾建议确认；主审按用户完成动作/产品取舍收窄为建议，不计Bug"
+  },
+  {
+    "ids": [
+      "F27"
+    ],
+    "status": "runtime",
+    "title": "MiniApp图片预取后refresh可能重复初始化副作用",
+    "reason": "refresh确实存在；ai.generate/sendToConversation/createArtifact未实现，撤回重复计费断言，只验证storage/fetch/search等实际可用方法",
+    "mergeOverride": "独立复核确认源码refresh；实际重复副作用未设备验证，最终归runtime"
+  },
+  {
+    "ids": [
+      "F28"
+    ],
+    "status": "debt",
+    "title": "章节/资料删除缺恢复保护",
+    "reason": "明确点击删除会永久移除，但缺确认不自动等价越权/误删Bug；列高优先UX安全改进，设备核实误触风险",
+    "mergeOverride": "独立复核候选曾建议确认；主审按用户完成动作/产品取舍收窄为建议，不计Bug"
+  },
+  {
+    "ids": [
+      "F29"
+    ],
+    "status": "confirmed",
+    "severity": "P2",
+    "title": "editorial_slant模板缩放按钮不影响内容",
+    "anchor": "DeepReadArticlePage.ets:305-313,388-399,464-479; DeepReadTemplate.ets:151",
+    "reason": "fontScale改变但Web模板函数不消费，原生分支消费；fontSerif无消费作为同显示配置链子项",
+    "fix": "模板接fontScale或隐藏不支持按钮；原生/Web模板同输入比较，字体模式单独核验"
+  },
+  {
+    "ids": [
+      "F30"
+    ],
+    "status": "confirmed",
+    "severity": "P1",
+    "title": "重进未完成深读会隐式新建任务并替换当前轮次",
+    "anchor": "DeepReadArticlePage.ets:116-127,129-176,282-288; scheduler.ts:108-131; run_manager.ts:293-308",
+    "reason": "取消意图只在页State，离页不abort；重新进入不查isRunning，仅完整缓存短路，否则新run触发REPLACE；不声称进度清零或锁内并发写",
+    "fix": "存在run时仅订阅，取消/中断显示显式继续；测活动run重入、取消重入、完整缓存对照"
+  },
+  {
+    "ids": [
+      "F31"
+    ],
+    "status": "debt",
+    "title": "会话手动重命名代码无入口",
+    "reason": "startEditTitle及drawer均无入口，全局无替代手动rename；但没有可见按钮承诺，按功能缺口/死代码登记而非现行点击故障"
+  },
+  {
+    "ids": [
+      "F32"
+    ],
+    "status": "confirmed",
+    "severity": "P2",
+    "title": "收进章节后跳错资料建议二级页签",
+    "anchor": "NovelWorkspacePage.ets:109,951-965,1756,1845-1873",
+    "reason": "成功只tab=2，settingsSection仍0，建议在section1，用户不能直接看刚生成建议",
+    "fix": "明确tab和settingsSection或保留正文显示提示；初始section0收集后应定位资料建议"
+  },
+  {
+    "ids": [
+      "F33"
+    ],
+    "status": "debt",
+    "title": "重新分析只扫末章且范围不明",
+    "reason": "源码只last章为事实，标题未明确承诺整项目，不擅自扩大需求；明确范围/展示warning为改进",
+    "mergeOverride": "独立复核候选曾建议确认；主审按用户完成动作/产品取舍收窄为建议，不计Bug"
+  },
+  {
+    "ids": [
+      "F34"
+    ],
+    "status": "confirmed",
+    "severity": "P2",
+    "title": "助手绑定模型与菜单显示/切换模型不一致",
+    "anchor": "AppContainer.ets:1003-1021; ChatPage.ets:2814-2822,2840-2849; ChatModelPickerPage.ets:60-74",
+    "reason": "实际runtime优先assistant.chatModelId，UI只读写全局；带绑定助手通过恢复可达，手动绑定旧助手页不可达",
+    "fix": "展示和请求采用同一effective model，提供清除绑定；合成恢复助手绑定A/全局B后比较菜单与请求"
+  },
+  {
+    "ids": [
+      "F35"
+    ],
+    "status": "confirmed",
+    "severity": "P2",
+    "title": "助手工具和扩展开关并发写入可丢失更新",
+    "anchor": "ChatAssistantExtensionsPage.ets:84-135; ChatAssistantLocalToolsPage.ets:135-160; ChatAssistantMcpPage.ets:97-123; kv_store.ts:59-60",
+    "reason": "依据旧this.assistant算列表，await load后整份put；assistants键无共享RMW锁，其它键的mutex不保护它",
+    "fix": "按助手/键串行mutation，锁内读最新并变更字段；受控两次开关乱序写验证均保留，避免仅锁旧快照写"
+  },
+  {
+    "ids": [
+      "F36"
+    ],
+    "status": "debt",
+    "title": "通讯录暂不可用项点击无反馈",
+    "reason": "已显示暂不可用/ACL原因，未授权与不可用非同义；撤回撒谎/权限故障定性"
+  },
+  {
+    "ids": [
+      "F37"
+    ],
+    "status": "runtime",
+    "title": "弹窗卡片空白点击可能传播至遮罩关闭",
+    "reason": "缺内容消费点击且有正确反例，但真实hit-test须设备；不声称已经丢用户输入"
+  },
+  {
+    "ids": [
+      "F38",
+      "F40"
+    ],
+    "status": "confirmed",
+    "severity": "P2",
+    "title": "自绘覆盖层未接管返回，返回跳过弹窗层级",
+    "anchor": "NovelWorkspacePage.ets:2030-2168; ChatPage.ets:777-781,4631-4640,4858-4936",
+    "reason": "小说无onBackPress，ChatPage只处理不可达drawer；模型菜单/拒绝/编辑等自绘层不能像系统sheet消费返回；同返回层级契约合并一项",
+    "fix": "统一overlay优先返回，编辑脏数据确认；测试关闭弹窗而非退出页面，系统sheet不重复拦截"
+  },
+  {
+    "ids": [
+      "F39"
+    ],
+    "status": "merged",
+    "target": "R23",
+    "title": "通知/Want路由不及时消费",
+    "reason": "栈顶非首页不导航与R23重复；sourceUrl首建不落盘及清键先导航失败为待验证扩展，未另计"
+  },
+  {
+    "ids": [
+      "F41",
+      "F42"
+    ],
+    "status": "confirmed",
+    "severity": "P2",
+    "title": "页面加载状态不闭合：返回卸载列表、加载前误报为空",
+    "anchor": "NovelProjectsPage.ets:33-54,282-294; ChatPage.ets:4836; CouncilPage.ets:43,68-71,235-237",
+    "reason": "小说返回先loading=true移除既有列表，Chat/Council未区分未加载和空；逻辑分支可证，闪烁时长/滚动损失待设备；合并状态展示契约一项",
+    "fix": "初载/刷新/空/错分离，刷新保留旧内容；慢fake库断言不会显示空库或卸载已读列表"
+  },
+  {
+    "ids": [
+      "F43"
+    ],
+    "status": "merged",
+    "target": "R07",
+    "title": "WebMount挂载标志永不就绪",
+    "reason": "与R07同一状态/同一setter零调用，保留一条，L01/L02独立"
+  },
+  {
+    "ids": [
+      "F44"
+    ],
+    "status": "confirmed",
+    "severity": "P2",
+    "title": "聊天文档附件没有打开或预览路径",
+    "anchor": "ContentAttachmentChip.ets:15-33; AgentMessageRow.ets:351-376",
+    "reason": "文档chip无onOpen，用户消息整体点击编辑不等于预览；音视频仅导入历史可出现，不泛化当前产生",
+    "fix": "支持类型绑定open/preview，无法打开明确标记；用户及助手文档两路径测试"
+  },
+  {
+    "ids": [
+      "X01"
+    ],
+    "status": "confirmed",
+    "severity": "P2",
+    "title": "已完成深读缓存早退，重进忽略已保存字号和模板",
+    "anchor": "DeepReadArticlePage.ets:69,76-77,129-150",
+    "reason": "isComplete命中137-140return，唯一KV显示设置读取144-150被跳过，无onPageShow；完整缓存只用默认1.0/none，部分缓存对照才读设置",
+    "fix": "读取显示偏好与生成/缓存命中解耦；完整/部分/无缓存三种入口均读取，已完成不触发新生成"
+  }
+]

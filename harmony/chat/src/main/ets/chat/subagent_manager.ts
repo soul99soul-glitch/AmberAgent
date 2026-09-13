@@ -55,6 +55,7 @@ interface TerminalTaskUpdate {
   summary: string;
   error: string | null;
   cancelCapability: boolean;
+  lastErrorCode: string | null;
 }
 
 interface RuntimeRun {
@@ -204,12 +205,19 @@ const isHistoryReader = (definition: SubAgentDefinition): boolean => {
     (toolName: string): boolean => HISTORY_FULL_READ_TOOLS.has(toolName));
 };
 
+// live = 仍可被 finish/cancel 收口的运行态。approval_required 是子代理自身无法
+//   自行审批的挂起态:任务板映射为 INTERRUPTED(带原因),但运行对象保持 live,
+//   使 cancel() 仍能收口为 cancelled(R14),不再出现"不可恢复、不可取消"。
+const isLiveRunStatus = (status: SubAgentRunStatus): boolean =>
+  status === 'running' || status === 'approval_required';
+
 const statusToAgentTaskStatus = (status: SubAgentRunStatus): AgentTaskStatus => {
-  if (status === 'running' || status === 'approval_required') return 'RUNNING';
+  if (status === 'running') return 'RUNNING';
   if (status === 'completed') return 'COMPLETED';
   if (status === 'failed') return 'FAILED';
   if (status === 'cancelled') return 'CANCELLED';
   if (status === 'timed_out') return 'TIMED_OUT';
+  // approval_required(无法在子代理内授权)与 interrupted 一样按 INTERRUPTED 收口
   return 'INTERRUPTED';
 };
 
@@ -598,7 +606,7 @@ export class SubAgentManager {
     const next: SubAgentRun | null = await runtimeRun.terminalMutex.withLock(
       (): Promise<SubAgentRun | null> => {
         const current: SubAgentRun = runtimeRun.snapshot;
-        if (!subAgentRunStatusRunning(current.status)) return Promise.resolve(null);
+        if (!isLiveRunStatus(current.status)) return Promise.resolve(null);
         const updated: SubAgentRun = copyRunWithResult(
           current, result, displayText, this.deps.now());
         runtimeRun.snapshot = updated;
@@ -611,12 +619,26 @@ export class SubAgentManager {
     const summary: string = result.summary.trim().length > 0
       ? result.summary
       : result.findings.join('; ').slice(0, 1000);
-    const error: string | null = result.error.trim().length > 0 ? result.error : null;
+    // approval_required 也必须带可见原因(任务板显示 INTERRUPTED 而非裸 RUNNING):
+    //   运行对象仍 live,用户可再 cancel();任务板给出挂起原因与错误码(R14)。
+    const explicitError: string = result.error.trim();
+    const approvalReason: string = next.status === 'approval_required'
+      ? 'Subagent stopped because it requested approval, which cannot be granted inside the subagent run.'
+      : '';
+    const error: string | null = explicitError.length > 0
+      ? explicitError
+      : (approvalReason.length > 0 ? approvalReason : null);
+    const lastErrorCode: string | null = explicitError.length === 0 && approvalReason.length > 0
+      ? 'subagent_approval_required'
+      : null;
     const terminalTaskUpdate: TerminalTaskUpdate = {
       status,
       summary,
       error,
-      cancelCapability: false,
+      // approval_required 运行对象仍 live 且 start() 已注册取消回调 → 任务板保留
+      //   取消能力(看板取消可经回调收口);其余终态一律 false(R14)。
+      cancelCapability: next.status === 'approval_required',
+      lastErrorCode,
     };
     if (runtimeRun.taskRegistered) {
       this.scheduleTaskUpdate(runId, terminalTaskUpdate);
@@ -635,6 +657,7 @@ export class SubAgentManager {
       status: update.status,
       summary: update.summary,
       error: update.error,
+      lastErrorCode: update.lastErrorCode,
       cancelCapability: update.cancelCapability,
     }).catch((): void => {});
   }

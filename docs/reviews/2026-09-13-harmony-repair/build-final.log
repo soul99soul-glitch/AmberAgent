@@ -1,0 +1,1663 @@
+DEVECO_SDK_HOME=/Users/mi/Library/Huawei/commandline/command-line-tools/sdk
+OHOS_BASE_SDK_HOME=/Users/mi/Library/Huawei/commandline/command-line-tools/sdk/default/openharmony
+Running: hvigorw --mode module -p module=entry@default -p product=default assembleHap --no-daemon
+> hvigor [32mUP-TO-DATE :entry:default@PreBuild...  [39m
+> hvigor [33mWARN: deepread: HAR modules cannot be installed independently. As a result, the "applyToProducts" configuration will not take effect. See more details.[39m
+> hvigor [32mUP-TO-DATE :deepread:default@PreBuild...  [39m
+> hvigor [33mWARN: chat: HAR modules cannot be installed independently. As a result, the "applyToProducts" configuration will not take effect. See more details.[39m
+> hvigor [32mUP-TO-DATE :chat:default@PreBuild...  [39m
+> hvigor [32mFinished :entry:default@CreateModuleInfo... after 1 ms [39m
+> hvigor [32mUP-TO-DATE :entry:default@GenerateMetadata...  [39m
+> hvigor [32mFinished :entry:default@PreCheckSyscap... after 1 ms [39m
+> hvigor [32mFinished :entry:default@GeneratePkgContextInfo... after 3 ms [39m
+> hvigor [32mUP-TO-DATE :entry:default@GeneratePkgSdkInfo...  [39m
+> hvigor [32mFinished :entry:default@ProcessIntegratedHsp... after 1 ms [39m
+> hvigor [32mUP-TO-DATE :deepread:default@CreateHarBuildProfile...  [39m
+> hvigor [32mFinished :deepread:default@ConfigureCmake... after 1 ms [39m
+> hvigor [32mUP-TO-DATE :deepread:default@MergeProfile...  [39m
+> hvigor [32mFinished :entry:default@SyscapTransform... after 5 ms [39m
+> hvigor [32mUP-TO-DATE :entry:default@ProcessRouterMap...  [39m
+> hvigor [32mUP-TO-DATE :entry:default@ProcessShareConfig...  [39m
+> hvigor [32mFinished :entry:default@ProcessStartupConfig... after 1 ms [39m
+> hvigor [32mUP-TO-DATE :chat:default@CreateHarBuildProfile...  [39m
+> hvigor [32mFinished :deepread:default@BuildNativeWithCmake... after 1 ms [39m
+> hvigor [32mUP-TO-DATE :chat:default@MergeProfile...  [39m
+> hvigor [32mUP-TO-DATE :entry:default@GenerateLoaderJson...  [39m
+> hvigor [32mUP-TO-DATE :entry:default@CreateBuildProfile...  [39m
+> hvigor [32mFinished :deepread:default@BuildNativeWithNinja... after 1 ms [39m
+> hvigor [32mFinished :chat:default@ConfigureCmake... after 1 ms [39m
+> hvigor [32mUP-TO-DATE :entry:default@MergeProfile...  [39m
+> hvigor [32mUP-TO-DATE :deepread:default@ProcessLibs...  [39m
+> hvigor [32mFinished :chat:default@BuildNativeWithCmake... after 1 ms [39m
+> hvigor [32mUP-TO-DATE :entry:default@MakePackInfo...  [39m
+> hvigor [32mUP-TO-DATE :entry:default@ProcessProfile...  [39m
+> hvigor [32mUP-TO-DATE :deepread:default@DoNativeStrip...  [39m
+> hvigor [32mFinished :entry:default@ConfigureCmake... after 1 ms [39m
+> hvigor [32mUP-TO-DATE :entry:default@ProcessResource...  [39m
+> hvigor [32mFinished :chat:default@BuildNativeWithNinja... after 1 ms [39m
+> hvigor [32mFinished :entry:default@BuildNativeWithCmake... after 1 ms [39m
+> hvigor [32mUP-TO-DATE :entry:default@CompileResource...  [39m
+> hvigor [32mUP-TO-DATE :chat:default@ProcessLibs...  [39m
+> hvigor [32mFinished :entry:default@BuildJS... after 1 ms [39m
+> hvigor [32mUP-TO-DATE :chat:default@DoNativeStrip...  [39m
+> hvigor [32mFinished :entry:default@BuildNativeWithNinja... after 1 ms [39m
+> hvigor [32mUP-TO-DATE :entry:default@ProcessLibs...  [39m
+> hvigor [32mUP-TO-DATE :entry:default@DoNativeStrip...  [39m
+> hvigor [32mUP-TO-DATE :entry:default@CacheNativeLibs...  [39m
+> hvigor [33mWARN: [33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/platform_impl/PreferencesStorage.ets:22:35
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/platform_impl/PreferencesStorage.ets:28:46
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/platform_impl/PreferencesStorage.ets:34:13
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/platform_impl/PreferencesStorage.ets:35:13
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/platform_impl/PreferencesStorage.ets:40:13
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/platform_impl/PreferencesStorage.ets:41:13
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/platform_impl/PreferencesStorage.ets:46:46
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/platform_impl/PreferencesStorage.ets:55:13
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/platform_impl/PreferencesStorage.ets:56:13
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/platform_impl/PreferencesStorage.ets:61:13
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/platform_impl/PreferencesStorage.ets:62:13
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/platform_impl/PreferencesStorage.ets:67:48
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/platform_impl/RdbRepository.ets:167:67
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/platform_impl/RdbRepository.ets:171:53
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/platform_impl/RdbRepository.ets:190:62
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/platform_impl/RdbRepository.ets:192:22
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/platform_impl/RdbRepository.ets:195:17
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/platform_impl/RdbRepository.ets:218:17
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/platform_impl/RdbRepository.ets:353:62
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/platform_impl/RdbRepository.ets:356:24
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/platform_impl/RdbRepository.ets:362:17
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/platform_impl/RdbRepository.ets:404:62
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/platform_impl/RdbRepository.ets:407:24
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/platform_impl/RdbRepository.ets:407:63
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/platform_impl/RdbRepository.ets:410:17
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/platform_impl/FileStore.ets:56:38
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/platform_impl/FileStore.ets:58:25
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/platform_impl/FileStore.ets:65:44
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/platform_impl/FileStore.ets:67:20
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/platform_impl/FileStore.ets:69:20
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/platform_impl/FileStore.ets:75:38
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/platform_impl/FileStore.ets:77:44
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/platform_impl/FileStore.ets:79:46
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/platform_impl/FileStore.ets:81:20
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/platform_impl/FileStore.ets:84:20
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/platform_impl/FileStore.ets:92:44
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/platform_impl/FileStore.ets:96:20
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/platform_impl/FileStore.ets:98:20
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/platform_impl/FileStore.ets:106:44
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/platform_impl/FileStore.ets:108:20
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/platform_impl/FileStore.ets:110:20
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/platform_impl/FileStore.ets:116:25
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/platform_impl/FileStore.ets:121:38
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/platform_impl/FileStore.ets:123:25
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/platform_impl/FileStore.ets:128:38
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/platform_impl/FileStore.ets:130:18
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/platform_impl/FileStore.ets:137:18
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/platform_impl/FileStore.ets:161:38
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/platform_impl/FileStore.ets:163:44
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/platform_impl/FileStore.ets:164:17
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/platform_impl/FileStore.ets:180:44
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/platform_impl/FileStore.ets:182:18
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/platform_impl/FileStore.ets:186:14
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/platform_impl/FileStore.ets:189:20
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/platform_impl/FileStore.ets:196:38
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/platform_impl/ArtifactPorts.ets:38:45
+ The 'PATCH' API is supported since SDK version 26.0.0. However, the current compatible SDK version is 5.0.0(12).
+ It is recommended to use apiAvailable to safeguard API compatibility.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/platform_impl/EntryDocumentParser.ets:75:63
+ 'parse' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/platform_impl/EntryDocumentParser.ets:86:63
+ 'parse' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/platform_impl/ChatRdbRepository.ets:118:17
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/platform_impl/ChatRdbRepository.ets:122:17
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/platform_impl/ChatRdbRepository.ets:124:19
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/platform_impl/ChatRdbRepository.ets:133:11
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/platform_impl/ChatRdbRepository.ets:136:13
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/platform_impl/ChatRdbRepository.ets:149:35
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/platform_impl/ChatRdbRepository.ets:152:41
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/platform_impl/ChatRdbRepository.ets:153:24
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/platform_impl/ChatRdbRepository.ets:154:32
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/platform_impl/ChatRdbRepository.ets:157:17
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/platform_impl/ChatRdbRepository.ets:161:21
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/platform_impl/ChatRdbRepository.ets:220:28
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/platform_impl/ChatRdbRepository.ets:223:17
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/platform_impl/ChatRdbRepository.ets:225:18
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/platform_impl/ChatRdbRepository.ets:226:28
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/platform_impl/ChatRdbRepository.ets:227:21
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/platform_impl/ChatRdbRepository.ets:228:25
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/platform_impl/ChatRdbRepository.ets:229:25
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/platform_impl/ChatRdbRepository.ets:230:27
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/platform_impl/ChatRdbRepository.ets:231:25
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/platform_impl/ChatRdbRepository.ets:232:34
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/platform_impl/ChatRdbRepository.ets:237:10
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/platform_impl/ChatRdbRepository.ets:268:28
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/platform_impl/ChatRdbRepository.ets:271:17
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/platform_impl/ChatRdbRepository.ets:273:18
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/platform_impl/ChatRdbRepository.ets:274:31
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/platform_impl/ChatRdbRepository.ets:275:26
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/platform_impl/ChatRdbRepository.ets:276:24
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/platform_impl/ChatRdbRepository.ets:277:28
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/platform_impl/ChatRdbRepository.ets:282:10
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/platform_impl/ChatRdbRepository.ets:290:28
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/platform_impl/ChatRdbRepository.ets:293:14
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/platform_impl/ChatRdbRepository.ets:293:39
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/platform_impl/ChatRdbRepository.ets:296:10
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/platform_impl/ChatRdbRepository.ets:502:28
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/platform_impl/ChatRdbRepository.ets:504:17
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/platform_impl/ChatRdbRepository.ets:505:35
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/platform_impl/ChatRdbRepository.ets:506:38
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/platform_impl/ChatRdbRepository.ets:509:51
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/platform_impl/ChatRdbRepository.ets:513:10
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/platform_impl/McpFilesStore.ets:52:44
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/platform_impl/McpFilesStore.ets:56:20
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/platform_impl/McpFilesStore.ets:58:20
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/platform_impl/EntryLocalToolPorts.ets:20:34
+ To use this API, you need to apply for the permissions: ohos.permission.READ_PASTEBOARD [since 12]
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/platform_impl/AgentCronStore.ets:108:56
+ 'encode' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/platform_impl/SubAgentStore.ets:82:56
+ 'encode' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/design/fonts.ets:35:12
+ 'registerFont' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/entryability/EntryAbility.ets:95:12
+ 'pushUrl' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/AssistantBackgroundPicker.ets:28:27
+ 'getParams' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/AssistantBackgroundPicker.ets:47:49
+ 'back' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/AssistantBackgroundPicker.ets:61:12
+ 'back' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/AssistantBackgroundPicker.ets:69:41
+ 'back' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/AssistantBasicPage.ets:36:27
+ 'getParams' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/AssistantBasicPage.ets:84:49
+ 'back' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/AssistantBasicPage.ets:104:12
+ 'back' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/AssistantBasicPage.ets:116:41
+ 'back' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/AssistantDetailPage.ets:37:27
+ 'getParams' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/AssistantDetailPage.ets:89:12
+ 'pushUrl' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/AssistantDetailPage.ets:89:12
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/AssistantDetailPage.ets:97:41
+ 'back' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/AssistantDetailPage.ets:178:24
+ 'pushUrl' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/AssistantExtensionsPage.ets:32:27
+ 'getParams' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/AssistantExtensionsPage.ets:39:12
+ 'pushUrl' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/AssistantExtensionsPage.ets:39:12
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/AssistantExtensionsPage.ets:54:41
+ 'back' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/AssistantImporter.ets:125:56
+ 'back' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/AssistantImporter.ets:153:41
+ 'back' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/AssistantListPage.ets:93:12
+ 'pushUrl' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/AssistantListPage.ets:93:12
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/AssistantListPage.ets:104:12
+ 'pushUrl' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/AssistantListPage.ets:104:12
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/AssistantListPage.ets:109:5
+ 'AlertDialog' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/AssistantListPage.ets:109:17
+ 'show' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/AssistantListPage.ets:150:20
+ To use this API, you need to apply for the permissions: ohos.permission.READ_PASTEBOARD [since 12]
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/AssistantListPage.ets:221:41
+ 'back' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/AssistantMemoryPage.ets:34:27
+ 'getParams' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/AssistantMemoryPage.ets:62:49
+ 'back' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/AssistantMemoryPage.ets:73:12
+ 'back' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/AssistantMemoryPage.ets:89:41
+ 'back' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/AssistantPromptPage.ets:42:27
+ 'getParams' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/AssistantPromptPage.ets:124:49
+ 'back' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/AssistantPromptPage.ets:166:12
+ 'back' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/AssistantPromptPage.ets:183:88
+ 'back' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/AssistantPropertyEditor.ets:28:27
+ 'getParams' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/AssistantPropertyEditor.ets:42:12
+ 'back' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/AssistantPropertyEditor.ets:58:41
+ 'back' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/AssistantRequestPage.ets:30:27
+ 'getParams' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/AssistantRequestPage.ets:78:49
+ 'back' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/AssistantRequestPage.ets:96:12
+ 'back' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/AssistantRequestPage.ets:135:41
+ 'back' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/components/PageTemplate.ets:29:45
+ 'back' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/components/PageTemplate.ets:199:7
+ 'animateTo' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/components/PageTemplate.ets:232:7
+ 'animateTo' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/components/PageTemplate.ets:352:9
+ 'animateTo' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/components/PageTemplate.ets:485:9
+ 'animateTo' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/BoardPage.ets:211:9
+ 'animateTo' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/BoardPage.ets:232:12
+ 'pushUrl' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/BoardPage.ets:232:12
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/BoardPage.ets:238:44
+ 'getContext' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/BoardPage.ets:244:22
+ 'showToast' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/BoardPage.ets:247:20
+ 'showToast' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/BoardPage.ets:247:20
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/BoardPage.ets:257:20
+ 'showToast' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/BoardPage.ets:259:20
+ 'showToast' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/BoardPage.ets:259:20
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/BoardPage.ets:278:15
+ 'animateTo' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/BoardPage.ets:315:40
+ 'pushUrl' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/BoardPage.ets:418:25
+ 'animateTo' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/BoardPage.ets:442:15
+ 'animateTo' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/BoardPage.ets:495:7
+ 'animateTo' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ChatAgentPermissionsPage.ets:47:7
+ 'AlertDialog' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ChatAgentPermissionsPage.ets:47:19
+ 'show' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ChatAssistantExtensionsPage.ets:53:27
+ 'getParams' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ChatAssistantExtensionsPage.ets:137:12
+ 'pushUrl' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ChatAssistantExtensionsPage.ets:137:12
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ChatAssistantExtensionsPage.ets:235:51
+ 'pushUrl' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ChatAssistantExtensionsPage.ets:344:51
+ 'pushUrl' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ChatAssistantLocalToolsPage.ets:115:27
+ 'getParams' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ChatAssistantMcpPage.ets:59:27
+ 'getParams' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ChatAssistantsPage.ets:308:5
+ 'AlertDialog' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ChatAssistantsPage.ets:308:17
+ 'show' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ChatAssistantsPage.ets:352:39
+ 'back' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ChatAssistantsPage.ets:359:41
+ 'pushUrl' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ChatAssistantsPage.ets:394:30
+ 'pushUrl' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ChatAssistantsPage.ets:402:30
+ 'pushUrl' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ChatAssistantsPage.ets:411:30
+ 'pushUrl' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ChatAssistantsPage.ets:421:30
+ 'pushUrl' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/design/components.ets:93:8
+ The 'fill' API is supported since SDK version 26.0.0. However, the current compatible SDK version is 5.0.0(12).
+ It is recommended to use apiAvailable to safeguard API compatibility.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/design/components.ets:321:5
+ 'animateTo' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/design/components.ets:469:5
+ 'animateTo' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ChatListPage.ets:118:9
+ 'animateTo' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ChatListPage.ets:201:12
+ 'pushUrl' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ChatListPage.ets:221:7
+ 'animateTo' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ChatListPage.ets:229:20
+ 'showToast' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ChatListPage.ets:243:5
+ 'animateTo' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ChatListPage.ets:253:5
+ 'animateTo' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ChatListPage.ets:264:22
+ 'showToast' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ChatListPage.ets:285:22
+ 'showToast' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ChatListPage.ets:290:20
+ 'showToast' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ChatListPage.ets:295:5
+ 'AlertDialog' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ChatListPage.ets:295:17
+ 'show' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ChatListPage.ets:337:23
+ 'showToast' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ChatListPage.ets:337:23
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ChatListPage.ets:445:18
+ 'showActionMenu' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ChatListPage.ets:464:22
+ 'showToast' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ChatListPage.ets:471:22
+ 'showToast' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ChatListPage.ets:473:22
+ 'showToast' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ChatListPage.ets:476:20
+ 'showToast' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ChatListPage.ets:484:22
+ 'showToast' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ChatListPage.ets:501:20
+ 'showToast' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ChatListPage.ets:511:20
+ 'showToast' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ChatListPage.ets:514:20
+ 'showToast' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ChatListPage.ets:514:20
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ChatListPage.ets:532:20
+ 'showToast' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ChatListPage.ets:535:20
+ 'showToast' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ChatListPage.ets:535:20
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ChatListPage.ets:618:41
+ 'pushUrl' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ChatListPage.ets:633:41
+ 'pushUrl' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ChatListPage.ets:774:13
+ 'animateTo' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ChatMcpSettingsPage.ets:243:16
+ The 'fill' API is supported since SDK version 26.0.0. However, the current compatible SDK version is 5.0.0(12).
+ It is recommended to use apiAvailable to safeguard API compatibility.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ChatMcpSettingsPage.ets:581:39
+ 'back' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ChatModelParamsPage.ets:56:27
+ 'getParams' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ChatModelParamsPage.ets:180:16
+ 'back' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ChatModelParamsPage.ets:352:63
+ 'back' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ChatModelPickerPage.ets:40:27
+ 'getParams' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ChatModelPickerPage.ets:89:34
+ 'back' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ChatModelPickerPage.ets:91:22
+ 'showToast' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ChatModelPickerPage.ets:98:34
+ 'back' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ChatModelPickerPage.ets:100:22
+ 'showToast' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ChatModelPickerPage.ets:161:43
+ 'pushUrl' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/platform_impl/WebMountSession.ets:396:26
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/platform_impl/WebMountSession.ets:397:21
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/platform_impl/WebMountSession.ets:403:26
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/platform_impl/WebMountSession.ets:404:21
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/platform_impl/WebMountSession.ets:414:21
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/platform_impl/WebMountSession.ets:428:47
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/platform_impl/WebMountSession.ets:436:51
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/platform_impl/WebMountSession.ets:440:45
+ 'packing' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/components/ChatInput.ets:61:5
+ 'animateTo' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/components/MarkdownText.ets:393:20
+ 'showToast' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/components/MarkdownText.ets:395:20
+ 'showToast' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/components/MarkdownText.ets:395:20
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/components/MarkdownText.ets:409:44
+ 'getContext' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/components/MarkdownText.ets:423:5
+ 'AlertDialog' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/components/MarkdownText.ets:423:17
+ 'show' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/components/GeneratedImageCarousel.ets:23:11
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/components/GeneratedImageCarousel.ets:24:18
+ 'showToast' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/components/GeneratedImageCarousel.ets:24:18
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/components/ui/DotLoading.ets:12:5
+ 'animateTo' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/components/ui/DotLoading.ets:20:10
+ The 'fill' API is supported since SDK version 26.0.0. However, the current compatible SDK version is 5.0.0(12).
+ It is recommended to use apiAvailable to safeguard API compatibility.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/components/ui/DotLoading.ets:23:10
+ The 'fill' API is supported since SDK version 26.0.0. However, the current compatible SDK version is 5.0.0(12).
+ It is recommended to use apiAvailable to safeguard API compatibility.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/components/ui/DotLoading.ets:27:10
+ The 'fill' API is supported since SDK version 26.0.0. However, the current compatible SDK version is 5.0.0(12).
+ It is recommended to use apiAvailable to safeguard API compatibility.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/components/SubAgentAvatar.ets:27:12
+ The 'fill' API is supported since SDK version 26.0.0. However, the current compatible SDK version is 5.0.0(12).
+ It is recommended to use apiAvailable to safeguard API compatibility.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/components/ChatMessageCommon.ets:31:52
+ 'getContext' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/platform_impl/MiniAppFiles.ets:158:44
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/platform_impl/MiniAppFiles.ets:160:20
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/platform_impl/MiniAppFiles.ets:162:20
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/platform_impl/MiniAppFiles.ets:173:20
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/components/MiniAppChatCard.ets:62:18
+ 'showToast' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/components/MiniAppChatCard.ets:62:18
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/components/MiniAppChatCard.ets:139:26
+ 'getContext' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/components/MiniAppChatCard.ets:171:26
+ 'getContext' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/components/AgentMessageRow.ets:532:7
+ 'animateTo' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/components/ChatMessageCopySheet.ets:19:11
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/components/ChatMessageToolPreviewSheet.ets:32:11
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/components/ChatMessageToolPreviewSheet.ets:33:18
+ 'showToast' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/components/ChatMessageToolPreviewSheet.ets:33:18
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/components/ChatListIndicators.ets:20:5
+ 'animateTo' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ChatPage.ets:747:7
+ 'animateTo' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ChatPage.ets:750:9
+ 'animateTo' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ChatPage.ets:826:37
+ 'back' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ChatPage.ets:1028:27
+ 'getParams' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ChatPage.ets:1659:12
+ 'replaceUrl' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ChatPage.ets:1659:12
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ChatPage.ets:2123:14
+ 'pushUrl' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ChatPage.ets:2202:44
+ 'getContext' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ChatPage.ets:2271:38
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ChatPage.ets:2273:38
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ChatPage.ets:2278:14
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ChatPage.ets:2281:14
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ChatPage.ets:2460:5
+ 'AlertDialog' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ChatPage.ets:2460:17
+ 'show' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ChatPage.ets:2702:20
+ 'showToast' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ChatPage.ets:2704:20
+ 'showToast' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ChatPage.ets:2772:20
+ 'showToast' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ChatPage.ets:2772:20
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ChatPage.ets:2795:20
+ 'showToast' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ChatPage.ets:2845:12
+ 'replaceUrl' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ChatPage.ets:2845:12
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ChatPage.ets:2854:5
+ 'AlertDialog' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ChatPage.ets:2854:17
+ 'show' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ChatPage.ets:2865:22
+ 'replaceUrl' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ChatPage.ets:2886:12
+ 'pushUrl' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ChatPage.ets:2886:12
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ChatPage.ets:2891:12
+ 'pushUrl' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ChatPage.ets:2891:12
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ChatPage.ets:2896:12
+ 'pushUrl' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ChatPage.ets:2896:12
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ChatPage.ets:2901:12
+ 'pushUrl' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ChatPage.ets:2901:12
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ChatPage.ets:2921:5
+ 'animateTo' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ChatPage.ets:2962:9
+ 'animateTo' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ChatPage.ets:3803:12
+ 'pushUrl' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ChatPage.ets:3803:12
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ChatPage.ets:4559:20
+ 'pushUrl' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ChatPage.ets:4562:51
+ 'pushUrl' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ChatPage.ets:4595:22
+ 'pushUrl' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ChatPage.ets:4598:53
+ 'pushUrl' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ChatPage.ets:4636:20
+ 'pushUrl' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ChatPage.ets:4639:51
+ 'pushUrl' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ChatPage.ets:4695:13
+ 'animateTo' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ChatPage.ets:5018:13
+ 'animateTo' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ChatPage.ets:5081:18
+ 'pushUrl' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ChatPage.ets:5086:18
+ 'pushUrl' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ChatPage.ets:5157:7
+ 'animateTo' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ChatPromptsPage.ets:152:20
+ 'showToast' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ChatPromptsPage.ets:154:20
+ 'showToast' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ChatPromptsPage.ets:175:24
+ 'showToast' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ChatPromptsPage.ets:196:22
+ 'showToast' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ChatPromptsPage.ets:201:22
+ 'showToast' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ChatPromptsPage.ets:204:20
+ 'showToast' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ChatPromptsPage.ets:230:41
+ 'showToast' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ChatPromptsPage.ets:285:41
+ 'showToast' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ChatProviderDetailPage.ets:61:14
+ 'getParams' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ChatProviderDetailPage.ets:228:5
+ 'AlertDialog' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ChatProviderDetailPage.ets:228:17
+ 'show' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ChatProviderDetailPage.ets:242:20
+ 'back' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ChatProviderDetailPage.ets:327:39
+ 'back' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ChatProviderDetailPage.ets:365:26
+ 'showToast' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ChatProviderDetailPage.ets:492:30
+ 'pushUrl' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ChatProviderSettingsPage.ets:201:14
+ 'pushUrl' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ChatProviderSettingsPage.ets:359:22
+ 'pushUrl' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ChatProviderSettingsPage.ets:363:28
+ 'showToast' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ChatTaskModelPickerPage.ets:52:27
+ 'getParams' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ChatTaskModelPickerPage.ets:112:39
+ 'back' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ChatTaskModelPickerPage.ets:150:43
+ 'pushUrl' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ChatTaskModelsPage.ets:155:12
+ 'pushUrl' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ChatTaskModelsPage.ets:155:12
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/CouncilPage.ets:128:14
+ 'pushUrl' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/CouncilPage.ets:152:82
+ 'back' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/CouncilRunPage.ets:44:27
+ 'getParams' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/CouncilRunPage.ets:167:82
+ 'back' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/CouncilRunPage.ets:186:37
+ 'back' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/DeepReadArticlePage.ets:93:38
+ 'getParams' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/DeepReadArticlePage.ets:334:44
+ 'getContext' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/DeepReadArticlePage.ets:340:22
+ 'showToast' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/DeepReadArticlePage.ets:343:20
+ 'showToast' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/DeepReadArticlePage.ets:343:20
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/DeepReadArticlePage.ets:394:24
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/DeepReadArticlePage.ets:473:37
+ 'back' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/DeepReadArticlePage.ets:786:18
+ The 'fill' API is supported since SDK version 26.0.0. However, the current compatible SDK version is 5.0.0(12).
+ It is recommended to use apiAvailable to safeguard API compatibility.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/DeepReadHistoryPage.ets:70:12
+ 'pushUrl' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/DeepReadHistoryPage.ets:70:12
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/DeepReadHistoryPage.ets:77:88
+ 'back' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/DeepReadTemplateSettingsPage.ets:10:12
+ 'replaceUrl' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/DeepReadTemplateSettingsPage.ets:10:12
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/DeepReadTemplateWorkbenchPage.ets:10:12
+ 'replaceUrl' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/DeepReadTemplateWorkbenchPage.ets:10:12
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/FavoritePage.ets:135:19
+ 'AlertDialog' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/FavoritePage.ets:135:31
+ 'show' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/FavoritePage.ets:141:40
+ 'showToast' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/HistoryPage.ets:169:22
+ 'showToast' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/HistoryPage.ets:172:22
+ 'showToast' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/HistoryPage.ets:175:20
+ 'showToast' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/HistoryPage.ets:212:30
+ 'pushUrl' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/HotListSourceSettingsPage.ets:68:88
+ 'back' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/MemoryPage.ets:65:18
+ 'showToast' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/MemoryPage.ets:65:18
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/MemoryPage.ets:129:5
+ 'AlertDialog' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/MemoryPage.ets:129:17
+ 'show' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/MemoryPage.ets:166:39
+ 'back' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/components/ui/ConfirmDialog.ets:17:5
+ 'animateTo' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/MiniAppListPage.ets:67:18
+ 'showToast' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/MiniAppListPage.ets:67:18
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/MiniAppListPage.ets:84:12
+ 'pushUrl' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/MiniAppListPage.ets:84:12
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/MiniAppListPage.ets:88:12
+ 'pushUrl' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/MiniAppListPage.ets:88:12
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/MiniAppListPage.ets:154:26
+ 'getContext' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/MiniAppListPage.ets:186:26
+ 'getContext' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/MiniAppListPage.ets:223:37
+ 'back' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/platform_impl/MiniAppBridgeImpl.ets:158:26
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/platform_impl/MiniAppBridgeImpl.ets:199:65
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/platform_impl/MiniAppBridgeImpl.ets:421:15
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/MiniAppRunnerPage.ets:122:27
+ 'getParams' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/MiniAppRunnerPage.ets:180:22
+ 'showToast' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/MiniAppRunnerPage.ets:183:22
+ 'showDialog' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/MiniAppRunnerPage.ets:199:16
+ 'pushUrl' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/MiniAppRunnerPage.ets:324:57
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/MiniAppRunnerPage.ets:381:18
+ 'showActionMenu' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/MiniAppRunnerPage.ets:396:26
+ 'getContext' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/MiniAppRunnerPage.ets:419:20
+ 'showToast' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/MiniAppRunnerPage.ets:429:26
+ 'getContext' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/MiniAppRunnerPage.ets:445:20
+ 'showToast' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/MiniAppRunnerPage.ets:449:20
+ 'showToast' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/MiniAppRunnerPage.ets:449:20
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/MiniAppRunnerPage.ets:465:37
+ 'back' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/MiniAppSettingsPage.ets:76:27
+ 'getParams' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/MiniAppSettingsPage.ets:93:18
+ 'showToast' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/MiniAppSettingsPage.ets:93:18
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/MiniAppSettingsPage.ets:188:16
+ 'pushUrl' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/NovelProjectsPage.ets:69:11
+ 'animateTo' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/NovelProjectsPage.ets:87:5
+ 'animateTo' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/NovelProjectsPage.ets:96:5
+ 'animateTo' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/NovelProjectsPage.ets:110:9
+ 'animateTo' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/NovelProjectsPage.ets:114:9
+ 'animateTo' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/NovelProjectsPage.ets:126:5
+ 'animateTo' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/NovelProjectsPage.ets:152:38
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/NovelProjectsPage.ets:154:40
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/NovelProjectsPage.ets:157:14
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/NovelProjectsPage.ets:160:14
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/NovelProjectsPage.ets:189:12
+ 'pushUrl' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/NovelProjectsPage.ets:189:12
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/NovelProjectsPage.ets:194:18
+ 'showActionMenu' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/NovelProjectsPage.ets:202:9
+ 'animateTo' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/NovelProjectsPage.ets:379:19
+ 'animateTo' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/NovelProjectsPage.ets:398:11
+ 'animateTo' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/NovelProjectsPage.ets:418:19
+ 'animateTo' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/NovelProjectsPage.ets:436:11
+ 'animateTo' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/NovelWorkspacePage.ets:138:20
+ 'showToast' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/NovelWorkspacePage.ets:138:20
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/NovelWorkspacePage.ets:145:20
+ 'showToast' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/NovelWorkspacePage.ets:209:27
+ 'getParams' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/NovelWorkspacePage.ets:240:41
+ 'back' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/NovelWorkspacePage.ets:294:5
+ 'AlertDialog' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/NovelWorkspacePage.ets:294:17
+ 'show' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/NovelWorkspacePage.ets:311:5
+ 'AlertDialog' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/NovelWorkspacePage.ets:311:17
+ 'show' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/NovelWorkspacePage.ets:386:24
+ 'showToast' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/NovelWorkspacePage.ets:771:18
+ 'showToast' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/NovelWorkspacePage.ets:771:18
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/NovelWorkspacePage.ets:775:38
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/NovelWorkspacePage.ets:780:14
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/NovelWorkspacePage.ets:782:14
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/NovelWorkspacePage.ets:818:18
+ 'showToast' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/NovelWorkspacePage.ets:818:18
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/NovelWorkspacePage.ets:839:20
+ 'showToast' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/NovelWorkspacePage.ets:839:20
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/NovelWorkspacePage.ets:847:18
+ 'showActionMenu' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ProfilePage.ets:352:42
+ 'getContext' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ProfilePage.ets:354:37
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ProfilePage.ets:356:38
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ProfilePage.ets:358:14
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ProfilePage.ets:359:39
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ProfilePage.ets:362:16
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ProfilePage.ets:364:16
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ProfilePage.ets:368:14
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/ProfilePage.ets:544:22
+ 'pushUrl' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/PromptTemplatePage.ets:99:27
+ 'getParams' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/PromptTemplatePage.ets:169:14
+ 'back' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/PromptTemplatePage.ets:185:14
+ 'back' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/PromptTemplatePage.ets:197:20
+ To use this API, you need to apply for the permissions: ohos.permission.READ_PASTEBOARD [since 12]
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/PromptTemplatePage.ets:205:11
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/PromptTemplatePage.ets:263:35
+ 'back' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/PromptTemplatePage.ets:306:72
+ 'back' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/QuickMessagesPage.ets:163:88
+ 'back' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/SearchPage.ets:163:27
+ 'getParams' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/SearchPage.ets:294:14
+ 'pushUrl' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/SearchPage.ets:294:14
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/SearchPage.ets:300:20
+ 'showToast' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/SearchPage.ets:342:88
+ 'back' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/SettingAgentExecutionPageFull.ets:10:12
+ 'replaceUrl' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/SettingAgentExecutionPageFull.ets:10:12
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/SettingAgentExtensionsPageFull.ets:10:12
+ 'replaceUrl' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/SettingAgentExtensionsPageFull.ets:10:12
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/SettingAgentMemoryPageFull.ets:149:25
+ 'AlertDialog' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/SettingAgentMemoryPageFull.ets:149:37
+ 'show' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/SettingAgentPermissionsPageFull.ets:10:12
+ 'replaceUrl' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/SettingAgentPermissionsPageFull.ets:10:12
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/SettingBackupPage.ets:56:18
+ 'showToast' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/SettingBackupPage.ets:56:18
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/SettingBackupPage.ets:69:12
+ 'getContext' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/SettingCronTasksPage.ets:44:20
+ 'showToast' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/SettingCronTasksPage.ets:103:32
+ 'showToast' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/SettingCronTasksPage.ets:152:34
+ 'showToast' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/SettingCronTasksPage.ets:157:34
+ 'showToast' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/SettingCronTasksPage.ets:172:30
+ 'showToast' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/SettingCronTasksPage.ets:178:30
+ 'showToast' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/SettingCronTasksPage.ets:184:30
+ 'showToast' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/SettingCronTasksPage.ets:187:30
+ 'showToast' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/SettingCronTasksPage.ets:200:15
+ 'AlertDialog' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/SettingCronTasksPage.ets:200:27
+ 'show' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/SettingCronTasksPage.ets:209:36
+ 'showToast' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/SettingExperimentalModelCouncilPageFull.ets:10:12
+ 'replaceUrl' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/SettingExperimentalModelCouncilPageFull.ets:10:12
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/SettingExperimentalPage.ets:12:12
+ 'pushUrl' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/SettingExperimentalPage.ets:12:12
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/SettingExperimentalSubAgentPageFull.ets:10:12
+ 'replaceUrl' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/SettingExperimentalSubAgentPageFull.ets:10:12
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/SettingExperimentalWebMountPage.ets:106:19
+ 'getContext' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/SettingFilesPage.ets:149:5
+ 'AlertDialog' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/SettingFilesPage.ets:149:17
+ 'show' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/SettingFilesPage.ets:176:20
+ 'showToast' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/SettingFilesPage.ets:176:20
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/SettingFilesPage.ets:184:22
+ 'showToast' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/SettingFilesPage.ets:188:22
+ 'showToast' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/SettingFilesPage.ets:196:7
+ 'AlertDialog' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/SettingFilesPage.ets:196:19
+ 'show' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/SettingFilesPage.ets:212:20
+ 'showToast' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/SettingFilesPage.ets:223:20
+ 'showToast' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/SettingFilesPage.ets:228:20
+ 'showToast' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/SettingMcpPageFull.ets:10:12
+ 'replaceUrl' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/SettingMcpPageFull.ets:10:12
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/SettingModelCouncilPage.ets:119:14
+ 'back' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/SettingModelCouncilPage.ets:121:7
+ 'AlertDialog' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/SettingModelCouncilPage.ets:121:19
+ 'show' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/SettingModelCouncilPage.ets:133:14
+ 'back' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/SettingModelCouncilPage.ets:136:5
+ 'AlertDialog' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/SettingModelCouncilPage.ets:136:17
+ 'show' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/SettingModelCouncilPage.ets:143:18
+ 'back' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/SettingModelPage.ets:10:12
+ 'replaceUrl' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/SettingModelPage.ets:10:12
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/SettingPage.ets:58:12
+ 'pushUrl' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/SettingPage.ets:58:12
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/SettingSearchListCards.ets:10:12
+ 'replaceUrl' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/SettingSearchListCards.ets:10:12
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/SettingSearchServiceEditorSheet.ets:10:12
+ 'replaceUrl' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/SettingSearchServiceEditorSheet.ets:10:12
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/SettingSubAgentPage.ets:123:14
+ 'back' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/SettingSubAgentPage.ets:125:7
+ 'AlertDialog' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/SettingSubAgentPage.ets:125:19
+ 'show' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/SettingSubAgentPage.ets:137:14
+ 'back' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/SettingSubAgentPage.ets:140:5
+ 'AlertDialog' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/SettingSubAgentPage.ets:140:17
+ 'show' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/SettingSubAgentPage.ets:147:18
+ 'back' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/SettingSystemAccessPage.ets:111:12
+ 'back' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/SkillDetailPage.ets:10:12
+ 'replaceUrl' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/SkillDetailPage.ets:10:12
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/SkillsPage.ets:48:12
+ 'pushUrl' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/SkillsPage.ets:48:12
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/SkillsPage.ets:129:15
+ 'AlertDialog' has been deprecated.
+[39m[39m
+[33mWARN: [33m[33mArkTS:WARN File: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/pages/SkillsPage.ets:129:27
+ 'show' has been deprecated.
+[39m[39m
+[39m
+> hvigor [32mFinished :entry:default@CompileArkTS... after 3 s 725 ms [39m
+> hvigor [32mUP-TO-DATE :entry:default@GeneratePkgModuleJson...  [39m
+> hvigor [32mFinished :entry:default@ProcessCompiledResources... after 1 ms [39m
+> hvigor [32mFinished :entry:default@PackageHap... after 349 ms [39m
+> hvigor [32mFinished :entry:default@PackingCheck... after 4 ms [39m
+> hvigor [91mERROR: Failed :entry:default@SignHap... [39m
+> hvigor [91mERROR: [31m00303107 Configuration Error
+Error Message: Invalid storeFile value. Make sure it is not null or empty. The file must be included in '/Users/arquiel/.ohos/config/default_harmony_5ZNrrDPsh8bhZDvNg1eA2lRJ1vXsCP9onQ66dnpr1o=.p12'. At file: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/build-profile.json5
+
+* Try the following:
+  > Please check signingConfigs in root project file
+[39m
+
+[31m* Try:
+> Run with --stacktrace option to get the stack trace.
+> Run with --debug option to get more log output.
+[39m
+> hvigor [91mERROR: BUILD FAILED in 5 s 344 ms [39m

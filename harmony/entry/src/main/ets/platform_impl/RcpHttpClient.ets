@@ -38,6 +38,9 @@ interface StreamOpts {
   onChunk: (chunk: ArrayBuffer, end: boolean) => void;
   onDataEnd?: () => void;
   signal?: AbortSignalLike;
+  // R18:消费方解析到协议终态(done/error)后返回 true → 立即销毁底层请求并
+  //   以当前状态 settle,不再等服务端 dataEnd(避免终止帧后持续心跳挂等)。
+  shouldStop?: () => boolean;
 }
 
 class OhosHttpClient implements HttpClient {
@@ -174,24 +177,6 @@ class OhosHttpClient implements HttpClient {
         hilog.error(DOMAIN, TAG, logMessage, safeUrl);
         reject(error);
       };
-      const emit = (chunk: ArrayBuffer, end: boolean): boolean => {
-        try {
-          opts.onChunk(chunk, end);
-          return true;
-        } catch (e) {
-          fail(new Error(`${safeUrl} stream callback failed: ${String(e)}`),
-            'fetchStream callback failed: %{public}s');
-          return false;
-        }
-      };
-      const flushPendingSuccessChunks = (): boolean => {
-        const chunks: ArrayBuffer[] = pendingChunks;
-        pendingChunks = [];
-        for (const chunk of chunks) {
-          if (!emit(chunk, false)) return false;
-        }
-        return true;
-      };
       const notifyDataEnd = (): boolean => {
         if (dataEndNotified) return true;
         dataEndNotified = true;
@@ -204,6 +189,40 @@ class OhosHttpClient implements HttpClient {
             'fetchStream dataEnd callback failed: %{public}s');
           return false;
         }
+      };
+      // R18:协议 done/error 已达成 → 关闭底层并立即 settle(携带真实 status;
+      //   status 尚未回传时为 0,消费方已按 state.done 提前返回,不再判 status)。
+      const stopConsumption = (): boolean => {
+        if (settled) return false;
+        if (!notifyDataEnd()) return false;
+        if (settled) return false;
+        settled = true;
+        cleanup();
+        hilog.info(DOMAIN, TAG, 'fetchStream stopped by consumer: %{public}s', safeUrl);
+        resolve({ status: status !== null ? status : 0, headers, body: '' });
+        return false;
+      };
+      const emit = (chunk: ArrayBuffer, end: boolean): boolean => {
+        try {
+          opts.onChunk(chunk, end);
+        } catch (e) {
+          fail(new Error(`${safeUrl} stream callback failed: ${String(e)}`),
+            'fetchStream callback failed: %{public}s');
+          return false;
+        }
+        const shouldStop: (() => boolean) | undefined = opts.shouldStop;
+        if (shouldStop !== undefined && shouldStop()) {
+          return stopConsumption();
+        }
+        return true;
+      };
+      const flushPendingSuccessChunks = (): boolean => {
+        const chunks: ArrayBuffer[] = pendingChunks;
+        pendingChunks = [];
+        for (const chunk of chunks) {
+          if (!emit(chunk, false)) return false;
+        }
+        return true;
       };
       const settleWhenReady = (): void => {
         if (settled || status === null) return;

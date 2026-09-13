@@ -1,0 +1,2 @@
+F-03 CONFIRMED: actual session.open takes all 50 mount-wait ticks then rejects; loadUrl never invoked. Clock accelerated, no SDK/UI/network.
+Source call-site search separately confirms markHostMounted has definition only, including WebMountHost.

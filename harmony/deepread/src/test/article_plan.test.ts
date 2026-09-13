@@ -4,6 +4,7 @@ import {
   fallbackPlan, buildPlanningPrompt, parsePlanJson, normalizePlan, generateArticlePlan,
 } from '../main/ets/research/article_plan.ts';
 import type { DeepReadEvidencePack, DeepReadArticlePlan } from '../main/ets/research/evidence_pack.ts';
+import { cardsFor } from '../main/ets/research/evidence_pack.ts';
 import type { DeepReadSource } from '../main/ets/research/source_prefetcher.ts';
 import type { AiClient } from '../main/ets/platform/ai_client.ts';
 import type { UIMessage } from '../main/ets/agent/message.ts';
@@ -78,12 +79,25 @@ test('fallbackPlan: produces valid structure', () => {
   assert.ok(Array.isArray(plan.stageSourceIds.overview));
 });
 
-test('fallbackPlan: stageSourceIds come from pack.cardsByStage', () => {
-  const pack = buildPack(8);  // OVERVIEW has s1..s6
+test('fallbackPlan: stageSourceIds start from pack.cardsByStage and fill from global pool', () => {
+  const pack = buildPack(8);  // OVERVIEW has s1..s6, NARRATIVE s7..s8, others empty
   const plan = fallbackPlan('t', pack);
   assert.deepEqual(plan.stageSourceIds.overview, ['s1', 's2', 's3', 's4', 's5', 's6']);
-  assert.deepEqual(plan.stageSourceIds.narrative, ['s7', 's8']);
-  assert.deepEqual(plan.stageSourceIds.analysis, []);
+  // 本段 bucket 优先(s7,s8),不足时从全局池补齐
+  assert.deepEqual(plan.stageSourceIds.narrative.slice(0, 2), ['s7', 's8']);
+  assert.ok(plan.stageSourceIds.narrative.length > 2, 'narrative bucket topped up from global pool');
+});
+
+test('R24: fallbackPlan gives every stage evidence from the global pool', () => {
+  // 规划降级且来源集中在首段(buildPack 连续分桶的典型形态):后段不得为 0 证据
+  const pack = buildPack(6);  // only OVERVIEW bucket non-empty
+  const plan = fallbackPlan('t', pack);
+  for (const key of ['overview', 'narrative', 'analysis', 'extended_reading']) {
+    assert.ok(plan.stageSourceIds[key].length > 0, `${key} must not be starved`);
+    // 复用真实 cardsFor 路径确认能取到卡片
+    const cards = cardsFor(pack, key.toUpperCase() as never, plan);
+    assert.ok(cards.length > 0, `${key} cardsFor must yield evidence`);
+  }
 });
 
 test('fallbackPlan: requiredSourceIds = distinct stage ids, take target', () => {

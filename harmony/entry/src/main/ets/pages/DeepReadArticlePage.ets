@@ -16,7 +16,7 @@ import { Icon } from '../components/ui/Icon.ets';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import type {
   CorePoint, DeepReadCacheEntry, DeepReadGenerationStage, DeepReadImageAsset, DeepReadOutput,
-  DeepReadScheduler, Perspective, Quote, ReadingLink, RunResult, TimelineEvent,
+  DeepReadRepository, DeepReadScheduler, Perspective, Quote, ReadingLink, RunResult, TimelineEvent,
 } from '@amber/deepread-domain';
 import { displayHeroImageUrl, firstFailureMessage, firstFailedStage, isComplete, isCacheEntryExpired, deepReadProgressSnapshot, STAGE_ORDER } from '@amber/deepread-domain';
 import type { DeepReadProgressSnapshot } from '@amber/deepread-domain';
@@ -62,12 +62,16 @@ struct DeepReadArticlePage {
   @State errorMsg: string = '';
   @State currentStage: string = '';
   @State cancelled: boolean = false;
+  // UI-F30:重进时存在未完成/已取消缓存但无活动 run → 显示显式「继续生成」,不自动 REPLACE
+  @State awaitingContinue: boolean = false;
   @State confirmed: boolean = true;      // 首用确认(KV deepread_first_use_confirmed)
   @State progress: DeepReadProgressSnapshot = { percent: 0, label: '未开始' };
   @State fromHistory: boolean = false;
   @State historyExpired: boolean = false;
   @State templateId: string = 'none';   // 模板选择(editorial_slant → WebView 渲染)
   private webController: webview.WebviewController = new webview.WebviewController();
+  // Web 组件是否已 attach:未 attach 时 loadData 会失败,zoom 刷新需门控
+  private webAttached: boolean = false;
 
   private openTemplateInWeb(): void {
     // 预留:外部打开
@@ -130,24 +134,15 @@ struct DeepReadArticlePage {
     const repository = getRepository();
     const cached: DeepReadCacheEntry | null = await repository.get(this.topicId);
     if (!this.pageAlive || token !== this.pageToken) return;
+    // UI-X01:显示偏好先于缓存早退读取(完整缓存也生效,不再只用默认字号/模板)
+    await this.loadDisplaySettings();
+    if (!this.pageAlive || token !== this.pageToken) return;
     if (cached !== null) {
       this.historyExpired = isCacheEntryExpired(cached);
       if (!force) {
         this.applyOutput(cached.output, token);
-        if (isComplete(cached.output)) {
-          this.running = false;
-          return;
-        }
       }
     }
-    // P5:阅读体验初始值(字号百分比/字体模式;ChatKvStore 只存字符串)
-    const scaleRaw: string | null = await getChatKvStore().get('deepread_font_scale');
-    const scalePct: number = scaleRaw !== null ? parseFloat(scaleRaw) : 100;
-    this.fontScale = Math.max(0.8, Math.min(1.3, (Number.isNaN(scalePct) ? 100 : scalePct) / 100));
-    const fontMode: string | null = await getChatKvStore().get('deepread_font_mode');
-    this.fontSerif = fontMode === 'serif';
-    const tpl: string | null = await getChatKvStore().get('deepread_template_id');
-    this.templateId = tpl !== null ? tpl : 'none';
     // 首用确认门(Android deepReadFirstUseConfirmed):未确认不自动跑
     const confirmedRaw: string | null = await getChatKvStore().get('deepread_first_use_confirmed');
     this.confirmed = confirmedRaw === 'true';
@@ -157,21 +152,81 @@ struct DeepReadArticlePage {
     }
     this.scheduler = await getDeepReadScheduler();
     if (!this.pageAlive || token !== this.pageToken) return;
+    this.subscribeToUpdates(repository, token);
+
+    const isRunning: boolean = this.scheduler.isRunning(this.topicId);
+    // 用户显式重新生成:直接跑(force 覆盖旧轮)
+    if (force) {
+      await this.runNow(token, true);
+      return;
+    }
+    // UI-F30:完整缓存 → 仅展示;已有 run 或部分/取消缓存 → 仅订阅/显式继续,不自动 REPLACE
+    const cachedOutput: DeepReadOutput | null = cached !== null ? cached.output : null;
+    if (cachedOutput !== null && (cachedOutput.generationPhase === 'COMPLETE' || isComplete(cachedOutput))) {
+      this.running = false;
+      this.awaitingContinue = false;
+      return;
+    }
+    if (isRunning) {
+      // 已有活动 run:只订阅,等它自己推进/收口
+      this.awaitingContinue = false;
+      this.running = true;
+      this.currentStage = this.phaseLabel(cachedOutput);
+      return;
+    }
+    if (cachedOutput !== null) {
+      // 部分进度或已取消的缓存:显式「继续生成」,不隐式新建并 REPLACE。
+      // 无任何进度痕迹的空壳缓存(phase=IDLE 且无 sectionStates)按首次处理。
+      const hasProgress: boolean = cachedOutput.generationPhase !== 'IDLE'
+        || Object.keys(cachedOutput.sectionStates).length > 0;
+      if (hasProgress) {
+        this.awaitingContinue = true;
+        this.running = false;
+        this.errorMsg = '';
+        this.currentStage = this.phaseLabel(cachedOutput);
+        return;
+      }
+    }
+    // 首次(无缓存或无进度痕迹):正常启动
+    await this.runNow(token, false);
+  }
+
+  // UI-X01:显示偏好(字号/字体模式/模板)独立于生成与缓存命中
+  private async loadDisplaySettings(): Promise<void> {
+    const scaleRaw: string | null = await getChatKvStore().get('deepread_font_scale');
+    const scalePct: number = scaleRaw !== null ? parseFloat(scaleRaw) : 100;
+    this.fontScale = Math.max(0.8, Math.min(1.3, (Number.isNaN(scalePct) ? 100 : scalePct) / 100));
+    const fontMode: string | null = await getChatKvStore().get('deepread_font_mode');
+    this.fontSerif = fontMode === 'serif';
+    const tpl: string | null = await getChatKvStore().get('deepread_template_id');
+    this.templateId = tpl !== null ? tpl : 'none';
+  }
+
+  // 订阅 output/running(重复调用先退订,避免叠加)
+  private subscribeToUpdates(repository: DeepReadRepository, token: number): void {
     if (this.unsubscribeOutput !== null) this.unsubscribeOutput();
     this.unsubscribeOutput = repository.observe(this.topicId).subscribe((entry: DeepReadCacheEntry | null): void => {
       if (!this.pageAlive || token !== this.pageToken || entry === null) return;
       this.applyOutput(entry.output, token);
     });
+    if (this.scheduler === null) return;
     if (this.unsubscribeRunning !== null) this.unsubscribeRunning();
     this.unsubscribeRunning = this.scheduler.observeRunning(this.topicId).subscribe((running: boolean): void => {
       if (!this.pageAlive || token !== this.pageToken) return;
-      this.running = this.cancelled ? false : running;
+      // 显式继续/已取消态下不因残留中断 phase 假装在跑(避免无限 spinner)
+      this.running = (this.cancelled || this.awaitingContinue) ? false : running;
       if (running && this.currentStage.length === 0) this.currentStage = this.progressLabel('收集来源', 1);
     });
+  }
+
+  // 实际发起 run(force=false 时 run_manager 走缓存/续跑;不隐式 clear)
+  private async runNow(token: number, force: boolean): Promise<void> {
+    if (this.scheduler === null) return;
+    this.awaitingContinue = false;
     this.running = true;
     this.cancelled = false;
     this.errorMsg = '';
-    this.currentStage = force ? this.progressLabel('收集来源', 1) : this.phaseLabel(cached?.output ?? null);
+    this.currentStage = force ? this.progressLabel('收集来源', 1) : this.phaseLabel(this.output);
     const result: RunResult = await this.scheduler.run(this.topicId, this.title,
       { force, seedUrl: this.sourceUrl.length > 0 ? this.sourceUrl : null });
     if (!this.pageAlive || token !== this.pageToken) return;
@@ -185,6 +240,16 @@ struct DeepReadArticlePage {
       }
     }
     this.running = false;
+  }
+
+  // UI-F30:显式继续(部分/取消缓存),不 REPLACE 已在执行的轮次
+  private continueGeneration(): void {
+    this.runNow(this.pageToken, false).catch((e: Error): void => {
+      if (this.pageAlive) {
+        this.errorMsg = this.cancelled ? '生成已取消' : e.message;
+        this.running = false;
+      }
+    });
   }
 
   private applyOutput(next: DeepReadOutput, token: number): void {
@@ -292,6 +357,7 @@ struct DeepReadArticlePage {
     this.output = null;
     this.errorMsg = '';
     this.cancelled = false;
+    this.awaitingContinue = false;
     this.running = true;
     this.currentStage = this.progressLabel('收集来源', 1);
     this.loadArticle(token, true).catch((e: Error): void => {
@@ -302,14 +368,37 @@ struct DeepReadArticlePage {
     });
   }
 
-  // G5-S1:字号缩放 — zoom in/out
+  // G5-S1:字号缩放 — zoom in/out;F29:模板路径重载 HTML 让 --ds 生效
   private zoomIn(): void {
     const next: number = this.fontScale + FONT_SCALE_STEP;
     this.fontScale = next > FONT_SCALE_MAX ? FONT_SCALE_MAX : next;
+    this.refreshTemplateWeb();
   }
   private zoomOut(): void {
     const next: number = this.fontScale - FONT_SCALE_STEP;
     this.fontScale = next < FONT_SCALE_MIN ? FONT_SCALE_MIN : next;
+    this.refreshTemplateWeb();
+  }
+
+  // F29:editorial_slant 模板按当前字号/字体模式重渲染(纯 CSS,不开 JS)
+  private editorialHtml(): string {
+    return renderEditorialSlantHtml(this.title, this.output, {
+      fontScale: this.fontScale,
+      fontSerif: this.fontSerif,
+    });
+  }
+
+  private loadTemplateHtml(): void {
+    if (!this.webAttached) return;
+    const html: string = this.editorialHtml();
+    this.webController.loadData(
+      encodeURIComponent(html).replace(/#/g, '%23'),
+      'text/html', 'UTF-8', ' ', ' ');
+  }
+
+  private refreshTemplateWeb(): void {
+    if (this.templateId !== 'editorial_slant') return;
+    this.loadTemplateHtml();
   }
 
   // 基础稿判定:fallback 稿部分 READY 但未完成
@@ -452,6 +541,21 @@ struct DeepReadArticlePage {
               .margin({ top: 12 })
               .onClick((): void => { this.cancelGeneration(); })
           }.width('100%').layoutWeight(1).justifyContent(FlexAlign.Center)
+        } else if (this.awaitingContinue) {
+          // UI-F30:存在部分/取消缓存但无活动 run → 显式继续,不自动新建并 REPLACE
+          Column() {
+            Text('文章尚未完成').fontSize(TITLE).fontWeight(FontWeight.Medium).fontColor(INK).margin({ top: 12 })
+            Text('已保存的进度仍可用,是否继续生成?')
+              .fontSize(META).fontColor(INK3).margin({ top: 8 })
+            Text('继续生成').fontSize(BODY).fontColor(ACCENT)
+              .padding({ left: 28, right: 28, top: 12, bottom: 12 })
+              .margin({ top: 20 })
+              .onClick((): void => { this.continueGeneration(); })
+            Text('重新生成').fontSize(BODY2).fontColor(INK3)
+              .padding({ left: 20, right: 20, top: 8, bottom: 8 })
+              .margin({ top: 10 })
+              .onClick((): void => { this.showRegenerateDialog = true; })
+          }.width('100%').layoutWeight(1).justifyContent(FlexAlign.Center)
         } else if (this.errorMsg.length > 0 && this.output === null) {
           // 首次生成失败或显式取消,保留明确重试入口
           Column() {
@@ -470,10 +574,8 @@ struct DeepReadArticlePage {
               .javaScriptAccess(false)
               .onControllerAttached((): void => {
                 // data: URL 带 '#' 色值会白屏 → loadData + 官方空格兜底参数
-                const html: string = renderEditorialSlantHtml(this.title, this.output);
-                this.webController.loadData(
-                  encodeURIComponent(html).replace(/#/g, '%23'),
-                  'text/html', 'UTF-8', ' ', ' ');
+                this.webAttached = true;
+                this.loadTemplateHtml();
               })
           }
           .width('100%').layoutWeight(1)

@@ -1,6 +1,6 @@
 // AmberPrimitives — 设计系统原语(对齐 Android AmberPrimitives.kt)
 // AmberCard / Hairline / BtnInk / BtnAccent / SectionLabel / LiveDot / BlinkingCursor
-import { ACCENT, INK, INK2, INK3, INK4, SURFACE, SURFACE2, LINE, BG, BODY, META, LABEL, RADIUS } from '../../design/tokens.ets';
+import { ACCENT, ACCENT_INK, INK, INK2, INK3, INK4, SURFACE, SURFACE2, LINE, BG, BODY, META, LABEL, RADIUS } from '../../design/tokens.ets';
 
 // AmberCard — 圆角卡片容器(borderRadius 14, surface 背景, line 边框)
 @Component
@@ -64,7 +64,7 @@ export struct BtnAccent {
       Text(this.text)
         .fontSize(BODY)
         .fontWeight(FontWeight.Medium)
-        .fontColor(this.enabled ? '#FFFFFF' : INK4)
+        .fontColor(this.enabled ? ACCENT_INK : INK4)
     }
     .width('100%')
     .justifyContent(FlexAlign.Center)

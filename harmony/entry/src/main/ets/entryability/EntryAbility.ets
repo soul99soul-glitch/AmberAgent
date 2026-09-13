@@ -4,7 +4,7 @@
 // 对照设计 §6.5
 
 import { UIAbility, AbilityConstant, Want, Configuration, ConfigurationConstant } from '@kit.AbilityKit';
-import { window, display } from '@kit.ArkUI';
+import { window, display, router } from '@kit.ArkUI';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { notificationManager } from '@kit.NotificationKit';
 import { BusinessError } from '@kit.BasicServicesKit';
@@ -41,6 +41,119 @@ const validatedWantParameter = (value: object | undefined): string => {
   if (value === undefined || typeof value !== 'string') return '';
   const trimmed: string = (value as string).trim();
   return trimmed.length > 0 && trimmed.length <= MAX_WANT_PARAMETER_LENGTH ? trimmed : '';
+};
+
+// ===== R23:统一 Want 深链派发 =====
+// 根因:onNewWant 只写 AppStorage,唯一消费者是根页 ChatListPage;栈顶为
+// ChatPage/设置页时前台 Want 不被消费,未消费参数还会被后续 Want 覆盖。
+// 机制:EntryAbility 把校验后的目标写入待处理槽并自增序列号;onNewWant 与窗口
+// loadContent 成功(markWantRoutingReady)都触发 routePendingWant,经全局 router
+// 从任意栈顶 push 目标页;仅 pushUrl 成功且序列号未被新 Want 顶替时才清参数,
+// 旧跳的迟到回调不得清掉新参数;冷启动在 loadContent 前只挂起、不发跳。
+const WANT_ROUTE_SEQ_KEY: string = 'wantRouteSeq';
+const WANT_ROUTE_READY_KEY: string = 'wantRouteReady';
+let wantRouteInFlight: boolean = false;
+
+const clearPendingWantRoute = (): void => {
+  AppStorage.setOrCreate<string>('wantTopicId', '');
+  AppStorage.setOrCreate<string>('wantTitle', '');
+  AppStorage.setOrCreate<string>('wantNovelProjectId', '');
+  AppStorage.setOrCreate<string>('wantNovelBranchId', '');
+  AppStorage.setOrCreate<string>('wantNovelJobId', '');
+  AppStorage.setOrCreate<number>(WANT_ROUTE_SEQ_KEY, 0);
+};
+
+// 消费 AppStorage 里的待处理深链。ready 前 / 无 pending / 跳转在途 → 空操作。
+export const routePendingWant = (): void => {
+  if (!(AppStorage.get<boolean>(WANT_ROUTE_READY_KEY) ?? false)) return;
+  if (wantRouteInFlight) return;
+  const seq: number = AppStorage.get<number>(WANT_ROUTE_SEQ_KEY) ?? 0;
+  if (seq <= 0) return;
+  const novelProjectId: string = AppStorage.get<string>('wantNovelProjectId') ?? '';
+  const novelBranchId: string = AppStorage.get<string>('wantNovelBranchId') ?? '';
+  const novelJobId: string = AppStorage.get<string>('wantNovelJobId') ?? '';
+  const topicId: string = AppStorage.get<string>('wantTopicId') ?? '';
+  const title: string = AppStorage.get<string>('wantTitle') ?? '';
+  let targetUrl: string = '';
+  const targetParams: Record<string, string> = {};
+  if (novelProjectId.length > 0 && novelBranchId.length > 0 && novelJobId.length > 0) {
+    targetUrl = 'pages/NovelWorkspacePage';
+    targetParams['projectId'] = novelProjectId;
+    targetParams['branchId'] = novelBranchId;
+    targetParams['jobId'] = novelJobId;
+    targetParams['tab'] = 'chapters';
+  } else if (topicId.length > 0) {
+    targetUrl = 'pages/DeepReadArticlePage';
+    targetParams['topicId'] = topicId;
+    targetParams['title'] = title;
+  } else {
+    clearPendingWantRoute();
+    return;
+  }
+  wantRouteInFlight = true;
+  try {
+    router.pushUrl({ url: targetUrl, params: targetParams }).then((): void => {
+      wantRouteInFlight = false;
+      // sequence 守卫:跳转期间到达的新 Want 参数不得被旧跳清除
+      if ((AppStorage.get<number>(WANT_ROUTE_SEQ_KEY) ?? 0) === seq) {
+        clearPendingWantRoute();
+        return;
+      }
+      routePendingWant();
+    }).catch((e: Error): void => {
+      wantRouteInFlight = false;
+      // nav success 才清:pending 保留,下次 onNewWant/onPageShow 重试
+      hilog.warn(DOMAIN, TAG, 'want route failed: %{public}s', String(e));
+    });
+  } catch (e) {
+    wantRouteInFlight = false;
+    hilog.warn(DOMAIN, TAG, 'want route threw: %{public}s', String(e));
+  }
+};
+
+// 路由就绪(窗口 loadContent 成功)后才允许消费;并补跳冷启动挂起的 Want。
+export const markWantRoutingReady = (): void => {
+  AppStorage.setOrCreate<boolean>(WANT_ROUTE_READY_KEY, true);
+  routePendingWant();
+};
+
+// 校验后的目标写入待处理槽 + 自增序列号。三类语义:
+//   1) 完整目标(topic 或 novel 三键齐全)→ 落参 + seq++ + 派发。
+//   2) 含 topic/novel 路由字段但**不完整**(如只有 novelProjectId)→ 这是一个新的
+//      畸形意图,作废旧 pending(wantRouteSeq=0),避免用户被误路由到上一条合法目标;
+//      既有 seq 守卫保证旧的在途 push 迟到回调不会再清/跳。
+//   3) 完全不含路由字段的普通激活(如无参数点图标、或只有无关参数)→ **保留** pending,
+//      不机械清;否则冷启动已挂起的目标会被一次无关激活吞掉。
+export const publishWantRoute = (
+  topicId: string, title: string,
+  novelProjectId: string, novelBranchId: string, novelJobId: string,
+): void => {
+  const hasNovel: boolean =
+    novelProjectId.length > 0 && novelBranchId.length > 0 && novelJobId.length > 0;
+  const hasTopic: boolean = topicId.length > 0;
+  if (!hasNovel && !hasTopic) {
+    const declaredRoute: boolean = topicId.length > 0 || title.length > 0
+      || novelProjectId.length > 0 || novelBranchId.length > 0 || novelJobId.length > 0;
+    if (declaredRoute) clearPendingWantRoute();
+    return;
+  }
+  if (hasNovel) {
+    AppStorage.setOrCreate<string>('wantNovelProjectId', novelProjectId);
+    AppStorage.setOrCreate<string>('wantNovelBranchId', novelBranchId);
+    AppStorage.setOrCreate<string>('wantNovelJobId', novelJobId);
+    AppStorage.setOrCreate<string>('wantTopicId', '');
+    AppStorage.setOrCreate<string>('wantTitle', '');
+  } else {
+    AppStorage.setOrCreate<string>('wantTopicId', topicId);
+    // title 无条件覆写(含空):仅在有值时写入会残留上一条通知的旧标题
+    AppStorage.setOrCreate<string>('wantTitle', title);
+    AppStorage.setOrCreate<string>('wantNovelProjectId', '');
+    AppStorage.setOrCreate<string>('wantNovelBranchId', '');
+    AppStorage.setOrCreate<string>('wantNovelJobId', '');
+  }
+  AppStorage.setOrCreate<number>(WANT_ROUTE_SEQ_KEY,
+    (AppStorage.get<number>(WANT_ROUTE_SEQ_KEY) ?? 0) + 1);
+  routePendingWant();
 };
 
 export default class EntryAbility extends UIAbility {
@@ -92,27 +205,15 @@ export default class EntryAbility extends UIAbility {
     if (params === undefined || params === null) {
       return;
     }
-    const topicId: string = validatedWantParameter(params['topicId']);
-    const title: string = validatedWantParameter(params['title']);
-    const novelProjectId: string = validatedWantParameter(params['novelProjectId']);
-    const novelBranchId: string = validatedWantParameter(params['novelBranchId']);
-    const novelJobId: string = validatedWantParameter(params['novelJobId']);
-    if (novelProjectId.length > 0 && novelBranchId.length > 0 && novelJobId.length > 0) {
-      AppStorage.setOrCreate<string>('wantNovelProjectId', novelProjectId);
-      AppStorage.setOrCreate<string>('wantNovelBranchId', novelBranchId);
-      AppStorage.setOrCreate<string>('wantNovelJobId', novelJobId);
-      AppStorage.setOrCreate<string>('wantTopicId', '');
-      AppStorage.setOrCreate<string>('wantTitle', '');
-      return;
-    }
-    if (topicId.length > 0) {
-      AppStorage.setOrCreate<string>('wantTopicId', topicId);
-      // title 无条件覆写(含空):仅在有值时写入会残留上一条通知的旧标题
-      AppStorage.setOrCreate<string>('wantTitle', title);
-      AppStorage.setOrCreate<string>('wantNovelProjectId', '');
-      AppStorage.setOrCreate<string>('wantNovelBranchId', '');
-      AppStorage.setOrCreate<string>('wantNovelJobId', '');
-    }
+    // R23:校验后在统一待处理槽落参并触发派发(ready 前只挂起,冷启动由
+    // loadContent 成功回调补跳;前台任意栈顶由 onNewWant 立即派发)。
+    publishWantRoute(
+      validatedWantParameter(params['topicId']),
+      validatedWantParameter(params['title']),
+      validatedWantParameter(params['novelProjectId']),
+      validatedWantParameter(params['novelBranchId']),
+      validatedWantParameter(params['novelJobId']),
+    );
   }
 
   onWindowStageCreate(windowStage: window.WindowStage): void {
@@ -177,6 +278,9 @@ export default class EntryAbility extends UIAbility {
           notificationManager.requestEnableNotification(this.context).catch((): void => {
             hilog.warn(DOMAIN, TAG, 'requestEnableNotification rejected');
           });
+          // R23:窗口内容就绪 = 全局 router 可用;此时补跳冷启动挂起的 Want
+          //   (onCreate 已写待处理槽,但那时 router 尚未就绪,不能发跳)。
+          markWantRoutingReady();
         }
       });
     };

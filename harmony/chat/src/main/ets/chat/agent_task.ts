@@ -595,6 +595,11 @@ export class AgentTaskStore {
       const current: AgentTaskSnapshot | undefined = this.tasks.get(taskId);
       if (current === undefined) return null;
       const status: AgentTaskStatus | null = patch.status !== undefined ? patch.status : null;
+      // 显式声明 cancelCapability=false = 终态封口 → 同步注销取消回调,防止
+      //   completed/failed/interrupted 残留回调被后续 cleanup 误判为"活跃"(R25)。
+      if (patch.cancelCapability === false) {
+        this.cancelCallbacks.delete(taskId);
+      }
       const next: AgentTaskSnapshot = copyAgentTaskSnapshot(current, {
         status: status !== null ? status : current.status,
         queueState: patch.queueState !== undefined && patch.queueState !== null
@@ -672,12 +677,16 @@ export class AgentTaskStore {
     return found !== undefined ? found : null;
   }
 
+  // 「可取消」由 cancelCapability + 活回调回答,不再由 status 猜测(R14×R25):
+  //   approval_required 子代理任务板映射 INTERRUPTED 但运行对象仍 live 且回调在,
+  //   此时看板取消必须真正触发回调。正常终态(非运行且无活回调)仍保持 no-op。
   async cancel(taskId: string): Promise<AgentTaskSnapshot> {
     const current: AgentTaskSnapshot | undefined = this.tasks.get(taskId);
     if (current === undefined) throw new Error(`Unknown agent task: ${taskId}`);
-    if (!agentTaskStatusRunning(current.status)) return current;
     const callback: (() => Promise<boolean>) | undefined = this.cancelCallbacks.get(taskId);
-    if (!current.cancelCapability || callback === undefined) {
+    if (callback === undefined || !current.cancelCapability) {
+      // 正常终态(非运行且无可取消能力)→ no-op 保持;运行中但缺失回调 → 记录错误
+      if (!agentTaskStatusRunning(current.status)) return current;
       const updated: AgentTaskSnapshot | null = await this.update(taskId, {
         error: 'Task cannot be cancelled from AmberAgent.',
       });
@@ -689,8 +698,14 @@ export class AgentTaskStore {
     } catch {
       ok = false;
     }
+    // 成功取消置 cancelCapability:false(update 同时注销回调),避免残留回调
+    //   让后续 cleanup 永久拒绝。
     const updated: AgentTaskSnapshot | null = ok
-      ? await this.update(taskId, { status: 'CANCELLED', summary: 'Cancellation requested.' })
+      ? await this.update(taskId, {
+        status: 'CANCELLED',
+        summary: 'Cancellation requested.',
+        cancelCapability: false,
+      })
       : await this.update(taskId, { error: 'Cancellation request failed.' });
     return updated !== null ? updated : current;
   }
@@ -752,10 +767,18 @@ export class AgentTaskStore {
     return updated !== null ? updated : current;
   }
 
+  // :107-111 terminal 判定:仅 COMPLETED/FAILED/CANCELLED/TIMED_OUT/INTERRUPTED
+  //   为终态。QUEUED/RUNNING(含子代理 approval_required 映射的 RUNNING)非终态,
+  //   不可清理 — 否则任务仍在跑/仍可取消却从看板消失、并删掉取消回调(R25)。
   async cleanup(taskId: string, deletePrivateOutput: boolean = false): Promise<boolean> {
     return this.mutex.withLock(async (): Promise<boolean> => {
       const current: AgentTaskSnapshot | undefined = this.tasks.get(taskId);
       if (current === undefined) return false;
+      // 非终态(QUEUED/RUNNING)一律拒绝
+      if (agentTaskStatusRunning(current.status)) return false;
+      // 映射为 INTERRUPTED 但运行对象仍 live 且回调在(approval_required 子代理等)
+      //   → 明确"可活跃",也必须拒绝清理记录/回调(R14×R25)。
+      if (current.cancelCapability && this.cancelCallbacks.has(taskId)) return false;
       if (deletePrivateOutput) {
         const outputFile: string | null = await this.privateOutputFile(current);
         if (outputFile !== null) await this.deps.files.delete(outputFile);

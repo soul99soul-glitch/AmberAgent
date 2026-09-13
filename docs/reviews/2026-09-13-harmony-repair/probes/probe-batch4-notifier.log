@@ -1,0 +1,10 @@
+PASS  notifyCompleted stays pending until platform publish settles (awaits real publish)
+PASS  completed notification is visible after publish
+PASS  no stray cancel queued by notifyCompleted
+PASS  stale old-run token cancel must not queue a cancel
+PASS  new run notification survives stale cancel
+PASS  matching token cancel is queued
+PASS  matching token cancel removes notification
+
+ALL PASS
+notifier exit=0

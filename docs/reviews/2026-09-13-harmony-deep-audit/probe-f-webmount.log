@@ -1,0 +1,3 @@
+F-02 CONFIRMED: gate accepts github.com userinfo while standard URL host is outside.invalid
+F-01 CONFIRMED: actual wm_click.execute runs injected expression with wm_eval omitted; no browser/network or user data used
+All probes import/transpile current source, not copied implementation. SDK/WebView dispatch remains unexecuted.

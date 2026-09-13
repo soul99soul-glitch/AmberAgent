@@ -1,0 +1,7 @@
+[F35] loaded real mutateAssistant + sharedKvMutex: true true
+[F35] real mutateAssistant: 20/20 concurrent toggles preserved
+[F35] control (removed pattern): stale snapshot dropped A → ["B"]
+[F35] missing target: returned null, table untouched
+[R26] single failure: rolled back to dark | error: "主题设置保存失败,已恢复原设置"
+[R26] race guard: late failure left newer selection = dark | error empty
+PROBE OK: batch 5B (F35 + R26)

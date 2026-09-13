@@ -43,7 +43,7 @@ import { makeGenerationRetrySetting } from './generation_retry.ts';
 import type { ToolInvocationContext } from './tool_permission.ts';
 import { permissionDecisionTraceToJson } from './tool_permission.ts';
 import type { PermissionDecision } from './tool_permission.ts';
-import type { AgentToolDispatcher } from './tool_dispatcher.ts';
+import type { AgentToolDispatcher, ToolBatchResultPair } from './tool_dispatcher.ts';
 import { AgentToolDispatcher as DefaultDispatcher, defaultToolInvocationHooks } from './tool_dispatcher.ts';
 import { buildAgentLoopBudgetPrompt, agentLoopShouldHideTools } from './agent_loop_budget.ts';
 import type { ToolExposureState } from './tool_exposure.ts';
@@ -112,34 +112,53 @@ const rewriteLastMessage = (conv: Conversation, newMsg: UIMessage): Conversation
   };
 };
 
-// 结果写回末条 assistant 消息(:366-373;非工具 part 不动)。
-// 批次(审批 map 或 executeBatch 结果)恒为消息工具的**保序子集**(两条路径都按
-// parts 顺序过滤未执行工具而来),按位置对齐消费即可;已执行工具跳过 —
-// 跨步骤的旧 blank 工具不会被新批次覆写,并行无 id 工具也不按 '' 互相命中。
+// 结果/审批态写回末条 assistant 消息(:366-373;非工具 part 不动)。
+// 定位严格按 (input,result) 配对里的**输入 part 对象身份** — executeBatchPairs
+// 保留原引用,审批 map 也以原 part 为 input。空 toolCallId 或批次只是真子集时,
+// 不得用 '' 等价或位置游标猜,否则会把结果写到同 blank 的另一个工具上(R08)。
+// 身份失配(理论上不发生)时,仅当该 part 非空 id 在本次批次内唯一才回退命中;
+// 已执行 part 不参与回退。后到补全的真实 toolCallId 由 provider merge 保留,
+// result 沿用 input 的 id,不在此重写(R08 "保留后到真实id merge")。
 const rewriteLastMessageTools = (
-  conv: Conversation, updatedTools: UIMessagePartTool[],
+  conv: Conversation, pairs: ToolBatchResultPair[],
 ): Conversation => {
   const nodes: MessageNode[] = conv.messageNodes;
   if (nodes.length === 0) return conv;
   const cur: UIMessage = nodeCurrentMessage(nodes[nodes.length - 1]);
-  let cursor: number = 0;
-  const newMsg: UIMessage = {
-    ...cur,
-    parts: cur.parts.map((p: UIMessagePart): UIMessagePart => {
-      if (p.type !== 'tool') return p;
-      const tp: UIMessagePartTool = p as UIMessagePartTool;
-      if (isToolExecuted(tp)) return p; // 既往批次产物,不在本次对位范围
-      if (cursor >= updatedTools.length) return p;
-      const candidate: UIMessagePartTool = updatedTools[cursor];
-      const aligned: boolean = tp.toolCallId.length > 0
-        ? candidate.toolCallId === tp.toolCallId
-        : candidate.toolCallId.length === 0; // 双 blank:位置即对位
-      if (!aligned) return p;
-      cursor++;
-      return candidate;
-    }),
-  };
-  return rewriteLastMessage(conv, newMsg);
+  const byIdentity: Map<UIMessagePartTool, UIMessagePartTool> =
+    new Map<UIMessagePartTool, UIMessagePartTool>();
+  const idCounts: Map<string, number> = new Map<string, number>();
+  for (const pair of pairs) {
+    byIdentity.set(pair.input, pair.result);
+    if (pair.input.toolCallId.length > 0) {
+      idCounts.set(pair.input.toolCallId, (idCounts.get(pair.input.toolCallId) ?? 0) + 1);
+    }
+  }
+  const byUniqueId: Map<string, UIMessagePartTool> = new Map<string, UIMessagePartTool>();
+  for (const pair of pairs) {
+    const id: string = pair.input.toolCallId;
+    if (id.length > 0 && idCounts.get(id) === 1) byUniqueId.set(id, pair.result);
+  }
+  let changed: boolean = false;
+  const parts: UIMessagePart[] = cur.parts.map((p: UIMessagePart): UIMessagePart => {
+    if (p.type !== 'tool') return p;
+    const tp: UIMessagePartTool = p as UIMessagePartTool;
+    const direct: UIMessagePartTool | undefined = byIdentity.get(tp);
+    if (direct !== undefined) {
+      if (direct !== tp) changed = true;
+      return direct;
+    }
+    if (!isToolExecuted(tp) && tp.toolCallId.length > 0) {
+      const byId: UIMessagePartTool | undefined = byUniqueId.get(tp.toolCallId);
+      if (byId !== undefined) {
+        changed = true;
+        return byId;
+      }
+    }
+    return p;
+  });
+  if (!changed) return conv;
+  return rewriteLastMessage(conv, { ...cur, parts });
 };
 
 const emitSnapshot = (conv: Conversation, deps: ChatTurnDeps, ctx: TransformerContext): void => {
@@ -321,7 +340,12 @@ const runToolLoopCore = async (
       });
 
       if (changed) {
-        conv = rewriteLastMessageTools(conv, updatedTools);
+        // approval 写回同样按输入身份:tools[i] 是消息里的原 part,updatedTools[i]
+        //   是改写后结果(未变则同一引用),空 id 也不互相命中(R08)。
+        const approvalPairs: ToolBatchResultPair[] = tools.map(
+          (tool: UIMessagePartTool, i: number): ToolBatchResultPair =>
+            ({ input: tool, result: updatedTools[i] }));
+        conv = rewriteLastMessageTools(conv, approvalPairs);
         await deps.store.save(conv);
         emitSnapshot(conv, deps, ctx);
       }
@@ -342,19 +366,20 @@ const runToolLoopCore = async (
       ? await speculativeRunner.reusableResults(toolsToProcess)
       : new Map<string, UIMessagePartTool>();
     if (deps.abortSignal !== undefined && deps.abortSignal.aborted) break;
-    const executedTools: UIMessagePartTool[] = await dispatcher.executeBatch(
+    const executedPairs: ToolBatchResultPair[] = await dispatcher.executeBatchPairs(
       toolsToProcess, stepDefsMap,
       autoApproveTools, autoApproveHighRiskTools, autoApprovedToolNames,
       invocationContext, prefetchedTools, toolRetry, deps.abortSignal);
-    if (executedTools.length === 0) {
+    if (executedPairs.length === 0) {
       // 全部 pending 无结果(:360-363)
       break;
     }
     // D-062(:364):tool_search expanded_tools 步间暴露(先于写回)
-    toolExposure.observeExecutedTools(executedTools);
+    toolExposure.observeExecutedTools(
+      executedPairs.map((pair: ToolBatchResultPair): UIMessagePartTool => pair.result));
 
-    // 写回同一 assistant 消息(:366-373)
-    conv = rewriteLastMessageTools(conv, executedTools);
+    // 写回同一 assistant 消息(:366-373;按输入 part 身份定位)
+    conv = rewriteLastMessageTools(conv, executedPairs);
     await deps.store.save(conv);
     emitSnapshot(conv, deps, ctx);
 

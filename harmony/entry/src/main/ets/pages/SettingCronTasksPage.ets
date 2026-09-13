@@ -52,6 +52,22 @@ struct SettingCronTasksPage {
     return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
   }
 
+  // R17:状态摘要——Cancelled/Suspend 与 Succeeded 明示区分,避免用户把
+  //   「已取消本轮」误读成正常完成。
+  private statusLabel(t: AgentCronTask): string {
+    if (t.lastStatus === 'Running') return '运行中';
+    if (t.lastStatus === 'Queued') return '已排队';
+    if (t.lastStatus === 'Failed') return '上次失败';
+    if (t.lastStatus === 'Cancelled') return '本轮已取消';
+    if (t.lastStatus === 'Suspend') return '已停止';
+    if (t.lastStatus === 'Succeeded') return '上次成功';
+    return '';
+  }
+
+  private isRunning(t: AgentCronTask): boolean {
+    return t.lastStatus === 'Running';
+  }
+
   @State pressedTask: string = '';
 
   @Builder taskRow(t: AgentCronTask, isLast: boolean): void {
@@ -96,6 +112,13 @@ struct SettingCronTasksPage {
             .fontFamily(FONT_SANS).fontColor(INK3).margin({ top: 4 })
             .maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis })
 
+          if (t.lastError !== null && t.lastError.length > 0) {
+            Text(t.lastError)
+              .fontSize(MONO_SMALL).fontWeight(FontWeight.Normal).lineHeight(TEXT_STYLES.meta.lineHeight)
+              .fontFamily(FONT_MONO).fontColor(ERROR).margin({ top: 4 })
+              .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+          }
+
           Row() {
             Text(t.cronExpression)
               .fontSize(MONO_SMALL).fontWeight(FontWeight.Normal).lineHeight(TEXT_STYLES.meta.lineHeight)
@@ -107,11 +130,38 @@ struct SettingCronTasksPage {
             Text(`已跑 ${t.runCount} 次`)
               .fontSize(MONO_SMALL).fontWeight(FontWeight.Normal).lineHeight(TEXT_STYLES.meta.lineHeight)
               .fontFamily(FONT_MONO).fontColor(INK4).margin({ left: 12 })
+            if (this.statusLabel(t).length > 0) {
+              Text(this.statusLabel(t))
+                .fontSize(MONO_SMALL).fontWeight(FontWeight.Medium).lineHeight(TEXT_STYLES.meta.lineHeight)
+                .fontFamily(FONT_MONO)
+                .fontColor(t.lastStatus === 'Failed' ? ERROR : INK3)
+                .margin({ left: 12 })
+            }
             Blank()
+            // R17:运行中提供「停止本轮」入口(停当前生成;下一周期仍按计划保留)
+            if (this.isRunning(t)) {
+              Text('停止本轮')
+                .fontSize(MONO_SMALL).fontWeight(FontWeight.Medium).lineHeight(TEXT_STYLES.meta.lineHeight)
+                .fontFamily(FONT_MONO).fontColor(ERROR)
+                .padding({ left: 8, right: 8, top: 6, bottom: 6 })
+                .accessibilityText('停止本轮生成')
+                .onClick((): void => {
+                  const m: AgentCronManager | null = this.manager;
+                  if (m === null) return;
+                  m.cancelRun(t.id).then((stopped: boolean): void => {
+                    promptAction.showToast({
+                      message: stopped ? '已停止本轮生成' : '当前没有在跑的运行', duration: 1500,
+                    });
+                    this.reload();
+                  }).catch((e: Error): void => {
+                    promptAction.showToast({ message: e.message, duration: 1800 });
+                  });
+                })
+            }
             Row() {
               Icon({
                 name: 'retry', iconSize: 15,
-                color: this.executionAvailable ? INK3 : INK4,
+                color: this.executionAvailable && !this.isRunning(t) ? INK3 : INK4,
               })
             }
             .width(44).height(44)
@@ -122,6 +172,10 @@ struct SettingCronTasksPage {
                 promptAction.showToast({
                   message: '当前 Harmony 版本暂不支持 Cron 执行', duration: 1800,
                 });
+                return;
+              }
+              if (this.isRunning(t)) {
+                promptAction.showToast({ message: '任务正在运行', duration: 1500 });
                 return;
               }
               const m: AgentCronManager | null = this.manager;
@@ -144,7 +198,10 @@ struct SettingCronTasksPage {
               const m: AgentCronManager | null = this.manager;
               if (m === null) return;
               AlertDialog.show({
-                title: '删除定时任务', message: `删除「${t.title}」？`,
+                title: '删除定时任务',
+                message: this.isRunning(t)
+                  ? `删除「${t.title}」？正在运行的生成也会被停止，且不再排下一周期。`
+                  : `删除「${t.title}」？`,
                 primaryButton: { value: '取消', action: (): void => {} },
                 secondaryButton: { value: '删除', fontColor: ERROR, action: (): void => {
                   m.deleteTask(t.id).then((): void => { this.reload(); })

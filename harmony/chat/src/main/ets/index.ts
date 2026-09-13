@@ -222,7 +222,7 @@ export {
 } from './chat/tool_loop.ts';
 export type { RegenerateSeed } from './chat/regenerate.ts';
 export { prepareRegenerateSeed } from './chat/regenerate.ts';
-export type { ToolApprovalVerdict, IdleToolBlockerResult } from './chat/tool_approval.ts';
+export type { ToolApprovalVerdict, ToolApprovalPartLocator, IdleToolBlockerResult } from './chat/tool_approval.ts';
 export {
   TOOL_APPROVAL_CONTINUATION_WORDS, isToolApprovalContinuation,
   findToolNameInConversation, conversationHasPendingOrUnexecutedTools,
@@ -391,10 +391,12 @@ export {
 export type { WebMountWaitConditions, WebMountWaitProbe, WebMountWaitResult } from './chat/webmount_wait.ts';
 export {
   createSyncBackup, restoreSyncBackup, inspectSyncArchive, buildSyncPayload, decodeArchive,
+  conversationFromSyncDto, settingsFromSyncPayload,
   SYNC_ARCHIVE_VERSION, MANIFEST_ENTRY, PAYLOAD_ENTRY,
 } from './chat/sync_snapshot.ts';
 export type {
   SyncManifest, SyncCryptoPort, SyncPayload, SyncBackupInput, SyncInspectPreview, SyncRestoreResult,
+  SyncConversationDto, SyncRestoreSettings,
 } from './chat/sync_snapshot.ts';
 export {
   createWebDavClient, webDavBuildUrl, webDavBackupFileName,

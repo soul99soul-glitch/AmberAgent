@@ -16,6 +16,7 @@ import {
   INK, INK2, INK3, INK4, SURFACE, SURFACE2, LINE, BG,
   ACCENT, ERROR, TITLE, BODY, BODY2, META, GUTTER, RADIUS,
 } from '../design/tokens.ets';
+import { FONT_MONO } from '../design/fonts.ets';
 import { Icon } from '../components/ui/Icon.ets';
 
 interface MemoryDraft {
@@ -197,10 +198,10 @@ struct MemoryPage {
           .margin({ left: 10 }).onClick((): void => { this.togglePin(item); })
       }.width('100%')
       Row() {
-        Text(this.scopeLabel(item)).fontSize(10.5).fontColor(INK3).fontFamily('JetBrainsMono')
+        Text(this.scopeLabel(item)).fontSize(10.5).fontColor(INK3).fontFamily(FONT_MONO)
           .backgroundColor(SURFACE2).padding({ left: 7, right: 7, top: 2, bottom: 2 }).borderRadius(5)
         Text(this.timeLabel(item.updatedAt)).fontSize(10.5).fontColor(INK4)
-          .fontFamily('JetBrainsMono').layoutWeight(1).textAlign(TextAlign.End)
+          .fontFamily(FONT_MONO).layoutWeight(1).textAlign(TextAlign.End)
         Text('✎').fontSize(15).fontColor(INK4).margin({ left: 10 })
           .onClick((): void => { this.openEdit(item); })
         Icon({ name: 'trash', iconSize: 15, color: INK4 }).margin({ left: 8 })
@@ -243,14 +244,14 @@ struct MemoryPage {
             this.autoCard()
             Row() {
               Text('// 已存 ' + this.memories.length.toString() + ' 条')
-                .fontSize(META).fontWeight(600).fontColor(INK3).fontFamily('JetBrainsMono')
+                .fontSize(META).fontWeight(600).fontColor(INK3).fontFamily(FONT_MONO)
               Blank()
               Text('+ 新增').fontSize(BODY2).fontWeight(600).fontColor(ACCENT)
                 .onClick((): void => { this.openAdd(); })
             }.width('100%').padding({ left: 6, right: 6, top: 24, bottom: 10 })
             if (this.loaded && this.memories.length === 0) {
               Column() {
-                Text('// 暂无核心记忆').fontSize(META).fontColor(INK3).fontFamily('JetBrainsMono')
+                Text('// 暂无核心记忆').fontSize(META).fontColor(INK3).fontFamily(FONT_MONO)
                 Text('Agent 会在对话中自动沉淀，也可手动添加')
                   .fontSize(BODY2).fontColor(INK4).margin({ top: 8 })
                   .maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis })

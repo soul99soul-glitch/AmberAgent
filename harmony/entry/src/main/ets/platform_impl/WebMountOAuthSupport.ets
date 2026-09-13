@@ -34,13 +34,9 @@ const sha256Base64Url = async (input: string): Promise<string> => {
 };
 
 const randomBase64Url = async (byteLength: number): Promise<string> => {
-  const out = new Uint8Array(byteLength);
-  let seed = (Date.now() ^ Math.imul(byteLength, 0x9e3779b9)) >>> 0;
-  for (let i = 0; i < byteLength; i++) {
-    seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
-    out[i] = (seed >>> 16) & 0xff;
-  }
-  return base64Url(out);
+  const rnd = cryptoFramework.createRandom();
+  const buf: cryptoFramework.DataBlob = rnd.generateRandomSync(byteLength);
+  return base64Url(new Uint8Array(buf.data));
 };
 
 class WebMountCryptoPortImpl implements WebMountCryptoPort {

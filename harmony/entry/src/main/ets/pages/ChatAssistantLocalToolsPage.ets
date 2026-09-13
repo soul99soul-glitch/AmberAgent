@@ -17,10 +17,11 @@ import { ACCENT,BG,INK,INK3,INK4,LINE,SURFACE,GUTTER,RADIUS,BODY,BODY2,META,TINY
 import { PageTitleBar } from '../components/PageTemplate.ets';
 import { router } from '@kit.ArkUI';
 import {
-  loadAssistants, saveAssistants, patchAssistant,
+  loadAssistants, patchAssistant,
 } from '@amber/chat-domain';
 import type { Assistant, LocalToolOption } from '@amber/chat-domain';
 import { getChatKvStore } from '../di/AppContainer.ets';
+import { mutateAssistant } from '../platform_impl/AssistantMutation.ets';
 
 
 interface RouterParams {
@@ -132,31 +133,23 @@ struct ChatAssistantLocalToolsPage {
   // toggleLocalTool(:71-84 逐字):enable → + option(Set 去重);
   //   disable → webmount 连带 - webmount_eval(Phase 2 M2.0.2:重开 WebMount
   //   不静默带回 wm_eval),否则 - option
+  // F35:整段 RMW 进 assistants 键共享锁,options 由锁内最新助手算出
   private async toggleLocalTool(option: LocalToolOption, enabled: boolean): Promise<void> {
-    if (this.assistant === null) return;
-    const cur: Assistant = this.assistant;
-    let next: LocalToolOption[];
-    if (enabled) {
-      next = cur.localTools.indexOf(option) >= 0
-        ? cur.localTools.slice() : [...cur.localTools, option];
-    } else if (option === 'webmount') {
-      next = cur.localTools.filter(
-        (x: LocalToolOption): boolean => x !== 'webmount' && x !== 'webmount_eval');
-    } else {
-      next = cur.localTools.filter((x: LocalToolOption): boolean => x !== option);
-    }
-    await this.saveAssistant(patchAssistant(cur, { localTools: next }));
-  }
-
-  private async saveAssistant(next: Assistant): Promise<void> {
-    const kv = getChatKvStore();
-    const assistants: Assistant[] | null = await loadAssistants(kv);
-    const list: Assistant[] = assistants === null ? [] : assistants.slice();
-    const index: number = list.findIndex((a: Assistant): boolean => a.id === next.id);
-    if (index >= 0) list[index] = next;
-    else list.push(next);
-    await saveAssistants(kv, list);
-    this.assistant = next;
+    const next: Assistant | null = await mutateAssistant(this.assistantId,
+      (cur: Assistant): Assistant => {
+        let tools: LocalToolOption[];
+        if (enabled) {
+          tools = cur.localTools.indexOf(option) >= 0
+            ? cur.localTools : cur.localTools.concat([option]);
+        } else if (option === 'webmount') {
+          tools = cur.localTools.filter(
+            (x: LocalToolOption): boolean => x !== 'webmount' && x !== 'webmount_eval');
+        } else {
+          tools = cur.localTools.filter((x: LocalToolOption): boolean => x !== option);
+        }
+        return patchAssistant(cur, { localTools: tools });
+      });
+    if (next !== null) this.assistant = next;
   }
 
   build() {
@@ -200,7 +193,7 @@ struct ChatAssistantLocalToolsPage {
                     (row.option !== 'webmount_eval' || this.hasTool('webmount')))
                   .opacity(row.unavailable ? 0.4 : 1)
                   .onChange((v: boolean): void => {
-                    this.toggleLocalTool(row.option, v);
+                    this.toggleLocalTool(row.option, v).catch((): void => {});
                   })
               }
               .width('100%')

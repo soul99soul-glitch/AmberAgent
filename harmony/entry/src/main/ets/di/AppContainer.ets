@@ -8,7 +8,7 @@ import type {
   RunManagerDeps, AiClient, UIMessage, Tool, ToolDefinition,
   DeepReadOutput, DeepReadScheduler, DeepReadCacheEntry, Observable, HttpClient, Storage,
   DeepReadRepository, SearchProviderRegistry, Notifier,
-  SourcePrefetcher, FileStore, ModelRegistry,
+  SourcePrefetcher, FileStore, ModelRegistry, AbortSignalLike,
   ModelCouncilTextRunner, ModelCouncilRuntimeSetting, ModelCouncilSeat, ModelConfig,
   NovelProjectRepository, NovelModelTarget, NovelPolishEffects, DurablePolishJob,
 } from '@amber/deepread-domain';
@@ -68,7 +68,9 @@ import {
   createAskUserTool, createNovelWorkspaceTools,
   createKvResponseResumeStore,
   AgentCronTools,
-  runChatTurn,
+  runChatTurnWithTools, conversationHasPendingOrUnexecutedTools,
+  createTimeTool, createWorkspaceTools, createSearchTools, loadSearchPrefs,
+  createToolRegistry, filterToolProfile, createMcpServerTools,
   thinkTagTransformer, regexOutputTransformer,
   type ChatTurnDeps,
 } from '@amber/chat-domain';
@@ -102,6 +104,8 @@ import {
   createEntrySubAgentTranscriptPort, subAgentRunsDir, subAgentTranscriptPathForRun,
 } from '../platform_impl/SubAgentStore.ets';
 import { loadAgentRuntimeSnapshot } from '../platform_impl/AgentRuntimePrefs.ets';
+import { beginConversationRun } from '../platform_impl/ConversationRunGuard.ets';
+import { ensureSearchSdk } from '../platform_impl/SearchSdkInit.ets';
 import { util } from '@kit.ArkTS';
 
 const DOMAIN: number = 0x0001;
@@ -436,16 +440,18 @@ export const getAgentTaskTools = async (): Promise<AgentTool[]> => {
 
 let agentCronManagerPromise: Promise<AgentCronManager> | null = null;
 
-// 无头执行体:仅跑 ChatTurn;状态机(prepare/markStarted/Completed/Failed/scheduleNext)
-// 由 AgentCronSchedulerPort.fire 负责(AgentCronWorker.doWork 控制流)。
-const createEntryCronRunExecutor = (): (taskId: string) => Promise<void> => {
-  return async (taskId: string): Promise<void> => {
+// 无头执行不暴露依赖页面的工具，待审批结果不得当作成功完成。
+const createEntryCronRunExecutor = (): ((taskId: string, signal?: AbortSignalLike) => Promise<void>) => {
+  return async (taskId: string, signal?: AbortSignalLike): Promise<void> => {
     const manager: AgentCronManager = await getAgentCronManager();
     const tasks = await manager.listTasksSnapshot();
     const task = tasks.find((t): boolean => t.id === taskId);
     if (task === undefined) {
       throw new Error(`Cron task not found: ${taskId}`);
     }
+    if (signal?.aborted) throw new Error('Cron run cancelled');
+    const releaseRun: () => void = beginConversationRun(
+      task.conversationId.length > 0 ? task.conversationId : `cron-${task.id}`);
     notifyCronRunning(task.id, task.title);
     try {
       let conversation = task.conversationId.length > 0
@@ -471,6 +477,24 @@ const createEntryCronRunExecutor = (): (taskId: string) => Promise<void> => {
       if (runtime === null) {
         throw new Error('Cron run failed: no usable chat provider/model');
       }
+      if (signal?.aborted) throw new Error('Cron run cancelled');
+      const searchSettings = await loadSearchPrefs(getChatKvStore());
+      const execution = await loadAgentRuntimeSnapshot(getChatKvStore());
+      ensureSearchSdk();
+      await initMcpManager();
+      if (signal?.aborted) throw new Error('Cron run cancelled');
+      const localTools = runtime.assistant.localTools;
+      const availableTools: AgentTool[] = [
+        createTimeTool(),
+        ...(localTools.indexOf('workspace_files') >= 0
+          ? createWorkspaceTools(getWorkspaceManager(), getToolActivityStore()) : []),
+        ...(searchSettings.enableWebSearch ? createSearchTools(searchSettings) : []),
+        ...createMcpServerTools({
+          manager: getMcpManager(), assistantIds: [...runtime.assistant.mcpServers],
+        }),
+      ];
+      const tools: AgentTool[] = createToolRegistry(
+        filterToolProfile(availableTools, runtime.assistant.toolProfile).tools).tools();
       const deps: ChatTurnDeps = {
         assistant: runtime.assistant,
         inputTransformers: [],
@@ -478,14 +502,40 @@ const createEntryCronRunExecutor = (): (taskId: string) => Promise<void> => {
         provider: asChatStreamProvider(runtime.api, (): TextGenerationParams => runtime.params),
         store: getChatRepository(),
         contextMessageSize: runtime.contextMessageSize,
+        abortSignal: signal,
       };
-      const out = await runChatTurn(conversation, task.prompt, deps);
+      const out = await runChatTurnWithTools(conversation,
+        `这是定时任务。只能使用当前提供的工具；需要人工审批时停止，不得宣称操作已完成。\n${task.prompt}`,
+        deps, {
+          tools,
+          invocationContext: 'cron',
+          autoApproveTools: false,
+          autoApproveHighRiskTools: false,
+          maxSteps: execution.maxToolLoopSteps,
+          toolPromptModel: runtime.params.model,
+          makeProviderForStep: (definitions: ChatToolDefinition[]): ChatStreamProvider =>
+            asChatStreamProvider(runtime.api, (): TextGenerationParams => makeTextGenerationParams({
+              model: runtime.params.model,
+              temperature: runtime.params.temperature,
+              topP: runtime.params.topP,
+              maxTokens: runtime.params.maxTokens,
+              reasoningLevel: runtime.params.reasoningLevel,
+              customBody: runtime.params.customBody,
+              tools: definitions,
+            })),
+        });
+      if (signal?.aborted) throw new Error('Cron run cancelled');
       await getChatRepository().save(out);
+      if (conversationHasPendingOrUnexecutedTools(out)) {
+        throw new Error('定时任务需要人工审批或未完成工具执行，请打开任务会话处理');
+      }
       notifyCronCompleted(task.id, task.title);
     } catch (e) {
       const message: string = e instanceof Error ? e.message : String(e);
-      notifyCronFailed(task.id, task.title, message);
+      if (!signal?.aborted) notifyCronFailed(task.id, task.title, message);
       throw new Error(message);
+    } finally {
+      releaseRun();
     }
   };
 };
@@ -498,6 +548,7 @@ export const getAgentCronManager = (): Promise<AgentCronManager> => {
         createEntryCronSchedulerPort({
           manager: (): Promise<AgentCronManager> => getAgentCronManager(),
           runExecutor: createEntryCronRunExecutor(),
+          createAbortController: createEntryAbortController,
         }),
         await getAgentTaskStore(),
       ))();

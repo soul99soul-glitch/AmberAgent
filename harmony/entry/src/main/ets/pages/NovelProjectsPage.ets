@@ -29,12 +29,26 @@ struct NovelProjectsPage {
   @State pressedId: string = '';
   private pageAlive: boolean = false;
   private loadToken: number = 0;
+  // F41:仅首次加载展示整页 loading;后续刷新保留既有列表(不卸载已读内容)
+  private loadedOnce: boolean = false;
+  // aboutToAppear 与首次 onPageShow 都会触发,首屏只加载一次
+  private firstShowDone: boolean = false;
 
   aboutToAppear(): void {
     this.pageAlive = true;
     this.loadProjects().catch((e: Error): void => {
       if (this.pageAlive) this.errorMsg = String(e);
     });
+  }
+
+  onPageShow(): void {
+    if (this.firstShowDone) {
+      this.loadProjects().catch((e: Error): void => {
+        if (this.pageAlive) this.errorMsg = String(e);
+      });
+    } else {
+      this.firstShowDone = true;
+    }
   }
 
   aboutToDisappear(): void {
@@ -44,18 +58,21 @@ struct NovelProjectsPage {
 
   async loadProjects(): Promise<void> {
     const token: number = ++this.loadToken;
-    if (this.pageAlive) this.loading = true;
+    // F41:仅首次进入显示 loading;刷新时保留 projects,避免列表闪烁/滚动位置丢失
+    const firstLoad: boolean = !this.loadedOnce;
+    if (this.pageAlive && firstLoad) this.loading = true;
     try {
       const projects: NovelProject[] = await getNovelCreation().listProjects();
       if (this.pageAlive && token === this.loadToken) {
         // 首次填充走 animateTo,让行交错入场 transition 生效
-        if (this.loading && projects.length > 0) {
+        if (firstLoad && projects.length > 0) {
           animateTo({ duration: MOTION_ENTER, curve: Curve.EaseOut }, (): void => {
             this.projects = projects;
           });
         } else {
           this.projects = projects;
         }
+        this.loadedOnce = true;
         this.errorMsg = '';
       }
     } finally {

@@ -37,7 +37,6 @@
     "pages/FavoritePage",
     "pages/HistoryPage",
     "pages/HotListSourceSettingsPage",
-    "pages/Index",
     "pages/MemoryPage",
     "pages/MiniAppListPage",
     "pages/MiniAppRunnerPage",

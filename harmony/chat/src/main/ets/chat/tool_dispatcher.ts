@@ -189,6 +189,13 @@ export interface AgentToolDispatcherDeps {
   sleep?: (ms: number) => Promise<void>;
 }
 
+// (input, result) 配对:input 为批次中的原 part 引用,是回写定位的唯一稳定键
+// (空 toolCallId / 真子集批次下 id 与位置都无法区分;R08)。
+export interface ToolBatchResultPair {
+  input: UIMessagePartTool;
+  result: UIMessagePartTool;
+}
+
 export class AgentToolDispatcher {
   private readonly resolver: PermissionDecisionResolver;
   private readonly hooks: ToolInvocationHook[];
@@ -234,8 +241,91 @@ export class AgentToolDispatcher {
   }
 
   // executeBatch(:63-117):prefetch 复用 → 并行(全部 canRunInParallel)或顺序 →
-  //   按输入序重排(结果与输入按序/恒等配对 — 并行无 id 工具 toolCallId 同为 '',
-  //   按 id 关联会互相覆写)。signal:abort 后不再启动新工具副作用。
+  //   按输入序重排,并以 (input,result) 配对返回。配对保留**输入 part 对象身份**:
+  //   并行无 id 工具 toolCallId 同为 '' 或批次只是真子集时,调用方按身份回写,
+  //   不按 '' / 位置游标猜(R08)。signal:abort 后不再启动新工具副作用。
+  public async executeBatchPairs(
+    tools: UIMessagePartTool[],
+    toolDefinitions: Map<string, AgentTool>,
+    autoApproveTools: boolean,
+    autoApproveHighRiskTools: boolean = false,
+    autoApprovedToolNames: string[] = [],
+    invocationContext: ToolInvocationContext = 'normal',
+    prefetchedTools: Map<string, UIMessagePartTool> = new Map<string, UIMessagePartTool>(),
+    retrySetting: GenerationRetrySetting = makeGenerationRetrySetting({ enabled: false }),
+    signal: AbortSignalLike | undefined = undefined,
+  ): Promise<ToolBatchResultPair[]> {
+    const isAborted = (): boolean => signal !== undefined && signal.aborted;
+    const reusedPairs: ToolBatchResultPair[] = [];
+    const reusedInputs: Set<UIMessagePartTool> = new Set<UIMessagePartTool>();
+    for (const tool of tools) {
+      // prefetch 复用依赖 toolCallId;空 id 无法稳定命中,不复用
+      if (tool.toolCallId.length === 0) continue;
+      const prefetched: UIMessagePartTool | undefined = prefetchedTools.get(tool.toolCallId);
+      if (prefetched !== undefined
+        && prefetched.toolName === tool.toolName
+        && prefetched.input === tool.input
+        && prefetched.output.length > 0) {
+        reusedPairs.push({ input: tool, result: prefetched });
+        reusedInputs.add(tool);
+      }
+    }
+    const remaining: UIMessagePartTool[] = tools.filter(
+      (t: UIMessagePartTool): boolean => !reusedInputs.has(t));
+    // (input, result) 按执行序配对;result=null(被跳过/abort)不产生对
+    const executedPairs: ToolBatchResultPair[] = [];
+    if (remaining.length > 0) {
+      const runOne = async (tool: UIMessagePartTool): Promise<UIMessagePartTool | null> => {
+        if (isAborted()) return null;
+        try {
+          return await this.execute(
+            tool, toolDefinitions.get(tool.toolName) ?? null,
+            autoApproveTools, autoApproveHighRiskTools, autoApprovedToolNames,
+            invocationContext, retrySetting, signal);
+        } catch (e) {
+          // abort 打断重试等待:丢弃该工具(保持未执行,留给停止收口),不外抛
+          if (isAbortError(e) && isAborted()) return null;
+          throw e;
+        }
+      };
+      if (remaining.length > 1 && remaining.every(
+        (t: UIMessagePartTool): boolean => this.canRunInParallel(t, toolDefinitions.get(t.toolName) ?? null))) {
+        const results: (UIMessagePartTool | null)[] = await Promise.all(remaining.map(runOne));
+        for (let i = 0; i < remaining.length; i++) {
+          if (results[i] !== null) {
+            executedPairs.push({ input: remaining[i], result: results[i] as UIMessagePartTool });
+          }
+        }
+      } else {
+        for (const tool of remaining) {
+          const result: UIMessagePartTool | null = await runOne(tool);
+          if (result !== null) executedPairs.push({ input: tool, result });
+          if (isAborted()) break;
+        }
+      }
+    }
+    // 按 tools 原序重排(reused/executed 均保持输入相对序,双游标即可)
+    const out: ToolBatchResultPair[] = [];
+    let reusedCursor = 0;
+    let pairCursor = 0;
+    for (const tool of tools) {
+      if (reusedInputs.has(tool)) {
+        if (reusedCursor < reusedPairs.length) {
+          out.push(reusedPairs[reusedCursor]);
+          reusedCursor++;
+        }
+        continue;
+      }
+      while (pairCursor < executedPairs.length && executedPairs[pairCursor].input !== tool) pairCursor++;
+      if (pairCursor < executedPairs.length) {
+        out.push(executedPairs[pairCursor]);
+        pairCursor++;
+      }
+    }
+    return out;
+  }
+
+  // 兼容形:只取结果(既有调用方/测试);写回路径请用 executeBatchPairs 保留输入身份。
   public async executeBatch(
     tools: UIMessagePartTool[],
     toolDefinitions: Map<string, AgentTool>,
@@ -247,71 +337,10 @@ export class AgentToolDispatcher {
     retrySetting: GenerationRetrySetting = makeGenerationRetrySetting({ enabled: false }),
     signal: AbortSignalLike | undefined = undefined,
   ): Promise<UIMessagePartTool[]> {
-    const isAborted = (): boolean => signal !== undefined && signal.aborted;
-    const reused: UIMessagePartTool[] = [];
-    const reusedInputs: Set<UIMessagePartTool> = new Set<UIMessagePartTool>();
-    for (const tool of tools) {
-      // prefetch 复用依赖 toolCallId;空 id 无法稳定命中,不复用
-      if (tool.toolCallId.length === 0) continue;
-      const prefetched: UIMessagePartTool | undefined = prefetchedTools.get(tool.toolCallId);
-      if (prefetched !== undefined
-        && prefetched.toolName === tool.toolName
-        && prefetched.input === tool.input
-        && prefetched.output.length > 0) {
-        reused.push(prefetched);
-        reusedInputs.add(tool);
-      }
-    }
-    const remaining: UIMessagePartTool[] = tools.filter(
-      (t: UIMessagePartTool): boolean => !reusedInputs.has(t));
-    if (remaining.length === 0) return reused;
-    // (input, result) 按执行序配对;result=null(被跳过/abort)不产生对
-    const pairs: Array<{ input: UIMessagePartTool; result: UIMessagePartTool }> = [];
-    const runOne = async (tool: UIMessagePartTool): Promise<UIMessagePartTool | null> => {
-      if (isAborted()) return null;
-      try {
-        return await this.execute(
-          tool, toolDefinitions.get(tool.toolName) ?? null,
-          autoApproveTools, autoApproveHighRiskTools, autoApprovedToolNames,
-          invocationContext, retrySetting, signal);
-      } catch (e) {
-        // abort 打断重试等待:丢弃该工具(保持未执行,留给停止收口),不外抛
-        if (isAbortError(e) && isAborted()) return null;
-        throw e;
-      }
-    };
-    if (remaining.length > 1 && remaining.every(
-      (t: UIMessagePartTool): boolean => this.canRunInParallel(t, toolDefinitions.get(t.toolName) ?? null))) {
-      const results: (UIMessagePartTool | null)[] = await Promise.all(remaining.map(runOne));
-      for (let i = 0; i < remaining.length; i++) {
-        if (results[i] !== null) pairs.push({ input: remaining[i], result: results[i] as UIMessagePartTool });
-      }
-    } else {
-      for (const tool of remaining) {
-        const result: UIMessagePartTool | null = await runOne(tool);
-        if (result !== null) pairs.push({ input: tool, result });
-        if (isAborted()) break;
-      }
-    }
-    // 按 tools 原序重排(reused/pairs 均保持输入相对序,双游标即可)
-    const out: UIMessagePartTool[] = [];
-    let reusedCursor = 0;
-    let pairCursor = 0;
-    for (const tool of tools) {
-      if (reusedInputs.has(tool)) {
-        if (reusedCursor < reused.length) {
-          out.push(reused[reusedCursor]);
-          reusedCursor++;
-        }
-        continue;
-      }
-      while (pairCursor < pairs.length && pairs[pairCursor].input !== tool) pairCursor++;
-      if (pairCursor < pairs.length) {
-        out.push(pairs[pairCursor].result);
-        pairCursor++;
-      }
-    }
-    return out;
+    const pairs: ToolBatchResultPair[] = await this.executeBatchPairs(
+      tools, toolDefinitions, autoApproveTools, autoApproveHighRiskTools,
+      autoApprovedToolNames, invocationContext, prefetchedTools, retrySetting, signal);
+    return pairs.map((pair: ToolBatchResultPair): UIMessagePartTool => pair.result);
   }
 
   // execute(:119-185):permission_trace 恒注入 metadata;approvalState 分支

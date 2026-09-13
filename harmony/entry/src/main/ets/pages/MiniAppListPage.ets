@@ -55,6 +55,10 @@ struct MiniAppListPage {
     });
   }
 
+  onPageShow(): void {
+    if (this.platform !== null) this.refresh();
+  }
+
   aboutToDisappear(): void {
     this.alive = false;
   }

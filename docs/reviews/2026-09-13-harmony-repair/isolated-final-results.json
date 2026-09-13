@@ -1,0 +1,46 @@
+[
+  {
+    "probe": "probe-batch1-f20.cjs",
+    "exitCode": 0
+  },
+  {
+    "probe": "probe-batch1-r10-r11.cjs",
+    "exitCode": 0
+  },
+  {
+    "probe": "probe-batch3-cron.cjs",
+    "exitCode": 0
+  },
+  {
+    "probe": "probe-batch4-notifier.mjs",
+    "exitCode": 0
+  },
+  {
+    "probe": "probe-batch4-template.mjs",
+    "exitCode": 0
+  },
+  {
+    "probe": "probe-batch4-webmount-mount.cjs",
+    "exitCode": 0
+  },
+  {
+    "probe": "probe-batch4-webmount-sites.cjs",
+    "exitCode": 0
+  },
+  {
+    "probe": "probe-batch4-webmount-tools.cjs",
+    "exitCode": 0
+  },
+  {
+    "probe": "probe-batch5-settings.cjs",
+    "exitCode": 0
+  },
+  {
+    "probe": "probe-batch5r-routing-model.cjs",
+    "exitCode": 0
+  },
+  {
+    "probe": "probe-f44-document-preview.cjs",
+    "exitCode": 0
+  }
+]

@@ -13,6 +13,7 @@
 //   ❌ 席位编辑(后续迭代)
 
 import { getAgentPromptSettingsPort } from '../di/AppContainer.ets';
+import { router } from '@kit.ArkUI';
 import type { ModelCouncilRuntimeSetting, ModelCouncilSeat, ModelCouncilRolePreset } from '@amber/deepread-domain';
 import {
   LENS_PRESETS, findRolePreset, isCoreRole, makeSeat,
@@ -38,9 +39,22 @@ struct SettingModelCouncilPage {
   @State expandedSeatId: string = '';
   @State showAddSeatMenu: boolean = false;
   @State loaded: boolean = false;
+  // F21:席位文本编辑未落盘标记 + 显式保存状态(唯一机制:显式保存 + 脏返回确认)
+  @State dirty: boolean = false;
+  @State saving: boolean = false;
+  @State saveError: string = '';
 
   aboutToAppear(): void {
     this.loadSetting();
+  }
+
+  // F21:系统返回手势/物理返回;脏则弹确认(返回 true 消费本次返回)
+  onBackPress(): boolean {
+    if (this.dirty || this.saving) {
+      this.requestBack();
+      return true;
+    }
+    return false;
   }
 
   private async loadSetting(): Promise<void> {
@@ -67,7 +81,8 @@ struct SettingModelCouncilPage {
     }
   }
 
-  private async saveSetting(): Promise<void> {
+  // F21:返回是否成功,供「保存并返回」在落盘成功后才 back,失败留草稿在页
+  private async saveSetting(): Promise<boolean> {
     try {
       const port = getAgentPromptSettingsPort();
       const current: ModelCouncilRuntimeSetting = await port.getCouncilSetting();
@@ -84,14 +99,74 @@ struct SettingModelCouncilPage {
         showSeatOutputs: this.showSeatOutputs,
       };
       await port.updateCouncilSetting(next);
+      this.dirty = false;
+      this.saveError = '';
+      return true;
     } catch (_e) {
-      // 保存失败静默
+      this.saveError = '保存失败,修改尚未写入,请重试';
+      return false;
     }
+  }
+
+  // F21:显式「保存」— await 成功才 back;失败留在本页且草稿不丢
+  private async saveAndBack(): Promise<void> {
+    if (this.saving) return;
+    this.saving = true;
+    this.saveError = '';
+    const ok: boolean = await this.saveSetting();
+    this.saving = false;
+    if (ok) {
+      router.back();
+    } else {
+      AlertDialog.show({
+        title: '保存失败',
+        message: '设置未写入存储,草稿已保留,可重试或放弃修改。',
+        primaryButton: { value: '知道了', action: (): void => {} },
+      });
+    }
+  }
+
+  // F21:脏返回确认(放弃 / 保存并返回;点外部取消)
+  private requestBack(): void {
+    if (this.saving) return;
+    if (!this.dirty) {
+      router.back();
+      return;
+    }
+    AlertDialog.show({
+      title: '有未保存的修改',
+      message: '席位修改尚未保存,是否保存后返回?',
+      primaryButton: {
+        value: '放弃修改',
+        action: (): void => {
+          this.dirty = false;
+          router.back();
+        },
+      },
+      secondaryButton: {
+        value: '保存并返回',
+        action: (): void => { this.saveAndBack(); },
+      },
+    });
   }
 
   build(): void {
     Column() {
-      PageTitleBar({ title: 'Model Council 设置' })
+      PageTitleBar({
+        title: 'Model Council 设置',
+        actionText: this.saving ? '保存中…' : '保存',
+        onAction: (): void => { this.saveAndBack(); },
+        onBack: (): void => { this.requestBack(); },
+      })
+
+      if (this.saveError.length > 0) {
+        Text(this.saveError)
+          .fontSize(TEXT_STYLES.secondary.size).fontWeight(TEXT_STYLES.secondary.weight)
+          .lineHeight(TEXT_STYLES.secondary.lineHeight).fontFamily(TEXT_STYLES.secondary.family)
+          .fontColor(ERROR)
+          .width('100%').padding({ left: 16, right: 16, top: 8, bottom: 8 })
+          .backgroundColor(SURFACE2)
+      }
 
       if (!this.loaded) {
         Text('加载中…')
@@ -312,6 +387,7 @@ struct SettingModelCouncilPage {
         systemPrompt: s.systemPrompt, outputBudgetChars: s.outputBudgetChars,
         reasoningLevel: s.reasoningLevel, temperature: s.temperature } : s,
     );
+    this.dirty = true;
   }
 
   // M3.3:更新席位 systemPrompt
@@ -321,6 +397,7 @@ struct SettingModelCouncilPage {
         systemPrompt: prompt, outputBudgetChars: s.outputBudgetChars,
         reasoningLevel: s.reasoningLevel, temperature: s.temperature } : s,
     );
+    this.dirty = true;
   }
 
   // M3.3:删除席位(核心席不可删)

@@ -1,0 +1,18 @@
+[R10-T1] transient readText during addMemory -> rejected: true | persisted contents: ["alpha","beta"]
+[R10-T1] PASS: error read is rejected, no empty-snapshot overwrite.
+[R10-T2] corrupt registry -> addMemory rejected: true | quarantine marker: true
+[R10-T2] PASS: quarantine is sticky; next write is not a first-init overwrite.
+[R10-T3] missing file (true first init) -> addMemory ok, id: 1 | contents: ["first"]
+[R10-T4] managed insert with transient read failure -> rejected: true | rows: ["upload/a.txt","upload/b.txt"]
+[R10-T5] managed listByFolder on corrupt registry -> error: managed_files.json 损坏已被隔离,拒绝覆盖(需先恢复或显式清除 .quarantined)
+[R10-T6] managed first init insert ok, id: 1
+[R10-T7] FavoriteStore addFavorite on corrupt blob -> rejected: true | stored blob unchanged: { not valid json
+[R11-T1] deleteConversationCompactData -> compacts: false | events: false | marker: true
+[R11-T2] late insertCompact/recordEvent after delete -> compacts: [] | events key: false
+[R11-T3] cleanupDeletedConversation -> compact: false | events: false | marker: true | favorites: []
+[R11-T4] cleanup with corrupt favorites -> threw: false | compact removed: true | corrupt blob kept: { corrupt
+[R11-T4] PASS: compact cleanup independent of the favorites cascade.
+[R11-T5] racing delete during insert -> raw compact key present: false
+[R11-T5] PASS: post-write generation re-check prevents residual summary data.
+
+All batch-1 R10/R11 assertions passed. Real .ets sources, mocked FS/KV only.

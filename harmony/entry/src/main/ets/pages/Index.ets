@@ -1,4 +1,5 @@
-// Index — 首页(对齐 Android 首屏基准)
+// Index — legacy 首页(已从 main_pages 移除;冷启动页为 ChatListPage)
+// 本文件保留供对照 Android 首屏,无路由入口,勿再挂新导航。
 //
 // 首页只负责新会话入口和最近会话列表。模型选择与图片物化仍由既有页面承接,
 // 以保持首页与 ChatPage 的发送/附件行为一致。

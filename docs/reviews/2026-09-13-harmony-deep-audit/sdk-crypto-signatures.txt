@@ -1,0 +1,118 @@
+1586-         * @throws { BusinessError } 401 - invalid parameters. Possible causes: 1. Mandatory parameters are left unspecified;
+1587-         * <br>2. Incorrect parameter types; 3. Parameter verification failed.
+1588-         * @throws { BusinessError } 17620001 - memory operation failed.
+1589-         * @throws { BusinessError } 17630001 - crypto operation error.
+1590-         * @syscap SystemCapability.Security.CryptoFramework.Rand
+1591-         * @crossplatform
+1592-         * @atomicservice
+1593-         * @since 12
+1594-         */
+1595:        generateRandomSync(len: number): DataBlob;
+1596-        /**
+1597-         * Set seed by given DataBlob.
+1598-         *
+1599-         * @param { DataBlob } seed - indicates the seed DataBlob.
+1600-         * @throws { BusinessError } 17620001 - memory operation failed.
+1601-         * @syscap SystemCapability.Security.CryptoFramework
+--
+2111-         *     <br>3. Parameter verification failed.
+2112-         * @throws { BusinessError } 17620001 - memory operation failed.
+2113-         * @throws { BusinessError } 17620003 - parameter check failed.
+2114-         * @throws { BusinessError } 17630001 - crypto operation error.
+2115-         * @syscap SystemCapability.Security.CryptoFramework.Key.AsymKey
+2116-         * @crossplatform
+2117-         * @atomicservice
+2118-         * @since 26.0.0
+2119-         */
+2120:        convertKeySync(pubKey: DataBlob | null, priKey: DataBlob | null): KeyPair;
+2121-        /**
+2122-         * Used to convert asymmetric key in PEM format to keypair object.
+2123-         *
+2124-         * @param { string | null } pubKey - the public key string in PEM format.
+2125-         * @param { string | null } priKey - the private key string in PEM format.
+2126-         * @returns { Promise<KeyPair> } return keypair.
+--
+2541-         *     <br>2. Incorrect parameter types;
+2542-         *     <br>3. Parameter verification failed.
+2543-         * @throws { BusinessError } 17620001 - memory operation failed.
+2544-         * @throws { BusinessError } 17620003 - parameter check failed.
+2545-         * @syscap SystemCapability.Security.CryptoFramework.Key.SymKey
+2546-         * @crossplatform
+2547-         * @atomicservice
+2548-         * @since 26.0.0
+2549-         */
+2550:        convertKeySync(key: DataBlob): SymKey;
+2551-        /**
+2552-         * Indicates the algorithm name of the SymKeyGenerator object.
+2553-         *
+2554-         * @type { string }
+2555-         * @readonly
+2556-         * @syscap SystemCapability.Security.CryptoFramework
+--
+2844-         * @throws { BusinessError } 401 - invalid parameters. Possible causes: 1. Mandatory parameters are left unspecified;
+2845-         * <br>2. Incorrect parameter types; 3. Parameter verification failed.
+2846-         * @throws { BusinessError } 17620001 - memory operation failed.
+2847-         * @throws { BusinessError } 17630001 - crypto operation error.
+2848-         * @syscap SystemCapability.Security.CryptoFramework.Mac
+2849-         * @crossplatform
+2850-         * @atomicservice
+2851-         * @since 12
+2852-         */
+2853:        initSync(key: SymKey): void;
+2854-        /**
+2855-         * Update mac with DataBlob.
+2856-         *
+2857-         * @param { DataBlob } input - indicates the DataBlob.
+2858-         * @param { AsyncCallback<void> } callback - the callback of the update function.
+2859-         * @throws { BusinessError } 401 - invalid parameters. Possible causes: 1. Mandatory parameters are left unspecified;
+--
+4116-         *     <br>1. Invalid opMode value;
+4117-         *     <br>2. Invalid iv length;
+4118-         *     <br>3. Invalid key length.
+4119-         * @throws { BusinessError } 17630001 - crypto operation error.
+4120-         * @syscap SystemCapability.Security.CryptoFramework.Cipher
+4121-         * @crossplatform
+4122-         * @atomicservice
+4123-         * @since 22
+4124-         */
+4125:        initSync(opMode: CryptoMode, key: Key, params: ParamsSpec | null): void;
+4126-        /**
+4127-         * Update the crypto operation with the input data, and feed back the encrypted or decrypted data
+4128-         * this time. RSA is not supported in this function.
+4129-         *
+4130-         * @param { DataBlob } data - indicates the data to be encrypted or decrypted.
+4131-         * @param { AsyncCallback<DataBlob> } callback - the callback of the update function.
+--
+5064-         * @throws { BusinessError } 17620002 - failed to convert parameters between arkts and c.
+5065-         * @throws { BusinessError } 17620003 - parameter check failed. Possible causes:
+5066-         *     <br>1. Incorrect key type.
+5067-         * @throws { BusinessError } 17630001 - crypto operation error.
+5068-         * @syscap SystemCapability.Security.CryptoFramework.Signature
+5069-         * @crossplatform
+5070-         * @atomicservice
+5071-         * @since 26.0.0
+5072-         */
+5073:        initSync(priKey: PriKey): void;
+5074-        /**
+5075-         * Used to append the message need to be signed.
+5076-         *
+5077-         * @param { DataBlob } data - the data need to be signed.
+5078-         * @param { AsyncCallback<void> } callback - the call back function return nothing.
+5079-         * @throws { BusinessError } 401 - invalid parameters. Possible causes:
+--
+5962-         * @throws { BusinessError } 17620002 - failed to convert parameters between arkts and c.
+5963-         * @throws { BusinessError } 17620003 - parameter check failed. Possible causes:
+5964-         *     <br>1. Incorrect key type.
+5965-         * @throws { BusinessError } 17630001 - crypto operation error.
+5966-         * @syscap SystemCapability.Security.CryptoFramework.Signature
+5967-         * @crossplatform
+5968-         * @atomicservice
+5969-         * @since 26.0.0
+5970-         */
+5971:        initSync(pubKey: PubKey): void;
+5972-        /**
+5973-         * Used to append the message need to be verified.
+5974-         *
+5975-         * @param { DataBlob } data - the data need to be verified.
+5976-         * @param { AsyncCallback<void> } callback - return nothing.
+5977-         * @throws { BusinessError } 401 - invalid parameters. Possible causes:

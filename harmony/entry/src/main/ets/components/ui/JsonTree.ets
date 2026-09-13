@@ -1,7 +1,8 @@
 // JsonTree — JSON 树查看器(对齐 Android JsonTree.kt)
 // 可展开/折叠的 JSON 结构渲染,支持对象/数组/字符串/数字/布尔/null
 // 值颜色: string=#6A8759, boolean=#CC7832, number=#6897BB, null=outline
-import { INK, INK2, INK3, INK4, SURFACE, SURFACE2, LINE, ACCENT, META, BODY } from '../../design/tokens.ets';
+import { INK2, INK3, ACCENT, META } from '../../design/tokens.ets';
+import { FONT_MONO } from '../../design/fonts.ets';
 
 // JSON 节点类型
 type JsonNodeType = 'object' | 'array' | 'string' | 'number' | 'boolean' | 'null';
@@ -55,11 +56,11 @@ const buildNode = (key: string, value: object): JsonNodeData => {
   return { key, type: 'object', value: '', children, childCount: keys.length } as JsonNodeData;
 };
 
-const valueColor = (type: JsonNodeType): string => {
-  if (type === 'string') return '#6A8759';
-  if (type === 'boolean') return '#CC7832';
-  if (type === 'number') return '#6897BB';
-  if (type === 'null') return '#8F8B80';
+const valueColor = (type: JsonNodeType, dark: boolean): string => {
+  if (type === 'string') return dark ? '#98C379' : '#6A8759';
+  if (type === 'boolean') return dark ? '#D19A66' : '#CC7832';
+  if (type === 'number') return dark ? '#61AFEF' : '#6897BB';
+  if (type === 'null') return INK3;
   return INK2;
 };
 
@@ -78,6 +79,7 @@ const bracketClose = (type: JsonNodeType): string => {
 
 @Component
 export struct JsonTree {
+  @StorageProp('darkMode') darkMode: boolean = false;
   @Prop json: string = '';
   @State root: JsonNodeData | null = null;
 
@@ -108,17 +110,17 @@ export struct JsonTree {
           Text(`"${node.key}"`)
             .fontSize(META)
             .fontColor(ACCENT)
-            .fontFamily('JetBrainsMono')
+            .fontFamily(FONT_MONO)
             .margin({ right: 4 })
           Text(': ')
             .fontSize(META)
             .fontColor(INK2)
-            .fontFamily('JetBrainsMono')
+            .fontFamily(FONT_MONO)
         }
         Text(formatValue(node.type, node.value))
           .fontSize(META)
-          .fontColor(valueColor(node.type))
-          .fontFamily('JetBrainsMono')
+          .fontColor(valueColor(node.type, this.darkMode))
+          .fontFamily(FONT_MONO)
       }
       .width('100%')
       .padding({ left: depth * 16 + 14, top: 2, bottom: 2 })
@@ -138,25 +140,25 @@ export struct JsonTree {
           Text(`"${node.key}"`)
             .fontSize(META)
             .fontColor(ACCENT)
-            .fontFamily('JetBrainsMono')
+            .fontFamily(FONT_MONO)
             .margin({ right: 4 })
           Text(': ')
             .fontSize(META)
             .fontColor(INK2)
-            .fontFamily('JetBrainsMono')
+            .fontFamily(FONT_MONO)
         }
         Text(bracketOpen(node.type))
           .fontSize(META)
           .fontColor(INK2)
-          .fontFamily('JetBrainsMono')
+          .fontFamily(FONT_MONO)
         Text(` ${node.childCount} `)
           .fontSize(META)
           .fontColor(INK3)
-          .fontFamily('JetBrainsMono')
+          .fontFamily(FONT_MONO)
         Text(bracketClose(node.type))
           .fontSize(META)
           .fontColor(INK2)
-          .fontFamily('JetBrainsMono')
+          .fontFamily(FONT_MONO)
       }
       .width('100%')
       .padding({ left: depth * 16, top: 2, bottom: 2 })
@@ -171,7 +173,7 @@ export struct JsonTree {
         Text(bracketClose(node.type))
           .fontSize(META)
           .fontColor(INK2)
-          .fontFamily('JetBrainsMono')
+          .fontFamily(FONT_MONO)
       }
       .width('100%')
       .padding({ left: depth * 16 + 14, top: 0, bottom: 2 })

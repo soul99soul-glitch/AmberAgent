@@ -23,6 +23,12 @@ export interface HttpClient {
       onChunk: (chunk: ArrayBuffer, end: boolean) => void;
       onDataEnd?: () => void;
       signal?: AbortSignalLike;
+      /**
+       * 协议收口(R18):消费方在解析到 done/error 等协议终态后置位,客户端在
+       * 每次 onChunk 之后检视该回调,返回 true 即立即销毁底层请求并 settle
+       * (不再等待服务端关流,也不泄漏连接)。未提供时行为不变(兼容既有实现)。
+       */
+      shouldStop?: () => boolean;
     },
   ): Promise<HttpResponse>;
 }

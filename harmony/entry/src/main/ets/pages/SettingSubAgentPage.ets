@@ -16,13 +16,14 @@
 //   ❌ custom definition 编辑(后续迭代)
 
 import { getAgentPromptSettingsPort, refreshSubAgentSetting } from '../di/AppContainer.ets';
+import { router } from '@kit.ArkUI';
 import type { SubAgentRuntimeSetting, SubAgentMode, SubAgentOverride, SubAgentDefinition } from '@amber/chat-domain';
 import {
   DEFAULT_SUB_AGENT_TIMEOUT_MS, DEFAULT_SUB_AGENT_MAX_TURNS,
   DEFAULT_SUB_AGENT_MAX_CONCURRENT_RUNS, DEFAULT_SUB_AGENT_OUTPUT_BUDGET_CHARS,
   SUB_AGENT_BUILT_INS,
 } from '@amber/chat-domain';
-import { INK, INK3, SURFACE2, BG, TEXT_STYLES } from '../design/tokens.ets';
+import { INK, INK3, SURFACE2, BG, ERROR, TEXT_STYLES } from '../design/tokens.ets';
 import { FONT_SANS_SEMIBOLD, FONT_MONO_MEDIUM } from '../design/fonts.ets';
 import { PageTitleBar, SectionHeader, ToggleRow, SelectRow, Seg, PaperSeparator, PageSpacer, BtnGhost } from '../components/PageTemplate.ets';
 
@@ -41,9 +42,23 @@ struct SettingSubAgentPage {
   @State overrides: Record<string, SubAgentOverride> = {};
   @State expandedRoleId: string = '';
   @State loaded: boolean = false;
+  // F21:文本编辑未落盘标记 + 显式保存状态(唯一机制:显式保存 + 脏返回确认;
+  //   不加 aboutToDisappear flush,也不每键自动保存)
+  @State dirty: boolean = false;
+  @State saving: boolean = false;
+  @State saveError: string = '';
 
   aboutToAppear(): void {
     this.loadSetting();
+  }
+
+  // F21:系统返回手势/物理返回;脏则弹确认(返回 true 消费本次返回)
+  onBackPress(): boolean {
+    if (this.dirty || this.saving) {
+      this.requestBack();
+      return true;
+    }
+    return false;
   }
 
   private async loadSetting(): Promise<void> {
@@ -67,7 +82,9 @@ struct SettingSubAgentPage {
     }
   }
 
-  private async saveSetting(): Promise<void> {
+  // F21:返回是否成功,供「保存并返回」在落盘成功后才 back,失败留草稿在页。
+  //   注意:saveSetting 写整份 @State,故任何一次成功保存都会把文本编辑一并落盘。
+  private async saveSetting(): Promise<boolean> {
     try {
       const port = getAgentPromptSettingsPort();
       const current: SubAgentRuntimeSetting = await port.getSubAgentSetting();
@@ -85,14 +102,75 @@ struct SettingSubAgentPage {
       };
       await port.updateSubAgentSetting(next);
       await refreshSubAgentSetting();
+      this.dirty = false;
+      this.saveError = '';
+      return true;
     } catch (_e) {
-      // 保存失败静默(不伪成功,设置页无 toast)
+      // F21:不再静默吞错;失败保留草稿并给出可见反馈
+      this.saveError = '保存失败,修改尚未写入,请重试';
+      return false;
     }
+  }
+
+  // F21:显式「保存」— await 成功才 back;失败留在本页且草稿不丢
+  private async saveAndBack(): Promise<void> {
+    if (this.saving) return;
+    this.saving = true;
+    this.saveError = '';
+    const ok: boolean = await this.saveSetting();
+    this.saving = false;
+    if (ok) {
+      router.back();
+    } else {
+      AlertDialog.show({
+        title: '保存失败',
+        message: '设置未写入存储,草稿已保留,可重试或放弃修改。',
+        primaryButton: { value: '知道了', action: (): void => {} },
+      });
+    }
+  }
+
+  // F21:脏返回确认(放弃 / 保存并返回;点外部取消)
+  private requestBack(): void {
+    if (this.saving) return;
+    if (!this.dirty) {
+      router.back();
+      return;
+    }
+    AlertDialog.show({
+      title: '有未保存的修改',
+      message: '角色提示词修改尚未保存,是否保存后返回?',
+      primaryButton: {
+        value: '放弃修改',
+        action: (): void => {
+          this.dirty = false;
+          router.back();
+        },
+      },
+      secondaryButton: {
+        value: '保存并返回',
+        action: (): void => { this.saveAndBack(); },
+      },
+    });
   }
 
   build(): void {
     Column() {
-      PageTitleBar({ title: '子代理设置' })
+      PageTitleBar({
+        title: '子代理设置',
+        actionText: this.saving ? '保存中…' : '保存',
+        onAction: (): void => { this.saveAndBack(); },
+        onBack: (): void => { this.requestBack(); },
+      })
+
+      if (this.saveError.length > 0) {
+        Text(this.saveError)
+          .fontSize(TEXT_STYLES.secondary.size).fontWeight(TEXT_STYLES.secondary.weight)
+          .lineHeight(TEXT_STYLES.secondary.lineHeight).fontFamily(TEXT_STYLES.secondary.family)
+          .fontColor(ERROR)
+          .width('100%').padding({ left: 16, right: 16, top: 8, bottom: 8 })
+          .backgroundColor(SURFACE2)
+      }
 
       if (!this.loaded) {
         Text('加载中…')
@@ -313,6 +391,7 @@ struct SettingSubAgentPage {
     for (const k of keys) ov[k] = this.overrides[k];
     ov[roleId] = next;
     this.overrides = ov;
+    this.dirty = true;
   }
 
   // M3.2:清除某 role 的 override(恢复默认)

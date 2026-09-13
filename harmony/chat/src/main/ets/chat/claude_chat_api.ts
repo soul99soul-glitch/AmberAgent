@@ -88,16 +88,20 @@ export const createClaudeChatApi = (deps: ClaudeChatApiDeps): OpenAIChatApi => {
   ): Promise<void> => {
     const req = buildRequest(deps, messages, params, true);
     const assembler = new SseAssembler();
-    const state: { error: Error | null; done: boolean } = { error: null, done: false };
+    const state: { error: Error | null; done: boolean; sawEvent: boolean } =
+      { error: null, done: false, sawEvent: false };
 
     const resp = await deps.http.fetchStream(req, {
       signal: opts?.signal,
       onDataEnd: opts?.onDataEnd,
+      // R18:message_stop/error 为协议终态 → 立即关闭底层并 settle
+      shouldStop: (): boolean => state.done || state.error !== null,
       onChunk: (bytes: ArrayBuffer, end: boolean): void => {
         if (state.error !== null || state.done) return; // 终止后不再消费
         try {
           const events: SseEvent[] = assembler.feed(bytes);
           if (end) events.push(...assembler.flush());
+          if (events.length > 0) state.sawEvent = true;
           for (const evt of events) {
             // Claude 依赖 event: 字段分发(SseAssembler 已支持)
             const result = parseClaudeStreamEvent(evt.event, evt.id, evt.data);
@@ -114,7 +118,12 @@ export const createClaudeChatApi = (deps: ClaudeChatApiDeps): OpenAIChatApi => {
     });
 
     if (state.error !== null) throw state.error;
+    if (state.done) return;
     if (resp.status < 200 || resp.status >= 300) {
+      throw errorFromFailureBody(resp.status, resp.body);
+    }
+    // R06:2xx 但零 SSE 事件(网关 200 回普通 JSON)→ 不是成功流
+    if (!state.sawEvent) {
       throw errorFromFailureBody(resp.status, resp.body);
     }
   };

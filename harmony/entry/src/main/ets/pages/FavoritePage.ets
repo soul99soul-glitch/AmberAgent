@@ -91,6 +91,10 @@ struct FavoritePage {
     this.reload();
   }
 
+  onPageShow(): void {
+    this.reload();
+  }
+
   private reload(): void {
     listFavorites().then((list: FavoriteEntry[]): void => {
       this.items = list;

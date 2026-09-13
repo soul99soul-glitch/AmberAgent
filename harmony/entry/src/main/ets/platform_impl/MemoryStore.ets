@@ -23,7 +23,8 @@ import {
   memoryRecordToAssistantMemory, touchMemoryRecords, updateMemoryRecordContent,
   upsertMemoryRecord,
 } from '@amber/chat-domain';
-import { writeTextFileAtomic, quarantineIfStillInvalid } from './AtomicJsonFile.ets';
+import { writeTextFileAtomic, readGuardedJson } from './AtomicJsonFile.ets';
+import type { GuardedJsonRead } from './AtomicJsonFile.ets';
 import { publishBasicNotification, cancelNotification } from './NotificationNotifier.ets';
 
 const MEMORY_FOLDER: string = 'memory';
@@ -36,36 +37,64 @@ const memoryPath = (name: string): string => {
   return `${ctx.filesDir}/${MEMORY_FOLDER}/${name}`;
 };
 
+// 结构校验:仅接受 JSON 数组;解析失败/非数组 → null(触发隔离,不是空库)
+const parseJsonArray = <T>(text: string): T[] | null => {
+  try {
+    const parsed = JSON.parse(text) as T[];
+    return Array.isArray(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+};
+
+// 只读路径:损坏/IO 错时降级为空(不写回,故不丢数据;召回/列表为空可恢复),
+// 避免把「读失败」变成上层调用链的硬错误。写路径不走这里(见 requireArrayForWrite)。
 const readJsonArray = async <T>(path: string): Promise<T[]> => {
-  let text: string;
-  try {
-    const ok: boolean = await fileIo.access(path);
-    if (!ok) return []; // 文件不存在 → 空库(等价空表)
-    text = await fileIo.readText(path);
-  } catch {
-    return []; // IO 异常 → 空库(不崩溃)
-  }
-  try {
-    const parsed: T[] = JSON.parse(text) as T[];
-    if (Array.isArray(parsed)) return parsed;
-  } catch {
-    // 落入下方隔离
-  }
-  // 损坏 → 二次确认仍无效则保留 .bad 现场后按空库回退,防下次写以空快照覆盖
-  await quarantineIfStillInvalid(path, (t: string): boolean => {
-    try {
-      return !Array.isArray(JSON.parse(t));
-    } catch {
-      return true;
-    }
-  });
-  return [];
+  const outcome: GuardedJsonRead<T[]> =
+    await readGuardedJson<T[]>(path, (t: string): T[] | null => parseJsonArray<T>(t));
+  return outcome.status === 'ok' && outcome.value !== null ? outcome.value : [];
 };
 
 const writeJsonArray = async <T>(path: string, items: T[]): Promise<void> =>
   writeTextFileAtomic(path, JSON.stringify(items));
 
+// 写基准三态:missing → 可作首次初始化(空数组);blocked/io_error → 拒绝写入。
+// 仅返回错误文案,由调用方决定如何暴露(此处一律 throw,不静默用空快照覆盖)。
+interface ArrayWriteBase<T> {
+  error: string;
+  items: T[] | null;
+}
+
+const loadArrayForWrite = async <T>(path: string): Promise<ArrayWriteBase<T>> => {
+  const outcome: GuardedJsonRead<T[]> =
+    await readGuardedJson<T[]>(path, (t: string): T[] | null => parseJsonArray<T>(t));
+  if (outcome.status === 'ok') {
+    const ok: ArrayWriteBase<T> = { error: '', items: outcome.value };
+    return ok;
+  }
+  if (outcome.status === 'missing') {
+    const firstInit: ArrayWriteBase<T> = { error: '', items: [] };
+    return firstInit;
+  }
+  const reason: string = outcome.status === 'blocked'
+    ? '存储文件损坏已被隔离,拒绝以空数据覆盖(需恢复或显式重置)'
+    : '存储文件读取失败,拒绝覆盖';
+  const bad: ArrayWriteBase<T> = { error: reason, items: null };
+  return bad;
+};
+
+const requireArrayForWrite = async <T>(path: string): Promise<T[]> => {
+  const read: ArrayWriteBase<T> = await loadArrayForWrite<T>(path);
+  if (read.error !== '') throw new Error(read.error);
+  return read.items !== null ? read.items : [];
+};
+
 const readAll = (): Promise<MemoryRecord[]> => readJsonArray<MemoryRecord>(memoryPath(MEMORY_FILE));
+
+// 写路径基准:损坏/IO 错时抛错(不再返回空库)
+const readAllForWrite = (): Promise<MemoryRecord[]> =>
+  requireArrayForWrite<MemoryRecord>(memoryPath(MEMORY_FILE));
+
 
 const writeAll = (records: MemoryRecord[]): Promise<void> =>
   writeJsonArray<MemoryRecord>(memoryPath(MEMORY_FILE), records);
@@ -89,7 +118,7 @@ export const getMemoryReadRepository = (): MemoryReadRepository => ({
   touchMemories: (ids: number[]): Promise<void> => {
     if (ids.length === 0) return Promise.resolve(); // MemoryRepository.kt:150
     return enqueueWrite(async (): Promise<void> => {
-      const all: MemoryRecord[] = await readAll();
+      const all: MemoryRecord[] = await readAllForWrite();
       await writeAll(touchMemoryRecords(all, ids, Date.now()));
     });
   },
@@ -100,7 +129,7 @@ export const getMemoryReadRepository = (): MemoryReadRepository => ({
 // addMemory(:102-133)— id 自增在 appendMemoryRecord(max+1);返回所插记录
 const addMemory = (params: MemoryAddParams): Promise<MemoryRecord> =>
   enqueueWrite(async (): Promise<MemoryRecord> => {
-    const all: MemoryRecord[] = await readAll();
+    const all: MemoryRecord[] = await readAllForWrite();
     const out = appendMemoryRecord(all, params, Date.now());
     await writeAll(out.records);
     return out.record;
@@ -109,7 +138,7 @@ const addMemory = (params: MemoryAddParams): Promise<MemoryRecord> =>
 // updateContent(:84-89)— 未命中错误消息逐字,经 enqueueWrite 传播
 const updateContent = (id: number, content: string): Promise<MemoryRecord> =>
   enqueueWrite(async (): Promise<MemoryRecord> => {
-    const all: MemoryRecord[] = await readAll();
+    const all: MemoryRecord[] = await readAllForWrite();
     const out = updateMemoryRecordContent(all, id, content, Date.now());
     await writeAll(out.records);
     return out.record;
@@ -118,13 +147,13 @@ const updateContent = (id: number, content: string): Promise<MemoryRecord> =>
 // deleteMemory(:145-147)— 未命中 no-op
 const deleteMemory = (id: number): Promise<void> =>
   enqueueWrite(async (): Promise<void> => {
-    const all: MemoryRecord[] = await readAll();
+    const all: MemoryRecord[] = await readAllForWrite();
     await writeAll(deleteMemoryRecord(all, id));
   });
 
 const updatePinned = (id: number, pinned: boolean): Promise<MemoryRecord> =>
   enqueueWrite(async (): Promise<MemoryRecord> => {
-    const all: MemoryRecord[] = await readAll();
+    const all: MemoryRecord[] = await readAllForWrite();
     const index: number = all.findIndex((r: MemoryRecord): boolean => r.id === id);
     if (index < 0) throw new Error(`Memory record #${id} not found`);
     const row: MemoryRecord = all[index];
@@ -190,14 +219,16 @@ export const getMemoryToolDeps = (todayText: string): MemoryToolDeps => ({
 // addCandidate/addCandidates(MemoryRepository.kt:166-172)— 追加(insertAll)
 const addCandidate = (candidate: MemoryCandidate): Promise<void> =>
   enqueueWrite(async (): Promise<void> => {
-    const all: MemoryCandidate[] = await readJsonArray<MemoryCandidate>(memoryPath(CANDIDATES_FILE));
+    const all: MemoryCandidate[] =
+      await requireArrayForWrite<MemoryCandidate>(memoryPath(CANDIDATES_FILE));
     await writeJsonArray<MemoryCandidate>(memoryPath(CANDIDATES_FILE), [...all, candidate]);
   });
 
 const addCandidates = (candidates: MemoryCandidate[]): Promise<void> => {
   if (candidates.length === 0) return Promise.resolve(); // insertAll(空)= no-op
   return enqueueWrite(async (): Promise<void> => {
-    const all: MemoryCandidate[] = await readJsonArray<MemoryCandidate>(memoryPath(CANDIDATES_FILE));
+    const all: MemoryCandidate[] =
+      await requireArrayForWrite<MemoryCandidate>(memoryPath(CANDIDATES_FILE));
     await writeJsonArray<MemoryCandidate>(memoryPath(CANDIDATES_FILE), [...all, ...candidates]);
   });
 };
@@ -205,7 +236,8 @@ const addCandidates = (candidates: MemoryCandidate[]): Promise<void> => {
 // addEvent(:203-205)— message take(2_000) 在 toEntity(:316),此处截断对齐
 const addEvent = (event: MemoryEvent): Promise<void> =>
   enqueueWrite(async (): Promise<void> => {
-    const all: MemoryEvent[] = await readJsonArray<MemoryEvent>(memoryPath(EVENTS_FILE));
+    const all: MemoryEvent[] =
+      await requireArrayForWrite<MemoryEvent>(memoryPath(EVENTS_FILE));
     const truncated: MemoryEvent = {
       id: event.id, type: event.type, conversationId: event.conversationId,
       memoryId: event.memoryId, candidateId: event.candidateId, modelId: event.modelId,
@@ -261,7 +293,7 @@ const getRecentEvents = async (limit: number): Promise<MemoryEvent[]> => {
 // upsertRecord(MemoryRepository.kt:135-143)
 const upsertRecord = (record: MemoryRecord): Promise<MemoryRecord> =>
   enqueueWrite(async (): Promise<MemoryRecord> => {
-    const all: MemoryRecord[] = await readAll();
+    const all: MemoryRecord[] = await readAllForWrite();
     const out = upsertMemoryRecord(all, record, Date.now());
     await writeAll(out.records);
     return out.record;
@@ -348,7 +380,8 @@ const getAllCandidates = async (): Promise<MemoryCandidate[]> => {
 //   Room @Update 未命中 = 0 行(no-op)
 const updateCandidate = (candidate: MemoryCandidate): Promise<void> =>
   enqueueWrite(async (): Promise<void> => {
-    const all: MemoryCandidate[] = await readJsonArray<MemoryCandidate>(memoryPath(CANDIDATES_FILE));
+    const all: MemoryCandidate[] =
+      await requireArrayForWrite<MemoryCandidate>(memoryPath(CANDIDATES_FILE));
     const index: number = all.findIndex((c: MemoryCandidate): boolean => c.id === candidate.id);
     if (index < 0) return;
     const updated: MemoryCandidate = {
@@ -445,7 +478,7 @@ const dreamPlanDao: MemoryDreamPlanDaoPort = {
     entity: MemoryDreamPlanEntity): Promise<void> =>
     enqueueWrite(async (): Promise<void> => {
       const all: MemoryDreamPlanEntity[] =
-        await readJsonArray<MemoryDreamPlanEntity>(memoryPath(DREAM_PLANS_FILE));
+        await requireArrayForWrite<MemoryDreamPlanEntity>(memoryPath(DREAM_PLANS_FILE));
       const next: MemoryDreamPlanEntity[] = all.map(
         (row: MemoryDreamPlanEntity): MemoryDreamPlanEntity => {
           if (row.status !== 'pending') return row;
@@ -466,7 +499,7 @@ const dreamPlanDao: MemoryDreamPlanDaoPort = {
   updatePendingStatus: (status: string, dismissedAt: number): Promise<void> =>
     enqueueWrite(async (): Promise<void> => {
       const all: MemoryDreamPlanEntity[] =
-        await readJsonArray<MemoryDreamPlanEntity>(memoryPath(DREAM_PLANS_FILE));
+        await requireArrayForWrite<MemoryDreamPlanEntity>(memoryPath(DREAM_PLANS_FILE));
       const next: MemoryDreamPlanEntity[] = all.map(
         (row: MemoryDreamPlanEntity): MemoryDreamPlanEntity => {
           if (row.status !== 'pending') return row;
@@ -483,7 +516,7 @@ const dreamPlanDao: MemoryDreamPlanDaoPort = {
   markApplied: (id: string, appliedAt: number): Promise<void> =>
     enqueueWrite(async (): Promise<void> => {
       const all: MemoryDreamPlanEntity[] =
-        await readJsonArray<MemoryDreamPlanEntity>(memoryPath(DREAM_PLANS_FILE));
+        await requireArrayForWrite<MemoryDreamPlanEntity>(memoryPath(DREAM_PLANS_FILE));
       const index: number = all.findIndex(
         (row: MemoryDreamPlanEntity): boolean => row.id === id);
       if (index < 0) return;
@@ -502,7 +535,7 @@ const dreamPlanDao: MemoryDreamPlanDaoPort = {
   markDismissed: (id: string, dismissedAt: number): Promise<void> =>
     enqueueWrite(async (): Promise<void> => {
       const all: MemoryDreamPlanEntity[] =
-        await readJsonArray<MemoryDreamPlanEntity>(memoryPath(DREAM_PLANS_FILE));
+        await requireArrayForWrite<MemoryDreamPlanEntity>(memoryPath(DREAM_PLANS_FILE));
       const index: number = all.findIndex(
         (row: MemoryDreamPlanEntity): boolean => row.id === id);
       if (index < 0) return;
@@ -521,7 +554,7 @@ const dreamPlanDao: MemoryDreamPlanDaoPort = {
   insert: (entity: MemoryDreamPlanEntity): Promise<void> =>
     enqueueWrite(async (): Promise<void> => {
       const all: MemoryDreamPlanEntity[] =
-        await readJsonArray<MemoryDreamPlanEntity>(memoryPath(DREAM_PLANS_FILE));
+        await requireArrayForWrite<MemoryDreamPlanEntity>(memoryPath(DREAM_PLANS_FILE));
       const index: number = all.findIndex(
         (row: MemoryDreamPlanEntity): boolean => row.id === entity.id);
       const next: MemoryDreamPlanEntity[] = [...all];

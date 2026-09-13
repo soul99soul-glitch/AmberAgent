@@ -14,7 +14,7 @@ import { makeConversation, currentMessages, toMessageNode } from '../main/ets/ch
 import type { Conversation } from '../main/ets/chat/conversation.ts';
 import { makeAssistant } from '../main/ets/chat/assistant.ts';
 import type { MessageChunk, UIMessage, UIMessagePart, UIMessagePartTool } from '../main/ets/chat/message.ts';
-import { makeUserMessage, makeAssistantMessage, toText } from '../main/ets/chat/message.ts';
+import { makeUIMessage, makeUserMessage, makeAssistantMessage, toText } from '../main/ets/chat/message.ts';
 import { makeAgentTool, makeInputSchemaObj } from '../main/ets/chat/tool.ts';
 import type { AgentTool } from '../main/ets/chat/tool.ts';
 import type { ChatToolDefinition } from '../main/ets/chat/provider_model.ts';
@@ -313,6 +313,47 @@ describe('审批门(:288-339)', () => {
     const payload = JSON.parse((tp.output[0] as { text: string }).text);
     assert.equal(payload.status, 'denied');
     assert.ok(String(payload.message).includes('别写'));
+  });
+});
+
+describe('R08 空 toolCallId 写回按 part 身份', () => {
+  // 非合规 provider 全程不给 id:两个 blank 工具,其中一个已在本步之前被批准/执行
+  // (blank + 已执行 output),批次只含未执行的另一个。旧"双 blank 位置即对位"会把
+  // 新结果写到已执行 part 上;身份回写必须只更新对应 part。
+  it('blank 真子集 resume:结果只写到未执行的 blank part,已执行 blank 不动', async () => {
+    const ran: string[] = [];
+    const mkTool = (name: string): AgentTool => makeAgentTool({
+      name,
+      description: name,
+      execute: (input: JsonValue): Promise<UIMessagePart[]> => {
+        ran.push(`${name}:${String((input as { q?: string }).q ?? '')}`);
+        return Promise.resolve([{ type: 'text', text: `out:${name}`, metadata: null }]);
+      },
+    });
+    const done: UIMessagePartTool = {
+      type: 'tool', toolCallId: '', toolName: 'file_read', input: '{"q":"old"}',
+      output: [{ type: 'text', text: 'out:old', metadata: null }],
+      approvalState: { type: 'auto' }, metadata: null,
+    };
+    const target: UIMessagePartTool = {
+      type: 'tool', toolCallId: '', toolName: 'file_list', input: '{"q":"new"}',
+      output: [], approvalState: { type: 'approved' }, metadata: null,
+    };
+    const conv: Conversation = makeConversation('c-blank', [
+      toMessageNode(makeUserMessage('go')),
+      toMessageNode(makeUIMessage('assistant', [done, target])),
+    ]);
+    const provider = scriptedProvider([[textDelta('done')]]);
+    const out = await runToolLoopContinuation(
+      conv, baseDeps(provider), loopOf(provider, [mkTool('file_read'), mkTool('file_list')]));
+    const last = currentMessages(out)[currentMessages(out).length - 1];
+    const tools = last.parts.filter(
+      (p: UIMessagePart): boolean => p.type === 'tool') as UIMessagePartTool[];
+    assert.deepEqual(ran, ['file_list:new']);
+    // 已执行 blank part 结果不变
+    assert.equal((tools[0].output[0] as { text: string }).text, 'out:old');
+    // 未执行 blank part 拿到自己工具的结果(而非错配到 file_read)
+    assert.equal((tools[1].output[0] as { text: string }).text, 'out:file_list');
   });
 });
 

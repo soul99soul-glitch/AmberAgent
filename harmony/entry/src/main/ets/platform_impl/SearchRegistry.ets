@@ -1,13 +1,17 @@
 // SearchRegistry — 多搜索 provider 并发 + 合并去重
 // 对照 Android:20 个搜索源,这里实现主要 provider(免费 + 需 key)
 
-import type { HttpClient, HttpRequest, HttpResponse, Storage, SearchProviderRegistry, SearchProvider, SearchHit } from '@amber/deepread-domain';
+import type { AbortSignalLike, HttpClient, HttpRequest, HttpResponse, Storage, SearchProviderRegistry, SearchProvider, SearchHit } from '@amber/deepread-domain';
 import { createTavilyProvider } from '@amber/deepread-domain';
 import { createNewsNowProvider } from './NewsNowProvider.ets';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 
 const DOMAIN: number = 0x0001;
 const TAG: string = 'DeepRead.Search';
+
+// R20:取消已发生时不再进入下一轮 query、不再发起 HTTP;真实中止底层外呼
+const isAborted = (signal?: AbortSignalLike): boolean =>
+  signal !== undefined && signal.aborted;
 
 // ── 响应类型(顶层声明) ──
 interface BochaResult { url?: string; name?: string; snippet?: string; }
@@ -33,10 +37,11 @@ class BochaProvider implements SearchProvider {
     this.apiKey = apiKey;
   }
 
-  async search(queries: string[]): Promise<SearchHit[]> {
+  async search(queries: string[], signal?: AbortSignalLike): Promise<SearchHit[]> {
     if (this.apiKey.length === 0) return [];
     const hits: SearchHit[] = [];
     for (let qi = 0; qi < queries.length; qi++) {
+      if (isAborted(signal)) break;
       const q: string = queries[qi];
       try {
         const req: HttpRequest = {
@@ -48,7 +53,7 @@ class BochaProvider implements SearchProvider {
           },
           body: JSON.stringify({ query: q, summary: false, count: 5 }),
         };
-        const resp: HttpResponse = await this.http.fetch(req);
+        const resp: HttpResponse = await this.http.fetch(req, signal === undefined ? undefined : { signal: signal });
         if (resp.status !== 200) continue;
         const data: BochaResponse = JSON.parse(resp.body) as BochaResponse;
         const items = data.data?.webPages?.value ?? [];
@@ -59,6 +64,7 @@ class BochaProvider implements SearchProvider {
           }
         }
       } catch (e) {
+        if (isAborted(signal)) break;
         hilog.warn(DOMAIN, TAG, 'Bocha failed: %{public}s', String(e));
       }
     }
@@ -77,10 +83,11 @@ class BraveProvider implements SearchProvider {
     this.apiKey = apiKey;
   }
 
-  async search(queries: string[]): Promise<SearchHit[]> {
+  async search(queries: string[], signal?: AbortSignalLike): Promise<SearchHit[]> {
     if (this.apiKey.length === 0) return [];
     const hits: SearchHit[] = [];
     for (let qi = 0; qi < queries.length; qi++) {
+      if (isAborted(signal)) break;
       const q: string = queries[qi];
       try {
         const url: string = `https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(q)}&count=5`;
@@ -92,7 +99,7 @@ class BraveProvider implements SearchProvider {
             'X-Subscription-Token': this.apiKey,
           },
         };
-        const resp: HttpResponse = await this.http.fetch(req);
+        const resp: HttpResponse = await this.http.fetch(req, signal === undefined ? undefined : { signal: signal });
         if (resp.status !== 200) continue;
         const data: BraveResponse = JSON.parse(resp.body) as BraveResponse;
         const items = data.web?.results ?? [];
@@ -103,6 +110,7 @@ class BraveProvider implements SearchProvider {
           }
         }
       } catch (e) {
+        if (isAborted(signal)) break;
         hilog.warn(DOMAIN, TAG, 'Brave failed: %{public}s', String(e));
       }
     }
@@ -121,10 +129,11 @@ class ExaProvider implements SearchProvider {
     this.apiKey = apiKey;
   }
 
-  async search(queries: string[]): Promise<SearchHit[]> {
+  async search(queries: string[], signal?: AbortSignalLike): Promise<SearchHit[]> {
     if (this.apiKey.length === 0) return [];
     const hits: SearchHit[] = [];
     for (let qi = 0; qi < queries.length; qi++) {
+      if (isAborted(signal)) break;
       const q: string = queries[qi];
       try {
         const req: HttpRequest = {
@@ -136,7 +145,7 @@ class ExaProvider implements SearchProvider {
           },
           body: JSON.stringify({ query: q, numResults: 5, type: 'auto' }),
         };
-        const resp: HttpResponse = await this.http.fetch(req);
+        const resp: HttpResponse = await this.http.fetch(req, signal === undefined ? undefined : { signal: signal });
         if (resp.status !== 200) continue;
         const data: ExaResponse = JSON.parse(resp.body) as ExaResponse;
         const items = data.results ?? [];
@@ -147,6 +156,7 @@ class ExaProvider implements SearchProvider {
           }
         }
       } catch (e) {
+        if (isAborted(signal)) break;
         hilog.warn(DOMAIN, TAG, 'Exa failed: %{public}s', String(e));
       }
     }
@@ -165,10 +175,11 @@ class SearXNGProvider implements SearchProvider {
     this.baseUrl = baseUrl;
   }
 
-  async search(queries: string[]): Promise<SearchHit[]> {
+  async search(queries: string[], signal?: AbortSignalLike): Promise<SearchHit[]> {
     if (this.baseUrl.length === 0) return [];
     const hits: SearchHit[] = [];
     for (let qi = 0; qi < queries.length; qi++) {
+      if (isAborted(signal)) break;
       const q: string = queries[qi];
       try {
         const base: string = this.baseUrl.endsWith('/') ? this.baseUrl.substring(0, this.baseUrl.length - 1) : this.baseUrl;
@@ -179,7 +190,7 @@ class SearXNGProvider implements SearchProvider {
           method: 'GET',
           headers: headers,
         };
-        const resp: HttpResponse = await this.http.fetch(req);
+        const resp: HttpResponse = await this.http.fetch(req, signal === undefined ? undefined : { signal: signal });
         if (resp.status !== 200) continue;
         interface SearxResult { url?: string; title?: string; content?: string; }
         interface SearxResponse { results?: SearxResult[]; }
@@ -192,6 +203,7 @@ class SearXNGProvider implements SearchProvider {
           }
         }
       } catch (e) {
+        if (isAborted(signal)) break;
         hilog.warn(DOMAIN, TAG, 'SearXNG failed: %{public}s', String(e));
       }
     }
@@ -206,9 +218,10 @@ class DuckDuckGoProvider implements SearchProvider {
 
   constructor(http: HttpClient) { this.http = http; }
 
-  async search(queries: string[]): Promise<SearchHit[]> {
+  async search(queries: string[], signal?: AbortSignalLike): Promise<SearchHit[]> {
     const hits: SearchHit[] = [];
     for (let qi = 0; qi < queries.length; qi++) {
+      if (isAborted(signal)) break;
       const q: string = queries[qi];
       try {
         const headers: Record<string, string> = {
@@ -220,7 +233,7 @@ class DuckDuckGoProvider implements SearchProvider {
           method: 'GET',
           headers: headers,
         };
-        const resp: HttpResponse = await this.http.fetch(req);
+        const resp: HttpResponse = await this.http.fetch(req, signal === undefined ? undefined : { signal: signal });
         if (resp.status !== 200) continue;
         const linkRe = /<a[^>]*href="([^"]+)"[^>]*>([^<]+)<\/a>/g;
         let m: RegExpExecArray | null;
@@ -234,6 +247,7 @@ class DuckDuckGoProvider implements SearchProvider {
           }
         }
       } catch (e) {
+        if (isAborted(signal)) break;
         hilog.warn(DOMAIN, TAG, 'DuckDuckGo failed: %{public}s', String(e));
       }
     }
@@ -249,9 +263,10 @@ class HackerNewsProvider implements SearchProvider {
 
   constructor(http: HttpClient) { this.http = http; }
 
-  async search(queries: string[]): Promise<SearchHit[]> {
+  async search(queries: string[], signal?: AbortSignalLike): Promise<SearchHit[]> {
     const hits: SearchHit[] = [];
     for (let qi = 0; qi < queries.length; qi++) {
+      if (isAborted(signal)) break;
       const q: string = queries[qi];
       try {
         const headers: Record<string, string> = { 'Accept': 'application/json' };
@@ -260,7 +275,7 @@ class HackerNewsProvider implements SearchProvider {
           method: 'GET',
           headers: headers,
         };
-        const resp: HttpResponse = await this.http.fetch(req);
+        const resp: HttpResponse = await this.http.fetch(req, signal === undefined ? undefined : { signal: signal });
         if (resp.status !== 200) continue;
         const data: HnResponse = JSON.parse(resp.body) as HnResponse;
         if (data.hits === undefined || data.hits === null) continue;
@@ -277,6 +292,7 @@ class HackerNewsProvider implements SearchProvider {
           }
         }
       } catch (e) {
+        if (isAborted(signal)) break;
         hilog.warn(DOMAIN, TAG, 'HackerNews failed: %{public}s', String(e));
       }
     }
@@ -291,9 +307,10 @@ class JinaProvider implements SearchProvider {
 
   constructor(http: HttpClient) { this.http = http; }
 
-  async search(queries: string[]): Promise<SearchHit[]> {
+  async search(queries: string[], signal?: AbortSignalLike): Promise<SearchHit[]> {
     const hits: SearchHit[] = [];
     for (let qi = 0; qi < queries.length; qi++) {
+      if (isAborted(signal)) break;
       const q: string = queries[qi];
       try {
         const headers: Record<string, string> = {
@@ -305,7 +322,7 @@ class JinaProvider implements SearchProvider {
           method: 'GET',
           headers: headers,
         };
-        const resp: HttpResponse = await this.http.fetch(req);
+        const resp: HttpResponse = await this.http.fetch(req, signal === undefined ? undefined : { signal: signal });
         if (resp.status !== 200) continue;
         const lines = resp.body.split('\n');
         for (let i = 0; i < lines.length && i < 5; i++) {
@@ -318,6 +335,7 @@ class JinaProvider implements SearchProvider {
           }
         }
       } catch (e) {
+        if (isAborted(signal)) break;
         hilog.warn(DOMAIN, TAG, 'Jina failed: %{public}s', String(e));
       }
     }

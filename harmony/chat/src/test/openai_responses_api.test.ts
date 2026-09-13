@@ -84,6 +84,35 @@ test('buildResponsesRequestBody: resume forces store=true', () => {
   assert.equal(body['store'], true);
 });
 
+test('buildResponsesRequestBody: image_generation omits store and adds built-in tool', () => {
+  const body = buildResponsesRequestBody({
+    messages: sampleMessages(),
+    params: makeTextGenerationParams({
+      model: makeChatModel({ modelId: 'gpt-4o', abilities: ['tool'], tools: ['image_generation'] }),
+    }),
+    setting: makeProviderSettingOpenAI({ baseUrl: 'https://api.openai.com/v1', useResponseApi: true }),
+    stream: false,
+  });
+  assert.equal('store' in body, false);
+  const tools = body['tools'] as Array<{ type: string; model?: string }>;
+  assert.ok(Array.isArray(tools));
+  assert.ok(tools.some((t) => t.type === 'image_generation' && t.model === 'gpt-image-2'));
+});
+
+test('buildResponsesRequestBody: search built-in maps to web_search', () => {
+  const body = buildResponsesRequestBody({
+    messages: sampleMessages(),
+    params: makeTextGenerationParams({
+      model: makeChatModel({ modelId: 'gpt-4o', tools: ['search'] }),
+    }),
+    setting: makeProviderSettingOpenAI({ baseUrl: 'https://api.openai.com/v1', useResponseApi: true }),
+    stream: false,
+  });
+  assert.equal(body['store'], false);
+  const tools = body['tools'] as Array<{ type: string }>;
+  assert.ok(tools.some((t) => t.type === 'web_search'));
+});
+
 test('buildResponsesRequestBody: o-series strips temperature', () => {
   const body = buildResponsesRequestBody({
     messages: sampleMessages(),
@@ -326,6 +355,73 @@ test('createOpenAIResponsesApi: streamText parses Responses SSE into chunks', as
   assert.ok(firstDelta !== null && firstDelta !== undefined);
   assert.equal(firstDelta.parts[0].type, 'text');
   assert.equal((firstDelta.parts[0] as { text: string }).text, 'Hel');
+});
+
+test('createOpenAIResponsesApi.streamText: non-2xx status throws', async () => {
+  const api = createOpenAIResponsesApi({
+    http: {
+      fetch: async () => ({ status: 401, headers: {}, body: '' }),
+      fetchStream: async () => ({
+        status: 401,
+        headers: {},
+        body: JSON.stringify({ error: { message: 'invalid api key' } }),
+      }),
+    },
+    setting: makeProviderSettingOpenAI({ baseUrl: 'https://api.openai.com/v1', useResponseApi: true }),
+  });
+  await assert.rejects(
+    () => api.streamText(sampleMessages(), makeTextGenerationParams({
+      model: makeChatModel({ modelId: 'gpt-4o' }),
+    }), (): void => {}),
+    /invalid api key|Failed to get response/,
+  );
+});
+
+// ===== R06 / R18:Responses 协议收口与非 SSE 守卫 =====
+
+test('R06/R18 responses streamText: 200 非 SSE → 抛错;response.completed → 请求收口', async () => {
+  const encoder = new TextEncoder();
+  const jsonBody = JSON.stringify({ error: { message: 'gateway json error' } });
+  const nonSse = createOpenAIResponsesApi({
+    http: {
+      fetch: async () => ({ status: 200, headers: {}, body: '' }),
+      fetchStream: async (_req, opts): Promise<{ status: number; headers: Record<string, string>; body: string }> => {
+        opts.onChunk(encoder.encode(jsonBody).buffer as ArrayBuffer, true);
+        return { status: 200, headers: {}, body: jsonBody };
+      },
+    },
+    setting: makeProviderSettingOpenAI({ baseUrl: 'https://api.openai.com/v1', useResponseApi: true }),
+  });
+  await assert.rejects(
+    () => nonSse.streamText(sampleMessages(), makeTextGenerationParams({
+      model: makeChatModel({ modelId: 'gpt-4o' }),
+    }), (): void => {}),
+    /gateway json error/, '200 + 非 SSE JSON 必须报错');
+
+  const sse = [
+    'event: response.output_text.delta',
+    'data: {"type":"response.output_text.delta","item_id":"msg_1","delta":"hi"}',
+    '',
+    'event: response.completed',
+    'data: {"type":"response.completed","response":{"id":"resp_1","model":"gpt-4o","status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"hi"}]}]}}',
+    '',
+  ].join('\n');
+  let stopRequested = false;
+  const ok = createOpenAIResponsesApi({
+    http: {
+      fetch: async () => ({ status: 200, headers: {}, body: '' }),
+      fetchStream: async (_req, opts): Promise<{ status: number; headers: Record<string, string>; body: string }> => {
+        opts.onChunk(encoder.encode(sse).buffer as ArrayBuffer, true);
+        if (opts.shouldStop !== undefined && opts.shouldStop()) stopRequested = true;
+        return { status: 200, headers: {}, body: '' };
+      },
+    },
+    setting: makeProviderSettingOpenAI({ baseUrl: 'https://api.openai.com/v1', useResponseApi: true }),
+  });
+  await ok.streamText(sampleMessages(), makeTextGenerationParams({
+    model: makeChatModel({ modelId: 'gpt-4o' }),
+  }), (): void => {});
+  assert.equal(stopRequested, true, 'response.completed 后必须请求关闭底层流');
 });
 
 // ===== Grok =====

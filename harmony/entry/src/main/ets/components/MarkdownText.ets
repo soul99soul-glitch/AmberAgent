@@ -28,7 +28,7 @@ import type {
   HighlightToken,
   MarkdownCacheResult,
 } from '@amber/chat-domain';
-import { ACCENT, BODY, INK, INK3, LINE, META, MONO_SMALL, SURFACE2, TEXT_STYLES, lineHeightForSize } from '../design/tokens.ets';
+import { ACCENT, BODY, INK, INK3, LABEL, LINE, META, MONO_SMALL, SURFACE2, TEXT_STYLES, lineHeightForSize } from '../design/tokens.ets';
 import { FONT_SANS, FONT_SANS_BOLD, FONT_SANS_MEDIUM, FONT_MONO, FONT_SERIF } from '../design/fonts.ets';
 import { Icon } from './ui/Icon.ets';
 import { promptAction } from '@kit.ArkUI';
@@ -101,6 +101,9 @@ const CODE_PLAIN: string = '#ABB2BF';
 const CODE_BG: string = '#282C34';
 const CODE_HEADER_BG: string = '#20242B';
 const CODE_TEXT: string = '#ABB2BF';
+// F16:超过该行数自动折叠(与 SettingDisplayPage 文案一致:超过 10 行)
+const CODE_COLLAPSE_THRESHOLD: number = 10;
+const CODE_LINE_NO: string = '#5C6370';
 
 // 行内代码样式
 const INLINE_CODE_FG: string = ACCENT;
@@ -124,6 +127,10 @@ export struct MarkdownText {
   // P3:可见文本增长回调(逐字/drain 推进时触发,供 ChatPage 复用既有
   //   followStreamingUpdate,不新建第二套滚动状态机;内部节流防风暴)
   onVisibleGrow: () => void = (): void => {};
+  // F16:代码块显示设置(默认 false = 保持既有外观)
+  @Prop codeBlockAutoCollapse: boolean = false;
+  @Prop showLineNumbers: boolean = false;
+  @State private codeExpanded: Record<string, boolean> = {};
   @State private displayText: string = '';
   @State private displayBlocks: MarkdownBlock[] = [];
   private highlightCache: Map<string, HighlightToken[]> = new Map<string, HighlightToken[]>();
@@ -297,7 +304,7 @@ export struct MarkdownText {
               } else if (block.kind === 'paragraph') {
                 this.RenderParagraph(block)
               } else if (block.kind === 'code_block') {
-                this.RenderCodeBlock(block)
+                this.RenderCodeBlock(block, idx)
               } else if (block.kind === 'list') {
                 this.RenderList(block)
               } else if (block.kind === 'blockquote') {
@@ -468,6 +475,50 @@ export struct MarkdownText {
       .height('100%')
       .backgroundColor('#000000')
     }
+  }
+
+  // ===== F16:代码块行号 / 自动折叠(默认关闭,仅在设置开启时生效) =====
+
+  private codeKey(block: MarkdownBlock, bi: number): string {
+    if (block.kind !== 'code_block') return '';
+    return `${bi}:${block.lang}:${block.code.length}`;
+  }
+
+  private codeSourceLines(block: MarkdownBlock): string[] {
+    if (block.kind !== 'code_block') return [];
+    return block.code.split('\n');
+  }
+
+  private codeLineCount(block: MarkdownBlock): number {
+    return this.codeSourceLines(block).length;
+  }
+
+  private codeIsCollapsed(block: MarkdownBlock, bi: number): boolean {
+    if (!this.codeBlockAutoCollapse) return false;
+    if (this.codeLineCount(block) <= CODE_COLLAPSE_THRESHOLD) return false;
+    return this.codeExpanded[this.codeKey(block, bi)] !== true;
+  }
+
+  private toggleCodeExpanded(block: MarkdownBlock, bi: number): void {
+    const key: string = this.codeKey(block, bi);
+    const copy: Record<string, boolean> = {};
+    const keys: string[] = Object.keys(this.codeExpanded);
+    for (const k of keys) copy[k] = this.codeExpanded[k];
+    copy[key] = !(this.codeExpanded[key] === true);
+    this.codeExpanded = copy;
+  }
+
+  private visibleCodeLineCap(block: MarkdownBlock, bi: number): number {
+    const total: number = this.codeLineCount(block);
+    return this.codeIsCollapsed(block, bi) ? Math.min(CODE_COLLAPSE_THRESHOLD, total) : total;
+  }
+
+  private visibleHighlightLines(block: MarkdownBlock, bi: number): HighlightToken[][] {
+    return this.getCodeLines(block).slice(0, this.visibleCodeLineCap(block, bi));
+  }
+
+  private visiblePlainLines(block: MarkdownBlock, bi: number): string[] {
+    return this.codeSourceLines(block).slice(0, this.visibleCodeLineCap(block, bi));
   }
 
   private splitTokensByLine(tokens: HighlightToken[]): HighlightToken[][] {
@@ -643,7 +694,50 @@ export struct MarkdownText {
   }
 
   @Builder
-  RenderCodeBlock(block: MarkdownBlock): void {
+  CodeLineText(idx: number, lineTokens: HighlightToken[], plainText: string): void {
+    Row() {
+      // F16:行号(默认关;与代码行同基线同字号)
+      if (this.showLineNumbers) {
+        Text(`${idx + 1}`)
+          .fontSize(12)
+          .fontFamily(FONT_MONO)
+          .fontColor(CODE_LINE_NO)
+          .width(28)
+          .textAlign(TextAlign.End)
+          .lineHeight(18)
+          .margin({ right: 10 })
+      }
+      if (lineTokens.length > 0) {
+        Text() {
+          ForEach(
+            lineTokens,
+            (tok: HighlightToken, ti: number): void => {
+              Span(tok.text)
+                .fontSize(12)
+                .fontFamily(FONT_MONO)
+                .fontColor(this.tokenColor(tok.type))
+            },
+            (tok: HighlightToken, ti: number): string => `tok-${idx}-${ti}`,
+          )
+        }
+        .fontSize(12)
+        .fontFamily(FONT_MONO)
+        .lineHeight(18)
+      } else if (plainText.length > 0) {
+        Text(plainText)
+          .fontSize(12)
+          .fontColor(CODE_TEXT)
+          .fontFamily(FONT_MONO)
+          .lineHeight(18)
+      } else {
+        Text(' ').fontSize(12).fontFamily(FONT_MONO).lineHeight(18)
+      }
+    }
+    .alignItems(VerticalAlign.Top)
+  }
+
+  @Builder
+  RenderCodeBlock(block: MarkdownBlock, bi: number): void {
     Column() {
       if (block.kind === 'code_block') {
         Row() {
@@ -652,6 +746,20 @@ export struct MarkdownText {
             .fontColor('#9AA3B2')
             .fontFamily(FONT_MONO)
             .layoutWeight(1)
+          if (this.codeBlockAutoCollapse && this.codeLineCount(block) > CODE_COLLAPSE_THRESHOLD) {
+            Text(this.codeIsCollapsed(block, bi) ? '展开' : '收起')
+              .fontSize(META)
+              .lineHeight(lineHeightForSize(META))
+              .fontFamily(FONT_SANS)
+              .fontColor(CODE_TEXT)
+              .width(48)
+              .height(44)
+              .textAlign(TextAlign.Center)
+              .onClick((): void => {
+                this.toggleCodeExpanded(block, bi);
+              })
+              .accessibilityText('展开或收起代码块')
+          }
           Text('复制')
             .fontSize(META)
             .lineHeight(lineHeightForSize(META))
@@ -674,36 +782,29 @@ export struct MarkdownText {
           Column() {
             if (block.lang.length > 0) {
               ForEach(
-                this.getCodeLines(block),
+                this.visibleHighlightLines(block, bi),
                 (lineTokens: HighlightToken[], idx: number): void => {
-                  if (lineTokens.length === 0) {
-                    Text(' ').fontSize(12).fontFamily(FONT_MONO).lineHeight(18)
-                  } else {
-                    Text() {
-                      ForEach(
-                        lineTokens,
-                        (tok: HighlightToken, ti: number): void => {
-                          Span(tok.text)
-                            .fontSize(12)
-                            .fontFamily(FONT_MONO)
-                            .fontColor(this.tokenColor(tok.type))
-                        },
-                        (tok: HighlightToken, ti: number): string => `tok-${idx}-${ti}`,
-                      )
-                    }
-                    .fontSize(12)
-                    .fontFamily(FONT_MONO)
-                    .lineHeight(18)
-                  }
+                  this.CodeLineText(idx, lineTokens, '')
                 },
                 (lineTokens: HighlightToken[], idx: number): string => `codeline-${idx}`,
               )
             } else {
-              Text(block.code)
-                .fontSize(12)
-                .fontColor(CODE_TEXT)
-                .fontFamily(FONT_MONO)
-                .lineHeight(18)
+              if (this.showLineNumbers || this.codeBlockAutoCollapse) {
+                ForEach(
+                  this.visiblePlainLines(block, bi),
+                  (line: string, idx: number): void => {
+                    this.CodeLineText(idx, [], line)
+                  },
+                  (line: string, idx: number): string => `codetext-${idx}`,
+                )
+              } else {
+                // 默认路径:与既有渲染一致(整段单个 Text,不逐行)
+                Text(block.code)
+                  .fontSize(12)
+                  .fontColor(CODE_TEXT)
+                  .fontFamily(FONT_MONO)
+                  .lineHeight(18)
+              }
             }
           }
           .alignItems(HorizontalAlign.Start)
@@ -712,6 +813,17 @@ export struct MarkdownText {
         .scrollBar(BarState.Off)
         .width('100%')
         .align(Alignment.TopStart)
+        if (this.codeIsCollapsed(block, bi)) {
+          Text('已折叠，点击展开')
+            .fontSize(LABEL)
+            .fontColor(CODE_LINE_NO)
+            .fontFamily(FONT_MONO)
+            .width('100%')
+            .padding({ top: 6 })
+            .onClick((): void => {
+              this.toggleCodeExpanded(block, bi);
+            })
+        }
       }
     }
     .width('100%')

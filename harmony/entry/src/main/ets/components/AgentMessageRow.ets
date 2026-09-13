@@ -4,12 +4,14 @@
 import { INK, INK3, META, SURFACE2, USER_BG, USER_INK } from '../design/tokens.ets';
 import type {
   AskUserQuestion, MessagePartBlock, ReasoningCardState, ThinkingStep, UIMessage,
-  UIMessagePartReasoning, UIMessagePartTool,
+  UIMessagePartDocument, UIMessagePartReasoning, UIMessagePartTool,
 } from '@amber/chat-domain';
 import {
   ASK_USER_TOOL_NAME, buildAskUserAnswerPayload, groupMessageParts,
   onReasoningExpandedChange, parseAskUserQuestions, reasoningCardStateExpanded,
+  streamToolIndex,
 } from '@amber/chat-domain';
+import type { ToolApprovalPartLocator } from '@amber/chat-domain';
 import { MarkdownText } from './MarkdownText.ets';
 import { ChatMessageReasoning } from './ChatMessageReasoning.ets';
 import { ChatMessageTools } from './ChatMessageTools.ets';
@@ -37,6 +39,8 @@ export interface AgentMessageRowHostCapabilities {
   runMiniApp: boolean;
   modifyMiniApp: boolean;
   openMiniAppList: boolean;
+  // F44:文档附件是否可打开(宿主提供真实 open 路径时置 true)
+  openDocument: boolean;
 }
 
 export const NO_AGENT_MESSAGE_ROW_CAPABILITIES: AgentMessageRowHostCapabilities = {
@@ -55,6 +59,7 @@ export const NO_AGENT_MESSAGE_ROW_CAPABILITIES: AgentMessageRowHostCapabilities 
   runMiniApp: false,
   modifyMiniApp: false,
   openMiniAppList: false,
+  openDocument: false,
 };
 
 @Component
@@ -72,6 +77,13 @@ export struct AgentMessageRow {
   // Markdown reveal 只在真实 live text delta 时启用，避免 one-shot 假流式。
   @Prop textDeltasLive: boolean = true;
   @Prop autoCloseThinking: boolean = true;
+  // F16:显示设置消费(默认值 == 当前渲染行为,不改变既有外观)
+  @Prop showAssistantBubble: boolean = false;
+  @Prop showModelName: boolean = true;
+  @Prop showModelIcon: boolean = false;
+  @Prop fontSizeRatio: number = 1.0;
+  @Prop codeBlockAutoCollapse: boolean = false;
+  @Prop showLineNumbers: boolean = false;
   // 同一 message id 可同时出现在已提交行与工具续跑预览中；预览使用独立键命名空间。
   @Prop streamKeyTag: string = '';
   onSwitch: (idx: number) => void = (_idx: number): void => {};
@@ -79,16 +91,21 @@ export struct AgentMessageRow {
   onEdit: () => void = (): void => {};
   onOpenActions: () => void = (): void => {};
   onFork: () => void = (): void => {};
-  // D-057:工具审批回调(toolCallId 定位,ChatService.handleToolApproval)
-  onApproveTool: (toolCallId: string) => void = (_id: string): void => {};
-  onDenyTool: (toolCallId: string) => void = (_id: string): void => {};
-  // D-105:ask_user 应答回调(ChatMessageAskUserStep.kt onToolAnswer)
-  onAnswerTool: (toolCallId: string, answer: string) => void = (_id: string, _a: string): void => {};
+  // D-057/R08:工具审批回调(toolCallId + 可选精确 locator;旧调用只传 id)
+  onApproveTool: (toolCallId: string, locator?: ToolApprovalPartLocator) => void =
+    (_id: string, _loc?: ToolApprovalPartLocator): void => {};
+  onDenyTool: (toolCallId: string, locator?: ToolApprovalPartLocator) => void =
+    (_id: string, _loc?: ToolApprovalPartLocator): void => {};
+  // D-105/R08:ask_user 应答回调(ChatMessageAskUserStep.kt onToolAnswer)
+  onAnswerTool: (toolCallId: string, answer: string, locator?: ToolApprovalPartLocator) => void =
+    (_id: string, _a: string, _loc?: ToolApprovalPartLocator): void => {};
   onOpenSubAgentRun: (runId: string, tools: UIMessagePartTool[]) => void =
     (_id: string, _t: UIMessagePartTool[]): void => {};
   onCopy: () => void = (): void => {};
   onFavorite: (text: string) => void = (_t: string): void => {};
   onOpenToolPreview: (part: UIMessagePartTool) => void = (_p: UIMessagePartTool): void => {};
+  // F44:文档附件打开(宿主未提供路径时 capabilities.openDocument=false → 纯展示)
+  onOpenDocument: (part: UIMessagePartDocument) => void = (_p: UIMessagePartDocument): void => {};
   // P3:可见文本增长回调(逐字 reveal / 终态 drain 推进时触发;冒泡到 ChatPage
   //   复用既有 followStreamingUpdate,不新建第二套滚动状态机)
   onTextGrow: () => void = (): void => {};
@@ -146,6 +163,28 @@ export struct AgentMessageRow {
     return parseAskUserQuestions(t.input);
   }
 
+  // R08:partIndex 必须是原 message.parts 索引。先 indexOf 原数组;
+  //   group 复制体不在原数组时,仅用 metadata stream_tool_index 作为**匹配键**
+  //   在原 parts 中唯一查找,取该候选的真实 parts 下标;不唯一则拒歧义不传。
+  //   (streamToolIndex 是流内工具序号,可能与 parts 下标不同,不能直接当 partIndex)
+  private locatorFor(t: UIMessagePartTool): ToolApprovalPartLocator | undefined {
+    const index: number = this.message.parts.indexOf(t);
+    if (index >= 0) return { messageId: this.message.id, partIndex: index };
+    const sidx: number | null = streamToolIndex(t);
+    if (sidx === null) return undefined;
+    let found: number = -1;
+    let count: number = 0;
+    for (let i: number = 0; i < this.message.parts.length; i++) {
+      const p = this.message.parts[i];
+      if (p.type === 'tool' && streamToolIndex(p as UIMessagePartTool) === sidx) {
+        if (found < 0) found = i;
+        count++;
+      }
+    }
+    if (count !== 1) return undefined;
+    return { messageId: this.message.id, partIndex: found };
+  }
+
   private setAskAnswer(qid: string, value: string): void {
     const copy: Record<string, string> = {};
     const keys: string[] = Object.keys(this.askAnswers);
@@ -174,7 +213,8 @@ export struct AgentMessageRow {
   private submitAskAnswers(t: UIMessagePartTool): void {
     const qs: AskUserQuestion[] = this.askQuestionsOf(t);
     this.onAnswerTool(t.toolCallId,
-      buildAskUserAnswerPayload(qs, this.askAnswers, this.askMultiAnswers));
+      buildAskUserAnswerPayload(qs, this.askAnswers, this.askMultiAnswers),
+      this.locatorFor(t));
   }
 
   private reasoningStateAt(idx: string): ReasoningCardState {
@@ -205,6 +245,12 @@ export struct AgentMessageRow {
 
   private getBlocks(): MessagePartBlock[] {
     return groupMessageParts(this.message.parts);
+  }
+
+  // F16:字号比例应用到消息正文(默认 1.0 → 15,与既有渲染一致)
+  private bodyFontSize(): number {
+    const scaled: number = 15 * this.fontSizeRatio;
+    return Math.round(scaled * 10) / 10;
   }
 
   private isLastTextBlock(blocks: MessagePartBlock[], index: number): boolean {
@@ -307,8 +353,13 @@ export struct AgentMessageRow {
                   canApprove: this.capabilities.approveTool,
                   canDeny: this.capabilities.denyTool,
                   canOpenPreview: this.capabilities.openToolPreview,
-                  onApprove: (toolCallId: string): void => { this.onApproveTool(toolCallId); },
-                  onDeny: (toolCallId: string): void => { this.onDenyTool(toolCallId); },
+                  streaming: this.streaming,
+                  onApprove: (toolCallId: string): void => {
+                    this.onApproveTool(toolCallId, this.locatorFor(step.tool));
+                  },
+                  onDeny: (toolCallId: string): void => {
+                    this.onDenyTool(toolCallId, this.locatorFor(step.tool));
+                  },
                   onOpenPreview: (): void => { this.onOpenToolPreview(step.tool); },
                   deniedLabel: step.tool.approvalState.type === 'denied' ? this.deniedLabel(step.tool) : '',
                 })
@@ -322,9 +373,11 @@ export struct AgentMessageRow {
             Column() {
               MarkdownText({
                 content: block.part.text,
-                fontSize: 15,
+                fontSize: this.bodyFontSize(),
                 fontColor: USER_INK,
                 fillWidth: false,
+                codeBlockAutoCollapse: this.codeBlockAutoCollapse,
+                showLineNumbers: this.showLineNumbers,
                 streamKey: `${this.streamKeyTag}${this.message.id}#${block.index}`,
               })
             }
@@ -338,14 +391,20 @@ export struct AgentMessageRow {
             Column() {
               MarkdownText({
                 content: block.part.text,
-                fontSize: 15,
+                fontSize: this.bodyFontSize(),
                 fontColor: INK,
                 streaming: this.streaming && this.textDeltasLive &&
                   this.isLastTextBlock(this.getBlocks(), bi),
+                codeBlockAutoCollapse: this.codeBlockAutoCollapse,
+                showLineNumbers: this.showLineNumbers,
                 streamKey: `${this.streamKeyTag}${this.message.id}#${block.index}`,
                 onVisibleGrow: (): void => { this.onTextGrow(); },
               })
             }
+            .alignItems(HorizontalAlign.Start)
+            .padding(this.showAssistantBubble ? { left: 12, right: 12, top: 8, bottom: 8 } : 0)
+            .backgroundColor(this.showAssistantBubble ? SURFACE2 : Color.Transparent)
+            .borderRadius(this.showAssistantBubble ? 10 : 0)
             .margin({ bottom: 4 })
           }
         } else if (block.part.type === 'image') {
@@ -373,6 +432,8 @@ export struct AgentMessageRow {
             label: block.part.fileName.length > 0 ? block.part.fileName :
               (urlBasename(block.part.url).length > 0 ? urlBasename(block.part.url) : '文档'),
             sublabel: block.part.mime,
+            openable: this.capabilities.openDocument,
+            onOpen: (): void => { this.onOpenDocument(block.part as UIMessagePartDocument); },
           })
         } else if (block.part.type === 'mini_app') {
           MiniAppChatCard({
@@ -430,7 +491,12 @@ export struct AgentMessageRow {
 
   build(): void {
     Column() {
-      ChatMessageAvatar({ message: this.message, streaming: this.streaming })
+      ChatMessageAvatar({
+        message: this.message,
+        streaming: this.streaming,
+        showModelName: this.showModelName,
+        showModelIcon: this.showModelIcon,
+      })
       this.hostHeader()
       this.MessageContent()
       ChatMessageActionFooter({

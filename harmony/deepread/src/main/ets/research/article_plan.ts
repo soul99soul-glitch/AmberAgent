@@ -8,6 +8,7 @@
 // - generateArticlePlan:LLM 失败/解析失败 → fallback
 
 import type { AiClient } from '../platform/ai_client.ts';
+import type { AbortSignalLike } from '../platform/runtime_api.ts';
 import type { UIMessage } from '../agent/message.ts';
 import { makeUserMessage, latestAssistantText } from '../agent/message.ts';
 import type { DeepReadEvidencePack, DeepReadArticlePlan } from './evidence_pack.ts';
@@ -27,11 +28,25 @@ const STAKEHOLDERS_MAX = 8;
 const COVERAGE_CHECKS_MAX = 10;
 
 // fallbackPlan — 照搬 Android DeepReadResearchHarness.kt:62-91
-// 各 stage 的 sourceIds 取自 pack.cardsByStage[stage]
+// 各 stage 的 sourceIds 优先取 pack.cardsByStage[stage];该段 bucket 为空时
+// 从全局卡池(四段并集)补满,避免降级计划给后段分配零证据(R24)。
 export const fallbackPlan = (title: string, pack: DeepReadEvidencePack): DeepReadArticlePlan => {
+  // 全局池:按 STAGE_ORDER 顺序汇总四段 bucket 的 sourceId(去重,保持 credibility 排序后的相对顺序)
+  const globalIds: string[] = [];
+  for (const stage of STAGE_ORDER) {
+    for (const c of pack.cardsByStage[stage]) {
+      if (!globalIds.includes(c.sourceId)) globalIds.push(c.sourceId);
+    }
+  }
   const stageSourceIds: Record<string, string[]> = {};
   for (const stage of STAGE_ORDER) {
-    stageSourceIds[STAGE_KEY[stage]] = pack.cardsByStage[stage].map(c => c.sourceId);
+    const filled: string[] = pack.cardsByStage[stage].map(c => c.sourceId);
+    // bucket 不足 STAGE_EVIDENCE_MAX 时从全局池补(与 normalizePlan 的 allIds 补满同源)
+    for (const id of globalIds) {
+      if (filled.length >= STAGE_EVIDENCE_MAX) break;
+      if (!filled.includes(id)) filled.push(id);
+    }
+    stageSourceIds[STAGE_KEY[stage]] = filled;
   }
   const allStageIds = STAGE_ORDER.flatMap(stage => stageSourceIds[STAGE_KEY[stage]]);
   const distinctIds = Array.from(new Set(allStageIds));
@@ -237,14 +252,15 @@ const mergeWithFallbackIds = (
   return filled.slice(0, STAGE_EVIDENCE_MAX);
 };
 
-// 主入口:1 次 LLM 调用,失败 fallback
-// 照搬 Android generateArticlePlan 流程
+// 主入口:1 次 LLM 调用,失败 fallback。signal 贯穿 → 取消时真实中止 LLM 调用
+// (R20;abort 由调用方 createRunContext 依据 signal 状态统一归一,不在此宽判 message)。
 export const generateArticlePlan = async (
   ai: AiClient,
   model: string,
   title: string,
   pack: DeepReadEvidencePack,
   playbookMd: string,
+  signal?: AbortSignalLike,
 ): Promise<DeepReadArticlePlan> => {
   const fallback = fallbackPlan(title, pack);
   try {
@@ -253,6 +269,7 @@ export const generateArticlePlan = async (
       messages: [makeUserMessage(buildPlanningPrompt(title, pack, playbookMd))],
       stream: false,
       maxSteps: 1,  // planning 不需要 tool
+      signal,
     });
     const text = extractAssistantText(messages);
     const parsed = parsePlanJson(text);

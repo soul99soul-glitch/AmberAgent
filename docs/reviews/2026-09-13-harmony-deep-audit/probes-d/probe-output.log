@@ -1,0 +1,67 @@
+### topic-d-probe.ts
+PASS  P1a wm_click policy: sensitive/needsApproval/autoApprovable=true/mandatory=false
+PASS  P1b wm_click single auto-approve toggle => allow (bypasses manual)
+PASS  P1c wm_click run-trust => allow after one approval in same run
+PASS  P1d contrast wm_eval single toggle stays ask (mandatory+high)
+PASS  P1e wm_click double toggle => unattended allow (same as wm_eval)
+PASS  P8 ask_user always asks even with single/both toggles
+PASS  P2 cron has no run lock: second trigger prepares again while first active
+PASS  P2b concurrent triggers lose runCount update (non-atomic replaceTasks)
+PASS  P3 prepareTriggeredRun ignores nextRunAtMs (runs far-future task)
+PASS  P4 deleted task cannot be triggered (prepare returns null)
+PASS  P5a disabled cron restart => CANCELLED (not revived)
+PASS  P5b enabled cron restart => SCHEDULED (intended)
+PASS  P6 approval_required maps to task RUNNING and cannot be cancelled
+PASS  P7a timeout => timed_out terminal + task TIMED_OUT
+PASS  P7b user cancel => cancelled terminal (runner aborted, not restarted)
+
+=== probe summary: pass=15 fail=0 ===
+
+### topic-d-probe2.ts
+PASS  P9a file_read policy is parallel-safe read (premise)
+PASS  P9b pre-aborted signal => zero tool side effects, empty results
+PASS  P9c two parallel reads both execute, order preserved
+PASS  P9d pending approval tool is not executed (returns null)
+PASS  P9e denied tool yields denied output, never executes
+PASS  P10a due cron task runs once per fireDueCronTasks call
+PASS  P10b concurrent fireDueCronTasks on same due task => double execution
+PASS  P10c fireDueCronTasks does not clear due => re-fire persists
+
+=== probe2 summary: pass=8 fail=0 ===
+### topic-d-probe3.ts
+node:internal/modules/package_json_reader:331
+  throw new ERR_MODULE_NOT_FOUND(packageName, fileURLToPath(base), null);
+        ^
+
+Error [ERR_MODULE_NOT_FOUND]: Cannot find package '@amber/deepread-domain' imported from /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/chat/src/main/ets/chat/message.ts
+    at Object.getPackageJSONURL (node:internal/modules/package_json_reader:331:9)
+    at packageResolve (node:internal/modules/esm/resolve:784:25)
+    at moduleResolve (node:internal/modules/esm/resolve:873:18)
+    at defaultResolve (node:internal/modules/esm/resolve:1006:11)
+    at #cachedDefaultResolve (node:internal/modules/esm/loader:708:20)
+    at #resolveAndMaybeBlockOnLoaderThread (node:internal/modules/esm/loader:728:38)
+    at nextStep (node:internal/modules/customization_hooks:189:26)
+    at resolveBaseSync (file:///Users/mi/.npm/_npx/fd45a72a545557e9/node_modules/tsx/dist/register-SoqaU4rg.mjs:2:10932)
+    at resolveDirectorySync (file:///Users/mi/.npm/_npx/fd45a72a545557e9/node_modules/tsx/dist/register-SoqaU4rg.mjs:2:12238)
+    at resolveTsPathsSync (file:///Users/mi/.npm/_npx/fd45a72a545557e9/node_modules/tsx/dist/register-SoqaU4rg.mjs:2:13445) {
+  code: 'ERR_MODULE_NOT_FOUND'
+}
+
+Node.js v26.8.1
+### topic-d-probe3.ts
+PASS  D11a pending wm_eval is not resumable before any user input
+PASS  D11b pure-text "继续写首诗" approves pending wm_eval (mandatory bypass)
+PASS  D11c approved-by-text wm_eval resolves to allow despite mandatory+high
+PASS  D11c2 resolver treats any non-auto state (incl. pending) as allow
+PASS  D11d pure-text "继续" also approves pending sms_send (alwaysAsk bypass)
+PASS  D11e unrelated message does NOT approve; instead cancels stale tool
+PASS  D11f non-pure-text message with 继续 does NOT approve
+PASS  D12a six tools present; list/read/runtime not approval-gated
+PASS  D12b agent_task_retry is a no-op for subagent/cron (retryable=false)
+PASS  D12c agent_task_cancel works only when cancelCapability + callback
+PASS  D12d cron tasks register cancelCapability=false => cannot be cancelled from tools
+PASS  D12e agent_task_cleanup deletes output only when inside appFilesDir
+PASS  D12f agent_task_cleanup is autoApprovable under single toggle (deletes private output)
+PASS  D12g minimal tool profile drops cancel/retry/cleanup (counter-evidence)
+
+=== probe3 summary: pass=14 fail=0 ===

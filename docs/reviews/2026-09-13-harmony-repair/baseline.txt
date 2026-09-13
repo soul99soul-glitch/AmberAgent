@@ -1,0 +1,56 @@
+2026-09-13T16:36:39.088899+08:00
+bdce551dd373f3d7e4c393b194997cae19289c40
+ M PARITY_DEBT.md
+ M harmony/chat/src/main/ets/chat/agent_cron_run_executor.ts
+ M harmony/chat/src/main/ets/chat/context_assembly.ts
+ M harmony/chat/src/main/ets/chat/openai_responses_api.ts
+ M harmony/chat/src/main/ets/chat/openai_responses_request.ts
+ M harmony/chat/src/main/ets/chat/provider_model.ts
+ M harmony/chat/src/main/ets/chat/provider_settings.ts
+ M harmony/chat/src/main/ets/chat/sync_snapshot.ts
+ M harmony/chat/src/test/agent_cron_run_executor.test.ts
+ M harmony/chat/src/test/openai_responses_api.test.ts
+ M harmony/chat/src/test/sync_snapshot.test.ts
+ M harmony/entry/src/main/ets/components/ChatMessageAvatar.ets
+ M harmony/entry/src/main/ets/components/PageTemplate.ets
+ M harmony/entry/src/main/ets/components/ui/AmberPrimitives.ets
+ M harmony/entry/src/main/ets/components/ui/CompressContextDialog.ets
+ M harmony/entry/src/main/ets/components/ui/ConfirmDialog.ets
+ M harmony/entry/src/main/ets/components/ui/ErrorCard.ets
+ M harmony/entry/src/main/ets/components/ui/JsonTree.ets
+ M harmony/entry/src/main/ets/components/ui/Switch.ets
+ M harmony/entry/src/main/ets/components/ui/Tag.ets
+ M harmony/entry/src/main/ets/components/ui/WorkspaceStyle.ets
+ M harmony/entry/src/main/ets/design/components.ets
+ M harmony/entry/src/main/ets/design/tokens.ets
+ M harmony/entry/src/main/ets/pages/ChatListPage.ets
+ M harmony/entry/src/main/ets/pages/ChatPage.ets
+ M harmony/entry/src/main/ets/pages/DeepReadTemplateSettingsPage.ets
+ M harmony/entry/src/main/ets/pages/DeepReadTemplateWorkbenchPage.ets
+ M harmony/entry/src/main/ets/pages/FavoritePage.ets
+ M harmony/entry/src/main/ets/pages/HistoryPage.ets
+ M harmony/entry/src/main/ets/pages/Index.ets
+ M harmony/entry/src/main/ets/pages/MemoryPage.ets
+ M harmony/entry/src/main/ets/pages/MiniAppListPage.ets
+ M harmony/entry/src/main/ets/pages/MiniAppRunnerPage.ets
+ M harmony/entry/src/main/ets/pages/NovelProjectsPage.ets
+ M harmony/entry/src/main/ets/pages/ProfilePage.ets
+ M harmony/entry/src/main/ets/pages/SettingAgentExecutionPageFull.ets
+ M harmony/entry/src/main/ets/pages/SettingAgentExtensionsPageFull.ets
+ M harmony/entry/src/main/ets/pages/SettingAgentPermissionsPageFull.ets
+ M harmony/entry/src/main/ets/pages/SettingBackupPage.ets
+ M harmony/entry/src/main/ets/pages/SettingExperimentalModelCouncilPageFull.ets
+ M harmony/entry/src/main/ets/pages/SettingExperimentalSubAgentPageFull.ets
+ M harmony/entry/src/main/ets/pages/SettingExperimentalWebMountPage.ets
+ M harmony/entry/src/main/ets/pages/SettingMcpPageFull.ets
+ M harmony/entry/src/main/ets/pages/SettingModelPage.ets
+ M harmony/entry/src/main/ets/pages/SettingPage.ets
+ M harmony/entry/src/main/ets/pages/SettingSearchListCards.ets
+ M harmony/entry/src/main/ets/pages/SettingSearchServiceEditorSheet.ets
+ M harmony/entry/src/main/ets/pages/SkillDetailPage.ets
+ M harmony/entry/src/main/ets/platform_impl/SyncCryptoPort.ets
+ M harmony/entry/src/main/ets/platform_impl/WebMountOAuthSupport.ets
+ M harmony/entry/src/main/ets/platform_impl/WebMountSites.ets
+ M harmony/entry/src/main/resources/base/profile/main_pages.json
+?? docs/audits/
+?? docs/reviews/

@@ -81,6 +81,67 @@ describe('handleToolApproval 纯逻辑(:1133-1172)', () => {
     assert.equal(findPart(out, 'c1').approvalState.type, 'approved');
     assert.equal(findPart(out, 'c2').approvalState.type, 'auto');
   });
+  it('R08 applyToolApprovalToConversation:空 id 命中多处 → 拒绝歧义(不全部批准)', () => {
+    const blankA = toolPart('', 'file_write', { type: 'pending' });
+    const blankB = toolPart('', 'ask_user', { type: 'pending' });
+    const conv = convWithTool(blankA);
+    const conv2: Conversation = {
+      ...conv,
+      messageNodes: [{
+        ...conv.messageNodes[0],
+        messages: [makeUIMessage('assistant', [blankA, blankB])],
+      }],
+    };
+    // 旧 id-only 接口对 '' 会命中全部 → 必须原样返回
+    const out = applyToolApprovalToConversation(conv2, '', { kind: 'approved' });
+    assert.equal(out, conv2);
+    const parts = currentMessages(out)[0].parts as UIMessagePartTool[];
+    assert.equal(parts[0].approvalState.type, 'pending');
+    assert.equal(parts[1].approvalState.type, 'pending');
+    // part locator 精确指向第二个 part → 只改它
+    const msgId = currentMessages(conv2)[0].id;
+    const located = applyToolApprovalToConversation(conv2, '', { kind: 'approved' },
+      { messageId: msgId, partIndex: 1 });
+    const locatedParts = currentMessages(located)[0].parts as UIMessagePartTool[];
+    assert.equal(locatedParts[0].approvalState.type, 'pending');
+    assert.equal(locatedParts[1].approvalState.type, 'approved');
+  });
+  it('P2-3 locator 未命中/类型不符/重复 messageId → 返回原 conversation 引用', () => {
+    const pending = toolPart('c1', 'file_write', { type: 'pending' });
+    const text: UIMessagePart = { type: 'text', text: 'hi', metadata: null };
+    const conv: Conversation = makeConversation('c1', [
+      toMessageNode(makeUIMessage('assistant', [text, pending])),
+    ]);
+    const msgId = currentMessages(conv)[0].id;
+    // text 下标 → 非 tool,未命中 → 原引用(ChatPage 的 out===previous 守卫生效)
+    assert.equal(applyToolApprovalToConversation(conv, 'c1', { kind: 'approved' },
+      { messageId: msgId, partIndex: 0 }), conv);
+    // 错误 messageId → 原引用
+    assert.equal(applyToolApprovalToConversation(conv, 'c1', { kind: 'approved' },
+      { messageId: 'nope', partIndex: 1 }), conv);
+    // toolCallId 与命中项不符 → 原引用
+    assert.equal(applyToolApprovalToConversation(conv, 'other', { kind: 'approved' },
+      { messageId: msgId, partIndex: 1 }), conv);
+    // 正确 locator → 命中且 toolCallId 相符(空 id 合法)
+    const ok = applyToolApprovalToConversation(conv, 'c1', { kind: 'approved' },
+      { messageId: msgId, partIndex: 1 });
+    assert.notEqual(ok, conv);
+    assert.equal(findPart(ok, 'c1').approvalState.type, 'approved');
+  });
+  it('R08 applyToolApprovalToConversation:重复真实 id 也拒绝歧义', () => {
+    const a = toolPart('dup', 'file_read', { type: 'pending' });
+    const b = toolPart('dup', 'file_write', { type: 'pending' });
+    const conv: Conversation = makeConversation('c1', [
+      toMessageNode(makeUIMessage('assistant', [a, b])),
+    ]);
+    assert.equal(applyToolApprovalToConversation(conv, 'dup', { kind: 'denied', reason: 'x' }), conv);
+    const msgId = currentMessages(conv)[0].id;
+    const located = applyToolApprovalToConversation(conv, 'dup', { kind: 'denied', reason: 'x' },
+      { messageId: msgId, partIndex: 0 });
+    const parts = currentMessages(located)[0].parts as UIMessagePartTool[];
+    assert.equal(parts[0].approvalState.type, 'denied');
+    assert.equal(parts[1].approvalState.type, 'pending');
+  });
   it('conversationHasPendingTools:任一节点 currentMessage 有 pending → true', () => {
     const conv = convWithTool(toolPart('c1', 'file_write', { type: 'pending' }));
     assert.equal(conversationHasPendingTools(conv), true);
@@ -128,24 +189,33 @@ describe('resolveIdleToolBlocker(:869-943)', () => {
     assert.equal(r.changed, false);
     assert.equal(r.event, null);
   });
-  it('「继续」→ pending 全 approve,shouldResume,event pending_tool_resume', () => {
+  it('R15 「继续」不再批准 pending → 取消陈旧工具,shouldResume=false', () => {
     const conv = convWithTool(toolPart('c1', 'file_write', { type: 'pending' }));
     const r = resolveIdleToolBlocker(conv, '继续', true);
     assert.equal(r.changed, true);
-    assert.equal(r.shouldResume, true);
-    assert.equal(r.event, 'pending_tool_resume');
+    assert.equal(r.shouldResume, false);
+    assert.equal(r.event, 'pending_tool_cancel');
     assert.equal(r.blockingCount, 1);
     assert.deepEqual(r.blockingToolNames, ['file_write']);
-    assert.equal(findPart(r.conversation, 'c1').approvalState.type, 'approved');
+    assert.equal(findPart(r.conversation, 'c1').approvalState.type, 'denied');
   });
-  it('「继续」→ 非 pending 未执行(auto)工具 → skipStale', () => {
+  it('R15 mandatory 工具 + 裸「继续」/续写句一律不得批准', () => {
+    // mandatory 只在显式审批按钮路径生效;自然语言路径绝不能放行(R15)
+    const conv = convWithTool(toolPart('c1', 'wm_eval', { type: 'pending' }));
+    for (const word of ['继续', '继续写首诗', '可以继续吗', 'yes', '批准', 'go ahead']) {
+      const r = resolveIdleToolBlocker(conv, word, true);
+      assert.equal(findPart(r.conversation, 'c1').approvalState.type, 'denied',
+        `"${word}" must not approve a pending tool`);
+      assert.equal(r.shouldResume, false, `"${word}" must not resume as approval`);
+    }
+  });
+  it('「继续」→ 非 pending 未执行(auto)工具 → 取消(不再 skipStale)', () => {
     const conv = convWithTool(toolPart('c1', 'file_read', { type: 'auto' }));
     const r = resolveIdleToolBlocker(conv, '继续', true);
     assert.equal(r.changed, true);
-    assert.equal(r.shouldResume, true);
-    assert.deepEqual(findPart(r.conversation, 'c1').approvalState, {
-      type: 'denied', reason: 'Skipped stale tool after user asked to continue',
-    });
+    assert.equal(r.shouldResume, false);
+    assert.equal(r.event, 'pending_tool_cancel');
+    assert.equal(findPart(r.conversation, 'c1').approvalState.type, 'denied');
   });
   it('普通新消息 → 陈旧工具 cancelled(逐字 JSON),shouldResume=false,event pending_tool_cancel', () => {
     const conv = convWithTool(toolPart('c1', 'file_write', { type: 'pending' }));

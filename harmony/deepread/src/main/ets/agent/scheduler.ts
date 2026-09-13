@@ -14,7 +14,8 @@ import type { Observable } from '../platform/observable.ts';
 import type { DeepReadOutput } from '../domain/models.ts';
 import type { DeepReadGenerationStage } from '../domain/enums.ts';
 import type { RunResult, RunManagerDeps } from '../agent/run_manager.ts';
-import { run, runSection } from '../agent/run_manager.ts';
+import { run, runSection, isAborted } from '../agent/run_manager.ts';
+import { isComplete } from '../domain/helpers.ts';
 import type { AbortControllerLike } from '../platform/runtime_api.ts';
 
 // ===== Scheduler interface(照搬设计 §6.3) =====
@@ -48,10 +49,11 @@ export interface SchedulerDeps {
   // 持久化 observe(真实由 RDB observe;测试注入内存 observable)
   observeOutput: (topicId: string) => Observable<DeepReadOutput>;
   // notifier(真实由 notificationManager;测试 noop)
+  // runToken(R22):完成发布需 await;取消只撤当前 token 持有的通知。
   notifier?: {
-    notifyRunning: (topicId: string, title: string) => Promise<void>;
-    notifyCompleted: (topicId: string, title: string, complete: boolean) => Promise<void>;
-    cancelRunning: (topicId: string) => Promise<void>;
+    notifyRunning: (topicId: string, title: string, runToken?: number) => Promise<void>;
+    notifyCompleted: (topicId: string, title: string, complete: boolean, runToken?: number) => Promise<void>;
+    cancelRunning: (topicId: string, runToken?: number) => Promise<void>;
   };
   // 检查 phase 是否为中断态(COLLECTING/PLANNING/WRITING)
   isInterruptedPhase: (output: DeepReadOutput) => boolean;
@@ -135,10 +137,12 @@ export const createScheduler = (deps: SchedulerDeps): DeepReadScheduler => {
       return { ok: false, output: deps.runManager.repository?.get(topicId, title) ?? makeEmpty(), error: 'aborted' };
     }
 
+    // R22:完成通知是否已真实发布(成功发布后 finally 不得撤同 id)
+    let completedPublished: boolean = false;
     try {
       // 不申请 ContinuousTask(0.2);只 ongoing notification。
       // 在 try 内:notifyRunning 拒绝时 finally 兜底清理注册,不泄漏
-      await deps.notifier?.notifyRunning(topicId, title);
+      await deps.notifier?.notifyRunning(topicId, title, job.token);
       const result = await withTopicLock(topicId, async () => {
         // 检查 abort(在锁内再确认;per-job signal,不受他轮影响)
         if (controller.signal.aborted) {
@@ -147,16 +151,34 @@ export const createScheduler = (deps: SchedulerDeps): DeepReadScheduler => {
         return run(deps.runManager, topicId, title, { force: opts.force, seedUrl: opts.seedUrl, signal: controller.signal });
       });
       const finalResult: RunResult = await result;
-      await deps.notifier?.notifyCompleted(topicId, title, finalResult.output.generationComplete);
-      return finalResult;
-    } finally {
-      // 仅当注册条目仍是本轮(token 匹配)才清除:避免 A 轮迟到 finally
-      // 误删 REPLACE 后 B 轮的注册,导致 C 轮并发进入
-      const current = runningJobs.get(topicId);
-      if (current !== undefined && current.token === job.token) {
-        runningJobs.delete(topicId);
+      // R22/P2-3:完成通知必须真实发布(await)且成功才算「已发布」。
+      // 发布失败(reject)时置 false → finally 仍撤同一 id 的 ongoing 通知,
+      // 不留下永久「正在深度阅读」;通知失败不影响深读结果本身。
+      if (!(finalResult.ok === false && finalResult.error === 'aborted')) {
+        try {
+          await deps.notifier?.notifyCompleted(topicId, title, finalResult.output.generationComplete, job.token);
+          completedPublished = true;
+        } catch (_notifyError) {
+          completedPublished = false;
+        }
       }
-      await deps.notifier?.cancelRunning(topicId);
+      return finalResult;
+    } catch (error) {
+      // R20:取消以 signal 状态归一为统一 aborted RunResult(不宽判 message)
+      if (isAborted(controller.signal)) {
+        return { ok: false, output: deps.runManager.repository?.get(topicId, title) ?? makeEmpty(), error: 'aborted' };
+      }
+      throw error;
+    } finally {
+      const current = runningJobs.get(topicId);
+      const owner: boolean = current !== undefined && current.token === job.token;
+      // 仅注册条目仍是本轮(token 匹配)才清除:避免 A 轮迟到 finally
+      // 误删 REPLACE 后 B 轮的注册
+      if (owner) runningJobs.delete(topicId);
+      // R22:旧 run 的 finally 不得撤新 run 的通知;完成通知发布成功也不撤
+      if (owner && !completedPublished) {
+        await deps.notifier?.cancelRunning(topicId, job.token);
+      }
     }
   };
 
@@ -190,6 +212,12 @@ export const createScheduler = (deps: SchedulerDeps): DeepReadScheduler => {
         }
         return runSection(deps.runManager, topicId, title, stage, seedUrl, controller.signal);
       });
+    } catch (error) {
+      // R20:取消统一归一为 aborted RunResult,不把 abort 泄露成业务失败
+      if (isAborted(controller.signal)) {
+        return { ok: false, output: deps.runManager.repository?.get(topicId, title) ?? makeEmpty(), error: 'aborted' };
+      }
+      throw error;
     } finally {
       const current = runningJobs.get(topicId);
       if (current !== undefined && current.token === job.token) {
@@ -236,6 +264,26 @@ export const isInterruptedPhase = (output: DeepReadOutput): boolean =>
   output.generationPhase === 'PLANNING' ||
   output.generationPhase === 'WRITING' ||
   output.generationPhase === 'VERIFYING';
+
+// ===== 重进文章页决策(UI-F30 契约,供 entry 层调用;纯函数可测) =====
+// 重进已完成/进行中深读时:不得隐式新建并 REPLACE 当前轮次。
+// - 'idle'     :无本次活动痕迹(首次或无进度空壳),可直接启动新 run
+// - 'complete' :完整缓存 → 仅展示,绝不启动新生成
+// - 'subscribe':已有 run 在跑 / 有部分或取消缓存 → 仅订阅或显示显式「继续」,不自动 REPLACE
+// 判定顺序与 DeepReadArticlePage.loadArticle 一致(先完整缓存,再活动 run,再进度痕迹)
+export type DeepReadReentryAction = 'idle' | 'complete' | 'subscribe';
+
+export const decideReentryAction = (
+  isRunning: boolean,
+  cached: DeepReadOutput | null,
+): DeepReadReentryAction => {
+  if (cached !== null && (cached.generationPhase === 'COMPLETE' || isComplete(cached))) return 'complete';
+  if (isRunning) return 'subscribe';
+  if (cached === null) return 'idle';
+  // 有部分进度/取消/失败痕迹 → 显式继续,不自动 REPLACE
+  if (cached.generationPhase !== 'IDLE' || Object.keys(cached.sectionStates).length > 0) return 'subscribe';
+  return 'idle';
+};
 
 // ===== 辅助:Observable map + getCurrent(简化;真实 Observable 已有这些) =====
 

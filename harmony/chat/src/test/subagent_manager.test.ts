@@ -580,8 +580,9 @@ describe('SubAgentManager registration, transcript, and terminal mapping', () =>
     const statuses: SubAgentRunStatus[] = [
       'completed', 'failed', 'approval_required', 'cancelled', 'timed_out', 'interrupted',
     ];
+    // R14: approval_required 无法在子代理内授权 → 任务板 INTERRUPTED(带原因),不再裸 RUNNING
     const expectedTask: string[] = [
-      'COMPLETED', 'FAILED', 'RUNNING', 'CANCELLED', 'TIMED_OUT', 'INTERRUPTED',
+      'COMPLETED', 'FAILED', 'INTERRUPTED', 'CANCELLED', 'TIMED_OUT', 'INTERRUPTED',
     ];
     for (let index: number = 0; index < statuses.length; index++) {
       const status: SubAgentRunStatus = statuses[index];
@@ -599,12 +600,64 @@ describe('SubAgentManager registration, transcript, and terminal mapping', () =>
       await waitForStatus(harness.manager, runId, status);
       const task: AgentTaskSnapshot = await waitForTaskStatus(
         harness.taskStore, runId, expectedTask[index]);
-      assert.equal(task.cancelCapability, false);
+      // approval_required 运行对象仍 live → 任务板保留取消能力(其余终态 false)
+      assert.equal(task.cancelCapability, status === 'approval_required');
       assert.equal(task.retryPolicy.retryable, false);
       assert.equal(task.outputRef?.exists, false);
       if (status === 'completed') assert.equal(task.summary, 'one; two');
       if (status === 'failed') assert.equal(task.error, 'boom');
+      if (status === 'approval_required') {
+        assert.equal(task.lastErrorCode, 'subagent_approval_required');
+        assert.ok((task.error ?? '').includes('requested approval'));
+      }
     }
+  });
+
+  it('R14 approval_required 仍可 cancel 收口为 cancelled', async () => {
+    const harness = await createManager(makeSetting(), (runner): void => {
+      runner.scripts.push((): Promise<SubAgentResult> => Promise.resolve(makeSubAgentResult({
+        status: 'approval_required',
+        summary: 'Subagent requested approval for file_write.',
+      })));
+    });
+    const initial: JsonObject = await harness.manager.start(
+      'parent', builtinInput(), [textTool('file_read')]);
+    const runId: string = payloadRunId(initial);
+    await waitForStatus(harness.manager, runId, 'approval_required');
+    // 任务板已收口 INTERRUPTED 且带原因
+    const suspended: AgentTaskSnapshot = await waitForTaskStatus(
+      harness.taskStore, runId, 'INTERRUPTED');
+    assert.equal(suspended.lastErrorCode, 'subagent_approval_required');
+    // cancel 仍可终结运行对象与任务板(R14:不可恢复/不可取消的挂起态消除)
+    const cancelled: JsonObject = await harness.manager.cancel(runId);
+    assert.equal(payloadStatus(cancelled), 'cancelled');
+    await waitForTaskStatus(harness.taskStore, runId, 'CANCELLED');
+  });
+
+  it('R14×R25 approval_required:看板取消经回调收口,活跃期间 cleanup 拒绝', async () => {
+    const harness = await createManager(makeSetting(), (runner): void => {
+      runner.scripts.push((): Promise<SubAgentResult> => Promise.resolve(makeSubAgentResult({
+        status: 'approval_required',
+        summary: 'Subagent requested approval.',
+      })));
+    });
+    const initial: JsonObject = await harness.manager.start(
+      'parent', builtinInput(), [textTool('file_read')]);
+    const runId: string = payloadRunId(initial);
+    await waitForStatus(harness.manager, runId, 'approval_required');
+    const suspended: AgentTaskSnapshot = await waitForTaskStatus(
+      harness.taskStore, runId, 'INTERRUPTED');
+    // 任务板保留取消能力 → P1-1:cleanup 不得删活跃记录/回调
+    assert.equal(suspended.cancelCapability, true);
+    assert.equal(await harness.taskStore.cleanup(runId, true), false);
+    assert.notEqual(harness.taskStore.read(runId), null);
+    // P2-1:看板取消真正触发 manager 回调 → 运行对象与看板都 CANCELLED
+    const cancelled: AgentTaskSnapshot = await harness.taskStore.cancel(runId);
+    assert.equal(cancelled.status, 'CANCELLED');
+    assert.equal(harness.manager.snapshot(runId)?.status, 'cancelled');
+    // 收口后回调注销,记录可清
+    assert.equal(await harness.taskStore.cleanup(runId), true);
+    assert.equal(harness.taskStore.read(runId), null);
   });
 
   it('does not block the terminal run/transcript on the fire-and-forget task update', async () => {

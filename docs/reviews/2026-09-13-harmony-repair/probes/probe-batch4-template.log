@@ -1,0 +1,12 @@
+PASS  default keeps --ds:1.000
+PASS  default html uses calc() font sizing
+PASS  default has no serif body class
+PASS  fontScale 1.25 -> --ds:1.250
+PASS  fontSerif true -> body.ds-serif
+PASS  fontScale clamped to 1.3
+PASS  fontScale clamped to 0.8
+PASS  no javascript: URL emitted
+PASS  js style untouched (css only)
+
+ALL PASS
+template exit=0

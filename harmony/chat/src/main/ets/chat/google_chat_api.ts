@@ -24,6 +24,8 @@ import {
   createGoogleStreamToolIdAllocator, parseGoogleResponseBody,
   parseGoogleStreamEventData,
 } from './google_parse.ts';
+import { parseOpenAiErrorDetail } from './openai_parse.ts';
+import type { JsonValue } from './json.ts';
 import type { ChatStreamProvider, StreamOpts } from './chat_turn.ts';
 import type { CallOpts, OpenAIChatApi } from './openai_chat_api.ts';
 import { createDefaultKeyRoulette } from '../search/search_service.ts';
@@ -102,6 +104,21 @@ const buildRequest = (
   return { url, method: 'POST', headers, body: JSON.stringify(body) };
 };
 
+// Google 无标准 [DONE];流内错误事件 {"error":{...}} 会被 parseGoogleStreamEventData
+//   当「无 candidates」静默跳过 → 在此显式收口,错误才可见、底层流才能立即关闭(R18)
+const googleEventError = (data: string): Error | null => {
+  if (data.indexOf('"error"') < 0) return null;
+  try {
+    const parsed: unknown = JSON.parse(data);
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return null;
+    const errValue: unknown = (parsed as Record<string, unknown>)['error'];
+    if (errValue === undefined || errValue === null) return null;
+    return parseOpenAiErrorDetail(errValue as JsonValue);
+  } catch {
+    return null; // 非 JSON 正文交给 parseGoogleStreamEventData 的原语义
+  }
+};
+
 // onFailure(:416-448):body → error.message 提取;空 body → Unknown error: status
 const errorFromFailureBody = (status: number, bodyRaw: string): Error => {
   if (bodyRaw.trim().length > 0) {
@@ -131,17 +148,22 @@ export const createGoogleChatApi = (deps: GoogleChatApiDeps): OpenAIChatApi => {
     const assembler = new SseAssembler();
     // 流 scope tool id 稳定分配(Android :334)
     const allocator = createGoogleStreamToolIdAllocator();
-    const state: { error: Error | null } = { error: null };
+    const state: { error: Error | null; sawEvent: boolean } = { error: null, sawEvent: false };
 
     const resp = await deps.http.fetchStream(req, {
       signal: opts?.signal,
       onDataEnd: opts?.onDataEnd,
+      // R18:Google 无标准 [DONE],但 malformed/错误事件收口仍需立即关流
+      shouldStop: (): boolean => state.error !== null,
       onChunk: (bytes: ArrayBuffer, end: boolean): void => {
         if (state.error !== null) return; // 终止后不再消费
         try {
           const events: SseEvent[] = assembler.feed(bytes);
           if (end) events.push(...assembler.flush());
+          if (events.length > 0) state.sawEvent = true;
           for (const evt of events) {
+            const evtError: Error | null = googleEventError(evt.data);
+            if (evtError !== null) throw evtError;
             const chunk: MessageChunk | null =
               parseGoogleStreamEventData(evt.data, params.model.modelId, allocator);
             if (chunk !== null) onChunk(chunk);
@@ -155,6 +177,10 @@ export const createGoogleChatApi = (deps: GoogleChatApiDeps): OpenAIChatApi => {
 
     if (state.error !== null) throw state.error;
     if (resp.status < 200 || resp.status >= 300) {
+      throw errorFromFailureBody(resp.status, resp.body);
+    }
+    // R06:2xx 但零 SSE 事件(网关 200 回普通 JSON)→ 不是成功流
+    if (!state.sawEvent) {
       throw errorFromFailureBody(resp.status, resp.body);
     }
   };

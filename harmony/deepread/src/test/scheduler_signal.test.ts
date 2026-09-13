@@ -2,7 +2,7 @@
 
 import { test } from 'node:test';
 import { strict as assert } from 'node:assert';
-import { createScheduler, isInterruptedPhase } from '../main/ets/agent/scheduler.ts';
+import { createScheduler, isInterruptedPhase, decideReentryAction } from '../main/ets/agent/scheduler.ts';
 import type { RunManagerDeps } from '../main/ets/agent/run_manager.ts';
 import type { CollectRunFn } from '../main/ets/agent/supervisor_loop.ts';
 import type { AbortSignalLike } from '../main/ets/platform/runtime_api.ts';
@@ -53,7 +53,7 @@ const baseDeps = (collectRun: CollectRunFn): RunManagerDeps => ({
 
 // ===== #3a: signal 从 scheduler 贯穿到 collectRun =====
 
-test('scheduler.abort: signal reaches collectRun; run rejects with abort; cleanup done', async () => {
+test('scheduler.abort: signal reaches collectRun; run resolves aborted; cleanup done', async () => {
   let seenSignal: AbortSignalLike | undefined;
   let callCount = 0;
   const collectRun: CollectRunFn = async (messages, _label, signal) => {
@@ -95,7 +95,10 @@ test('scheduler.abort: signal reaches collectRun; run rejects with abort; cleanu
   assert.equal(scheduler.isRunning('t1'), true);
 
   scheduler.abort('t1');
-  await assert.rejects(runPromise, (e: unknown) => e instanceof Error && /abort/i.test(e.message));
+  // R20:取消统一归一为 aborted RunResult(不再以 rejection 泄露原始 abort message)
+  const aborted = await runPromise;
+  assert.equal(aborted.ok, false);
+  assert.equal(aborted.error, 'aborted');
   assert.equal(scheduler.isRunning('t1'), false, 'running job must be cleaned up after abort');
 });
 
@@ -120,21 +123,24 @@ test('scheduler: sequential runs on same topic complete (topicLock release)', as
 // ===== #3c: waitForAbort 超时后 REPLACE — A 轮迟到 finally 不得误删 B 轮注册 =====
 
 test('scheduler: REPLACE after abort-wait timeout keeps B registration (token guard)', { timeout: 20_000 }, async () => {
-  // A:collectRun 忽略 signal,挂住不放(触发 waitForAbort 5s 超时)
-  let aCollectCalls = 0;
+  // A(第 1 次 collectRun)忽略 signal,挂住不放(触发 waitForAbort 5s 超时);
+  // B(第 2 次)挂在自己的 gate 上。两次调用用调用序号区分。
+  let collectCalls = 0;
   let releaseA: (() => void) | null = null;
-  const aGate = new Promise<void>(r => { releaseA = r; });
-  const collectRunA: CollectRunFn = async (messages) => {
-    aCollectCalls++;
-    await aGate; // 显式释放前不结束(无视 signal = 故意不遵守,模拟坏实现)
-    return [...messages, makeAssistantMessage('A done')];
+  let releaseB: (() => void) | null = null;
+  const gateA = new Promise<void>(r => { releaseA = r; });
+  const gateB = new Promise<void>(r => { releaseB = r; });
+  const collectRun: CollectRunFn = async (messages) => {
+    collectCalls++;
+    const n = collectCalls;
+    if (n === 1) await gateA;
+    else await gateB;
+    return [...messages, makeAssistantMessage(`done-${n}`)];
   };
-  const depsA = baseDeps(collectRunA);
+  const depsA = baseDeps(collectRun);
 
-  // 通知钩子:每次 cancelRunning 时记录 isRunning — A 的迟到 finally 触发的
-  // 首次 cancel 时,B 必须仍处于注册状态(token guard 的直接观测点)
   const runningCount = { n: 0 };
-  const isRunningAtCancel: boolean[] = [];
+  const cancelTokens: number[] = [];
   const scheduler = createScheduler({
     runManager: depsA,
     observeOutput: () => makeMemoryObservable(makeEmptyDeepReadOutput()),
@@ -143,8 +149,8 @@ test('scheduler: REPLACE after abort-wait timeout keeps B registration (token gu
     notifier: {
       notifyRunning: async (): Promise<void> => { runningCount.n++; },
       notifyCompleted: async (): Promise<void> => {},
-      cancelRunning: async (topicId: string): Promise<void> => {
-        isRunningAtCancel.push(scheduler.isRunning(topicId));
+      cancelRunning: async (_topicId: string, runToken?: number): Promise<void> => {
+        if (runToken !== undefined) cancelTokens.push(runToken);
       },
     },
   });
@@ -153,30 +159,103 @@ test('scheduler: REPLACE after abort-wait timeout keeps B registration (token gu
 
   // 等 A 进入 collectRun
   const started = Date.now() + 10_000;
-  while (aCollectCalls === 0 && Date.now() < started) {
+  while (collectCalls === 0 && Date.now() < started) {
     await new Promise<void>((r): void => { setTimeout(r, 10); });
   }
-  assert.ok(aCollectCalls > 0);
+  assert.equal(collectCalls, 1);
 
-  // B:同 topic REPLACE — waitForAbort 5s 超时后仍注册并等待 topicLock
+  // B:同 topic REPLACE — waitForAbort 5s 超时后仍注册,B 随后阻塞在 A 持有的 topicLock
   const runB = scheduler.run('tA', 'B', { force: true });
   runB.catch(() => {});
-  await new Promise(r => setTimeout(r, 6_000));
+  // 等 B 通过准入并注册(runningCount 2);此时 B 未必进入 collectRun(topicLock 被 A 持有)
+  const bRegistered = Date.now() + 10_000;
+  while (runningCount.n < 2 && Date.now() < bRegistered) {
+    await new Promise<void>((r): void => { setTimeout(r, 20); });
+  }
   assert.equal(runningCount.n, 2, 'A and B both registered (B via REPLACE timeout)');
   assert.equal(scheduler.isRunning('tA'), true);
 
-  // 释放 A:A 走完剩余 pass → 迟到 finally。
-  // 无 token guard 时 A 会无条件 delete,B 的注册被抹掉 → 首次 cancel 时 isRunning=false
+  // 释放 A:A 走完剩余 pass → 迟到 finally。无 token guard 时 A 会无条件 delete,
+  // B 的注册被抹掉 → 此后 B 进不了 collectRun / isRunning 变 false。
   releaseA!();
+  const bStarted = Date.now() + 10_000;
+  while (collectCalls < 2 && Date.now() < bStarted) {
+    await new Promise<void>((r): void => { setTimeout(r, 20); });
+  }
+  assert.equal(collectCalls, 2, 'late A finally must NOT delete B registration (token guard)');
+  assert.equal(scheduler.isRunning('tA'), true, 'B remains registered after A finishes');
+  assert.equal(cancelTokens.length, 0,
+    'late A finally must NOT cancel B run notification (token-scoped)');
 
+  // 释放 B:B 完成并自行清除注册
+  releaseB!();
   const settleDeadline = Date.now() + 15_000;
   while (scheduler.isRunning('tA') && Date.now() < settleDeadline) {
     await new Promise<void>((r): void => { setTimeout(r, 50); });
   }
   assert.equal(scheduler.isRunning('tA'), false, 'all runs settle after gate release');
-  assert.ok(isRunningAtCancel.length >= 1, 'A/B finally both fired cancelRunning');
-  assert.equal(isRunningAtCancel[0], true,
-    'late A finally must NOT delete B registration (token guard)');
+});
+
+// ===== R22:完成通知发布成功不被同 id finally cancel 撤回 =====
+
+test('scheduler: completed run does not cancel its just-published notification', async () => {
+  const collectRun: CollectRunFn = async (messages) =>
+    [...messages, makeAssistantMessage('done')];
+  let cancelCalls = 0;
+  let completedCalls = 0;
+  const scheduler = createScheduler({
+    runManager: baseDeps(collectRun),
+    observeOutput: () => makeMemoryObservable(makeEmptyDeepReadOutput()),
+    isInterruptedPhase,
+    createAbortController: () => new AbortController(),
+    notifier: {
+      notifyRunning: async (): Promise<void> => {},
+      notifyCompleted: async (): Promise<void> => { completedCalls++; },
+      cancelRunning: async (): Promise<void> => { cancelCalls++; },
+    },
+  });
+  await scheduler.run('tDone', '标题', { force: true });
+  assert.equal(completedCalls, 1, 'completed notification published once');
+  assert.equal(cancelCalls, 0, 'published completion must not be cancelled on same id');
+});
+
+// ===== P2-3:完成通知发布失败 → 仍撤 ongoing,不留永久「正在深度阅读」 =====
+
+test('scheduler: failed completion publish still cancels the ongoing notification', async () => {
+  const collectRun: CollectRunFn = async (messages) =>
+    [...messages, makeAssistantMessage('done')];
+  let cancelCalls = 0;
+  const scheduler = createScheduler({
+    runManager: baseDeps(collectRun),
+    observeOutput: () => makeMemoryObservable(makeEmptyDeepReadOutput()),
+    isInterruptedPhase,
+    createAbortController: () => new AbortController(),
+    notifier: {
+      notifyRunning: async (): Promise<void> => {},
+      notifyCompleted: async (): Promise<void> => { throw new Error('notification service down'); },
+      cancelRunning: async (): Promise<void> => { cancelCalls++; },
+    },
+  });
+  const result = await scheduler.run('tFail', '标题', { force: true });
+  // 通知失败不污染深读结果本身
+  assert.equal(result.ok, true, `run result must be unaffected: ${result.error}`);
+  assert.equal(cancelCalls, 1, 'failed completion publish must still cancel ongoing notification');
+});
+
+// ===== UI-F30:重进决策 — 不隐式新建并 REPLACE =====
+
+test('decideReentryAction: running wins; partial/cancel cache needs explicit continue', () => {
+  const empty = makeEmptyDeepReadOutput();
+  // 活动 run → 仅订阅(即使缓存为完整)
+  assert.equal(decideReentryAction(true, empty), 'subscribe');
+  // 无缓存无 run → 首次
+  assert.equal(decideReentryAction(false, null), 'idle');
+  // 完整缓存 → 仅展示
+  const complete = { ...empty, generationPhase: 'COMPLETE' as const, generationComplete: true };
+  assert.equal(decideReentryAction(false, complete), 'complete');
+  // 部分进度(有 sectionStates/phase)→ 显式继续,不自动 REPLACE
+  const partial = { ...empty, generationPhase: 'WRITING' as const, sectionStates: { OVERVIEW: { status: 'READY' as const, errorMessage: null } } };
+  assert.equal(decideReentryAction(false, partial), 'subscribe');
 });
 
 test('scheduler: notifyRunning rejection does not leak runningJobs registration', async () => {
@@ -238,7 +317,9 @@ test('scheduler: concurrent REPLACE admission — later caller aborts the earlie
   });
   // A 挂在 gate 上
   const runA = scheduler.run('tR', 'A', { force: true });
-  runA.then((): void => { runOutcomes.push('A-ok'); }, (e: Error): void => { runOutcomes.push(`A-err:${e.message}`); });
+  // R20:取消归一为 {ok:false,error:'aborted'} 的 resolved 结果
+  runA.then((r): void => { runOutcomes.push(r.error === 'aborted' ? 'A-aborted' : 'A-ok'); },
+    (e: Error): void => { runOutcomes.push(`A-err:${e.message}`); });
   const started = Date.now() + 10_000;
   while (runCounter === 0 && Date.now() < started) await new Promise<void>((r): void => { setTimeout(r, 10); });
   assert.ok(runCounter > 0, 'A entered collectRun');
@@ -246,19 +327,21 @@ test('scheduler: concurrent REPLACE admission — later caller aborts the earlie
   // B、C 相隔 50ms 并发 REPLACE(旧实现:两者都会通过准入 → 都跑完;
   // 新实现:C 的准入会 abort B 的注册)
   const runB = scheduler.run('tR', 'B', { force: true });
-  runB.then((): void => { runOutcomes.push('B-ok'); }, (e: Error): void => { runOutcomes.push(`B-err:${e.message}`); });
+  runB.then((r): void => { runOutcomes.push(r.error === 'aborted' ? 'B-aborted' : 'B-ok'); },
+    (e: Error): void => { runOutcomes.push(`B-err:${e.message}`); });
   await new Promise<void>((r): void => { setTimeout(r, 50); });
   const runC = scheduler.run('tR', 'C', { force: true });
-  runC.then((): void => { runOutcomes.push('C-ok'); }, (e: Error): void => { runOutcomes.push(`C-err:${e.message}`); });
+  runC.then((r): void => { runOutcomes.push(r.ok ? 'C-ok' : `C-err:${r.error}`); },
+    (e: Error): void => { runOutcomes.push(`C-err:${e.message}`); });
 
   // C 进入准入后 5s 超时等 A → 先开 gate 让链路流动
   await new Promise(r => setTimeout(r, 1_000));
   releaseGate!();
   await new Promise(r => setTimeout(r, 1_000));
 
-  // A 被 B abort(signal)→ A-err;B 被 C abort → B-err;C 正常完成
-  assert.ok(runOutcomes.some(o => o.startsWith('A-err')), `A should be aborted: ${runOutcomes}`);
-  assert.ok(runOutcomes.some(o => o.startsWith('B-err')), `B should be aborted by C: ${runOutcomes}`);
+  // A 被 B abort(signal)→ A-aborted;B 被 C abort → B-aborted;C 正常完成
+  assert.ok(runOutcomes.some(o => o.startsWith('A-aborted') || o.startsWith('A-err')), `A should be aborted: ${runOutcomes}`);
+  assert.ok(runOutcomes.some(o => o.startsWith('B-aborted') || o.startsWith('B-err')), `B should be aborted by C: ${runOutcomes}`);
   assert.ok(runOutcomes.includes('C-ok'), `C should complete: ${runOutcomes}`);
   assert.equal(scheduler.isRunning('tR'), false);
 });

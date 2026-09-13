@@ -12,6 +12,28 @@ import type { CompactStore, ConversationCompact, KeyValueStore } from '@amber/ch
 
 const compactsKey = (conversationId: string): string => `compacts/${conversationId}`;
 const compactsEventsKey = (conversationId: string): string => `compacts/${conversationId}.events`;
+const deletedMarkerKey = (conversationId: string): string => `compacts/${conversationId}.deleted`;
+
+// R11:删除标记(代际保护)。
+// 会话删除后,若仍有在途摘要落到同一 conversationId,insertCompact 会把它写回,
+// 形成「已删除会话的摘要复活」。删除时落一个 deleted 标记,后续 insert 遇到标记
+// 一律拒绝;记录类重放(recordEvent)在删除后也拒绝写入。没有标记就当首次,
+// 不引入额外写放大。
+export const deleteConversationCompactData = async (
+  kv: KeyValueStore, conversationId: string,
+): Promise<void> => {
+  await kv.put(deletedMarkerKey(conversationId), JSON.stringify({ deletedAt: Date.now() }));
+  await kv.delete(compactsKey(conversationId));
+  await kv.delete(compactsEventsKey(conversationId));
+};
+
+// 显式「授权重建」时才清除删除标记(R09 备份恢复 / 产品级撤销删除的接线入口)。
+// 读路径与 compaction 路径绝不自动清除,否则在途摘要会借清除之机复活。
+export const clearConversationDeletedMarker = async (
+  kv: KeyValueStore, conversationId: string,
+): Promise<void> => {
+  await kv.delete(deletedMarkerKey(conversationId));
+};
 
 class EntryCompactStore implements CompactStore {
   private readonly kv: KeyValueStore;
@@ -32,7 +54,13 @@ class EntryCompactStore implements CompactStore {
     });
   }
 
+  private async isDeleted(conversationId: string): Promise<boolean> {
+    const marker: string | null = await this.kv.get(deletedMarkerKey(conversationId));
+    return marker !== null;
+  }
+
   async getCompacts(conversationId: string): Promise<ConversationCompact[]> {
+    if (await this.isDeleted(conversationId)) return [];
     const raw: string | null = await this.kv.get(compactsKey(conversationId));
     if (raw === null) return [];
     try {
@@ -45,8 +73,14 @@ class EntryCompactStore implements CompactStore {
 
   insertCompact(compact: ConversationCompact): Promise<void> {
     return this.enqueueWrite(compact.conversationId, async (): Promise<void> => {
+      // 删除标记先于写检查:在途摘要迟到不会复活已删除会话
+      if (await this.isDeleted(compact.conversationId)) return;
       const list: ConversationCompact[] = await this.getCompacts(compact.conversationId);
-      await this.kv.put(compactsKey(compact.conversationId), JSON.stringify([...list, compact]));
+      const key: string = compactsKey(compact.conversationId);
+      await this.kv.put(key, JSON.stringify([...list, compact]));
+      // 写后复核:deleteConversationCompactData 不走本队列,可能在两次 await 之间
+      // 落标记并删键;若如此,撤回本次写入,避免摘要成为不可见残留
+      if (await this.isDeleted(compact.conversationId)) await this.kv.delete(key);
     });
   }
 
@@ -61,6 +95,7 @@ class EntryCompactStore implements CompactStore {
   recordEvent(conversationId: string, eventType: string,
     summaryId: string | null, message: string): Promise<void> {
     return this.enqueueWrite(conversationId, async (): Promise<void> => {
+      if (await this.isDeleted(conversationId)) return;
       const key: string = compactsEventsKey(conversationId);
       const existing: string | null = await this.kv.get(key);
       const line: string = JSON.stringify({
@@ -71,6 +106,7 @@ class EntryCompactStore implements CompactStore {
         message,
       });
       await this.kv.put(key, `${existing ?? ''}${line}\n`);
+      if (await this.isDeleted(conversationId)) await this.kv.delete(key);
     });
   }
 }

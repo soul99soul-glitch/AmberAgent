@@ -45,7 +45,7 @@ import {
   shouldScrollOnStreamUpdate, transitionOnGenerateEnd, transitionOnJumpToBottom,
   transitionOnStreamUpdate, transitionOnUserScroll,
 } from '@amber/chat-domain';
-import type { FollowMode } from '@amber/chat-domain';
+import type { FollowMode, ToolApprovalPartLocator } from '@amber/chat-domain';
 
 const GREEN: string = '#43A047';
 
@@ -65,6 +65,7 @@ const NOVEL_AGENT_MESSAGE_CAPABILITIES: AgentMessageRowHostCapabilities = {
   runMiniApp: false,
   modifyMiniApp: false,
   openMiniAppList: false,
+  openDocument: false,
 };
 
 type ComposeMode = 'discuss' | 'continue' | 'whole_chapter';
@@ -194,6 +195,13 @@ struct NovelWorkspacePage {
   private polishPollToken: number = 0;
   private requestedBranchId: string = '';
   private requestedPolishJobId: string = '';
+  // F38:编辑器脏检查基线(打开时快照;返回时对比,脏则确认放弃)
+  private chapterOriginalTitle: string = '';
+  private chapterOriginalContent: string = '';
+  private materialOriginalKind: NovelMaterialKind = 'world';
+  private materialOriginalTitle: string = '';
+  private materialOriginalContent: string = '';
+  private materialOriginalEnabled: boolean = true;
 
   aboutToAppear(): void {
     this.getUIContext().setKeyboardAvoidMode(KeyboardAvoidMode.RESIZE);
@@ -219,6 +227,97 @@ struct NovelWorkspacePage {
       this.currentUnsub = null;
       unsub(); // 终结即退订,emitter 不再持有页面闭包
     }
+  }
+
+  // F38:系统返回优先消费自绘 overlay,避免直接退出页面(编辑脏数据先确认)。
+  //   系统 sheet(AlertDialog/actionMenu)由平台自行消费返回,本页不重复拦截。
+  onBackPress(): boolean {
+    return this.closeTopOverlay();
+  }
+
+  // 顶栏返回与系统返回同路径,保证层级一致
+  private handleBack(): void {
+    if (!this.closeTopOverlay()) router.back();
+  }
+
+  // 关闭最上层自绘 overlay;有关闭动作返回 true(已消费返回),无 overlay 返回 false。
+  private closeTopOverlay(): boolean {
+    // 渲染顺序:后面的 child 更靠上,故按逆序检查
+    if (this.polishCreateOpen) {
+      if (!this.polishBusy) this.polishCreateOpen = false;
+      return true;
+    }
+    if (this.branchSheetOpen) {
+      this.branchSheetOpen = false;
+      return true;
+    }
+    if (this.versionsOpen) {
+      this.versionsOpen = false;
+      return true;
+    }
+    if (this.chapterMenuId.length > 0) {
+      this.chapterMenuId = '';
+      return true;
+    }
+    if (this.materialEditorOpen) {
+      this.confirmDiscardMaterial();
+      return true;
+    }
+    if (this.chapterEditorOpen) {
+      this.confirmDiscardChapter();
+      return true;
+    }
+    if (this.collectMessageId.length > 0) {
+      this.collectMessageId = '';
+      return true;
+    }
+    return false;
+  }
+
+  private chapterDirty(): boolean {
+    return this.chapterTitle !== this.chapterOriginalTitle
+      || this.chapterContent !== this.chapterOriginalContent;
+  }
+
+  private materialDirty(): boolean {
+    return this.materialKind !== this.materialOriginalKind
+      || this.materialTitle !== this.materialOriginalTitle
+      || this.materialContent !== this.materialOriginalContent
+      || this.materialEnabled !== this.materialOriginalEnabled;
+  }
+
+  private confirmDiscardChapter(): void {
+    if (!this.chapterDirty()) {
+      this.chapterEditorOpen = false;
+      return;
+    }
+    AlertDialog.show({
+      title: '放弃编辑？',
+      message: '未保存的章节内容将丢失。',
+      primaryButton: { value: '继续编辑', action: (): void => {} },
+      secondaryButton: {
+        value: '放弃',
+        fontColor: ERROR,
+        action: (): void => { this.chapterEditorOpen = false; },
+      },
+    });
+  }
+
+  private confirmDiscardMaterial(): void {
+    if (!this.materialDirty()) {
+      this.materialEditorOpen = false;
+      return;
+    }
+    AlertDialog.show({
+      title: '放弃编辑？',
+      message: '未保存的资料内容将丢失。',
+      primaryButton: { value: '继续编辑', action: (): void => {} },
+      secondaryButton: {
+        value: '放弃',
+        fontColor: ERROR,
+        action: (): void => { this.materialEditorOpen = false; },
+      },
+    });
   }
 
   async reload(): Promise<void> {
@@ -886,11 +985,52 @@ struct NovelWorkspacePage {
     this.collectTitle = p !== null ? `第 ${p.chapters.length + 1} 章` : '第 1 章';
   }
 
-  private continueNovelTool(toolCallId: string, verdict: NovelToolContinuationVerdict): void {
+  private continueNovelTool(toolCallId: string, verdict: NovelToolContinuationVerdict,
+    locator?: ToolApprovalPartLocator): void {
     if (this.hasBlockingNovelRun()) return;
-    const run: NovelRun = getNovelCreation().continueTool(this.projectId, toolCallId, verdict);
+    // R08:NovelService.continueTool 目前按 id 定位(findTool 取首个匹配),
+    //   空 id 会错误命中同 blank 的其它工具、重复 id 也无法区分。UI 侧先用 locator
+    //   精确解析出真实 id;无法唯一确定时安全拒绝,绝不按 blank 等价批准/续跑。
+    const resolvedId: string = this.resolveNovelToolId(toolCallId, locator);
+    if (resolvedId.length === 0) {
+      this.errorMsg = '无法唯一定位这次工具调用（缺少或重复的工具 ID），已拒绝本次操作。';
+      return;
+    }
+    const run: NovelRun = getNovelCreation().continueTool(this.projectId, resolvedId, verdict);
     this.attachNovelRun(
       run, this.project?.messages.length ?? 0, '', Date.now(), '正在继续同一轮任务…');
+  }
+
+  // R08:locator(messageId+partIndex)优先精确定位到目标工具 part 的 toolCallId;
+  //   无 locator 时要求 id 非空且在整个项目内唯一命中,否则返回 ''(调用方拒绝)。
+  private resolveNovelToolId(toolCallId: string, locator?: ToolApprovalPartLocator): string {
+    const project: NovelProject | null = this.project;
+    if (project === null) return '';
+    if (locator !== undefined) {
+      for (let i: number = 0; i < project.messages.length; i++) {
+        const ui: UIMessage = novelMessageUi(project.messages[i]);
+        if (ui.id !== locator.messageId) continue;
+        const parts: UIMessagePart[] = ui.parts;
+        if (locator.partIndex < 0 || locator.partIndex >= parts.length) return '';
+        const target: UIMessagePart = parts[locator.partIndex];
+        if (target.type !== 'tool') return '';
+        return target.toolCallId.length > 0 ? target.toolCallId : '';
+      }
+      return '';
+    }
+    if (toolCallId.length === 0) return '';
+    let found: string = '';
+    let count: number = 0;
+    for (let i: number = 0; i < project.messages.length; i++) {
+      const parts: UIMessagePart[] = novelMessageUi(project.messages[i]).parts;
+      for (let p: number = 0; p < parts.length; p++) {
+        const part: UIMessagePart = parts[p];
+        if (part.type !== 'tool' || part.toolCallId !== toolCallId) continue;
+        found = part.toolCallId;
+        count++;
+      }
+    }
+    return count === 1 ? found : '';
   }
 
   private clearNovelRunUi(): void {
@@ -956,7 +1096,9 @@ struct NovelWorkspacePage {
       this.collectMessageId = '';
       this.errorMsg = '';
       await this.reload();
-      this.tab = 2; // 收录后跳到活资料查看建议
+      // F32:收录后跳到活资料并直接定位「资料库」二级页(section=1),否则建议在 section1 而用户停在 section0
+      this.tab = 2;
+      this.settingsSection = 1;
     } catch (e) {
       this.errorMsg = String(e);
     } finally {
@@ -984,6 +1126,8 @@ struct NovelWorkspacePage {
     const p: NovelProject | null = this.project;
     this.chapterTitle = p !== null ? `第 ${p.chapters.length + 1} 章` : '第 1 章';
     this.chapterContent = '';
+    this.chapterOriginalTitle = this.chapterTitle;
+    this.chapterOriginalContent = this.chapterContent;
     this.chapterEditorOpen = true;
   }
 
@@ -992,6 +1136,8 @@ struct NovelWorkspacePage {
     this.editingChapterId = c.id;
     this.chapterTitle = c.title;
     this.chapterContent = c.content;
+    this.chapterOriginalTitle = c.title;
+    this.chapterOriginalContent = c.content;
     this.chapterEditorOpen = true;
   }
 
@@ -1173,6 +1319,10 @@ struct NovelWorkspacePage {
     this.materialTitle = '';
     this.materialContent = '';
     this.materialEnabled = true;
+    this.materialOriginalKind = this.materialKind;
+    this.materialOriginalTitle = this.materialTitle;
+    this.materialOriginalContent = this.materialContent;
+    this.materialOriginalEnabled = this.materialEnabled;
     this.materialEditorOpen = true;
   }
 
@@ -1182,6 +1332,10 @@ struct NovelWorkspacePage {
     this.materialTitle = m.title;
     this.materialContent = m.content;
     this.materialEnabled = m.enabled;
+    this.materialOriginalKind = m.kind;
+    this.materialOriginalTitle = m.title;
+    this.materialOriginalContent = m.content;
+    this.materialOriginalEnabled = m.enabled;
     this.materialEditorOpen = true;
   }
 
@@ -1333,14 +1487,15 @@ struct NovelWorkspacePage {
             hostHeader: (): void => { this.novelMessageHeader(message); },
             hostFooter: (): void => { this.novelMessageFooter(message); },
             streaming: false,
-            onApproveTool: (toolCallId: string): void => {
-              this.continueNovelTool(toolCallId, { kind: 'approved' });
+            onApproveTool: (toolCallId: string, locator?: ToolApprovalPartLocator): void => {
+              this.continueNovelTool(toolCallId, { kind: 'approved' }, locator);
             },
-            onDenyTool: (toolCallId: string): void => {
-              this.continueNovelTool(toolCallId, { kind: 'denied', reason: '用户拒绝了这次操作' });
+            onDenyTool: (toolCallId: string, locator?: ToolApprovalPartLocator): void => {
+              this.continueNovelTool(toolCallId, { kind: 'denied', reason: '用户拒绝了这次操作' }, locator);
             },
-            onAnswerTool: (toolCallId: string, answer: string): void => {
-              this.continueNovelTool(toolCallId, { kind: 'answered', answer });
+            onAnswerTool: (toolCallId: string, answer: string,
+              locator?: ToolApprovalPartLocator): void => {
+              this.continueNovelTool(toolCallId, { kind: 'answered', answer }, locator);
             },
           })
         }
@@ -1386,14 +1541,15 @@ struct NovelWorkspacePage {
               textDeltasLive: this.activeTextDeltasLive,
               isLastAssistant: index === this.activeMessages.length - 1,
               onTextGrow: (): void => { this.followNovelStreamingUpdate(); },
-              onApproveTool: (toolCallId: string): void => {
-                this.continueNovelTool(toolCallId, { kind: 'approved' });
+              onApproveTool: (toolCallId: string, locator?: ToolApprovalPartLocator): void => {
+                this.continueNovelTool(toolCallId, { kind: 'approved' }, locator);
               },
-              onDenyTool: (toolCallId: string): void => {
-                this.continueNovelTool(toolCallId, { kind: 'denied', reason: '用户拒绝了这次操作' });
+              onDenyTool: (toolCallId: string, locator?: ToolApprovalPartLocator): void => {
+                this.continueNovelTool(toolCallId, { kind: 'denied', reason: '用户拒绝了这次操作' }, locator);
               },
-              onAnswerTool: (toolCallId: string, answer: string): void => {
-                this.continueNovelTool(toolCallId, { kind: 'answered', answer });
+              onAnswerTool: (toolCallId: string, answer: string,
+                locator?: ToolApprovalPartLocator): void => {
+                this.continueNovelTool(toolCallId, { kind: 'answered', answer }, locator);
               },
             })
           }
@@ -1904,7 +2060,7 @@ struct NovelWorkspacePage {
             Icon({ name: 'back', iconSize: 22, color: INK3 })
           }
           .width(44).height(44).alignContent(Alignment.Center)
-          .onClick(() => { router.back(); })
+          .onClick(() => { this.handleBack(); })
           .accessibilityText('返回')
           Text(this.project !== null ? this.project.name : '小说创作')
             .fontSize(20).fontWeight(FontWeight.Bold).fontColor(INK)
@@ -2080,7 +2236,7 @@ struct NovelWorkspacePage {
         Row() {
           Text('取消').fontSize(14).fontColor(INK3).layoutWeight(1).textAlign(TextAlign.Center)
             .height(44)
-            .onClick(() => { this.chapterEditorOpen = false; })
+            .onClick(() => { this.confirmDiscardChapter(); })
           Text('保存').fontSize(14).fontColor(ACCENT).layoutWeight(1).textAlign(TextAlign.Center)
             .height(44)
             .onClick(() => { this.saveChapter(); })
@@ -2131,7 +2287,7 @@ struct NovelWorkspacePage {
         Row() {
           Text('取消').fontSize(14).fontColor(INK3).layoutWeight(1).textAlign(TextAlign.Center)
             .height(44)
-            .onClick(() => { this.materialEditorOpen = false; })
+            .onClick(() => { this.confirmDiscardMaterial(); })
           Text('保存').fontSize(14).fontColor(ACCENT).layoutWeight(1).textAlign(TextAlign.Center)
             .height(44)
             .onClick(() => { this.saveMaterial(); })

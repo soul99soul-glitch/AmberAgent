@@ -397,17 +397,22 @@ export struct ToggleRow {
         .alignItems(HorizontalAlign.Start)
         .layoutWeight(1)
 
-        Stack({ alignContent: Alignment.Start }) {
-          Column()
-            .width(42).height(24).borderRadius(99)
-            .backgroundColor(this.checked ? this.accentColorStore : LINE2)
-          Column()
-            .width(20).height(20).borderRadius(10)
-            .backgroundColor('#FFFFFF') // 开关滑块固定纯白:暗色 off 轨(LINE2)上仍需对比
-            .margin({ left: this.checked ? 22 : 2 })
-            .animation({ duration: 150, curve: Curve.EaseOut })
+        Row() {
+          Stack({ alignContent: Alignment.Start }) {
+            Column()
+              .width(42).height(24).borderRadius(99)
+              .backgroundColor(this.checked ? this.accentColorStore : LINE2)
+            Column()
+              .width(20).height(20).borderRadius(10)
+              .backgroundColor(Color.White) // 滑块固定纯白:off 轨上仍需对比
+              .margin({ left: this.checked ? 22 : 2 })
+              .animation({ duration: 150, curve: Curve.EaseOut })
+          }
+          .clip(true)
         }
-        .clip(true)
+        .constraintSize({ minWidth: 44, minHeight: 44 })
+        .justifyContent(FlexAlign.End)
+        .alignItems(VerticalAlign.Center)
         .margin({ left: 12 })
         .onClick((): void => { this.onToggle(); })
         .accessibilityText(this.checked ? '已开启' : '已关闭')

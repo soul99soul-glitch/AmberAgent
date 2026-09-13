@@ -12,11 +12,18 @@ import { common } from '@kit.AbilityKit';
 import { getChatKvStore, getAppContainer } from '../di/AppContainer.ets';
 import { loadWebMountSites, saveWebMountSites, makeUserSite, hostOf, isSeedSite, restoreMissingSeedSites, SEED_SITES } from '../platform_impl/WebMountSites.ets';
 import type { UserSiteEntry } from '../platform_impl/WebMountSites.ets';
+import { setWebMountGlobalEnabled } from '../platform_impl/WebMountSession.ets';
 import {
   makeFeishuPkce, exchangeFeishuCode, createKvWebMountTokenStore, feishuTokenStatusText,
   type FeishuExchangeInput,
 } from '../platform_impl/WebMountOAuthSupport.ets';
 import { buildFeishuAuthorizationUrl, type WebMountPkce, type WebMountOAuthToken } from '@amber/chat-domain';
+
+/** 飞书回调粘贴解析结果：裸 code 时 state 为 null */
+interface FeishuCodePaste {
+  code: string;
+  state: string | null;
+}
 
 @Entry
 @Component
@@ -119,13 +126,24 @@ struct SettingExperimentalWebMountPage {
       this.feishuStatus = '请填写 App Secret';
       return;
     }
+    const paste = this.parseFeishuCodePaste(this.feishuAuthCode);
+    if (paste.code.length === 0) {
+      this.feishuStatus = '未能从粘贴内容中解析出 code';
+      return;
+    }
+    // 粘贴内容带 state 时必须匹配本次会话(CSRF);裸 code 手动流程放行,仍靠 PKCE
+    if (paste.state !== null && paste.state.length > 0
+      && paste.state !== this.feishuPkce.state) {
+      this.feishuStatus = 'state 不匹配：请确认使用本次生成的授权链接后重试';
+      return;
+    }
     this.feishuBusy = true;
     this.feishuStatus = '兑换中…';
     try {
       const exchangeInput: FeishuExchangeInput = {
         appId: this.feishuAppId.trim(),
         appSecret: this.feishuAppSecret.trim(),
-        code: this.feishuAuthCode.trim(),
+        code: paste.code,
         codeVerifier: this.feishuPkce.codeVerifier,
       };
       const token = await exchangeFeishuCode(getAppContainer().httpClient, exchangeInput);
@@ -137,6 +155,43 @@ struct SettingExperimentalWebMountPage {
     } finally {
       this.feishuBusy = false;
     }
+  }
+
+  /** 裸 code 或完整回调 URL；URL 带 state 时交由调用方比对 */
+  private parseFeishuCodePaste(paste: string): FeishuCodePaste {
+    const trimmed: string = paste.trim();
+    if (trimmed.indexOf('code=') < 0) {
+      const bare: FeishuCodePaste = { code: trimmed, state: null };
+      return bare;
+    }
+    let query: string = trimmed;
+    const qIdx: number = query.indexOf('?');
+    if (qIdx >= 0) {
+      query = query.substring(qIdx + 1);
+    }
+    const hashIdx: number = query.indexOf('#');
+    if (hashIdx >= 0) {
+      query = query.substring(0, hashIdx);
+    }
+    let code: string = '';
+    let state: string | null = null;
+    const parts: string[] = query.split('&');
+    for (const part of parts) {
+      const eq: number = part.indexOf('=');
+      if (eq < 0) continue;
+      const key: string = part.substring(0, eq);
+      const value: string = part.substring(eq + 1);
+      if (key === 'code') {
+        code = value;
+      } else if (key === 'state') {
+        state = value;
+      }
+    }
+    const parsed: FeishuCodePaste = {
+      code: code.length > 0 ? code : trimmed,
+      state: state,
+    };
+    return parsed;
   }
 
   private async logoutFeishu(): Promise<void> {
@@ -198,7 +253,8 @@ struct SettingExperimentalWebMountPage {
             Row() {
               Column() {
                 Text('启用 WebMount').fontSize(BODY).fontColor(INK)
-                Text('开启后 Agent 可在已授权站点上阅读与操作网页')
+                Text('开启后 Agent 可在已授权站点上阅读与操作网页;'
+                  + '关闭会立即结束后台会话页面,但已单独勾选 WebMount 的助手仍可继续使用')
                   .fontSize(LABEL).fontColor(INK3).margin({ top: 3 })
               }
               .alignItems(HorizontalAlign.Start).layoutWeight(1).margin({ right: 12 })
@@ -207,6 +263,9 @@ struct SettingExperimentalWebMountPage {
                 .onChange((v: boolean): void => {
                   this.globalEnabled = v;
                   this.setToggle('webmount_global_enabled', v);
+                  // 显式关闭立即终止当前会话(复位页面、阻止后续操作);
+                  //   下次合法建 tools 重新按 OR(global||助手勾选)求值,非总禁用
+                  if (!v) setWebMountGlobalEnabled(false);
                 })
             }
             .width('100%').padding({ left: 16, right: 16, top: 14, bottom: 14 })
@@ -254,7 +313,7 @@ struct SettingExperimentalWebMountPage {
                 .maxLines(3).textOverflow({ overflow: TextOverflow.Ellipsis })
                 .width('100%').padding({ left: 16, right: 16, bottom: 6 })
             }
-            TextInput({ text: this.feishuAuthCode, placeholder: '粘贴授权 code' })
+            TextInput({ text: this.feishuAuthCode, placeholder: '粘贴授权 code 或回调 URL' })
               .height(44).fontSize(BODY).fontColor(INK).placeholderColor(INK3)
               .backgroundColor(SURFACE2).borderRadius(RADIUS)
               .padding({ left: 12, right: 12 })

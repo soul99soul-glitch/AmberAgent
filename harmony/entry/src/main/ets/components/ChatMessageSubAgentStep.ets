@@ -16,7 +16,23 @@ const SUBAGENT_TOOL_NAMES: ReadonlySet<string> = new Set<string>([
   'subagent_start', 'subagent_wait', 'subagent_read', 'subagent_cancel',
 ]);
 
-const DEFAULT_PHASES: string[] = ['分析', '搜索', '整理', '汇总'];
+// F12:阶段只在工具 output 提供结构化字段时显示;缺失 → 不伪造,仅显示运行状态。
+//   取自 output 的 phase/phase_label/stage/stage_label(字符串)。
+const SUBAGENT_PHASE_KEYS: string[] = ['phase_label', 'phase', 'stage_label', 'stage'];
+
+const parseLatestPhase = (tools: UIMessagePartTool[]): string => {
+  for (let i: number = tools.length - 1; i >= 0; i--) {
+    const t: UIMessagePartTool = tools[i];
+    if (!SUBAGENT_TOOL_NAMES.has(t.toolName)) continue;
+    if (t.output.length === 0) continue;
+    const json: JsonObject = toolOutputJson(t);
+    for (const key of SUBAGENT_PHASE_KEYS) {
+      const v: JsonValue = json[key];
+      if (typeof v === 'string' && v.trim().length > 0) return v.trim();
+    }
+  }
+  return '';
+};
 
 const parseLatestStatus = (tools: UIMessagePartTool[]): string => {
   for (let i: number = tools.length - 1; i >= 0; i--) {
@@ -74,10 +90,17 @@ export struct ChatMessageSubAgentStep {
   onOpenRun: (runId: string) => void = (_id: string): void => {};
   @State objectiveExpanded: boolean = false;
 
+  // F12:真实阶段(结构化 output 字段);无则空,不按墙钟伪造轮播
   private currentPhase(): string {
-    if (this.currentStatus() !== 'running') return DEFAULT_PHASES[DEFAULT_PHASES.length - 1];
-    const elapsed: number = Date.now() / 5000;
-    return DEFAULT_PHASES[Math.floor(elapsed) % DEFAULT_PHASES.length];
+    return parseLatestPhase(this.tools);
+  }
+
+  private headerText(): string {
+    const status: string = statusVerb(this.currentStatus());
+    const phase: string = this.currentPhase();
+    return phase.length > 0
+      ? `@${this.displayName()} ${status} · ${phase}`
+      : `@${this.displayName()} ${status}`;
   }
 
   build(): void {
@@ -146,7 +169,7 @@ export struct ChatMessageSubAgentStep {
       avatarSize: 16,
       status: this.currentStatus(),
     })
-    Text(`@${this.displayName()} ${statusVerb(this.currentStatus())} · ${this.currentPhase()}`)
+    Text(this.headerText())
       .fontSize(META)
       .fontColor(INK2)
       .fontWeight(FontWeight.Medium)

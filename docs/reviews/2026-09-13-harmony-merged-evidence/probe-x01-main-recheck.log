@@ -1,0 +1,8 @@
+[extract] loadArticle sha256/16: 5b79c94353aeac4c len 2930
+[extract] offset(isComplete gate)= 421 < offset(font read)= 636
+[T1] complete-cache reopen -> kv reads: [] | fontScale: 1 | fontSerif: false | templateId: none
+[T1] CONFIRMED: completed article reopen ignores font scale / serif / template.
+[T2] partial-cache reopen -> kv reads: ["deepread_font_scale","deepread_font_mode","deepread_template_id","deepread_first_use_confirmed"] | fontScale: 1.25 | fontSerif: true | templateId: editorial_slant
+[T2] CONFIRMED: only the non-complete path loads display settings.
+
+Assertions passed. Real page methods, headless; no UI rendering/device/network/real files.

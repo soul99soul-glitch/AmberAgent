@@ -20,11 +20,12 @@ import { ACCENT,BG,INK,INK3,LINE,SURFACE,GUTTER,RADIUS,BODY2,META } from '../des
 import { PageTitleBar } from '../components/PageTemplate.ets';
 import { router } from '@kit.ArkUI';
 import {
-  loadAssistants, saveAssistants, patchAssistant,
+  loadAssistants, patchAssistant,
 } from '@amber/chat-domain';
 import type { Assistant, McpServerConfig, McpStatus, McpTool } from '@amber/chat-domain';
 import { getChatKvStore, getMcpManager, initMcpManager } from '../di/AppContainer.ets';
 import { getMcpSettingsStore } from '../platform_impl/McpSettingsStore.ets';
+import { mutateAssistant } from '../platform_impl/AssistantMutation.ets';
 
 const RED: string = '#EA4335';
 
@@ -94,32 +95,25 @@ struct ChatAssistantMcpPage {
   }
 
   // :223-246 — Switch:checked → ids+id;否则 ids-id;随后 vm.update(assistant.copy)
+  // F35:整段 RMW 进 assistants 键共享锁;ids 由锁内最新助手算出,不写旧快照
   private async toggleServer(server: McpServerConfig, checked: boolean): Promise<void> {
-    if (this.assistant === null) return;
-    const cur: Assistant = this.assistant;
-    let ids: string[];
-    if (checked) {
-      ids = cur.mcpServers.indexOf(server.id) >= 0
-        ? cur.mcpServers.slice()
-        : [...cur.mcpServers, server.id];
-    } else {
-      ids = cur.mcpServers.filter((x: string): boolean => x !== server.id);
-    }
-    // :229/:238 removeIf — 谓词为常量(servers 无此 id 时清空全表);
-    //   行仅为列表内 server 渲染 → 不可达,忠实保留
-    const absent: boolean = !this.servers.some(
-      (s: McpServerConfig): boolean => s.id === server.id);
-    if (absent) ids = [];
-    const next: Assistant = patchAssistant(cur, { mcpServers: ids });
-    const kv = getChatKvStore();
-    const assistants: Assistant[] | null = await loadAssistants(kv);
-    const list: Assistant[] = assistants === null ? [] : assistants.slice();
-    const index: number = list.findIndex((a: Assistant): boolean => a.id === next.id);
-    if (index >= 0) {
-      list[index] = next;
-      await saveAssistants(kv, list);
-    }
-    this.assistant = next;
+    const next: Assistant | null = await mutateAssistant(this.assistantId,
+      (cur: Assistant): Assistant => {
+        let ids: string[];
+        if (checked) {
+          ids = cur.mcpServers.indexOf(server.id) >= 0
+            ? cur.mcpServers : cur.mcpServers.concat([server.id]);
+        } else {
+          ids = cur.mcpServers.filter((x: string): boolean => x !== server.id);
+        }
+        // :229/:238 removeIf — 谓词为常量(servers 无此 id 时清空全表);
+        //   行仅为列表内 server 渲染 → 不可达,忠实保留
+        const absent: boolean = !this.servers.some(
+          (s: McpServerConfig): boolean => s.id === server.id);
+        if (absent) ids = [];
+        return patchAssistant(cur, { mcpServers: ids });
+      });
+    if (next !== null) this.assistant = next;
   }
 
   @Builder

@@ -6,12 +6,12 @@
 //   + 孤立文件清理(磁盘有、DB 无 → unlink)。
 
 import { promptAction } from '@kit.ArkUI';
-import { fileIo } from '@kit.CoreFileKit';
 import type { FilesRepository, ManagedFileEntity } from '@amber/chat-domain';
 import {
-  FILE_FOLDERS_UPLOAD, FILE_FOLDERS_SKILLS, FILE_FOLDERS_CHAT_IMAGES, FILE_FOLDERS_IMAGES,
-} from '@amber/chat-domain';
-import { getFilesRepository, getDeleteChatFilesDeps } from '../platform_impl/ManagedFileStore.ets';
+  getFilesRepository, getDeleteChatFilesDeps, MANAGED_FILE_FOLDERS,
+  scanManagedOrphans, deleteManagedOrphans, OrphanScanResult,
+} from '../platform_impl/ManagedFileStore.ets';
+import { getChatRepository } from '../di/AppContainer.ets';
 import {
   BG, SURFACE2, INK, INK3, INK4, ACCENT, ERROR,
   BODY2, META, TEXT_STYLES,
@@ -102,6 +102,9 @@ struct SettingFilesPage {
   @State rows: FileRow[] = [];
   @State loaded: boolean = false;
   @State cleaning: boolean = false;
+  // 非空 = 登记库读取/解析失败:禁用破坏性清理,并展示原因(不再伪装成「暂无托管文件」)
+  @State registryError: string = '';
+  @State pendingOrphans: string[] = [];
   private repo: FilesRepository = getFilesRepository();
 
   aboutToAppear(): void {
@@ -109,12 +112,13 @@ struct SettingFilesPage {
   }
 
   private reload(): void {
-    const folders: string[] =
-      [FILE_FOLDERS_UPLOAD, FILE_FOLDERS_SKILLS, FILE_FOLDERS_CHAT_IMAGES, FILE_FOLDERS_IMAGES];
+    const folders: string[] = [...MANAGED_FILE_FOLDERS];
     const acc: FileRow[] = [];
+    let failure: string = '';
     const step = (i: number): void => {
       if (i >= folders.length) {
         this.rows = acc;
+        this.registryError = failure;
         this.loaded = true;
         return;
       }
@@ -122,9 +126,17 @@ struct SettingFilesPage {
       this.repo.listByFolder(f).then((list: ManagedFileEntity[]): void => {
         for (const file of list) acc.push({ folder: f, file });
         step(i + 1);
-      }).catch((): void => { step(i + 1); }); // 单 folder 失败不断链
+      }).catch((e: Error): void => {
+        // 单 folder 失败不断链,但必须记住错误:此时 acc 不完整,绝不可当空库
+        if (failure.length === 0) failure = e.message;
+        step(i + 1);
+      });
     };
     step(0);
+  }
+
+  private canClean(): boolean {
+    return this.loaded && this.registryError.length === 0 && !this.cleaning;
   }
 
   private fmtSize(bytes: number): string {
@@ -153,45 +165,69 @@ struct SettingFilesPage {
     });
   }
 
-  // 孤立文件:磁盘存在但 DB 无记录 → unlink(对齐 FilesManager 清理语义)
+  // 孤立文件:磁盘存在但登记无记录且无任何会话引用 → 先预览候选,确认后删除
+  // 安全边界(UI-F20):
+  //   1) 登记库必须健康;损坏/缺失/读失败一律拒绝清理(空快照不是删除依据);
+  //   2) scanManagedOrphans 内部重新拉取健康登记 + 遍历全部会话引用;
+  //   3) 执行时 deleteManagedOrphans 再次核对登记与引用,只删仍然确认的文件。
   private cleanOrphans(): void {
-    // !loaded 时 rows 为空,会把已登记文件全当孤儿 → 必须守卫
     if (this.cleaning || !this.loaded) return;
+    if (this.registryError.length > 0) {
+      promptAction.showToast({ message: '登记库不可用,已禁用清理', duration: 2200 });
+      return;
+    }
     this.cleaning = true;
-    const ctx = AppStorage.get<Context>('abilityContext') as Context;
-    const base: string = ctx.filesDir;
-    const known: string[] = [];
-    for (const r of this.rows) known.push(r.file.relativePath);
-    const folders: string[] =
-      [FILE_FOLDERS_UPLOAD, FILE_FOLDERS_SKILLS, FILE_FOLDERS_CHAT_IMAGES, FILE_FOLDERS_IMAGES];
-    let removed: number = 0;
-    const step = (i: number): void => {
-      if (i >= folders.length) {
-        this.cleaning = false;
-        promptAction.showToast({ message: `已清理 ${removed} 个孤立文件`, duration: 2000 });
+    scanManagedOrphans(getChatRepository()).then((result: OrphanScanResult): void => {
+      this.cleaning = false;
+      if (result.error.length > 0) {
+        this.registryError = result.error;
+        promptAction.showToast({ message: `登记库不可用,已取消清理:${result.error}`, duration: 2600 });
+        return;
+      }
+      if (result.candidates.length === 0) {
+        promptAction.showToast({ message: '没有可清理的孤立文件', duration: 2000 });
         this.reload();
         return;
       }
-      const folder: string = folders[i];
-      try {
-        const names: string[] = fileIo.listFileSync(`${base}/${folder}`);
-        const next = (j: number): void => {
-          if (j >= names.length) { step(i + 1); return; }
-          const rel: string = `${folder}/${names[j]}`;
-          if (known.indexOf(rel) < 0) {
-            try {
-              fileIo.unlinkSync(`${base}/${rel}`);
-              removed++;
-            } catch (e) { /* 单文件失败跳过 */ }
-          }
-          next(j + 1);
-        };
-        next(0);
-      } catch (e) {
-        step(i + 1); // 目录不存在 → 跳过
-      }
-    };
-    step(0);
+      const preview: string = result.candidates.slice(0, 5).join('\n');
+      const more: string = result.candidates.length > 5
+        ? `\n…另有 ${result.candidates.length - 5} 个` : '';
+      this.pendingOrphans = result.candidates;
+      AlertDialog.show({
+        title: '清理孤立文件',
+        message: `以下 ${result.candidates.length} 个文件未登记、也未被任何会话引用,`
+          + `将被永久删除:\n${preview}${more}`,
+        primaryButton: {
+          value: '取消',
+          action: (): void => { this.pendingOrphans = []; },
+        },
+        secondaryButton: {
+          value: '删除',
+          fontColor: ERROR,
+          action: (): void => { this.confirmCleanOrphans(); },
+        },
+      });
+    }).catch((e: Error): void => {
+      this.cleaning = false;
+      promptAction.showToast({ message: `清理前检查失败:${e.message}`, duration: 2200 });
+    });
+  }
+
+  private confirmCleanOrphans(): void {
+    const planned: string[] = this.pendingOrphans;
+    this.pendingOrphans = [];
+    if (planned.length === 0) return;
+    this.cleaning = true;
+    deleteManagedOrphans(getChatRepository(), planned).then((removed: number): void => {
+      this.cleaning = false;
+      promptAction.showToast({ message: `已清理 ${removed} 个孤立文件`, duration: 2000 });
+      this.reload();
+    }).catch((e: Error): void => {
+      this.cleaning = false;
+      this.registryError = e.message;
+      promptAction.showToast({ message: `清理失败:${e.message}`, duration: 2200 });
+      this.reload();
+    });
   }
 
   build(): void {
@@ -204,12 +240,27 @@ struct SettingFilesPage {
           .fontFamily(FONT_MONO_MEDIUM).fontColor(INK3).layoutWeight(1)
         Text(this.cleaning ? '清理中…' : '清理孤立文件')
           .fontSize(BODY2).fontWeight(500).lineHeight(TEXT_STYLES.secondary.lineHeight)
-          .fontFamily(TEXT_STYLES.secondary.family).fontColor(ACCENT)
+          .fontFamily(TEXT_STYLES.secondary.family)
+          .fontColor(this.canClean() ? ACCENT : INK4)
           .onClick((): void => { this.cleanOrphans(); })
       }
       .width('100%').padding({ left: 16, right: 16, top: 10, bottom: 4 })
 
-      if (this.loaded && this.rows.length === 0) {
+      if (this.loaded && this.registryError.length > 0) {
+        Column() {
+          Text('// 登记库不可用')
+            .fontSize(META).fontWeight(500).lineHeight(TEXT_STYLES.meta.lineHeight)
+            .fontFamily(FONT_MONO_MEDIUM).fontColor(ERROR)
+          Text(this.registryError)
+            .fontSize(BODY2).fontWeight(400).lineHeight(TEXT_STYLES.secondary.lineHeight)
+            .fontFamily(TEXT_STYLES.secondary.family).fontColor(INK3)
+            .margin({ top: 8 }).textAlign(TextAlign.Center)
+          Text('已禁用「清理孤立文件」,以免误删仍被引用的附件')
+            .fontSize(BODY2).fontWeight(400).lineHeight(TEXT_STYLES.secondary.lineHeight)
+            .fontFamily(TEXT_STYLES.secondary.family).fontColor(INK4).margin({ top: 8 })
+        }
+        .width('100%').padding({ top: 60, left: 24, right: 24 }).alignItems(HorizontalAlign.Center)
+      } else if (this.loaded && this.rows.length === 0) {
         Column() {
           Text('// 暂无托管文件')
             .fontSize(META).fontWeight(500).lineHeight(TEXT_STYLES.meta.lineHeight)

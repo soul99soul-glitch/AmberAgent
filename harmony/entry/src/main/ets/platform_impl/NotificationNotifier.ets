@@ -96,9 +96,9 @@ export const publishNovelJobNotification = async (
   await publishBasicNotification(notificationIdFor(`novel-polish:${jobId}`), title, text, wa);
 };
 
-export const publishBasicNotification = (
+const buildBasicRequest = (
   id: number, title: string, text: string, wantAgentObj?: object | null,
-): Promise<void> => {
+): notificationManager.NotificationRequest => {
   const request: notificationManager.NotificationRequest = {
     id,
     content: {
@@ -109,14 +109,34 @@ export const publishBasicNotification = (
   if (wantAgentObj !== undefined && wantAgentObj !== null) {
     request.wantAgent = wantAgentObj;
   }
-  return notificationManager.publish(request)
+  return request;
+};
+
+// 普通(尽力而为)通知:失败仅记日志,不 reject —— 保持 fire-and-forget 调用方无 unhandled。
+export const publishBasicNotification = (
+  id: number, title: string, text: string, wantAgentObj?: object | null,
+): Promise<void> => {
+  // 返回真实 publish promise:调用方可 await 到平台落地(R22 完成发布竞态)
+  return notificationManager.publish(buildBasicRequest(id, title, text, wantAgentObj))
     .catch((e: BusinessError): void => {
       hilog.warn(DOMAIN, TAG, 'publish %{public}d failed: %{public}s', id, String(e));
     });
 };
 
-export const cancelNotification = (id: number): void => {
-  notificationManager.cancel(id).catch((e: BusinessError): void => {
+// 严格发布:失败 reject(带日志)。仅供需要据落地结果决定后续动作的调用方
+// (如 notifyCompleted 的 owner/撤同 id 判定);普通通知仍走上面的 best-effort。
+export const publishBasicNotificationStrict = (
+  id: number, title: string, text: string, wantAgentObj?: object | null,
+): Promise<void> => {
+  return notificationManager.publish(buildBasicRequest(id, title, text, wantAgentObj))
+    .then((): void => {}, (e: BusinessError): void => {
+      hilog.warn(DOMAIN, TAG, 'publish %{public}d failed: %{public}s', id, String(e));
+      throw new Error(e.message);
+    });
+};
+
+export const cancelNotification = (id: number): Promise<void> => {
+  return notificationManager.cancel(id).catch((e: BusinessError): void => {
     hilog.warn(DOMAIN, TAG, 'cancel %{public}d failed: %{public}s', id, String(e));
   });
 };
@@ -147,25 +167,44 @@ export const notifyCronFailed = (taskId: string, title: string, errorText: strin
 };
 
 class NotificationNotifierImpl implements Notifier {
-  async notifyRunning(topicId: string, title: string): Promise<void> {
-    const wa: object | null = await buildArticleWantAgent(topicId, title, '');
-    publishBasicNotification(notificationIdFor(topicId), '正在深度阅读', title, wa);
+  // R22:每 topic 通知归属的 run token。notifyRunning/notifyCompleted 记录持有者,
+  // cancelRunning 仅在 token 匹配(或调用方未传 token)时撤销 → 旧 run 的迟到
+  // cancel 不能撤掉新 run 已发布的同 id 通知。
+  private ownerToken: Map<string, number> = new Map<string, number>();
+
+  private claim(topicId: string, runToken?: number): void {
+    if (runToken !== undefined) this.ownerToken.set(topicId, runToken);
   }
 
-  async notifyCompleted(topicId: string, title: string, complete: boolean): Promise<void> {
+  async notifyRunning(topicId: string, title: string, runToken?: number): Promise<void> {
     const wa: object | null = await buildArticleWantAgent(topicId, title, '');
-    publishBasicNotification(notificationIdFor(topicId),
+    this.claim(topicId, runToken);
+    // await 真实 publish:调用方 await 返回即平台已落地(R22)
+    await publishBasicNotification(notificationIdFor(topicId), '正在深度阅读', title, wa);
+  }
+
+  async notifyCompleted(topicId: string, title: string, complete: boolean, runToken?: number): Promise<void> {
+    const wa: object | null = await buildArticleWantAgent(topicId, title, '');
+    this.claim(topicId, runToken);
+    // 严格 await:发布失败必须上抛(P2-3),不能对调度层谎报「已发布」,
+    // 否则 finally 不撤同一 id,「正在深度阅读」永久残留。
+    await publishBasicNotificationStrict(notificationIdFor(topicId),
       complete ? '深度阅读完成' : '深度阅读部分完成', title, wa);
   }
 
-  async notifyFailed(topicId: string, title: string, errorMessage: string): Promise<void> {
+  async notifyFailed(topicId: string, title: string, errorMessage: string, runToken?: number): Promise<void> {
     const wa: object | null = await buildArticleWantAgent(topicId, title, '');
-    publishBasicNotification(notificationIdFor(topicId), '深度阅读失败',
+    this.claim(topicId, runToken);
+    await publishBasicNotification(notificationIdFor(topicId), '深度阅读失败',
       `${title} — ${errorMessage}`.slice(0, 120), wa);
   }
 
-  async cancelRunning(topicId: string): Promise<void> {
-    cancelNotification(notificationIdFor(topicId));
+  async cancelRunning(topicId: string, runToken?: number): Promise<void> {
+    const owner: number | undefined = this.ownerToken.get(topicId);
+    // 旧 run token 不可取消新通知:owner 已换且调用方仍带旧 token → no-op
+    if (runToken !== undefined && owner !== undefined && owner !== runToken) return;
+    this.ownerToken.delete(topicId);
+    await cancelNotification(notificationIdFor(topicId));
   }
 }
 

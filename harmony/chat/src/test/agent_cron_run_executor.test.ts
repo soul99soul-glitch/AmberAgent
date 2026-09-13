@@ -67,7 +67,7 @@ test('isCronTaskDue', () => {
   assert.equal(isCronTaskDue({ ...t, enabled: false }, 100), false);
 });
 
-test('runCronTaskOnce: success marks completed and notifies', async () => {
+test('runCronTaskOnce: success notifies without marking (scheduler owns state)', async () => {
   const manager = await makeManager();
   const repository = createMemoryConversationRepository();
   const events: string[] = [];
@@ -110,7 +110,7 @@ test('runCronTaskOnce: success marks completed and notifies', async () => {
   assert.ok(saved!.messageNodes.length >= 2);
 });
 
-test('runCronTaskOnce: failure marks failed', async () => {
+test('runCronTaskOnce: failure notifies without marking (scheduler owns state)', async () => {
   const manager = await makeManager();
   const repository = createMemoryConversationRepository();
   const events: string[] = [];

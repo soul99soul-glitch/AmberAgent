@@ -6,6 +6,7 @@
 // 而非 class mutation(ArkTS 友好,与 observable.ts 一致)。
 
 import type { HttpClient } from '../platform/http.ts';
+import type { AbortSignalLike } from '../platform/runtime_api.ts';
 import type { SearchProviderRegistry, SearchHit } from '../platform/search.ts';
 import type { ScoredImageCandidate, ImageCandidate } from './image_scorer.ts';
 import {
@@ -38,6 +39,9 @@ export interface SourcePrefetcher {
     title: string,
     seedUrl: string | null,
     force: boolean,
+    // 取消贯穿(R20):provider search / HTTP fetch 均透传 signal,取消即真实中止;
+    // 可选参数,既有调用方不变。
+    signal?: AbortSignalLike,
   ): Promise<DeepReadSource[]>;
   /** 测试/诊断用:查看 LRU cache 大小 */
   cacheSize(): number;
@@ -77,12 +81,13 @@ export const createSourcePrefetcher = (
     source: string,
     minChars: number,
     fetchOpts: { autoApproveAll: boolean; autoApproveHighRisk: boolean },
+    signal?: AbortSignalLike,
   ): Promise<DeepReadSource | null> => {
     // 私网 gate(默认不允许;caller 控制 flags)
     if (!urlAllowedForBackgroundFetch(url, fetchOpts.autoApproveAll, fetchOpts.autoApproveHighRisk)) {
       return null;
     }
-    const resp = await http.fetch({ url, method: 'GET', headers: {} });
+    const resp = await http.fetch({ url, method: 'GET', headers: {} }, { signal });
     if (resp.status !== 200) return null;
     const html = resp.body;
     const evidenceText = extractReadableText(html, url);
@@ -109,7 +114,10 @@ export const createSourcePrefetcher = (
     title: string,
     seedUrl: string | null,
     force: boolean,
+    signal?: AbortSignalLike,
   ): Promise<DeepReadSource[]> => {
+    // 取消已发生 → 不查缓存/不发起任何请求,立即返回空(调用方统一归一 aborted)
+    if (isAborted(signal)) return [];
     const cacheKey = `${topicId}|${seedUrl ?? ''}`;
     if (!force) {
       const cached = cache.get(cacheKey);
@@ -126,14 +134,15 @@ export const createSourcePrefetcher = (
     // 36s wall budget
     const deadline = Date.now() + PREFETCH_WALL_BUDGET_MS;
 
-    // 1. 多 provider 并行搜索(失败 provider → 空 bucket)
+    // 1. 多 provider 并行搜索(失败 provider → 空 bucket;signal 透传真实取消)
     const queries = buildDeepReadQueries(title, seedUrl);
     const providers = [...searchRegistry.enabled(), ...searchRegistry.fallback()];
     // catch 在 withDeadline 外:provider 超时只丢该 bucket,
     // 不让 Promise.all 整体失败丢掉其它 provider 已完成的结果
     const searchBuckets = await Promise.all(
-      providers.map(p => withDeadline(deadline, p.search(queries)).catch(() => [] as SearchHit[])),
+      providers.map(p => withDeadline(deadline, p.search(queries, signal), signal).catch(() => [] as SearchHit[])),
     );
+    if (isAborted(signal)) return [];
     const interleaved = interleaveSearchResults(searchBuckets);
 
     // 2. seed URL 直接 fetch(优先,低阈值)— 即使私网也走 gate
@@ -141,20 +150,24 @@ export const createSourcePrefetcher = (
     if (seedUrl) {
       const seedSource = await withDeadline(
         deadline,
-        fetchSource(seedUrl, title, 'seed', MIN_SEED_SOURCE_CHARS, { autoApproveAll: false, autoApproveHighRisk: false }),
+        fetchSource(seedUrl, title, 'seed', MIN_SEED_SOURCE_CHARS, { autoApproveAll: false, autoApproveHighRisk: false }, signal),
+        signal,
       ).catch(() => null); // catch 在外:seed 超时只丢 seed,不中止整个 collect
       if (seedSource) sources.push(seedSource);
     }
+    if (isAborted(signal)) return [];
 
     // 3. 并行 scrape + extract + score(失败单个 → null,不影响其他)
     const scraped = await Promise.all(
       interleaved.slice(0, TOP_SCRAPE_CANDIDATES).map(hit =>
         withDeadline(
           deadline,
-          fetchSource(hit.url, hit.title, hit.source, MIN_SOURCE_CHARS, { autoApproveAll: false, autoApproveHighRisk: false }),
+          fetchSource(hit.url, hit.title, hit.source, MIN_SOURCE_CHARS, { autoApproveAll: false, autoApproveHighRisk: false }, signal),
+          signal,
         ).catch(() => null),
       ),
     );
+    if (isAborted(signal)) return [];
     for (const s of scraped) {
       if (s) sources.push(s);
     }
@@ -244,7 +257,12 @@ const makeSourceId = (): string => {
 
 // 带 deadline 的 promise 包装:到期立即拒绝 — 原实现 return p 会无限等待
 // 未完成的请求(调用方 collect 卡死)
-const withDeadline = async <T>(deadline: number, p: Promise<T>): Promise<T> => {
+// signal 可选:取消时立即拒绝(监听 abort;settle 后移除监听,避免泄漏)
+const withDeadline = async <T>(deadline: number, p: Promise<T>, signal?: AbortSignalLike): Promise<T> => {
+  if (isAborted(signal)) {
+    p.catch((): void => {}); // 消化败者 rejection
+    throw makeAbortedError();
+  }
   const remaining = deadline - Date.now();
   if (remaining <= 0) {
     p.catch((): void => {}); // 只挂消化 handler,不等待(原请求可能永不完成)
@@ -255,11 +273,37 @@ const withDeadline = async <T>(deadline: number, p: Promise<T>): Promise<T> => {
     timer = setTimeout((): void => { reject(new Error('prefetch deadline exceeded')); }, remaining);
   });
   timeoutPromise.catch((): void => {}); // 败者 rejection 不外溢
+
+  let onAbort: (() => void) | null = null;
+  let abortPromise: Promise<T> = new Promise<T>((): void => {}); // 无 signal 时永挂,race 不误触
+  if (signal !== undefined) {
+    // 捕获局部引用:可选方法在闭包内不再被 TS 收窄
+    const addListener = signal.addEventListener;
+    if (typeof addListener === 'function') {
+      abortPromise = new Promise<T>((_, reject): void => {
+        onAbort = (): void => { reject(makeAbortedError()); };
+        addListener('abort', onAbort);
+      });
+      abortPromise.catch((): void => {});
+    }
+  }
   try {
-    return await Promise.race([p, timeoutPromise]);
+    return await Promise.race([p, timeoutPromise, abortPromise]);
   } finally {
     if (timer !== null) clearTimeout(timer); // 快请求不留定时器
+    if (signal !== undefined && onAbort !== null && typeof signal.removeEventListener === 'function') {
+      signal.removeEventListener('abort', onAbort);
+    }
   }
+};
+
+const isAborted = (signal?: AbortSignalLike): boolean =>
+  signal !== undefined && signal.aborted;
+
+const makeAbortedError = (): Error => {
+  const e = new Error('aborted');
+  e.name = 'AbortError';
+  return e;
 };
 
 // 重新导出辅助(测试可能用到)

@@ -124,17 +124,21 @@ export const createOpenAIResponsesApi = (deps: OpenAIResponsesApiDeps): OpenAIRe
     const request = buildHttpRequest(deps, messages, params, true, resume);
     const reconciler = new ResponseStreamReconciler();
     const assembler = new SseAssembler();
-    const state: { error: Error | null; done: boolean } = { error: null, done: false };
+    const state: { error: Error | null; done: boolean; sawEvent: boolean } =
+      { error: null, done: false, sawEvent: false };
     let sequence = 0;
 
-    await deps.http.fetchStream(request, {
+    const resp = await deps.http.fetchStream(request, {
       signal: opts?.signal,
       onDataEnd: opts?.onDataEnd,
+      // R18:response.completed/incomplete/[DONE]/error 为协议终态 → 立即收口
+      shouldStop: (): boolean => state.done || state.error !== null,
       onChunk: (chunk: ArrayBuffer, end: boolean): void => {
         if (state.error !== null || state.done) return;
         try {
           const events: SseEvent[] = assembler.feed(chunk);
           if (end) events.push(...assembler.flush());
+          if (events.length > 0) state.sawEvent = true;
           for (const event of events) {
             const payloads = normalizeOpenAIStreamDataLines(event.data);
             if (payloads.length === 0 && event.data.indexOf('[DONE]') >= 0) {
@@ -186,6 +190,14 @@ export const createOpenAIResponsesApi = (deps: OpenAIResponsesApiDeps): OpenAIRe
       },
     });
     if (state.error !== null) throw state.error;
+    if (state.done) return;
+    if (resp.status < 200 || resp.status >= 300) {
+      throw errorFromFailure(resp.status, resp.body);
+    }
+    // R06:2xx 但零 SSE 事件(网关 200 回普通 JSON)→ 不是成功流
+    if (!state.sawEvent) {
+      throw errorFromFailure(resp.status, resp.body);
+    }
   };
 
   const generateText = async (
