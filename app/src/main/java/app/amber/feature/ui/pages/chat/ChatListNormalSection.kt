@@ -1,5 +1,6 @@
 package app.amber.feature.ui.pages.chat
 
+import app.amber.feature.ui.utils.amberTraceMeasure
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.AnimatedVisibilityScope
 import androidx.compose.animation.animateContentSize
@@ -475,6 +476,10 @@ internal fun ChatListNormal(
                     )
         }
     }
+    androidx.compose.runtime.CompositionLocalProvider(
+        app.amber.feature.ui.context.LocalReasoningScrollAnchor provides
+            app.amber.feature.ui.context.rememberReasoningScrollAnchor(state),
+    ) {
     Box(
         modifier = Modifier
             .fillMaxSize(),
@@ -508,6 +513,7 @@ internal fun ChatListNormal(
             verticalArrangement = Arrangement.spacedBy(0.dp),
             modifier = Modifier
                 .fillMaxSize()
+                .amberTraceMeasure("Amber Chat list measure")
                 .then(
                     if (useTimelineHaze) Modifier.hazeSource(state = hazeState) else Modifier
                 )
@@ -1060,6 +1066,7 @@ internal fun ChatListNormal(
             }
             }
         }
+    }
     }
     }
 }

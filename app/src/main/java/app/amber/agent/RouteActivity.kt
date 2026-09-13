@@ -129,6 +129,7 @@ import app.amber.feature.ui.pages.setting.SettingAgentPermissionsPage
 import app.amber.feature.ui.pages.setting.SettingCapabilityPermissionsPage
 import app.amber.feature.ui.pages.setting.SettingAgentRuntimeTasksPage
 import app.amber.feature.ui.pages.setting.SettingCronTasksPage
+import app.amber.feature.ui.pages.setting.SettingAppearancePage
 import app.amber.feature.ui.pages.setting.SettingDisplayPage
 import app.amber.feature.ui.pages.setting.SettingExperimentalICloudPage
 import app.amber.feature.ui.pages.setting.SettingExperimentalModelCouncilPage
@@ -187,8 +188,9 @@ internal fun <S> AnimatedContentTransitionScope<S>.routePushTransition(): Conten
 
 internal fun <S> AnimatedContentTransitionScope<S>.routePopTransition(
     predictive: Boolean = false,
+    chat: Boolean = false,
 ): ContentTransform {
-    val animationSpec = if (predictive) PredictiveRouteTransitionSpec else RouteTransitionSpec
+    val animationSpec = if (predictive && !chat) PredictiveRouteTransitionSpec else RouteTransitionSpec
     return slideInHorizontally(animationSpec = animationSpec) { -it } togetherWith
         slideOutHorizontally(animationSpec = animationSpec) { it }
 }
@@ -546,7 +548,10 @@ class RouteActivity : ComponentActivity() {
             }
         }
 
-        val backStack = rememberNavBackStack(startScreen)
+        val backStack = rememberNavBackStack(
+            *if (startScreen is Screen.Chat) arrayOf(Screen.SessionHome, startScreen)
+            else arrayOf(startScreen)
+        )
         var currentIntent by remember { mutableStateOf(intent) }
         SideEffect {
             this@RouteActivity.navStack = backStack
@@ -617,7 +622,13 @@ class RouteActivity : ComponentActivity() {
                         popTransitionSpec = { routePopTransition() },
                         predictivePopTransitionSpec = { routePopTransition(predictive = true) },
                         entryProvider = entryProvider {
-                            entry<Screen.Chat> { key ->
+                            entry<Screen.Chat>(
+                                // System back from chat uses the same easing and duration as
+                                // opening it, including the predictive gesture completion.
+                                metadata = NavDisplay.predictivePopTransitionSpec {
+                                    routePopTransition(predictive = true, chat = true)
+                                },
+                            ) { key ->
                                 ChatPage(
                                     id = Uuid.parse(key.id),
                                     text = key.text,
@@ -708,6 +719,10 @@ class RouteActivity : ComponentActivity() {
 
                             entry<Screen.SettingDisplay> {
                                 SettingDisplayPage()
+                            }
+
+                            entry<Screen.SettingAppearance> {
+                                SettingAppearancePage()
                             }
 
                             entry<Screen.SettingProvider> {
@@ -1075,6 +1090,9 @@ sealed interface Screen : NavKey {
 
     @Serializable
     data object SettingDisplay : Screen
+
+    @Serializable
+    data object SettingAppearance : Screen
 
     @Serializable
     data object SettingProvider : Screen

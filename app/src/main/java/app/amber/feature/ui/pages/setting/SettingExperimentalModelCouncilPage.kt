@@ -1,6 +1,5 @@
 package app.amber.feature.ui.pages.setting
 
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
@@ -378,12 +377,13 @@ private fun CouncilHeroCard(
 ) {
     val tokens = LocalAmberTokens.current
     val type = LocalAmberType.current
+    val shape = RoundedCornerShape(14.dp)
     Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(14.dp),
+        modifier = Modifier
+            .fillMaxWidth(),
+        shape = shape,
         color = tokens.surface,
         contentColor = tokens.ink,
-        border = BorderStroke(1.dp, tokens.line),
     ) {
         Row(
             modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
@@ -416,17 +416,18 @@ private fun CouncilSectionCard(
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val tokens = LocalAmberTokens.current
+    val shape = RoundedCornerShape(14.dp)
     Column(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         SettingSectionTitle(title, modifier = Modifier.padding(top = 10.dp))
         Surface(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(14.dp),
+            modifier = Modifier
+                .fillMaxWidth(),
+            shape = shape,
             color = tokens.surface,
             contentColor = tokens.ink,
-            border = BorderStroke(1.dp, tokens.line),
         ) {
             Column(
                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
@@ -486,10 +487,10 @@ private fun ModelCouncilSeatEditor(
         settingsProviders.flatMap { it.models }.firstOrNull { it.type == ModelType.CHAT }
     }
     Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(8.dp),
+        modifier = Modifier
+            .fillMaxWidth(),
+        shape = RoundedCornerShape(12.dp),
         color = workspace.paper,
-        border = BorderStroke(1.dp, workspace.hairline),
     ) {
         Column(
             modifier = Modifier.padding(horizontal = 12.dp, vertical = 12.dp),
@@ -501,10 +502,9 @@ private fun ModelCouncilSeatEditor(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 Surface(
-                    shape = RoundedCornerShape(6.dp),
+                    shape = RoundedCornerShape(999.dp),
                     color = workspace.row,
                     contentColor = workspace.faint,
-                    border = BorderStroke(1.dp, workspace.hairline),
                 ) {
                     Text(
                         text = "#${index + 1}",

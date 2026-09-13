@@ -26,7 +26,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -34,7 +33,6 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
@@ -43,6 +41,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import app.amber.feature.ui.components.ds.pressable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -59,6 +58,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.amber.agent.R
 import app.amber.agent.Screen
@@ -281,28 +281,38 @@ fun NovelProjectsPage(
             )
         },
         floatingActionButton = {
-            FloatingActionButton(
-                onClick = { if (!state.busy) showCreate = true },
+            Box(
                 modifier = Modifier
-                    .height(56.dp)
-                    .widthIn(min = 152.dp),
-                containerColor = tokens.accent,
-                contentColor = tokens.accentInk,
-                shape = RoundedCornerShape(999.dp),
+                    .heightIn(min = 48.dp)
+                    .pressable(
+                        enabled = !state.busy,
+                        onClick = { showCreate = true },
+                    ),
+                contentAlignment = Alignment.Center,
             ) {
                 Row(
-                    modifier = Modifier.padding(horizontal = 22.dp),
+                    modifier = Modifier
+                        .height(40.dp)
+                        .clip(RoundedCornerShape(999.dp))
+                        .background(tokens.accent)
+                        .padding(horizontal = 12.dp),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
                     Icon(
                         Lucide.Plus,
                         contentDescription = stringResource(R.string.novel_new_project),
-                        modifier = Modifier.size(20.dp),
+                        modifier = Modifier.size(18.dp),
+                        tint = tokens.accentInk,
                     )
                     Text(
                         text = stringResource(R.string.novel_new_project),
-                        fontWeight = FontWeight.SemiBold,
+                        style = type.meta.copy(
+                            fontSize = 13.sp,
+                            lineHeight = 16.sp,
+                            fontWeight = FontWeight.Medium,
+                        ),
+                        color = tokens.accentInk,
                     )
                 }
             }

@@ -444,6 +444,7 @@ internal fun applyBackfillAndSeed(it: Settings): Settings {
  * - Filter favoriteModels — only models that still exist in providers survive
  * - Filter searchEnabledServiceIds — only services that still exist survive
  * - Dedup modeInjections / lorebooks / quickMessages (by id)
+ * - Normalize display fields whose settings controls were removed
  */
 internal fun applyCrossDomainConsistency(settings: Settings): Settings {
     val migratedSettings = settings.withMigratedMemoryDreamLegacy().withMigratedPromptDefaults()
@@ -465,6 +466,15 @@ internal fun applyCrossDomainConsistency(settings: Settings): Settings {
                 .orEmpty()
         }
     return migratedSettings.copy(
+        // These controls are intentionally no longer user-configurable. Keep the
+        // canonical values at the settings boundary so old persisted snapshots and
+        // imported backups cannot re-enable the removed display switches.
+        displaySetting = migratedSettings.displaySetting.copy(
+            showModelIcon = false,
+            showDateBelowName = false,
+            autoCloseThinking = true,
+            enableLatexRendering = true,
+        ),
         searchServiceSelected = cleanedSearchSelected,
         searchEnabledServiceIds = cleanedSearchEnabledIds,
         providers = migratedSettings.providers.distinctBy { it.id }.map { provider ->

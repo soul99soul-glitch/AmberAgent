@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -16,6 +17,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -33,7 +35,6 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Box
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -46,6 +47,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
@@ -82,7 +84,6 @@ import app.amber.feature.ui.components.nav.BackButton
 import app.amber.feature.ui.components.ui.ConfirmDialog
 import app.amber.feature.ui.components.ui.WorkspaceLeadingIcon
 import app.amber.feature.ui.components.ui.WorkspaceStatusPill
-import app.amber.feature.ui.components.ui.WorkspaceTextButton
 import app.amber.feature.ui.components.ui.WorkspaceTone
 import app.amber.feature.ui.components.ui.WorkspaceTopBar
 import app.amber.feature.ui.context.LocalNavController
@@ -124,35 +125,39 @@ fun SkillsPage() {
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
             contentPadding = innerPadding + PaddingValues(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(0.dp),
         ) {
             item {
-                SkillLibraryStatusCard(
-                    installedCount = skills.size,
-                    enabledCount = skills.count { it.name in enabledSkillNames },
-                    disabledCount = skills.count { it.name !in enabledSkillNames },
-                    issueCount = skillIssues.size,
-                    onAdd = { showAddDialog = true },
-                    onImport = { showImportDialog = true },
-                    onRefresh = { vm.loadSkills() },
-                    onOptimizeAll = {
-                        navigateToChatPage(
-                            navigator = navController,
-                            initText = buildOptimizeAllPrompt(skills.map { it.name }),
-                        )
-                    },
-                )
+                Column(Modifier.padding(bottom = 8.dp)) {
+                    SkillLibraryStatusCard(
+                        installedCount = skills.size,
+                        enabledCount = skills.count { it.name in enabledSkillNames },
+                        disabledCount = skills.count { it.name !in enabledSkillNames },
+                        issueCount = skillIssues.size,
+                        onAdd = { showAddDialog = true },
+                        onImport = { showImportDialog = true },
+                        onRefresh = { vm.loadSkills() },
+                        onOptimizeAll = {
+                            navigateToChatPage(
+                                navigator = navController,
+                                initText = buildOptimizeAllPrompt(skills.map { it.name }),
+                            )
+                        },
+                    )
+                }
             }
 
             items(skillIssues, key = { it.directoryName }) { issue ->
-                SkillIssueCard(issue = issue)
+                Column(Modifier.padding(bottom = 8.dp)) {
+                    SkillIssueCard(issue = issue)
+                }
             }
 
             if (skills.isNotEmpty()) {
                 item {
                     SectionLabel(
                         text = stringResource(R.string.skills_page_installed_count, skills.size),
-                        modifier = Modifier.padding(top = 8.dp),
+                        modifier = Modifier.padding(top = 8.dp, bottom = 8.dp),
                     )
                 }
             }
@@ -192,7 +197,16 @@ fun SkillsPage() {
                     key = { _, skill -> skill.name },
                 ) { index, skill ->
                     Column(modifier = Modifier.fillMaxWidth()) {
-                        if (index > 0) Hairline()
+                        if (index > 0) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .background(LocalAmberTokens.current.surface)
+                                    .padding(start = 68.dp, end = 16.dp)
+                                    .heightIn(min = 0.5.dp)
+                                    .background(LocalAmberTokens.current.line.copy(alpha = 0.46f)),
+                            )
+                        }
                         SkillCard(
                             skill = skill,
                             enabled = skill.name in enabledSkillNames,
@@ -281,7 +295,7 @@ private fun SkillLibraryStatusCard(
     AmberCard(
         modifier = Modifier.fillMaxWidth(),
         containerColor = tokens.surface,
-        borderColor = tokens.line,
+        borderColor = Color.Transparent,
     ) {
         Column(
             modifier = Modifier
@@ -340,32 +354,30 @@ private fun SkillLibraryStatusCard(
             }
             Hairline()
             Row(
-                modifier = Modifier.horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 SkillActionButton(
-                    icon = Lucide.Plus,
                     label = stringResource(R.string.skills_page_add_title),
                     onClick = onAdd,
                     accent = true,
+                    modifier = Modifier.weight(1f),
                 )
                 SkillActionButton(
-                    icon = Lucide.Download,
-                    label = stringResource(R.string.skills_page_import_from_github),
+                    label = stringResource(R.string.skills_page_github_action_short),
                     onClick = onImport,
+                    modifier = Modifier.weight(1f),
                 )
                 SkillActionButton(
-                    icon = Lucide.RefreshCw,
                     label = stringResource(R.string.skills_page_refresh),
                     onClick = onRefresh,
+                    modifier = Modifier.weight(1f),
                 )
                 if (installedCount > 0) {
-                    WorkspaceTextButton(
-                        text = stringResource(R.string.skills_page_optimize_all),
+                    SkillActionButton(
+                        label = stringResource(R.string.skills_page_optimize_all),
                         onClick = onOptimizeAll,
-                        modifier = Modifier.heightIn(min = 48.dp),
-                        tone = WorkspaceTone.Accent,
+                        modifier = Modifier.weight(1f),
                     )
                 }
             }
@@ -375,33 +387,37 @@ private fun SkillLibraryStatusCard(
 
 @Composable
 private fun SkillActionButton(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
     label: String,
     onClick: () -> Unit,
     accent: Boolean = false,
+    modifier: Modifier = Modifier,
 ) {
     val tokens = LocalAmberTokens.current
     val type = LocalAmberType.current
-    Row(
-        modifier = Modifier
+    Box(
+        modifier = modifier
             .heightIn(min = 48.dp)
-            .pressable(onClick = onClick)
-            .padding(horizontal = 2.dp),
-        horizontalArrangement = Arrangement.spacedBy(7.dp),
-        verticalAlignment = Alignment.CenterVertically,
+            .pressable(onClick = onClick),
+        contentAlignment = Alignment.Center,
     ) {
-        Icon(
-            icon,
-            contentDescription = null,
-            modifier = Modifier.size(20.dp),
-            tint = if (accent) tokens.accent else tokens.ink2,
-        )
-        Text(
-            label,
-            style = type.tinyTag,
-            color = if (accent) tokens.accent else tokens.ink2,
-            maxLines = 1,
-        )
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(28.dp)
+                .clip(CircleShape)
+                .background(if (accent) tokens.accent.copy(alpha = 0.10f) else tokens.surface2)
+                .padding(horizontal = 6.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                label,
+                style = type.tinyTag,
+                color = tokens.ink2,
+                maxLines = 1,
+                softWrap = false,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
     }
 }
 
@@ -468,13 +484,12 @@ private fun SkillCard(
         bottomStart = if (groupedLast) 14.dp else 0.dp,
         bottomEnd = if (groupedLast) 14.dp else 0.dp,
     )
-
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .heightIn(min = 64.dp)
+            .clip(rowShape)
             .background(tokens.surface, rowShape)
-            .border(1.dp, tokens.line, rowShape)
             .pressable(onClick = onClick)
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,

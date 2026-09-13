@@ -66,7 +66,6 @@ import app.amber.feature.ui.components.ds.amberCanvas
 import app.amber.core.settings.isNotConfigured
 import app.amber.core.files.FilesManager
 import app.amber.feature.ui.components.nav.BackButton
-import app.amber.feature.ui.components.ui.Select
 import app.amber.feature.ui.components.ui.UIAvatar
 import app.amber.feature.ui.components.ui.WorkspaceLeadingIcon
 import app.amber.feature.ui.components.ui.WorkspaceTone
@@ -74,8 +73,6 @@ import app.amber.feature.ui.components.ui.WorkspaceTopBar
 import app.amber.feature.ui.components.ui.workspaceColors
 import app.amber.feature.ui.context.LocalNavController
 import app.amber.feature.ui.context.Navigator
-import app.amber.feature.ui.hooks.rememberColorMode
-import app.amber.feature.ui.theme.ColorMode
 import app.amber.feature.ui.theme.LocalAmberType
 import app.amber.core.utils.plus
 import org.koin.androidx.compose.koinViewModel
@@ -139,35 +136,15 @@ fun SettingPage(vm: SettingVM = koinViewModel()) {
             }
 
             item("generalSettings") {
-                var colorMode by rememberColorMode()
                 SettingCardGroup(
                     title = stringResource(R.string.setting_page_general_settings),
                 ) {
                     item(
                         modifier = Modifier.settingSingleLine(),
+                        onClick = { navController.navigate(Screen.SettingAppearance) },
                         leadingContent = { SettingLeadingIcon(Lucide.Sun) },
-                        trailingContent = {
-                            Select(
-                                options = ColorMode.entries,
-                                selectedOption = colorMode,
-                                onOptionSelected = {
-                                    colorMode = it
-                                    navController.navigate(Screen.Setting) {
-                                        popUpTo(Screen.Setting) {
-                                            inclusive = true
-                                        }
-                                    }
-                                },
-                                optionToString = {
-                                    when (it) {
-                                        ColorMode.SYSTEM -> stringResource(R.string.setting_page_color_mode_system)
-                                        ColorMode.LIGHT -> stringResource(R.string.setting_page_color_mode_light)
-                                        ColorMode.DARK -> stringResource(R.string.setting_page_color_mode_dark)
-                                    }
-                                },
-                            )
-                        },
                         headlineContent = { SettingRowTitle(stringResource(R.string.setting_page_appearance)) },
+                        trailingContent = { SettingChevron() },
                     )
                     item(
                         modifier = Modifier.settingSingleLine(),
@@ -385,6 +362,7 @@ fun SettingPage(vm: SettingVM = koinViewModel()) {
             }
         }
     }
+
 }
 
 @Composable

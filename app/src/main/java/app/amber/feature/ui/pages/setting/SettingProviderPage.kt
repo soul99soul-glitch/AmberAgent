@@ -37,10 +37,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.geometry.CornerRadius
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Scaffold
@@ -296,7 +292,7 @@ private fun ProviderRegistryFilter(
             .height(44.dp)
             .clip(shape)
             .background(t.surface2)
-            .border(1.dp, t.line, shape)
+            .border(1.dp, t.line.copy(alpha = 0.52f), shape)
             .padding(horizontal = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(9.dp),
@@ -373,23 +369,9 @@ private fun ProviderGroupRow(
         modifier = modifier
             .fillMaxWidth()
             .clip(shape)
-            .background(t.surface)
-            .drawBehind {
-                val stroke = 1.dp.toPx()
-                val radius = 14.dp.toPx()
-                val half = stroke / 2f
-                val top = if (first) half else -radius
-                val bottom = if (last) size.height - half else size.height + radius
-                drawRoundRect(
-                    color = t.line,
-                    topLeft = Offset(half, top),
-                    size = Size(size.width - stroke, bottom - top),
-                    cornerRadius = CornerRadius(radius, radius),
-                    style = androidx.compose.ui.graphics.drawscope.Stroke(width = stroke),
-                )
-            },
+            .background(t.surface),
     ) {
-        if (!first) ProviderHairline()
+        if (!first) ProviderHairline(Modifier.padding(start = 66.dp, end = 14.dp))
         content()
     }
 }
@@ -915,7 +897,7 @@ private fun ProviderRegistryAuthBadge(text: String) {
         modifier = Modifier
             .clip(CircleShape)
             .background(t.surface2)
-            .border(1.dp, t.line, CircleShape)
+            .border(1.dp, t.line.copy(alpha = 0.48f), CircleShape)
             .padding(horizontal = 8.dp, vertical = 3.dp),
         contentAlignment = Alignment.Center,
     ) {

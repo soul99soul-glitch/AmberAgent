@@ -1,11 +1,12 @@
 package app.amber.feature.ui.pages.setting
 
 import com.composables.icons.lucide.Lucide
-import com.composables.icons.lucide.ArrowDown
-import com.composables.icons.lucide.ArrowUp
-import com.composables.icons.lucide.FileInput
+import com.composables.icons.lucide.ChevronDown
+import com.composables.icons.lucide.ChevronUp
+import com.composables.icons.lucide.Download
 import com.composables.icons.lucide.Plus
 import com.composables.icons.lucide.Settings
+import com.composables.icons.lucide.Server
 import com.composables.icons.lucide.Trash2
 import com.composables.icons.lucide.X
 import androidx.compose.animation.animateContentSize
@@ -37,7 +38,6 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -47,9 +47,6 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SecondaryTabRow
-import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.SegmentedButtonDefaults
-import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Surface
 import androidx.compose.material3.SwipeToDismissBox
 import app.amber.feature.ui.components.ui.Switch
@@ -98,16 +95,28 @@ import app.amber.core.ai.mcp.McpTool
 import app.amber.core.ai.mcp.RealMcpConnectPreflight
 import app.amber.feature.runtime.CapabilityPermissionStore
 import app.amber.feature.ui.components.nav.BackButton
-import app.amber.feature.ui.components.ui.FormItem
 import app.amber.feature.ui.components.ui.Tag
 import app.amber.feature.ui.components.ui.TagType
 import app.amber.feature.ui.components.ui.WorkspaceTopBar
 import app.amber.feature.ui.components.ui.WorkspaceTone
 import app.amber.feature.ui.components.ui.workspaceColors
+import app.amber.feature.ui.pages.setting.components.ProviderCard
+import app.amber.feature.ui.pages.setting.components.ProviderCommandButton
+import app.amber.feature.ui.pages.setting.components.ProviderGhostButton
+import app.amber.feature.ui.pages.setting.components.ProviderIconButton
+import app.amber.feature.ui.pages.setting.components.ProviderLabeledField
+import app.amber.feature.ui.pages.setting.components.ProviderPillSeg
+import app.amber.feature.ui.pages.setting.components.ProviderSecretField
+import app.amber.feature.ui.pages.setting.components.ProviderSegOption
+import app.amber.feature.ui.pages.setting.components.ProviderSheetGrabber
+import app.amber.feature.ui.pages.setting.components.ProviderSmallIconButton
+import app.amber.feature.ui.pages.setting.components.ProviderTextField
 import app.amber.feature.ui.hooks.EditState
 import app.amber.feature.ui.hooks.EditStateContent
 import app.amber.feature.ui.hooks.useEditState
 import app.amber.feature.ui.theme.CustomColors
+import app.amber.feature.ui.theme.LocalAmberTokens
+import app.amber.feature.ui.theme.LocalAmberType
 import app.amber.feature.ui.theme.extendColors
 import org.koin.androidx.compose.koinViewModel
 import org.koin.compose.koinInject
@@ -162,26 +171,17 @@ fun SettingMcpPage(vm: SettingVM = koinViewModel()) {
                 title = stringResource(R.string.setting_mcp_page_title),
                 navigationIcon = { BackButton() },
                 actions = {
-                    IconButton(
-                        onClick = {
-                            showImportDialog = true
-                        }
-                    ) {
-                        Icon(
-                            Lucide.FileInput,
-                            contentDescription = stringResource(R.string.setting_mcp_page_import_title),
-                        )
-                    }
-                    IconButton(
-                        onClick = {
-                            creationState.open(McpServerConfig.StreamableHTTPServer())
-                        }
-                    ) {
-                        Icon(
-                            Lucide.Plus,
-                            contentDescription = stringResource(R.string.add),
-                        )
-                    }
+                    ProviderGhostButton(
+                        text = stringResource(R.string.setting_mcp_page_import_confirm),
+                        imageVector = Lucide.Download,
+                        modifier = Modifier.padding(end = 6.dp),
+                        onClick = { showImportDialog = true },
+                    )
+                    ProviderGhostButton(
+                        text = stringResource(R.string.add),
+                        imageVector = Lucide.Plus,
+                        onClick = { creationState.open(McpServerConfig.StreamableHTTPServer()) },
+                    )
                 },
                 scrollBehavior = scrollBehavior,
             )
@@ -294,38 +294,24 @@ private fun McpServerItem(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
             ) {
-                FilledTonalIconButton(
-                    onClick = {
-                        scope.launch { dismissBoxState.reset() }
-                    }
-                ) {
-                    Icon(
-                        Lucide.X,
-                        contentDescription = stringResource(R.string.cancel),
-                    )
-                }
-                FilledTonalIconButton(
-                    onClick = {
-                        onDelete()
-                    }
-                ) {
-                    Icon(
-                        Lucide.Trash2,
-                        contentDescription = stringResource(R.string.delete),
-                    )
-                }
+                ProviderSmallIconButton(
+                    imageVector = Lucide.X,
+                    contentDescription = stringResource(R.string.cancel),
+                    onClick = { scope.launch { dismissBoxState.reset() } },
+                )
+                ProviderSmallIconButton(
+                    imageVector = Lucide.Trash2,
+                    contentDescription = stringResource(R.string.delete),
+                    onClick = onDelete,
+                    tint = workspace.muted,
+                )
             }
         },
         enableDismissFromStartToEnd = false,
         enableDismissFromEndToStart = true,
         modifier = modifier
     ) {
-        Surface(
-            shape = RoundedCornerShape(14.dp),
-            color = workspace.paper,
-            contentColor = workspace.ink,
-            border = BorderStroke(1.dp, workspace.hairline),
-        ) {
+        ProviderCard(modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.fillMaxWidth()) {
                 Row(
                     modifier = Modifier
@@ -342,9 +328,10 @@ private fun McpServerItem(
                         contentColor = workspace.muted,
                     ) {
                         Box(contentAlignment = Alignment.Center) {
-                            Text(
-                                text = "{}",
-                                style = MaterialTheme.typography.labelMedium,
+                            Icon(
+                                imageVector = Lucide.Server,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp),
                             )
                         }
                     }
@@ -399,19 +386,12 @@ private fun McpServerItem(
                         }
                     }
 
-                    IconButton(
-                        onClick = {
-                            onEdit(item)
-                        },
-                        modifier = Modifier.size(48.dp),
-                    ) {
-                        Icon(
-                            Lucide.Settings,
-                            contentDescription = stringResource(R.string.setting_mcp_page_edit_server),
-                            modifier = Modifier.size(20.dp),
-                            tint = workspace.muted,
-                        )
-                    }
+                    ProviderIconButton(
+                        imageVector = Lucide.Settings,
+                        contentDescription = stringResource(R.string.setting_mcp_page_edit_server),
+                        onClick = { onEdit(item) },
+                        tint = workspace.muted,
+                    )
                 }
                 McpOAuthSection(
                     item = item,
@@ -558,7 +538,9 @@ private fun McpServerConfigModal(state: EditState<McpServerConfig>) {
             onDismissRequest = {
                 state.dismiss()
             },
-            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+            containerColor = LocalAmberTokens.current.raised,
+            dragHandle = { ProviderSheetGrabber() },
         ) {
             Column(
                 modifier = Modifier
@@ -620,15 +602,13 @@ private fun McpServerConfigModal(state: EditState<McpServerConfig>) {
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End)
                 ) {
-                    TextButton(
-                        onClick = {
-                            if (config.commonOptions.name.isNotBlank()) {
-                                state.confirm()
-                            }
-                        }
-                    ) {
-                        Text(stringResource(R.string.setting_mcp_page_save))
-                    }
+                    ProviderCommandButton(
+                        text = stringResource(R.string.setting_mcp_page_save),
+                        accent = true,
+                        enabled = config.commonOptions.name.isNotBlank(),
+                        onClick = { state.confirm() },
+                        modifier = Modifier.width(120.dp),
+                    )
                 }
             }
         }
@@ -649,54 +629,39 @@ private fun McpCommonOptionsConfigure(
             .imePadding(),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        // 启用/禁用开关
-        FormItem(
-            label = {
-                Text(stringResource(R.string.setting_mcp_page_enable))
-            },
-            description = {
-                Text(stringResource(R.string.setting_mcp_page_enable_desc))
-            }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(stringResource(R.string.setting_mcp_page_enable))
-                Spacer(Modifier.weight(1f))
-                Switch(
-                    checked = config.commonOptions.enable,
-                    modifier = Modifier.semantics { contentDescription = enableLabel },
-                    onCheckedChange = { enabled ->
-                        update(
-                            when (config) {
-                                is McpServerConfig.SseTransportServer -> config.copy(
-                                    commonOptions = config.commonOptions.copy(enable = enabled)
-                                )
-
-                                is McpServerConfig.StreamableHTTPServer -> config.copy(
-                                    commonOptions = config.commonOptions.copy(enable = enabled)
-                                )
-                            }
-                        )
-                    }
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(stringResource(R.string.setting_mcp_page_enable), style = LocalAmberType.current.body)
+                Text(
+                    stringResource(R.string.setting_mcp_page_enable_desc),
+                    style = LocalAmberType.current.secondary,
+                    color = LocalAmberTokens.current.ink3,
                 )
             }
+            Switch(
+                checked = config.commonOptions.enable,
+                modifier = Modifier.semantics { contentDescription = enableLabel },
+                onCheckedChange = { enabled ->
+                    update(
+                        when (config) {
+                            is McpServerConfig.SseTransportServer -> config.copy(
+                                commonOptions = config.commonOptions.copy(enable = enabled)
+                            )
+                            is McpServerConfig.StreamableHTTPServer -> config.copy(
+                                commonOptions = config.commonOptions.copy(enable = enabled)
+                            )
+                        }
+                    )
+                },
+            )
         }
 
-        HorizontalDivider()
-
-        // 名称输入框
-        FormItem(
-            label = {
-                Text(stringResource(R.string.setting_mcp_page_name))
-            },
-            description = {
-                Text(stringResource(R.string.setting_mcp_page_name_desc))
-            }
-        ) {
-            OutlinedTextField(
+        ProviderLabeledField(stringResource(R.string.setting_mcp_page_name)) {
+            ProviderTextField(
                 value = config.commonOptions.name,
                 onValueChange = { name ->
                     update(
@@ -704,96 +669,60 @@ private fun McpCommonOptionsConfigure(
                             is McpServerConfig.SseTransportServer -> config.copy(
                                 commonOptions = config.commonOptions.copy(name = name)
                             )
-
                             is McpServerConfig.StreamableHTTPServer -> config.copy(
                                 commonOptions = config.commonOptions.copy(name = name)
                             )
                         }
                     )
                 },
-                label = { Text(stringResource(R.string.setting_mcp_page_name)) },
-                modifier = Modifier.fillMaxWidth(),
-                placeholder = { Text(stringResource(R.string.setting_mcp_page_name_placeholder)) }
+                placeholder = stringResource(R.string.setting_mcp_page_name_placeholder),
             )
         }
 
-        HorizontalDivider()
-
-        // 传输类型选择
-        FormItem(
-            label = {
-                Text(stringResource(R.string.setting_mcp_page_transport_type))
-            },
-            description = {
-                Text(stringResource(R.string.setting_mcp_page_transport_type_desc))
-            }
-        ) {
-            val transportTypes = listOf(
-                "Streamable HTTP",
-                "SSE"
+        val currentTypeIndex = when (config) {
+            is McpServerConfig.StreamableHTTPServer -> 0
+            is McpServerConfig.SseTransportServer -> 1
+        }
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(stringResource(R.string.setting_mcp_page_transport_type), style = LocalAmberType.current.body)
+            Text(
+                stringResource(R.string.setting_mcp_page_transport_type_desc),
+                style = LocalAmberType.current.secondary,
+                color = LocalAmberTokens.current.ink3,
             )
-            val currentTypeIndex = when (config) {
-                is McpServerConfig.StreamableHTTPServer -> 0
-                is McpServerConfig.SseTransportServer -> 1
-            }
-
-            SingleChoiceSegmentedButtonRow(
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                transportTypes.forEachIndexed { index, type ->
-                    SegmentedButton(
-                        shape = SegmentedButtonDefaults.itemShape(index, transportTypes.size),
-                        onClick = {
-                            if (index != currentTypeIndex) {
-                                val newConfig = when (index) {
-                                    0 -> McpServerConfig.StreamableHTTPServer(
-                                        id = config.id,
-                                        commonOptions = config.commonOptions,
-                                        url = when (config) {
-                                            is McpServerConfig.SseTransportServer -> config.url
-                                            is McpServerConfig.StreamableHTTPServer -> config.url
-                                        }
-                                    )
-
-                                    1 -> McpServerConfig.SseTransportServer(
-                                        id = config.id,
-                                        commonOptions = config.commonOptions,
-                                        url = when (config) {
-                                            is McpServerConfig.SseTransportServer -> config.url
-                                            is McpServerConfig.StreamableHTTPServer -> config.url
-                                        }
-                                    )
-
-                                    else -> config
-                                }
-                                update(newConfig)
+            ProviderPillSeg(
+                options = listOf(
+                    ProviderSegOption(0, "Streamable HTTP"),
+                    ProviderSegOption(1, "SSE"),
+                ),
+                selected = currentTypeIndex,
+                onSelected = { index ->
+                    val newConfig = when (index) {
+                        0 -> McpServerConfig.StreamableHTTPServer(
+                            id = config.id,
+                            commonOptions = config.commonOptions,
+                            url = when (config) {
+                                is McpServerConfig.SseTransportServer -> config.url
+                                is McpServerConfig.StreamableHTTPServer -> config.url
                             }
-                        },
-                        selected = index == currentTypeIndex
-                    ) {
-                        Text(type)
+                        )
+                        else -> McpServerConfig.SseTransportServer(
+                            id = config.id,
+                            commonOptions = config.commonOptions,
+                            url = when (config) {
+                                is McpServerConfig.SseTransportServer -> config.url
+                                is McpServerConfig.StreamableHTTPServer -> config.url
+                            }
+                        )
                     }
-                }
-            }
+                    update(newConfig)
+                },
+                mono = true,
+            )
         }
 
-        HorizontalDivider()
-
-        // 服务器地址配置
-        FormItem(
-            label = {
-                Text(stringResource(R.string.setting_mcp_page_server_url))
-            },
-            description = {
-                Text(
-                    when (config) {
-                        is McpServerConfig.SseTransportServer -> stringResource(R.string.setting_mcp_page_sse_url_desc)
-                        is McpServerConfig.StreamableHTTPServer -> stringResource(R.string.setting_mcp_page_streamable_http_url_desc)
-                    }
-                )
-            }
-        ) {
-            OutlinedTextField(
+        ProviderLabeledField(stringResource(R.string.setting_mcp_page_url_label)) {
+            ProviderTextField(
                 value = when (config) {
                     is McpServerConfig.SseTransportServer -> config.url
                     is McpServerConfig.StreamableHTTPServer -> config.url
@@ -806,30 +735,30 @@ private fun McpCommonOptionsConfigure(
                         }
                     )
                 },
-                label = { Text(stringResource(R.string.setting_mcp_page_url_label)) },
-                modifier = Modifier.fillMaxWidth(),
-                placeholder = {
-                    Text(
-                        when (config) {
-                            is McpServerConfig.SseTransportServer -> stringResource(R.string.setting_mcp_page_sse_url_placeholder)
-                            is McpServerConfig.StreamableHTTPServer -> stringResource(R.string.setting_mcp_page_streamable_http_url_placeholder)
-                        }
-                    )
-                }
+                placeholder = when (config) {
+                    is McpServerConfig.SseTransportServer -> stringResource(R.string.setting_mcp_page_sse_url_placeholder)
+                    is McpServerConfig.StreamableHTTPServer -> stringResource(R.string.setting_mcp_page_streamable_http_url_placeholder)
+                },
+                mono = true,
             )
         }
-
-        HorizontalDivider()
+        Text(
+            when (config) {
+                is McpServerConfig.SseTransportServer -> stringResource(R.string.setting_mcp_page_sse_url_desc)
+                is McpServerConfig.StreamableHTTPServer -> stringResource(R.string.setting_mcp_page_streamable_http_url_desc)
+            },
+            style = LocalAmberType.current.secondary,
+            color = LocalAmberTokens.current.ink3,
+        )
 
         // 请求头配置
-        FormItem(
-            label = {
-                Text(stringResource(R.string.setting_mcp_page_custom_headers))
-            },
-            description = {
-                Text(stringResource(R.string.setting_mcp_page_custom_headers_desc))
-            }
-        ) {
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(stringResource(R.string.setting_mcp_page_custom_headers), style = LocalAmberType.current.body)
+            Text(
+                stringResource(R.string.setting_mcp_page_custom_headers_desc),
+                style = LocalAmberType.current.secondary,
+                color = LocalAmberTokens.current.ink3,
+            )
             Column(
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
@@ -842,7 +771,8 @@ private fun McpCommonOptionsConfigure(
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
-                            OutlinedTextField(
+                            ProviderLabeledField(stringResource(R.string.setting_mcp_page_header_name)) {
+                                ProviderTextField(
                                 value = headerName,
                                 onValueChange = {
                                     headerName = it
@@ -862,18 +792,19 @@ private fun McpCommonOptionsConfigure(
                                         }
                                     )
                                 },
-                                label = { Text(stringResource(R.string.setting_mcp_page_header_name)) },
-                                modifier = Modifier.fillMaxWidth(),
-                                placeholder = { Text(stringResource(R.string.setting_mcp_page_header_name_placeholder)) }
-                            )
-                            Spacer(Modifier.height(8.dp))
-                            OutlinedTextField(
+                                placeholder = stringResource(R.string.setting_mcp_page_header_name_placeholder),
+                                mono = true,
+                                )
+                            }
+                            ProviderLabeledField(stringResource(R.string.setting_mcp_page_header_value)) {
+                                if (headerName.equals("authorization", ignoreCase = true)) {
+                                    ProviderSecretField(
                                 value = headerValue,
                                 onValueChange = {
                                     headerValue = it
                                     val updatedHeaders =
                                         config.commonOptions.headers.toMutableList()
-                                    updatedHeaders[index] = updatedHeaders[index].first to it.trim()
+                                    updatedHeaders[index] = updatedHeaders[index].first to it
                                     update(
                                         when (config) {
                                             is McpServerConfig.SseTransportServer -> config.copy(
@@ -886,12 +817,36 @@ private fun McpCommonOptionsConfigure(
                                         }
                                     )
                                 },
-                                label = { Text(stringResource(R.string.setting_mcp_page_header_value)) },
-                                modifier = Modifier.fillMaxWidth(),
-                                placeholder = { Text(stringResource(R.string.setting_mcp_page_header_value_placeholder)) }
-                            )
+                                        placeholder = stringResource(R.string.setting_mcp_page_header_value_placeholder),
+                                    )
+                                } else {
+                                    ProviderTextField(
+                                        value = headerValue,
+                                        onValueChange = {
+                                            headerValue = it
+                                            val updatedHeaders = config.commonOptions.headers.toMutableList()
+                                            updatedHeaders[index] = updatedHeaders[index].first to it
+                                            update(
+                                                when (config) {
+                                                    is McpServerConfig.SseTransportServer -> config.copy(
+                                                        commonOptions = config.commonOptions.copy(headers = updatedHeaders)
+                                                    )
+                                                    is McpServerConfig.StreamableHTTPServer -> config.copy(
+                                                        commonOptions = config.commonOptions.copy(headers = updatedHeaders)
+                                                    )
+                                                }
+                                            )
+                                        },
+                                        placeholder = stringResource(R.string.setting_mcp_page_header_value_placeholder),
+                                        mono = true,
+                                    )
+                                }
+                            }
                         }
-                        IconButton(onClick = {
+                        ProviderSmallIconButton(
+                            imageVector = Lucide.Trash2,
+                            contentDescription = stringResource(R.string.setting_mcp_page_delete_header),
+                            onClick = {
                             val updatedHeaders = config.commonOptions.headers.toMutableList()
                             updatedHeaders.removeAt(index)
                             update(
@@ -905,16 +860,14 @@ private fun McpCommonOptionsConfigure(
                                     )
                                 }
                             )
-                        }) {
-                            Icon(
-                                Lucide.Trash2,
-                                contentDescription = stringResource(R.string.setting_mcp_page_delete_header)
-                            )
-                        }
+                            },
+                        )
                     }
                 }
 
-                Button(
+                ProviderGhostButton(
+                    text = stringResource(R.string.setting_mcp_page_add_header),
+                    imageVector = Lucide.Plus,
                     onClick = {
                         val updatedHeaders = config.commonOptions.headers.toMutableList()
                         updatedHeaders.add("" to "")
@@ -930,15 +883,8 @@ private fun McpCommonOptionsConfigure(
                             }
                         )
                     },
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Icon(
-                        Lucide.Plus,
-                        contentDescription = stringResource(R.string.setting_mcp_page_add_header)
-                    )
-                    Spacer(Modifier.width(4.dp))
-                    Text(stringResource(R.string.setting_mcp_page_add_header))
-                }
+                    modifier = Modifier.align(Alignment.Start),
+                )
             }
         }
     }
@@ -1007,19 +953,15 @@ private fun McpToolCard(
     var expanded by remember { mutableStateOf(false) }
     val needsApprovalLabel = stringResource(R.string.setting_mcp_page_needs_approval)
     val enableLabel = stringResource(R.string.setting_mcp_page_enable)
-    Card(
-        colors = CardDefaults.cardColors(
-            containerColor = CustomColors.listItemColors.containerColor
-        )
+    ProviderCard(
+        modifier = Modifier
+            .fillMaxWidth()
+            .animateContentSize(),
     ) {
         Column(
-            modifier = Modifier
-                .animateContentSize()
-                .fillMaxWidth()
-                .padding(8.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+            verticalArrangement = Arrangement.spacedBy(0.dp),
         ) {
-            // 第一行：工具名字和3个按钮
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -1027,69 +969,53 @@ private fun McpToolCard(
             ) {
                 Text(
                     text = tool.name,
-                    style = MaterialTheme.typography.titleMedium,
+                    style = LocalAmberType.current.body.copy(fontWeight = FontWeight.SemiBold),
+                    color = LocalAmberTokens.current.ink,
                     modifier = Modifier.weight(1f),
-                    maxLines = 1,
+                    maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
-                // 需要审批开关
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                ) {
-                    Text(
-                        text = stringResource(R.string.setting_mcp_page_needs_approval),
-                        style = MaterialTheme.typography.labelSmall,
-                    )
-                    Switch(
-                        checked = tool.needsApproval,
-                        modifier = Modifier.semantics { contentDescription = needsApprovalLabel },
-                        onCheckedChange = onNeedsApprovalChange,
-                        size = SwitchSize.Small
-                    )
-                }
-                // 启用开关
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                ) {
-                    Text(
-                        text = stringResource(R.string.setting_mcp_page_enable),
-                        style = MaterialTheme.typography.labelSmall,
-                    )
-                    Switch(
-                        checked = tool.enable,
-                        modifier = Modifier.semantics { contentDescription = enableLabel },
-                        onCheckedChange = onEnableChange,
-                        size = SwitchSize.Small
-                    )
-                }
-                // 展开/收起按钮
                 IconButton(
                     onClick = { expanded = !expanded },
-                    modifier = Modifier.size(48.dp)
+                    modifier = Modifier.size(32.dp),
                 ) {
                     Icon(
-                        if (expanded) Lucide.ArrowUp else Lucide.ArrowDown,
+                        if (expanded) Lucide.ChevronUp else Lucide.ChevronDown,
                         contentDescription = stringResource(
                             if (expanded) R.string.code_block_collapse else R.string.code_block_expand
                         ),
-                        modifier = Modifier.size(16.dp)
+                        tint = LocalAmberTokens.current.ink3,
+                        modifier = Modifier.size(17.dp),
                     )
                 }
             }
-            // 展开后显示描述和参数
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                McpToolToggle(
+                    label = needsApprovalLabel,
+                    checked = tool.needsApproval,
+                    onCheckedChange = onNeedsApprovalChange,
+                    modifier = Modifier.weight(1f),
+                )
+                McpToolToggle(
+                    label = enableLabel,
+                    checked = tool.enable,
+                    onCheckedChange = onEnableChange,
+                    modifier = Modifier.weight(1f),
+                )
+            }
             if (expanded) {
-                // 描述
+                Spacer(Modifier.height(6.dp))
                 val toolDescription = tool.description
                 if (!toolDescription.isNullOrBlank()) {
                     Text(
                         text = toolDescription,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
+                        style = LocalAmberType.current.secondary,
+                        color = LocalAmberTokens.current.ink3,
                     )
                 }
-                // 参数标签
                 tool.inputSchema?.let { it as? InputSchema.Obj }?.let { schema ->
                     if (schema.properties.isNotEmpty()) {
                         FlowRow(
@@ -1100,10 +1026,7 @@ private fun McpToolCard(
                                 Tag(
                                     type = if (schema.required?.contains(key) == true) TagType.INFO else TagType.DEFAULT
                                 ) {
-                                    Text(
-                                        text = key,
-                                        style = MaterialTheme.typography.bodySmall,
-                                    )
+                                    Text(text = key, style = LocalAmberType.current.meta)
                                 }
                             }
                         }
@@ -1111,6 +1034,38 @@ private fun McpToolCard(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun McpToolToggle(
+    label: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val tokens = LocalAmberTokens.current
+    Row(
+        modifier = modifier
+            .heightIn(min = 48.dp)
+            .padding(horizontal = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Text(
+            text = label,
+            style = LocalAmberType.current.meta,
+            color = tokens.ink3,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
+        Switch(
+            checked = checked,
+            modifier = Modifier.semantics { contentDescription = label },
+            onCheckedChange = onCheckedChange,
+            size = SwitchSize.Small,
+        )
     }
 }
 

@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -37,7 +38,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import app.amber.ai.core.ReasoningLevel
 import app.amber.agent.R
+import app.amber.ai.provider.ModelAbility
 import app.amber.ai.provider.Model
 import app.amber.ai.provider.ModelType
 import app.amber.ai.provider.ProviderSetting
@@ -68,9 +71,22 @@ fun TopModelMenu(
     currentModelId: Uuid?,
     onSelect: (Model) -> Unit,
     onClose: () -> Unit,
+    reasoningLevel: ReasoningLevel? = null,
+    onUpdateReasoningLevel: (ReasoningLevel) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val chatTheme = LocalChatTheme.current
+    val selectedModel = remember(providers, modelType, currentModelId) {
+        providers.asSequence()
+            .flatMap { provider -> provider.models.asSequence() }
+            .firstOrNull { model -> model.type == modelType && model.id == currentModelId }
+    }
+    val reasoningLevels = remember(selectedModel) {
+        selectedModel?.let(::reasoningLevelsForModel).orEmpty()
+    }
+    val showReasoningPicker = reasoningLevel != null &&
+        selectedModel?.abilities?.contains(ModelAbility.REASONING) == true &&
+        reasoningLevels.isNotEmpty()
 
     // 哪些组展开。初始 = [currentProviderId]；open 变 true 时重置为 [currentProviderId]。
     var openIds by remember { mutableStateOf(setOfNotNull(currentProviderId)) }
@@ -120,41 +136,100 @@ fun TopModelMenu(
                         )
                     }
                     .heightIn(max = 560.dp)
-                    .verticalScroll(rememberScrollState())
-                    .padding(start = 16.dp, end = 16.dp, top = 6.dp, bottom = 12.dp),
             ) {
-                if (providers.isEmpty()) {
-                    Text(
-                        text = stringResource(R.string.model_list_no_providers),
-                        style = LocalAmberType.current.meta.copy(
-                            fontSize = 12.5.sp,
-                            lineHeight = 17.sp,
-                            fontWeight = FontWeight.Medium,
-                            letterSpacing = 0.sp,
-                        ),
-                        color = LocalAmberTokens.current.ink3,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 18.dp),
-                    )
-                } else {
-                    providers.forEach { provider ->
-                        ProviderGroup(
-                            provider = provider,
-                            modelType = modelType,
-                            open = openIds.contains(provider.id),
-                            active = provider.id == currentProviderId,
-                            selectedModelId = currentModelId,
-                            onToggle = {
-                                openIds = if (openIds.contains(provider.id)) openIds - provider.id
-                                else openIds + provider.id
-                            },
-                            onSelect = onSelect,
+                Column(
+                    modifier = Modifier
+                        .weight(1f, fill = false)
+                        .verticalScroll(rememberScrollState())
+                        .padding(start = 16.dp, end = 16.dp, top = 6.dp, bottom = 12.dp),
+                ) {
+                    if (providers.isEmpty()) {
+                        Text(
+                            text = stringResource(R.string.model_list_no_providers),
+                            style = LocalAmberType.current.meta.copy(
+                                fontSize = 12.5.sp,
+                                lineHeight = 17.sp,
+                                fontWeight = FontWeight.Medium,
+                                letterSpacing = 0.sp,
+                            ),
+                            color = LocalAmberTokens.current.ink3,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 18.dp),
                         )
+                    } else {
+                        providers.forEach { provider ->
+                            ProviderGroup(
+                                provider = provider,
+                                modelType = modelType,
+                                open = openIds.contains(provider.id),
+                                active = provider.id == currentProviderId,
+                                selectedModelId = currentModelId,
+                                onToggle = {
+                                    openIds = if (openIds.contains(provider.id)) openIds - provider.id
+                                    else openIds + provider.id
+                                },
+                                onSelect = onSelect,
+                            )
+                        }
                     }
+                }
+
+                if (showReasoningPicker) {
+                    ModelMenuReasoningFooter(
+                        currentLevel = reasoningLevel,
+                        levels = reasoningLevels,
+                        onChange = onUpdateReasoningLevel,
+                    )
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun ModelMenuReasoningFooter(
+    currentLevel: ReasoningLevel,
+    levels: List<Pair<ReasoningLevel, String>>,
+    onChange: (ReasoningLevel) -> Unit,
+) {
+    val chatTheme = LocalChatTheme.current
+    val tokens = LocalAmberTokens.current
+    val localizedLevels = levels.map { (level, _) ->
+        level to stringResource(
+            when (level) {
+                ReasoningLevel.OFF -> R.string.reasoning_off
+                ReasoningLevel.AUTO -> R.string.reasoning_auto
+                ReasoningLevel.LOW -> R.string.reasoning_light
+                ReasoningLevel.MEDIUM -> R.string.reasoning_medium
+                ReasoningLevel.HIGH -> R.string.reasoning_heavy
+                ReasoningLevel.XHIGH -> R.string.reasoning_xhigh
+                ReasoningLevel.MAX -> R.string.reasoning_max
+            }
+        )
+    }
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(tokens.surface2)
+            .padding(horizontal = 16.dp, vertical = 10.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        HorizontalDivider(color = chatTheme.hair)
+        Text(
+            text = stringResource(R.string.chat_input_reasoning_level),
+            style = LocalAmberType.current.meta.copy(
+                fontSize = 11.5.sp,
+                fontWeight = FontWeight.Medium,
+                letterSpacing = 0.sp,
+            ),
+            color = tokens.ink3,
+        )
+        ThinkingLevelSegment(
+            levels = localizedLevels,
+            current = currentLevel,
+            onChange = onChange,
+        )
     }
 }
 

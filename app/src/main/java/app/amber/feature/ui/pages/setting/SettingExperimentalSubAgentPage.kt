@@ -46,8 +46,10 @@ import app.amber.agent.Screen
 import app.amber.feature.prompts.AgentPromptConfigRepository
 import app.amber.feature.subagent.DEFAULT_SUB_AGENT_OUTPUT_BUDGET_CHARS
 import app.amber.feature.subagent.DEFAULT_SUB_AGENT_TIMEOUT_MS
+import app.amber.feature.subagent.DEFAULT_SUB_AGENT_DOCK_AUTO_HIDE_AFTER_MS
 import app.amber.feature.subagent.EXTENDED_SUB_AGENT_OUTPUT_BUDGET_CHARS
 import app.amber.feature.subagent.EXTENDED_SUB_AGENT_TIMEOUT_MS
+import app.amber.feature.subagent.SUB_AGENT_DOCK_AUTO_HIDE_NEVER
 import app.amber.feature.subagent.SubAgentDefinition
 import app.amber.feature.subagent.SubAgentDefinitions
 import app.amber.feature.subagent.SubAgentDisplay
@@ -85,6 +87,12 @@ fun SettingExperimentalSubAgentPage(
     val concurrencyOptions = listOf(1, 2, 3, 4, 5)
     val turnOptions = listOf(2, 4, 6, 8)
     val timeoutOptions = listOf(60_000L, 180_000L, DEFAULT_SUB_AGENT_TIMEOUT_MS, 600_000L, EXTENDED_SUB_AGENT_TIMEOUT_MS)
+    val dockAutoHideOptions = listOf(
+        15_000L,
+        DEFAULT_SUB_AGENT_DOCK_AUTO_HIDE_AFTER_MS,
+        60_000L,
+        SUB_AGENT_DOCK_AUTO_HIDE_NEVER,
+    )
     val budgetOptions = listOf(8_000, DEFAULT_SUB_AGENT_OUTPUT_BUDGET_CHARS, 20_000, 40_000, EXTENDED_SUB_AGENT_OUTPUT_BUDGET_CHARS)
     val modeOptions = SubAgentMode.entries
     // null sentinel = "follow main assistant"; otherwise pick a specific reasoning level.
@@ -260,6 +268,61 @@ fun SettingExperimentalSubAgentPage(
                                 optionToString = { "${it / 1000}k" },
                             )
                         }
+                    }
+                }
+            }
+
+            item {
+                ExperimentSectionCard(title = stringResource(R.string.setting_subagent_section_dock)) {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            Column(
+                                modifier = Modifier.weight(1f),
+                                verticalArrangement = Arrangement.spacedBy(2.dp),
+                            ) {
+                                Text(
+                                    text = stringResource(R.string.setting_subagent_dock_enabled),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = workspaceColors().ink,
+                                )
+                                Text(
+                                    text = stringResource(R.string.setting_subagent_dock_enabled_desc),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = workspaceColors().muted,
+                                )
+                            }
+                            Switch(
+                                checked = subAgent.dockEnabled,
+                                onCheckedChange = { checked -> update { it.copy(dockEnabled = checked) } },
+                            )
+                        }
+                        SubAgentSelectRow(
+                            modifier = Modifier.fillMaxWidth(),
+                            label = stringResource(R.string.setting_subagent_dock_auto_hide),
+                            options = dockAutoHideOptions,
+                            selected = dockAutoHideOptions.minBy {
+                                if (it == SUB_AGENT_DOCK_AUTO_HIDE_NEVER) {
+                                    if (subAgent.dockAutoHideAfterMs == SUB_AGENT_DOCK_AUTO_HIDE_NEVER) 0L
+                                    else Long.MAX_VALUE
+                                } else {
+                                    kotlin.math.abs(it - subAgent.dockAutoHideAfterMs)
+                                }
+                            },
+                            onSelected = { value -> update { it.copy(dockAutoHideAfterMs = value) } },
+                            optionToString = { value ->
+                                when (value) {
+                                    15_000L -> stringResource(R.string.setting_subagent_dock_auto_hide_15s)
+                                    DEFAULT_SUB_AGENT_DOCK_AUTO_HIDE_AFTER_MS -> stringResource(R.string.setting_subagent_dock_auto_hide_30s)
+                                    60_000L -> stringResource(R.string.setting_subagent_dock_auto_hide_1m)
+                                    else -> stringResource(R.string.setting_subagent_dock_auto_hide_never)
+                                }
+                            },
+                        )
+                        ExperimentNote(text = stringResource(R.string.setting_subagent_dock_auto_hide_desc))
                     }
                 }
             }

@@ -149,7 +149,7 @@ class ChatTimelinePlanTest {
     }
 
     @Test
-    fun planKeepsTwoTailAssistantMessagesAsSingleItems() {
+    fun staticHistoryVirtualizesAssistantTailMessages() {
         val conversation = conversationOf(
             message("u1", MessageRole.USER),
             message(longMarkdown("older"), MessageRole.ASSISTANT),
@@ -173,11 +173,112 @@ class ChatTimelinePlanTest {
             virtualItemCache = ChatVirtualItemCache(),
         )
 
-        assertTrue(plan.entries.any { it is ChatTimelineEntry.VirtualMessage && it.messageIndex == 1 })
-        assertTrue(plan.entries.any { it is ChatTimelineEntry.Message && it.messageIndex == 2 })
-        assertTrue(plan.entries.any { it is ChatTimelineEntry.Message && it.messageIndex == 3 })
-        assertTrue(plan.entries.none { it is ChatTimelineEntry.VirtualMessage && it.messageIndex == 2 })
-        assertTrue(plan.entries.none { it is ChatTimelineEntry.VirtualMessage && it.messageIndex == 3 })
+        for (messageIndex in 1..3) {
+            assertTrue(
+                "static assistant $messageIndex should be virtualized",
+                plan.entries.any {
+                    it is ChatTimelineEntry.VirtualMessage && it.messageIndex == messageIndex
+                },
+            )
+            assertTrue(
+                "static assistant $messageIndex should not stay whole",
+                plan.entries.none {
+                    it is ChatTimelineEntry.Message && it.messageIndex == messageIndex
+                },
+            )
+        }
+    }
+
+    @Test
+    fun streamingTailStaysSingleWhenLoadingFinishes() {
+        val conversation = conversationOf(
+            message("u1", MessageRole.USER),
+            message(longMarkdown("older"), MessageRole.ASSISTANT),
+            message(longMarkdown("middle"), MessageRole.ASSISTANT),
+            message(longMarkdown("tail"), MessageRole.ASSISTANT),
+        )
+        val cache = ChatVirtualItemCache()
+        cache.observeStreamingAssistant(conversation.messageNodes.last().id)
+        val protectedIds = cache.protectedStreamingNodeIds()
+
+        val loadingPlan = buildChatTimelinePlan(
+            conversation = conversation,
+            assistant = null,
+            showAssistantBubble = true,
+            timelineLoading = true,
+            hasHistoryLoadingItem = false,
+            pendingMessageCount = 0,
+            postSendState = emptyPostSendState(),
+            virtualItemCache = cache,
+            protectedStreamingNodeIds = protectedIds,
+        )
+        val finishedPlan = buildChatTimelinePlan(
+            conversation = conversation,
+            assistant = null,
+            showAssistantBubble = true,
+            timelineLoading = false,
+            hasHistoryLoadingItem = false,
+            pendingMessageCount = 0,
+            postSendState = emptyPostSendState(),
+            virtualItemCache = cache,
+            protectedStreamingNodeIds = cache.protectedStreamingNodeIds(),
+        )
+
+        assertEquals(loadingPlan.lazyItemMessageIndexes, finishedPlan.lazyItemMessageIndexes)
+        assertTrue(finishedPlan.entries.any { it is ChatTimelineEntry.Message && it.messageIndex == 3 })
+        assertTrue(finishedPlan.entries.none { it is ChatTimelineEntry.VirtualMessage && it.messageIndex == 3 })
+        assertTrue(finishedPlan.entries.any { it is ChatTimelineEntry.VirtualMessage && it.messageIndex == 2 })
+    }
+
+    @Test
+    fun nextStreamingTailDoesNotPromotePreviousStaticTail() {
+        val history = conversationOf(
+            message("u1", MessageRole.USER),
+            message(longMarkdown("history-tail"), MessageRole.ASSISTANT),
+        )
+        val cache = ChatVirtualItemCache()
+        val historyPlan = buildChatTimelinePlan(
+            conversation = history,
+            assistant = null,
+            showAssistantBubble = true,
+            timelineLoading = false,
+            hasHistoryLoadingItem = false,
+            pendingMessageCount = 0,
+            postSendState = emptyPostSendState(),
+            virtualItemCache = cache,
+        )
+        assertTrue(historyPlan.entries.any { it is ChatTimelineEntry.VirtualMessage && it.messageIndex == 1 })
+
+        val nextConversation = conversationOf(
+            message("u1", MessageRole.USER),
+            message(longMarkdown("history-tail"), MessageRole.ASSISTANT),
+            message("u2", MessageRole.USER),
+            message(longMarkdown("new-streaming-tail"), MessageRole.ASSISTANT),
+        )
+        cache.observeStreamingAssistant(nextConversation.messageNodes.last().id)
+        val nextPlan = buildChatTimelinePlan(
+            conversation = nextConversation,
+            assistant = null,
+            showAssistantBubble = true,
+            timelineLoading = false,
+            hasHistoryLoadingItem = false,
+            pendingMessageCount = 0,
+            postSendState = emptyPostSendState(),
+            virtualItemCache = cache,
+            protectedStreamingNodeIds = cache.protectedStreamingNodeIds(),
+        )
+
+        assertTrue(
+            "the previous static tail must remain virtualized",
+            nextPlan.entries.any { it is ChatTimelineEntry.VirtualMessage && it.messageIndex == 1 },
+        )
+        assertTrue(
+            "the newly observed streaming tail stays a single item",
+            nextPlan.entries.any { it is ChatTimelineEntry.Message && it.messageIndex == 3 },
+        )
+        assertTrue(
+            nextPlan.entries.none { it is ChatTimelineEntry.VirtualMessage && it.messageIndex == 3 },
+        )
     }
 
     @Test

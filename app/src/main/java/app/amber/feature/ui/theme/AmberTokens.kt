@@ -37,21 +37,24 @@ data class AmberTokens(
 
 enum class AmberBase { LIGHT, DARK, SAGE, SAGE_DARK }
 
-// ── LIGHT · warm off-white / graphite ──────────────────────────────────────
+internal const val SIT_TERRACOTTA_ACCENT_HEX = "#B8623A"
+
+// Default warm canvas: iOS "点阵 · 陶土" (AmberTheme.paperLight / paperDark).
+// Accent remains independently editable; selecting the built-in restores terracotta.
 internal val AmberLight = AmberTokens(
-    bg = Color(0xFFF4F2EC), surface = Color(0xFFFAF9F5), surface2 = Color(0xFFEFECE4), raised = Color(0xFFFFFFFF),
-    ink = Color(0xFF1B1A17), ink2 = Color(0xFF57544C), ink3 = Color(0xFF8F8B80), ink4 = Color(0xFFB6B1A4),
-    line = Color(0xFFE4E0D6), line2 = Color(0xFFD6D1C4),
-    userBg = Color(0xFF1B1A17), userInk = Color(0xFFF6F4EE), codeBg = Color(0xFFEDEAE1),
+    bg = Color(0xFFEFE7D6), surface = Color(0xFFFFFDF7), surface2 = Color(0xFFF0EBE2), raised = Color(0xFFFFFFFF),
+    ink = Color(0xFF1B1813), ink2 = Color(0xFF5B5449), ink3 = Color(0xFF746D62), ink4 = Color(0xFF918A80),
+    line = Color(0xFFECE3D6), line2 = Color(0xFFDBCEBC),
+    userBg = Color(0xFF1B1813), userInk = Color(0xFFFFFDF7), codeBg = Color(0xFFF0EBE2),
     signal = Color(0xFF5E9C6E), accent = Color(0xFFB8623A), accentInk = Color(0xFFFFFFFF), isDark = false,
 )
 
 // ── DARK · warm graphite ───────────────────────────────────────────────────
 internal val AmberDark = AmberTokens(
-    bg = Color(0xFF161512), surface = Color(0xFF1C1B17), surface2 = Color(0xFF211F1A), raised = Color(0xFF23211C),
-    ink = Color(0xFFECE8DF), ink2 = Color(0xFFA8A298), ink3 = Color(0xFF756F64), ink4 = Color(0xFF564F45),
-    line = Color(0xFF2E2B25), line2 = Color(0xFF3A362E),
-    userBg = Color(0xFFECE8DF), userInk = Color(0xFF1B1A17), codeBg = Color(0xFF211F1A),
+    bg = Color(0xFF14110E), surface = Color(0xFF221E19), surface2 = Color(0xFF2E2822), raised = Color(0xFF2E2822),
+    ink = Color(0xFFF5F0E8), ink2 = Color(0xFFC8BDB0), ink3 = Color(0xFFA89888), ink4 = Color(0xFF6E6258),
+    line = Color(0xFF2A241E), line2 = Color(0xFF3D342C),
+    userBg = Color(0xFFF5F0E8), userInk = Color(0xFF14110E), codeBg = Color(0xFF2E2822),
     signal = Color(0xFF5E9C6E), accent = Color(0xFFB8623A), accentInk = Color(0xFFFFFFFF), isDark = true,
 )
 

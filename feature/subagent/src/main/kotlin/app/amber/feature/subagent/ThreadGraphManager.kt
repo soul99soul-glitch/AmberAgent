@@ -59,6 +59,7 @@ class ThreadGraphManager(
         val startedAtMs: Long,
         val updatedAtMs: Long,
         val finalAnswer: String = "",
+        val resultFinishedAtMs: Long? = null,
     )
 
     /** Definition + task restored from a persisted node (followup_task). */
@@ -319,6 +320,7 @@ class ThreadGraphManager(
             startedAtMs = node.startedAtMs,
             updatedAtMs = node.updatedAtMs,
             finalAnswer = result?.finalAnswer.orEmpty(),
+            resultFinishedAtMs = result?.finishedAtMs,
         )
     }
 

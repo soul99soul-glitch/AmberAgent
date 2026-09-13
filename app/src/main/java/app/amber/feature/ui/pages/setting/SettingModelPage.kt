@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
@@ -858,7 +859,6 @@ private fun ModelPickerRow(
     val selectedLabel = selectedModel?.modelId ?: emptyLabel
         ?: stringResource(R.string.model_list_select_model)
     val followSelection = selectedModel == null && !emptyLabel.isNullOrBlank()
-    val triggerShape = RoundedCornerShape(9.dp)
     Column(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.Center,
@@ -875,64 +875,70 @@ private fun ModelPickerRow(
             preferredInputModality = preferredInputModality,
             onClear = onClear,
             customTrigger = { openPicker ->
-                Row(
+                Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(36.dp)
-                        .clip(triggerShape)
-                        .background(t.surface2)
-                        .border(1.dp, t.line, triggerShape)
                         .pressable(onClick = openPicker)
-                        .padding(start = 11.dp, end = 5.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(7.dp),
+                        .heightIn(min = 48.dp),
+                    contentAlignment = Alignment.Center,
                 ) {
-                    Text(
-                        text = selectedLabel,
-                        style = type.meta.copy(
-                            fontSize = 12.5.sp,
-                            fontWeight = FontWeight.Medium,
-                            fontStyle = if (followSelection) androidx.compose.ui.text.font.FontStyle.Italic else androidx.compose.ui.text.font.FontStyle.Normal,
-                        ),
-                        color = if (followSelection) t.ink3 else t.ink,
-                        modifier = Modifier.weight(1f),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    selectedProvider?.let { provider ->
-                        Box(
-                            modifier = Modifier
-                                .size(3.dp)
-                                .clip(androidx.compose.foundation.shape.CircleShape)
-                                .background(t.ink4),
-                        )
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(36.dp)
+                            .clip(CircleShape)
+                            .background(t.surface2)
+                            .padding(start = 13.dp, end = 5.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(7.dp),
+                    ) {
                         Text(
-                            text = provider.providerSlugLabel(),
-                            style = type.meta.copy(fontSize = 11.5.sp),
-                            color = t.ink3,
+                            text = selectedLabel,
+                            style = type.meta.copy(
+                                fontSize = 12.5.sp,
+                                fontWeight = FontWeight.Medium,
+                                fontStyle = if (followSelection) androidx.compose.ui.text.font.FontStyle.Italic else androidx.compose.ui.text.font.FontStyle.Normal,
+                            ),
+                            color = if (followSelection) t.ink3 else t.ink,
+                            modifier = Modifier.weight(1f),
                             maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
                         )
-                    }
-                    Icon(
-                        imageVector = Lucide.ArrowDown,
-                        contentDescription = null,
-                        tint = t.ink3,
-                        modifier = Modifier.size(14.dp),
-                    )
-                    if (allowClear && selectedModel != null) {
-                        Box(
-                            modifier = Modifier
-                                .size(32.dp)
-                                .pressable(onClick = { onClear?.invoke() ?: onSelect(Model()) }),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Icon(
-                                imageVector = Lucide.X,
-                                contentDescription = clearContentDescription
-                                    ?: stringResource(R.string.clear),
-                                tint = t.ink4,
-                                modifier = Modifier.size(14.dp),
+                        selectedProvider?.let { provider ->
+                            Box(
+                                modifier = Modifier
+                                    .size(3.dp)
+                                    .clip(CircleShape)
+                                    .background(t.ink4),
                             )
+                            Text(
+                                text = provider.providerSlugLabel(),
+                                style = type.meta.copy(fontSize = 11.5.sp),
+                                color = t.ink3,
+                                maxLines = 1,
+                            )
+                        }
+                        Icon(
+                            imageVector = Lucide.ArrowDown,
+                            contentDescription = null,
+                            tint = t.ink3,
+                            modifier = Modifier.size(14.dp),
+                        )
+                        if (allowClear && selectedModel != null) {
+                            Box(
+                                modifier = Modifier
+                                    .size(48.dp)
+                                    .pressable(onClick = { onClear?.invoke() ?: onSelect(Model()) }),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Icon(
+                                    imageVector = Lucide.X,
+                                    contentDescription = clearContentDescription
+                                        ?: stringResource(R.string.clear),
+                                    tint = t.ink4,
+                                    modifier = Modifier.size(14.dp),
+                                )
+                            }
                         }
                     }
                 }
@@ -1006,9 +1012,9 @@ private fun ModelPromptSheet(
 
                 if (reasoningLevel != null && onReasoningChange != null) {
                     Surface(
-                        shape = RoundedCornerShape(10.dp),
+                        shape = RoundedCornerShape(14.dp),
                         color = t.surface2,
-                        border = BorderStroke(1.dp, t.line),
+                        border = BorderStroke(1.dp, t.line.copy(alpha = 0.42f)),
                     ) {
                         Column(
                             modifier = Modifier
@@ -1161,9 +1167,9 @@ private fun ModelGroupSessionDefaultsSheet(
                     ?: ModelGroupSessionDefault(groupId = group.id)
                 Surface(
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(10.dp),
+                    shape = RoundedCornerShape(14.dp),
                     color = t.surface,
-                    border = BorderStroke(1.dp, t.line),
+                    border = BorderStroke(1.dp, t.line.copy(alpha = 0.42f)),
                 ) {
                     Column(
                         modifier = Modifier.padding(12.dp),
@@ -1202,7 +1208,7 @@ private fun ModelGroupSessionDefaultsSheet(
                                 }
                             },
                             modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(8.dp),
+                            shape = RoundedCornerShape(14.dp),
                             // Graphite §3: the context-message count is a machine-fact → MONO.
                             textStyle = LocalAmberType.current.meta,
                             label = {
@@ -1309,12 +1315,12 @@ private fun NotionReasoningChip(
     Surface(
         onClick = onClick,
         modifier = modifier,
-        shape = RoundedCornerShape(7.dp),
+        shape = CircleShape,
         color = if (selected) t.accent.copy(alpha = 0.14f) else t.surface2,
         contentColor = if (selected) t.accent else t.ink2,
         border = BorderStroke(
             width = 1.dp,
-            color = if (selected) t.accent.copy(alpha = 0.42f) else t.line,
+            color = if (selected) t.accent.copy(alpha = 0.28f) else t.line.copy(alpha = 0.42f),
         ),
     ) {
         Box(

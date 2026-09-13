@@ -1,6 +1,7 @@
 package app.amber.feature.ui.pages.setting
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -16,6 +17,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -25,8 +27,10 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import app.amber.feature.ui.components.ds.pressable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -132,17 +136,18 @@ internal fun ExperimentSectionCard(
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val workspace = workspaceColors()
+    val shape = RoundedCornerShape(14.dp)
     Column(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         SettingSectionTitle(title, modifier = Modifier.padding(top = 10.dp))
         Surface(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(14.dp),
+            modifier = Modifier
+                .fillMaxWidth(),
+            shape = shape,
             color = workspace.paper,
             contentColor = workspace.ink,
-            border = BorderStroke(1.dp, workspace.hairline),
         ) {
             Column(
                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
@@ -162,12 +167,13 @@ internal fun ExperimentHeroCard(
 ) {
     val workspace = workspaceColors()
     val type = LocalAmberType.current
+    val shape = RoundedCornerShape(14.dp)
     Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(14.dp),
+        modifier = Modifier
+            .fillMaxWidth(),
+        shape = shape,
         color = workspace.paper,
         contentColor = workspace.ink,
-        border = BorderStroke(1.dp, workspace.hairline),
     ) {
         Row(
             modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
@@ -257,15 +263,16 @@ private fun ExperimentFeatureRow(
 }
 
 @Composable
-internal fun ExperimentDivider() {
+internal fun ExperimentDivider(startPadding: androidx.compose.ui.unit.Dp = 38.dp) {
     val workspace = workspaceColors()
     Surface(
         modifier = Modifier
             .fillMaxWidth()
-            // V3 settings-experimental.jsx HairDivider indent={60} —— 让 divider 对齐到 leading icon 右边线
-            .padding(start = 60.dp)
-            .height(1.dp),
-        color = workspace.hairline,
+            // Content rows have a 28dp leading icon and a 10dp gap; align with
+            // the title instead of spanning the full card width.
+            .padding(start = startPadding)
+            .height(0.5.dp),
+        color = workspace.hairline.copy(alpha = 0.48f),
     ) {}
 }
 
@@ -298,35 +305,34 @@ internal fun ExperimentActionButton(
     val container = when {
         !enabled -> workspace.row
         primary -> scheme.primary
-        else -> workspace.paper
+        else -> workspace.row
     }
     val contentColor = when {
         !enabled -> workspace.faint
         primary -> scheme.onPrimary
         else -> workspace.ink
     }
-    Surface(
+    Box(
         modifier = Modifier
-            .heightIn(min = if (compact) 32.dp else 48.dp)
-            .clickable(enabled = enabled, onClick = onClick),
-        shape = RoundedCornerShape(if (compact) 999.dp else 15.dp),
-        color = container,
-        contentColor = contentColor,
-        border = if (primary || !enabled) null else BorderStroke(1.dp, workspace.hairline),
+            .heightIn(min = 48.dp)
+            .pressable(enabled = enabled, onClick = onClick),
+        contentAlignment = Alignment.Center,
     ) {
-        Text(
-            text = text,
-            style = if (compact) {
-                type.tinyTag
-            } else {
-                type.body.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold)
-            },
-            maxLines = 1,
-            modifier = Modifier.padding(
-                horizontal = if (compact) 12.dp else 14.dp,
-                vertical = if (compact) 5.dp else 9.dp,
-            ),
-        )
+        Box(
+            modifier = Modifier
+                .height(if (compact) 26.dp else 28.dp)
+                .clip(CircleShape)
+                .background(container)
+                .padding(horizontal = 12.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                text = text,
+                style = type.tinyTag,
+                color = contentColor,
+                maxLines = 1,
+            )
+        }
     }
 }
 
@@ -393,7 +399,6 @@ internal fun ExperimentNote(
         shape = RoundedCornerShape(8.dp),
         color = if (error) MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.35f) else workspace.row,
         contentColor = if (error) MaterialTheme.colorScheme.error else workspace.muted,
-        border = BorderStroke(1.dp, workspace.hairline),
     ) {
         Text(
             text = text,

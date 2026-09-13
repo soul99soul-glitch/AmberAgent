@@ -22,7 +22,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -350,26 +349,35 @@ private fun ProviderAddModelButton(
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .height(48.dp)
-            .clip(RoundedCornerShape(15.dp))
-            .background(t.ink)
+            .heightIn(min = 48.dp)
             .pressable(onClick = onClick)
             .padding(horizontal = 18.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.Center,
     ) {
-        Icon(
-            imageVector = Lucide.Plus,
-            contentDescription = null,
-            tint = t.bg,
-            modifier = Modifier.size(18.dp),
-        )
-        Text(
-            text = stringResource(R.string.setting_provider_page_add_model),
-            style = type.body.copy(fontWeight = FontWeight.SemiBold),
-            color = t.bg,
-            modifier = Modifier.padding(start = 8.dp),
-        )
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(36.dp)
+                .clip(androidx.compose.foundation.shape.CircleShape)
+                .background(t.accent)
+                .padding(horizontal = 18.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center,
+        ) {
+            Icon(
+                imageVector = Lucide.Plus,
+                contentDescription = null,
+                tint = t.accentInk,
+                modifier = Modifier.size(18.dp),
+            )
+            Text(
+                text = stringResource(R.string.setting_provider_page_add_model),
+                style = type.body.copy(fontWeight = FontWeight.Medium),
+                color = t.accentInk,
+                modifier = Modifier.padding(start = 8.dp),
+            )
+        }
     }
 }
 

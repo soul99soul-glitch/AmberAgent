@@ -14,13 +14,15 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.draw.clip
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -49,6 +51,7 @@ import app.amber.feature.ui.theme.ThemePackageImportResult
 import app.amber.feature.ui.theme.ThemePackageManager
 import app.amber.feature.ui.theme.AmberBase
 import app.amber.feature.ui.theme.buildAmberTokens
+import app.amber.feature.ui.theme.SIT_TERRACOTTA_ACCENT_HEX
 import com.dokar.sonner.ToastType
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -57,13 +60,11 @@ import org.koin.compose.koinInject
 
 /**
  * P8-09 — 主题设置区接入：主题库区块（导出当前主题 / 导入主题包 + preview /
- * 内置主题 apply / 导入包 apply/remove）。复用现有主题设置页
- * （SettingDisplayPage）的卡片样式。
+ * 内置主题 apply / 导入包 apply/remove）。复用设置页的卡片样式。
  */
 @Composable
 fun ThemeLibrarySection(
     displaySetting: DisplaySetting,
-    onBaseFamilyChange: (String) -> Unit,
     modifier: Modifier = Modifier,
     manager: ThemePackageManager = koinInject(),
 ) {
@@ -131,15 +132,6 @@ fun ThemeLibrarySection(
             title = stringResource(R.string.setting_theme_library_title),
         ) {
             item(
-                headlineContent = { Text(stringResource(R.string.setting_display_page_base_family_title)) },
-                trailingContent = {
-                    ThemeFamilyChoice(
-                        selected = displaySetting.amberBaseFamily,
-                        onSelected = onBaseFamilyChange,
-                    )
-                },
-            )
-            item(
                 headlineContent = { Text(stringResource(R.string.setting_theme_library_export_current_title)) },
                 supportingContent = { Text(stringResource(R.string.setting_theme_library_export_current_desc)) },
                 trailingContent = {
@@ -168,15 +160,10 @@ fun ThemeLibrarySection(
                 "SAGE" to R.string.setting_theme_library_builtin_sage,
             ).forEach { (family, labelRes) ->
                 val active = displaySetting.amberBaseFamily == family &&
-                    displaySetting.appliedThemePackageId == null
+                    displaySetting.appliedThemePackageId == null &&
+                    (family != "WARM" || displaySetting.accentColor.equals(SIT_TERRACOTTA_ACCENT_HEX, ignoreCase = true))
                 item(
-                    headlineContent = {
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Text(stringResource(labelRes))
-                            if (active) BuiltinActiveTag()
-                        }
-                    },
-                    supportingContent = { Text(stringResource(R.string.setting_theme_library_builtin_desc)) },
+                    headlineContent = { Text(stringResource(labelRes)) },
                     trailingContent = {
                         TextButton(
                             onClick = {
@@ -355,7 +342,7 @@ fun ThemeLibrarySection(
 }
 
 @Composable
-private fun ThemeFamilyChoice(
+internal fun ThemeFamilyChoice(
     selected: String,
     onSelected: (String) -> Unit,
 ) {
@@ -365,25 +352,34 @@ private fun ThemeFamilyChoice(
         "SAGE" to stringResource(R.string.setting_display_page_base_family_sage),
     )
     Row(
-        modifier = Modifier
-            .clip(CircleShape)
-            .background(colors.row)
-            .border(1.dp, colors.hairline, CircleShape)
-            .padding(3.dp),
-        horizontalArrangement = Arrangement.spacedBy(2.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         options.forEach { (family, label) ->
+            val active = family == selected
             Box(
                 modifier = Modifier
                     .clip(CircleShape)
                     .clickable { onSelected(family) }
                     .background(
-                        if (family == selected) colors.paper else androidx.compose.ui.graphics.Color.Transparent,
+                        if (active) MaterialTheme.colorScheme.primary else colors.row,
                     )
-                    .padding(horizontal = 10.dp, vertical = 7.dp),
+                    .border(
+                        width = 1.dp,
+                        color = if (active) MaterialTheme.colorScheme.primary else colors.hairline,
+                        shape = CircleShape,
+                    )
+                    .padding(horizontal = 12.dp, vertical = 6.dp),
                 contentAlignment = Alignment.Center,
             ) {
-                Text(label, style = app.amber.feature.ui.theme.LocalAmberType.current.meta)
+                CompositionLocalProvider(
+                    LocalContentColor provides if (active) {
+                        MaterialTheme.colorScheme.onPrimary
+                    } else {
+                        colors.muted
+                    },
+                ) {
+                    Text(label, style = app.amber.feature.ui.theme.LocalAmberType.current.meta)
+                }
             }
         }
     }

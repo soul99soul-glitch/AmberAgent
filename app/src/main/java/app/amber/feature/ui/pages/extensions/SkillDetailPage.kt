@@ -303,16 +303,11 @@ private fun SkillFilesPanel(
                 color = tokens.ink2,
                 modifier = Modifier.weight(1f),
             )
-            TextButton(
+            WorkspaceTextButton(
+                text = "+ " + stringResource(R.string.skill_detail_page_new_file),
                 onClick = onAdd,
-                contentPadding = PaddingValues(horizontal = 6.dp),
-            ) {
-                Text(
-                    text = "+ " + stringResource(R.string.skill_detail_page_new_file),
-                    style = type.tinyTag,
-                    color = tokens.accent,
-                )
-            }
+                tone = WorkspaceTone.Accent,
+            )
         }
         Hairline()
         if (nodes.isEmpty()) {

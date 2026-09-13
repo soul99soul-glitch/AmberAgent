@@ -2,26 +2,18 @@ package app.amber.feature.ui.hooks
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.MutableState
-import androidx.compose.runtime.derivedStateOf
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import app.amber.feature.ui.theme.ColorMode
 
 @Composable
 fun rememberColorMode(): MutableState<ColorMode> {
-    var colorModeValue by rememberSharedPreferenceString("colorMode", "SYSTEM")
-    val colorMode by remember(colorModeValue) {
-        derivedStateOf {
-            ColorMode.entries.firstOrNull { it.name == colorModeValue } ?: ColorMode.SYSTEM
-        }
-    }
-    return remember {
+    val preference = rememberSharedPreferenceString("colorMode", "SYSTEM")
+    return remember(preference) {
         object : MutableState<ColorMode> {
             override var value: ColorMode
-                get() = colorMode
+                get() = ColorMode.entries.firstOrNull { it.name == preference.value } ?: ColorMode.SYSTEM
                 set(value) {
-                    colorModeValue = value.name
+                    preference.value = value.name
                 }
 
             override fun component1(): ColorMode = value

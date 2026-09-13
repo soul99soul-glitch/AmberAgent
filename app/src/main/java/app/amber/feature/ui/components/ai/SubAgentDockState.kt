@@ -1,9 +1,11 @@
 package app.amber.feature.ui.components.ai
 
 import app.amber.core.infra.AppScope
+import app.amber.core.settings.prefs.SettingsAggregator
 import app.amber.feature.subagent.SubAgentManager
 import app.amber.feature.subagent.SubAgentRun
 import app.amber.feature.subagent.SubAgentRunStatus
+import app.amber.feature.subagent.SUB_AGENT_DOCK_AUTO_HIDE_NEVER
 import app.amber.feature.task.AgentTaskSnapshot
 import app.amber.feature.task.AgentTaskStatus
 import app.amber.feature.task.AgentTaskStore
@@ -13,6 +15,9 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.delay
+import java.io.File
 import kotlin.uuid.Uuid
 
 /**
@@ -61,6 +66,8 @@ data class SubAgentDockTask(
 
 data class SubAgentDockUiState(
     val tasks: List<SubAgentDockTask> = emptyList(),
+    /** User-facing visibility gate; tasks remain observed while this is false. */
+    val enabled: Boolean = true,
 )
 
 /**
@@ -74,6 +81,7 @@ class SubAgentDockState(
     private val agentTaskStore: AgentTaskStore,
     private val subAgentManager: SubAgentManager,
     private val appScope: AppScope,
+    private val settingsStore: SettingsAggregator,
 ) {
     private val tracker = SubAgentDockTracker()
     private val collectors = mutableMapOf<String, RunCollector>()
@@ -89,17 +97,30 @@ class SubAgentDockState(
         .filter { it.second }
         .mapTo(mutableSetOf()) { it.first }
     private var taskSnapshots: List<AgentTaskSnapshot> = emptyList()
+    private var dockEnabled: Boolean = settingsStore.settingsFlow.value.agentRuntime.subAgent.dockEnabled
+    private var autoHideAfterMs: Long = settingsStore.settingsFlow.value.agentRuntime.subAgent.dockAutoHideAfterMs
+        .coerceAtLeast(SUB_AGENT_DOCK_AUTO_HIDE_NEVER)
+    private var detailsOpenKey: SubAgentDockRunKey? = null
+    private var autoHideJob: Job? = null
 
     private val _uiState = MutableStateFlow(SubAgentDockUiState())
     val uiState: StateFlow<SubAgentDockUiState> = _uiState.asStateFlow()
 
     init {
         appScope.launch {
+            settingsStore.settingsFlow.collect { settings ->
+                val subAgent = settings.agentRuntime.subAgent
+                dockEnabled = subAgent.dockEnabled
+                autoHideAfterMs = subAgent.dockAutoHideAfterMs.coerceAtLeast(SUB_AGENT_DOCK_AUTO_HIDE_NEVER)
+                publishAndReschedule()
+            }
+        }
+        appScope.launch {
             agentTaskStore.tasksFlow.collect { snapshots ->
                 taskSnapshots = snapshots.filter { it.type == SUBAGENT_TASK_TYPE }
                 markProcessRunKeys()
                 reconcileRunCollectors()
-                publish()
+                publishAndReschedule()
             }
         }
     }
@@ -110,8 +131,38 @@ class SubAgentDockState(
      */
     fun dismiss(key: SubAgentDockRunKey) {
         tracker.dismiss(key)
-        publish()
+        publishAndReschedule()
     }
+
+    /**
+     * Hides every currently tracked generation from the dock without cancelling or mutating any
+     * task. A followup with a new [SubAgentDockRunKey] is admitted normally.
+     */
+    fun dismissAll() {
+        tracker.dismissAll()
+        publishAndReschedule()
+    }
+
+    /**
+     * Keeps an opened details sheet out of terminal auto-hide. Passing null releases the guard;
+     * an already-expired row is then hidden on the next synchronous publish.
+     */
+    fun keepDetailsOpen(key: SubAgentDockRunKey?) {
+        detailsOpenKey = key
+        publishAndReschedule()
+    }
+
+    /**
+     * Cold details stream for the explicitly opened task sheet. The compact dock never collects
+     * this path, so live parts and bounded transcript reads stay out of the global metadata rail.
+     */
+    fun detailsFlow(key: SubAgentDockRunKey, runRoot: File): Flow<SubAgentDockDetails> =
+        subAgentDockDetailsFlow(
+            agentTaskStore = agentTaskStore,
+            subAgentManager = subAgentManager,
+            key = key,
+            runRoot = runRoot,
+        )
 
     private fun reconcileRunCollectors() {
         val activeSnapshots = taskSnapshots.filter { it.status.keepsDockObserved }
@@ -147,18 +198,43 @@ class SubAgentDockState(
                     // still unwinding. Only the collector owning this generation may publish.
                     if (collectors[snapshot.taskId]?.key != key) return@collect
                     liveRuns[snapshot.taskId] = run
-                    publish()
+                    publishAndReschedule()
                 }
             }
         }
     }
 
-    private fun publish() {
+    private fun publishAndReschedule() {
+        tracker.dismissExpired(
+            nowMs = System.currentTimeMillis(),
+            autoHideAfterMs = autoHideAfterMs,
+            protectedKey = detailsOpenKey,
+        )
         _uiState.value = tracker.reduce(
             snapshots = taskSnapshots,
             liveRuns = liveRuns,
             processRunKeys = processRunKeys,
-        )
+        ).copy(enabled = dockEnabled)
+        scheduleAutoHide()
+    }
+
+    private fun scheduleAutoHide() {
+        autoHideJob?.cancel()
+        autoHideJob = null
+        val deadline = tracker.nextAutoDismissAt(
+            nowMs = System.currentTimeMillis(),
+            autoHideAfterMs = autoHideAfterMs,
+            protectedKey = detailsOpenKey,
+        ) ?: return
+        autoHideJob = appScope.launch {
+            delay((deadline - System.currentTimeMillis()).coerceAtLeast(1L))
+            tracker.dismissExpired(
+                nowMs = System.currentTimeMillis(),
+                autoHideAfterMs = autoHideAfterMs,
+                protectedKey = detailsOpenKey,
+            )
+            publishAndReschedule()
+        }
     }
 
     private fun markProcessRunKeys() {
@@ -259,13 +335,11 @@ internal class SubAgentDockTracker {
                     status = status,
                     // Freeze the first terminal timestamp. Later task-summary writes must never
                     // make an already completed duration continue to grow.
-                    // If the manager's matching *terminal* live snapshot arrives after the
-                    // durable task row, prefer its exact generation finish time over that
-                    // coarse fallback. A stale RUNNING snapshot is never a finish time.
-                    finishedAtMs = live
-                        ?.takeIf { !it.status.keepsDockVisible }
-                        ?.updatedAtMs
-                        ?: previous.finishedAtMs
+                    // A stale RUNNING snapshot is never a finish time.
+                    finishedAtMs = previous.finishedAtMs
+                        ?: live
+                            ?.takeIf { !it.status.keepsDockVisible }
+                            ?.updatedAtMs
                         ?: snapshot.updatedAtMs,
                 )
             }
@@ -287,6 +361,52 @@ internal class SubAgentDockTracker {
         tracked[key]
             ?.takeIf { it.status.canDismiss }
             ?.let { dismissed += key }
+    }
+
+    /** Hide all current generations in the UI while leaving their durable/runtime state intact. */
+    fun dismissAll() {
+        dismissed += tracked.keys
+    }
+
+    /** Hide terminal rows whose first real terminal timestamp has passed the configured delay. */
+    fun dismissExpired(
+        nowMs: Long,
+        autoHideAfterMs: Long,
+        protectedKey: SubAgentDockRunKey? = null,
+    ): Boolean {
+        if (autoHideAfterMs <= SUB_AGENT_DOCK_AUTO_HIDE_NEVER) return false
+        val before = dismissed.size
+        tracked.values
+            .asSequence()
+            .filter { it.key != protectedKey && it.status.canDismiss }
+            .filter { task ->
+                val finishedAtMs = task.finishedAtMs ?: return@filter false
+                nowMs >= finishedAtMs && nowMs - finishedAtMs >= autoHideAfterMs
+            }
+            .forEach { dismissed += it.key }
+        return dismissed.size != before
+    }
+
+    fun nextAutoDismissAt(
+        nowMs: Long,
+        autoHideAfterMs: Long,
+        protectedKey: SubAgentDockRunKey? = null,
+    ): Long? {
+        if (autoHideAfterMs <= SUB_AGENT_DOCK_AUTO_HIDE_NEVER) return null
+        return tracked.values
+            .asSequence()
+            .filter { it.key != protectedKey && it.status.canDismiss && it.key !in dismissed }
+            .mapNotNull { task ->
+                task.finishedAtMs?.let { finishedAtMs ->
+                    val deadline = if (finishedAtMs > Long.MAX_VALUE - autoHideAfterMs) {
+                        Long.MAX_VALUE
+                    } else {
+                        finishedAtMs + autoHideAfterMs
+                    }
+                    deadline.coerceAtLeast(nowMs)
+                }
+            }
+            .minOrNull()
     }
 
     private companion object {

@@ -7,7 +7,9 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -17,7 +19,9 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.AlertDialog
@@ -42,11 +46,15 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.DialogProperties
 import com.composables.icons.lucide.Lucide
@@ -79,11 +87,11 @@ import java.util.Date
 import java.util.Locale
 import android.provider.OpenableColumns
 import app.amber.feature.ui.components.ds.Hairline
-import app.amber.feature.ui.components.ds.SectionLabel
 import app.amber.feature.ui.components.ds.amberCanvas
 import app.amber.feature.ui.components.nav.BackButton
 import app.amber.feature.ui.pages.setting.SettingTileIcon
-import app.amber.feature.ui.components.ui.CardGroup
+import app.amber.feature.ui.pages.setting.SettingCardGroup
+import app.amber.feature.ui.pages.setting.ExperimentActionButton
 import app.amber.feature.ui.components.ui.WorkspaceTopBar
 import app.amber.feature.ui.theme.LocalAmberTokens
 import app.amber.feature.ui.theme.LocalAmberType
@@ -146,6 +154,56 @@ internal fun WebDavDraft.syncFrom(config: WebDavConfig): WebDavDraft = copy(
     password = if (passwordDirty) password else config.password,
     path = if (pathDirty) path else config.path,
 )
+
+@Composable
+private fun BackupCompactField(
+    label: String,
+    value: String,
+    onValueChange: (String) -> Unit,
+    keyboardType: KeyboardType = KeyboardType.Text,
+    visualTransformation: VisualTransformation = VisualTransformation.None,
+) {
+    val tokens = LocalAmberTokens.current
+    val type = LocalAmberType.current
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 48.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(tokens.surface2)
+            .padding(horizontal = 14.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Text(
+            text = label,
+            style = type.secondary.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.Medium),
+            color = tokens.ink3,
+            maxLines = 1,
+            modifier = Modifier.width(88.dp),
+        )
+        BasicTextField(
+            value = value,
+            onValueChange = onValueChange,
+            modifier = Modifier
+                .weight(1f)
+                .heightIn(min = 28.dp),
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(keyboardType = keyboardType),
+            visualTransformation = visualTransformation,
+            cursorBrush = androidx.compose.ui.graphics.SolidColor(tokens.accent),
+            textStyle = type.body.copy(color = tokens.ink),
+            decorationBox = { inner ->
+                Box(
+                    modifier = Modifier.fillMaxWidth(),
+                    contentAlignment = Alignment.CenterStart,
+                ) {
+                    inner()
+                }
+            },
+        )
+    }
+}
 
 @Composable
 private fun BackupStatusContent(
@@ -222,6 +280,7 @@ fun BackupPage(vm: BackupVM = koinViewModel()) {
     val folderMessageText = folderMessage.resolveBackupMessage()
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     var pendingGoogleAction by remember { mutableStateOf<GoogleSyncAction?>(null) }
+    var showGoogleConfigDetails by remember { mutableStateOf(false) }
     // Restore scope is always EVERYTHING; within it the user opts in to
     // including chat history / generated images. Default OFF for both — the
     // safe path is "leave local chat & gallery alone". User framed it as:
@@ -400,7 +459,7 @@ fun BackupPage(vm: BackupVM = koinViewModel()) {
                 .padding(horizontal = 16.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            CardGroup(title = { SectionLabel("Google Drive") }) {
+            SettingCardGroup(title = "Google Drive") {
                 item(
                     onClick = if (googleAvailable) {
                         { vm.connectGoogle() }
@@ -410,29 +469,41 @@ fun BackupPage(vm: BackupVM = koinViewModel()) {
                     leadingContent = { SettingTileIcon(Lucide.DatabaseZap) },
                     headlineContent = { Text(stringResource(R.string.backup_google_account)) },
                     supportingContent = {
-                        val supportingText = when {
-                            !googleAvailable -> stringResource(
-                                R.string.backup_google_oauth_missing_client,
-                                context.packageName,
-                            )
-                            googleMessageText != null -> googleMessageText
-                            googleSession != null -> stringResource(
-                                R.string.backup_google_connected,
-                                googleSession?.label.orEmpty(),
-                            )
-                            hasGoogleConnection -> stringResource(
-                                R.string.backup_google_last_connected,
-                                settings.syncSettings.googleAccountEmail,
-                            )
-                            settings.syncSettings.googleAccountEmail.isNotBlank() -> stringResource(
-                                R.string.backup_google_last_connected,
-                                settings.syncSettings.googleAccountEmail,
-                            )
-                            !vm.googleConfigStatus.credentialManagerAvailable ->
-                                stringResource(R.string.backup_google_credential_manager_unavailable)
-                            else -> stringResource(R.string.backup_google_login_hint)
+                        if (!googleAvailable) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { showGoogleConfigDetails = true },
+                                verticalArrangement = Arrangement.spacedBy(2.dp),
+                            ) {
+                                Text(stringResource(R.string.backup_google_not_configured))
+                                Text(
+                                    stringResource(R.string.backup_google_config_details),
+                                    style = LocalAmberType.current.meta,
+                                    color = LocalAmberTokens.current.accent,
+                                )
+                            }
+                        } else {
+                            val supportingText = when {
+                                googleMessageText != null -> googleMessageText
+                                googleSession != null -> stringResource(
+                                    R.string.backup_google_connected,
+                                    googleSession?.label.orEmpty(),
+                                )
+                                hasGoogleConnection -> stringResource(
+                                    R.string.backup_google_last_connected,
+                                    settings.syncSettings.googleAccountEmail,
+                                )
+                                settings.syncSettings.googleAccountEmail.isNotBlank() -> stringResource(
+                                    R.string.backup_google_last_connected,
+                                    settings.syncSettings.googleAccountEmail,
+                                )
+                                !vm.googleConfigStatus.credentialManagerAvailable ->
+                                    stringResource(R.string.backup_google_credential_manager_unavailable)
+                                else -> stringResource(R.string.backup_google_login_hint)
+                            }
+                            Text(supportingText)
                         }
-                        Text(supportingText)
                     },
                     trailingContent = {
                         Text(
@@ -480,9 +551,12 @@ fun BackupPage(vm: BackupVM = koinViewModel()) {
                 rawItem {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
                     ) {
-                        Button(
+                        ExperimentActionButton(
+                            text = stringResource(R.string.backup_upload),
+                            enabled = googleAvailable,
+                            compact = false,
                             onClick = {
                                 if (googleSession == null) {
                                     pendingGoogleAction = GoogleSyncAction.Upload
@@ -491,17 +565,11 @@ fun BackupPage(vm: BackupVM = koinViewModel()) {
                                     vm.requestExport(ExportSource.Google)
                                 }
                             },
+                        )
+                        ExperimentActionButton(
+                            text = stringResource(R.string.backup_download),
                             enabled = googleAvailable,
-                            modifier = Modifier
-                                .weight(1f)
-                                .heightIn(min = 48.dp),
-                            shape = RoundedCornerShape(15.dp),
-                        ) {
-                            Icon(Lucide.Upload, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(Modifier.size(6.dp))
-                            Text(stringResource(R.string.backup_upload))
-                        }
-                        Button(
+                            compact = false,
                             onClick = {
                                 if (googleSession == null) {
                                     pendingGoogleAction = GoogleSyncAction.Download
@@ -510,98 +578,99 @@ fun BackupPage(vm: BackupVM = koinViewModel()) {
                                     vm.downloadGooglePreview()
                                 }
                             },
-                            enabled = googleAvailable,
-                            modifier = Modifier
-                                .weight(1f)
-                                .heightIn(min = 48.dp),
-                            shape = RoundedCornerShape(15.dp),
-                        ) {
-                            Icon(Lucide.CloudDownload, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(Modifier.size(6.dp))
-                            Text(stringResource(R.string.backup_download))
-                        }
+                        )
                     }
                 }
             }
 
             if (providerV2Enabled) {
-                CardGroup(title = { SectionLabel("WebDAV") }) {
-                    item(
-                        leadingContent = { SettingTileIcon(Lucide.DatabaseZap) },
-                        headlineContent = { Text(stringResource(R.string.backup_server_config)) },
-                        supportingContent = {
-                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                OutlinedTextField(
-                                    value = webDavUrl,
-                                    onValueChange = {
-                                        webDavUrl = it
-                                        webDavUrlDirty = true
-                                    },
-                                    label = { Text(stringResource(R.string.backup_server_address)) },
-                                    singleLine = true,
-                                    modifier = Modifier.fillMaxWidth(),
-                                    shape = RoundedCornerShape(12.dp),
+                SettingCardGroup(title = "WebDAV") {
+                    rawItem(dividerStartPadding = 50.dp) {
+                        val tokens = LocalAmberTokens.current
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 12.dp, vertical = 10.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                SettingTileIcon(Lucide.DatabaseZap)
+                                Text(
+                                    stringResource(R.string.backup_server_config),
+                                    style = LocalAmberType.current.body,
+                                    color = tokens.ink,
                                 )
-                                OutlinedTextField(
-                                    value = webDavUsername,
-                                    onValueChange = {
-                                        webDavUsername = it
-                                        webDavUsernameDirty = true
-                                    },
-                                    label = { Text(stringResource(R.string.backup_username)) },
-                                    singleLine = true,
-                                    modifier = Modifier.fillMaxWidth(),
-                                    shape = RoundedCornerShape(12.dp),
-                                )
-                                OutlinedTextField(
-                                    value = webDavPassword,
-                                    onValueChange = {
-                                        webDavPassword = it
-                                        webDavPasswordDirty = true
-                                    },
-                                    label = { Text(stringResource(R.string.backup_password)) },
-                                    singleLine = true,
-                                    visualTransformation = PasswordVisualTransformation(),
-                                    modifier = Modifier.fillMaxWidth(),
-                                    shape = RoundedCornerShape(12.dp),
-                                )
-                                OutlinedTextField(
-                                    value = webDavPath,
-                                    onValueChange = {
-                                        webDavPath = it
-                                        webDavPathDirty = true
-                                    },
-                                    label = { Text(stringResource(R.string.backup_directory)) },
-                                    singleLine = true,
-                                    modifier = Modifier.fillMaxWidth(),
-                                    shape = RoundedCornerShape(12.dp),
-                                )
-                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    Button(
-                                        onClick = {
-                                            vm.saveWebDavConfig(webDavUrl, webDavUsername, webDavPassword, webDavPath)
-                                            webDavUrlDirty = false
-                                            webDavUsernameDirty = false
-                                            webDavPasswordDirty = false
-                                            webDavPathDirty = false
-                                        },
-                                        modifier = Modifier.heightIn(min = 48.dp),
-                                        shape = RoundedCornerShape(15.dp),
-                                    ) { Text(stringResource(R.string.backup_save_config)) }
-                                    TextButton(onClick = { vm.refreshWebDavSnapshots() }) {
-                                        Text(stringResource(R.string.backup_read_snapshots))
-                                    }
-                                }
-                                if (webDavMessageText != null) {
-                                    Text(
-                                        webDavMessageText,
-                                        style = LocalAmberType.current.secondary,
-                                        color = LocalAmberTokens.current.ink3,
-                                    )
-                                }
                             }
-                        },
-                    )
+                            BackupCompactField(
+                                label = stringResource(R.string.backup_server_address),
+                                value = webDavUrl,
+                                onValueChange = {
+                                    webDavUrl = it
+                                    webDavUrlDirty = true
+                                },
+                                keyboardType = KeyboardType.Uri,
+                            )
+                            BackupCompactField(
+                                label = stringResource(R.string.backup_username),
+                                value = webDavUsername,
+                                onValueChange = {
+                                    webDavUsername = it
+                                    webDavUsernameDirty = true
+                                },
+                            )
+                            BackupCompactField(
+                                label = stringResource(R.string.backup_password),
+                                keyboardType = KeyboardType.Password,
+                                value = webDavPassword,
+                                onValueChange = {
+                                    webDavPassword = it
+                                    webDavPasswordDirty = true
+                                },
+                                visualTransformation = PasswordVisualTransformation(),
+                            )
+                            BackupCompactField(
+                                label = stringResource(R.string.backup_directory),
+                                value = webDavPath,
+                                onValueChange = {
+                                    webDavPath = it
+                                    webDavPathDirty = true
+                                },
+                            )
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
+                                ExperimentActionButton(
+                                    text = stringResource(R.string.backup_save_config),
+                                    enabled = true,
+                                    primary = true,
+                                    onClick = {
+                                        vm.saveWebDavConfig(webDavUrl, webDavUsername, webDavPassword, webDavPath)
+                                        webDavUrlDirty = false
+                                        webDavUsernameDirty = false
+                                        webDavPasswordDirty = false
+                                        webDavPathDirty = false
+                                    },
+                                )
+                                ExperimentActionButton(
+                                    text = stringResource(R.string.backup_read_snapshots),
+                                    enabled = true,
+                                    compact = true,
+                                    onClick = { vm.refreshWebDavSnapshots() },
+                                )
+                            }
+                            if (webDavMessageText != null) {
+                                Text(
+                                    webDavMessageText,
+                                    style = LocalAmberType.current.secondary,
+                                    color = tokens.ink3,
+                                )
+                            }
+                        }
+                    }
                     item(
                         onClick = { vm.requestExport(ExportSource.WebDav) },
                         leadingContent = { SettingTileIcon(Lucide.Upload) },
@@ -610,7 +679,7 @@ fun BackupPage(vm: BackupVM = koinViewModel()) {
                     )
                 }
                 if (webDavSnapshots.isNotEmpty()) {
-                    CardGroup(title = { SectionLabel(stringResource(R.string.backup_webdav_snapshots)) }) {
+                    SettingCardGroup(title = stringResource(R.string.backup_webdav_snapshots)) {
                         webDavSnapshots.forEachIndexed { index, snapshot ->
                             rawItem {
                                 ProviderSnapshotRow(
@@ -624,7 +693,7 @@ fun BackupPage(vm: BackupVM = koinViewModel()) {
                     }
                 }
 
-                CardGroup(title = { SectionLabel(stringResource(R.string.backup_local_folder)) }) {
+                SettingCardGroup(title = stringResource(R.string.backup_local_folder)) {
                     item(
                         onClick = { folderPickerLauncher.launch(null) },
                         leadingContent = { SettingTileIcon(Lucide.FolderOpen) },
@@ -658,7 +727,7 @@ fun BackupPage(vm: BackupVM = koinViewModel()) {
                     )
                 }
                 if (localFolderSnapshots.isNotEmpty()) {
-                    CardGroup(title = { SectionLabel(stringResource(R.string.backup_folder_snapshots)) }) {
+                    SettingCardGroup(title = stringResource(R.string.backup_folder_snapshots)) {
                         localFolderSnapshots.forEachIndexed { index, snapshot ->
                             rawItem {
                                 ProviderSnapshotRow(
@@ -673,7 +742,7 @@ fun BackupPage(vm: BackupVM = koinViewModel()) {
                 }
             }
 
-            CardGroup(title = { SectionLabel(stringResource(R.string.backup_local_backup)) }) {
+            SettingCardGroup(title = stringResource(R.string.backup_local_backup)) {
                 item(
                     onClick = {
                         createDocumentLauncher.launch(LocalBackupRepository.suggestedFileName())
@@ -867,6 +936,28 @@ fun BackupPage(vm: BackupVM = koinViewModel()) {
         // 必须强制重启进程，否则旧内存状态会被重新写回新库造成数据混合。
         // （BackupDialog 仅一个确认按钮，点击后 exitProcess(0)）
         BackupDialog()
+    }
+
+    if (showGoogleConfigDetails) {
+        AlertDialog(
+            onDismissRequest = { showGoogleConfigDetails = false },
+            title = { Text(stringResource(R.string.backup_google_not_configured)) },
+            text = {
+                Text(
+                    stringResource(
+                        R.string.backup_google_oauth_missing_client,
+                        context.packageName,
+                    ),
+                    style = LocalAmberType.current.secondary,
+                    color = LocalAmberTokens.current.ink3,
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { showGoogleConfigDetails = false }) {
+                    Text(stringResource(R.string.confirm))
+                }
+            },
+        )
     }
 
     cloudConflict?.let { conflict ->

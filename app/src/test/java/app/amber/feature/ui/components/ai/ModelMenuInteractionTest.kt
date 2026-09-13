@@ -1,18 +1,29 @@
 package app.amber.feature.ui.components.ai
 
 import android.app.Application
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.Column
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.unit.dp
+import androidx.test.core.app.ApplicationProvider
 import app.amber.ai.core.ReasoningLevel
 import app.amber.ai.provider.Model
+import app.amber.ai.provider.ModelAbility
 import app.amber.ai.provider.ModelType
+import app.amber.ai.provider.ProviderSetting
+import app.amber.agent.R
+import app.amber.agent.Screen
+import app.amber.feature.ui.context.LocalNavController
+import app.amber.feature.ui.context.Navigator
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Rule
@@ -30,10 +41,8 @@ import org.robolectric.annotation.GraphicsMode
  * composable that takes its segment data + an `onChange` callback (no `koinViewModel()` / no
  * `koinInject`), so we render it directly with fake data and drive real taps. It reads only
  * `LocalChatTheme`, which has a default value, so no Koin/theme scaffolding is required.
- * (The accordion-list composables `ModelItem`/`ModelItemRow` are `private` and the surrounding
- * `ModelList` pulls a concrete `SettingsAggregator` from Koin — no mock framework is on the test
- * classpath — so we test the largest stateless, callback-driven menu seam reachable from a
- * same-module test, plus the menu's pure selection-position logic.)
+ * ModelList receives favorites and updates from its owner, so the real search field,
+ * provider expansion, lazy row, and selection callback can be exercised without starting Koin.
  */
 @RunWith(RobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
@@ -68,18 +77,31 @@ class ModelMenuInteractionTest {
     }
 
     @Test
-    fun reasoningSegment_tappingLevelFiresCallbackWithThatLevel() {
+    fun topModelMenu_reasoningFooterFiresCallbackWithTheSupportedLevel() {
         var picked: ReasoningLevel? = null
+        val model = Model(
+            modelId = "deepseek-v4.1-flash",
+            displayName = "DeepSeek Flash",
+            abilities = listOf(ModelAbility.REASONING),
+        )
+        val provider = ProviderSetting.OpenAI(models = listOf(model))
         compose.setContent {
-            ThinkingLevelSegment(
-                levels = claudeLevels,
-                current = ReasoningLevel.AUTO,
-                onChange = { picked = it },
+            TopModelMenu(
+                open = true,
+                providers = listOf(provider),
+                modelType = ModelType.CHAT,
+                currentProviderId = provider.id,
+                currentModelId = model.id,
+                onSelect = {},
+                onClose = {},
+                reasoningLevel = ReasoningLevel.MAX,
+                onUpdateReasoningLevel = { picked = it },
             )
         }
 
         assertNull("no selection before any tap", picked)
-        compose.onNodeWithText("high").performClick()
+        compose.onNodeWithText("Thinking level").assertIsDisplayed()
+        compose.onNodeWithText("High").performClick()
         assertEquals(ReasoningLevel.HIGH, picked)
     }
 
@@ -137,5 +159,44 @@ class ModelMenuInteractionTest {
 
         compose.onNodeWithText("No available AI providers, please add in settings")
             .assertIsDisplayed()
+    }
+
+    @Test
+    fun modelList_keepsSearchAndModelRowVisibleAndSelectable() {
+        val model = Model(
+            modelId = "model-visible",
+            displayName = "model-visible",
+            type = ModelType.CHAT,
+        )
+        val provider = ProviderSetting.OpenAI(
+            name = "Test provider",
+            models = listOf(model),
+        )
+        var picked: Model? = null
+
+        compose.setContent {
+            CompositionLocalProvider(
+                LocalNavController provides Navigator(mutableListOf(Screen.SessionHome)),
+            ) {
+                Column(Modifier.height(600.dp)) {
+                    ModelList(
+                        currentModel = null,
+                        providers = listOf(provider),
+                        modelType = ModelType.CHAT,
+                        onSelect = { picked = it },
+                        onDismiss = {},
+                        favoriteModelIds = emptyList(),
+                        onFavoriteModelsChange = {},
+                    )
+                }
+            }
+        }
+
+        val context = ApplicationProvider.getApplicationContext<Application>()
+        compose.onNodeWithText(
+            context.getString(R.string.model_list_search_placeholder),
+        ).assertIsDisplayed()
+        compose.onNodeWithText("model-visible").assertIsDisplayed().performClick()
+        assertEquals(model.id, picked?.id)
     }
 }

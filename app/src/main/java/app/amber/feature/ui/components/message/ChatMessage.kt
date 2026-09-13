@@ -101,6 +101,11 @@ fun ChatMessage(
     Column(
         modifier = modifier
             .fillMaxWidth()
+            .messageActionsOnLongPress(
+                if (message.role == MessageRole.ASSISTANT && !loading && message.parts.hasRenderableChatMessageContent()) {
+                    { showActionsSheet = true }
+                } else null,
+            )
             .amberTraceMeasure("Amber ChatMessage ${message.role.name.lowercase()} measure"),
         horizontalAlignment = if (message.role == MessageRole.USER) Alignment.End else Alignment.Start,
         verticalArrangement = Arrangement.spacedBy(4.dp)
@@ -187,13 +192,8 @@ fun ChatMessage(
             loading = loading,
             textStyle = textStyle,
             actionFooterMode = actionFooterMode,
-            message = message,
             node = node,
-            onRegenerate = onRegenerate,
             onUpdate = onUpdate,
-            onOpenActionSheet = {
-                showActionsSheet = true
-            },
         )
     }
     if (showActionsSheet) {

@@ -31,10 +31,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithCache
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
@@ -64,16 +64,21 @@ import app.amber.feature.ui.modifier.shimmer
 import app.amber.core.utils.extractThinkingTitle
 import kotlin.time.Clock
 import kotlin.time.Duration
+import kotlin.math.ceil
 import kotlin.time.Duration.Companion.seconds
 import kotlin.time.DurationUnit
 
-private const val REASONING_PREVIEW_CHAR_LIMIT = 1_600
-private const val REASONING_EXPANDED_STREAM_CHAR_LIMIT = 6_000
+private const val REASONING_PREVIEW_CHAR_LIMIT = 2_000
+private const val REASONING_EXPANDED_STREAM_CHAR_LIMIT = 2_000
 private const val REASONING_EXPANDED_FINAL_CHAR_LIMIT = 18_000
 
 // 自动折叠相对"生成结束"的延迟: 错开结束瞬间的虚拟化切换/footer 显隐等布局变化
 private const val REASONING_AUTO_COLLAPSE_DELAY_MS = 300L
 private const val SCROLL_TAG = "AmberChatScroll"
+private val REASONING_PREVIEW_HEIGHT = 100.dp
+private val REASONING_STREAM_EXPANDED_MIN_HEIGHT = 220.dp
+private val REASONING_STREAM_EXPANDED_MAX_HEIGHT = 320.dp
+private val REASONING_FINAL_MAX_HEIGHT = 420.dp
 
 // 思考预览框的自动跟随速度上限（dp/s）——playbook 坑14 的 pt 限速先例。
 private const val REASONING_PREVIEW_FOLLOW_DP_PER_SECOND = 540f
@@ -84,6 +89,15 @@ enum class ReasoningCardState(val expanded: Boolean) {
     Expanded(true),
 }
 
+internal fun reasoningCardStateAfterToggle(nextExpanded: Boolean): ReasoningCardState =
+    if (nextExpanded) ReasoningCardState.Expanded else ReasoningCardState.Collapsed
+
+internal fun shouldAutoCollapseReasoning(
+    state: ReasoningCardState,
+    loading: Boolean,
+    autoCloseThinking: Boolean,
+): Boolean = !loading && autoCloseThinking && state.expanded
+
 @Stable
 private class ReasoningState(
     val scrollState: ScrollState,
@@ -91,14 +105,11 @@ private class ReasoningState(
 ) {
     var expandState by mutableStateOf(ReasoningCardState.Collapsed)
     var duration by mutableStateOf(initialDuration)
-    var sawStreamingMessage by mutableStateOf(false)
 
-    fun onExpandedChange(nextExpanded: Boolean, loading: Boolean) {
-        expandState = if (loading) {
-            if (nextExpanded) ReasoningCardState.Expanded else ReasoningCardState.Preview
-        } else {
-            if (nextExpanded) ReasoningCardState.Expanded else ReasoningCardState.Collapsed
-        }
+    fun onExpandedChange(nextExpanded: Boolean, _loading: Boolean) {
+        // A user collapse is authoritative even while the model is still streaming. The old
+        // Preview fallback made the next loading recomposition reopen the card immediately.
+        expandState = reasoningCardStateAfterToggle(nextExpanded)
     }
 }
 
@@ -124,19 +135,17 @@ private fun rememberReasoningState(
     }
 
     LaunchedEffect(loading, messageLoading) {
-        if (messageLoading) {
-            state.sawStreamingMessage = true
+        if (loading) {
             if (!state.expandState.expanded && settings.displaySetting.showThinkingContent)
                 state.expandState = ReasoningCardState.Preview
         } else {
-            if (state.sawStreamingMessage) {
-                // Collapsing the reasoning card while the answer is streaming, or
-                // immediately after it finishes, removes a large block above the
-                // tail content and makes LazyColumn restore around the message top.
-                // Keep streamed reasoning stable; users can still collapse it manually.
-                Log.d(SCROLL_TAG, "[reasoning] auto-collapse skipped for streamed message")
-            } else if (state.expandState.expanded) {
-                if (settings.displaySetting.autoCloseThinking) {
+            if (state.expandState.expanded) {
+                if (shouldAutoCollapseReasoning(
+                        state = state.expandState,
+                        loading = loading,
+                        autoCloseThinking = settings.displaySetting.autoCloseThinking,
+                    )
+                ) {
                     // 生成结束的同一帧里还会发生: 消息从整条 item 切换成虚拟化多
                     // item、ActionFooter 由占位转可见、流式/非流式渲染分支切换。
                     // 把自动折叠错开一拍, 让这些布局变化先落定, 避免叠加成一次
@@ -253,31 +262,29 @@ private fun ReasoningContent(
                                 )
                             }
                         }
-                        .heightIn(max = 100.dp)
+                        .heightIn(
+                            min = REASONING_PREVIEW_HEIGHT,
+                            max = REASONING_PREVIEW_HEIGHT,
+                        )
+                        .verticalScroll(scrollState)
+                } else if (loading) {
+                    contentModifier
+                        .heightIn(
+                            min = REASONING_STREAM_EXPANDED_MIN_HEIGHT,
+                            max = REASONING_STREAM_EXPANDED_MAX_HEIGHT,
+                        )
                         .verticalScroll(scrollState)
                 } else {
                     contentModifier
+                        .heightIn(max = REASONING_FINAL_MAX_HEIGHT)
+                        .verticalScroll(scrollState)
                 }
             }
     ) {
         SelectionContainer {
-            // V3 修: ReasoningContent 自带左竖线 — 让 reasoning step 有线、tool step 没线
-            // (wrapper 不画). 线 X=0 (ReasoningContent 起始, 跟 flushContent=true 的 wrapper
-            // step icon center 12dp 对齐), padding(start=14) 让文字距线 14dp.
-            val thinkRuleColor = app.amber.feature.ui.pages.chat.LocalChatTheme.current.thinkRule
+            // The enclosing card owns the symmetric body insets; no quote-rule indentation.
             androidx.compose.foundation.layout.Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .drawBehind {
-                        val strokePx = 2.dp.toPx()
-                        drawLine(
-                            color = thinkRuleColor,
-                            start = Offset(strokePx / 2f, 0f),
-                            end = Offset(strokePx / 2f, size.height),
-                            strokeWidth = strokePx,
-                        )
-                    }
-                    .padding(start = 14.dp),
+                modifier = Modifier.fillMaxWidth(),
             ) {
                 // 思考是人的 prose，不是文档：小卡片里渲染 ## 大标题/粗体很出戏。
                 // 显示层剥离标记（原文保留，导出/复制仍是 markdown），并复用与正文
@@ -292,8 +299,8 @@ private fun ReasoningContent(
                     // pacing + tail reveal. Trimmed (sliding-window) thoughts
                     // are prefix-breaking content and render statically.
                     streaming = displayTextStreaming,
-                    // Graphite §6.2: thoughts are human prose → SANS (.secondary), ink3/thinkBodyInk
-                    // behind the 2dp thinkRule left rule (drawn above).
+                    // Thoughts are human prose → SANS (.secondary), rendered directly on the
+                    // thinking surface without a document-style quote rule.
                     style = LocalAmberType.current.secondary.copy(
                         color = app.amber.feature.ui.pages.chat.LocalChatTheme.current.thinkBodyInk,
                         fontSize = 12.5.sp,
@@ -320,6 +327,9 @@ fun ChainOfThoughtScope.ChatMessageReasoningStep(
     framed: Boolean = true,
 ) {
     val (state, reasoningLoading) = rememberReasoningState(reasoning, loading)
+    val preserveScrollAnchor = app.amber.feature.ui.context.LocalReasoningScrollAnchor.current
+    var headerCoordinates by remember { mutableStateOf<androidx.compose.ui.layout.LayoutCoordinates?>(null) }
+
     val showReasoningDuration = reasoning.finishedAt != null || reasoningLoading
     val thinkingTitle = remember(reasoning.reasoning, reasoningLoading) {
         if (reasoningLoading) reasoning.reasoning.extractThinkingTitle() else null
@@ -331,53 +341,63 @@ fun ChainOfThoughtScope.ChatMessageReasoningStep(
         settings.rememberedReasoningLevelsByModelId[selectedModel.id.toString()]
             ?: settings.resolveSessionDefaults(selectedModel).reasoningLevel
     }
-    val budgetLabel = reasoningLevel.reasoningBudgetLabel()
+    val reasoningLabel = reasoningLevel.reasoningLabel()
 
-    // V3 主题感知 + 设计稿对齐: brain 图标 (替代默认灰圆豆 dot, 让"小图标"代表思考 step) +
-    //   flushContent=true 让 content 引用竖线 X 对齐 step icon center (12dp)
+    // V3 主题感知 + 设计稿对齐: brain 图标 (替代默认灰圆豆 dot, 让"小图标"代表思考 step).
     val chatThemeForReasoning = app.amber.feature.ui.pages.chat.LocalChatTheme.current
     ControlledChainOfThoughtStep(
-        expanded = state.expandState == ReasoningCardState.Expanded,
-        onExpandedChange = { state.onExpandedChange(it, reasoningLoading) },
+        // Preview already has visible content; treat it as expanded for the control so a tap
+        // collapses it instead of opening a second Expanded state first.
+        expanded = state.expandState.expanded,
+        onExpandedChange = { nextExpanded ->
+            preserveScrollAnchor?.invoke {
+                headerCoordinates?.takeIf { it.isAttached }?.positionInWindow()?.y
+            }
+            state.onExpandedChange(nextExpanded, reasoningLoading)
+        },
         icon = {
             Icon(
                 imageVector = Lucide.Brain,
                 contentDescription = null,
                 tint = chatThemeForReasoning.thinkHeaderInk,
-                modifier = Modifier.size(14.dp),
+                modifier = Modifier.size(12.dp),
             )
         },
         label = {
+            androidx.compose.foundation.layout.Box(Modifier.onGloballyPositioned { headerCoordinates = it }) {
             if (thinkingTitle != null) {
                 ReasoningTitle(title = thinkingTitle)
             } else {
                 val baseText = if (showReasoningDuration) {
                     stringResource(
                         R.string.deep_thinking_seconds,
-                        state.duration.toDouble(DurationUnit.SECONDS).toFloat()
+                        state.duration.displaySeconds(),
                     )
                 } else {
                     stringResource(R.string.deep_thinking)
                 }
-                // V3 设计稿: "思考了 5.4 秒 · auto" 一体显示，不分 extra
-                val combinedText = if (budgetLabel != null) "$baseText · $budgetLabel" else baseText
-                // Graphite §6.2 ThinkingStrip: MONO header (.meta) — machine timing/mode line.
+                // 耗时与等级紧凑地显示在同一行。
+                val combinedText = if (reasoningLabel != null) "$baseText · $reasoningLabel" else baseText
+                // This line mixes human-readable Chinese with timing and mode. Keep it in the
+                // sans UI face so CJK/Latin/digits stay compact and share a natural baseline.
                 Text(
                     text = combinedText,
-                    style = LocalAmberType.current.meta.copy(
-                        fontSize = 12.5.sp,
-                        fontWeight = FontWeight.Medium,
+                    style = LocalAmberType.current.secondary.copy(
+                        fontSize = 11.sp,
+                        lineHeight = 14.sp,
+                        fontWeight = FontWeight.Normal,
                         letterSpacing = 0.sp,
                     ),
-                    color = chatThemeForReasoning.thinkHeaderInk,  // 鲜亮 accent，不再 0.72 alpha
+                    color = chatThemeForReasoning.inkSoft,
                     modifier = Modifier.shimmer(isLoading = reasoningLoading),
                 )
+            }
             }
         },
         extra = {
             // V3 设计稿: 流式 title 时仅显示 duration 在右侧
             val durationLabel = if (showThinkingTitle && state.duration > 0.seconds) {
-                state.duration.toString(DurationUnit.SECONDS, 1)
+                "${state.duration.displaySeconds()}s"
             } else {
                 null
             }
@@ -389,14 +409,15 @@ fun ChainOfThoughtScope.ChatMessageReasoningStep(
                         fontSize = 11.5.sp,
                         fontWeight = FontWeight.Normal,
                     ),
-                    color = chatThemeForReasoning.thinkHeaderInk.copy(alpha = 0.56f),
+                    color = chatThemeForReasoning.inkSoft,
                     modifier = Modifier.shimmer(isLoading = reasoningLoading),
                 )
             }
         },
         collapsedAdaptiveWidth = collapsedAdaptiveWidth,
         contentVisible = state.expandState != ReasoningCardState.Collapsed,
-        flushContent = true,  // V3: content 竖线 X 跟 step icon center 对齐
+        // Framed reasoning uses symmetric body padding rather than a quote-rule inset.
+        flushContent = false,
         framed = framed,
         content = {
             ReasoningContent(
@@ -411,19 +432,19 @@ fun ChainOfThoughtScope.ChatMessageReasoningStep(
     )
 }
 
+private fun Duration.displaySeconds(): Int =
+    ceil(toDouble(DurationUnit.SECONDS)).coerceAtLeast(1.0).toInt()
+
 @Composable
-private fun ReasoningLevel?.reasoningBudgetLabel(): String? = when (this) {
+private fun ReasoningLevel?.reasoningLabel(): String? = when (this) {
     null,
     ReasoningLevel.OFF -> null
     ReasoningLevel.AUTO -> stringResource(R.string.reasoning_auto)
-    else -> stringResource(
-        R.string.chat_message_reasoning_budget_tokens,
-        this.budgetTokens.formatReasoningBudget(),
-    )
-}
-
-private fun Int.formatReasoningBudget(): String {
-    return if (this >= 1_000) "${this / 1_000}K" else toString()
+    ReasoningLevel.LOW -> stringResource(R.string.reasoning_light)
+    ReasoningLevel.MEDIUM -> stringResource(R.string.reasoning_medium)
+    ReasoningLevel.HIGH -> stringResource(R.string.reasoning_heavy)
+    ReasoningLevel.XHIGH -> stringResource(R.string.reasoning_xhigh)
+    ReasoningLevel.MAX -> stringResource(R.string.reasoning_max)
 }
 
 internal fun String.toDisplayReasoningText(
@@ -474,7 +495,7 @@ private fun ReasoningTitle(title: String) {
                 fontWeight = FontWeight.Normal,
             ),
             // V3 主题感知 (Paper 砖红 / Plain 黑 / Midnight 靛蓝)
-            color = chatTheme.thinkHeaderInk.copy(alpha = 0.72f),
+            color = chatTheme.inkSoft,
             modifier = Modifier
                 .padding(horizontal = 4.dp)
                 .shimmer(true),

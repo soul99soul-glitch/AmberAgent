@@ -28,6 +28,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
@@ -43,6 +44,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.stateDescription
@@ -367,11 +369,16 @@ internal fun AgentToolCallCapsule(
 ) {
     val workspace = workspaceColors()
     val theme = app.amber.feature.ui.pages.chat.LocalChatTheme.current
-    // V3 ResultPill spec (convo-tool-result.jsx:80):
-    //   padding 3/10/3/3, fillMaxWidth, 999 圆角, toolPillBg + 1dp toolPillEdge
-    //   左侧 16dp accent 圆 + 10dp 白勾 (替代旧 15dp tool 图标)
-    //   inline "tool · query" 11.5sp letter 0.2  toolLabelInk W500 / inkSoft W400
-    //   高度 ~22dp (3+16+3)
+    // Tint the conversation paper, rather than the brighter card surface, for the muted
+    // iOS-style capsule fill. Pre-compositing keeps the canvas texture out of the pill.
+    val capsuleBackground = theme.accent
+        .copy(alpha = if (theme.isDark) 0.16f else 0.08f)
+        .compositeOver(theme.bg)
+    val capsuleBorder = theme.accent
+        .copy(alpha = if (theme.isDark) 0.24f else 0.14f)
+        .compositeOver(theme.bg)
+    // Compact tool result pill: opaque accent wash, readable ink, and a small semantic status
+    // mark at the trailing edge. The status mark itself does not add a saturated color disk.
     val shape = androidx.compose.foundation.shape.CircleShape
     Box(
         modifier = modifier
@@ -398,15 +405,15 @@ internal fun AgentToolCallCapsule(
             // 一层 (input 流式增长/审批切换/output 回填时两层弹簧并行会弹跳)。
             // 见 ChatMessage.kt 中关于 message 渲染路径禁止叠加 animateContentSize 的注释。
             shape = shape,
-            color = theme.toolPillBg,
+            color = capsuleBackground,
             contentColor = workspace.ink,
             shadowElevation = 0.dp,
-            border = BorderStroke(1.dp, theme.toolPillEdge),
+            border = BorderStroke(1.dp, capsuleBorder),
         ) {
             val reserveStatusSlot = approvalActions == null
             Box {
                 Row(
-                    modifier = Modifier.padding(start = 7.dp, end = 3.dp, top = 3.dp, bottom = 3.dp),
+                    modifier = Modifier.padding(start = 7.dp, end = 3.dp, top = 5.dp, bottom = 5.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Row(
@@ -431,11 +438,11 @@ internal fun AgentToolCallCapsule(
                         val amberType = app.amber.feature.ui.theme.LocalAmberType.current
                         Text(
                             text = displayText,
-                            // §6.2 ToolCall row: tool name + args are machine-facts → mono (.meta),
-                            // colored with accent (toolLabelInk).
+                            // Tool name + args stay compact and machine-readable, while the
+                            // capsule text uses the theme ink for comfortable contrast.
                             style = amberType.meta.copy(fontSize = 11.sp),
-                            fontWeight = androidx.compose.ui.text.font.FontWeight.Medium,
-                            color = theme.toolLabelInk,
+                            fontWeight = androidx.compose.ui.text.font.FontWeight.Normal,
+                            color = theme.inkSoft,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                             modifier = (if (approvalActions == null) {
@@ -494,70 +501,62 @@ private fun V3ToolStatusBadge(
 ) {
     val theme = app.amber.feature.ui.pages.chat.LocalChatTheme.current
     val statusDescription = toolStatusLabel(status)
-    // §6.2 amended (2026-06-10): `signal` is aliased to the user accent in buildAmberTokens,
-    // so the completed badge renders in the accent — same family as the failed cross.
-    val signal = app.amber.feature.ui.theme.LocalAmberTokens.current.signal
-    val (bg, ink) = when (status) {
-        AgentToolStatus.SUCCEEDED -> signal to theme.toolDoneBadgeInk
-        AgentToolStatus.RUNNING -> Color.Transparent to theme.toolDoneBg
-        // 待授权/失败: 实心强调色底 + accentInk(随底色自适应黑/白)的图标 —— 与成功对勾共用同一套取色逻辑,
-        // 避免出现"对勾黑、叉白"的不一致。
-        AgentToolStatus.WAITING_FOR_PERMISSION -> theme.contextMid to theme.toolDoneBadgeInk
-        AgentToolStatus.UNKNOWN -> theme.contextMid to theme.toolDoneBadgeInk
-        AgentToolStatus.FAILED -> theme.contextHigh to theme.toolDoneBadgeInk
-        AgentToolStatus.TIMED_OUT -> theme.contextHigh to theme.toolDoneBadgeInk
-        AgentToolStatus.INTERRUPTED -> theme.contextMid to theme.toolDoneBadgeInk
-        // 已取消: 空心(透明底) + 强调色描边 + 强调色叉 —— 用"空心 vs 实心"与真正失败区分。
-        AgentToolStatus.CANCELLED -> Color.Transparent to theme.accent
+    val successInk = theme.toolIconInk
+    val ink = when (status) {
+        AgentToolStatus.SUCCEEDED -> successInk
+        AgentToolStatus.WAITING_FOR_PERMISSION -> theme.contextMid
+        AgentToolStatus.UNKNOWN -> theme.inkSoft
+        AgentToolStatus.FAILED,
+        AgentToolStatus.TIMED_OUT -> theme.contextHigh
+        AgentToolStatus.INTERRUPTED -> theme.contextMid
+        AgentToolStatus.CANCELLED -> theme.accent
+        AgentToolStatus.RUNNING -> theme.accent
     }
     if (status == AgentToolStatus.RUNNING) {
-        // §6.2 ToolCall row: running → breathing live dot (signal = accent alias).
-        Box(modifier.requiredSize(16.dp), contentAlignment = Alignment.Center) {
-            app.amber.feature.ui.components.ds.LiveDot()
+        Box(
+            modifier = modifier
+                .requiredSize(16.dp)
+                .semantics { stateDescription = statusDescription },
+            contentAlignment = Alignment.Center,
+        ) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(12.dp),
+                color = ink,
+                strokeWidth = 1.5.dp,
+            )
         }
         return
     }
-    Surface(
+    Box(
         modifier = modifier
             .requiredSize(16.dp)
             .semantics { stateDescription = statusDescription },
-        shape = androidx.compose.foundation.shape.CircleShape,
-        color = bg,
-        border = if (status == AgentToolStatus.CANCELLED) BorderStroke(1.dp, ink) else null,
+        contentAlignment = Alignment.Center,
     ) {
-        Box(contentAlignment = Alignment.Center) {
-            if (status == AgentToolStatus.SUCCEEDED) {
-                Icon(
-                    imageVector = Lucide.Check,
-                    contentDescription = null,
-                    tint = ink,
-                    modifier = Modifier.size(10.dp),
-                )
-            } else if (status == AgentToolStatus.FAILED || status == AgentToolStatus.TIMED_OUT) {
-                Icon(
-                    imageVector = Lucide.X,
-                    contentDescription = null,
-                    tint = ink,
-                    modifier = Modifier.size(10.dp),
-                )
-            } else if (status == AgentToolStatus.CANCELLED) {
-                Icon(
-                    imageVector = Lucide.X,
-                    contentDescription = null,
-                    tint = ink,
-                    modifier = Modifier.size(10.dp),
-                )
-            } else if (status == AgentToolStatus.WAITING_FOR_PERMISSION ||
-                status == AgentToolStatus.UNKNOWN ||
-                status == AgentToolStatus.INTERRUPTED
-            ) {
-                Icon(
-                    imageVector = Lucide.Clock,
-                    contentDescription = null,
-                    tint = ink,
-                    modifier = Modifier.size(10.dp),
-                )
-            }
+        when (status) {
+            AgentToolStatus.SUCCEEDED -> Icon(
+                imageVector = Lucide.Check,
+                contentDescription = null,
+                tint = ink,
+                modifier = Modifier.size(12.dp),
+            )
+            AgentToolStatus.FAILED,
+            AgentToolStatus.TIMED_OUT,
+            AgentToolStatus.CANCELLED -> Icon(
+                imageVector = Lucide.X,
+                contentDescription = null,
+                tint = ink,
+                modifier = Modifier.size(12.dp),
+            )
+            AgentToolStatus.WAITING_FOR_PERMISSION,
+            AgentToolStatus.UNKNOWN,
+            AgentToolStatus.INTERRUPTED -> Icon(
+                imageVector = Lucide.Clock,
+                contentDescription = null,
+                tint = ink,
+                modifier = Modifier.size(12.dp),
+            )
+            AgentToolStatus.RUNNING -> Unit
         }
     }
 }

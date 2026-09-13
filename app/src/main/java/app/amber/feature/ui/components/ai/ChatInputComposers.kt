@@ -59,15 +59,12 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import app.amber.ai.core.ReasoningLevel
 import com.composables.icons.lucide.Lucide
 import com.composables.icons.lucide.Maximize
 import app.amber.agent.R
 import app.amber.feature.subagent.SubAgentMode
 import app.amber.feature.ui.subagent.AppSubAgentDisplayLocalizer
-import app.amber.core.settings.defaultReasoningLevelForModel
 import app.amber.core.settings.getAmberQuickMessages
-import app.amber.core.settings.getCurrentChatModel
 import app.amber.core.files.FilesManager
 import app.amber.core.files.SkillManager
 import app.amber.core.files.SkillMetadata
@@ -120,8 +117,7 @@ internal fun TextInputRow(
     modifier: Modifier = Modifier,
     minimalChrome: Boolean = false,
     hidePlaceholder: Boolean = false,
-    // V3: SlashCommandPanel footer 需要 commit reasoningLevel 到全局 Settings.
-    // 为 null 时 (sandbox / 历史预览等场景) footer 不渲染. ChatInput 调用处必传.
+    // Kept for the shared composer call contract; reasoning level lives in the model menu.
     onUpdateSettings: ((app.amber.core.settings.Settings) -> Unit)? = null,
     onImportAttachment: ((Uri, ChatInputAttachmentKind) -> Unit)? = null,
     onImportTextFile: ((String) -> Unit)? = null,
@@ -329,38 +325,6 @@ internal fun TextInputRow(
                                 SlashCommandAction.OpenUsage -> {
                                     discardInput()
                                     onUsageClick()
-                                }
-                            }
-                        },
-                        // V3: thinking footer 数据来自当前 settings, 不为空且 model 支持 reasoning 时渲染
-                        thinkingFooter = onUpdateSettings?.let { update ->
-                            {
-                                val currentModel = settings.getCurrentChatModel()
-                                val hasReasoning = currentModel?.abilities?.contains(
-                                    app.amber.ai.provider.ModelAbility.REASONING
-                                ) == true
-                                if (hasReasoning) {
-                                    val currentLevel = settings.rememberedReasoningLevelsByModelId[
-                                        currentModel.id.toString()
-                                    ] ?: if (settings.reasoningLevel == ReasoningLevel.AUTO) {
-                                        settings.defaultReasoningLevelForModel(currentModel)
-                                    } else {
-                                        settings.reasoningLevel
-                                    }
-                                    SlashCommandThinkingFooter(
-                                        currentLevel = currentLevel,
-                                        levels = app.amber.feature.ui.components.ai.reasoningLevelsForModel(currentModel),
-                                        onChange = { level ->
-                                            update(
-                                                settings.copy(
-                                                    reasoningLevel = level,
-                                                    rememberedReasoningLevelsByModelId =
-                                                        settings.rememberedReasoningLevelsByModelId +
-                                                            (currentModel.id.toString() to level),
-                                                )
-                                            )
-                                        },
-                                    )
                                 }
                             }
                         },
@@ -588,7 +552,6 @@ private fun SlashCommandPanel(
     commands: List<SlashCommandItem>,
     hasAnyCommand: Boolean,
     onSelect: (SlashCommandItem) -> Unit,
-    thinkingFooter: (@Composable () -> Unit)? = null,
 ) {
     val workspace = workspaceColors()
     val chatTheme = app.amber.feature.ui.pages.chat.LocalChatTheme.current
@@ -637,37 +600,6 @@ private fun SlashCommandPanel(
                     }
                 }
             }
-            // V3: thinking-level footer — 跟着 panel 一起出现, 仅当 model 支持 reasoning 时显示
-            thinkingFooter?.invoke()
-        }
-    }
-}
-
-@Composable
-private fun SlashCommandThinkingFooter(
-    currentLevel: app.amber.ai.core.ReasoningLevel,
-    levels: List<Pair<app.amber.ai.core.ReasoningLevel, String>>,
-    onChange: (app.amber.ai.core.ReasoningLevel) -> Unit,
-) {
-    val workspace = workspaceColors()
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(top = 6.dp),
-    ) {
-        HorizontalDivider(color = workspace.hairline)
-        Text(
-            text = stringResource(R.string.chat_input_reasoning_level),
-            color = workspace.faint,
-            fontSize = 12.sp,
-            modifier = Modifier.padding(start = 12.dp, top = 8.dp, bottom = 6.dp),
-        )
-        Box(modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)) {
-            app.amber.feature.ui.components.ai.ThinkingLevelSegment(
-                levels = levels,
-                current = currentLevel,
-                onChange = onChange,
-            )
         }
     }
 }

@@ -67,6 +67,7 @@ internal fun SettingCardGroup(
     modifier: Modifier = Modifier,
     content: @Composable CardGroupScope.() -> Unit,
 ) {
+    val colors = workspaceColors()
     Column(
         modifier = modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(6.dp),
@@ -75,7 +76,16 @@ internal fun SettingCardGroup(
             text = title,
             modifier = Modifier.padding(top = 10.dp),
         )
-        CardGroup(content = content)
+        CardGroup(
+            containerColor = colors.paper,
+            border = null,
+            shadowElevation = 0.dp,
+            itemSpacing = 0.dp,
+            dividerColor = colors.hairline.copy(alpha = 0.28f),
+            dividerStartPadding = 12.dp,
+            dividerLeadingOffset = 38.dp,
+            content = content,
+        )
     }
 }
 

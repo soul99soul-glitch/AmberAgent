@@ -15,7 +15,6 @@ import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.defaultMinSize
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
@@ -102,7 +101,7 @@ internal fun ProviderCard(
         modifier = modifier
             .clip(RoundedCornerShape(14.dp))
             .background(t.surface)
-            .border(1.dp, t.line, RoundedCornerShape(14.dp)),
+            .border(1.dp, t.line.copy(alpha = 0.42f), RoundedCornerShape(14.dp)),
         content = content,
     )
 }
@@ -113,8 +112,8 @@ internal fun ProviderHairline(modifier: Modifier = Modifier) {
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .height(1.dp)
-            .background(t.line)
+            .height(0.5.dp)
+            .background(t.line.copy(alpha = 0.46f))
     )
 }
 
@@ -138,7 +137,7 @@ internal fun ProviderMonogram(
             .size(size)
             .clip(RoundedCornerShape(size * 0.28f))
             .background(t.surface2)
-            .border(1.dp, t.line, RoundedCornerShape(size * 0.28f)),
+            .border(1.dp, t.line.copy(alpha = 0.46f), RoundedCornerShape(size * 0.28f)),
         contentAlignment = Alignment.Center,
     ) {
         Text(
@@ -215,11 +214,8 @@ internal fun <T> ProviderPillSeg(
     val t = LocalAmberTokens.current
     val type = LocalAmberType.current
     Row(
-        modifier = modifier
-            .clip(RoundedCornerShape(11.dp))
-            .background(t.surface2)
-            .border(1.dp, t.line2, RoundedCornerShape(11.dp))
-            .padding(3.dp),
+        modifier = modifier.heightIn(min = 48.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         options.forEach { option ->
             val on = option.value == selected
@@ -233,9 +229,9 @@ internal fun <T> ProviderPillSeg(
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(38.dp)
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(if (on) t.raised else Color.Transparent),
+                        .height(32.dp)
+                        .clip(CircleShape)
+                        .background(if (on) t.accent.copy(alpha = 0.10f) else t.surface2),
                     contentAlignment = Alignment.Center,
                 ) {
                     Text(
@@ -352,7 +348,7 @@ internal fun ProviderTextField(
             .background(t.surface2)
             .border(
                 1.dp,
-                if (isError) MaterialTheme.colorScheme.error else t.line,
+                if (isError) MaterialTheme.colorScheme.error else t.line.copy(alpha = 0.58f),
                 RoundedCornerShape(12.dp),
             )
             .padding(horizontal = 14.dp, vertical = 12.dp),
@@ -401,9 +397,9 @@ internal fun ProviderSecretField(
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
+            .clip(RoundedCornerShape(14.dp))
             .background(t.surface2)
-            .border(1.dp, t.line, RoundedCornerShape(12.dp))
+            .border(1.dp, t.line.copy(alpha = 0.58f), RoundedCornerShape(14.dp))
             .padding(start = 14.dp, end = 6.dp, top = 8.dp, bottom = 8.dp),
         verticalAlignment = Alignment.Top,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -533,23 +529,29 @@ internal fun ProviderCommandButton(
     modifier: Modifier = Modifier,
     accent: Boolean = false,
     imageVector: ImageVector? = null,
+    enabled: Boolean = true,
 ) {
     val t = LocalAmberTokens.current
     val type = LocalAmberType.current
     Box(
         modifier = modifier
             .heightIn(min = 48.dp)
-            .pressable(onClick = onClick),
+            .pressable(onClick = onClick, enabled = enabled),
         contentAlignment = Alignment.Center,
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(44.dp)
-                .clip(RoundedCornerShape(10.dp))
-                .background(if (accent) t.accent else t.surface2)
-                .border(1.dp, if (accent) Color.Transparent else t.line, RoundedCornerShape(10.dp))
-                .padding(horizontal = 13.dp),
+                .height(36.dp)
+                .clip(CircleShape)
+                .background(
+                    when {
+                        accent && enabled -> t.accent
+                        enabled -> t.accent.copy(alpha = 0.10f)
+                        else -> t.surface2
+                    }
+                )
+                .padding(horizontal = 16.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.Center,
         ) {
@@ -557,15 +559,23 @@ internal fun ProviderCommandButton(
                 Icon(
                     imageVector = imageVector,
                     contentDescription = null,
-                    tint = if (accent) t.accentInk else t.ink3,
+                    tint = when {
+                        !enabled -> t.ink4
+                        accent -> t.accentInk
+                        else -> t.ink2
+                    },
                     modifier = Modifier.size(17.dp),
                 )
                 Spacer(Modifier.width(7.dp))
             }
             Text(
                 text = text,
-                style = type.meta.copy(fontSize = 11.5.sp, fontWeight = FontWeight.Bold),
-                color = if (accent) t.accentInk else t.ink2,
+                style = type.meta.copy(fontSize = 11.5.sp, fontWeight = FontWeight.Medium),
+                color = when {
+                    !enabled -> t.ink4
+                    accent -> t.accentInk
+                    else -> t.ink2
+                },
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -573,7 +583,7 @@ internal fun ProviderCommandButton(
     }
 }
 
-/* v5 ledger: bordered ghost text button ("+ 添加" / "导出" / "+ 全选") */
+/* v5 ledger: soft pill text button ("+ 添加" / "导出" / "+ 全选") */
 @Composable
 internal fun ProviderGhostButton(
     text: String,
@@ -592,10 +602,10 @@ internal fun ProviderGhostButton(
     ) {
         Row(
             modifier = Modifier
-                .height(32.dp)
-                .clip(RoundedCornerShape(3.dp))
-                .border(1.dp, if (accent) t.accent else t.line2, RoundedCornerShape(3.dp))
-                .padding(horizontal = 11.dp),
+                .height(34.dp)
+                .clip(CircleShape)
+                .background(if (accent) t.accent.copy(alpha = 0.10f) else t.surface2)
+                .padding(horizontal = 14.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
@@ -603,14 +613,14 @@ internal fun ProviderGhostButton(
                 Icon(
                     imageVector = imageVector,
                     contentDescription = null,
-                    tint = if (accent) t.accent else t.ink3,
+                    tint = t.ink2,
                     modifier = Modifier.size(13.dp),
                 )
             }
             Text(
                 text = text,
-                style = type.meta.copy(fontSize = 11.sp, fontWeight = FontWeight.Bold),
-                color = if (accent) t.accent else t.ink2,
+                style = type.meta.copy(fontSize = 11.sp, fontWeight = FontWeight.Medium),
+                color = t.ink2,
                 maxLines = 1,
             )
         }
@@ -658,7 +668,7 @@ internal fun ProviderUnderlineTabs(
     }
 }
 
-/* v5 ledger: square tag chip; solid = filled accent (table add buttons) */
+/* v5 ledger: pill tag chip; solid = filled accent (table add buttons) */
 @Composable
 internal fun ProviderSquareTag(
     text: String,
@@ -672,37 +682,39 @@ internal fun ProviderSquareTag(
     val filled = selected && solid
     Box(
         modifier = modifier
-            .defaultMinSize(minHeight = 28.dp)
-            .clip(RoundedCornerShape(3.dp))
-            .background(
-                when {
-                    filled -> t.accent
-                    selected -> t.accent.copy(alpha = 0.12f)
-                    else -> Color.Transparent
-                }
-            )
-            .border(
-                1.dp,
-                if (selected) t.accent else t.line2,
-                RoundedCornerShape(3.dp),
-            )
-            .then(if (onClick != null) Modifier.pressable(onClick = onClick) else Modifier)
-            .padding(horizontal = 10.dp, vertical = 5.dp),
+            .heightIn(min = 48.dp)
+            .then(if (onClick != null) Modifier.pressable(onClick = onClick) else Modifier),
         contentAlignment = Alignment.Center,
     ) {
-        Text(
-            text = text,
-            style = type.meta.copy(
-                fontSize = 10.5.sp,
-                fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
-            ),
-            color = when {
-                filled -> t.accentInk
-                selected -> t.accent
-                else -> t.ink3
-            },
-            maxLines = 1,
-        )
+        Box(
+            modifier = Modifier
+                .height(34.dp)
+                .clip(CircleShape)
+                .background(
+                    when {
+                        filled -> t.accent
+                        selected -> t.accent.copy(alpha = 0.12f)
+                        else -> t.surface2
+                    }
+                )
+                .padding(horizontal = 12.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                text = text,
+                style = type.meta.copy(
+                    fontSize = 10.5.sp,
+                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+                ),
+                color = when {
+                    filled -> t.accentInk
+                    selected -> t.accent
+                    else -> t.ink2
+                },
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
     }
 }
 
@@ -731,44 +743,26 @@ internal fun ProviderSplitBar(
     modifier: Modifier = Modifier,
     confirmEnabled: Boolean = true,
 ) {
-    val t = LocalAmberTokens.current
-    val type = LocalAmberType.current
-    Column(modifier = modifier.fillMaxWidth()) {
-        ProviderHairline()
-        Row(Modifier.fillMaxWidth().height(52.dp)) {
-            Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxHeight()
-                    .pressable(onClick = onCancel),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    text = cancelText,
-                    style = type.meta.copy(fontSize = 11.sp, fontWeight = FontWeight.SemiBold),
-                    color = t.ink3,
-                )
-            }
-            Box(
-                Modifier
-                    .width(1.dp)
-                    .fillMaxHeight()
-                    .background(t.line)
-            )
-            Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxHeight()
-                    .then(if (confirmEnabled) Modifier.pressable(onClick = onConfirm) else Modifier),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    text = confirmText,
-                    style = type.meta.copy(fontSize = 11.sp, fontWeight = FontWeight.Bold),
-                    color = if (confirmEnabled) t.accent else t.ink4,
-                )
-            }
-        }
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        ProviderGhostButton(
+            text = cancelText,
+            onClick = onCancel,
+            accent = false,
+            modifier = Modifier.weight(1f),
+        )
+        ProviderCommandButton(
+            text = confirmText,
+            onClick = onConfirm,
+            accent = true,
+            enabled = confirmEnabled,
+            modifier = Modifier.weight(1f),
+        )
     }
 }
 
@@ -778,10 +772,9 @@ internal fun ProviderAuthBadge(text: String) {
     val type = LocalAmberType.current
     Box(
         modifier = Modifier
-            .clip(RoundedCornerShape(3.dp))
+            .clip(CircleShape)
             .background(t.surface2)
-            .border(1.dp, t.line, RoundedCornerShape(3.dp))
-            .padding(horizontal = 6.dp, vertical = 2.dp),
+            .padding(horizontal = 8.dp, vertical = 3.dp),
         contentAlignment = Alignment.Center,
     ) {
         Text(

@@ -28,7 +28,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import app.amber.feature.ui.theme.CustomColors
 import app.amber.feature.ui.theme.LocalAmberType
@@ -49,6 +52,9 @@ data class CardGroupItem(
 
 class CardGroupScope {
     internal var defaultColors: ListItemColors? = null
+    internal var dividerColor: Color? = null
+    internal var dividerStartPadding: Dp = 12.dp
+    internal var dividerLeadingOffset: Dp = 38.dp
 
     @Composable
     fun item(
@@ -73,6 +79,8 @@ class CardGroupScope {
                 colors = colors,
             ),
             defaultColors = defaultColors,
+            dividerColor = dividerColor,
+            dividerStartPadding = dividerStartPadding + if (leadingContent != null) dividerLeadingOffset else 0.dp,
         )
     }
 
@@ -81,6 +89,7 @@ class CardGroupScope {
     fun rawItem(
         modifier: Modifier = Modifier,
         colors: ListItemColors? = null,
+        dividerStartPadding: Dp? = null,
         content: @Composable () -> Unit,
     ) {
         CardGroupListItem(
@@ -95,6 +104,8 @@ class CardGroupScope {
                 colors = colors,
             ),
             defaultColors = defaultColors,
+            dividerColor = dividerColor,
+            dividerStartPadding = dividerStartPadding ?: this.dividerStartPadding,
         )
     }
 }
@@ -103,56 +114,69 @@ class CardGroupScope {
 private fun CardGroupListItem(
     item: CardGroupItem,
     defaultColors: ListItemColors?,
+    dividerColor: Color?,
+    dividerStartPadding: Dp,
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val colors = item.colors ?: defaultColors ?: CustomColors.listItemColors
     val type = LocalAmberType.current
     val hasSecondaryText = item.supportingContent != null || item.overlineContent != null
-    Row(
-        modifier = item.modifier
-            .fillMaxWidth()
-            .heightIn(min = if (hasSecondaryText) 56.dp else 48.dp)
-            .background(colors.containerColor)
-            .then(
-                if (item.onClick != null) {
-                    Modifier.clickable(
-                        interactionSource = interactionSource,
-                        indication = LocalIndication.current,
-                        onClick = item.onClick,
-                    )
-                } else Modifier
-            )
-            .padding(horizontal = 12.dp, vertical = if (hasSecondaryText) 6.dp else 0.dp),
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        item.leadingContent?.let { leading ->
-            CompositionLocalProvider(LocalContentColor provides colors.leadingContentColor) {
-                leading()
-            }
-        }
-        Column(
-            modifier = Modifier.weight(1f),
-            verticalArrangement = Arrangement.spacedBy(2.dp),
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = item.modifier
+                .fillMaxWidth()
+                .heightIn(min = if (hasSecondaryText) 56.dp else 48.dp)
+                .background(colors.containerColor)
+                .then(
+                    if (item.onClick != null) {
+                        Modifier.clickable(
+                            interactionSource = interactionSource,
+                            indication = LocalIndication.current,
+                            onClick = item.onClick,
+                        )
+                    } else Modifier
+                )
+                .padding(horizontal = 12.dp, vertical = if (hasSecondaryText) 6.dp else 0.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            item.overlineContent?.let { overline ->
-                CompositionLocalProvider(LocalContentColor provides colors.overlineContentColor) {
-                    ProvideTextStyle(type.meta, overline)
+            item.leadingContent?.let { leading ->
+                CompositionLocalProvider(LocalContentColor provides colors.leadingContentColor) {
+                    leading()
                 }
             }
-            CompositionLocalProvider(LocalContentColor provides colors.contentColor) {
-                ProvideTextStyle(type.body, item.headlineContent)
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                item.overlineContent?.let { overline ->
+                    CompositionLocalProvider(LocalContentColor provides colors.overlineContentColor) {
+                        ProvideTextStyle(type.meta, overline)
+                    }
+                }
+                CompositionLocalProvider(LocalContentColor provides colors.contentColor) {
+                    ProvideTextStyle(type.body, item.headlineContent)
+                }
+                item.supportingContent?.let { supporting ->
+                    CompositionLocalProvider(LocalContentColor provides colors.supportingContentColor) {
+                        ProvideTextStyle(type.secondary, supporting)
+                    }
+                }
             }
-            item.supportingContent?.let { supporting ->
-                CompositionLocalProvider(LocalContentColor provides colors.supportingContentColor) {
-                    ProvideTextStyle(type.secondary, supporting)
+            item.trailingContent?.let { trailing ->
+                CompositionLocalProvider(LocalContentColor provides colors.trailingContentColor) {
+                    ProvideTextStyle(type.meta, trailing)
                 }
             }
         }
-        item.trailingContent?.let { trailing ->
-            CompositionLocalProvider(LocalContentColor provides colors.trailingContentColor) {
-                ProvideTextStyle(type.meta, trailing)
-            }
+        if (dividerColor != null) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = dividerStartPadding)
+                    .height(0.5.dp)
+                    .background(dividerColor),
+            )
         }
     }
 }
@@ -162,10 +186,22 @@ fun CardGroup(
     modifier: Modifier = Modifier,
     title: (@Composable () -> Unit)? = null,
     colors: ListItemColors? = null,
+    containerColor: Color? = null,
+    border: androidx.compose.foundation.BorderStroke? = androidx.compose.foundation.BorderStroke(
+        1.dp, MaterialTheme.colorScheme.outlineVariant,
+    ),
+    shadowElevation: Dp = 0.dp,
+    itemSpacing: Dp = CardGroupItemSpacing,
+    dividerColor: Color? = null,
+    dividerStartPadding: Dp = 12.dp,
+    dividerLeadingOffset: Dp = 38.dp,
     content: @Composable CardGroupScope.() -> Unit,
 ) {
     val scope = CardGroupScope()
     scope.defaultColors = colors
+    scope.dividerColor = dividerColor
+    scope.dividerStartPadding = dividerStartPadding
+    scope.dividerLeadingOffset = dividerLeadingOffset
 
     Column(modifier = modifier) {
         if (title != null) {
@@ -184,13 +220,17 @@ fun CardGroup(
                 }
             }
         }
+        val shape = RoundedCornerShape(CardGroupCorner)
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(CardGroupCorner))
-                .background(MaterialTheme.colorScheme.outlineVariant)
-                .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(CardGroupCorner)),
-            verticalArrangement = Arrangement.spacedBy(CardGroupItemSpacing),
+                .shadow(shadowElevation, shape)
+                .clip(shape)
+                .background(containerColor ?: MaterialTheme.colorScheme.outlineVariant)
+                .then(
+                    if (border != null) Modifier.border(border, shape) else Modifier,
+                ),
+            verticalArrangement = Arrangement.spacedBy(itemSpacing),
         ) {
             scope.content()
         }

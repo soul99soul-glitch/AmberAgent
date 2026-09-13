@@ -403,7 +403,7 @@ fun SettingExperimentalWebMountPage(
                                     }
                                 },
                             )
-                            if (index != sites.lastIndex) ExperimentDivider()
+                            if (index != sites.lastIndex) ExperimentDivider(startPadding = 44.dp)
                         }
                     }
                 }

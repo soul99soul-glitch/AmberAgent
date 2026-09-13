@@ -11,10 +11,16 @@ const val DEFAULT_SUB_AGENT_MAX_TURNS = 4
 const val DEFAULT_SUB_AGENT_OUTPUT_BUDGET_CHARS = 12_000
 const val EXTENDED_SUB_AGENT_TIMEOUT_MS = 20 * 60_000L
 const val EXTENDED_SUB_AGENT_OUTPUT_BUDGET_CHARS = 200_000
+const val DEFAULT_SUB_AGENT_DOCK_AUTO_HIDE_AFTER_MS = 30_000L
+const val SUB_AGENT_DOCK_AUTO_HIDE_NEVER = 0L
 
 @Serializable
 data class SubAgentRuntimeSetting(
     val enabled: Boolean = false,
+    /** Whether the process-wide floating subagent status dock is shown. */
+    val dockEnabled: Boolean = true,
+    /** Terminal dock rows are hidden after this delay; zero keeps them until dismissed. */
+    val dockAutoHideAfterMs: Long = DEFAULT_SUB_AGENT_DOCK_AUTO_HIDE_AFTER_MS,
     val mode: SubAgentMode = SubAgentMode.ROSTER,
     val allowDynamicSubAgents: Boolean = true,
     val maxConcurrentRuns: Int = DEFAULT_SUB_AGENT_MAX_CONCURRENT_RUNS,

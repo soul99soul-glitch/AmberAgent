@@ -100,7 +100,7 @@
   <string name="copy_all">전체 복사</string>
   <string name="create_fork">포크 생성</string>
   <string name="deep_thinking">심층 사고</string>
-  <string name="deep_thinking_seconds">%1$.1f 초 동안 생각했습니다</string>
+  <string name="deep_thinking_seconds">%1$d 초 동안 생각했습니다</string>
   <string name="delete">삭제</string>
   <string name="edit">편집</string>
   <string name="emoji_picker_search_placeholder">이모지 검색...</string>
@@ -1510,7 +1510,7 @@
   <string name="setting_theme_library_builtin_desc">기본 제공 테마 · 밝고 어두운 모드는 시스템 모드를 따름</string>
   <string name="setting_theme_library_builtin_id_suffix">· 기본 제공 ID 유지</string>
   <string name="setting_theme_library_builtin_sage">세이지 Sage</string>
-  <string name="setting_theme_library_builtin_warm">웜 그라파이트 Warm</string>
+  <string name="setting_theme_library_builtin_warm">도트 · 테라코타</string>
   <string name="setting_theme_library_empty_desc">가져온 패키지를 여기에서 적용하거나 제거할 수 있습니다</string>
   <string name="setting_theme_library_empty_title">가져온 테마 패키지가 없습니다</string>
   <string name="setting_theme_library_export_chooser">테마 패키지 내보내기</string>

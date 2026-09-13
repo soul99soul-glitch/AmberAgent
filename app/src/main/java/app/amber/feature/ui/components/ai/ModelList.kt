@@ -333,6 +333,8 @@ fun ModelSelector(
     }
 
     if (popup) {
+        val settingsStore: SettingsAggregator = koinInject()
+        val settings by settingsStore.settingsFlow.collectAsStateWithLifecycle()
         val state = rememberModalBottomSheetState(skipPartiallyExpanded = true)
         val chatTheme = app.amber.feature.ui.pages.chat.LocalChatTheme.current
         val tokens = LocalAmberTokens.current
@@ -399,6 +401,12 @@ fun ModelSelector(
                     providers = filteredProviderSettings,
                     modelType = type,
                     preferredInputModality = preferredInputModality,
+                    favoriteModelIds = settings.favoriteModels,
+                    onFavoriteModelsChange = { ids ->
+                        scope.launch {
+                            settingsStore.update { current -> current.copy(favoriteModels = ids) }
+                        }
+                    },
                     onSelect = { selectedModel ->
                         onSelect(selectedModel)
                         scope.launch {
@@ -476,24 +484,22 @@ private fun List<ProviderSetting>.buildModelProviderIndex(modelType: ModelType):
     }
 
 @Composable
-private fun ColumnScope.ModelList(
+internal fun ColumnScope.ModelList(
     currentModel: Uuid? = null,
     providers: List<ProviderSetting>,
     modelType: ModelType,
     preferredInputModality: Modality? = null,
     onSelect: (Model) -> Unit,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    favoriteModelIds: List<Uuid>,
+    onFavoriteModelsChange: (List<Uuid>) -> Unit,
 ) {
     val coroutineScope = rememberCoroutineScope()
-    val settingsStore = koinInject<SettingsAggregator>()
-    val settings = settingsStore.settingsFlow
-        .collectAsStateWithLifecycle()
-
     val modelIndex = remember(providers, modelType) {
         providers.buildModelProviderIndex(modelType)
     }
-    val allFavoriteModels = remember(settings.value.favoriteModels, modelIndex) {
-        settings.value.favoriteModels.mapNotNull { modelId ->
+    val allFavoriteModels = remember(favoriteModelIds, modelIndex) {
+        favoriteModelIds.mapNotNull { modelId ->
             val entry = modelIndex[modelId] ?: return@mapNotNull null
             if (entry.provider.isCodexOAuthProvider() && entry.model.isCodexOAuthReviewModel()) return@mapNotNull null
             entry.model to entry.provider
@@ -596,14 +602,10 @@ private fun ColumnScope.ModelList(
             if (fromIndex >= 0 && toIndex >= 0 &&
                 fromIndex < favoriteModels.size && toIndex < favoriteModels.size
             ) {
-                val newFavoriteModels = settings.value.favoriteModels.toMutableList().apply {
+                val newFavoriteModels = favoriteModelIds.toMutableList().apply {
                     add(toIndex, removeAt(fromIndex))
                 }
-                coroutineScope.launch {
-                    settingsStore.update { oldSettings ->
-                        oldSettings.copy(favoriteModels = newFavoriteModels)
-                    }
-                }
+                onFavoriteModelsChange(newFavoriteModels)
             }
         }
     }
@@ -635,6 +637,7 @@ private fun ColumnScope.ModelList(
             val expanded = expandedProviders[provider.id]
                 ?: searchKeywords.isNotBlank()
                 || groupModels.any { it.id == currentModel }
+                || currentModel == null
             if (expanded) currentIndex += groupModels.size
             hasProviderGroup = true
             provider.id to position
@@ -642,12 +645,12 @@ private fun ColumnScope.ModelList(
     }
 
     val tokens = LocalAmberTokens.current
-    // Amber Redesign §2: search field 12dp radius, surface bg, hairline border.
-    // §6: input field is a control → 12dp, NOT the 50% pill the old code used.
+    // Search is a compact control with the same soft pill treatment as the model trigger;
+    // the surrounding layout still reserves the 48dp touch target.
     Surface(
-        shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
-        color = tokens.surface,
-        border = androidx.compose.foundation.BorderStroke(1.dp, tokens.line),
+        shape = androidx.compose.foundation.shape.CircleShape,
+        color = tokens.surface2,
+        border = androidx.compose.foundation.BorderStroke(1.dp, tokens.line.copy(alpha = 0.46f)),
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp)
@@ -673,18 +676,23 @@ private fun ColumnScope.ModelList(
                 textStyle = MaterialTheme.typography.bodyMedium.copy(color = tokens.ink),
                 cursorBrush = SolidColor(tokens.accent),
                 decorationBox = { inner ->
-                    if (searchKeywords.isEmpty()) {
-                        Text(
-                            text = stringResource(R.string.model_list_search_placeholder),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = tokens.ink3,
-                        )
+                    Box(
+                        modifier = Modifier.fillMaxWidth(),
+                        contentAlignment = Alignment.CenterStart,
+                    ) {
+                        if (searchKeywords.isEmpty()) {
+                            Text(
+                                text = stringResource(R.string.model_list_search_placeholder),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = tokens.ink3,
+                            )
+                        }
+                        inner()
                     }
-                    inner()
                 },
                 modifier = Modifier
                     .weight(1f)
-                    .fillMaxHeight(),
+                    .heightIn(min = 24.dp),
             )
             if (searchKeywords.isNotEmpty()) {
                 IconButton(
@@ -769,13 +777,7 @@ private fun ColumnScope.ModelList(
                     tail = {
                         IconButton(
                             onClick = {
-                                coroutineScope.launch {
-                                    settingsStore.update { settings ->
-                                        settings.copy(
-                                            favoriteModels = settings.favoriteModels.filter { it != model.id }
-                                        )
-                                    }
-                                }
+                                onFavoriteModelsChange(favoriteModelIds.filter { it != model.id })
                             }
                         ) {
                             Icon(
@@ -800,6 +802,7 @@ private fun ColumnScope.ModelList(
             val expanded = expandedProviders[providerSetting.id]
                 ?: searchKeywords.isNotBlank()
                 || providerActive
+                || currentModel == null
             if (providerIndex > 0 || favoriteModels.isNotEmpty()) {
                 item(key = "group-gap:${providerSetting.id}") {
                     Spacer(Modifier.height(8.dp))
@@ -828,7 +831,7 @@ private fun ColumnScope.ModelList(
                     key = { _, model -> "group:${providerSetting.id}:model:${model.id}" },
                 ) { index, model ->
                     val isActive = model.id == currentModel
-                    val favorite = settings.value.favoriteModels.contains(model.id)
+                    val favorite = favoriteModelIds.contains(model.id)
                     PickerModelRow(
                         model = model,
                         providerSetting = providerSetting,
@@ -838,15 +841,13 @@ private fun ColumnScope.ModelList(
                         isLast = index == groupModels.lastIndex,
                         favorite = favorite,
                         onToggleFavorite = {
-                            coroutineScope.launch {
-                                settingsStore.update { s ->
-                                    if (favorite) {
-                                        s.copy(favoriteModels = s.favoriteModels.filter { it != model.id })
-                                    } else {
-                                        s.copy(favoriteModels = s.favoriteModels + model.id)
-                                    }
+                            onFavoriteModelsChange(
+                                if (favorite) {
+                                    favoriteModelIds.filter { it != model.id }
+                                } else {
+                                    favoriteModelIds + model.id
                                 }
-                            }
+                            )
                         },
                     )
                 }
@@ -1075,7 +1076,7 @@ private fun PickerProviderHeader(
             .fillMaxWidth()
             .clip(shape)
             .background(t.surface)
-            .border(1.dp, t.line, shape)
+            .border(1.dp, t.line.copy(alpha = 0.42f), shape)
             .pressable(onClick = onClick)
             .padding(horizontal = 14.dp, vertical = 13.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -1130,7 +1131,7 @@ private fun PickerModelRow(
             .fillMaxWidth()
             .clip(shape)
             .background(t.surface)
-            .border(1.dp, t.line, shape),
+            .border(1.dp, t.line.copy(alpha = 0.42f), shape),
     ) {
         ModelItemRow(
             model = model,

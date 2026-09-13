@@ -38,7 +38,6 @@ import com.composables.icons.lucide.Trash2
 import com.composables.icons.lucide.ServerCog
 import com.composables.icons.lucide.EllipsisVertical
 import com.composables.icons.lucide.Package
-import com.composables.icons.lucide.FileCode2
 import com.composables.icons.lucide.Type
 import com.composables.icons.lucide.Play
 import app.amber.agent.R
@@ -93,12 +92,6 @@ fun SettingAgentExtensionsPage() {
                         leadingContent = { SettingTileIcon(Lucide.Package) },
                         supportingContent = { Text(stringResource(R.string.setting_page_agent_skills_desc)) },
                         headlineContent = { Text(stringResource(R.string.setting_page_agent_skills)) },
-                    )
-                    item(
-                        onClick = { navController.navigate(Screen.Extensions) },
-                        leadingContent = { SettingTileIcon(Lucide.FileCode2) },
-                        supportingContent = { Text(stringResource(R.string.setting_page_extensions_desc)) },
-                        headlineContent = { Text(stringResource(R.string.setting_page_extensions)) },
                     )
                     item(
                         onClick = { navController.navigate(Screen.SettingMcp) },

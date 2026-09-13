@@ -1,5 +1,6 @@
 package app.amber.feature.ui.pages.sessionhome
 
+import app.amber.feature.ui.utils.amberTraceMeasure
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
@@ -52,6 +53,7 @@ import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -65,12 +67,14 @@ import androidx.compose.ui.draw.dropShadow
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.shadow.Shadow
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.font.FontWeight
@@ -84,6 +88,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
 import app.amber.agent.R
 import app.amber.agent.Screen
+import app.amber.agent.LAST_CONVERSATION_ID_PREF
 import app.amber.core.model.AMBER_AGENT_ID
 import app.amber.core.model.Conversation
 import app.amber.core.repository.ConversationRepository
@@ -96,16 +101,17 @@ import app.amber.feature.modelcouncil.CouncilRoomManager
 import app.amber.feature.modelcouncil.CouncilRoomOpResult
 import app.amber.feature.modelcouncil.toCouncilParticipant
 import app.amber.feature.ui.components.ui.UIAvatar
+import app.amber.feature.ui.components.ds.amberCanvas
 import app.amber.feature.ui.context.LocalNavController
 import app.amber.feature.ui.context.LocalSettings
 import app.amber.feature.ui.context.LocalToaster
+import app.amber.feature.ui.hooks.rememberSharedPreferenceString
 import app.amber.feature.ui.theme.JetBrainsMonoFamily
 import app.amber.feature.ui.theme.LocalAmberTokens
 import app.amber.feature.ui.theme.LocalAmberType
 import app.amber.feature.home.ContinueCandidate
 import app.amber.feature.home.ContinueRoute
 import app.amber.feature.home.ContinueSourceKind
-import app.amber.feature.home.ContinueStatus
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -121,7 +127,6 @@ import com.composables.icons.lucide.Lucide
 import com.composables.icons.lucide.BookOpenText
 import com.composables.icons.lucide.MessageCircle
 import com.composables.icons.lucide.X
-import com.composables.icons.lucide.Clock
 import com.composables.icons.lucide.Trash2
 import com.composables.icons.lucide.Earth
 import com.composables.icons.lucide.Grid2x2
@@ -132,13 +137,17 @@ import com.composables.icons.lucide.Search
 import com.composables.icons.lucide.ScanSearch
 import com.composables.icons.lucide.Settings
 import com.dokar.sonner.ToastType
+import dev.chrisbanes.haze.HazeState
+import dev.chrisbanes.haze.hazeEffect
+import dev.chrisbanes.haze.hazeSource
+import dev.chrisbanes.haze.rememberHazeState
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import org.koin.androidx.compose.koinViewModel
 import org.koin.compose.koinInject
 import kotlinx.coroutines.CancellationException
 
 /**
- * Session 首页 —— Fixed home of the app (Terminal × Modern graphite design).
+ * Session 首页 —— Scrollable home of the app (Terminal × Modern graphite design).
  *
  * Layout (top → bottom):
  *   Header: mono wordmark "Amber" + blinking cursor + date, settings gear, profile avatar
@@ -167,8 +176,23 @@ fun SessionHomePage() {
     val appendError = conversations.loadState.append as? LoadState.Error
     val isRefreshLoading = conversations.loadState.refresh is LoadState.Loading
     val continueCandidates = vm.continueCandidates.collectAsStateWithLifecycle().value
-    val hasContinueError = vm.hasContinueError.collectAsStateWithLifecycle().value
+    val lastConversationId = rememberSharedPreferenceString(LAST_CONVERSATION_ID_PREF).value
     val listState = rememberLazyListState()
+    val hazeState = rememberHazeState()
+    val hasTopOverflow by remember {
+        derivedStateOf { listState.canScrollBackward }
+    }
+    var topFadeActive by remember { mutableStateOf(false) }
+    LaunchedEffect(hasTopOverflow) {
+        if (hasTopOverflow) {
+            topFadeActive = true
+        } else {
+            // Keep the source attached for the short fade-out so Haze does not
+            // drop to a blank sample while the scrim is leaving the screen.
+            kotlinx.coroutines.delay(180)
+            topFadeActive = false
+        }
+    }
     val scope = rememberCoroutineScope()
     val fabShape = CircleShape
     val fabInteractionSource = remember { MutableInteractionSource() }
@@ -275,7 +299,7 @@ fun SessionHomePage() {
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(tokens.bg),
+            .amberCanvas(),
     ) {
         Column(
             modifier = Modifier
@@ -283,56 +307,70 @@ fun SessionHomePage() {
                 .windowInsetsPadding(WindowInsets.statusBars)
                 .windowInsetsPadding(WindowInsets.navigationBars),
         ) {
-            HomeHeader(
-                settings = settings,
-                searchExpanded = homeSearchExpanded,
-                onOpenSearch = { homeSearchExpanded = true },
-                onOpenSettings = { navController.navigate(Screen.Setting) },
-                onOpenProfile = { navController.navigate(Screen.Profile) },
-            )
-
-            AnimatedVisibility(
-                visible = homeSearchExpanded,
-                enter = fadeIn(animationSpec = tween(190)) +
-                    expandVertically(
-                        expandFrom = Alignment.Top,
-                        animationSpec = tween(190),
-                    ),
-                exit = fadeOut(animationSpec = tween(170)) +
-                    shrinkVertically(
-                        shrinkTowards = Alignment.Top,
-                        animationSpec = tween(170),
-                    ),
-            ) {
-                LaunchedEffect(homeSearchExpanded) {
-                    if (homeSearchExpanded) {
-                        homeSearchFocusRequester.requestFocus()
-                    }
-                }
-                HomeSearchField(
-                    query = homeSearchQuery,
-                    focusRequester = homeSearchFocusRequester,
-                    onQueryChange = { homeSearchQuery = it },
-                    onClear = { homeSearchQuery = "" },
-                    onOpenFullSearch = {
-                        navController.navigate(Screen.MessageSearch)
-                    },
-                    onCollapse = {
-                        focusManager.clearFocus(force = true)
-                        keyboardController?.hide()
-                        homeSearchQuery = ""
-                        homeSearchExpanded = false
-                    },
-                )
-            }
-
             LazyColumn(
                 state = listState,
                 modifier = Modifier
                     .weight(1f)
-                    .fillMaxWidth(),
+                    .fillMaxWidth()
+                    .amberTraceMeasure("Amber Home list measure")
+                    .then(
+                        if (hasTopOverflow || topFadeActive) {
+                            // Capture only when content crosses the top edge; the initial
+                            // home position remains clear and needs no blur layer.
+                            Modifier.hazeSource(state = hazeState, zIndex = 0f)
+                        } else {
+                            Modifier
+                        }
+                    ),
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 100.dp),
             ) {
+                item(key = "home_header") {
+                    HomeHeader(
+                        settings = settings,
+                        searchExpanded = homeSearchExpanded,
+                        onOpenSearch = { homeSearchExpanded = true },
+                        onOpenSettings = { navController.navigate(Screen.Setting) },
+                        onOpenProfile = { navController.navigate(Screen.Profile) },
+                    )
+                }
+
+                item(key = "home_search") {
+                    AnimatedVisibility(
+                        visible = homeSearchExpanded,
+                        enter = fadeIn(animationSpec = tween(190)) +
+                            expandVertically(
+                                expandFrom = Alignment.Top,
+                                animationSpec = tween(190),
+                            ),
+                        exit = fadeOut(animationSpec = tween(170)) +
+                            shrinkVertically(
+                                shrinkTowards = Alignment.Top,
+                                animationSpec = tween(170),
+                            ),
+                    ) {
+                        LaunchedEffect(homeSearchExpanded) {
+                            if (homeSearchExpanded) {
+                                homeSearchFocusRequester.requestFocus()
+                            }
+                        }
+                        HomeSearchField(
+                            query = homeSearchQuery,
+                            focusRequester = homeSearchFocusRequester,
+                            onQueryChange = { homeSearchQuery = it },
+                            onClear = { homeSearchQuery = "" },
+                            onOpenFullSearch = {
+                                navController.navigate(Screen.MessageSearch)
+                            },
+                            onCollapse = {
+                                focusManager.clearFocus(force = true)
+                                keyboardController?.hide()
+                                homeSearchQuery = ""
+                                homeSearchExpanded = false
+                            },
+                        )
+                    }
+                }
+
                 item(key = "home_features") {
                     HomeFeatureRail(
                         resumeCandidate = continueCandidates.firstOrNull(),
@@ -343,36 +381,6 @@ fun SessionHomePage() {
                         onWebMount = { navController.navigate(Screen.SettingExperimentalWebMount) },
                         onCouncil = openCouncilRoom,
                     )
-                }
-
-                // P8-08 首页「继续」聚合：点击路由到任务焦点
-                if (continueCandidates.size > 1) {
-                    item(key = "home_continue_header") {
-                        ContinueSectionHeader(count = continueCandidates.size - 1)
-                    }
-                    items(
-                        count = continueCandidates.size - 1,
-                        key = { index ->
-                            val candidate = continueCandidates[index + 1]
-                            "continue_${candidate.sourceKind.name}_${candidate.sourceId}"
-                        },
-                    ) { index ->
-                        val candidate = continueCandidates[index + 1]
-                        ContinueCandidateRow(
-                            candidate = candidate,
-                            onOpen = { openContinueCandidate(candidate) },
-                        )
-                    }
-                }
-
-                if (hasContinueError) {
-                    item(key = "home_continue_error") {
-                        if (continueCandidates.isEmpty()) {
-                            HomeContinueErrorState(onRetry = vm::retryContinueCandidates)
-                        } else {
-                            HomeContinueInlineError(onRetry = vm::retryContinueCandidates)
-                        }
-                    }
                 }
 
                 item(key = "home_conversations_header") {
@@ -416,9 +424,14 @@ fun SessionHomePage() {
                         key = conversations.itemKey { it.id.toString() },
                     ) { index ->
                         val conversation = conversations[index] ?: return@items
+                        val isLastVisited = conversation.id.toString() == lastConversationId
                         HomeSessionRow(
                             conversation = conversation,
-                            tileColor = homeConversationTileColor(conversation, tokens),
+                            tileColor = homeConversationTileColor(
+                                tokens = tokens,
+                                isLastVisited = isLastVisited,
+                            ),
+                            isLastVisited = isLastVisited,
                             isFirst = index == 0,
                             isLast = index == conversations.itemCount - 1,
                             // 首页是 hub：用 push（保留 SessionHome 在栈底），返回能回到首页；
@@ -441,6 +454,13 @@ fun SessionHomePage() {
                 }
             }
         }
+
+        // Header 和列表一起滚动；内容越过顶缘后保留渐隐，停手也不会重新硬切。
+        HomeScrollTopFade(
+            hazeState = hazeState,
+            visible = hasTopOverflow,
+            modifier = Modifier.align(Alignment.TopCenter),
+        )
 
         // 列表底部渐隐，给 FAB 让出视觉空间（对齐设计稿的 mask 渐隐）。
         // 让位 navigationBars：锚到「列表视口底」而非屏幕底，三键导航下不失效。
@@ -515,6 +535,48 @@ fun SessionHomePage() {
                 }
             }
         }
+    }
+}
+
+/**
+ * A short top scrim that softens content crossing the viewport edge, including when paused.
+ * Keeping it as a separate composable avoids adding any per-item drawing work to
+ * the scrolling list, and leaves the initial, unscrolled home completely unobscured.
+ */
+@Composable
+internal fun HomeScrollTopFade(
+    hazeState: HazeState,
+    visible: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    val tokens = LocalAmberTokens.current
+    AnimatedVisibility(
+        visible = visible,
+        modifier = modifier,
+        enter = fadeIn(animationSpec = tween(90)),
+        exit = fadeOut(animationSpec = tween(150)),
+    ) {
+        Box(
+            modifier = Modifier
+                .testTag("home-scroll-top-fade")
+                .windowInsetsPadding(WindowInsets.statusBars)
+                .fillMaxWidth()
+                .height(40.dp)
+                .hazeEffect(state = hazeState) {
+                    backgroundColor = tokens.bg
+                    blurRadius = 12.dp
+                    // Haze's mask is the low-cost gradient-blur path. It keeps
+                    // the effect soft without the extra progressive-blur cost.
+                    mask = Brush.verticalGradient(
+                        colors = listOf(Color.White, Color.Transparent),
+                    )
+                }
+                .background(
+                    Brush.verticalGradient(
+                        colors = listOf(tokens.bg, tokens.bg.copy(alpha = 0.6f), Color.Transparent),
+                    )
+                )
+        )
     }
 }
 
@@ -924,54 +986,6 @@ private fun HomeConversationInlineError(onRetry: () -> Unit) {
     }
 }
 
-@Composable
-private fun HomeContinueErrorState(onRetry: () -> Unit) {
-    val tokens = LocalAmberTokens.current
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        Text(
-            text = stringResource(R.string.parity_home_continue_error),
-            fontSize = 13.5.sp,
-            color = tokens.ink3,
-            textAlign = TextAlign.Center,
-        )
-        androidx.compose.material3.TextButton(onClick = onRetry) {
-            Text(stringResource(R.string.parity_home_retry))
-        }
-    }
-}
-
-@Composable
-private fun HomeContinueInlineError(onRetry: () -> Unit) {
-    val tokens = LocalAmberTokens.current
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 20.dp, vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween,
-    ) {
-        Text(
-            text = stringResource(R.string.parity_home_continue_error),
-            modifier = Modifier
-                .weight(1f)
-                .padding(end = 8.dp),
-            fontSize = 12.5.sp,
-            color = tokens.ink3,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
-        )
-        androidx.compose.material3.TextButton(onClick = onRetry) {
-            Text(stringResource(R.string.parity_home_retry))
-        }
-    }
-}
-
 /* ------------------------------------------------------------ feature rail --- */
 
 private data class FeatureEntry(
@@ -1092,8 +1106,8 @@ private fun HomeConversationHeader() {
         Box(
             modifier = Modifier
                 .weight(1f)
-                .height(1.dp)
-                .background(tokens.line),
+                .height(0.5.dp)
+                .background(tokens.line.copy(alpha = 0.46f)),
         )
     }
 }
@@ -1147,14 +1161,14 @@ internal fun HomeFeatureRail(
                     modifier = Modifier
                         .size(36.dp)
                         .clip(androidx.compose.foundation.shape.RoundedCornerShape(12.dp))
-                        .background(tokens.surface2),
+                        .background(tokens.accent.copy(alpha = 0.12f)),
                     contentAlignment = Alignment.Center,
                 ) {
                     Icon(
                         imageVector = feature.icon,
                         contentDescription = null,
                         modifier = Modifier.size(19.dp),
-                        tint = tokens.ink2,
+                        tint = tokens.accent,
                     )
                 }
                 Column(
@@ -1275,119 +1289,6 @@ internal suspend fun canOpenContinueRoute(
     return conversationExists(conversationId)
 }
 
-/** 首页「继续」聚合区块标题：mono 标签 + 数量。 */
-@Composable
-private fun ContinueSectionHeader(count: Int) {
-    val tokens = LocalAmberTokens.current
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(start = 20.dp, end = 20.dp, top = 14.dp, bottom = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(7.dp),
-    ) {
-        Icon(
-            imageVector = Lucide.Clock,
-            contentDescription = null,
-            modifier = Modifier.size(14.dp),
-            tint = tokens.accent,
-        )
-        Text(
-            text = stringResource(R.string.session_home_continue),
-            fontFamily = JetBrainsMonoFamily,
-            fontSize = 12.sp,
-            letterSpacing = 0.4.sp,
-            color = tokens.ink2,
-        )
-        Text(
-            text = "$count",
-            fontFamily = JetBrainsMonoFamily,
-            fontSize = 10.5.sp,
-            color = tokens.ink4,
-        )
-    }
-}
-
-/** 单条继续候选：功能名 + 标题/真实运行阶段，整行点击进入任务。 */
-@Composable
-private fun ContinueCandidateRow(
-    candidate: ContinueCandidate,
-    onOpen: () -> Unit,
-) {
-    val tokens = LocalAmberTokens.current
-    val feature = continueFeatureSpec(candidate.sourceKind)
-    Column(modifier = Modifier.fillMaxWidth()) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(tokens.bg)
-                .clickable(onClick = onOpen)
-                .padding(horizontal = 20.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column(
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(1.dp),
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    Text(
-                        text = feature.label,
-                        fontSize = 13.sp,
-                        lineHeight = 17.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        letterSpacing = (-0.2).sp,
-                        color = tokens.ink,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f, fill = false),
-                    )
-                    ContinueStatusChip(status = candidate.status)
-                }
-                ContinueCandidateSubtitle(
-                    candidate = candidate,
-                    color = tokens.ink3,
-                    fontSize = 10.5.sp,
-                )
-            }
-        }
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 20.dp)
-                .height(1.dp)
-                .background(tokens.line),
-        )
-    }
-}
-
-@Composable
-private fun ContinueStatusChip(status: ContinueStatus) {
-    val tokens = LocalAmberTokens.current
-    val (label, color) = when (status) {
-        ContinueStatus.WAITING_USER -> stringResource(R.string.session_home_status_waiting) to tokens.accent
-        ContinueStatus.FAILED_RESUMABLE -> stringResource(R.string.session_home_status_resumable) to tokens.signal
-        ContinueStatus.PAUSED -> stringResource(R.string.session_home_status_paused) to tokens.ink3
-        ContinueStatus.DRAFT -> stringResource(R.string.session_home_status_draft) to tokens.ink3
-    }
-    Box(
-        modifier = Modifier
-            .border(1.dp, color.copy(alpha = 0.45f), CircleShape)
-            .padding(horizontal = 7.dp, vertical = 2.dp),
-    ) {
-        Text(
-            text = label,
-            fontFamily = JetBrainsMonoFamily,
-            fontSize = 9.5.sp,
-            lineHeight = 12.sp,
-            letterSpacing = 0.3.sp,
-            color = color,
-        )
-    }
-}
-
 /**
  * 会话行：标题 + 最后消息预览 +（消息数 / 时间）。
  * 左滑（EndToStart）删除，右滑（StartToEnd）置顶/取消置顶——M3 SwipeToDismissBox 双向，
@@ -1398,6 +1299,7 @@ private fun ContinueStatusChip(status: ContinueStatus) {
 private fun HomeSessionRow(
     conversation: Conversation,
     tileColor: Color,
+    isLastVisited: Boolean,
     isFirst: Boolean,
     isLast: Boolean,
     onOpen: () -> Unit,
@@ -1438,6 +1340,12 @@ private fun HomeSessionRow(
         bottomStart = if (isLast) 14.dp else 0.dp,
         bottomEnd = if (isLast) 14.dp else 0.dp,
     )
+    val rowSurface = if (isLastVisited) {
+        tokens.accent.copy(alpha = if (tokens.isDark) 0.16f else 0.08f)
+            .compositeOver(tokens.surface)
+    } else {
+        tokens.surface
+    }
     SwipeToDismissBox(
         state = dismissState,
         backgroundContent = {
@@ -1483,32 +1391,29 @@ private fun HomeSessionRow(
             .padding(horizontal = 16.dp)
             .clip(rowShape),
     ) {
-            Column(modifier = Modifier.fillMaxWidth().background(tokens.surface)) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(rowSurface)
+            ) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .background(tokens.surface)
+                        .background(rowSurface)
                         .clickable(onClick = onOpen)
-                        .padding(horizontal = 14.dp, vertical = 8.dp),
+                        .padding(horizontal = 14.dp, vertical = 13.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Box(
                         modifier = Modifier
                             .size(36.dp)
                             .clip(CircleShape)
-                            .background(tileColor.copy(alpha = 0.13f))
-                            .border(1.dp, tileColor.copy(alpha = 0.30f), CircleShape),
+                            .background(tileColor.copy(alpha = 0.13f)),
                         contentAlignment = Alignment.Center,
                     ) {
-                        Icon(
-                            imageVector = when {
-                                conversation.isPinned -> Lucide.Pin
-                                conversation.title.contains("阅读", ignoreCase = true) -> Lucide.BookOpenText
-                                conversation.title.contains("小说", ignoreCase = true) -> Lucide.Pen
-                                else -> Lucide.MessageCircle
-                            },
-                            contentDescription = null,
-                            modifier = Modifier.size(17.dp),
+                        HomeSessionGlyph(
+                            title = conversation.title,
+                            modifier = Modifier.size(18.dp),
                             tint = tileColor,
                         )
                     }
@@ -1551,15 +1456,23 @@ private fun HomeSessionRow(
                             SessionCountBadge(count = conversation.messageCount)
                         }
                     }
-
+                    if (conversation.isPinned) {
+                        Spacer(Modifier.width(12.dp))
+                        Icon(
+                            imageVector = Lucide.Pin,
+                            contentDescription = pinLabel,
+                            modifier = Modifier.size(14.dp),
+                            tint = tileColor,
+                        )
+                    }
                 }
                 if (!isLast) {
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(start = 60.dp, end = 14.dp)
-                            .height(1.dp)
-                            .background(tokens.line),
+                            .height(0.5.dp)
+                            .background(tokens.line.copy(alpha = 0.46f)),
                     )
                 }
         }
@@ -1582,17 +1495,10 @@ private fun SessionCountBadge(count: Int) {
 }
 
 private fun homeConversationTileColor(
-    conversation: Conversation,
     tokens: app.amber.feature.ui.theme.AmberTokens,
+    isLastVisited: Boolean,
 ): Color {
-    if (conversation.isPinned) return tokens.accent
-    val palette = listOf(
-        Color(0xFF5E9C6E),
-        Color(0xFF4F86D6),
-        Color(0xFF9277C4),
-        Color(0xFFC2607A),
-    )
-    return palette[Math.floorMod(conversation.id.hashCode(), palette.size)]
+    return if (isLastVisited) tokens.accent else tokens.ink3
 }
 
 /** 相对时间：今天 → HH:mm，昨天 → 昨天，更早 → M月d日（跨年带年份）。 */

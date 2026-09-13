@@ -267,7 +267,7 @@ class GenerationSubAgentRunner(
             .joinToString("\n\n")
 
     private fun List<UIMessage>.toLiveParts(): List<UIMessagePart> =
-        flatMap { it.parts }
+        filter { it.role == MessageRole.ASSISTANT }.flatMap { it.parts }
 
     private fun Throwable.isRecoverableReportToolArgumentFailure(definition: SubAgentDefinition): Boolean {
         if (definition.toolAllowlist.isNotEmpty()) return false

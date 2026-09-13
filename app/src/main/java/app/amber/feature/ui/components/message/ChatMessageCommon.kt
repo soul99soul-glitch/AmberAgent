@@ -1,12 +1,14 @@
 package app.amber.feature.ui.components.message
 
 import android.os.Trace
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.foundation.text.selection.DisableSelection
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ProvideTextStyle
 import androidx.compose.material3.Text
@@ -18,6 +20,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.semantics.onLongClick
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.platform.LocalContext
@@ -52,13 +59,39 @@ private fun TraceChatComposable(section: String, content: @Composable () -> Unit
 
 @Composable
 internal fun MessageSelectionContainer(
+    enabled: Boolean = true,
     content: @Composable () -> Unit,
 ) {
     TraceChatComposable("Amber MessagePartsBlock SelectionContainer") {
-        SelectionContainer {
-            content()
+        if (enabled) {
+            SelectionContainer(content = content)
+        } else {
+            // Assistant text opens the message menu; precise text selection is
+            // available through that menu's Select and copy action.
+            DisableSelection(content = content)
         }
     }
+}
+
+@Composable
+internal fun Modifier.messageActionsOnLongPress(onLongPress: (() -> Unit)?): Modifier {
+    if (onLongPress == null) return this
+    val currentAction by rememberUpdatedState(onLongPress)
+    val haptic = LocalHapticFeedback.current
+    val label = stringResource(R.string.more_options)
+    return this
+        .semantics {
+            onLongClick(label) {
+                currentAction()
+                true
+            }
+        }
+        .pointerInput(Unit) {
+            detectTapGestures(onLongPress = {
+                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                currentAction()
+            })
+        }
 }
 
 @Composable

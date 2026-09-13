@@ -27,7 +27,17 @@ class Navigator(private val backStack: MutableList<NavKey>) {
 
     fun clearAndNavigate(screen: Screen) {
         backStack.clear()
+        if (screen is Screen.Chat) backStack.add(Screen.SessionHome)
         backStack.add(screen)
+    }
+
+    fun returnToSessionHome() {
+        val homeIndex = backStack.indexOfLast { it == Screen.SessionHome }
+        if (homeIndex >= 0) {
+            while (backStack.lastIndex > homeIndex) backStack.removeLastOrNull()
+        } else {
+            clearAndNavigate(Screen.SessionHome)
+        }
     }
 
     fun popBackStack() {

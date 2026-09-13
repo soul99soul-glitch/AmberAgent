@@ -103,7 +103,6 @@ class ChatVM(
     val conversationJob: StateFlow<Job?> =
         chatService
             .getGenerationJobStateFlow(_conversationId)
-            .stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
     val processingStatus: StateFlow<String?> =
         chatService
@@ -216,8 +215,7 @@ class ChatVM(
     }
 
     // 用户设置
-    val settings: StateFlow<Settings> =
-        settingsStore.settingsFlow.stateIn(viewModelScope, SharingStarted.Eagerly, Settings.dummy())
+    val settings: StateFlow<Settings> = settingsStore.settingsFlow
 
     // 网络搜索
     val enableWebSearch = settings.map {
@@ -227,7 +225,7 @@ class ChatVM(
     // 当前模型
     val currentChatModel = settings.map { settings ->
         settings.getCurrentChatModel()
-    }.stateIn(viewModelScope, SharingStarted.Lazily, null)
+    }.stateIn(viewModelScope, SharingStarted.Lazily, settings.value.getCurrentChatModel())
 
     // 错误状态
     // P8-07: 错误按会话过滤——只暴露属于当前 conversationId 的生成错误；

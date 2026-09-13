@@ -224,7 +224,7 @@ internal fun MessagePartsBlock(
             is MessagePartBlock.ContentBlock -> key(contentBlockKeys[blockIdx]) {
                 when (val part = block.part) {
                     is UIMessagePart.Text -> {
-                        MessageSelectionContainer {
+                        MessageSelectionContainer(enabled = role != MessageRole.ASSISTANT) {
                                 if (role == MessageRole.USER) {
                                     // Graphite user bubble: solid userBubble fill, asymmetric
                                     // corners, no outline/stripe. 长按弹 menu sheet

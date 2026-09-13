@@ -100,7 +100,7 @@
   <string name="copy_all">複製全部</string>
   <string name="create_fork">建立分支</string>
   <string name="deep_thinking">深度思考</string>
-  <string name="deep_thinking_seconds">思考了 %1$.1f 秒</string>
+  <string name="deep_thinking_seconds">思考了%1$d秒</string>
   <string name="delete">刪除</string>
   <string name="edit">編輯</string>
   <string name="emoji_picker_search_placeholder">搜尋表情符號...</string>
@@ -300,7 +300,7 @@
   <string name="setting_display_page_enable_latex_rendering_title">啟用 LaTeX 渲染</string>
   <string name="setting_display_page_enable_message_generation_haptic_effect_desc">訊息生成時啟用觸覺回饋效果</string>
   <string name="setting_display_page_enable_message_generation_haptic_effect_title">訊息生成觸覺回饋</string>
-  <string name="setting_display_page_font_size_preview">凌晨四點鐘，看到海棠花未眠。我常常這樣，在無人的夜裡獨自醒著，想，若有人此刻也在想我，那就好了。</string>
+  <string name="setting_display_page_font_size_preview">多年以後，面對行刑隊，奧雷里亞諾·布恩迪亞上校將會回想起父親帶他去見識冰塊的那個遙遠的下午。</string>
   <string name="setting_display_page_font_size_title">聊天字體大小</string>
   <string name="setting_display_page_message_jumper_position_desc">將訊息跳轉按鈕移至左側</string>
   <string name="setting_display_page_message_jumper_position_title">訊息跳轉位置</string>
@@ -626,7 +626,7 @@
   <string name="skills_page_disabled_count">未啟用 %d</string>
   <string name="skills_page_issue_count">%d 個 Skill 目錄格式異常，Agent 不會載入它們。</string>
   <string name="skills_page_scan_hint">Agent 會在每次執行前重新掃描已安裝 Skill。</string>
-  <string name="skills_page_refresh">重新整理 Skill</string>
+  <string name="skills_page_refresh">重新整理</string>
   <string name="skills_page_optimize_all">全部規整</string>
   <string name="skills_page_no_description">沒有描述</string>
   <string name="skills_page_disabled">未啟用</string>
@@ -1523,7 +1523,7 @@
   <string name="setting_theme_library_builtin_desc">內建主題 · 明暗跟隨系統模式</string>
   <string name="setting_theme_library_builtin_id_suffix">· 保留內建 ID</string>
   <string name="setting_theme_library_builtin_sage">鼠尾草 Sage</string>
-  <string name="setting_theme_library_builtin_warm">暖石墨 Warm</string>
+  <string name="setting_theme_library_builtin_warm">點陣 · 陶土</string>
   <string name="setting_theme_library_empty_desc">匯入後可在此套用或移除</string>
   <string name="setting_theme_library_empty_title">目前沒有匯入的主題包</string>
   <string name="setting_theme_library_export_chooser">匯出主題包</string>
@@ -3360,4 +3360,5 @@
     <string name="subagent_dock_details_title">子代理詳情</string>
     <string name="subagent_dock_dismiss">收起此任務</string>
     <string name="subagent_dock_status_queued">已排隊</string>
+  <string name="skills_page_github_action_short">GitHub匯入</string>
 </resources>

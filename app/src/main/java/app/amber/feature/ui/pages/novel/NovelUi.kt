@@ -187,7 +187,12 @@ fun NovelEmptyState(
         )
         if (actionLabel != null && onAction != null) {
             Spacer(Modifier.height(4.dp))
-            BtnAccent(text = actionLabel, onClick = onAction)
+            NovelPrimaryButton(
+                text = actionLabel,
+                onClick = onAction,
+                accent = true,
+                compact = true,
+            )
         }
     }
 }
@@ -197,11 +202,11 @@ fun NovelEmptyState(
  * paired actions never look different sizes at the same hierarchy.
  */
 object NovelControl {
-    val RadiusCompact = 12.dp
-    val RadiusPrimary = 15.dp
     val ChipRadius = 999.dp
+    val RadiusCompact = ChipRadius
+    val RadiusPrimary = 15.dp
     val CompactHPad = 14.dp
-    val CompactVPad = 8.dp
+    val CompactVPad = 6.dp
     val QuietHPad = 10.dp
     val QuietVPad = 8.dp
     val ChipHPad = 14.dp

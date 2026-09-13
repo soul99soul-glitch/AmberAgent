@@ -3,7 +3,6 @@ package app.amber.feature.ui.pages.setting
 import android.os.Build
 import androidx.compose.foundation.border
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -11,20 +10,15 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.LocalContentColor
-import androidx.compose.material3.Icon
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ProvideTextStyle
-import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -37,24 +31,21 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.amber.agent.R
-import app.amber.agent.LAUNCH_START_MODE_PREF
 import app.amber.feature.ui.components.ds.amberCanvas
-import app.amber.agent.LEGACY_CREATE_NEW_CONVERSATION_ON_START_PREF
-import app.amber.agent.LaunchStartMode
+import app.amber.feature.ui.components.ds.pressable
+import app.amber.feature.ui.pages.setting.components.ProviderGhostButton
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.RotateCcw
 import app.amber.core.settings.ChatFontFamily
 import app.amber.core.settings.DisplaySetting
-import app.amber.agent.migrateLaunchStartMode
 import app.amber.feature.ui.components.nav.BackButton
 import app.amber.feature.ui.components.richtext.MarkdownBlock
 import app.amber.feature.ui.components.ui.Switch
@@ -63,11 +54,6 @@ import app.amber.feature.ui.components.ui.permission.PermissionNotification
 import app.amber.feature.ui.components.ui.permission.rememberPermissionState
 import app.amber.feature.ui.components.ui.WorkspaceTopBar
 import app.amber.feature.ui.components.ui.workspaceColors
-import com.composables.icons.lucide.Lucide
-import com.composables.icons.lucide.ChevronRight
-import app.amber.feature.ui.hooks.rememberAmoledDarkMode
-import app.amber.feature.ui.hooks.rememberSharedPreferenceBoolean
-import app.amber.feature.ui.hooks.rememberSharedPreferenceString
 import app.amber.feature.ui.components.ui.IntLabel
 import app.amber.feature.ui.components.ui.NotionSlider
 import app.amber.feature.ui.components.ui.PercentLabel
@@ -77,14 +63,6 @@ import app.amber.core.utils.plus
 import org.koin.androidx.compose.koinViewModel
 
 @Composable
-private fun LaunchStartMode.launchStartModeLabel(): String = when (this) {
-    LaunchStartMode.AUTO -> stringResource(R.string.setting_display_page_launch_start_mode_auto)
-    LaunchStartMode.LAST_SESSION -> stringResource(R.string.setting_display_page_launch_start_mode_last_session)
-    LaunchStartMode.NEW_CHAT -> stringResource(R.string.setting_display_page_launch_start_mode_new_chat)
-    LaunchStartMode.HOME -> stringResource(R.string.setting_display_page_launch_start_mode_home)
-}
-
-@Composable
 private fun <T> WorkspaceSegmentedChoice(
     options: List<T>,
     selected: T,
@@ -92,29 +70,32 @@ private fun <T> WorkspaceSegmentedChoice(
     onSelected: (T) -> Unit,
     label: @Composable (T) -> Unit,
 ) {
-    // V3: 改胶囊形状 (CircleShape) — 之前是 6dp 圆角矩形, 视觉太"框框"
     val workspace = workspaceColors()
     val capsuleShape = androidx.compose.foundation.shape.CircleShape
+    val accent = MaterialTheme.colorScheme.primary
     Row(
-        modifier = modifier
-            .clip(capsuleShape)
-            .border(1.dp, workspace.hairline, capsuleShape)
-            .padding(3.dp),
-        horizontalArrangement = Arrangement.spacedBy(2.dp),
+        modifier = modifier,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         options.forEach { option ->
             val isSelected = option == selected
-            Surface(
-                onClick = { onSelected(option) },
-                modifier = Modifier.weight(1f),
-                shape = capsuleShape,
-                color = if (isSelected) workspace.row else Color.Transparent,
-                contentColor = if (isSelected) workspace.ink else workspace.muted,
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .heightIn(min = 48.dp)
+                    .pressable(onClick = { onSelected(option) }),
+                contentAlignment = Alignment.Center,
             ) {
-                CompositionLocalProvider(LocalContentColor provides LocalContentColor.current) {
+                CompositionLocalProvider(LocalContentColor provides if (isSelected) workspace.ink else workspace.muted) {
                     ProvideTextStyle(MaterialTheme.typography.labelMedium) {
                         Box(
-                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 7.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(32.dp)
+                                .clip(capsuleShape)
+                                .background(if (isSelected) accent.copy(alpha = 0.10f) else workspace.row)
+                                .border(1.dp, accent.copy(alpha = if (isSelected) 0.12f else 0.04f), capsuleShape)
+                                .padding(horizontal = 6.dp),
                             contentAlignment = Alignment.Center,
                         ) {
                             label(option)
@@ -131,8 +112,6 @@ private fun <T> WorkspaceSegmentedChoice(
 fun SettingDisplayPage(vm: SettingVM = koinViewModel()) {
     val settings by vm.settings.collectAsStateWithLifecycle()
     var displaySetting by remember(settings) { mutableStateOf(settings.displaySetting) }
-    var amoledDarkMode by rememberAmoledDarkMode()
-    var showThemeLibrary by remember { mutableStateOf(false) }
 
     fun updateDisplaySetting(setting: DisplaySetting) {
         displaySetting = setting
@@ -140,8 +119,6 @@ fun SettingDisplayPage(vm: SettingVM = koinViewModel()) {
     }
 
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
-    val workspace = workspaceColors()
-
     val permissionState = rememberPermissionState(
         permissions = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) setOf(
             PermissionNotification
@@ -167,152 +144,6 @@ fun SettingDisplayPage(vm: SettingVM = koinViewModel()) {
             contentPadding = contentPadding + PaddingValues(horizontal = SettingPageHorizontalInset, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            item {
-                // Graphite (D2/D3): base family (Warm/Sage) + independent accent. Light/dark
-                // follows the global color mode; the 9 legacy themes are replaced.
-                val baseFamily = displaySetting.amberBaseFamily
-                SettingCardGroup(
-                    title = stringResource(R.string.setting_page_theme_setting),
-                ) {
-                        item(
-                            modifier = Modifier.settingSingleLine(),
-                            headlineContent = { Text(stringResource(R.string.setting_display_page_base_family_title)) },
-                            trailingContent = {
-                                WorkspaceSegmentedChoice(
-                                    options = listOf("WARM", "SAGE"),
-                                    selected = baseFamily,
-                                    modifier = Modifier.widthIn(max = 190.dp),
-                                    onSelected = { fam -> updateDisplaySetting(displaySetting.copy(amberBaseFamily = fam)) },
-                                    label = { fam ->
-                                        Text(
-                                            text = stringResource(if (fam == "SAGE") R.string.setting_display_page_base_family_sage else R.string.setting_display_page_base_family_warm),
-                                            maxLines = 1,
-                                            textAlign = TextAlign.Center,
-                                            modifier = Modifier.fillMaxWidth(),
-                                        )
-                                    },
-                                )
-                            },
-                        )
-                        item(
-                            modifier = Modifier.settingSingleLine(),
-                            headlineContent = { Text(stringResource(R.string.setting_display_page_accent_color_title)) },
-                            trailingContent = {
-                                Row(
-                                    horizontalArrangement = Arrangement.spacedBy(9.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                ) {
-                                    app.amber.feature.ui.theme.AmberAccents.forEach { acc ->
-                                        val hex = "#%06X".format(acc.hex.toArgb() and 0xFFFFFF)
-                                        val selected = displaySetting.accentColor.equals(hex, ignoreCase = true)
-                                        Box(
-                                            modifier = Modifier
-                                                .size(40.dp)
-                                                .clickable { updateDisplaySetting(displaySetting.copy(accentColor = hex)) }
-                                                .semantics {
-                                                    contentDescription = acc.label
-                                                },
-                                            contentAlignment = Alignment.Center,
-                                        ) {
-                                            Box(
-                                                modifier = Modifier
-                                                    .size(26.dp)
-                                                    .clip(androidx.compose.foundation.shape.CircleShape)
-                                                    .background(acc.hex)
-                                                    .border(
-                                                        width = if (selected) 2.dp else 1.dp,
-                                                        color = if (selected) workspace.ink else workspace.hairline,
-                                                        shape = androidx.compose.foundation.shape.CircleShape,
-                                                    ),
-                                            )
-                                        }
-                                    }
-                                }
-                            },
-                        )
-                        item(
-                            modifier = Modifier.settingSingleLine(),
-                            headlineContent = { Text(stringResource(R.string.setting_display_page_amoled_dark_mode_title)) },
-                            trailingContent = { Switch(checked = amoledDarkMode, onCheckedChange = { amoledDarkMode = it }) },
-                        )
-                        item(
-                            modifier = Modifier.settingSingleLine(),
-                            onClick = { showThemeLibrary = true },
-                            headlineContent = { Text(stringResource(R.string.setting_theme_library_title)) },
-                            trailingContent = {
-                                Icon(
-                                    imageVector = Lucide.ChevronRight,
-                                    contentDescription = null,
-                                    tint = workspace.muted,
-                                )
-                            },
-                        )
-                }
-            }
-
-            item {
-                var launchStartModeRaw by rememberSharedPreferenceString(
-                    LAUNCH_START_MODE_PREF,
-                    null
-                )
-                var legacyCreateNewConversationOnStart by rememberSharedPreferenceBoolean(
-                    LEGACY_CREATE_NEW_CONVERSATION_ON_START_PREF,
-                    true
-                )
-                val launchStartMode = migrateLaunchStartMode(
-                    storedMode = launchStartModeRaw,
-                    legacyCreateNewConversationOnStart = legacyCreateNewConversationOnStart,
-                )
-                SettingCardGroup(
-                    title = stringResource(R.string.setting_page_general_settings),
-                ) {
-                    item(
-                        headlineContent = { Text(stringResource(R.string.setting_display_page_launch_start_mode_title)) },
-                        supportingContent = {
-                            Column(
-                                verticalArrangement = Arrangement.spacedBy(8.dp),
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Text(stringResource(R.string.setting_display_page_launch_start_mode_desc))
-                                WorkspaceSegmentedChoice(
-                                    options = LaunchStartMode.entries,
-                                    selected = launchStartMode,
-                                    modifier = Modifier.fillMaxWidth(),
-                                    onSelected = { mode ->
-                                        launchStartModeRaw = mode.name
-                                        legacyCreateNewConversationOnStart = mode == LaunchStartMode.NEW_CHAT
-                                    },
-                                    label = { mode ->
-                                        Text(
-                                            text = mode.launchStartModeLabel(),
-                                            maxLines = 1,
-                                            textAlign = TextAlign.Center,
-                                            modifier = Modifier.fillMaxWidth(),
-                                        )
-                                    },
-                                )
-                            }
-                        },
-                    )
-                    item(
-                        modifier = Modifier.settingTwoLine(),
-                        headlineContent = { Text(stringResource(R.string.setting_display_page_notification_message_generated)) },
-                        supportingContent = { Text(stringResource(R.string.setting_display_page_notification_message_generated_desc)) },
-                        trailingContent = {
-                            Switch(
-                                checked = displaySetting.enableNotificationOnMessageGeneration,
-                                onCheckedChange = {
-                                    if (it && !permissionState.allPermissionsGranted) {
-                                        permissionState.requestPermissions()
-                                    }
-                                    updateDisplaySetting(displaySetting.copy(enableNotificationOnMessageGeneration = it))
-                                }
-                            )
-                        },
-                    )
-                }
-            }
-
             item {
                 SettingCardGroup(
                     title = stringResource(R.string.setting_page_message_display_settings),
@@ -346,19 +177,6 @@ fun SettingDisplayPage(vm: SettingVM = koinViewModel()) {
                         )
                         item(
                             modifier = Modifier.settingTwoLine(),
-                            headlineContent = { Text(stringResource(R.string.setting_display_page_chat_list_model_icon_title)) },
-                            supportingContent = { Text(stringResource(R.string.setting_display_page_chat_list_model_icon_desc)) },
-                            trailingContent = {
-                                Switch(
-                                    checked = displaySetting.showModelIcon,
-                                    onCheckedChange = {
-                                        updateDisplaySetting(displaySetting.copy(showModelIcon = it))
-                                    }
-                                )
-                            },
-                        )
-                        item(
-                            modifier = Modifier.settingTwoLine(),
                             headlineContent = { Text(stringResource(R.string.setting_display_page_show_model_name_title)) },
                             supportingContent = { Text(stringResource(R.string.setting_display_page_show_model_name_desc)) },
                             trailingContent = {
@@ -372,19 +190,6 @@ fun SettingDisplayPage(vm: SettingVM = koinViewModel()) {
                         )
                         item(
                             modifier = Modifier.settingTwoLine(),
-                            headlineContent = { Text(stringResource(R.string.setting_display_page_show_date_below_name_title)) },
-                            supportingContent = { Text(stringResource(R.string.setting_display_page_show_date_below_name_desc)) },
-                            trailingContent = {
-                                Switch(
-                                    checked = displaySetting.showDateBelowName,
-                                    onCheckedChange = {
-                                        updateDisplaySetting(displaySetting.copy(showDateBelowName = it))
-                                    }
-                                )
-                            },
-                        )
-                        item(
-                            modifier = Modifier.settingTwoLine(),
                             headlineContent = { Text(stringResource(R.string.setting_display_page_show_thinking_content_title)) },
                             supportingContent = { Text(stringResource(R.string.setting_display_page_show_thinking_content_desc)) },
                             trailingContent = {
@@ -392,32 +197,6 @@ fun SettingDisplayPage(vm: SettingVM = koinViewModel()) {
                                     checked = displaySetting.showThinkingContent,
                                     onCheckedChange = {
                                         updateDisplaySetting(displaySetting.copy(showThinkingContent = it))
-                                    }
-                                )
-                            },
-                        )
-                        item(
-                            modifier = Modifier.settingTwoLine(),
-                            headlineContent = { Text(stringResource(R.string.setting_display_page_auto_collapse_thinking_title)) },
-                            supportingContent = { Text(stringResource(R.string.setting_display_page_auto_collapse_thinking_desc)) },
-                            trailingContent = {
-                                Switch(
-                                    checked = displaySetting.autoCloseThinking,
-                                    onCheckedChange = {
-                                        updateDisplaySetting(displaySetting.copy(autoCloseThinking = it))
-                                    }
-                                )
-                            },
-                        )
-                        item(
-                            modifier = Modifier.settingTwoLine(),
-                            headlineContent = { Text(stringResource(R.string.setting_display_page_enable_latex_rendering_title)) },
-                            supportingContent = { Text(stringResource(R.string.setting_display_page_enable_latex_rendering_desc)) },
-                            trailingContent = {
-                                Switch(
-                                    checked = displaySetting.enableLatexRendering,
-                                    onCheckedChange = {
-                                        updateDisplaySetting(displaySetting.copy(enableLatexRendering = it))
                                     }
                                 )
                             },
@@ -455,7 +234,24 @@ fun SettingDisplayPage(vm: SettingVM = koinViewModel()) {
                             }
                         )
                         item(
-                            headlineContent = { Text(stringResource(R.string.setting_display_page_font_size_title)) },
+                            headlineContent = {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Text(
+                                        stringResource(R.string.setting_display_page_font_size_title),
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                    ProviderGhostButton(
+                                        text = stringResource(R.string.setting_model_page_reset_to_default),
+                                        imageVector = Lucide.RotateCcw,
+                                        onClick = {
+                                            updateDisplaySetting(displaySetting.copy(fontSizeRatio = DisplaySetting().fontSizeRatio))
+                                        },
+                                    )
+                                }
+                            },
                             supportingContent = {
                                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                                     // Range 0.5..2.0 with 5% snap → {50, 55, ..., 200}%.
@@ -469,9 +265,9 @@ fun SettingDisplayPage(vm: SettingVM = koinViewModel()) {
                                         valueLabel = { PercentLabel(it) },
                                     )
                                     MarkdownBlock(
-                                        content = stringResource(R.string.setting_display_page_font_size_preview),
+                                        content = stringResource(R.string.setting_display_page_font_size_preview) + "\n\nAa Bb Cc · 0123456789",
                                         style = LocalTextStyle.current.copy(
-                                            fontSize = LocalTextStyle.current.fontSize * displaySetting.fontSizeRatio,
+                                            fontSize = 14.sp * displaySetting.fontSizeRatio,
                                             lineHeight = LocalTextStyle.current.lineHeight * displaySetting.fontSizeRatio,
                                             fontFamily = when (displaySetting.chatFontFamily) {
                                                 ChatFontFamily.DEFAULT -> FontFamily.Default
@@ -488,67 +284,24 @@ fun SettingDisplayPage(vm: SettingVM = koinViewModel()) {
 
             item {
                 SettingCardGroup(
-                    title = stringResource(R.string.setting_page_code_display_settings),
-                ) {
-                        item(
-                            modifier = Modifier.settingTwoLine(),
-                            headlineContent = { Text(stringResource(R.string.setting_display_page_code_block_auto_wrap_title)) },
-                        supportingContent = { Text(stringResource(R.string.setting_display_page_code_block_auto_wrap_desc)) },
-                        trailingContent = {
-                            Switch(
-                                checked = displaySetting.codeBlockAutoWrap,
-                                onCheckedChange = {
-                                    updateDisplaySetting(displaySetting.copy(codeBlockAutoWrap = it))
-                                }
-                            )
-                        },
-                    )
-                        item(
-                            modifier = Modifier.settingTwoLine(),
-                            headlineContent = { Text(stringResource(R.string.setting_display_page_code_block_auto_collapse_title)) },
-                        supportingContent = { Text(stringResource(R.string.setting_display_page_code_block_auto_collapse_desc)) },
-                        trailingContent = {
-                            Switch(
-                                checked = displaySetting.codeBlockAutoCollapse,
-                                onCheckedChange = {
-                                    updateDisplaySetting(displaySetting.copy(codeBlockAutoCollapse = it))
-                                }
-                            )
-                        },
-                    )
-                        item(
-                            modifier = Modifier.settingTwoLine(),
-                            headlineContent = { Text(stringResource(R.string.setting_display_page_show_line_numbers_title)) },
-                        supportingContent = { Text(stringResource(R.string.setting_display_page_show_line_numbers_desc)) },
-                        trailingContent = {
-                            Switch(
-                                checked = displaySetting.showLineNumbers,
-                                onCheckedChange = {
-                                    updateDisplaySetting(displaySetting.copy(showLineNumbers = it))
-                                }
-                            )
-                        },
-                    )
-                }
-            }
-
-            item {
-                SettingCardGroup(
                     title = stringResource(R.string.setting_page_interaction_notification_settings),
                 ) {
-                        item(
-                            modifier = Modifier.settingTwoLine(),
-                            headlineContent = { Text(stringResource(R.string.setting_display_page_send_on_enter_title)) },
-                            supportingContent = { Text(stringResource(R.string.setting_display_page_send_on_enter_desc)) },
-                            trailingContent = {
-                                Switch(
-                                    checked = displaySetting.sendOnEnter,
-                                    onCheckedChange = {
-                                        updateDisplaySetting(displaySetting.copy(sendOnEnter = it))
+                    item(
+                        modifier = Modifier.settingTwoLine(),
+                        headlineContent = { Text(stringResource(R.string.setting_display_page_notification_message_generated)) },
+                        supportingContent = { Text(stringResource(R.string.setting_display_page_notification_message_generated_desc)) },
+                        trailingContent = {
+                            Switch(
+                                checked = displaySetting.enableNotificationOnMessageGeneration,
+                                onCheckedChange = { enabled ->
+                                    if (enabled && !permissionState.allPermissionsGranted) {
+                                        permissionState.requestPermissions()
                                     }
-                                )
-                            },
-                        )
+                                    updateDisplaySetting(displaySetting.copy(enableNotificationOnMessageGeneration = enabled))
+                                },
+                            )
+                        },
+                    )
                         item(
                             modifier = Modifier.settingTwoLine(),
                             headlineContent = { Text(stringResource(R.string.setting_display_page_show_message_jumper_title)) },
@@ -562,21 +315,6 @@ fun SettingDisplayPage(vm: SettingVM = koinViewModel()) {
                                 )
                             },
                         )
-                        if (displaySetting.showMessageJumper) {
-                            item(
-                                modifier = Modifier.settingTwoLine(),
-                                headlineContent = { Text(stringResource(R.string.setting_display_page_message_jumper_position_title)) },
-                                supportingContent = { Text(stringResource(R.string.setting_display_page_message_jumper_position_desc)) },
-                                trailingContent = {
-                                    Switch(
-                                        checked = displaySetting.messageJumperOnLeft,
-                                        onCheckedChange = {
-                                            updateDisplaySetting(displaySetting.copy(messageJumperOnLeft = it))
-                                        }
-                                    )
-                                },
-                            )
-                        }
                         item(
                             modifier = Modifier.settingTwoLine(),
                             headlineContent = { Text(stringResource(R.string.setting_display_page_enable_auto_scroll_title)) },
@@ -592,19 +330,6 @@ fun SettingDisplayPage(vm: SettingVM = koinViewModel()) {
                         )
                         item(
                             modifier = Modifier.settingTwoLine(),
-                            headlineContent = { Text(stringResource(R.string.setting_display_page_bottom_follow_animation_title)) },
-                            supportingContent = { Text(stringResource(R.string.setting_display_page_bottom_follow_animation_desc)) },
-                            trailingContent = {
-                                Switch(
-                                    checked = displaySetting.showBottomFollowAnimation,
-                                    onCheckedChange = {
-                                        updateDisplaySetting(displaySetting.copy(showBottomFollowAnimation = it))
-                                    }
-                                )
-                            },
-                        )
-                        item(
-                            modifier = Modifier.settingTwoLine(),
                             headlineContent = { Text(stringResource(R.string.setting_display_page_enable_message_generation_haptic_effect_title)) },
                             supportingContent = { Text(stringResource(R.string.setting_display_page_enable_message_generation_haptic_effect_desc)) },
                             trailingContent = {
@@ -612,19 +337,6 @@ fun SettingDisplayPage(vm: SettingVM = koinViewModel()) {
                                     checked = displaySetting.enableMessageGenerationHapticEffect,
                                     onCheckedChange = {
                                         updateDisplaySetting(displaySetting.copy(enableMessageGenerationHapticEffect = it))
-                                    }
-                                )
-                            },
-                        )
-                        item(
-                            modifier = Modifier.settingTwoLine(),
-                            headlineContent = { Text(stringResource(R.string.setting_display_page_skip_crop_image_title)) },
-                            supportingContent = { Text(stringResource(R.string.setting_display_page_skip_crop_image_desc)) },
-                            trailingContent = {
-                                Switch(
-                                    checked = displaySetting.skipCropImage,
-                                    onCheckedChange = {
-                                        updateDisplaySetting(displaySetting.copy(skipCropImage = it))
                                     }
                                 )
                             },
@@ -662,60 +374,10 @@ fun SettingDisplayPage(vm: SettingVM = koinViewModel()) {
                                 },
                             )
                         }
-                        item(
-                            modifier = Modifier.settingTwoLine(),
-                            headlineContent = { Text(stringResource(R.string.setting_display_page_volume_key_scroll_title)) },
-                            supportingContent = { Text(stringResource(R.string.setting_display_page_volume_key_scroll_desc)) },
-                            trailingContent = {
-                                Switch(
-                                    checked = displaySetting.enableVolumeKeyScroll,
-                                    onCheckedChange = {
-                                        updateDisplaySetting(displaySetting.copy(enableVolumeKeyScroll = it))
-                                    }
-                                )
-                            },
-                        )
-                        if (displaySetting.enableVolumeKeyScroll) {
-                            item(
-                                headlineContent = { Text(stringResource(R.string.setting_display_page_volume_key_scroll_ratio)) },
-                                supportingContent = {
-                                    // Range 25%..100%, 25% snap → {25, 50, 75, 100}%.
-                                    NotionSlider(
-                                        value = displaySetting.volumeKeyScrollRatio,
-                                        onValueChangeFinished = {
-                                            updateDisplaySetting(displaySetting.copy(volumeKeyScrollRatio = it))
-                                        },
-                                        valueRange = 0.25f..1.0f,
-                                        snapStep = 0.25f,
-                                        valueLabel = { PercentLabel(it) },
-                                    )
-                                }
-                            )
-                        }
                 }
             }
 
         }
     }
 
-    if (showThemeLibrary) {
-        ModalBottomSheet(
-            onDismissRequest = { showThemeLibrary = false },
-            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .verticalScroll(rememberScrollState())
-                    .padding(horizontal = SettingPageHorizontalInset, vertical = 8.dp),
-            ) {
-                ThemeLibrarySection(
-                    displaySetting = displaySetting,
-                    onBaseFamilyChange = { family ->
-                        updateDisplaySetting(displaySetting.copy(amberBaseFamily = family))
-                    },
-                )
-            }
-        }
-    }
 }

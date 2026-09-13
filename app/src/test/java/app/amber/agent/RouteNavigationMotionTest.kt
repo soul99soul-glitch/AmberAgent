@@ -4,6 +4,7 @@ import android.app.Application
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.width
@@ -127,6 +128,45 @@ class RouteNavigationMotionTest {
         assertEquals(320f, leavingAtMidpoint.width, 1f)
     }
 
+    @Test
+    @Config(qualifiers = "w320dp-h500dp")
+    fun chatPredictiveReturnMatchesForwardMotionAtTheSameElapsedTime() {
+        compose.mainClock.autoAdvance = false
+        val target = mutableStateOf(0)
+        val pushPositions = ConcurrentHashMap<Int, Rect>()
+        val popPositions = ConcurrentHashMap<Int, Rect>()
+        compose.setContent {
+            CompositionLocalProvider(LocalDensity provides Density(1f)) {
+                Column {
+                    RouteMotionFixture(target.value, pop = false) { page, bounds ->
+                        pushPositions[page] = bounds
+                    }
+                    RouteMotionFixture(1 - target.value, pop = true, predictive = true, chat = true) { page, bounds ->
+                        popPositions[page] = bounds
+                    }
+                }
+            }
+        }
+        compose.onNodeWithTag("route-page-0").assertIsDisplayed()
+        compose.runOnIdle { target.value = 1 }
+        val firstFrame = advanceOneFrame()
+        compose.waitForIdle()
+        awaitPosition(pushPositions, 1, firstFrame)
+        awaitPosition(popPositions, 0, firstFrame)
+        repeat(3) {
+            compose.mainClock.advanceTimeBy(48)
+            assertEquals(
+                "return and enter must cover the same distance at each frame",
+                pushPositions.requirePage(1).left,
+                -popPositions.requirePage(0).left,
+                1f,
+            )
+        }
+        compose.mainClock.advanceTimeBy(320)
+        assertEquals(0f, pushPositions.requirePage(1).left, 1f)
+        assertEquals(0f, popPositions.requirePage(0).left, 1f)
+    }
+
     private fun advanceOneFrame(): Long {
         val before = compose.mainClock.currentTime
         compose.mainClock.advanceTimeByFrame()
@@ -155,6 +195,7 @@ private fun RouteMotionFixture(
     target: Int,
     pop: Boolean,
     predictive: Boolean = false,
+    chat: Boolean = false,
     onPositioned: (Int, Rect) -> Unit,
 ) {
     Box(
@@ -167,7 +208,7 @@ private fun RouteMotionFixture(
             targetState = target,
             modifier = Modifier.fillMaxSize(),
             transitionSpec = {
-                if (pop) routePopTransition(predictive = predictive) else routePushTransition()
+                if (pop) routePopTransition(predictive = predictive, chat = chat) else routePushTransition()
             },
             label = "route-motion-test",
         ) { page ->

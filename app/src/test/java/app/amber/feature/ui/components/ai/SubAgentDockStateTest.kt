@@ -1,9 +1,12 @@
 package app.amber.feature.ui.components.ai
 
 import app.amber.feature.subagent.SubAgentDefinition
+import app.amber.feature.subagent.SubAgentResult
 import app.amber.feature.subagent.SubAgentRun
+import app.amber.feature.subagent.ThreadGraphManager
 import app.amber.feature.subagent.SubAgentRunStatus
 import app.amber.feature.subagent.SubAgentTaskSpec
+import app.amber.ai.ui.UIMessagePart
 import app.amber.feature.task.AgentTaskSnapshot
 import app.amber.feature.task.AgentTaskStatus
 import kotlin.uuid.Uuid
@@ -43,7 +46,7 @@ class SubAgentDockStateTest {
         val summaryWrite = completed.copy(updatedAtMs = 880L)
         val stable = tracker.reduce(
             listOf(summaryWrite),
-            mapOf(summaryWrite.taskId to completedLive),
+            mapOf(summaryWrite.taskId to completedLive.copy(updatedAtMs = 880L)),
         ).tasks.single()
         assertEquals(135L, stable.finishedAtMs)
     }
@@ -94,6 +97,51 @@ class SubAgentDockStateTest {
         val reappeared = tracker.reduce(listOf(followupRunning), emptyMap()).tasks.single()
         assertEquals(SubAgentDockRunKey(followupRunning.taskId, 300L), reappeared.key)
         assertEquals(SubAgentDockStatus.RUNNING, reappeared.status)
+    }
+
+    @Test
+    fun dismissAllHidesActiveRunsWithoutCancellingAndNewGenerationReappears() {
+        val tracker = SubAgentDockTracker()
+        val firstRunning = snapshot(status = AgentTaskStatus.RUNNING, createdAtMs = 100L, updatedAtMs = 100L)
+
+        assertEquals(
+            SubAgentDockStatus.RUNNING,
+            tracker.reduce(listOf(firstRunning), emptyMap()).tasks.single().status,
+        )
+        tracker.dismissAll()
+
+        assertTrue(tracker.reduce(listOf(firstRunning), emptyMap()).tasks.isEmpty())
+        // This is presentation-only state: the task store still describes the run as active.
+        assertEquals(AgentTaskStatus.RUNNING, firstRunning.status)
+
+        val followupRunning = firstRunning.copy(createdAtMs = 300L, updatedAtMs = 300L)
+        assertEquals(
+            SubAgentDockStatus.RUNNING,
+            tracker.reduce(listOf(followupRunning), emptyMap()).tasks.single().status,
+        )
+    }
+
+    @Test
+    fun terminalAutoHideUsesFirstFinishDeadlineAndKeepsAnOpenDetailsRow() {
+        val tracker = SubAgentDockTracker()
+        val running = snapshot(status = AgentTaskStatus.RUNNING, createdAtMs = 100L, updatedAtMs = 100L)
+        tracker.reduce(listOf(running), emptyMap())
+        val terminal = tracker.reduce(
+            listOf(running.copy(status = AgentTaskStatus.COMPLETED, updatedAtMs = 200L)),
+            emptyMap(),
+        ).tasks.single()
+
+        assertFalse(tracker.dismissExpired(nowMs = 999L, autoHideAfterMs = 0L))
+        assertFalse(tracker.dismissExpired(nowMs = 229L, autoHideAfterMs = 30L))
+        assertFalse(
+            tracker.dismissExpired(
+                nowMs = 230L,
+                autoHideAfterMs = 30L,
+                protectedKey = terminal.key,
+            )
+        )
+        assertTrue(tracker.dismissExpired(nowMs = 230L, autoHideAfterMs = 30L))
+        assertTrue(tracker.reduce(listOf(running.copy(status = AgentTaskStatus.COMPLETED, updatedAtMs = 999L)), emptyMap()).tasks.isEmpty())
     }
 
     @Test
@@ -152,6 +200,149 @@ class SubAgentDockStateTest {
         ).tasks.single()
         assertEquals(SubAgentDockStatus.INTERRUPTED, interrupted.status)
         assertEquals(260L, interrupted.finishedAtMs)
+    }
+
+    @Test
+    fun runningSnapshotSummaryIsExposedOnlyAsObjective() {
+        val running = snapshot(
+            status = AgentTaskStatus.RUNNING,
+            createdAtMs = 500L,
+            updatedAtMs = 500L,
+        ).copy(summary = "original objective")
+
+        val details = buildDockDetails(
+            snapshot = running,
+            liveRun = null,
+            liveText = "",
+            liveParts = emptyList(),
+            persistedState = null,
+            followupSeed = null,
+            transcript = TranscriptDockDetails(),
+        )
+
+        assertEquals("original objective", details.objective)
+        assertEquals(null, details.summary)
+    }
+
+    @Test
+    fun livePartsProduceOnlyRealToolReasoningAndAssistantExcerpts() {
+        val stages = extractLiveStages(
+            parts = listOf(
+                UIMessagePart.Reasoning("Inspecting the relevant files", finishedAt = null),
+                UIMessagePart.Tool(
+                    toolCallId = "tool-1",
+                    toolName = "file_read",
+                    input = "logs.txt",
+                    output = listOf(UIMessagePart.Text("found the failure")),
+                ),
+                UIMessagePart.Text("The failure is in the retry path."),
+            ),
+            isRunActive = true,
+        )
+
+        assertEquals(3, stages.size)
+        assertEquals(SubAgentDockStageKind.REASONING, stages[0].kind)
+        assertEquals(SubAgentDockStageKind.TOOL, stages[1].kind)
+        assertEquals("file_read", stages[1].title)
+        assertEquals(SubAgentDockStageKind.TEXT, stages[2].kind)
+        assertTrue(stages[0].isRunning)
+    }
+
+    @Test
+    fun consecutiveToolsDoNotEvictEarlierReadableProgress() {
+        val details = buildDockDetails(
+            snapshot = snapshot(status = AgentTaskStatus.RUNNING, createdAtMs = 100L, updatedAtMs = 200L),
+            liveRun = null, liveText = "", persistedState = null, followupSeed = null,
+            transcript = TranscriptDockDetails(),
+            liveParts = listOf(UIMessagePart.Text("已确认重复请求来自重试逻辑。")) + List(6) { index ->
+                UIMessagePart.Tool(toolCallId = "tool-$index", toolName = "file_read", input = "{}", output = emptyList())
+            },
+        )
+        assertEquals(listOf("已确认重复请求来自重试逻辑。"), details.readableOverview().stages.map { it.text })
+    }
+
+    @Test
+    fun oldGenerationKeyIsRejectedAndFollowupSeedStaysPreviousOutput() {
+        val current = snapshot(
+            status = AgentTaskStatus.RUNNING,
+            createdAtMs = 700L,
+            updatedAtMs = 700L,
+        )
+        assertFalse(current.matchesDockRunKey(SubAgentDockRunKey(current.taskId, 699L)))
+
+        val details = buildDockDetails(
+            snapshot = current,
+            liveRun = liveRun(
+                taskId = current.taskId,
+                status = SubAgentRunStatus.RUNNING,
+                updatedAtMs = 700L,
+            ).copy(displayText = "previous generation answer"),
+            liveText = "",
+            liveParts = emptyList(),
+            persistedState = null,
+            followupSeed = "previous generation answer",
+            transcript = TranscriptDockDetails(),
+        )
+
+        assertEquals("previous generation answer", details.previousOutput)
+        assertEquals("", details.output)
+    }
+
+    @Test
+    fun terminalResultKeepsStructuredRiskAndNextStepSemantics() {
+        val terminal = snapshot(
+            status = AgentTaskStatus.COMPLETED,
+            createdAtMs = 900L,
+            updatedAtMs = 950L,
+        )
+        val details = buildDockDetails(
+            snapshot = terminal,
+            liveRun = liveRun(
+                taskId = terminal.taskId,
+                status = SubAgentRunStatus.COMPLETED,
+                updatedAtMs = 950L,
+            ).copy(
+                result = SubAgentResult(
+                    status = SubAgentRunStatus.COMPLETED,
+                    summary = "done",
+                    findings = listOf("finding"),
+                    evidence = listOf("evidence"),
+                    risks = listOf("risk"),
+                    recommendedNextSteps = listOf("next"),
+                ),
+            ),
+            liveText = "",
+            liveParts = emptyList(),
+            persistedState = null,
+            followupSeed = null,
+            transcript = TranscriptDockDetails(),
+        )
+
+        assertTrue(details.output.contains("risk"))
+        assertTrue(details.stages.any { it.kind == SubAgentDockStageKind.FINDING })
+        assertTrue(details.stages.any { it.kind == SubAgentDockStageKind.EVIDENCE })
+        assertTrue(details.stages.any { it.kind == SubAgentDockStageKind.RISK })
+        assertTrue(details.stages.any { it.kind == SubAgentDockStageKind.NEXT_STEP })
+    }
+
+    @Test
+    fun aRecoveredFollowupDoesNotShowThePreviousPersistedAnswerAsItsOwn() {
+        val terminal = snapshot(status = AgentTaskStatus.INTERRUPTED, createdAtMs = 700L, updatedAtMs = 900L)
+        val persisted = ThreadGraphManager.ThreadGraphState(
+            status = SubAgentRunStatus.INTERRUPTED,
+            startedAtMs = 100L,
+            updatedAtMs = 900L,
+            finalAnswer = "previous answer",
+            resultFinishedAtMs = 600L,
+        )
+        fun details(state: ThreadGraphManager.ThreadGraphState) = buildDockDetails(
+            snapshot = terminal, liveRun = null, liveText = "", liveParts = emptyList(),
+            persistedState = state, followupSeed = null, transcript = TranscriptDockDetails(),
+        )
+        assertEquals("", details(persisted).output)
+        assertEquals("current answer", details(persisted.copy(
+            finalAnswer = "current answer", resultFinishedAtMs = 800L,
+        )).output)
     }
 
     private fun snapshot(

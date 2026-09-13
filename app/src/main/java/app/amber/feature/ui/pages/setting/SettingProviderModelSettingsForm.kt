@@ -181,10 +181,6 @@ internal fun ModelEditorSheet(
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
-                ProviderGhostButton(
-                    text = stringResource(R.string.setting_provider_page_save),
-                    onClick = { if (canConfirm) onConfirm() },
-                )
             }
 
             Column(
@@ -298,7 +294,7 @@ internal fun ModelSettingsForm(
                                         )
                                     },
                                 )
-                                ProviderHairline()
+                                ProviderHairline(Modifier.padding(horizontal = 14.dp))
                                 ModelCapabilitySwitchRow(
                                     title = "工具",
                                     machineLabel = "tools",
@@ -314,7 +310,7 @@ internal fun ModelSettingsForm(
                                         )
                                     },
                                 )
-                                ProviderHairline()
+                                ProviderHairline(Modifier.padding(horizontal = 14.dp))
                                 ModelCapabilitySwitchRow(
                                     title = "推理",
                                     machineLabel = "reasoning",
@@ -330,7 +326,7 @@ internal fun ModelSettingsForm(
                                         )
                                     },
                                 )
-                                ProviderHairline()
+                                ProviderHairline(Modifier.padding(horizontal = 14.dp))
                                 ModelCapabilitySwitchRow(
                                     title = "图像",
                                     machineLabel = "image",
@@ -383,36 +379,42 @@ internal fun ModelSettingsForm(
 
                         ModelEditorSection(stringResource(R.string.setting_provider_page_basic_settings)) {
                             ProviderCard(modifier = Modifier.fillMaxWidth()) {
-                                ProviderLedgerRow("model_type") {
-                                    FlowRow(
-                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                        verticalArrangement = Arrangement.spacedBy(6.dp),
-                                    ) {
-                                        ModelType.entries.forEach { type ->
-                                            ProviderSquareTag(
-                                                text = type.name.lowercase(),
-                                                selected = model.type == type,
-                                                onClick = { onModelChange(model.copy(type = type)) },
-                                            )
+                                Column(Modifier.padding(14.dp)) {
+                                    ProviderLedgerRow(stringResource(R.string.setting_provider_page_model_type)) {
+                                        FlowRow(
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                            verticalArrangement = Arrangement.spacedBy(6.dp),
+                                        ) {
+                                            ModelType.entries.forEach { type ->
+                                                ProviderSquareTag(
+                                                    text = stringResource(when (type) {
+                                                        ModelType.CHAT -> R.string.setting_provider_page_chat_model
+                                                        ModelType.IMAGE -> R.string.setting_provider_page_image_model
+                                                        ModelType.EMBEDDING -> R.string.setting_provider_page_embedding_model
+                                                    }),
+                                                    selected = model.type == type,
+                                                    onClick = { onModelChange(model.copy(type = type)) },
+                                                )
+                                            }
                                         }
                                     }
-                                }
-                                if (model.type == ModelType.CHAT) {
-                                    ProviderLedgerRow("input_modalities") {
-                                        ModalityTagRow(
-                                            selected = model.inputModalities,
-                                            onToggle = { modality ->
-                                                onModelChange(model.copy(inputModalities = model.inputModalities.withModality(modality, modality !in model.inputModalities)))
-                                            },
-                                        )
-                                    }
-                                    ProviderLedgerRow("output_modalities") {
-                                        ModalityTagRow(
-                                            selected = model.outputModalities,
-                                            onToggle = { modality ->
-                                                onModelChange(model.copy(outputModalities = model.outputModalities.withModality(modality, modality !in model.outputModalities)))
-                                            },
-                                        )
+                                    if (model.type == ModelType.CHAT) {
+                                        ProviderLedgerRow(stringResource(R.string.setting_provider_page_input_modality)) {
+                                            ModalityTagRow(
+                                                selected = model.inputModalities,
+                                                onToggle = { modality ->
+                                                    onModelChange(model.copy(inputModalities = model.inputModalities.withModality(modality, modality !in model.inputModalities)))
+                                                },
+                                            )
+                                        }
+                                        ProviderLedgerRow(stringResource(R.string.setting_provider_page_output_modality)) {
+                                            ModalityTagRow(
+                                                selected = model.outputModalities,
+                                                onToggle = { modality ->
+                                                    onModelChange(model.copy(outputModalities = model.outputModalities.withModality(modality, modality !in model.outputModalities)))
+                                                },
+                                            )
+                                        }
                                     }
                                 }
                             }
@@ -633,7 +635,11 @@ private fun ModalityTagRow(
     ) {
         Modality.entries.forEach { modality ->
             ProviderSquareTag(
-                text = modality.name.lowercase(),
+                text = stringResource(when (modality) {
+                    Modality.TEXT -> R.string.setting_provider_page_text
+                    Modality.IMAGE -> R.string.setting_provider_page_image
+                    Modality.AUDIO -> R.string.setting_provider_page_audio
+                }),
                 selected = modality in selected,
                 onClick = { onToggle(modality) },
             )

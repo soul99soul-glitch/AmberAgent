@@ -95,6 +95,7 @@ fun <T> Select(
         }
         ExposedDropdownMenu(
             expanded = expanded,
+            matchAnchorWidth = false,
             onDismissRequest = {
                 expanded = false
             }
@@ -106,14 +107,12 @@ fun <T> Select(
                         expanded = false
                     },
                     text = {
-                        // V3: 去掉 maxLines=1 + 加 softWrap=false, 短 anchor 宽度下长 option 不被截 (不折行只挤一行)
+                        // The popup measures its options independently of the compact value chip.
                         Text(text = optionToString(option), softWrap = false)
                     },
                     leadingIcon = optionLeading?.let {
                         { it(option) }
                     },
-                    // anchor 宽度 (e.g. "浅色" 60dp) < option 文字 ("跟随系统" 80dp) 时 dropdown
-                    // 默认还是 anchor width, 文字被截. 给 item 最小宽度 140dp 留余地.
                     modifier = Modifier.widthIn(min = 140.dp),
                 )
             }

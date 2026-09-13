@@ -1,5 +1,6 @@
 package app.amber.feature.ui.pages.chat
 
+import app.amber.feature.ui.utils.amberTraceMeasure
 import android.content.Context
 import android.net.Uri
 import androidx.compose.animation.core.FastOutSlowInEasing
@@ -96,6 +97,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
 import app.amber.ai.core.MessageRole
+import app.amber.ai.core.ReasoningLevel
 import app.amber.ai.provider.Model
 import app.amber.ai.provider.ModelType
 import app.amber.ai.registry.ModelRegistry
@@ -122,6 +124,7 @@ import app.amber.core.ai.tools.parseDeepReadSlashCommand
 import app.amber.core.settings.Settings
 import app.amber.core.settings.findProvider
 import app.amber.core.settings.getCurrentChatModel
+import app.amber.core.settings.defaultReasoningLevelForModel
 import app.amber.core.files.FilesManager
 import app.amber.core.context.ActiveCompactBoundary
 import app.amber.core.context.CompactLifecycleState
@@ -140,7 +143,6 @@ import app.amber.feature.ui.components.ai.SandboxActivitySheet
 import app.amber.feature.ui.components.ai.TopModelMenu
 import app.amber.feature.ui.components.ds.BlinkingCursor
 import app.amber.feature.ui.components.ds.amberCanvas
-import app.amber.feature.ui.components.ds.Hairline
 import app.amber.feature.ui.theme.LocalAmberTokens
 import app.amber.feature.ui.theme.LocalAmberType
 import app.amber.feature.ui.components.ui.WorkspaceIconButton
@@ -355,8 +357,15 @@ fun ChatPage(
     val chatRegexes = setting.regexes
     val compactInTimelineActive = isCompacting || compactLifecycleState.isActive
     val activeGeneration = loadingJob != null || pendingUserMessages.isNotEmpty() || compactInTimelineActive
+    // Initialization publishes the conversation and its load state separately. While the
+    // spinner is visible, do not parse and plan history that cannot be displayed yet.
+    val timelineConversation = if (timelineLoadState.initialized) {
+        conversation
+    } else {
+        remember(conversation.id) { conversation.copy(messageNodes = emptyList()) }
+    }
     val chatTimelinePlan = rememberChatTimelinePlan(
-        conversation = conversation,
+        conversation = timelineConversation,
         regexes = chatRegexes,
         showAssistantBubble = setting.displaySetting.showAssistantBubble,
         loading = loadingJob != null,
@@ -524,6 +533,14 @@ private fun ChatPageContent(
     val chatProvidersForMenu = setting.providers.filter { provider ->
         provider.enabled && provider.models.any { it.type == ModelType.CHAT }
     }
+    val currentReasoningLevelForMenu = currentChatModel?.let { model ->
+        setting.rememberedReasoningLevelsByModelId[model.id.toString()]
+            ?: if (setting.reasoningLevel == ReasoningLevel.AUTO) {
+                setting.defaultReasoningLevelForModel(model)
+            } else {
+                setting.reasoningLevel
+            }
+    }
     val resourceContext = context
     val localeTag = resourceContext.resources.configuration.locales.toLanguageTags()
     var previewMode by rememberSaveable { mutableStateOf(false) }
@@ -673,6 +690,7 @@ private fun ChatPageContent(
         // `bloomTarget` / `bloomIntensity` above are now inert; cleaned up with the bloom machinery
         // when the chat background is fully de-decorated.
         Scaffold(
+            modifier = Modifier.amberTraceMeasure("Amber ChatPage measure"),
             topBar = {
                 TopBar(
                     settings = setting,
@@ -680,10 +698,7 @@ private fun ChatPageContent(
                     contextCompacts = contextCompacts,
                     bigScreen = bigScreen,
                     onBack = {
-                        // Session 首页取代了 ChatDrawer 侧边栏：顶栏入口从「打开抽屉」
-                        // 改为返回 Screen.SessionHome。进 Chat 是 clearAndNavigate，
-                        // 返回对称地清栈回首页。
-                        navController.clearAndNavigate(Screen.SessionHome)
+                        navController.returnToSessionHome()
                     },
                     currentChatModel = currentChatModel,
                     previewMode = previewMode,
@@ -1169,6 +1184,19 @@ private fun ChatPageContent(
                     modelMenuOpen = false
                 },
                 onClose = { modelMenuOpen = false },
+                reasoningLevel = currentReasoningLevelForMenu,
+                onUpdateReasoningLevel = { level ->
+                    currentChatModel?.let { model ->
+                        vm.updateSettings(
+                            setting.copy(
+                                reasoningLevel = level,
+                                rememberedReasoningLevelsByModelId =
+                                    setting.rememberedReasoningLevelsByModelId +
+                                        (model.id.toString() to level),
+                            )
+                        )
+                    }
+                },
                 modifier = Modifier.padding(top = innerPadding.calculateTopPadding()),
             )
             }  // end outer Box (fillMaxSize)
@@ -1236,7 +1264,7 @@ private fun EmptyChatSuggestions(
                 shape = CircleShape,
                 color = Color.Transparent,
                 contentColor = tokens.ink2,
-                border = BorderStroke(1.dp, tokens.line),
+                border = BorderStroke(1.dp, tokens.accent.copy(alpha = 0.10f)),
                 tonalElevation = 0.dp,
             ) {
                 Box(
@@ -1871,8 +1899,7 @@ private fun TopBar(
             .fillMaxWidth()
             .windowInsetsPadding(WindowInsets.statusBars),
     ) {
-        // Graphite §6.2 two-line ChatHeader: title block over the mono model-id trigger,
-        // closed by a bottom hairline (line token).
+        // The header and composer use matching fine accent rules around the timeline.
         Column(modifier = Modifier.fillMaxWidth()) {
             Row(
                 modifier = Modifier
@@ -2035,7 +2062,12 @@ private fun TopBar(
                 }
             }
             }
-            Hairline()
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .height(1.dp)
+                    .background(LocalAmberTokens.current.accent.copy(alpha = 0.10f)),
+            )
         }
     }
 }

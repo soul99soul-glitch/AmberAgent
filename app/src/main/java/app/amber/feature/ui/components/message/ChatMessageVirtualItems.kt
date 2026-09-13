@@ -1,9 +1,9 @@
 package app.amber.feature.ui.components.message
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ProvideTextStyle
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -22,20 +22,16 @@ import app.amber.ai.ui.UIMessage
 import app.amber.ai.ui.UIMessagePart
 import app.amber.ai.ui.isEmptyUIMessage
 import app.amber.agent.PerfFlags
-import app.amber.agent.Screen
 import app.amber.core.model.AssistantAffectScope
 import app.amber.core.model.AssistantRegex
 import app.amber.core.model.MessageNode
 import app.amber.core.ai.generative.GenerativeWidgetParser
 import app.amber.feature.ui.components.richtext.MarkdownParseResult
-import app.amber.feature.ui.components.richtext.buildMarkdownPreviewHtml
 import app.amber.feature.ui.components.richtext.canRenderByTopLevelBlocks
 import app.amber.feature.ui.components.richtext.topLevelBlockCount
 import app.amber.feature.ui.components.richtext.topLevelBlockKey
-import app.amber.feature.ui.context.LocalNavController
 import app.amber.feature.ui.context.LocalSettings
 import app.amber.feature.ui.utils.amberTraceMeasure
-import app.amber.core.utils.base64Encode
 import app.amber.core.utils.copyMessageToClipboard
 
 internal const val ChatMessageVirtualMarkdownMinChars = 600
@@ -295,225 +291,187 @@ internal fun ChatMessageVirtualItemContent(
     val searchPresentation = rememberSearchPresentation(message.parts)
     val searchSources = searchPresentation.sources.takeIf { it.isNotEmpty }
     val searchImageUrls = searchPresentation.imageUrls
-    when (item) {
-        is ChatMessageVirtualItem.Header -> {
-            Column(
-                modifier = modifier
-                    .fillMaxWidth()
-                    .amberTraceMeasure("Amber ChatMessage ${message.role.name.lowercase()} header measure"),
-                horizontalAlignment = Alignment.Start,
-            ) {
-                if (message.parts.hasRenderableChatMessageContent()) {
-                    ChatMessageAssistantAvatar(
-                        message = message,
-                        model = model,
-                        modifier = Modifier.fillMaxWidth()
+    var showActionsSheet by remember(message.id) { mutableStateOf(false) }
+    var showSelectCopySheet by remember(message.id) { mutableStateOf(false) }
+    val context = LocalContext.current
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .messageActionsOnLongPress(
+                if (!loading && message.parts.hasRenderableChatMessageContent()) {
+                    { showActionsSheet = true }
+                } else null,
+            ),
+    ) {
+        when (item) {
+            is ChatMessageVirtualItem.Header -> {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .amberTraceMeasure("Amber ChatMessage ${message.role.name.lowercase()} header measure"),
+                    horizontalAlignment = Alignment.Start,
+                ) {
+                    if (message.parts.hasRenderableChatMessageContent()) {
+                        ChatMessageAssistantAvatar(
+                            message = message,
+                            model = model,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                    SearchImageGallery(
+                        images = item.galleryImages,
+                        modifier = Modifier.fillMaxWidth(),
                     )
                 }
-                SearchImageGallery(
-                    images = item.galleryImages,
-                    modifier = Modifier.fillMaxWidth(),
-                )
             }
-        }
 
-        is ChatMessageVirtualItem.Thinking -> {
-            ProvideTextStyle(textStyle) {
-                MessagePartsBlock(
-                    regexes = regexes,
-                    role = message.role,
-                    // SubAgentTaskStep is fanned back out to its underlying tools — MessagePartsBlock
-                    // calls groupMessageParts again and will re-coalesce them into one card.
-                    parts = item.block.steps.flatMap { step ->
-                        when (step) {
+            is ChatMessageVirtualItem.Thinking -> {
+                ProvideTextStyle(textStyle) {
+                    MessagePartsBlock(
+                        regexes = regexes,
+                        role = message.role,
+                        // SubAgentTaskStep is fanned back out to its underlying tools — MessagePartsBlock
+                        // calls groupMessageParts again and will re-coalesce them into one card.
+                        parts = item.block.steps.flatMap { step ->
+                            when (step) {
+                                is ThinkingStep.ReasoningStep -> listOf(step.reasoning)
+                                is ThinkingStep.ToolStep -> listOf(step.tool)
+                                is ThinkingStep.SubAgentTaskStep -> step.tools
+                                is ThinkingStep.CouncilTaskStep -> step.tools
+                            }
+                        },
+                        loading = loading,
+                        model = model,
+                        onToolApproval = onToolApproval,
+                        onToolAnswer = onToolAnswer,
+                        onOpenWorkspaceFile = onOpenWorkspaceFile,
+                        onGenerativeWidgetAction = onGenerativeWidgetAction,
+                        onMiniAppModify = onMiniAppModify,
+                    )
+                }
+            }
+
+            is ChatMessageVirtualItem.ThinkingStepItem -> {
+                ProvideTextStyle(textStyle) {
+                    MessagePartsBlock(
+                        regexes = regexes,
+                        role = message.role,
+                        parts = when (val step = item.step) {
                             is ThinkingStep.ReasoningStep -> listOf(step.reasoning)
                             is ThinkingStep.ToolStep -> listOf(step.tool)
                             is ThinkingStep.SubAgentTaskStep -> step.tools
                             is ThinkingStep.CouncilTaskStep -> step.tools
+                        },
+                        loading = loading,
+                        model = model,
+                        onToolApproval = onToolApproval,
+                        onToolAnswer = onToolAnswer,
+                        onOpenWorkspaceFile = onOpenWorkspaceFile,
+                        onGenerativeWidgetAction = onGenerativeWidgetAction,
+                        onMiniAppModify = onMiniAppModify,
+                    )
+                }
+            }
+
+            is ChatMessageVirtualItem.Content -> {
+                CompositionLocalProvider(
+                    LocalSearchSources provides searchSources,
+                    LocalSearchImageUrls provides searchImageUrls,
+                ) {
+                    ProvideTextStyle(textStyle) {
+                        if (item.block.part is UIMessagePart.Text) {
+                            VirtualizedAssistantText(
+                                fullMessageParts = message.parts,
+                                part = item.block.part,
+                                regexes = regexes,
+                                markdownChild = null,
+                                showAssistantBubble = LocalSettings.current.displaySetting.showAssistantBubble,
+                                onGenerativeWidgetAction = onGenerativeWidgetAction,
+                            )
+                        } else {
+                            MessagePartsBlock(
+                                regexes = regexes,
+                                role = message.role,
+                                parts = listOf(item.block.part),
+                                loading = loading,
+                                model = model,
+                                onToolApproval = onToolApproval,
+                                onToolAnswer = onToolAnswer,
+                                onOpenWorkspaceFile = onOpenWorkspaceFile,
+                                onGenerativeWidgetAction = onGenerativeWidgetAction,
+                                onMiniAppModify = onMiniAppModify,
+                            )
                         }
-                    },
-                    loading = loading,
-                    model = model,
-                    onToolApproval = onToolApproval,
-                    onToolAnswer = onToolAnswer,
-                    onOpenWorkspaceFile = onOpenWorkspaceFile,
-                    onGenerativeWidgetAction = onGenerativeWidgetAction,
-                    onMiniAppModify = onMiniAppModify,
-                )
+                    }
+                }
             }
-        }
 
-        is ChatMessageVirtualItem.ThinkingStepItem -> {
-            ProvideTextStyle(textStyle) {
-                MessagePartsBlock(
-                    regexes = regexes,
-                    role = message.role,
-                    parts = when (val step = item.step) {
-                        is ThinkingStep.ReasoningStep -> listOf(step.reasoning)
-                        is ThinkingStep.ToolStep -> listOf(step.tool)
-                        is ThinkingStep.SubAgentTaskStep -> step.tools
-                        is ThinkingStep.CouncilTaskStep -> step.tools
-                    },
-                    loading = loading,
-                    model = model,
-                    onToolApproval = onToolApproval,
-                    onToolAnswer = onToolAnswer,
-                    onOpenWorkspaceFile = onOpenWorkspaceFile,
-                    onGenerativeWidgetAction = onGenerativeWidgetAction,
-                    onMiniAppModify = onMiniAppModify,
-                )
-            }
-        }
-
-        is ChatMessageVirtualItem.Content -> {
-            CompositionLocalProvider(
-                LocalSearchSources provides searchSources,
-                LocalSearchImageUrls provides searchImageUrls,
-            ) {
-                ProvideTextStyle(textStyle) {
-                    if (item.block.part is UIMessagePart.Text) {
+            is ChatMessageVirtualItem.MarkdownChild -> {
+                CompositionLocalProvider(
+                    LocalSearchSources provides searchSources,
+                    LocalSearchImageUrls provides searchImageUrls,
+                ) {
+                    ProvideTextStyle(textStyle) {
                         VirtualizedAssistantText(
                             fullMessageParts = message.parts,
-                            part = item.block.part,
+                            part = item.block.part as UIMessagePart.Text,
                             regexes = regexes,
-                            markdownChild = null,
+                            markdownChild = item,
+                            attachments = item.attachments,
                             showAssistantBubble = LocalSettings.current.displaySetting.showAssistantBubble,
                             onGenerativeWidgetAction = onGenerativeWidgetAction,
                         )
-                    } else {
-                        MessagePartsBlock(
-                            regexes = regexes,
-                            role = message.role,
-                            parts = listOf(item.block.part),
+                    }
+                }
+            }
+
+            is ChatMessageVirtualItem.SubAgent -> {
+                ProvideTextStyle(textStyle) {
+                    SubAgentTaskStepView(
+                        step = item.block.step,
+                        loading = loading,
+                    )
+                }
+            }
+
+            is ChatMessageVirtualItem.Council -> {
+                ProvideTextStyle(textStyle) {
+                    CouncilTaskStepView(
+                        step = item.block.step,
+                        loading = loading,
+                    )
+                }
+            }
+
+            ChatMessageVirtualItem.Footer -> {
+                CompositionLocalProvider(
+                    LocalSearchSources provides searchSources,
+                    LocalSearchImageUrls provides searchImageUrls,
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .amberTraceMeasure("Amber ChatMessage ${message.role.name.lowercase()} footer measure"),
+                        horizontalAlignment = Alignment.Start,
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        ChatMessageMessageFooter(
+                            annotations = message.annotations,
                             loading = loading,
-                            model = model,
-                            onToolApproval = onToolApproval,
-                            onToolAnswer = onToolAnswer,
-                            onOpenWorkspaceFile = onOpenWorkspaceFile,
-                            onGenerativeWidgetAction = onGenerativeWidgetAction,
-                            onMiniAppModify = onMiniAppModify,
+                            textStyle = textStyle,
+                            actionFooterMode = resolveActionFooterMode(
+                                role = message.role,
+                                lastMessage = lastMessage,
+                                loading = loading,
+                                hasContent = message.parts.isEmptyUIMessage().not(),
+                            ),
+                            node = node,
+                            onUpdate = onUpdate,
                         )
                     }
                 }
             }
         }
-
-        is ChatMessageVirtualItem.MarkdownChild -> {
-            CompositionLocalProvider(
-                LocalSearchSources provides searchSources,
-                LocalSearchImageUrls provides searchImageUrls,
-            ) {
-                ProvideTextStyle(textStyle) {
-                    VirtualizedAssistantText(
-                        fullMessageParts = message.parts,
-                        part = item.block.part as UIMessagePart.Text,
-                        regexes = regexes,
-                        markdownChild = item,
-                        attachments = item.attachments,
-                        showAssistantBubble = LocalSettings.current.displaySetting.showAssistantBubble,
-                        onGenerativeWidgetAction = onGenerativeWidgetAction,
-                    )
-                }
-            }
-        }
-
-        is ChatMessageVirtualItem.SubAgent -> {
-            ProvideTextStyle(textStyle) {
-                SubAgentTaskStepView(
-                    step = item.block.step,
-                    loading = loading,
-                )
-            }
-        }
-
-        is ChatMessageVirtualItem.Council -> {
-            ProvideTextStyle(textStyle) {
-                CouncilTaskStepView(
-                    step = item.block.step,
-                    loading = loading,
-                )
-            }
-        }
-
-        ChatMessageVirtualItem.Footer -> {
-            CompositionLocalProvider(
-                LocalSearchSources provides searchSources,
-                LocalSearchImageUrls provides searchImageUrls,
-            ) {
-                ChatMessageVirtualFooter(
-                    node = node,
-                    loading = loading,
-                    model = model,
-                    lastMessage = lastMessage,
-                    onFork = onFork,
-                    onRegenerate = onRegenerate,
-                    onEdit = onEdit,
-                    onShare = onShare,
-                    onQuote = onQuote,
-                    onDelete = onDelete,
-                    onUpdate = onUpdate,
-                    isFavorite = isFavorite,
-                    onToggleFavorite = onToggleFavorite,
-                    onSaveToWorkspace = onSaveToWorkspace,
-                    textStyle = textStyle,
-                )
-            }
-        }
-    }
-}
-
-
-@Composable
-private fun ChatMessageVirtualFooter(
-    node: MessageNode,
-    loading: Boolean,
-    model: Model?,
-    lastMessage: Boolean,
-    onFork: () -> Unit,
-    onRegenerate: () -> Unit,
-    onEdit: () -> Unit,
-    onShare: () -> Unit,
-    onQuote: (String) -> Unit,
-    onDelete: () -> Unit,
-    onUpdate: (MessageNode) -> Unit,
-    isFavorite: Boolean,
-    onToggleFavorite: (() -> Unit)?,
-    onSaveToWorkspace: ((UIMessage) -> Unit)?,
-    textStyle: androidx.compose.ui.text.TextStyle,
-) {
-    val message = node.currentMessage
-    var showActionsSheet by remember { mutableStateOf(false) }
-    var showSelectCopySheet by remember { mutableStateOf(false) }
-    val navController = LocalNavController.current
-    val context = LocalContext.current
-    val colorScheme = MaterialTheme.colorScheme
-    val actionFooterMode = resolveActionFooterMode(
-        role = message.role,
-        lastMessage = lastMessage,
-        loading = loading,
-        hasContent = message.parts.isEmptyUIMessage().not(),
-    )
-
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .amberTraceMeasure("Amber ChatMessage ${message.role.name.lowercase()} footer measure"),
-        horizontalAlignment = Alignment.Start,
-        verticalArrangement = Arrangement.spacedBy(4.dp),
-    ) {
-        ChatMessageMessageFooter(
-            annotations = message.annotations,
-            loading = loading,
-            textStyle = textStyle,
-            actionFooterMode = actionFooterMode,
-            message = message,
-            node = node,
-            onRegenerate = onRegenerate,
-            onUpdate = onUpdate,
-            onOpenActionSheet = {
-                showActionsSheet = true
-            },
-        )
     }
 
     if (showActionsSheet) {

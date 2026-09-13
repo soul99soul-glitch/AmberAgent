@@ -140,6 +140,7 @@ class SubAgentRunnerTest {
         assertEquals(SubAgentRunStatus.COMPLETED, result.status)
         assertEquals(visibleAnswer, liveText.value)
         assertTrue(liveParts.value.any { it is UIMessagePart.Tool && it.toolName == "search_web" })
+        assertEquals(setOf(visibleAnswer), liveParts.value.filterIsInstance<UIMessagePart.Text>().map { it.text }.toSet())
     }
 
     @Test

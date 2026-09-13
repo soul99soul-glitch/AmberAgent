@@ -100,7 +100,7 @@
   <string name="copy_all">全てコピー</string>
   <string name="create_fork">フォークを作成</string>
   <string name="deep_thinking">深く考える</string>
-  <string name="deep_thinking_seconds">%1$.1f 秒間思考中</string>
+  <string name="deep_thinking_seconds">%1$d 秒間思考中</string>
   <string name="delete">削除</string>
   <string name="edit">編集</string>
   <string name="emoji_picker_search_placeholder">絵文字を検索...</string>
@@ -1510,7 +1510,7 @@
   <string name="setting_theme_library_builtin_desc">組み込みテーマ · 明暗はシステムモードに従います</string>
   <string name="setting_theme_library_builtin_id_suffix">· 組み込み ID を保持</string>
   <string name="setting_theme_library_builtin_sage">セージ Sage</string>
-  <string name="setting_theme_library_builtin_warm">ウォームグラファイト Warm</string>
+  <string name="setting_theme_library_builtin_warm">ドット · テラコッタ</string>
   <string name="setting_theme_library_empty_desc">インポートしたパッケージはここで適用または削除できます</string>
   <string name="setting_theme_library_empty_title">インポートしたテーマパッケージはありません</string>
   <string name="setting_theme_library_export_chooser">テーマパッケージをエクスポート</string>

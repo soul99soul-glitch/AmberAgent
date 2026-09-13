@@ -73,6 +73,27 @@ class ThemePackageManagerTest {
     )
 
     @Test
+    fun `default terracotta preset restores iOS paper colors without replacing reading preferences`() = runTest {
+        val initial = customDisplay().copy(appliedThemePackageId = "custom")
+        val store = FakeThemeSettingsStore(Settings(displaySetting = initial))
+        val manager = ThemePackageManager(dao = db.themePackageDao(), settingsStore = store)
+
+        assertEquals(ThemePackageApplyResult.Applied, manager.applyBuiltin("WARM"))
+        val applied = store.current.displaySetting
+        assertEquals(DisplaySetting().amberBaseFamily, applied.amberBaseFamily)
+        assertEquals(SIT_TERRACOTTA_ACCENT_HEX, applied.accentColor)
+        assertEquals(initial.chatFontFamily, applied.chatFontFamily)
+        assertEquals(initial.fontSizeRatio, applied.fontSizeRatio)
+        assertEquals(initial.showUserAvatar, applied.showUserAvatar)
+        assertNull(applied.appliedThemePackageId)
+        assertEquals(ThemePackageApplyResult.AlreadyApplied, manager.applyBuiltin("WARM"))
+
+        assertEquals(androidx.compose.ui.graphics.Color(0xFFEFE7D6), baseTokens(AmberBase.LIGHT).bg)
+        assertEquals(androidx.compose.ui.graphics.Color(0xFFFFFDF7), baseTokens(AmberBase.LIGHT).surface)
+        assertEquals(androidx.compose.ui.graphics.Color(0xFF14110E), baseTokens(AmberBase.DARK).bg)
+    }
+
+    @Test
     fun `prepare apply export round-trips the current custom theme`() = runTest {
         val initial = customDisplay()
         val store = FakeThemeSettingsStore(Settings(displaySetting = initial))

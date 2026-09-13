@@ -2,11 +2,19 @@ package app.amber.feature.ui.pages.sessionhome
 
 import android.app.Application
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalDensity
@@ -34,6 +42,9 @@ import app.amber.feature.ui.theme.AmberBase
 import app.amber.feature.ui.theme.LocalAmberTokens
 import app.amber.feature.ui.theme.buildAmberTokens
 import java.time.Instant
+import dev.chrisbanes.haze.rememberHazeState
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.launch
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -128,6 +139,71 @@ class HomeCompactLayoutTest {
         compose.onNodeWithText(phase, useUnmergedTree = true).assertDoesNotExist()
         compose.mainClock.advanceTimeBy(8_000)
         compose.onNodeWithText(article, useUnmergedTree = true).assertIsDisplayed()
+    }
+
+    @Test
+    fun homeTopFadeStaysAtClippedEdgeUntilReturningToStart() {
+        compose.mainClock.autoAdvance = false
+        lateinit var listState: LazyListState
+        lateinit var scrollScope: CoroutineScope
+        compose.setContent {
+            CompositionLocalProvider(
+                LocalSettings provides Settings(),
+                LocalAmberTokens provides buildAmberTokens(AmberBase.LIGHT, Color(0xFFB8623A)),
+            ) {
+                MaterialTheme {
+                    val state = rememberLazyListState()
+                    listState = state
+                    scrollScope = rememberCoroutineScope()
+                    Box(Modifier.fillMaxSize()) {
+                        LazyColumn(state = state, modifier = Modifier.fillMaxSize()) {
+                            item {
+                                HomeHeader(
+                                    settings = Settings(),
+                                    searchExpanded = false,
+                                    onOpenSearch = {},
+                                    onOpenSettings = {},
+                                    onOpenProfile = {},
+                                )
+                            }
+                            items((0 until 32).toList()) { index ->
+                                Text("row $index", modifier = Modifier.height(64.dp))
+                            }
+                        }
+                        HomeScrollTopFade(
+                            hazeState = rememberHazeState(),
+                            visible = state.canScrollBackward,
+                        )
+                    }
+                }
+            }
+        }
+        compose.waitForIdle()
+        compose.onNode(hasText("今天 ·", substring = true), useUnmergedTree = true)
+            .assertIsDisplayed()
+        compose.onNodeWithTag("home-scroll-top-fade", useUnmergedTree = true)
+            .assertDoesNotExist()
+
+        compose.runOnIdle {
+            scrollScope.launch { listState.animateScrollToItem(20) }
+        }
+        compose.mainClock.advanceTimeBy(80)
+        compose.onNodeWithTag("home-scroll-top-fade", useUnmergedTree = true)
+            .assertIsDisplayed()
+        compose.mainClock.advanceTimeBy(500)
+        compose.waitForIdle()
+        compose.onNode(hasText("今天 ·", substring = true), useUnmergedTree = true)
+            .assertDoesNotExist()
+        compose.mainClock.advanceTimeBy(220)
+        assertFalse(listState.isScrollInProgress)
+        compose.onNodeWithTag("home-scroll-top-fade", useUnmergedTree = true)
+            .assertIsDisplayed()
+        compose.runOnIdle {
+            scrollScope.launch { listState.scrollToItem(0) }
+        }
+        compose.mainClock.advanceTimeBy(220)
+        compose.onNodeWithTag("home-scroll-top-fade", useUnmergedTree = true)
+            .assertDoesNotExist()
     }
 
     private fun candidate(running: Boolean) = ContinueCandidate(

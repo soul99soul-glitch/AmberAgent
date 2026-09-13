@@ -9,9 +9,7 @@ import androidx.compose.material3.ProvideTextStyle
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.text.TextStyle
 import app.amber.ai.core.MessageRole
-import app.amber.ai.ui.UIMessage
 import app.amber.ai.ui.UIMessageAnnotation
-import app.amber.ai.ui.isEmptyUIMessage
 import app.amber.core.model.MessageNode
 
 internal enum class ActionFooterMode {
@@ -44,7 +42,7 @@ internal fun resolveActionFooterMode(
 }
 
 /**
- * Shared message tail: citations/token metadata plus the assistant action row.
+ * Shared message tail: citations and the branch selector for alternate replies.
  * Real and virtualized chat paths both render this once, after message body content.
  */
 @Composable
@@ -53,53 +51,35 @@ internal fun ColumnScope.ChatMessageMessageFooter(
     loading: Boolean,
     textStyle: TextStyle,
     actionFooterMode: ActionFooterMode,
-    message: UIMessage,
     node: MessageNode,
-    onRegenerate: () -> Unit,
     onUpdate: (MessageNode) -> Unit,
-    onOpenActionSheet: () -> Unit,
 ) {
     ProvideTextStyle(textStyle) {
         MessageAnnotations(annotations = annotations, loading = loading)
     }
     ChatMessageActionFooter(
         mode = actionFooterMode,
-        message = message,
         node = node,
-        onRegenerate = onRegenerate,
         onUpdate = onUpdate,
-        onOpenActionSheet = onOpenActionSheet,
     )
 }
 
 @Composable
 internal fun ColumnScope.ChatMessageActionFooter(
     mode: ActionFooterMode,
-    message: UIMessage,
     node: MessageNode,
     onUpdate: (MessageNode) -> Unit,
-    onRegenerate: () -> Unit,
-    onOpenActionSheet: () -> Unit,
 ) {
-    // Reserved no longer holds an invisible full-height row: during streaming
-    // that reservation parked a ~48dp blank band between the writing head and
-    // the input bar for the whole generation (user-visible "big blank during
-    // streaming"). The action row now mounts when generation ends. Its height
-    // growth rides the list item's animateContentSize spring (still enabled
-    // via the drain grace window — ChatListNormalSection), so here only the
-    // alpha eases in; a nested height animation is banned by the 2026-05-14
-    // single-amortizer rule (ChatMessage.kt:235).
+    // Ordinary replies have no footer controls. Alternate replies retain
+    // their branch selector; message actions are available by long press.
     AnimatedVisibility(
-        visible = mode == ActionFooterMode.Visible,
+        visible = mode == ActionFooterMode.Visible && node.messages.size > 1,
         enter = fadeIn(animationSpec = tween(220)),
         exit = ExitTransition.None,
     ) {
-        ChatMessageActionButtons(
-            message = message,
-            onRegenerate = onRegenerate,
+        ChatMessageBranchSelector(
             node = node,
             onUpdate = onUpdate,
-            onOpenActionSheet = onOpenActionSheet,
             interactionEnabled = true,
         )
     }

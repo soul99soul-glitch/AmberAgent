@@ -54,7 +54,7 @@ internal fun VirtualizedAssistantText(
     onGenerativeWidgetAction: (String) -> Unit,
 ) {
     val handleClickCitation = rememberClickCitationHandler(fullMessageParts)
-    MessageSelectionContainer {
+    MessageSelectionContainer(enabled = false) {
         if (markdownChild != null) {
             val blockContent: @Composable () -> Unit = {
                 Column {

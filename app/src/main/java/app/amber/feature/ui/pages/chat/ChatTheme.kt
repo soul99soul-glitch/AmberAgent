@@ -155,13 +155,13 @@ fun AmberTokens.toChatTheme(): ChatTheme = ChatTheme(
     toolPillBg = codeBg,
     toolPillEdge = line,
     toolLabelInk = accent,
-    toolIconInk = accent,
+    toolIconInk = if (isDark) Color(0xFF8AD39A) else Color(0xFF4B9866),
     toolDoneBg = accent,
     // 2026-06-10: fixed near-black (graphite ink) instead of accentInk — badge glyphs
     // (tick/cross/clock) stay one color across all accents rather than flipping white/black.
     toolDoneBadgeInk = Color(0xFF1B1A17),
     thinkRule = line2,
-    thinkHeaderInk = accent,
+    thinkHeaderInk = if (isDark) Color(0xFFE4AD61) else Color(0xFFD68A28),
     thinkBodyInk = ink3,
     sheetBackdrop = if (isDark) Color(0x99000000) else Color(0x52000000),
     dragHandle = line2,

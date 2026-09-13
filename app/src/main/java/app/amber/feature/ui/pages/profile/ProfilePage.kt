@@ -5,6 +5,7 @@ import android.graphics.Typeface
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -22,13 +23,22 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.Surface
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -42,7 +52,13 @@ import androidx.compose.material3.LocalContentColor
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -61,6 +77,8 @@ import app.amber.feature.ui.pages.stats.StatsVM
 import app.amber.feature.ui.pages.sessionhome.SessionHomeVM
 import app.amber.core.utils.appLocale
 import app.amber.agent.R
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.Pencil
 import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.temporal.TemporalAdjusters
@@ -68,7 +86,7 @@ import kotlin.math.max
 import org.koin.androidx.compose.koinViewModel
 
 /**
- * 个人资料 / 统计页：头像 + 昵称 + 徽章、五项统计卡、聊天活动热力图。
+ * 个人资料 / 统计页：头像 + 可编辑昵称、五项统计卡、聊天活动热力图。
  * 数据复用 [StatsVM]（累计 token、每日活跃），连续天数由每日活跃推导。
  */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -78,12 +96,42 @@ fun ProfilePage(
     sessionHomeVm: SessionHomeVM = koinViewModel(),
 ) {
     val tokens = LocalAmberTokens.current
-    val appLocale = LocalContext.current.appLocale()
     val settings = LocalSettings.current
     val stats by vm.stats.collectAsStateWithLifecycle()
 
     val defaultNickname = stringResource(R.string.profile_default_nickname)
-    val nickname = settings.displaySetting.userNickname.ifBlank { defaultNickname }
+    val storedNickname = settings.displaySetting.userNickname
+    val nickname = storedNickname.ifBlank { defaultNickname }
+    var editingNickname by rememberSaveable { mutableStateOf(false) }
+    var nicknameDraft by rememberSaveable(storedNickname) { mutableStateOf(storedNickname) }
+    val nicknameFocusRequester = remember { FocusRequester() }
+    val focusManager = LocalFocusManager.current
+    val keyboardController = LocalSoftwareKeyboardController.current
+
+    fun saveNickname() {
+        val normalized = nicknameDraft.trim()
+        if (normalized != storedNickname) {
+            sessionHomeVm.updateSettings(
+                settings.copy(
+                    displaySetting = settings.displaySetting.copy(userNickname = normalized),
+                )
+            )
+        }
+        editingNickname = false
+        focusManager.clearFocus(force = true)
+        keyboardController?.hide()
+    }
+
+    fun cancelNicknameEdit() {
+        nicknameDraft = storedNickname
+        editingNickname = false
+        focusManager.clearFocus(force = true)
+        keyboardController?.hide()
+    }
+
+    LaunchedEffect(editingNickname) {
+        if (editingNickname) nicknameFocusRequester.requestFocus()
+    }
 
     Scaffold(
         modifier = Modifier.amberCanvas(),
@@ -104,7 +152,7 @@ fun ProfilePage(
         ) {
             Spacer(Modifier.height(16.dp))
 
-            // 头像 + 昵称 + 徽章
+            // 头像 + 可编辑昵称
             Column(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalAlignment = Alignment.CenterHorizontally,
@@ -145,41 +193,67 @@ fun ProfilePage(
                     }
                 }
                 Spacer(Modifier.height(8.dp))
-                Text(
-                    text = nickname,
-                    fontSize = 24.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = tokens.ink,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Spacer(Modifier.height(8.dp))
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    Text(
-                        text = "@${nickname.lowercase(appLocale).replace(" ", "")}",
-                        style = LocalAmberType.current.meta,
-                        color = tokens.ink2,
-                    )
-                    Box(
+                if (editingNickname) {
+                    BasicTextField(
+                        value = nicknameDraft,
+                        onValueChange = { nicknameDraft = it },
                         modifier = Modifier
-                            .clip(CircleShape)
-                            .background(tokens.surface2)
-                            .border(1.dp, tokens.line, CircleShape)
-                            .padding(horizontal = 9.dp, vertical = 3.dp),
+                            .fillMaxWidth()
+                            .heightIn(min = 42.dp)
+                            .clip(RoundedCornerShape(22.dp))
+                            .background(tokens.surface)
+                            .border(1.dp, tokens.accent.copy(alpha = 0.55f), RoundedCornerShape(22.dp))
+                            .focusRequester(nicknameFocusRequester)
+                            .padding(horizontal = 16.dp, vertical = 9.dp),
+                        singleLine = true,
+                        cursorBrush = androidx.compose.ui.graphics.SolidColor(tokens.accent),
+                        textStyle = LocalAmberType.current.screenTitle.copy(
+                            fontSize = 20.sp,
+                            lineHeight = 24.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = tokens.ink,
+                            textAlign = TextAlign.Center,
+                        ),
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                        keyboardActions = KeyboardActions(onDone = { saveNickname() }),
+                    )
+                } else {
+                    Row(
+                        modifier = Modifier
+                            .heightIn(min = 48.dp)
+                            .clip(RoundedCornerShape(24.dp))
+                            .clickable(role = Role.Button) { editingNickname = true }
+                            .padding(horizontal = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
                     ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(5.dp),
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(5.dp)
-                                    .background(tokens.accent, CircleShape),
-                            )
-                            Text(text = "Amber", fontSize = 10.5.sp, color = tokens.ink)
+                        Text(
+                            text = nickname,
+                            modifier = Modifier.weight(1f, fill = false),
+                            fontSize = 24.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = tokens.ink,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Icon(
+                            imageVector = Lucide.Pencil,
+                            contentDescription = stringResource(R.string.edit),
+                            modifier = Modifier.size(15.dp),
+                            tint = tokens.ink3,
+                        )
+                    }
+                }
+                if (editingNickname) {
+                    Row(
+                        modifier = Modifier.padding(top = 4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        TextButton(onClick = { cancelNicknameEdit() }) {
+                            Text(stringResource(R.string.cancel))
+                        }
+                        TextButton(onClick = { saveNickname() }) {
+                            Text(stringResource(R.string.common_save))
                         }
                     }
                 }
@@ -357,117 +431,119 @@ private fun ActivityHeatmap(days: Map<LocalDate, Int>) {
             hScroll.scrollTo(hScroll.maxValue)
         }
     }
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .horizontalScroll(hScroll),
-    ) {
-        Box(
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Row(
             modifier = Modifier
-                .width(totalWidthDp)
-                .height(totalHeightDp),
+                .fillMaxWidth()
+                .horizontalScroll(hScroll),
         ) {
-            androidx.compose.foundation.Canvas(modifier = Modifier.fillMaxSize()) {
-                val cellPx = cellDp.toPx()
-                val gapPx = gapDp.toPx()
-                val stepPx = cellPx + gapPx
-                val labelY = labelPaddingPx - monthFontMetrics.top
-                val gridTopPx = labelHeightPx + labelGridGapDp.toPx()
+            Box(
+                modifier = Modifier
+                    .width(totalWidthDp)
+                    .height(totalHeightDp),
+            ) {
+                androidx.compose.foundation.Canvas(modifier = Modifier.fillMaxSize()) {
+                    val cellPx = cellDp.toPx()
+                    val gapPx = gapDp.toPx()
+                    val stepPx = cellPx + gapPx
+                    val labelY = labelPaddingPx - monthFontMetrics.top
+                    val gridTopPx = labelHeightPx + labelGridGapDp.toPx()
 
-                drawIntoCanvas { canvas ->
-                    val paint = Paint().apply { isAntiAlias = true }
-                    val textPaint = Paint().apply {
-                        isAntiAlias = true
-                        color = labelColor
-                        textSize = monthTextSizePx
-                        typeface = Typeface.DEFAULT
-                    }
-                    val cornerPx = 2.dp.toPx()
-
-                    var lastMonth = -1
-                    var lastLabelWeek = -99
-                    for (w in 0 until weeks) {
-                        val weekStart = start.plusDays((w * 7).toLong())
-                        if (
-                            weekStart.monthValue != lastMonth &&
-                            w - lastLabelWeek >= 3 &&
-                            !weekStart.isAfter(today)
-                        ) {
-                            lastMonth = weekStart.monthValue
-                            lastLabelWeek = w
-                            val monthLabel = String.format(
-                                appLocale,
-                                monthLabelTemplate,
-                                weekStart.monthValue,
-                            )
-                            canvas.nativeCanvas.drawText(
-                                monthLabel,
-                                (w * stepPx).coerceAtMost(
-                                    (size.width - textPaint.measureText(monthLabel)).coerceAtLeast(0f),
-                                ),
-                                labelY,
-                                textPaint,
-                            )
-                        } else if (weekStart.monthValue != lastMonth) {
-                            lastMonth = weekStart.monthValue
+                    drawIntoCanvas { canvas ->
+                        val paint = Paint().apply { isAntiAlias = true }
+                        val textPaint = Paint().apply {
+                            isAntiAlias = true
+                            color = labelColor
+                            textSize = monthTextSizePx
+                            typeface = Typeface.DEFAULT
                         }
-                        for (d in 0 until 7) {
-                            val date = weekStart.plusDays(d.toLong())
-                            val isFuture = date.isAfter(today)
-                            val count = if (isFuture) 0 else (days[date] ?: 0)
-                            paint.color = when {
-                                isFuture -> tokens.line.toArgb()
-                                count <= 0 -> emptyColor
-                                else -> {
-                                    val ratio = (count.toFloat() / maxCount).coerceIn(0.15f, 1f)
-                                    blend(emptyColor, accentArgb, 0.25f + 0.75f * ratio)
-                                }
+                        val cornerPx = 2.dp.toPx()
+
+                        var lastMonth = -1
+                        var lastLabelWeek = -99
+                        for (w in 0 until weeks) {
+                            val weekStart = start.plusDays((w * 7).toLong())
+                            if (
+                                weekStart.monthValue != lastMonth &&
+                                w - lastLabelWeek >= 3 &&
+                                !weekStart.isAfter(today)
+                            ) {
+                                lastMonth = weekStart.monthValue
+                                lastLabelWeek = w
+                                val monthLabel = String.format(
+                                    appLocale,
+                                    monthLabelTemplate,
+                                    weekStart.monthValue,
+                                )
+                                canvas.nativeCanvas.drawText(
+                                    monthLabel,
+                                    (w * stepPx).coerceAtMost(
+                                        (size.width - textPaint.measureText(monthLabel)).coerceAtLeast(0f),
+                                    ),
+                                    labelY,
+                                    textPaint,
+                                )
+                            } else if (weekStart.monthValue != lastMonth) {
+                                lastMonth = weekStart.monthValue
                             }
-                            val x = w * stepPx
-                            val y = gridTopPx + d * stepPx
-                            canvas.nativeCanvas.drawRoundRect(
-                                x, y, x + cellPx, y + cellPx,
-                                cornerPx, cornerPx, paint,
-                            )
+                            for (d in 0 until 7) {
+                                val date = weekStart.plusDays(d.toLong())
+                                val isFuture = date.isAfter(today)
+                                val count = if (isFuture) 0 else (days[date] ?: 0)
+                                paint.color = when {
+                                    isFuture -> tokens.line.toArgb()
+                                    count <= 0 -> emptyColor
+                                    else -> {
+                                        val ratio = (count.toFloat() / maxCount).coerceIn(0.15f, 1f)
+                                        blend(emptyColor, accentArgb, 0.25f + 0.75f * ratio)
+                                    }
+                                }
+                                val x = w * stepPx
+                                val y = gridTopPx + d * stepPx
+                                canvas.nativeCanvas.drawRoundRect(
+                                    x, y, x + cellPx, y + cellPx,
+                                    cornerPx, cornerPx, paint,
+                                )
+                            }
                         }
                     }
                 }
             }
         }
-    }
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(top = 12.dp),
-        horizontalArrangement = Arrangement.End,
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(
-            text = stringResource(R.string.stats_page_heatmap_less),
-            style = type.tinyTag.copy(fontSize = 9.5.sp, lineHeight = 13.sp),
-            color = tokens.ink3,
-        )
-        Spacer(Modifier.width(5.dp))
-        listOf(
-            tokens.line2,
-            tokens.accent.copy(alpha = 0.30f),
-            tokens.accent.copy(alpha = 0.52f),
-            tokens.accent.copy(alpha = 0.78f),
-            tokens.accent,
-        ).forEach { color ->
-            Box(
-                modifier = Modifier
-                    .size(11.dp)
-                    .clip(RoundedCornerShape(3.dp))
-                    .background(color),
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 12.dp),
+            horizontalArrangement = Arrangement.End,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = stringResource(R.string.stats_page_heatmap_less),
+                style = type.tinyTag.copy(fontSize = 9.5.sp, lineHeight = 13.sp),
+                color = tokens.ink3,
             )
             Spacer(Modifier.width(5.dp))
+            listOf(
+                tokens.line2,
+                tokens.accent.copy(alpha = 0.30f),
+                tokens.accent.copy(alpha = 0.52f),
+                tokens.accent.copy(alpha = 0.78f),
+                tokens.accent,
+            ).forEach { color ->
+                Box(
+                    modifier = Modifier
+                        .size(11.dp)
+                        .clip(RoundedCornerShape(3.dp))
+                        .background(color),
+                )
+                Spacer(Modifier.width(5.dp))
+            }
+            Text(
+                text = stringResource(R.string.stats_page_heatmap_more),
+                style = type.tinyTag.copy(fontSize = 9.5.sp, lineHeight = 13.sp),
+                color = tokens.ink3,
+            )
         }
-        Text(
-            text = stringResource(R.string.stats_page_heatmap_more),
-            style = type.tinyTag.copy(fontSize = 9.5.sp, lineHeight = 13.sp),
-            color = tokens.ink3,
-        )
     }
 }
 

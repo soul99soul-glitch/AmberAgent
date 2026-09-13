@@ -36,7 +36,7 @@ import kotlin.uuid.Uuid
 
 private const val CHAT_TIMELINE_PLAN_CACHE_MAX_ENTRIES = 2048
 private const val CHAT_TIMELINE_PLAN_CACHE_MAX_MARKDOWN_CHARS = 1_200_000
-private const val CHAT_TIMELINE_TAIL_ASSISTANT_MESSAGE_PROTECT_COUNT = 2
+private const val CHAT_TIMELINE_STREAMING_TAIL_PROTECT_COUNT = 2
 private const val CHAT_PERF_TAG = "AmberChatPerf"
 
 /**
@@ -158,6 +158,11 @@ internal fun rememberChatTimelinePlan(
         buildPostSendTimelineState(conversation, activeGeneration)
     }
     val timelineLoading = loading && !postSendState.waitingForAssistantContent
+    val lastNode = conversation.messageNodes.lastOrNull()
+    if (timelineLoading && lastNode?.currentMessage?.role == MessageRole.ASSISTANT) {
+        virtualItemCache.observeStreamingAssistant(lastNode.id)
+    }
+    val protectedStreamingNodeIds = virtualItemCache.protectedStreamingNodeIds()
     return remember(
         conversation.messageNodes,
         regexes,
@@ -167,6 +172,7 @@ internal fun rememberChatTimelinePlan(
         pendingMessageCount,
         postSendState,
         virtualItemCache,
+        protectedStreamingNodeIds,
     ) {
         measureChatTimelinePlan(
             messageCount = conversation.messageNodes.size,
@@ -181,6 +187,7 @@ internal fun rememberChatTimelinePlan(
                 pendingMessageCount = pendingMessageCount,
                 postSendState = postSendState,
                 virtualItemCache = virtualItemCache,
+                protectedStreamingNodeIds = protectedStreamingNodeIds,
             )
         }
     }
@@ -326,6 +333,23 @@ internal class ChatVirtualItemCache(
     var misses: Int = 0
         private set
 
+    private val streamingAssistantNodeIds = ArrayDeque<Uuid>()
+
+    /**
+     * Record only assistant nodes that were actually observed while loading.
+     * A finished historical tail never enters this set, so opening an old
+     * conversation does not force its Markdown into one expensive item.
+     */
+    fun observeStreamingAssistant(nodeId: Uuid) {
+        streamingAssistantNodeIds.remove(nodeId)
+        streamingAssistantNodeIds.addLast(nodeId)
+        while (streamingAssistantNodeIds.size > CHAT_TIMELINE_STREAMING_TAIL_PROTECT_COUNT) {
+            streamingAssistantNodeIds.removeFirst()
+        }
+    }
+
+    fun protectedStreamingNodeIds(): Set<Uuid> = streamingAssistantNodeIds.toSet()
+
     fun getOrBuild(
         node: MessageNode,
         regexes: List<AssistantRegex>,
@@ -449,9 +473,9 @@ internal fun buildChatTimelinePlan(
     pendingMessageCount: Int,
     postSendState: PostSendTimelineState,
     virtualItemCache: ChatVirtualItemCache,
+    protectedStreamingNodeIds: Set<Uuid> = emptySet(),
 ): ChatTimelinePlan {
     val regexes = assistant.orEmpty()
-    val protectedAssistantMessageIndexes = conversation.messageNodes.tailAssistantMessageIndexes()
     // Built in reading order (oldest → newest, slices in reading order), then
     // reversed once at the end: the timeline LazyColumn uses reverseLayout, so
     // lazy index 0 must be the visual bottom (newest content). A flat reversal
@@ -460,7 +484,9 @@ internal fun buildChatTimelinePlan(
     val readingOrderEntries = buildList {
         if (hasHistoryLoadingItem) add(ChatTimelineEntry.HistoryLoading)
         conversation.messageNodes.forEachIndexed { index, node ->
-            val keepAsSingleItem = index in protectedAssistantMessageIndexes
+            val keepAsSingleItem = node.id in protectedStreamingNodeIds ||
+                (index == conversation.messageNodes.lastIndex &&
+                    index == postSendState.hiddenAssistantMessageIndex)
             if (index == postSendState.hiddenAssistantMessageIndex && !keepAsSingleItem) {
                 add(ChatTimelineEntry.PostSendHiddenAssistant(index, node))
                 return@forEachIndexed
@@ -524,20 +550,6 @@ internal fun buildChatTimelinePlan(
         postSendState = postSendState,
         timelineLoading = timelineLoading,
     )
-}
-
-private fun List<MessageNode>.tailAssistantMessageIndexes(
-    count: Int = CHAT_TIMELINE_TAIL_ASSISTANT_MESSAGE_PROTECT_COUNT,
-): Set<Int> {
-    if (count <= 0 || isEmpty()) return emptySet()
-    val indexes = LinkedHashSet<Int>(count)
-    for (index in indices.reversed()) {
-        if (this[index].currentMessage.role == MessageRole.ASSISTANT) {
-            indexes.add(index)
-            if (indexes.size >= count) break
-        }
-    }
-    return indexes
 }
 
 private inline fun measureChatTimelinePlan(

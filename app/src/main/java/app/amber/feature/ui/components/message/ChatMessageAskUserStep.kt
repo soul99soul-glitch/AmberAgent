@@ -1,5 +1,6 @@
 package app.amber.feature.ui.components.message
 
+import app.amber.feature.ui.utils.amberTraceMeasure
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -141,7 +142,7 @@ internal fun ChainOfThoughtScope.AskUserToolStep(
         content = {
             Column(
                 verticalArrangement = Arrangement.spacedBy(14.dp),
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth().amberTraceMeasure("Amber AskUser contents measure"),
             ) {
                 questions.forEachIndexed { index, q ->
                     if (index > 0) {

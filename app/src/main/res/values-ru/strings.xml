@@ -100,7 +100,7 @@
   <string name="copy_all">Копировать всё</string>
   <string name="create_fork">Создать форк</string>
   <string name="deep_thinking">Глубокое мышление</string>
-  <string name="deep_thinking_seconds">Думал %1$.1f секунд</string>
+  <string name="deep_thinking_seconds">Думал %1$d секунд</string>
   <string name="delete">Удалить</string>
   <string name="edit">Редактировать</string>
   <string name="emoji_picker_search_placeholder">Поиск эмодзи...</string>
@@ -1510,7 +1510,7 @@
   <string name="setting_theme_library_builtin_desc">Встроенная тема · светлый/тёмный режим следует системному</string>
   <string name="setting_theme_library_builtin_id_suffix">· встроенный ID сохранён</string>
   <string name="setting_theme_library_builtin_sage">Шалфей Sage</string>
-  <string name="setting_theme_library_builtin_warm">Тёплый графит Warm</string>
+  <string name="setting_theme_library_builtin_warm">Точки · Терракота</string>
   <string name="setting_theme_library_empty_desc">Здесь можно применить или удалить импортированные пакеты</string>
   <string name="setting_theme_library_empty_title">Нет импортированных пакетов тем</string>
   <string name="setting_theme_library_export_chooser">Экспортировать пакет темы</string>

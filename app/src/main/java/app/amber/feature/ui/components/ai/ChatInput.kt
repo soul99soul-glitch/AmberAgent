@@ -901,17 +901,16 @@ fun ChatInput(
     }
 
     val tokens = LocalAmberTokens.current
-    // Graphite §7.4 "immersive bottom": the composer sits on a full-bleed tray = `surface`
-    // fill that continues to the screen edges (and under the nav inset). Flat, with one
-    // hairline top rule that separates the tray from the timeline.
+    // Continue the conversation paper under the composer and navigation inset, with
+    // the same fine accent rule used below the chat header.
     Column(modifier = modifier.imePadding()) {
         aboveComposerContent()
         Surface(
-            color = tokens.surface,
+            color = tokens.bg,
             modifier = Modifier.drawWithContent {
                 drawContent()
                 drawLine(
-                    color = tokens.line,
+                    color = tokens.accent.copy(alpha = 0.10f),
                     start = Offset(0f, 0f),
                     end = Offset(size.width, 0f),
                     strokeWidth = 1.dp.toPx(),

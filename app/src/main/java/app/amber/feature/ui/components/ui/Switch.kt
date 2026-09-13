@@ -4,6 +4,9 @@ import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.LocalIndication
+import androidx.compose.foundation.indication
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -94,6 +97,7 @@ fun Switch(
         else -> thumbColorUnchecked
     }
 
+    val interactionSource = remember { MutableInteractionSource() }
     Box(
         modifier = modifier
             .minimumInteractiveComponentSize()
@@ -101,6 +105,8 @@ fun Switch(
                 value = checked,
                 enabled = enabled,
                 role = Role.Switch,
+                interactionSource = interactionSource,
+                indication = null,
                 onValueChange = onCheckedChange,
             ),
         contentAlignment = Alignment.Center,
@@ -110,7 +116,8 @@ fun Switch(
                 .size(width = dimensions.trackWidth, height = dimensions.trackHeight)
                 .clip(RoundedCornerShape(50))
                 .background(currentTrackColor)
-                .border(1.dp, if (checked) currentTrackColor else MaterialTheme.colorScheme.outline, CircleShape),
+                .border(1.dp, if (checked) currentTrackColor else MaterialTheme.colorScheme.outline, CircleShape)
+                .indication(interactionSource, LocalIndication.current),
             contentAlignment = Alignment.CenterStart,
         ) {
             Box(

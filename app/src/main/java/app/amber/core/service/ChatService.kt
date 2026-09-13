@@ -680,10 +680,8 @@ class ChatService(
         return getOrCreateSession(conversationId).timelineLoadState
     }
 
-    fun getGenerationJobStateFlow(conversationId: Uuid): Flow<Job?> {
-        val session = sessions[conversationId] ?: return flowOf(null)
-        return session.generationJob
-    }
+    fun getGenerationJobStateFlow(conversationId: Uuid): StateFlow<Job?> =
+        getOrCreateSession(conversationId).generationJob
 
     fun getProcessingStatusFlow(conversationId: Uuid): StateFlow<String?> {
         return getOrCreateSession(conversationId).processingStatus

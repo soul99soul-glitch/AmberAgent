@@ -5,6 +5,7 @@ import app.amber.ai.provider.ProviderSetting
 import app.amber.core.model.AMBER_AGENT_ID
 import app.amber.core.settings.LegacyAssistantProfile
 import app.amber.core.settings.DEFAULT_PROVIDERS
+import app.amber.core.settings.DisplaySetting
 import app.amber.core.settings.GeminiProviderIdRef
 import app.amber.core.settings.OpenAIProviderIdRef
 import app.amber.core.settings.SeedGeminiImageModelId
@@ -128,6 +129,38 @@ class SettingsAggregatorHelpersTest {
         assertEquals(setOf(validServer), out.enabledMcpServerIds)
         assertEquals(setOf(validMode), out.enabledModeInjectionIds)
         assertEquals(setOf(validLorebook), out.enabledLorebookIds)
+    }
+
+    @Test
+    fun `display consistency fixes removed switches without changing hidden settings`() {
+        val input = composeRawSettings(
+            ui = UIPrefsData(
+                displaySetting = DisplaySetting(
+                    showModelIcon = true,
+                    showDateBelowName = true,
+                    autoCloseThinking = false,
+                    enableLatexRendering = false,
+                    sendOnEnter = true,
+                    codeBlockAutoWrap = true,
+                    skipCropImage = true,
+                ),
+            ),
+            search = SearchPrefsData(),
+            agent = AgentPrefsData(),
+            provider = ProviderPrefsData(),
+            chat = ChatPrefsData(),
+            ext = ExtensionPrefsData(),
+        )
+
+        val out = applyCrossDomainConsistency(input)
+
+        assertFalse(out.displaySetting.showModelIcon)
+        assertFalse(out.displaySetting.showDateBelowName)
+        assertTrue(out.displaySetting.autoCloseThinking)
+        assertTrue(out.displaySetting.enableLatexRendering)
+        assertTrue(out.displaySetting.sendOnEnter)
+        assertTrue(out.displaySetting.codeBlockAutoWrap)
+        assertTrue(out.displaySetting.skipCropImage)
     }
 
     @Test

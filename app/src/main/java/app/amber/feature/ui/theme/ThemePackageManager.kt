@@ -207,25 +207,25 @@ class ThemePackageManager(
         }
     }
 
-    /** 应用内置主题（只写 baseFamily，清除包标记）；内置主题不可被移除/覆盖。 */
+    /** Warm is the default dot-grid terracotta preset; custom typography/layout are retained. */
     suspend fun applyBuiltin(baseFamily: String): ThemePackageApplyResult {
         require(baseFamily in setOf("WARM", "SAGE")) { "未知的内置色系：$baseFamily" }
         return withThemeWrite {
             val current = settingsStore.settingsFlow.first()
-            if (current.displaySetting.amberBaseFamily == baseFamily &&
-                current.displaySetting.appliedThemePackageId == null
-            ) {
+            val nextDisplay = current.displaySetting.copy(
+                amberBaseFamily = baseFamily,
+                accentColor = if (baseFamily == "WARM") {
+                    SIT_TERRACOTTA_ACCENT_HEX
+                } else current.displaySetting.accentColor,
+                appliedThemePackageId = null,
+            )
+            if (nextDisplay == current.displaySetting) {
                 clearTryOn()
                 return@withThemeWrite ThemePackageApplyResult.AlreadyApplied
             }
             val result = updateWithRollback(
                 current,
-                current.copy(
-                    displaySetting = current.displaySetting.copy(
-                        amberBaseFamily = baseFamily,
-                        appliedThemePackageId = null,
-                    ),
-                ),
+                current.copy(displaySetting = nextDisplay),
             )
             if (result == ThemePackageApplyResult.Applied) clearTryOn()
             result

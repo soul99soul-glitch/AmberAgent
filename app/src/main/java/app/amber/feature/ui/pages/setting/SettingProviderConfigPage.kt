@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -385,33 +386,41 @@ private fun <T> ProviderConfigCapsule(
 ) {
     val t = LocalAmberTokens.current
     val type = LocalAmberType.current
-    Row(
+    Box(
         modifier = modifier
             .fillMaxWidth()
-            .clip(CircleShape)
-            .background(t.surface2)
-            .border(1.dp, t.line, CircleShape)
-            .padding(2.dp),
-        horizontalArrangement = Arrangement.spacedBy(2.dp),
+            .heightIn(min = 48.dp),
+        contentAlignment = Alignment.Center,
     ) {
-        options.forEach { option ->
-            val isSelected = option.value == selected
-            Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .height(26.dp)
-                    .clip(CircleShape)
-                    .background(if (isSelected) t.accent else Color.Transparent)
-                    .pressable(onClick = { onSelected(option.value) }),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    text = option.label,
-                    style = type.secondary.copy(fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold),
-                    color = if (isSelected) t.accentInk else t.ink3,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(36.dp)
+                .clip(CircleShape)
+                .background(t.surface2)
+                .border(1.dp, t.line.copy(alpha = 0.52f), CircleShape)
+                .padding(2.dp),
+            horizontalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            options.forEach { option ->
+                val isSelected = option.value == selected
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                        .clip(CircleShape)
+                        .background(if (isSelected) t.accent else Color.Transparent)
+                        .pressable(onClick = { onSelected(option.value) }),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = option.label,
+                        style = type.secondary.copy(fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold),
+                        color = if (isSelected) t.accentInk else t.ink3,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
             }
         }
     }
@@ -429,7 +438,7 @@ private fun ProviderConfigStatusPill(
         modifier = Modifier
             .clip(CircleShape)
             .background(if (connected) t.signal.copy(alpha = 0.14f) else t.surface2)
-            .border(1.dp, if (connected) t.signal.copy(alpha = 0.32f) else t.line, CircleShape)
+            .border(1.dp, if (connected) t.signal.copy(alpha = 0.26f) else t.line.copy(alpha = 0.44f), CircleShape)
             .padding(horizontal = 8.dp, vertical = 3.dp),
         contentAlignment = Alignment.Center,
     ) {
@@ -456,7 +465,7 @@ private fun ProviderConfigAuthBadge(text: String) {
         modifier = Modifier
             .clip(CircleShape)
             .background(t.surface2)
-            .border(1.dp, t.line, CircleShape)
+            .border(1.dp, t.line.copy(alpha = 0.44f), CircleShape)
             .padding(horizontal = 8.dp, vertical = 3.dp),
         contentAlignment = Alignment.Center,
     ) {

@@ -28,11 +28,16 @@ class ChatMessageReasoningTest {
     fun `reasoning tail trim only starts past active limit`() {
         assertEquals(
             false,
-            "a".repeat(1_600).isReasoningTailTrimmed(loading = true, expanded = false),
+            "a".repeat(2_000).isReasoningTailTrimmed(loading = true, expanded = false),
         )
         assertEquals(
             true,
-            "a".repeat(1_601).isReasoningTailTrimmed(loading = true, expanded = false),
+            "a".repeat(2_001).isReasoningTailTrimmed(loading = true, expanded = false),
+        )
+        assertTrue(
+            "a".repeat(2_001)
+                .toDisplayReasoningText(loading = true, expanded = true)
+                .startsWith("… 已省略前"),
         )
     }
 
