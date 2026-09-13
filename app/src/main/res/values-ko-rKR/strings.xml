@@ -3338,4 +3338,13 @@
   <string name="setting_chat_storage_conversation_summary">대화 %1$d개 · 메시지 노드 %2$d개</string>
   <string name="setting_chat_storage_attachment_summary">파일 %1$d개 · %2$s</string>
   <string name="setting_sandbox_more_settings">추가 설정</string>
+    <string name="subagent_dock_header_running">하위 에이전트 %1$d개 실행 중</string>
+    <string name="subagent_dock_header_tasks">하위 에이전트 작업 %1$d개</string>
+    <string name="subagent_dock_header_other_conversations">다른 대화에서 %1$d개</string>
+    <string name="subagent_dock_expand">모두 펼치기</string>
+    <string name="subagent_dock_collapse">접기</string>
+    <string name="subagent_dock_source_conversation">원본 대화 열기</string>
+    <string name="subagent_dock_details_title">하위 에이전트 세부 정보</string>
+    <string name="subagent_dock_dismiss">이 작업 숨기기</string>
+    <string name="subagent_dock_status_queued">대기 중</string>
 </resources>

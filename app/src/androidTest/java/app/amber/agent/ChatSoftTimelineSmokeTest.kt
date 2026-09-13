@@ -9,18 +9,18 @@ import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasAnyDescendant
 import androidx.compose.ui.test.hasClickAction
-import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasScrollAction
+import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.isDisplayed
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
-import androidx.compose.ui.test.onAllNodes
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToNode
 import androidx.test.core.app.ActivityScenario
+import androidx.test.espresso.Espresso.closeSoftKeyboard
 import androidx.test.espresso.Espresso.pressBack
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -31,17 +31,23 @@ import app.amber.ai.ui.UIMessagePart
 import app.amber.core.model.Conversation
 import app.amber.core.model.MessageNode
 import app.amber.core.repository.ConversationRepository
+import app.amber.core.settings.AgentOperationPreviewMode
+import app.amber.core.settings.Settings
+import app.amber.core.settings.prefs.SettingsAggregator
 import app.amber.feature.task.AgentTaskQueueState
 import app.amber.feature.task.AgentTaskRecoveryState
 import app.amber.feature.task.AgentTaskRetryPolicy
 import app.amber.feature.task.AgentTaskSnapshot
 import app.amber.feature.task.AgentTaskStatus
 import app.amber.feature.task.AgentTaskStore
+import app.amber.feature.ui.components.ai.SubAgentDockState
 import java.io.File
 import kotlin.time.Clock
 import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.Uuid
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import org.junit.After
 import org.junit.Assume.assumeTrue
 import org.junit.Rule
@@ -64,6 +70,7 @@ class ChatSoftTimelineSmokeTest {
     private val preferences = targetContext.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
     private val originalLaunchMode = preferences.getString(LAUNCH_START_MODE_PREF, null)
     private val originalColorMode = preferences.getString(COLOR_MODE_PREF, null)
+    private var originalSettings: Settings? = null
 
     private val fixtureConversationIds = mutableListOf<Uuid>()
     private val fixtureConversationTitles = mutableMapOf<Uuid, String>()
@@ -79,11 +86,12 @@ class ChatSoftTimelineSmokeTest {
             targetContext.applicationContext is AmberAgentApp,
         )
         assumeEmulator()
-        setDeterministicUiPreferences()
 
         try {
+            setDeterministicUiPreferences()
             val (firstConversation, secondConversation) = prepareConversations()
             prepareTasks(firstConversation, secondConversation)
+            awaitEagerDockSeed()
 
             val intent = Intent(targetContext, RouteActivity::class.java).apply {
                 // RouteActivity owns this production deep-link path and lands on
@@ -97,9 +105,27 @@ class ChatSoftTimelineSmokeTest {
                 revealText(FIRST_USER_MARKER)
                 revealText(targetContext.getString(R.string.chat_message_tool_deny))
                 revealText(targetContext.getString(R.string.chat_message_tool_approve))
-                revealText(targetContext.getString(R.string.setting_cron_tasks_view_details))
+                val approvalDetailsLabel = targetContext.getString(R.string.setting_cron_tasks_view_details)
+                revealText(approvalDetailsLabel)
+                clickVisibleText(approvalDetailsLabel)
+                waitForVisibleText(targetContext.getString(R.string.chat_message_tool_call_title))
+                waitForVisibleText(
+                    targetContext.getString(
+                        R.string.chat_message_tool_call_label,
+                        "file_write",
+                    ),
+                )
+                waitForVisibleText(PENDING_TOOL_PATH)
+                pressBack()
+                waitForTextToDisappear(targetContext.getString(R.string.chat_message_tool_call_title))
                 waitForVisibleText(TASK_TITLES.first())
-                capture("01-first-collapsed")
+                capture("01-first-collapsed", anchor = approvalDetailsLabel)
+
+                // The compact rail is intentionally a LazyRow: the third pill
+                // need not be composed on a phone-width viewport. Expand the
+                // real header first, then verify all three in the two-column grid.
+                ensureTaskDockExpanded()
+                TASK_TITLES.forEach(::waitForVisibleText)
 
                 // The mixed chain initially keeps its last two steps. Expand the
                 // chain, then the reasoning row, so the framed thinking shape and
@@ -107,7 +133,7 @@ class ChatSoftTimelineSmokeTest {
                 clickVisibleText(targetContext.getString(R.string.chain_of_thought_show_more_steps, 1))
                 clickVisibleText(targetContext.getString(R.string.deep_thinking_seconds, 0f))
                 waitForVisibleText(REASONING_MARKER)
-                capture("02-first-thinking-expanded")
+                capture("02-first-thinking-expanded", anchor = targetContext.getString(R.string.deep_thinking_seconds, 0f))
 
                 // ContextRing is a clickable parent around the percentage text.
                 // Its popup is read-only and uses the production 380ms enter path.
@@ -117,18 +143,31 @@ class ChatSoftTimelineSmokeTest {
                 pressBack()
                 waitForTextToDisappear(targetContext.getString(R.string.context_ring_usage_context))
 
-                // The chat header's left control routes back to SessionHome. It is
-                // a custom drawn arrow, so locate its real top-left clickable node
-                // by bounds rather than adding a test-only content description.
-                clickChatHeaderBack()
-                waitForVisibleText(secondConversationTitle())
-                clickVisibleText(secondConversationTitle())
+                // Navigate through the real global dock's source action, so both
+                // directions exercise the feature without geometric header selectors.
+                openTaskDetails(TASK_TITLES[1])
+                clickVisibleText(targetContext.getString(R.string.subagent_dock_source_conversation))
                 waitForVisibleText(SECOND_USER_MARKER)
 
                 // Global dock continuity: switching conversations must keep all
                 // three store-backed tasks visible, regardless of source session.
+                waitForVisibleText(TASK_TITLES.first())
+                ensureTaskDockExpanded()
                 TASK_TITLES.forEach(::waitForVisibleText)
-                capture("04-second-tasks-running")
+                capture("04-second-tasks-running", anchor = TASK_TITLES[2])
+
+                // Focus the real composer field without entering or sending
+                // text. The dock owns its IME policy and collapses back to the
+                // compact LazyRow while the keyboard is visible.
+                focusChatInput()
+                waitForVisibleText(targetContext.getString(R.string.subagent_dock_expand))
+                waitForTextToDisappear(targetContext.getString(R.string.subagent_dock_collapse))
+                waitForVisibleText(targetContext.getString(R.string.chat_input_compose_placeholder))
+                capture("05-keyboard-dock-collapsed")
+                closeSoftKeyboard()
+                compose.waitForIdle()
+                ensureTaskDockExpanded()
+                TASK_TITLES.forEach(::waitForVisibleText)
 
                 val taskStore: AgentTaskStore = getKoin().get()
                 runBlocking {
@@ -139,13 +178,15 @@ class ChatSoftTimelineSmokeTest {
                     )
                 }
                 waitForVisibleText(targetContext.getString(R.string.chat_message_subagent_status_completed))
-                capture("05-second-task-completed")
+                capture("06-second-task-completed", anchor = TASK_TITLES.first())
 
                 // Source is a read-only route back to the first fixture. This
-                // matcher accepts either the localized text or the equivalent
-                // accessibility description supplied by the dock implementation.
-                clickTaskSource()
-                waitForVisibleText(FIRST_USER_MARKER)
+                // opens the selected pill's details sheet first; no task action
+                // or provider execution is involved.
+                openTaskDetails(TASK_TITLES.first())
+                waitForVisibleText(targetContext.getString(R.string.subagent_dock_details_title))
+                clickVisibleText(targetContext.getString(R.string.subagent_dock_source_conversation))
+                revealText(FIRST_USER_MARKER)
 
                 // Settle the remaining two metadata-only tasks after the source
                 // route has been exercised, leaving the final dock in its
@@ -161,13 +202,30 @@ class ChatSoftTimelineSmokeTest {
                 }
                 waitForVisibleText(targetContext.getString(R.string.chat_message_subagent_status_completed))
 
-                // Completed-only dock state can be collapsed. The test never
-                // invokes any task row's provider or approval action.
-                clickTerminalDockCollapse()
-                TASK_TITLES.forEach(::waitForTextToDisappear)
+                // Terminal pills expose their own details sheet. Dismiss each
+                // one through the real `subagent_dock_dismiss` action instead
+                // of toggling the header, and prove the store rows remain.
+                ensureTaskDockExpanded()
+                TASK_TITLES.forEach { title ->
+                    openTaskDetails(title)
+                    waitForVisibleText(targetContext.getString(R.string.subagent_dock_details_title))
+                    clickVisibleText(targetContext.getString(R.string.subagent_dock_dismiss))
+                    waitForTextToDisappear(title)
+                }
+                runBlocking {
+                    fixtureTaskIds.forEach { taskId ->
+                        check(taskStore.read(taskId)?.status == AgentTaskStatus.COMPLETED) {
+                            "Dock dismiss unexpectedly changed task status: $taskId"
+                        }
+                    }
+                }
             }
         } finally {
-            cleanupFixtures()
+            try {
+                cleanupFixtures()
+            } finally {
+                restoreCanarySettings()
+            }
         }
     }
 
@@ -201,14 +259,41 @@ class ChatSoftTimelineSmokeTest {
             .putString(LAUNCH_START_MODE_PREF, LaunchStartMode.HOME.name)
             .putString(COLOR_MODE_PREF, COLOR_MODE_LIGHT)
             .apply()
+
+        val settingsStore: SettingsAggregator = getKoin().get()
+        val original = runBlocking {
+            withTimeout(WAIT_TIMEOUT_MS) {
+                settingsStore.settingsFlow.first { !it.init }
+            }
+        }
+        originalSettings = original
+        runBlocking {
+            settingsStore.update(
+                original.copy(
+                    agentRuntime = original.agentRuntime.copy(
+                        operationPreviewMode = AgentOperationPreviewMode.HIDDEN,
+                    ),
+                ),
+            )
+        }
+    }
+
+    private fun restoreCanarySettings() {
+        val original = originalSettings ?: return
+        val settingsStore: SettingsAggregator = getKoin().get()
+        try {
+            runBlocking { settingsStore.update(original) }
+        } finally {
+            originalSettings = null
+        }
     }
 
     private fun prepareConversations(): Pair<Uuid, Uuid> {
         val repository: ConversationRepository = getKoin().get()
         val firstId = Uuid.random()
         val secondId = Uuid.random()
-        val firstTitle = "Canary conversation A"
-        val secondTitle = "Canary conversation B"
+        val firstTitle = "会话甲"
+        val secondTitle = "会话乙"
         fixtureConversationIds += firstId
         fixtureConversationIds += secondId
         fixtureConversationTitles[firstId] = firstTitle
@@ -223,7 +308,7 @@ class ChatSoftTimelineSmokeTest {
 
         val now = Clock.System.now()
         val reasoning = UIMessagePart.Reasoning(
-            reasoning = "$REASONING_MARKER\n\nThe local fixture keeps reasoning, an ordinary read, and a pending write as separate timeline steps.",
+            reasoning = "$REASONING_MARKER\n\n保留思考、普通工具和待批写入。",
             createdAt = now,
             finishedAt = now,
         )
@@ -240,7 +325,7 @@ class ChatSoftTimelineSmokeTest {
         val pendingTool = UIMessagePart.Tool(
             toolCallId = "soft-timeline-pending-$firstId",
             toolName = "file_write",
-            input = "{\"path\":\"$PENDING_TOOL_PATH\",\"content\":\"synthetic fixture\"}",
+            input = "{\"path\":\"$PENDING_TOOL_PATH\",\"content\":\"测试内容\"}",
             approvalState = ToolApprovalState.Pending,
         )
         val firstAssistant = UIMessage(
@@ -313,9 +398,18 @@ class ChatSoftTimelineSmokeTest {
         }
     }
 
-    private fun secondConversationTitle(): String =
-        fixtureConversationTitles[fixtureConversationIds[1]]
-            ?: error("Second conversation fixture title is missing")
+    private fun awaitEagerDockSeed() {
+        val dockState: SubAgentDockState = getKoin().get()
+        runBlocking {
+            withTimeout(WAIT_TIMEOUT_MS) {
+                dockState.uiState.first { state ->
+                    fixtureTaskIds.all { taskId ->
+                        state.tasks.any { task -> task.key.taskId == taskId }
+                    }
+                }
+            }
+        }
+    }
 
     private fun clickContextRing() {
         clickVisibleMatcher(
@@ -324,48 +418,28 @@ class ChatSoftTimelineSmokeTest {
         )
     }
 
-    private fun clickChatHeaderBack() {
-        val candidates = compose.onAllNodes(hasClickAction(), useUnmergedTree = true)
+    private fun focusChatInput() {
+        val inputs = compose.onAllNodes(hasSetTextAction(), useUnmergedTree = true)
         compose.waitUntil(timeoutMillis = WAIT_TIMEOUT_MS) {
-            candidates.fetchSemanticsNodes().any(::isTopLeftHeaderNode)
+            visibleIndex(inputs) >= 0
         }
-        val nodes = candidates.fetchSemanticsNodes()
-        val index = nodes.indexOfFirst(::isTopLeftHeaderNode)
-        check(index >= 0) { "Chat header back action was not reachable" }
-        candidates[index].assertIsDisplayed().performClick()
+        val index = visibleIndex(inputs)
+        check(index >= 0) { "Chat input field was not reachable" }
+        inputs[index].assertIsDisplayed().performClick()
         compose.waitForIdle()
     }
 
-    private fun isTopLeftHeaderNode(node: androidx.compose.ui.semantics.SemanticsNode): Boolean {
-        val bounds = node.boundsInRoot
-        val density = targetContext.resources.displayMetrics.density
-        return bounds.top < density * 96f &&
-            bounds.left < density * 64f &&
-            bounds.right < density * 80f
+    private fun ensureTaskDockExpanded() {
+        val collapseLabel = targetContext.getString(R.string.subagent_dock_collapse)
+        if (isVisibleText(collapseLabel)) return
+        clickVisibleText(targetContext.getString(R.string.subagent_dock_expand))
     }
 
-    private fun clickTaskSource() {
-        val sourceText = hasText("来源", substring = true) or hasText("Source", substring = true)
-        val sourceDescription = hasContentDescription("来源", substring = true) or
-            hasContentDescription("Source", substring = true)
-        val direct = hasClickAction() and (sourceText or sourceDescription)
-        val ancestor = hasClickAction() and hasAnyDescendant(sourceText or sourceDescription)
-        clickVisibleMatcher(direct or ancestor, description = "task source")
-    }
-
-    private fun clickTerminalDockCollapse() {
-        val collapseText = hasText("收起", substring = true) or
-            hasText("Collapse", substring = true) or
-            hasText("隐藏任务", substring = true) or
-            hasText("Hide tasks", substring = true)
-        val collapseDescription = hasContentDescription("收起", substring = true) or
-            hasContentDescription("Collapse", substring = true) or
-            hasContentDescription("隐藏任务", substring = true) or
-            hasContentDescription("Hide tasks", substring = true)
-        clickVisibleMatcher(
-            hasClickAction() and (collapseText or collapseDescription),
-            description = "terminal task dock collapse",
-        )
+    private fun openTaskDetails(title: String) {
+        clickVisibleText(title)
+        compose.waitUntil(timeoutMillis = WAIT_TIMEOUT_MS) {
+            isVisibleText(targetContext.getString(R.string.subagent_dock_details_title))
+        }
     }
 
     private fun clickVisibleText(value: String) {
@@ -430,6 +504,15 @@ class ChatSoftTimelineSmokeTest {
         }
     }
 
+    private fun isVisibleText(value: String): Boolean {
+        val matches = compose.onAllNodesWithText(
+            value,
+            substring = true,
+            useUnmergedTree = true,
+        )
+        return visibleIndex(matches) >= 0
+    }
+
     private fun visibleIndex(matches: androidx.compose.ui.test.SemanticsNodeInteractionCollection): Int {
         val count = matches.fetchSemanticsNodes().size
         return (0 until count).firstOrNull { index ->
@@ -437,7 +520,8 @@ class ChatSoftTimelineSmokeTest {
         } ?: -1
     }
 
-    private fun capture(name: String) {
+    private fun capture(name: String, anchor: String? = null) {
+        anchor?.let(::revealText)
         compose.waitForIdle()
         instrumentation.waitForIdleSync()
         // Cover the ContextRing enter and the dock's settling transition before
@@ -462,8 +546,8 @@ class ChatSoftTimelineSmokeTest {
     }
 
     private fun cleanupFixtures() {
-        val taskStore: AgentTaskStore = runCatching { getKoin().get() }.getOrNull()
-        val repository: ConversationRepository = runCatching { getKoin().get() }.getOrNull()
+        val taskStore = runCatching { getKoin().get<AgentTaskStore>() }.getOrNull()
+        val repository = runCatching { getKoin().get<ConversationRepository>() }.getOrNull()
         var firstFailure: Throwable? = null
         runBlocking {
             taskStore?.let { store ->
@@ -478,7 +562,7 @@ class ChatSoftTimelineSmokeTest {
                     runCatching {
                         val existing = repo.getConversationById(conversationId)
                         val expectedTitle = fixtureConversationTitles[conversationId]
-                        if (existing?.title == expectedTitle) {
+                        if (existing != null && existing.title == expectedTitle) {
                             repo.deleteConversation(existing)
                         }
                     }.onFailure { error ->
@@ -500,18 +584,18 @@ class ChatSoftTimelineSmokeTest {
         const val COLOR_MODE_LIGHT = "LIGHT"
         const val SCREENSHOT_DIRECTORY = "chat-soft-timeline-smoke"
         const val WAIT_TIMEOUT_MS = 15_000L
-        const val ORDINARY_TOOL_PATH = "chat-soft-timeline/ordinary.txt"
-        const val PENDING_TOOL_PATH = "chat-soft-timeline/pending.txt"
-        const val ORDINARY_TOOL_MARKER = "soft timeline ordinary output"
-        const val REASONING_MARKER = "soft timeline reasoning marker"
-        const val FIRST_USER_MARKER = "soft timeline first user marker"
-        const val FIRST_ASSISTANT_MARKER = "soft timeline first assistant marker"
-        const val SECOND_USER_MARKER = "soft timeline second user marker"
-        const val SECOND_ASSISTANT_MARKER = "soft timeline second assistant marker"
+        const val ORDINARY_TOOL_PATH = "普通.txt"
+        const val PENDING_TOOL_PATH = "待批.txt"
+        const val ORDINARY_TOOL_MARKER = "普通工具完成"
+        const val REASONING_MARKER = "软时序甲·推理"
+        const val FIRST_USER_MARKER = "软时序甲·用户"
+        const val FIRST_ASSISTANT_MARKER = "软时序甲·回答"
+        const val SECOND_USER_MARKER = "软时序乙·用户"
+        const val SECOND_ASSISTANT_MARKER = "软时序乙·回答"
         val TASK_TITLES = listOf(
-            "Canary task A",
-            "Canary task B",
-            "Canary task C",
+            "任务甲",
+            "任务乙",
+            "任务丙",
         )
     }
 }

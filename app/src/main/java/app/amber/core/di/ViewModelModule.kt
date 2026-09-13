@@ -1,5 +1,7 @@
 package app.amber.core.di
 
+import app.amber.core.infra.AppScope
+import app.amber.feature.ui.components.ai.SubAgentDockState
 import app.amber.feature.ui.pages.backup.BackupVM
 import app.amber.feature.ui.pages.chat.ChatDrawerVM
 import app.amber.feature.ui.pages.chat.ChatVM
@@ -30,6 +32,7 @@ import org.koin.core.module.dsl.viewModelOf
 import org.koin.dsl.module
 
 val viewModelModule = module {
+    single(createdAtStart = true) { SubAgentDockState(get(), get(), get<AppScope>()) }
     viewModel<ChatVM> { params ->
         ChatVM(
             id = params.get(),

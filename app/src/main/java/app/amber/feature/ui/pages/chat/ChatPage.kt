@@ -134,6 +134,8 @@ import app.amber.core.service.PendingUserMessageDisplayCopy
 import app.amber.core.service.PendingUserMessageMode
 import app.amber.core.service.previewText
 import app.amber.feature.ui.components.ai.ChatInput
+import app.amber.feature.ui.components.ai.SubAgentStatusDock
+import app.amber.core.repository.ConversationRepository
 import app.amber.feature.ui.components.ai.SandboxActivitySheet
 import app.amber.feature.ui.components.ai.TopModelMenu
 import app.amber.feature.ui.components.ds.BlinkingCursor
@@ -518,6 +520,7 @@ private fun ChatPageContent(
     val toaster = LocalToaster.current
     val context = LocalContext.current
     val filesManager: FilesManager = koinInject()
+    val conversationRepository: ConversationRepository = koinInject()
     val chatProvidersForMenu = setting.providers.filter { provider ->
         provider.enabled && provider.models.any { it.type == ModelType.CHAT }
     }
@@ -737,6 +740,22 @@ private fun ChatPageContent(
                         }
                     }
                     ChatInput(
+                    aboveComposerContent = {
+                        SubAgentStatusDock(
+                            currentConversationId = conversation.id,
+                            onOpenConversation = { sourceId ->
+                                if (sourceId != conversation.id) {
+                                    scope.launch {
+                                        if (conversationRepository.existsConversationById(sourceId)) {
+                                            navController.navigate(Screen.Chat(id = sourceId.toString()))
+                                        } else {
+                                            toaster.show(context.getString(R.string.workspace_source_unavailable), type = ToastType.Error)
+                                        }
+                                    }
+                                }
+                            },
+                        )
+                    },
                     state = inputState,
                     loading = loadingJob != null,
                     settings = setting,

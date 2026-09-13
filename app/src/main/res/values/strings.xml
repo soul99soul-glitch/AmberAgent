@@ -3356,4 +3356,13 @@ My task:</string>
   <string name="setting_chat_storage_conversation_summary">%1$d conversations · %2$d message nodes</string>
   <string name="setting_chat_storage_attachment_summary">%1$d files · %2$s</string>
   <string name="setting_sandbox_more_settings">More settings</string>
+    <string name="subagent_dock_header_running">%1$d subagents running</string>
+    <string name="subagent_dock_header_tasks">%1$d subagent tasks</string>
+    <string name="subagent_dock_header_other_conversations">%1$d from other conversations</string>
+    <string name="subagent_dock_expand">Show all</string>
+    <string name="subagent_dock_collapse">Collapse</string>
+    <string name="subagent_dock_source_conversation">Open source conversation</string>
+    <string name="subagent_dock_details_title">Subagent details</string>
+    <string name="subagent_dock_dismiss">Dismiss</string>
+    <string name="subagent_dock_status_queued">Queued</string>
 </resources>

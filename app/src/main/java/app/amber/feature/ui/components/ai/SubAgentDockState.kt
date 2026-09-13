@@ -78,6 +78,16 @@ class SubAgentDockState(
     private val tracker = SubAgentDockTracker()
     private val collectors = mutableMapOf<String, RunCollector>()
     private val liveRuns = mutableMapOf<String, SubAgentRun?>()
+    // StateFlow conflates. Capture the already-loaded task-store baseline synchronously so a
+    // generation registered after this singleton exists still qualifies for the dock even when
+    // its register → terminal transition completes before the collector's first reduction.
+    private val startupBaseline = agentTaskStore.tasksFlow.value
+        .filter { it.type == SUBAGENT_TASK_TYPE }
+        .map { it.toDockRunKey() to it.status.keepsDockObserved }
+    private val startupRunKeys = startupBaseline.mapTo(mutableSetOf()) { it.first }
+    private val processRunKeys = startupBaseline
+        .filter { it.second }
+        .mapTo(mutableSetOf()) { it.first }
     private var taskSnapshots: List<AgentTaskSnapshot> = emptyList()
 
     private val _uiState = MutableStateFlow(SubAgentDockUiState())
@@ -87,6 +97,7 @@ class SubAgentDockState(
         appScope.launch {
             agentTaskStore.tasksFlow.collect { snapshots ->
                 taskSnapshots = snapshots.filter { it.type == SUBAGENT_TASK_TYPE }
+                markProcessRunKeys()
                 reconcileRunCollectors()
                 publish()
             }
@@ -146,7 +157,19 @@ class SubAgentDockState(
         _uiState.value = tracker.reduce(
             snapshots = taskSnapshots,
             liveRuns = liveRuns,
+            processRunKeys = processRunKeys,
         )
+    }
+
+    private fun markProcessRunKeys() {
+        val currentKeys = taskSnapshots.mapTo(mutableSetOf()) { it.toDockRunKey() }
+        processRunKeys.retainAll(currentKeys)
+        taskSnapshots.forEach { snapshot ->
+            val key = snapshot.toDockRunKey()
+            if (snapshot.status.keepsDockObserved || key !in startupRunKeys) {
+                processRunKeys += key
+            }
+        }
     }
 
     private class RunCollector(
@@ -170,6 +193,8 @@ internal class SubAgentDockTracker {
     fun reduce(
         snapshots: List<AgentTaskSnapshot>,
         liveRuns: Map<String, SubAgentRun?>,
+        /** Current-process runs admitted by the state holder's pre-collection baseline. */
+        processRunKeys: Set<SubAgentDockRunKey> = emptySet(),
     ): SubAgentDockUiState {
         val subagentSnapshots = snapshots.filter { it.type == SUBAGENT_TASK_TYPE }
         val snapshotTaskIds = subagentSnapshots.mapTo(mutableSetOf()) { it.taskId }
@@ -212,7 +237,22 @@ internal class SubAgentDockTracker {
                     finishedAtMs = null,
                 )
             } else {
-                val previous = tracked[key] ?: return@forEach
+                val previous = tracked[key]
+                if (previous == null && key !in processRunKeys) return@forEach
+                if (previous == null) {
+                    tracked[key] = SubAgentDockTask(
+                        key = key,
+                        title = snapshot.title,
+                        sourceConversationId = snapshot.sourceConversationId.toUuidOrNull(),
+                        status = status,
+                        startedAtMs = snapshot.createdAtMs,
+                        finishedAtMs = live
+                            ?.takeIf { !it.status.keepsDockVisible }
+                            ?.updatedAtMs
+                            ?: snapshot.updatedAtMs,
+                    )
+                    return@forEach
+                }
                 tracked[key] = previous.copy(
                     title = snapshot.title.ifBlank { previous.title },
                     sourceConversationId = snapshot.sourceConversationId.toUuidOrNull(),

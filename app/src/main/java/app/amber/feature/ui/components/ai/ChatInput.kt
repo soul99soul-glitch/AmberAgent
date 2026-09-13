@@ -248,6 +248,7 @@ fun ChatInput(
     onNextSandbox: (() -> Unit)? = null,
     webMountSessions: List<WebMountSessionMetadata> = emptyList(),
     onOpenWebMountSession: (sessionId: String, reopen: Boolean) -> Unit = { _, _ -> },
+    aboveComposerContent: @Composable () -> Unit = {},
     modifier: Modifier = Modifier,
     onUpdateChatModel: (Model) -> Unit,
     onUpdateSettings: (Settings) -> Unit,
@@ -903,266 +904,268 @@ fun ChatInput(
     // Graphite §7.4 "immersive bottom": the composer sits on a full-bleed tray = `surface`
     // fill that continues to the screen edges (and under the nav inset). Flat, with one
     // hairline top rule that separates the tray from the timeline.
-    Surface(
-        color = tokens.surface,
-        modifier = Modifier.drawWithContent {
-            drawContent()
-            drawLine(
-                color = tokens.line,
-                start = Offset(0f, 0f),
-                end = Offset(size.width, 0f),
-                strokeWidth = 1.dp.toPx(),
-            )
-        },
-    ) {
-        Column(
-            modifier = modifier
-                .imePadding()
-                .navigationBarsPadding()
-                // breathing room below the gesture/nav inset
-                .padding(bottom = 6.dp)
-                .padding(horizontal = 16.dp)
-                .padding(top = 10.dp),
-            // spacedBy 控制 SandboxPeekBar 与 composer pill 之间的间距。
-            // 设计稿是预览卡紧贴输入框，2dp 足够留一条 hair 缝
-            verticalArrangement = Arrangement.spacedBy(2.dp)
+    Column(modifier = modifier.imePadding()) {
+        aboveComposerContent()
+        Surface(
+            color = tokens.surface,
+            modifier = Modifier.drawWithContent {
+                drawContent()
+                drawLine(
+                    color = tokens.line,
+                    start = Offset(0f, 0f),
+                    end = Offset(size.width, 0f),
+                    strokeWidth = 1.dp.toPx(),
+                )
+            },
         ) {
-            if (webMountSessions.isNotEmpty()) {
-                WebMountTaskCard(
-                    sessions = webMountSessions,
-                    onOpenSession = onOpenWebMountSession,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-            }
-            sandboxActivity?.let { activity ->
-                SandboxPeekBar(
-                    activity = activity,
-                    onOpen = onOpenSandbox,
-                    onCancel = onCancelSandbox?.takeIf { activity.canCancel },
-                    onPrevious = onPreviousSandbox,
-                    onNext = onNextSandbox,
-                    modifier = Modifier.align(Alignment.Start),
-                )
-            }
-
-            val pulseFraction = suggestionFillPulse.value
-            val chatTheme = app.amber.feature.ui.pages.chat.LocalChatTheme.current
-            // Graphite §6.2 / §7.4 composer: three separate `surface-2` surfaces on the tray,
-            // separated by gaps — circular [+] · pill input · circular send. Flat & hairline
-            // only (no shadow / glow on any of them). The suggestion-fill pulse now tints the
-            // input pill's hairline border (resting = `line`).
-            val attachmentsExpanded = expand == ExpandState.Files
-            val hideComposerPlaceholder = attachmentsExpanded || keepPlaceholderHiddenDuringAttachmentExit
-            val addRotation by animateFloatAsState(
-                targetValue = if (attachmentsExpanded) 45f else 0f,
-                animationSpec = tween(durationMillis = 220, easing = FastOutSlowInEasing),
-                label = "composerAttachmentToggleRotation",
-            )
-            val pillBorder = lerp(
-                start = tokens.line,
-                stop = chatTheme.accent.copy(alpha = 0.42f),
-                fraction = pulseFraction,
-            )
-            Row(
+            Column(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(min = 44.dp),
-                verticalAlignment = Alignment.Bottom,
-                horizontalArrangement = Arrangement.spacedBy(9.dp),
+                    .navigationBarsPadding()
+                    // breathing room below the gesture/nav inset
+                    .padding(bottom = 6.dp)
+                    .padding(horizontal = 16.dp)
+                    .padding(top = 10.dp),
+                // spacedBy 控制 SandboxPeekBar 与 composer pill 之间的间距。
+                // 设计稿是预览卡紧贴输入框，2dp 足够留一条 hair 缝
+                verticalArrangement = Arrangement.spacedBy(2.dp)
             ) {
-                // ── attach chip — `surface-2` circle that morphs into the [× · image · file]
-                //    capsule (animated width via animateContentSize; + rotates to ×).
+                if (webMountSessions.isNotEmpty()) {
+                    WebMountTaskCard(
+                        sessions = webMountSessions,
+                        onOpenSession = onOpenWebMountSession,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+                sandboxActivity?.let { activity ->
+                    SandboxPeekBar(
+                        activity = activity,
+                        onOpen = onOpenSandbox,
+                        onCancel = onCancelSandbox?.takeIf { activity.canCancel },
+                        onPrevious = onPreviousSandbox,
+                        onNext = onNextSandbox,
+                        modifier = Modifier.align(Alignment.Start),
+                    )
+                }
+
+                val pulseFraction = suggestionFillPulse.value
+                val chatTheme = app.amber.feature.ui.pages.chat.LocalChatTheme.current
+                // Graphite §6.2 / §7.4 composer: three separate `surface-2` surfaces on the tray,
+                // separated by gaps — circular [+] · pill input · circular send. Flat & hairline
+                // only (no shadow / glow on any of them). The suggestion-fill pulse now tints the
+                // input pill's hairline border (resting = `line`).
+                val attachmentsExpanded = expand == ExpandState.Files
+                val hideComposerPlaceholder = attachmentsExpanded || keepPlaceholderHiddenDuringAttachmentExit
+                val addRotation by animateFloatAsState(
+                    targetValue = if (attachmentsExpanded) 45f else 0f,
+                    animationSpec = tween(durationMillis = 220, easing = FastOutSlowInEasing),
+                    label = "composerAttachmentToggleRotation",
+                )
+                val pillBorder = lerp(
+                    start = tokens.line,
+                    stop = chatTheme.accent.copy(alpha = 0.42f),
+                    fraction = pulseFraction,
+                )
                 Row(
                     modifier = Modifier
-                        .height(44.dp)
-                        .clip(CircleShape)
-                        .background(tokens.surface2)
-                        .border(BorderStroke(1.dp, tokens.line), CircleShape)
-                        .animateContentSize(animationSpec = tween(220, easing = FastOutSlowInEasing)),
-                    verticalAlignment = Alignment.CenterVertically,
+                        .fillMaxWidth()
+                        .heightIn(min = 44.dp),
+                    verticalAlignment = Alignment.Bottom,
+                    horizontalArrangement = Arrangement.spacedBy(9.dp),
                 ) {
+                    // ── attach chip — `surface-2` circle that morphs into the [× · image · file]
+                    //    capsule (animated width via animateContentSize; + rotates to ×).
+                    Row(
+                        modifier = Modifier
+                            .height(44.dp)
+                            .clip(CircleShape)
+                            .background(tokens.surface2)
+                            .border(BorderStroke(1.dp, tokens.line), CircleShape)
+                            .animateContentSize(animationSpec = tween(220, easing = FastOutSlowInEasing)),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(44.dp)
+                                .clip(CircleShape)
+                                .clickable { expandToggle(ExpandState.Files) },
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(
+                                imageVector = Lucide.Plus,
+                                contentDescription = stringResource(R.string.more_options),
+                                // Collapsed attachment entry stays neutral; the open state uses the
+                                // active accent to make the expanded affordance easy to scan.
+                                tint = if (attachmentsExpanded) chatTheme.accent else tokens.ink2,
+                                modifier = Modifier
+                                    .size(24.dp)
+                                    .graphicsLayer {
+                                        rotationZ = addRotation
+                                    },
+                            )
+                        }
+
+                        AnimatedVisibility(
+                            visible = attachmentsExpanded,
+                            enter = fadeIn(animationSpec = tween(160)) + scaleIn(
+                                initialScale = 0.92f,
+                                animationSpec = tween(220, easing = FastOutSlowInEasing),
+                            ),
+                            exit = fadeOut(animationSpec = tween(120)) + scaleOut(
+                                targetScale = 0.94f,
+                                animationSpec = tween(160, easing = FastOutSlowInEasing),
+                            ),
+                        ) {
+                            InlineAttachmentActions(
+                                onTakePic = onLaunchCamera,
+                                onPickImage = {
+                                    imagePickerOwner = conversationId
+                                    imagePickerLauncher.launch("image/*")
+                                },
+                                onPickFile = {
+                                    filePickerOwner = conversationId
+                                    filePickerLauncher.launch(arrayOf("*/*"))
+                                },
+                                modifier = Modifier.padding(end = 4.dp),
+                            )
+                        }
+                    }
+
+                    // ── center input pill — `surface-2`, 26dp radius, 1dp hairline, flat.
+                    val pillShape = RoundedCornerShape(26.dp)
+                    Row(
+                        modifier = Modifier
+                            .weight(1f)
+                            .heightIn(min = 44.dp)
+                            .clip(pillShape)
+                            .background(tokens.surface2)
+                            .border(BorderStroke(1.dp, pillBorder), pillShape)
+                            // 26dp 大圆角下，文字左内距给足 18dp 才不贴边；右侧留 16dp 对称
+                            .padding(start = 18.dp, end = 16.dp),
+                        // 文字在药丸内垂直居中（TextField 取自然高度，多出的空隙上下均分）
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Box(modifier = Modifier.weight(1f)) {
+                            TextInputRow(
+                                state = state,
+                                onSendMessage = { sendMessage() },
+                                onUsageClick = { showUsageSheet = true },
+                                onCompactContext = onCompactContext,
+                                modifier = Modifier.fillMaxWidth(),
+                                minimalChrome = true,
+                                hidePlaceholder = hideComposerPlaceholder,
+                                onUpdateSettings = onUpdateSettings,
+                                onImportAttachment = { uri, kind ->
+                                    importOneAttachment(
+                                        ownerConversationId = conversationId,
+                                        sourceUri = uri,
+                                        kind = kind,
+                                    )
+                                },
+                                onImportTextFile = { text ->
+                                    importPastedTextFile(
+                                        ownerConversationId = conversationId,
+                                        text = text,
+                                    )
+                                },
+                            )
+                        }
+                    }
+
+                    if (loading && state.isEmpty()) {
+                        KeepScreenOn()
+                    }
+                    // Graphite §6.2 composer: a FLAT circular send button (no halo/glow/shadow).
+                    // Fills with accent when there is a draft (!isEmpty); neutral surface2 when
+                    // empty. Stop-state (loading & empty) keeps the cancel affordance like before.
+                    // pressable only exposes onClick, but send needs both onClick (send) and
+                    // onLongClick (send-without-answer) — so we drive press feedback (scale .975,
+                    // design §5) from a shared MutableInteractionSource that also feeds
+                    // combinedClickable, rather than stacking pressable + combinedClickable.
+                    val sendEmpty = state.isEmpty()
+                    val sendStopState = loading && sendEmpty
+                    val hasUnresolvedAttachments = state.hasUnresolvedAttachmentImports()
+                    val sendEnabled = sendStopState ||
+                        (!hasUnresolvedAttachments && composerSendEnabled(sendEmpty, loading))
+                    val sendFill by animateColorAsState(
+                        targetValue = if (!sendEnabled || (sendEmpty && !loading)) {
+                            tokens.surface2
+                        } else {
+                            tokens.accent
+                        },
+                        label = "sendButtonFill",
+                    )
+                    val sendIconTint by animateColorAsState(
+                        // 有效发送键使用主题为当前 accent 计算的前景色，确保 terracotta 等
+                        // accent 仍保持原稿的 AA 对比；空态仍用中性 ink3。
+                        targetValue = if (!sendEnabled || (sendEmpty && !loading)) tokens.ink3 else tokens.accentInk,
+                        label = "sendButtonIconTint",
+                    )
+                    val sendInteraction = remember { MutableInteractionSource() }
+                    val sendPressed by sendInteraction.collectIsPressedAsState()
+                    val sendScale by animateFloatAsState(
+                        targetValue = if (sendPressed) 0.975f else 1f,
+                        label = "sendButtonPress",
+                    )
                     Box(
                         modifier = Modifier
-                            .size(44.dp)
-                            .clip(CircleShape)
-                            .clickable { expandToggle(ExpandState.Files) },
+                            .size(48.dp)
+                            .minimumInteractiveComponentSize()
+                            .combinedClickable(
+                                interactionSource = sendInteraction,
+                                indication = null,
+                                enabled = sendEnabled,
+                                onClick = {
+                                    dismissExpand()
+                                    sendMessage()
+                                },
+                                onLongClick = {
+                                    dismissExpand()
+                                    sendMessageWithoutAnswer()
+                                },
+                            ),
                         contentAlignment = Alignment.Center,
                     ) {
-                        Icon(
-                            imageVector = Lucide.Plus,
-                            contentDescription = stringResource(R.string.more_options),
-                            // Collapsed attachment entry stays neutral; the open state uses the
-                            // active accent to make the expanded affordance easy to scan.
-                            tint = if (attachmentsExpanded) chatTheme.accent else tokens.ink2,
+                        Box(
                             modifier = Modifier
-                                .size(24.dp)
                                 .graphicsLayer {
-                                    rotationZ = addRotation
-                                },
-                        )
-                    }
-
-                    AnimatedVisibility(
-                        visible = attachmentsExpanded,
-                        enter = fadeIn(animationSpec = tween(160)) + scaleIn(
-                            initialScale = 0.92f,
-                            animationSpec = tween(220, easing = FastOutSlowInEasing),
-                        ),
-                        exit = fadeOut(animationSpec = tween(120)) + scaleOut(
-                            targetScale = 0.94f,
-                            animationSpec = tween(160, easing = FastOutSlowInEasing),
-                        ),
-                    ) {
-                        InlineAttachmentActions(
-                            onTakePic = onLaunchCamera,
-                            onPickImage = {
-                                imagePickerOwner = conversationId
-                                imagePickerLauncher.launch("image/*")
-                            },
-                            onPickFile = {
-                                filePickerOwner = conversationId
-                                filePickerLauncher.launch(arrayOf("*/*"))
-                            },
-                            modifier = Modifier.padding(end = 4.dp),
-                        )
+                                    scaleX = sendScale
+                                    scaleY = sendScale
+                                }
+                                .size(44.dp)
+                                .clip(CircleShape)
+                                .background(sendFill),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(
+                                imageVector = if (sendStopState) Lucide.X else Lucide.ArrowUp,
+                                contentDescription = stringResource(
+                                    if (sendStopState) R.string.stop else R.string.send,
+                                ),
+                                tint = sendIconTint,
+                                modifier = Modifier.size(22.dp),
+                            )
+                        }
                     }
                 }
 
-                // ── center input pill — `surface-2`, 26dp radius, 1dp hairline, flat.
-                val pillShape = RoundedCornerShape(26.dp)
-                Row(
-                    modifier = Modifier
-                        .weight(1f)
-                        .heightIn(min = 44.dp)
-                        .clip(pillShape)
-                        .background(tokens.surface2)
-                        .border(BorderStroke(1.dp, pillBorder), pillShape)
-                        // 26dp 大圆角下，文字左内距给足 18dp 才不贴边；右侧留 16dp 对称
-                        .padding(start = 18.dp, end = 16.dp),
-                    // 文字在药丸内垂直居中（TextField 取自然高度，多出的空隙上下均分）
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Box(modifier = Modifier.weight(1f)) {
-                        TextInputRow(
-                            state = state,
-                            onSendMessage = { sendMessage() },
-                            onUsageClick = { showUsageSheet = true },
-                            onCompactContext = onCompactContext,
-                            modifier = Modifier.fillMaxWidth(),
-                            minimalChrome = true,
-                            hidePlaceholder = hideComposerPlaceholder,
-                            onUpdateSettings = onUpdateSettings,
-                            onImportAttachment = { uri, kind ->
-                                importOneAttachment(
-                                    ownerConversationId = conversationId,
-                                    sourceUri = uri,
-                                    kind = kind,
-                                )
-                            },
-                            onImportTextFile = { text ->
-                                importPastedTextFile(
-                                    ownerConversationId = conversationId,
-                                    text = text,
-                                )
-                            },
-                        )
-                    }
+                if (state.messageContent.isNotEmpty() || state.attachmentImports.isNotEmpty()) {
+                    MediaFileInputRow(
+                        state = state,
+                        onRetryAttachment = ::retryAttachmentImport,
+                    )
                 }
 
-                if (loading && state.isEmpty()) {
-                    KeepScreenOn()
-                }
-                // Graphite §6.2 composer: a FLAT circular send button (no halo/glow/shadow).
-                // Fills with accent when there is a draft (!isEmpty); neutral surface2 when
-                // empty. Stop-state (loading & empty) keeps the cancel affordance like before.
-                // pressable only exposes onClick, but send needs both onClick (send) and
-                // onLongClick (send-without-answer) — so we drive press feedback (scale .975,
-                // design §5) from a shared MutableInteractionSource that also feeds
-                // combinedClickable, rather than stacking pressable + combinedClickable.
-                val sendEmpty = state.isEmpty()
-                val sendStopState = loading && sendEmpty
-                val hasUnresolvedAttachments = state.hasUnresolvedAttachmentImports()
-                val sendEnabled = sendStopState ||
-                    (!hasUnresolvedAttachments && composerSendEnabled(sendEmpty, loading))
-                val sendFill by animateColorAsState(
-                    targetValue = if (!sendEnabled || (sendEmpty && !loading)) {
-                        tokens.surface2
-                    } else {
-                        tokens.accent
-                    },
-                    label = "sendButtonFill",
-                )
-                val sendIconTint by animateColorAsState(
-                    // 有效发送键使用主题为当前 accent 计算的前景色，确保 terracotta 等
-                    // accent 仍保持原稿的 AA 对比；空态仍用中性 ink3。
-                    targetValue = if (!sendEnabled || (sendEmpty && !loading)) tokens.ink3 else tokens.accentInk,
-                    label = "sendButtonIconTint",
-                )
-                val sendInteraction = remember { MutableInteractionSource() }
-                val sendPressed by sendInteraction.collectIsPressedAsState()
-                val sendScale by animateFloatAsState(
-                    targetValue = if (sendPressed) 0.975f else 1f,
-                    label = "sendButtonPress",
-                )
+                // Expanded content
                 Box(
                     modifier = Modifier
-                        .size(48.dp)
-                        .minimumInteractiveComponentSize()
-                        .combinedClickable(
-                            interactionSource = sendInteraction,
-                            indication = null,
-                            enabled = sendEnabled,
-                            onClick = {
-                                dismissExpand()
-                                sendMessage()
-                            },
-                            onLongClick = {
-                                dismissExpand()
-                                sendMessageWithoutAnswer()
-                            },
-                        ),
-                    contentAlignment = Alignment.Center,
+                        .animateContentSize()
+                        .fillMaxWidth()
                 ) {
-                    Box(
-                        modifier = Modifier
-                            .graphicsLayer {
-                                scaleX = sendScale
-                                scaleY = sendScale
-                            }
-                            .size(44.dp)
-                            .clip(CircleShape)
-                            .background(sendFill),
-                        contentAlignment = Alignment.Center,
+                    BackHandler(
+                        enabled = expand != ExpandState.Collapsed,
                     ) {
-                        Icon(
-                            imageVector = if (sendStopState) Lucide.X else Lucide.ArrowUp,
-                            contentDescription = stringResource(
-                                if (sendStopState) R.string.stop else R.string.send,
-                            ),
-                            tint = sendIconTint,
-                            modifier = Modifier.size(22.dp),
-                        )
+                        dismissExpand()
                     }
-                }
-            }
-
-            if (state.messageContent.isNotEmpty() || state.attachmentImports.isNotEmpty()) {
-                MediaFileInputRow(
-                    state = state,
-                    onRetryAttachment = ::retryAttachmentImport,
-                )
-            }
-
-            // Expanded content
-            Box(
-                modifier = Modifier
-                    .animateContentSize()
-                    .fillMaxWidth()
-            ) {
-                BackHandler(
-                    enabled = expand != ExpandState.Collapsed,
-                ) {
-                    dismissExpand()
                 }
             }
         }

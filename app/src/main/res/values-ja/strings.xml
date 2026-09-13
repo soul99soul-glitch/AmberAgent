@@ -3338,4 +3338,13 @@
   <string name="setting_chat_storage_conversation_summary">会話 %1$d 件 · メッセージノード %2$d 件</string>
   <string name="setting_chat_storage_attachment_summary">%1$d ファイル · %2$s</string>
   <string name="setting_sandbox_more_settings">その他の設定</string>
+    <string name="subagent_dock_header_running">%1$d 件のサブエージェントが実行中</string>
+    <string name="subagent_dock_header_tasks">%1$d 件のサブエージェントタスク</string>
+    <string name="subagent_dock_header_other_conversations">他の会話から %1$d 件</string>
+    <string name="subagent_dock_expand">すべて表示</string>
+    <string name="subagent_dock_collapse">折りたたむ</string>
+    <string name="subagent_dock_source_conversation">元の会話を開く</string>
+    <string name="subagent_dock_details_title">サブエージェントの詳細</string>
+    <string name="subagent_dock_dismiss">このタスクを非表示</string>
+    <string name="subagent_dock_status_queued">待機中</string>
 </resources>

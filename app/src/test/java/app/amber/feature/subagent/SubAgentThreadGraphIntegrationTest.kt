@@ -27,6 +27,7 @@ import app.amber.core.sync.core.SyncRestoreWriteGate
 import app.amber.feature.history.SessionAccessGrantStore
 import app.amber.feature.runtime.DurableRuntimeTestBase
 import app.amber.feature.runtime.RoomThreadGraphStore
+import app.amber.feature.task.AgentTaskSnapshot
 import app.amber.feature.task.AgentTaskStore
 import app.amber.feature.task.AgentTaskStatus
 import java.io.File
@@ -34,6 +35,7 @@ import java.util.concurrent.CopyOnWriteArrayList
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
@@ -206,6 +208,27 @@ class SubAgentThreadGraphIntegrationTest : DurableRuntimeTestBase() {
             Thread.sleep(20)
         }
         error("thread $threadId did not reach a terminal status in time")
+    }
+
+    /** Wait for the manager's post-terminal task-store write without opening a second store. */
+    private suspend fun awaitDurableTaskSnapshot(
+        threadId: String,
+        expectedStatus: AgentTaskStatus,
+    ): AgentTaskSnapshot {
+        val file = File(context.filesDir, "amberagent/tasks/$threadId.json")
+        var snapshot: AgentTaskSnapshot? = null
+        withTimeout(5_000) {
+            while (snapshot?.status != expectedStatus) {
+                snapshot = file.takeIf { it.isFile }
+                    ?.let {
+                        runCatching {
+                            Json.decodeFromString(AgentTaskSnapshot.serializer(), it.readText())
+                        }.getOrNull()
+                    }
+                if (snapshot?.status != expectedStatus) delay(20)
+            }
+        }
+        return requireNotNull(snapshot)
     }
 
     /**
@@ -601,6 +624,11 @@ class SubAgentThreadGraphIntegrationTest : DurableRuntimeTestBase() {
         val threadId = started["run_id"]!!.jsonPrimitive.content
         awaitTerminal(manager, threadId)
         val stateFlow = manager.runStateFlow(threadId)
+        val initialThreadStartedAtMs = stateFlow.value!!.startedAtMs
+        val initialTask = awaitDurableTaskSnapshot(threadId, AgentTaskStatus.COMPLETED)
+        withTimeout(5_000) {
+            while (System.currentTimeMillis() <= initialTask.updatedAtMs) delay(1)
+        }
 
         fakeRunner.gate = CompletableDeferred()
         val followup = manager.followup(
@@ -614,6 +642,8 @@ class SubAgentThreadGraphIntegrationTest : DurableRuntimeTestBase() {
         )
         assertEquals("running", payloadStatus(followup))
         assertEquals(SubAgentRunStatus.RUNNING, stateFlow.value?.status)
+        val followupActivation = stateFlow.value!!
+        assertEquals(initialThreadStartedAtMs, followupActivation.startedAtMs)
 
         fakeRunner.gate!!.complete(
             SubAgentResult(status = SubAgentRunStatus.COMPLETED, summary = "flow terminal")
@@ -621,6 +651,12 @@ class SubAgentThreadGraphIntegrationTest : DurableRuntimeTestBase() {
         withTimeout(5_000) {
             stateFlow.first { it?.status == SubAgentRunStatus.COMPLETED }
         }
+        // The task row identifies the followup activation, while the thread/lifecycle snapshot
+        // retains the historical thread start for thread-graph semantics.
+        val followupTask = awaitDurableTaskSnapshot(threadId, AgentTaskStatus.COMPLETED)
+        assertEquals(followupActivation.updatedAtMs, followupTask.createdAtMs)
+        assertTrue(followupTask.createdAtMs > initialTask.updatedAtMs)
+        assertEquals(initialThreadStartedAtMs, stateFlow.value?.startedAtMs)
         Unit
     }
 

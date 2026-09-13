@@ -8,13 +8,14 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.weight
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -42,6 +43,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -53,6 +56,9 @@ import app.amber.feature.ui.components.ui.SubAgentAvatar
 import app.amber.feature.ui.components.ui.workspaceColors
 import app.amber.feature.ui.theme.LocalAmberTokens
 import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.ChevronDown
+import com.composables.icons.lucide.ChevronUp
+import com.composables.icons.lucide.MessageSquare
 import kotlinx.coroutines.delay
 import kotlin.uuid.Uuid
 import org.koin.compose.koinInject
@@ -75,8 +81,18 @@ fun SubAgentStatusDock(
 
     var expanded by rememberSaveable { mutableStateOf(false) }
     var selectedKey by remember { mutableStateOf<SubAgentDockRunKey?>(null) }
+    val imeVisible = WindowInsets.isImeVisible
+    LaunchedEffect(imeVisible) {
+        if (imeVisible) expanded = false
+    }
+    val dockExpanded = expanded && !imeVisible
     val selected = tasks.firstOrNull { it.key == selectedKey }
     val nowMs = rememberSubAgentDockNow(tasks)
+    // Keep the requested 48dp at normal type size; reserve both text lines when
+    // Android accessibility font scaling makes them taller than the compact pill.
+    val pillHeight = with(LocalDensity.current) {
+        maxOf(48.dp, 18.sp.toDp() + 16.sp.toDp() + 11.dp)
+    }
     val runningCount = tasks.count { it.status == SubAgentDockStatus.RUNNING }
     val otherConversationCount = tasks.count {
         it.sourceConversationId != null && it.sourceConversationId != currentConversationId
@@ -92,27 +108,26 @@ fun SubAgentStatusDock(
             runningCount = runningCount,
             taskCount = tasks.size,
             otherConversationCount = otherConversationCount,
-            expanded = expanded,
-            onToggle = { expanded = !expanded },
+            expanded = dockExpanded,
+            onToggle = { if (!imeVisible) expanded = !expanded },
         )
 
-        if (expanded) {
+        if (dockExpanded) {
             val visibleRows = minOf(3, (tasks.size + 1) / 2).coerceAtLeast(1)
             LazyVerticalGrid(
                 columns = GridCells.Fixed(2),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height((visibleRows * 56 + 8).dp)
-                    .heightIn(max = 210.dp),
-                contentPadding = PaddingValues(start = 12.dp, end = 12.dp, bottom = 7.dp),
+                    .height(minOf(210.dp, (pillHeight + 8.dp) * visibleRows)),
+                contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 4.dp, bottom = 4.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                gridItems(items = tasks, key = { it.key }) { task ->
+                gridItems(items = tasks, key = { it.stableLazyKey() }) { task ->
                     SubAgentDockPill(
                         task = task,
                         nowMs = nowMs,
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier.fillMaxWidth().height(pillHeight),
                         onClick = { selectedKey = task.key },
                     )
                 }
@@ -121,15 +136,15 @@ fun SubAgentStatusDock(
             LazyRow(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(56.dp),
-                contentPadding = PaddingValues(start = 12.dp, end = 12.dp, bottom = 8.dp),
+                    .height(pillHeight + 8.dp),
+                contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 4.dp, bottom = 4.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                rowItems(items = tasks, key = { it.key }) { task ->
+                rowItems(items = tasks, key = { it.stableLazyKey() }) { task ->
                     SubAgentDockPill(
                         task = task,
                         nowMs = nowMs,
-                        modifier = Modifier.width(166.dp),
+                        modifier = Modifier.width(166.dp).height(pillHeight),
                         onClick = { selectedKey = task.key },
                     )
                 }
@@ -166,7 +181,7 @@ private fun SubAgentDockHeader(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .heightIn(min = 36.dp)
+            .heightIn(min = 44.dp)
             .clickable(onClick = onToggle)
             .padding(horizontal = 16.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -225,11 +240,17 @@ private fun SubAgentDockPill(
 ) {
     val workspace = workspaceColors()
     val pillShape = RoundedCornerShape(999.dp)
+    val shadowInk = if (LocalAmberTokens.current.isDark) Color.Black else workspace.ink
     Surface(
         onClick = onClick,
         modifier = modifier
-            .height(48.dp)
-            .shadow(5.dp, pillShape),
+            .heightIn(min = 48.dp)
+            .shadow(
+                elevation = 5.dp,
+                shape = pillShape,
+                ambientColor = shadowInk.copy(alpha = 0.08f),
+                spotColor = shadowInk.copy(alpha = 0.12f),
+            ),
         shape = pillShape,
         color = workspace.paper,
         contentColor = workspace.ink,
@@ -261,7 +282,10 @@ private fun SubAgentDockPill(
             ) {
                 Text(
                     text = task.title,
-                    style = MaterialTheme.typography.titleSmall.copy(fontSize = 13.sp),
+                    style = MaterialTheme.typography.titleSmall.copy(
+                        fontSize = 13.sp,
+                        lineHeight = 18.sp,
+                    ),
                     fontWeight = FontWeight.SemiBold,
                     color = workspace.ink,
                     maxLines = 1,
@@ -278,7 +302,10 @@ private fun SubAgentDockPill(
                     )
                     Text(
                         text = "${task.status.label()} · ${formatSubAgentDockElapsed(task.elapsedAt(nowMs))}",
-                        style = MaterialTheme.typography.labelMedium.copy(fontSize = 11.sp),
+                        style = MaterialTheme.typography.labelMedium.copy(
+                            fontSize = 11.sp,
+                            lineHeight = 16.sp,
+                        ),
                         color = workspace.muted,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
@@ -401,6 +428,10 @@ private fun SubAgentDockStatus.toAvatarStatus(): SubAgentRunStatus? = when (this
     SubAgentDockStatus.TIMED_OUT -> SubAgentRunStatus.TIMED_OUT
     SubAgentDockStatus.INTERRUPTED -> SubAgentRunStatus.INTERRUPTED
 }
+
+/** Lazy layouts persist item state through Bundle-compatible keys. */
+private fun SubAgentDockTask.stableLazyKey(): String =
+    "${key.taskId}:${key.createdAtMs}"
 
 @Composable
 private fun rememberSubAgentDockNow(tasks: List<SubAgentDockTask>): Long {

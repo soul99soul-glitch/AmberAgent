@@ -1213,7 +1213,9 @@ class SubAgentManager(
             reason = "Sub Agent retry starts a new isolated run from the original task spec.",
         ),
         sourceToolName = "subagent_start",
-        createdAtMs = startedAtMs,
+        // A thread followup deliberately retains its original startedAtMs, but the task-store
+        // row represents this generation's activation so UI observers can distinguish it.
+        createdAtMs = updatedAtMs,
         updatedAtMs = updatedAtMs,
         cancelCapability = status.running,
         summary = task.objective.take(1_000),

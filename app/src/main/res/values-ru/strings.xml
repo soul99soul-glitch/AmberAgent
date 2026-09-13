@@ -3338,4 +3338,13 @@
   <string name="setting_chat_storage_conversation_summary">Бесед: %1$d · узлов сообщений: %2$d</string>
   <string name="setting_chat_storage_attachment_summary">Файлов: %1$d · %2$s</string>
   <string name="setting_sandbox_more_settings">Дополнительные настройки</string>
+    <string name="subagent_dock_header_running">Работают субагенты: %1$d</string>
+    <string name="subagent_dock_header_tasks">Задачи субагентов: %1$d</string>
+    <string name="subagent_dock_header_other_conversations">Из других бесед: %1$d</string>
+    <string name="subagent_dock_expand">Показать все</string>
+    <string name="subagent_dock_collapse">Свернуть</string>
+    <string name="subagent_dock_source_conversation">Открыть исходную беседу</string>
+    <string name="subagent_dock_details_title">Сведения о субагенте</string>
+    <string name="subagent_dock_dismiss">Скрыть задачу</string>
+    <string name="subagent_dock_status_queued">В очереди</string>
 </resources>

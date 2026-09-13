@@ -49,6 +49,29 @@ class SubAgentDockStateTest {
     }
 
     @Test
+    fun currentProcessTerminalSurvivesAConflatedActiveEmission() {
+        val tracker = SubAgentDockTracker()
+        val terminal = snapshot(
+            status = AgentTaskStatus.COMPLETED,
+            createdAtMs = 300L,
+            updatedAtMs = 340L,
+        )
+        val key = SubAgentDockRunKey(terminal.taskId, terminal.createdAtMs)
+
+        // The global StateFlow can publish only this terminal value when a local failure finishes
+        // between register and the Main collector's first reduction. The state holder admits a
+        // key absent from its startup baseline as current-process work.
+        val visible = tracker.reduce(
+            snapshots = listOf(terminal),
+            liveRuns = emptyMap(),
+            processRunKeys = setOf(key),
+        ).tasks.single()
+
+        assertEquals(SubAgentDockStatus.COMPLETED, visible.status)
+        assertEquals(340L, visible.finishedAtMs)
+    }
+
+    @Test
     fun dismissDoesNotMutateTaskAndReusedTaskIdWithNewGenerationReappears() {
         val tracker = SubAgentDockTracker()
         val firstRunning = snapshot(status = AgentTaskStatus.RUNNING, createdAtMs = 100L, updatedAtMs = 100L)

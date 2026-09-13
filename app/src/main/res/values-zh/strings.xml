@@ -3356,4 +3356,13 @@
   <string name="setting_chat_storage_conversation_summary">%1$d 个会话 · %2$d 个消息节点</string>
   <string name="setting_chat_storage_attachment_summary">%1$d 个文件 · %2$s</string>
   <string name="setting_sandbox_more_settings">更多设置</string>
+    <string name="subagent_dock_header_running">%1$d 个子代理运行中</string>
+    <string name="subagent_dock_header_tasks">%1$d 个子代理任务</string>
+    <string name="subagent_dock_header_other_conversations">来自其他会话 %1$d 个</string>
+    <string name="subagent_dock_expand">展开全部</string>
+    <string name="subagent_dock_collapse">收起</string>
+    <string name="subagent_dock_source_conversation">打开来源会话</string>
+    <string name="subagent_dock_details_title">子代理详情</string>
+    <string name="subagent_dock_dismiss">收起此任务</string>
+    <string name="subagent_dock_status_queued">已排队</string>
 </resources>
