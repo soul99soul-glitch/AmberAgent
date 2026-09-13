@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
 
-    <!-- Keep the starting window on the redesign canvas with the dot-matrix mark.
+    <!-- Keep the starting window on the redesign canvas with the dot-matrix mark and cursor.
          The window stays opaque so a cold launch cannot show the desktop through it. -->
     <style name="Theme.amberagent" parent="Theme.Material3.DayNight.NoActionBar">
         <item name="android:windowBackground">@drawable/amber_launch_background</item>

@@ -4,21 +4,26 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.clickable
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -34,10 +39,13 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import app.amber.agent.R
+import app.amber.feature.ui.components.ds.amberCanvas
 import app.amber.core.utils.plus
 import app.amber.feature.miniapp.MiniAppSpeechEngine
 import app.amber.feature.ui.components.nav.BackButton
 import app.amber.feature.ui.components.ui.WorkspaceTopBar
+import app.amber.feature.ui.components.ui.WorkspaceStatusPill
+import app.amber.feature.ui.components.ui.WorkspaceTone
 import app.amber.feature.ui.components.ui.workspaceColors
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
@@ -95,13 +103,15 @@ fun SettingTtsPage() {
                 scrollBehavior = scrollBehavior,
             )
         },
-        modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
-        containerColor = colors.canvas,
+        modifier = Modifier
+            .nestedScroll(scrollBehavior.nestedScrollConnection)
+            .amberCanvas(),
+        containerColor = androidx.compose.ui.graphics.Color.Transparent,
     ) { padding ->
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
             contentPadding = padding + PaddingValues(horizontal = SettingPageHorizontalInset, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             item {
                 Surface(
@@ -118,14 +128,8 @@ fun SettingTtsPage() {
                 }
             }
             item {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    SettingSectionTitle("试听")
-                    Surface(
-                        shape = RoundedCornerShape(14.dp),
-                        color = colors.paper,
-                        border = BorderStroke(1.dp, colors.hairline),
-                    ) {
-                    ListItem(
+                SettingCardGroup(title = "试听") {
+                    item(
                         headlineContent = { Text("系统 TTS") },
                         supportingContent = {
                             Text(
@@ -140,113 +144,121 @@ fun SettingTtsPage() {
                             if (busy && !speaking) {
                                 CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
                             } else {
-                                Text(
-                                    when {
+                                WorkspaceStatusPill(
+                                    text = when {
                                         engineError != null -> "不可用"
                                         checked -> "可用"
                                         else -> "未检测"
                                     },
-                                    style = MaterialTheme.typography.labelMedium,
-                                    color = when {
-                                        engineError != null -> MaterialTheme.colorScheme.error
-                                        checked -> colors.ink
-                                        else -> colors.muted
+                                    tone = when {
+                                        engineError != null -> WorkspaceTone.Danger
+                                        checked -> WorkspaceTone.Success
+                                        else -> WorkspaceTone.Neutral
                                     },
                                 )
                             }
                         },
                     )
-                    }
-                }
-            }
-            item {
-                Surface(
-                    shape = RoundedCornerShape(14.dp),
-                    color = colors.paper,
-                    border = BorderStroke(1.dp, colors.hairline),
-                ) {
-                    Column {
-                        ListItem(
-                            headlineContent = { Text("语速") },
-                            supportingContent = { Text("调整试听语速") },
-                            trailingContent = {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Text(
-                                        speeds[speedIndex].second,
-                                        style = MaterialTheme.typography.labelLarge,
-                                        color = colors.ink,
-                                    )
-                                    TextButton(onClick = { speedIndex = (speedIndex + 1) % speeds.size }) {
-                                        Text("切换")
+                    item(
+                        headlineContent = { Text("语速") },
+                        supportingContent = { Text("调整试听语速") },
+                        trailingContent = {
+                            TtsSpeedChoice(
+                                speeds = speeds,
+                                selectedIndex = speedIndex,
+                                onSelected = { speedIndex = it },
+                            )
+                        },
+                    )
+                    rawItem {
+                        Button(
+                            onClick = {
+                                if (speaking || busy) {
+                                    // 停止覆盖"启动中"与"朗读中"两种状态。
+                                    speakJob?.cancel()
+                                    speakJob = null
+                                    speakJob = scope.launch {
+                                        busy = true
+                                        try {
+                                            runCatching { speechEngine.dispatch("speech.stop", paramsOf()) }
+                                                .onFailure { if (it is CancellationException) throw it }
+                                        } finally {
+                                            speaking = false
+                                            busy = false
+                                        }
+                                    }
+                                } else {
+                                    engineError = null
+                                    // 引擎可能在 speak 返回前回报 onDone，先设置启动状态。
+                                    speaking = true
+                                    busy = true
+                                    speakJob = scope.launch {
+                                        try {
+                                            // speak 返回即引擎接受；引擎不可用/初始化失败会抛错。
+                                            speechEngine.dispatch(
+                                                "speech.speak",
+                                                paramsOf(
+                                                    "text" to "你好，这是 AmberAgent 的语音试听。系统 TTS 可用。",
+                                                    "language" to Locale.getDefault().toLanguageTag(),
+                                                    "rate" to (speeds[speedIndex].first / 2f),
+                                                ),
+                                            )
+                                            checked = true
+                                        } catch (cancel: CancellationException) {
+                                            throw cancel
+                                        } catch (error: Throwable) {
+                                            speaking = false
+                                            engineError = error.message ?: "系统 TTS 引擎不可用"
+                                        } finally {
+                                            busy = false
+                                        }
                                     }
                                 }
                             },
-                        )
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 16.dp, vertical = 10.dp),
-                            horizontalArrangement = Arrangement.End,
+                            enabled = !busy || speaking,
+                            modifier = Modifier.fillMaxWidth(),
                         ) {
-                            TextButton(
-                                onClick = {
-                                    if (speaking || busy) {
-                                        // 停止覆盖"启动中"与"朗读中"两种状态。
-                                        speakJob?.cancel()
-                                        speakJob = null
-                                        speakJob = scope.launch {
-                                            busy = true
-                                            try {
-                                                runCatching { speechEngine.dispatch("speech.stop", paramsOf()) }
-                                                    .onFailure { if (it is CancellationException) throw it }
-                                            } finally {
-                                                speaking = false
-                                                busy = false
-                                            }
-                                        }
-                                    } else {
-                                        engineError = null
-                                        // 引擎可能在 speak 返回前回报 onDone，先设置启动状态。
-                                        speaking = true
-                                        busy = true
-                                        speakJob = scope.launch {
-                                            try {
-                                                // speak 返回即引擎接受；引擎不可用/初始化失败会抛错。
-                                                speechEngine.dispatch(
-                                                    "speech.speak",
-                                                    paramsOf(
-                                                        "text" to "你好，这是 AmberAgent 的语音试听。系统 TTS 可用。",
-                                                        "language" to Locale.getDefault().toLanguageTag(),
-                                                        "rate" to (speeds[speedIndex].first / 2f),
-                                                    ),
-                                                )
-                                                checked = true
-                                            } catch (cancel: CancellationException) {
-                                                throw cancel
-                                            } catch (error: Throwable) {
-                                                speaking = false
-                                                engineError = error.message ?: "系统 TTS 引擎不可用"
-                                            } finally {
-                                                busy = false
-                                            }
-                                        }
-                                    }
-                                },
-                                // 启动中 speaking 已置 true，允许取消尚未完成的初始化；
-                                // 停止请求本身完成前避免重复提交 stop。
-                                enabled = !busy || speaking,
-                            ) {
-                                Text(
-                                    when {
-                                        speaking -> "停止试听"
-                                        busy -> "处理中…"
-                                        else -> "系统 TTS 试听"
-                                    }
-                                )
-                            }
+                            Text(
+                                when {
+                                    speaking -> "停止试听"
+                                    busy -> "处理中…"
+                                    else -> "系统 TTS 试听"
+                                }
+                            )
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun TtsSpeedChoice(
+    speeds: List<Pair<Float, String>>,
+    selectedIndex: Int,
+    onSelected: (Int) -> Unit,
+) {
+    val colors = workspaceColors()
+    Row(
+        modifier = Modifier
+            .clip(CircleShape)
+            .background(colors.row)
+            .border(1.dp, colors.hairline, CircleShape)
+            .padding(3.dp),
+        horizontalArrangement = Arrangement.spacedBy(2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        speeds.forEachIndexed { index, (_, label) ->
+            Box(
+                modifier = Modifier
+                    .clip(CircleShape)
+                    .clickable { onSelected(index) }
+                    .background(if (index == selectedIndex) colors.paper else androidx.compose.ui.graphics.Color.Transparent)
+                    .padding(horizontal = 8.dp, vertical = 7.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(label, style = app.amber.feature.ui.theme.LocalAmberType.current.meta)
             }
         }
     }

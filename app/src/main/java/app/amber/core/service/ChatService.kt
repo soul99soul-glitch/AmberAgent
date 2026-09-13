@@ -158,6 +158,7 @@ import app.amber.feature.runtime.OutcomeUnknownPrompt
 import app.amber.feature.runtime.PauseReason
 import app.amber.feature.runtime.RunOwnershipRegistry
 import app.amber.feature.runtime.RunRecoveryService
+import app.amber.feature.runtime.RunTerminal
 import app.amber.feature.runtime.RunTerminalState
 import app.amber.feature.runtime.RunTerminalStore
 import app.amber.feature.runtime.StoredResponseGateway
@@ -1011,6 +1012,7 @@ class ChatService(
         firstMessage: PendingUserMessage? = null,
         resumeWithoutNewMessage: Boolean = false,
         messageRange: ClosedRange<Int>? = null,
+        expectedPausedRunId: app.amber.core.agent.runtime.AgentRunId? = null,
         expectedRestoreEpoch: Long? = restoreWriteGate?.currentEpoch(),
     ) {
         val runner = agentRunner ?: return
@@ -1046,6 +1048,7 @@ class ChatService(
                 firstMessage = firstMessage,
                 resumeFirst = resumeWithoutNewMessage,
                 messageRange = messageRange,
+                expectedPausedRunId = expectedPausedRunId,
             )
         }
         session.setJob(job)
@@ -1070,6 +1073,7 @@ class ChatService(
         firstMessage: PendingUserMessage? = null,
         resumeFirst: Boolean = false,
         messageRange: ClosedRange<Int>? = null,
+        expectedPausedRunId: app.amber.core.agent.runtime.AgentRunId? = null,
     ) {
         var pendingResume = resumeFirst
         var pendingRange = messageRange
@@ -1093,9 +1097,14 @@ class ChatService(
                             messageNodeId = lastNode.id,
                             userMessageText = "",
                             messageRange = range,
+                            expectedPausedRunId = expectedPausedRunId,
                         )
                     }
                     _generationDoneFlow.emit(conversationId)
+                    // Settings-driven recovery owns only the paused run. It
+                    // must never use its successful completion as a reason to
+                    // drain queued user messages into a fresh run.
+                    if (expectedPausedRunId != null) return
                 } else {
                     val dispatchMessage =
                         session.preparePendingMessageForDispatch(conversationId, nextMessage!!)
@@ -1161,6 +1170,7 @@ class ChatService(
         messageNodeId: Uuid,
         userMessageText: String,
         messageRange: ClosedRange<Int>? = null,
+        expectedPausedRunId: app.amber.core.agent.runtime.AgentRunId? = null,
     ) {
         try {
             coldStartRecoveryGate?.awaitReady()
@@ -1184,13 +1194,23 @@ class ChatService(
         )
         // P1-03 parity with the legacy loop: a paused run (approval /
         // resumable) is resumed under the SAME runId so the ledger,
-        // terminal store and event log all continue the same run.
-        val resumeRunId = if (useDurableRuntime()) {
+        // terminal store and event log all continue the same run. Automatic
+        // approval recovery is stricter: it can only claim this conversation's
+        // still-live WAITING_USER row and never falls back to a new run.
+        val durable = useDurableRuntime()
+        val activeTerminal = if (durable) {
             runTerminalStore?.activeForConversation(conversationId.toString())
-                ?.let { app.amber.core.agent.runtime.AgentRunId(it.runId) }
         } else {
             null
         }
+        if (
+            expectedPausedRunId != null &&
+            !isExpectedWaitingUserRun(activeTerminal, conversationId, expectedPausedRunId)
+        ) {
+            return
+        }
+        val resumeRunId = activeTerminal
+            ?.let { app.amber.core.agent.runtime.AgentRunId(it.runId) }
         val resumeCursor = resumeRunId?.let { responsesResumeStore?.load(it.value) }
         if (resumeCursor != null && resumeCursor.providerId != model.findProvider(settings.providers)?.id?.toString()) {
             addError(
@@ -1200,22 +1220,77 @@ class ChatService(
             )
             return
         }
-        prepareKernelGenerationTurn(conversationId, settings, model)
-        // Validate the caller's epoch and capture the runner's launch epoch
-        // in one short gate section; a restore cannot slip between them.
-        val handle = withConversationWrite {
-            runner.launch(
-                app.amber.feature.chat.api.ChatTurnDescriptor.ID,
-                input,
-                requestedRunId = resumeRunId,
-            )
-        }.getOrElse { e ->
-            addError(e, conversationId, title = "Kernel dispatch failed")
-            return
+        var activeRunId: app.amber.core.agent.runtime.AgentRunId? = null
+        if (expectedPausedRunId != null) {
+            // Register the known run before the asynchronous AgentRunner gate.
+            // Stop then reaches AgentRunner.cancel(), whose pending-cancel
+            // handoff covers the gap before its job is registered.
+            activeKernelRuns.update { current ->
+                if (current[conversationId] == null) {
+                    current + (conversationId to expectedPausedRunId)
+                } else {
+                    current
+                }
+            }
+            if (activeKernelRuns.value[conversationId] != expectedPausedRunId) return
+            activeRunId = expectedPausedRunId
         }
-        activeKernelRuns.update { it + (conversationId to handle.runId) }
         try {
-            runner.observe(handle.runId).first { snapshot ->
+            // Stop can win while policy/model preflight is running. Recheck
+            // the durable owner immediately before launch; fixed requested
+            // runId is retained below so a later Stop can never mint fresh work.
+            if (
+                expectedPausedRunId != null &&
+                !isExpectedWaitingUserRun(
+                    runTerminalStore?.activeForConversation(conversationId.toString()),
+                    conversationId,
+                    expectedPausedRunId,
+                )
+            ) {
+                return
+            }
+            prepareKernelGenerationTurn(conversationId, settings, model)
+            if (
+                expectedPausedRunId != null &&
+                !isExpectedWaitingUserRun(
+                    runTerminalStore?.activeForConversation(conversationId.toString()),
+                    conversationId,
+                    expectedPausedRunId,
+                )
+            ) {
+                return
+            }
+            // Validate the caller's epoch and capture the runner's launch epoch
+            // in one short gate section; a restore cannot slip between them.
+            val preLaunchSnapshot = resumeRunId?.let { runner.observe(it).value }
+            val handle = withConversationWrite {
+                runner.launch(
+                    app.amber.feature.chat.api.ChatTurnDescriptor.ID,
+                    input,
+                    requestedRunId = resumeRunId,
+                )
+            }.getOrElse { e ->
+                addError(e, conversationId, title = "Kernel dispatch failed")
+                return
+            }
+            if (expectedPausedRunId != null && handle.runId != expectedPausedRunId) {
+                runner.cancel(handle.runId)
+                return
+            }
+            if (activeRunId == null) {
+                activeKernelRuns.update { it + (conversationId to handle.runId) }
+                activeRunId = handle.runId
+            }
+            val snapshots = runner.observe(handle.runId)
+            if (expectedPausedRunId != null && preLaunchSnapshot != null) {
+                // The runner replaces its immutable snapshot only after this
+                // launch clears the gate. Reference identity avoids relying
+                // on wall-clock timestamps when a resumed run pauses again.
+                snapshots.first { snapshot ->
+                    snapshot !== preLaunchSnapshot || snapshot.status.isTerminal
+                }
+            }
+            snapshots.first { snapshot ->
                 // Keep waiting through live states; a terminal outcome OR a
                 // persisted pause (approval / server-cancel pending) ends
                 // this turn's wait — the paused run resumes via its own
@@ -1223,10 +1298,14 @@ class ChatService(
                 snapshot.status.isTerminal || snapshot.status.isPause
             }
         } catch (cancelled: CancellationException) {
-            runner.cancel(handle.runId)
+            activeRunId?.let(runner::cancel)
             throw cancelled
         } finally {
-            activeKernelRuns.update { it - conversationId }
+            activeRunId?.let { runId ->
+                activeKernelRuns.update { current ->
+                    if (current[conversationId] == runId) current - conversationId else current
+                }
+            }
         }
     }
 
@@ -1259,7 +1338,7 @@ class ChatService(
             }
         }
         // check invalid messages
-        val conversation = sanitizeInvalidMessages(initialConversation)
+        val conversation = sanitizeInvalidMessagesForGeneration(initialConversation)
         if (conversation != initialConversation) {
             withConversationWrite { conversationRepo.updateConversation(conversation) }
             replaceSessionWithFullConversation(conversationId, conversation)
@@ -1276,11 +1355,16 @@ class ChatService(
      * [continueGenerationInline] — the launcher's isGenerating guard would
      * swallow the request (the caller's own job is the active one).
      */
-    private suspend fun continueGeneration(conversationId: Uuid, messageRange: ClosedRange<Int>? = null) {
+    private suspend fun continueGeneration(
+        conversationId: Uuid,
+        messageRange: ClosedRange<Int>? = null,
+        expectedPausedRunId: app.amber.core.agent.runtime.AgentRunId? = null,
+    ) {
         launchViaKernel(
             conversationId,
             resumeWithoutNewMessage = true,
             messageRange = messageRange,
+            expectedPausedRunId = expectedPausedRunId,
             expectedRestoreEpoch = captureRestoreEpoch(),
         )
     }
@@ -2173,6 +2257,44 @@ class ChatService(
         _generationDoneFlow.emit(conversationId)
     }
 
+    /**
+     * Re-evaluate one visible conversation after its high-risk approval setting
+     * changes. This is deliberately not a background sweep: it only resumes a
+     * persisted WAITING_USER run under the exact same run id.
+     */
+    suspend fun resumePendingToolsWithCurrentApprovalSettings(conversationId: Uuid) {
+        val session = getOrCreateSession(conversationId)
+        val previousJob = session.getJob()
+        previousJob?.join()
+        // Respect Stop: changing a setting must not revive a cancelled run.
+        if (previousJob?.isCancelled == true) return
+        if (!settingsStore.settingsFlow.value.agentRuntime.autoApproveHighRiskToolCalls) return
+        if (!useDurableRuntime()) return
+        val waitingRun = runTerminalStore?.activeForConversation(conversationId.toString())
+            ?.takeIf { it.state == RunTerminalState.WAITING_USER }
+            ?: return
+        val expectedRunId = app.amber.core.agent.runtime.AgentRunId(waitingRun.runId)
+        if (!isExpectedWaitingUserRun(waitingRun, conversationId, expectedRunId)) return
+        val conversation = ensureFullConversationLoaded(conversationId)
+        val pendingTools = conversation.currentMessages.lastOrNull()?.getTools()
+            ?.filter { it.isPending }
+            .orEmpty()
+        // ask_user remains an explicit human interaction. Do not re-arm a
+        // mixed approval batch from a global setting; the kernel independently
+        // rechecks the policy before any execution.
+        if (
+            pendingTools.isEmpty() ||
+            pendingTools.any { tool ->
+                tool.toolName == ASK_USER_TOOL_NAME ||
+                    tool.metadata?.get("run_id")?.jsonPrimitive?.contentOrNull != waitingRun.runId
+            }
+        ) return
+        continueGeneration(
+            conversationId = conversationId,
+            expectedPausedRunId = expectedRunId,
+        )
+    }
+
     fun approvePendingAutoApprovableTools(conversationId: Uuid) {
         val session = getOrCreateSession(conversationId)
         if (session.isGenerating) return
@@ -2470,32 +2592,6 @@ class ChatService(
                 prefetchingOlder = false,
             )
         )
-    }
-
-    private fun sanitizeInvalidMessages(conversation: Conversation): Conversation {
-        val validNodes = conversation.messageNodes.mapNotNull { node ->
-            val currentTools = node.currentMessage.getTools()
-            val unresolved = currentTools.filterNot { it.isExecuted }
-            val candidate = if (unresolved.isEmpty() || unresolved.any {
-                    it.approvalState.canResumeToolExecution()
-                }
-            ) {
-                node
-            } else {
-                node.copy(
-                    messages = node.messages.filterNot { it.id == node.currentMessage.id },
-                    selectIndex = (node.selectIndex - 1).coerceAtLeast(0),
-                )
-            }
-
-            if (candidate.messages.isEmpty()) return@mapNotNull null
-            if (candidate.selectIndex in candidate.messages.indices) {
-                candidate
-            } else {
-                candidate.copy(selectIndex = 0)
-            }
-        }
-        return conversation.copy(messageNodes = validNodes)
     }
 
     private fun cancelToolByUser(tool: UIMessagePart.Tool): UIMessagePart.Tool {
@@ -3845,6 +3941,23 @@ class ChatService(
     suspend fun stopGeneration(conversationId: Uuid, runId: String? = null) {
         val activeRun = activeKernelRuns.value[conversationId]
         if (runId != null && activeRun != null && activeRun.value != runId) return
+        val sessionJob = sessions[conversationId]?.getJob()
+        // A WAITING_USER pause intentionally releases both the session job
+        // and the active-kernel map. For a UI Stop only, recover that one
+        // same-conversation durable owner; notification Stops retain their
+        // explicit runId ownership contract.
+        val pausedFallbackRunId = if (runId == null && activeRun == null && sessionJob?.isActive != true) {
+            runTerminalStore?.activeForConversation(conversationId.toString())
+                ?.takeIf {
+                    it.conversationId == conversationId.toString() &&
+                        it.state == RunTerminalState.WAITING_USER &&
+                        it.finishedAtMs == null
+                }
+                ?.runId
+        } else {
+            null
+        }
+        val targetRunId = runId ?: activeRun?.value ?: pausedFallbackRunId
         // P6-01: when the run has a stored server-side response, cancel it
         // server-side FIRST and await a decidable outcome — before cancelling
         // the local job, so onCompletion sees the decision. A cancel that
@@ -3852,10 +3965,10 @@ class ChatService(
         // pretend cancelled); recovery settles it later.
         var serverCancelUnconfirmed = false
         val stopCancel = storedResponseStopCancel
-        val durableStopEnabled = runId != null && durableRuntimeForStop()
+        val durableStopEnabled = targetRunId != null && durableRuntimeForStop()
         if (durableStopEnabled) {
             val activeRun = runTerminalStore?.activeForConversation(conversationId.toString())
-            val requestedRunId = runId!!
+            val requestedRunId = targetRunId!!
             val terminalOwnsRun = activeRun != null &&
                 !activeRun.state.isTerminal &&
                 activeRun.conversationId == conversationId.toString() &&
@@ -3867,69 +3980,81 @@ class ChatService(
                 Log.w(
                     TAG,
                     "stopGeneration: refusing server cancel for unowned run " +
-                        "conversation=$conversationId runId=$runId",
+                        "conversation=$conversationId runId=$targetRunId",
                 )
                 return
             }
         }
         if (
             durableStopEnabled &&
-            storedResponseToggleOnForRun(runId!!) &&
+            storedResponseToggleOnForRun(targetRunId!!) &&
             stopCancel != null
         ) {
-            runCatching { stopCancel.cancelStored(runId) }
+            runCatching { stopCancel.cancelStored(targetRunId!!) }
                 .onSuccess { decidable ->
                     if (!decidable) serverCancelUnconfirmed = true
                 }
                 .onFailure { error ->
-                    Log.w(TAG, "stopGeneration: server cancel failed for run $runId", error)
+                    Log.w(TAG, "stopGeneration: server cancel failed for run $targetRunId", error)
                     serverCancelUnconfirmed = true
                 }
         }
         if (serverCancelUnconfirmed) {
-            pendingServerCancelFailures.add(runId)
+            pendingServerCancelFailures.add(targetRunId!!)
         }
         val activeKernelRun = activeKernelRuns.value[conversationId]
-        val cancelledByOwner = if (runId != null) {
-            runOwnershipRegistry?.cancel(runId = runId, conversationId = conversationId.toString()) == true
+        val cancelledByOwner = targetRunId != null &&
+            runOwnershipRegistry?.cancel(
+                runId = targetRunId,
+                conversationId = conversationId.toString(),
+            ) == true
+        // UI Stop remains conversation-scoped even when it resolved the
+        // persisted pause above; do not lose the session-job cancellation.
+        val cancelledBySession = if (runId == null && sessionJob != null) {
+            sessionJob.cancel()
+            runCatching { sessionJob.join() }
+            true
         } else {
-            val job = sessions[conversationId]?.getJob()
-            if (job != null) {
-                job.cancel()
-                runCatching { job.join() }
-                true
-            } else {
-                false
-            }
+            false
         }
         // Kernel-dispatched runs are owned by the AgentRunner, not the
         // session job or the ownership registry — cancel through the runner;
         // its CancellationException path settles the durable records.
-        val cancelledKernelRun = activeKernelRun
-            ?.takeIf { runId == null || it.value == runId }
-            ?.let { kernelRunId ->
-                agentRunner?.cancel(kernelRunId)
-                true
-            }
-            ?: false
+        val kernelRunId = activeKernelRun
+            ?.takeIf { targetRunId == null || it.value == targetRunId }
+            ?: targetRunId
+                ?.takeIf { candidate ->
+                    runTerminalStore?.activeForConversation(conversationId.toString())?.let { terminal ->
+                        terminal.runId == candidate &&
+                            terminal.conversationId == conversationId.toString() &&
+                            !terminal.state.isTerminal
+                    } == true
+                }
+                ?.let { app.amber.core.agent.runtime.AgentRunId(it) }
+        val cancelledKernelRun = kernelRunId?.let { candidate ->
+            // AgentRunner preserves a cancel intent if its launch gate has
+            // not registered the job yet, which closes Stop vs auto-resume.
+            agentRunner?.cancel(candidate)
+            true
+        } ?: false
         // WAITING_USER has no active generation Job by design: onCompletion
         // releases the in-memory owner while the persisted terminal keeps the
         // approval resumable. Notification Stop therefore falls back to the
         // same run-scoped durable owner, with conversation + state checked
         // atomically so a stale or cross-conversation runId cannot stop work.
-        val cancelledPersistedWaitingRun = runId != null &&
+        val cancelledPersistedWaitingRun = targetRunId != null &&
             !cancelledByOwner &&
             runTerminalStore?.cancelWaitingUser(
-                runId = runId,
+                runId = targetRunId,
                 conversationId = conversationId.toString(),
             ) == true
-        val cancelled = cancelledByOwner || cancelledPersistedWaitingRun || cancelledKernelRun
+        val cancelled = cancelledByOwner || cancelledBySession || cancelledPersistedWaitingRun || cancelledKernelRun
         if (!cancelled) {
             if (serverCancelUnconfirmed) {
                 // Nothing local to cancel — the flag has no consumer; drop it.
-                pendingServerCancelFailures.remove(runId)
+                targetRunId?.let(pendingServerCancelFailures::remove)
             }
-            Log.i(TAG, "stopGeneration: nothing to cancel conversation=$conversationId runId=$runId")
+            Log.i(TAG, "stopGeneration: nothing to cancel conversation=$conversationId runId=$targetRunId")
             return
         }
         if (cancelledPersistedWaitingRun) {
@@ -3941,7 +4066,7 @@ class ChatService(
             // forever (replayUnfinished deliberately skips pause states).
             runCatching {
                 agentEventStore?.transitionRun(
-                    app.amber.core.agent.runtime.AgentRunId(runId!!),
+                    app.amber.core.agent.runtime.AgentRunId(targetRunId!!),
                     app.amber.core.agent.runtime.RunStatus.PAUSE_STATES,
                     app.amber.core.agent.runtime.RunStatus.CANCELLED,
                     reason = "user_stop",
@@ -3951,7 +4076,7 @@ class ChatService(
             // (nested approval checkpoint). Cold-start recovery skips terminal
             // rows, so classify the effect here or a non-idempotent tool's
             // unknown outcome is never surfaced (Step 3-5).
-            runCatching { runRecovery?.reconcileStartedEffects(runId!!) }
+            runCatching { runRecovery?.reconcileStartedEffects(targetRunId!!) }
             runCatching { refreshOutcomeUnknown() }
         }
         cancelLiveUpdateNotification(conversationId)
@@ -4091,6 +4216,47 @@ class ChatService(
             }
         )
     )
+}
+
+/** Exact durable owner accepted by settings-driven approval recovery. */
+internal fun isExpectedWaitingUserRun(
+    terminal: RunTerminal?,
+    conversationId: Uuid,
+    expectedRunId: app.amber.core.agent.runtime.AgentRunId,
+): Boolean =
+    terminal?.runId == expectedRunId.value &&
+        terminal.conversationId == conversationId.toString() &&
+        terminal.state == RunTerminalState.WAITING_USER &&
+        terminal.finishedAtMs == null
+
+/** Drop only genuinely invalid unresolved tool messages before a new turn. */
+internal fun sanitizeInvalidMessagesForGeneration(conversation: Conversation): Conversation {
+    val validNodes = conversation.messageNodes.mapNotNull { node ->
+        val currentTools = node.currentMessage.getTools()
+        val unresolved = currentTools.filterNot { it.isExecuted }
+        val candidate = if (unresolved.isEmpty() || unresolved.any {
+                // A Pending tool is a valid, durable approval checkpoint.
+                // DefaultRunKernel re-evaluates it against the current policy
+                // before execution; dropping it would make approval unreachable.
+                it.isPending || it.approvalState.canResumeToolExecution()
+            }
+        ) {
+            node
+        } else {
+            node.copy(
+                messages = node.messages.filterNot { it.id == node.currentMessage.id },
+                selectIndex = (node.selectIndex - 1).coerceAtLeast(0),
+            )
+        }
+
+        if (candidate.messages.isEmpty()) return@mapNotNull null
+        if (candidate.selectIndex in candidate.messages.indices) {
+            candidate
+        } else {
+            candidate.copy(selectIndex = 0)
+        }
+    }
+    return conversation.copy(messageNodes = validNodes)
 }
 
 private fun Conversation.findToolName(toolCallId: String): String? =

@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -51,26 +52,37 @@ internal fun ProviderFileImportPreview(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        containerColor = t.bg,
+        containerColor = t.raised,
         dragHandle = { ProviderSheetGrabber() },
     ) {
-        Column(Modifier.fillMaxWidth().fillMaxHeight(0.8f)) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .fillMaxHeight(0.82f)
+                .padding(horizontal = 16.dp),
+        ) {
             Text(
                 stringResource(R.string.provider_file_import_title),
                 style = type.screenTitle,
                 color = t.ink,
-                modifier = Modifier.padding(horizontal = 18.dp, vertical = 8.dp),
+                modifier = Modifier.padding(top = 4.dp, bottom = 2.dp),
             )
             Text(
                 stringResource(R.string.provider_file_import_hint),
                 style = type.secondary,
                 color = t.ink3,
-                modifier = Modifier.padding(horizontal = 18.dp, vertical = 8.dp),
+                modifier = Modifier.padding(bottom = 8.dp),
             )
-            LazyColumn(Modifier.weight(1f)) {
+            LazyColumn(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth(),
+            ) {
                 itemsIndexed(providers) { index, provider ->
                     Row(
-                        Modifier.fillMaxWidth()
+                        Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 64.dp)
                             .toggleable(
                                 value = index in selected,
                                 enabled = !saving,
@@ -79,7 +91,7 @@ internal fun ProviderFileImportPreview(
                                     selected = if (checked) selected + index else selected - index
                                 },
                             )
-                            .padding(horizontal = 12.dp, vertical = 6.dp),
+                            .padding(horizontal = 2.dp, vertical = 4.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {

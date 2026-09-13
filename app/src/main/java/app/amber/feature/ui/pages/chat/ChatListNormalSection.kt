@@ -13,7 +13,6 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -450,9 +449,8 @@ internal fun ChatListNormal(
         )
     }
 
-    // 原稿的消息区保持 base bg，只有消息卡片和工具卡使用 surface 层次；
-    // 这样深浅主题都能维持气泡与画布的对比，不会把整段时间线铺成一张卡片。
-    val backgroundColor = app.amber.feature.ui.theme.LocalAmberTokens.current.bg
+    // ChatPage owns the canvas and bloom; leave the timeline transparent so its texture
+    // stays visible between opaque message/tool cards without changing their theme tokens.
     val tailIndicatorReserveVisible = showBottomFollowAnimation &&
         (
             timelineLoading ||
@@ -479,8 +477,7 @@ internal fun ChatListNormal(
     }
     Box(
         modifier = Modifier
-            .fillMaxSize()
-            .background(backgroundColor),
+            .fillMaxSize(),
     ) {
         val sessionVisibility = remember(conversation.id) {
             MutableTransitionState(false).apply { targetState = true }

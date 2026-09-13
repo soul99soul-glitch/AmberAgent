@@ -79,18 +79,18 @@ fun ProviderTemplatePickerSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
         sheetGesturesEnabled = false,
-        containerColor = t.bg,
+        containerColor = t.raised,
         dragHandle = { ProviderSheetGrabber() },
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .fillMaxHeight(0.92f)
-                .padding(horizontal = 18.dp),
+                .padding(horizontal = 16.dp),
         ) {
             Text(
                 text = stringResource(R.string.setting_provider_page_add_provider),
-                style = type.screenTitle.copy(fontSize = 22.sp),
+                style = type.screenTitle,
                 color = t.ink,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,

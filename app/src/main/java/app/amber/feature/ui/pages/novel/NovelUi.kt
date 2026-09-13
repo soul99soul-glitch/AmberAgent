@@ -458,12 +458,12 @@ fun NovelIconCircle(
     Box(
         modifier = modifier
             .size(40.dp)
-            .clip(RoundedCornerShape(12.dp))
+            .clip(CircleShape)
             .background(if (accent) tokens.accent.copy(alpha = 0.12f) else workspace.row)
             .border(
                 1.dp,
                 if (accent) tokens.accent.copy(alpha = 0.22f) else workspace.hairline,
-                RoundedCornerShape(12.dp),
+                CircleShape,
             ),
         contentAlignment = Alignment.Center,
     ) {

@@ -977,6 +977,7 @@ fun ChatInput(
                         .height(44.dp)
                         .clip(CircleShape)
                         .background(tokens.surface2)
+                        .border(BorderStroke(1.dp, tokens.line), CircleShape)
                         .animateContentSize(animationSpec = tween(220, easing = FastOutSlowInEasing)),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
@@ -990,8 +991,9 @@ fun ChatInput(
                         Icon(
                             imageVector = Lucide.Plus,
                             contentDescription = stringResource(R.string.more_options),
-                            // 与发送按钮图标同色（浅灰 ink3），不再用更深的 ink2
-                            tint = if (attachmentsExpanded) chatTheme.accent else tokens.ink3,
+                            // Collapsed attachment entry stays neutral; the open state uses the
+                            // active accent to make the expanded affordance easy to scan.
+                            tint = if (attachmentsExpanded) chatTheme.accent else tokens.ink2,
                             modifier = Modifier
                                 .size(24.dp)
                                 .graphicsLayer {

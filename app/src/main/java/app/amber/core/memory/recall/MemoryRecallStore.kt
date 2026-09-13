@@ -191,7 +191,9 @@ class MemoryRecallStore(
             var used = 0
             for (selection in this) {
                 val cost = selection.record.content.length + 32
-                if (selected.isNotEmpty() && used + cost > maxChars) continue
+                // Skip records that exceed the remaining prompt budget; this
+                // also covers an oversized first record without mutating it.
+                if (used + cost > maxChars) continue
                 selected += selection
                 used += cost
                 if (selected.size >= maxItems) break

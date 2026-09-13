@@ -5,20 +5,18 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Button
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -31,30 +29,30 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.composables.icons.lucide.Lucide
-import com.composables.icons.lucide.CodeXml
-import com.composables.icons.lucide.DatabaseZap
-import com.composables.icons.lucide.Server
 import app.amber.agent.R
+import app.amber.core.utils.plus
 import app.amber.feature.terminal.AlpineRuntimeInstaller
 import app.amber.feature.terminal.InstallStatus
 import app.amber.feature.terminal.TerminalRuntime
 import app.amber.feature.terminal.TerminalRuntimeKind
 import app.amber.feature.terminal.TermuxRuntimeStatus
-import app.amber.feature.workspace.WorkspaceManager
+import app.amber.feature.ui.components.ds.amberCanvas
 import app.amber.feature.ui.components.nav.BackButton
-import app.amber.feature.ui.components.ds.SectionLabel
-import app.amber.feature.ui.components.ui.CardGroup
 import app.amber.feature.ui.components.ui.WorkspaceTopBar
 import app.amber.feature.ui.components.ui.workspaceColors
-import app.amber.feature.ui.components.ui.Select
 import app.amber.feature.ui.context.LocalToaster
-import app.amber.feature.ui.theme.CustomColors
-import app.amber.core.utils.plus
+import app.amber.feature.ui.theme.LocalAmberType
+import app.amber.feature.workspace.WorkspaceManager
+import com.composables.icons.lucide.ChevronRight
+import com.composables.icons.lucide.CodeXml
+import com.composables.icons.lucide.DatabaseZap
+import com.composables.icons.lucide.EllipsisVertical
+import com.composables.icons.lucide.Lucide
 import com.dokar.sonner.ToastType
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
@@ -112,6 +110,35 @@ fun SettingSandboxPage(
         }
     }
 
+    var workspaceMenu by remember { mutableStateOf(false) }
+    fun chooseWorkspace() {
+        workspaceMutationRunning = true
+        workspaceLauncher.launch(null)
+    }
+    fun clearWorkspace() {
+        workspaceMutationRunning = true
+        scope.launch {
+            try {
+                workspaceManager.clearWorkspace()
+                toaster.show(workspaceClearedToast)
+            } catch (error: Throwable) {
+                if (error is CancellationException) throw error
+                toaster.show(workspaceUpdateFailed.format(error.message ?: error::class.java.simpleName), type = ToastType.Error)
+            } finally {
+                workspaceMutationRunning = false
+            }
+        }
+    }
+    val type = LocalAmberType.current
+    val colors = workspaceColors()
+    val runtimeStatus = installStatus?.let { status ->
+        if (status.success) stringResource(R.string.setting_sandbox_alpine_ready)
+        else stringResource(R.string.setting_sandbox_alpine_failed, status.message)
+    } ?: stringResource(R.string.calculating)
+    val runtimeSummary = installStatus?.let { status ->
+        "Alpine · " + stringResource(if (status.success) R.string.setting_experimental_ready else R.string.setting_experimental_missing)
+    } ?: stringResource(R.string.calculating)
+
     Scaffold(
         topBar = {
             WorkspaceTopBar(
@@ -120,237 +147,160 @@ fun SettingSandboxPage(
                 scrollBehavior = scrollBehavior,
             )
         },
-        modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
-        containerColor = workspaceColors().canvas,
+        modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection).amberCanvas(),
+        containerColor = Color.Transparent,
     ) { innerPadding ->
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
-            contentPadding = innerPadding + PaddingValues(horizontal = SettingPageHorizontalInset, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(22.dp),
+            contentPadding = innerPadding + PaddingValues(horizontal = SettingPageHorizontalInset, vertical = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             item {
-                CardGroup(
-                    title = { SectionLabel(stringResource(R.string.setting_sandbox_workspace_section)) },
-                ) {
-                    item(
-                        leadingContent = { SettingTileIcon(Lucide.DatabaseZap) },
-                        headlineContent = { Text(stringResource(R.string.setting_files_page_workspace_title)) },
-                        supportingContent = {
-                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Text(stringResource(R.string.setting_files_page_workspace_desc))
-                                Text(
-                                    text = if (workspaceState.configured) {
-                                        "${stringResource(R.string.setting_files_page_workspace_selected)}: ${workspaceState.displayName.orEmpty()}"
-                                    } else {
-                                        stringResource(R.string.setting_files_page_workspace_not_set)
-                                    },
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                ) {
-                                    Button(
-                                        onClick = {
-                                            workspaceMutationRunning = true
-                                            workspaceLauncher.launch(null)
-                                        },
-                                        enabled = !workspaceMutationRunning,
-                                        contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp),
-                                    ) {
-                                        Text(
-                                            text = stringResource(R.string.setting_files_page_workspace_choose),
-                                            maxLines = 1,
-                                        )
+                SandboxCard {
+                    SandboxSettingsRow(
+                        title = stringResource(R.string.setting_sandbox_workspace_section),
+                        summary = if (workspaceState.configured) {
+                            workspaceState.displayName?.takeIf { it.isNotBlank() }
+                                ?: stringResource(R.string.setting_files_page_workspace_selected)
+                        } else stringResource(R.string.setting_files_page_workspace_not_set),
+                        leading = Lucide.DatabaseZap,
+                        onClick = ::chooseWorkspace,
+                        enabled = !workspaceMutationRunning,
+                        trailing = {
+                            if (workspaceState.configured) {
+                                Box {
+                                    IconButton(onClick = { workspaceMenu = true }, enabled = !workspaceMutationRunning) {
+                                        Icon(Lucide.EllipsisVertical, stringResource(R.string.skills_page_more_actions), Modifier.size(18.dp))
                                     }
-                                    OutlinedButton(
-                                        onClick = {
-                                            workspaceMutationRunning = true
-                                            scope.launch {
-                                                try {
-                                                    workspaceManager.clearWorkspace()
-                                                    toaster.show(workspaceClearedToast)
-                                                } catch (error: Throwable) {
-                                                    if (error is CancellationException) throw error
-                                                    toaster.show(
-                                                        workspaceUpdateFailed.format(
-                                                            error.message ?: error::class.java.simpleName,
-                                                        ),
-                                                        type = ToastType.Error,
-                                                    )
-                                                } finally {
-                                                    workspaceMutationRunning = false
-                                                }
-                                            }
-                                        },
-                                        enabled = workspaceState.configured && !workspaceMutationRunning,
-                                        contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp),
-                                    ) {
-                                        Text(
-                                            text = stringResource(R.string.setting_files_page_workspace_clear),
-                                            maxLines = 1,
+                                    DropdownMenu(expanded = workspaceMenu, onDismissRequest = { workspaceMenu = false }) {
+                                        DropdownMenuItem(
+                                            text = { Text(stringResource(R.string.setting_files_page_workspace_choose), style = type.body) },
+                                            onClick = { workspaceMenu = false; chooseWorkspace() },
+                                        )
+                                        DropdownMenuItem(
+                                            text = { Text(stringResource(R.string.setting_files_page_workspace_clear), style = type.body) },
+                                            onClick = { workspaceMenu = false; clearWorkspace() },
                                         )
                                     }
                                 }
+                            } else {
+                                Icon(Lucide.ChevronRight, null, Modifier.size(16.dp), tint = colors.muted)
                             }
                         },
                     )
                 }
             }
-
             item {
-                SettingSshProfilesSection(terminalRuntime = terminalRuntime)
-            }
-
-            item {
-                // Runtime section: an inline status block above the operational items.
-                // The previous Alpine + "终端会话" rows were styled like clickable
-                // ListItems but had no action — confusing affordance. Now the install
-                // status sits in its own non-interactive Surface (clearly read-only),
-                // and the static "non-PTY shell" implementation note is dropped (users
-                // don't need to know about PTY plumbing).
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Box(modifier = Modifier.padding(start = 2.dp, top = 8.dp, bottom = 4.dp)) {
-                        SettingSectionTitle(stringResource(R.string.setting_sandbox_runtime_section))
-                    }
-                    RuntimeStatusBlock(
-                        installStatus = installStatus,
-                        installing = installingRuntime,
-                        onRefresh = {
-                            scope.launch {
-                                installStatus = alpineRuntimeInstaller.getInstallStatus()
-                            }
-                        },
-                        onInstallOrRepair = {
-                            scope.launch {
-                                installingRuntime = true
-                                try {
-                                    installStatus = alpineRuntimeInstaller.installOrRepair()
-                                } finally {
-                                    installingRuntime = false
-                                }
-                            }
-                        },
-                    )
-                    CardGroup {
-                        item(
-                        leadingContent = { SettingTileIcon(Lucide.CodeXml) },
-                        headlineContent = { Text(stringResource(R.string.setting_sandbox_terminal_runtime_title)) },
-                        supportingContent = { Text(stringResource(R.string.setting_sandbox_terminal_runtime_desc)) },
-                        trailingContent = {
-                            Select(
+                SandboxCard {
+                    SandboxSettingsRow(
+                        title = stringResource(R.string.setting_sandbox_terminal_runtime_title),
+                        leading = Lucide.CodeXml,
+                        trailing = {
+                            SandboxSelect(
                                 options = runtimeOptions,
                                 selectedOption = settings.agentRuntime.terminalDefaultRuntime,
                                 onOptionSelected = { runtime ->
-                                    vm.updateSettings(
-                                        settings.copy(
-                                            agentRuntime = settings.agentRuntime.copy(
-                                                terminalDefaultRuntime = runtime
-                                            )
-                                        )
-                                    )
+                                    vm.updateSettings { current -> current.copy(agentRuntime = current.agentRuntime.copy(terminalDefaultRuntime = runtime)) }
                                 },
-                                optionToString = { runtime ->
-                                    when (runtime) {
-                                        TerminalRuntimeKind.BUILTIN_ALPINE ->
-                                            stringResource(R.string.setting_sandbox_terminal_runtime_builtin)
-
-                                        TerminalRuntimeKind.ANDROID_SHELL ->
-                                            stringResource(R.string.setting_sandbox_terminal_runtime_android_shell)
-
-                                        TerminalRuntimeKind.TERMUX_EXTERNAL ->
-                                            stringResource(R.string.setting_sandbox_terminal_runtime_termux)
-
-                                        TerminalRuntimeKind.REMOTE_SSH ->
-                                            stringResource(R.string.setting_sandbox_terminal_runtime_ssh)
-                                    }
-                                },
-                                // V3 ValueChip 内容自适应,
+                                optionToString = { sandboxRuntimeName(it) },
                             )
                         },
                     )
-                    item(
-                        leadingContent = { SettingTileIcon(Lucide.Server) },
-                        headlineContent = { Text(stringResource(R.string.setting_sandbox_terminal_jobs_title)) },
-                        supportingContent = { Text(stringResource(R.string.setting_sandbox_terminal_jobs_desc)) },
-                        trailingContent = {
-                            Select(
-                                options = concurrentJobOptions,
-                                selectedOption = settings.agentRuntime.terminalMaxConcurrentJobs.coerceIn(1, 4),
-                                onOptionSelected = { count ->
-                                    vm.updateSettings(
-                                        settings.copy(
-                                            agentRuntime = settings.agentRuntime.copy(
-                                                terminalMaxConcurrentJobs = count
-                                            )
-                                        )
-                                    )
-                                },
-                                optionToString = { stringResource(R.string.setting_sandbox_terminal_jobs_value, it) },
-                                // V3 ValueChip 内容自适应,
-                            )
-                        },
-                    )
-                    item(
-                        leadingContent = { SettingTileIcon(Lucide.CodeXml) },
-                        headlineContent = { Text(stringResource(R.string.setting_sandbox_terminal_output_title)) },
-                        supportingContent = { Text(stringResource(R.string.setting_sandbox_terminal_output_desc)) },
-                        trailingContent = {
-                            Select(
-                                options = outputTailOptions,
-                                selectedOption = settings.agentRuntime.terminalOutputTailChars,
-                                onOptionSelected = { chars ->
-                                    vm.updateSettings(
-                                        settings.copy(
-                                            agentRuntime = settings.agentRuntime.copy(
-                                                terminalOutputTailChars = chars
-                                            )
-                                        )
-                                    )
-                                },
-                                optionToString = {
-                                    stringResource(R.string.setting_sandbox_terminal_output_value, it / 1024)
-                                },
-                                // V3 ValueChip 内容自适应,
-                            )
-                        },
-                    )
-                    item(
-                        leadingContent = { SettingTileIcon(Lucide.CodeXml) },
-                        headlineContent = { Text(stringResource(R.string.setting_sandbox_terminal_install_timeout_title)) },
-                        supportingContent = { Text(stringResource(R.string.setting_sandbox_terminal_install_timeout_desc)) },
-                        trailingContent = {
-                            Select(
-                                options = installTimeoutOptions,
-                                selectedOption = settings.agentRuntime.terminalInstallTimeoutMs,
-                                onOptionSelected = { timeout ->
-                                    vm.updateSettings(
-                                        settings.copy(
-                                            agentRuntime = settings.agentRuntime.copy(
-                                                terminalInstallTimeoutMs = timeout
-                                            )
-                                        )
-                                    )
-                                },
-                                optionToString = {
-                                    stringResource(R.string.setting_sandbox_terminal_install_timeout_value, it / 60_000L)
-                                },
-                                // V3 ValueChip 内容自适应,
-                            )
-                        },
-                    )
-                    item(
-                        leadingContent = { SettingTileIcon(Lucide.Server) },
-                        headlineContent = { Text(stringResource(R.string.setting_sandbox_termux_title)) },
-                        supportingContent = {
-                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Text(termuxStatus?.message ?: stringResource(R.string.calculating))
-                                OutlinedButton(onClick = { termuxProbeKey++ }) {
-                                    Text(stringResource(R.string.setting_sandbox_termux_probe))
+                }
+            }
+            item {
+                SettingSshProfilesSection(
+                    terminalRuntime = terminalRuntime,
+                    moreBusy = installingRuntime,
+                ) {
+                    SandboxDisclosure(
+                        title = stringResource(R.string.setting_chat_storage_maintenance),
+                        summary = if (installingRuntime) stringResource(R.string.setting_sandbox_runtime_installing) else runtimeSummary,
+                        forceExpanded = installingRuntime,
+                    ) {
+                        RuntimeStatusBlock(
+                            statusText = runtimeStatus,
+                            failed = installStatus?.success == false,
+                            installing = installingRuntime,
+                            onRefresh = { scope.launch { installStatus = alpineRuntimeInstaller.getInstallStatus() } },
+                            onInstallOrRepair = {
+                                scope.launch {
+                                    installingRuntime = true
+                                    try { installStatus = alpineRuntimeInstaller.installOrRepair() }
+                                    finally { installingRuntime = false }
                                 }
-                            }
-                        },
-                    )
+                            },
+                        )
+                        HorizontalDivider(Modifier.padding(horizontal = 12.dp), color = colors.hairline.copy(alpha = 0.55f))
+                        SandboxSettingsRow(
+                            title = stringResource(R.string.setting_sandbox_termux_title),
+                            trailing = {
+                                SandboxAction(
+                                    label = stringResource(R.string.setting_sandbox_termux_probe),
+                                    onClick = { termuxProbeKey++ },
+                                )
+                            },
+                        )
+                        Text(
+                            termuxStatus?.message ?: stringResource(R.string.calculating),
+                            style = type.secondary,
+                            color = colors.muted,
+                            modifier = Modifier.padding(start = 12.dp, end = 12.dp, bottom = 6.dp),
+                        )
+                    }
+
+                    SandboxDisclosure(
+                        title = stringResource(R.string.setting_provider_page_advanced_settings),
+                        summary = "${stringResource(R.string.setting_sandbox_terminal_jobs_title)} ${settings.agentRuntime.terminalMaxConcurrentJobs} · " +
+                            stringResource(R.string.setting_sandbox_terminal_output_value, settings.agentRuntime.terminalOutputTailChars / 1024),
+                    ) {
+                        SandboxSettingsRow(
+                            title = stringResource(R.string.setting_sandbox_terminal_jobs_title),
+                            trailing = {
+                                SandboxSelect(
+                                    options = concurrentJobOptions,
+                                    selectedOption = settings.agentRuntime.terminalMaxConcurrentJobs.coerceIn(1, 4),
+                                    onOptionSelected = { count ->
+                                        vm.updateSettings { current -> current.copy(agentRuntime = current.agentRuntime.copy(terminalMaxConcurrentJobs = count)) }
+                                    },
+                                    optionToString = { stringResource(R.string.setting_sandbox_terminal_jobs_value, it) },
+                                )
+                            },
+                        )
+                        SandboxSettingsRow(
+                            title = stringResource(R.string.setting_sandbox_terminal_output_title),
+                            trailing = {
+                                SandboxSelect(
+                                    options = outputTailOptions,
+                                    selectedOption = settings.agentRuntime.terminalOutputTailChars,
+                                    onOptionSelected = { count ->
+                                        vm.updateSettings { current -> current.copy(agentRuntime = current.agentRuntime.copy(terminalOutputTailChars = count)) }
+                                    },
+                                    optionToString = { stringResource(R.string.setting_sandbox_terminal_output_value, it / 1024) },
+                                )
+                            },
+                        )
+                        SandboxSettingsRow(
+                            title = stringResource(R.string.setting_sandbox_terminal_install_timeout_title),
+                            trailing = {
+                                SandboxSelect(
+                                    options = installTimeoutOptions,
+                                    selectedOption = settings.agentRuntime.terminalInstallTimeoutMs,
+                                    onOptionSelected = { timeout ->
+                                        vm.updateSettings { current -> current.copy(agentRuntime = current.agentRuntime.copy(terminalInstallTimeoutMs = timeout)) }
+                                    },
+                                    optionToString = { stringResource(R.string.setting_sandbox_terminal_install_timeout_value, it / 60_000L) },
+                                )
+                            },
+                        )
+                        Text(
+                            stringResource(R.string.setting_sandbox_terminal_runtime_desc) + "\n" +
+                                stringResource(R.string.setting_sandbox_terminal_jobs_desc) + "\n" +
+                                stringResource(R.string.setting_sandbox_terminal_output_desc),
+                            style = type.secondary,
+                            color = colors.muted,
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                        )
                     }
                 }
             }
@@ -358,79 +308,45 @@ fun SettingSandboxPage(
     }
 }
 
-/**
- * Lightweight status block above the operational items in the Runtime section. Entering
- * the page only checks file state; the expensive asset copy/repair path is button-driven.
- */
+@Composable
+private fun sandboxRuntimeName(runtime: TerminalRuntimeKind): String = stringResource(
+    when (runtime) {
+        TerminalRuntimeKind.BUILTIN_ALPINE -> R.string.setting_sandbox_terminal_runtime_builtin
+        TerminalRuntimeKind.ANDROID_SHELL -> R.string.setting_sandbox_terminal_runtime_android_shell
+        TerminalRuntimeKind.TERMUX_EXTERNAL -> R.string.setting_sandbox_terminal_runtime_termux
+        TerminalRuntimeKind.REMOTE_SSH -> R.string.setting_sandbox_terminal_runtime_ssh
+    },
+)
+
+/** Maintenance details stay behind one disclosure; repair remains button-driven. */
 @Composable
 private fun RuntimeStatusBlock(
-    installStatus: InstallStatus?,
+    statusText: String,
+    failed: Boolean,
     installing: Boolean,
     onRefresh: () -> Unit,
     onInstallOrRepair: () -> Unit,
 ) {
-    val isFailed = installStatus?.success == false
-    val text = installStatus?.let { status ->
-        if (status.success) {
-            stringResource(R.string.setting_sandbox_alpine_ready)
-        } else {
-            stringResource(R.string.setting_sandbox_alpine_failed, status.message)
-        }
-    } ?: stringResource(R.string.calculating)
-    Surface(
-        color = if (isFailed) {
-            MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.6f)
-        } else {
-            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
-        },
-        shape = RoundedCornerShape(8.dp),
-        modifier = Modifier.fillMaxWidth(),
+    val colors = workspaceColors()
+    Column(
+        Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        Column(
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            Text(
-                text = text,
-                style = MaterialTheme.typography.bodySmall,
-                color = if (isFailed) {
-                    MaterialTheme.colorScheme.onErrorContainer
-                } else {
-                    MaterialTheme.colorScheme.onSurfaceVariant
-                },
+        Text("Alpine", style = LocalAmberType.current.body)
+        if (failed) Text(statusText, style = LocalAmberType.current.secondary, color = colors.red)
+        Text(
+            stringResource(R.string.setting_sandbox_runtime_repair_note),
+            style = LocalAmberType.current.secondary,
+            color = colors.muted,
+        )
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            SandboxAction(stringResource(R.string.setting_sandbox_runtime_recheck), onRefresh, enabled = !installing)
+            SandboxAction(
+                label = stringResource(if (installing) R.string.setting_sandbox_runtime_installing else R.string.setting_sandbox_runtime_install_repair),
+                onClick = onInstallOrRepair,
+                enabled = !installing,
+                primary = true,
             )
-            Text(
-                text = stringResource(R.string.setting_sandbox_runtime_repair_note),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                OutlinedButton(
-                    onClick = onRefresh,
-                    enabled = !installing,
-                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
-                    modifier = Modifier.weight(1f),
-                ) {
-                    Text(stringResource(R.string.setting_sandbox_runtime_recheck))
-                }
-                Button(
-                    onClick = onInstallOrRepair,
-                    enabled = !installing,
-                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
-                    modifier = Modifier.weight(1f),
-                ) {
-                    Text(
-                        text = if (installing) {
-                            stringResource(R.string.setting_sandbox_runtime_installing)
-                        } else {
-                            stringResource(R.string.setting_sandbox_runtime_install_repair)
-                        },
-                    )
-                }
-            }
         }
     }
 }

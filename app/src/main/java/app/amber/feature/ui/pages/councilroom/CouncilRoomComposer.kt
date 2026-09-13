@@ -82,6 +82,7 @@ import app.amber.feature.ui.components.ui.workspaceColors
 import app.amber.feature.ui.context.LocalSettings
 import app.amber.feature.ui.context.LocalToaster
 import app.amber.feature.ui.theme.LocalAmberTokens
+import app.amber.feature.ui.theme.LocalAmberType
 import coil3.compose.AsyncImage
 import com.dokar.sonner.ToastType
 import kotlinx.coroutines.Dispatchers
@@ -112,6 +113,7 @@ fun CouncilRoomComposer(
     modifier: Modifier = Modifier,
 ) {
     val tokens = LocalAmberTokens.current
+    val type = LocalAmberType.current
     val filesManager: FilesManager = koinInject()
     val scope = rememberCoroutineScope()
     var textFieldValue by remember { mutableStateOf(TextFieldValue("")) }
@@ -193,7 +195,7 @@ fun CouncilRoomComposer(
                 .imePadding()
                 .navigationBarsPadding()
                 .padding(bottom = 6.dp)
-                .padding(horizontal = 12.dp)
+                .padding(horizontal = 16.dp)
                 .padding(top = 10.dp),
         ) {
             if (showMentionPopup) {
@@ -245,7 +247,7 @@ fun CouncilRoomComposer(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .heightIn(min = 48.dp),
+                    .heightIn(min = 44.dp),
                 verticalAlignment = Alignment.Bottom,
                 horizontalArrangement = Arrangement.spacedBy(9.dp),
             ) {
@@ -260,7 +262,7 @@ fun CouncilRoomComposer(
                 )
                 Row(
                     modifier = Modifier
-                        .height(46.dp)
+                        .height(44.dp)
                         .clip(CircleShape)
                         .background(tokens.surface2)
                         .animateContentSize(animationSpec = tween(220, easing = FastOutSlowInEasing)),
@@ -268,7 +270,7 @@ fun CouncilRoomComposer(
                 ) {
                     Box(
                         modifier = Modifier
-                            .size(46.dp)
+                            .size(44.dp)
                             .councilPressBounce(attachInteraction)
                             .clip(CircleShape)
                             .clickable(interactionSource = attachInteraction, indication = null) {
@@ -346,7 +348,7 @@ fun CouncilRoomComposer(
                 Row(
                     modifier = Modifier
                         .weight(1f)
-                        .heightIn(min = 46.dp)
+                        .heightIn(min = 44.dp)
                         .clip(pillShape)
                         .background(tokens.surface2)
                         .border(BorderStroke(1.dp, tokens.line), pillShape)
@@ -358,15 +360,15 @@ fun CouncilRoomComposer(
                             value = textFieldValue,
                             onValueChange = { textFieldValue = it },
                             modifier = Modifier.fillMaxWidth(),
-                            textStyle = MaterialTheme.typography.bodyLarge.copy(color = tokens.ink),
+                            textStyle = type.body.copy(color = tokens.ink),
                             cursorBrush = SolidColor(tokens.accent),
                             maxLines = 5,
                             decorationBox = { innerTextField ->
-                                Box(modifier = Modifier.padding(vertical = 9.dp)) {
+                                Box(modifier = Modifier.padding(vertical = 8.dp)) {
                                     if (textFieldValue.text.isEmpty()) {
                                         Text(
                                             text = stringResource(R.string.chat_input_compose_placeholder),
-                                            style = MaterialTheme.typography.bodyLarge,
+                                            style = type.body,
                                             color = tokens.ink3,
                                         )
                                     }
@@ -402,7 +404,7 @@ fun CouncilRoomComposer(
                 )
                 Box(
                     modifier = Modifier
-                        .size(46.dp)
+                    .size(44.dp)
                         .councilPressBounce(sendInteraction)
                         .clip(CircleShape)
                         .background(sendFill)

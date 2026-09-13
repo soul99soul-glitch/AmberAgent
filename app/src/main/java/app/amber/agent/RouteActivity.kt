@@ -145,6 +145,7 @@ import app.amber.feature.board.worker.BoardNotifier
 import app.amber.feature.runtime.RunTerminal
 import app.amber.feature.runtime.RunTerminalStore
 import app.amber.feature.ui.pages.setting.SettingFilesPage
+import app.amber.feature.ui.pages.setting.SettingChatStoragePage
 import app.amber.feature.ui.pages.setting.SettingStoragePage
 import app.amber.feature.ui.pages.setting.SettingMcpPage
 import app.amber.feature.ui.pages.setting.SettingModelPage
@@ -790,6 +791,10 @@ class RouteActivity : ComponentActivity() {
                                 SettingFilesPage()
                             }
 
+                            entry<Screen.SettingChatStorage> {
+                                SettingChatStoragePage()
+                            }
+
                             entry<Screen.SettingStorage> {
                                 SettingStoragePage()
                             }
@@ -1128,6 +1133,9 @@ sealed interface Screen : NavKey {
 
     @Serializable
     data object SettingFiles : Screen
+
+    @Serializable
+    data object SettingChatStorage : Screen
 
     @Serializable
     data object SettingStorage : Screen

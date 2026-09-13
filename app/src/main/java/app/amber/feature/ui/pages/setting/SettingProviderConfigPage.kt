@@ -8,6 +8,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -15,13 +16,16 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -77,16 +81,14 @@ import app.amber.core.utils.openUrl
 import app.amber.core.utils.writeClipboardText
 import app.amber.feature.ui.components.ai.ProviderBalanceText
 import app.amber.feature.ui.components.ds.pressable
+import app.amber.feature.ui.components.ds.BtnInk
 import app.amber.feature.ui.components.ui.SiliconFlowPowerByIcon
 import app.amber.feature.ui.context.LocalToaster
 import app.amber.feature.ui.pages.setting.components.ProviderCard
 import app.amber.feature.ui.pages.setting.components.ProviderCommandButton
 import app.amber.feature.ui.pages.setting.components.ProviderHairline
-import app.amber.feature.ui.pages.setting.components.ProviderIconButton
-import app.amber.feature.ui.pages.setting.components.ProviderLabeledField
 import app.amber.feature.ui.pages.setting.components.ProviderLiveDot
 import app.amber.feature.ui.pages.setting.components.ProviderMonogram
-import app.amber.feature.ui.pages.setting.components.ProviderPillSeg
 import app.amber.feature.ui.pages.setting.components.ProviderSecretField
 import app.amber.feature.ui.pages.setting.components.ProviderSectionLabel
 import app.amber.feature.ui.pages.setting.components.ProviderSegOption
@@ -208,7 +210,7 @@ internal fun ProviderConsole(
     provider: ProviderSetting,
     onEdit: (ProviderSetting) -> Unit,
     modifier: Modifier = Modifier,
-    contentPadding: PaddingValues = PaddingValues(horizontal = 18.dp, vertical = 16.dp),
+    contentPadding: PaddingValues = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
     autoStartOAuth: Boolean = false,
     onAutoStartConsumed: () -> Unit = {},
     onCommit: (ProviderSetting) -> Unit = onEdit,
@@ -216,12 +218,11 @@ internal fun ProviderConsole(
     onModelCandidatesInvalidated: () -> Unit = {},
     actionContent: (@Composable (ProviderSetting) -> Unit)? = null,
 ) {
-    val t = LocalAmberTokens.current
     LazyColumn(
         modifier = modifier
             .fillMaxSize()
             .imePadding()
-            .background(t.bg),
+            .background(Color.Transparent),
         contentPadding = contentPadding,
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
@@ -296,7 +297,7 @@ private fun ProviderConsoleIdentity(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(top = 6.dp, bottom = 14.dp),
+            .padding(start = 14.dp, end = 14.dp, top = 6.dp, bottom = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(13.dp),
     ) {
@@ -320,21 +321,26 @@ private fun ProviderConsoleIdentity(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                ProviderLiveDot(enabled = provider.enabled && provider.hasUsableAuth())
+                val connected = provider.enabled && provider.hasUsableAuth()
+                ProviderConfigStatusPill(
+                    connected = connected,
+                    text = when {
+                        !provider.enabled -> "未启用"
+                        connected -> "已连接"
+                        else -> "未连接"
+                    },
+                )
+                Text("·", style = type.meta, color = t.ink4)
+                ProviderConfigAuthBadge(provider.providerAuthLabel())
+                Text("·", style = type.meta, color = t.ink4)
                 Text(
                     text = stringResource(
-                        if (provider.enabled && provider.hasUsableAuth()) {
-                            R.string.setting_provider_page_connection_summary_connected
-                        } else {
-                            R.string.setting_provider_page_connection_summary_disconnected
-                        },
-                        provider.providerAuthLabel(),
+                        R.string.setting_provider_page_model_count,
                         provider.models.size,
                     ),
                     style = type.meta.copy(fontSize = 10.5.sp),
-                    color = t.ink3,
+                    color = t.ink2,
                     maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
                 )
             }
         }
@@ -344,6 +350,123 @@ private fun ProviderConsoleIdentity(
         )
     }
     ProviderHairline()
+}
+
+/** Provider-config fields follow the reference row pattern: a readable title above a 44dp well. */
+@Composable
+private fun ProviderLabeledField(
+    label: String,
+    modifier: Modifier = Modifier,
+    content: @Composable BoxScope.() -> Unit,
+) {
+    val t = LocalAmberTokens.current
+    val type = LocalAmberType.current
+    Column(
+        modifier = modifier.padding(top = 12.dp),
+    ) {
+        Text(
+            text = label,
+            style = type.body.copy(fontWeight = FontWeight.SemiBold),
+            color = t.ink,
+            modifier = Modifier.padding(start = 2.dp, bottom = 7.dp),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Box(Modifier.fillMaxWidth(), content = content)
+    }
+}
+
+@Composable
+private fun <T> ProviderConfigCapsule(
+    options: List<ProviderSegOption<T>>,
+    selected: T,
+    onSelected: (T) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val t = LocalAmberTokens.current
+    val type = LocalAmberType.current
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(CircleShape)
+            .background(t.surface2)
+            .border(1.dp, t.line, CircleShape)
+            .padding(2.dp),
+        horizontalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        options.forEach { option ->
+            val isSelected = option.value == selected
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .height(26.dp)
+                    .clip(CircleShape)
+                    .background(if (isSelected) t.accent else Color.Transparent)
+                    .pressable(onClick = { onSelected(option.value) }),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = option.label,
+                    style = type.secondary.copy(fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold),
+                    color = if (isSelected) t.accentInk else t.ink3,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ProviderConfigStatusPill(
+    connected: Boolean,
+    text: String,
+) {
+    val t = LocalAmberTokens.current
+    val type = LocalAmberType.current
+    val statusColor = if (connected) t.signal else t.ink3
+    Box(
+        modifier = Modifier
+            .clip(CircleShape)
+            .background(if (connected) t.signal.copy(alpha = 0.14f) else t.surface2)
+            .border(1.dp, if (connected) t.signal.copy(alpha = 0.32f) else t.line, CircleShape)
+            .padding(horizontal = 8.dp, vertical = 3.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            ProviderLiveDot(enabled = connected, size = 7.dp)
+            Text(
+                text = text,
+                style = type.meta.copy(fontSize = 10.5.sp, fontWeight = FontWeight.SemiBold),
+                color = statusColor,
+                maxLines = 1,
+            )
+        }
+    }
+}
+
+@Composable
+private fun ProviderConfigAuthBadge(text: String) {
+    val t = LocalAmberTokens.current
+    val type = LocalAmberType.current
+    Box(
+        modifier = Modifier
+            .clip(CircleShape)
+            .background(t.surface2)
+            .border(1.dp, t.line, CircleShape)
+            .padding(horizontal = 8.dp, vertical = 3.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = text,
+            style = type.meta.copy(fontSize = 10.5.sp, fontWeight = FontWeight.SemiBold),
+            color = if (text == "—") t.ink4 else t.ink2,
+            maxLines = 1,
+        )
+    }
 }
 
 @Composable
@@ -356,11 +479,10 @@ private fun ProviderProtocolSection(
         ProviderSegOption(type, type.simpleName ?: "")
     }
     ProviderCard(modifier = Modifier.fillMaxWidth()) {
-        ProviderPillSeg(
+        ProviderConfigCapsule(
             options = options,
             selected = provider::class,
             onSelected = { type -> onEdit(provider.convertTo(type)) },
-            mono = true,
             modifier = Modifier.padding(10.dp),
         )
     }
@@ -377,28 +499,33 @@ private fun ProviderAuthSection(
     onAutoStartConsumed: () -> Unit,
 ) {
     ProviderSectionLabel(stringResource(R.string.setting_provider_page_authentication))
-    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        when (provider) {
-            is ProviderSetting.OpenAI -> OpenAIAuthConsole(
-                provider = provider,
-                onEdit = onEdit,
-                onCommit = onCommit,
-                onModelsFetched = onModelsFetched,
-                onModelCandidatesInvalidated = onModelCandidatesInvalidated,
-                autoStartOAuth = autoStartOAuth,
-                onAutoStartConsumed = onAutoStartConsumed,
-            )
-            is ProviderSetting.Google -> GoogleAuthConsole(
-                provider = provider,
-                onEdit = onEdit,
-                onCommit = onCommit,
-                autoStartOAuth = autoStartOAuth,
-                onAutoStartConsumed = onAutoStartConsumed,
-            )
-            is ProviderSetting.Claude -> ClaudeAuthConsole(
-                provider = provider,
-                onEdit = onEdit,
-            )
+    ProviderCard(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 4.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            when (provider) {
+                is ProviderSetting.OpenAI -> OpenAIAuthConsole(
+                    provider = provider,
+                    onEdit = onEdit,
+                    onCommit = onCommit,
+                    onModelsFetched = onModelsFetched,
+                    onModelCandidatesInvalidated = onModelCandidatesInvalidated,
+                    autoStartOAuth = autoStartOAuth,
+                    onAutoStartConsumed = onAutoStartConsumed,
+                )
+                is ProviderSetting.Google -> GoogleAuthConsole(
+                    provider = provider,
+                    onEdit = onEdit,
+                    onCommit = onCommit,
+                    autoStartOAuth = autoStartOAuth,
+                    onAutoStartConsumed = onAutoStartConsumed,
+                )
+                is ProviderSetting.Claude -> ClaudeAuthConsole(
+                    provider = provider,
+                    onEdit = onEdit,
+                )
+            }
         }
     }
 }
@@ -418,7 +545,7 @@ private fun OpenAIAuthConsole(
         listOf(OpenAIAuthMode.API_KEY, OpenAIAuthMode.GROK_OAUTH)
     } else provider.brand.availableAuthModes()
     if (availableModes.size > 1) {
-        ProviderPillSeg(
+        ProviderConfigCapsule(
             options = availableModes.map { ProviderSegOption(it, it.openAIAuthLabel()) },
             selected = provider.authMode,
             onSelected = { mode ->
@@ -426,7 +553,6 @@ private fun OpenAIAuthConsole(
                     onEdit(provider.switchOpenAIAuthMode(mode))
                 }
             },
-            mono = true,
         )
     }
     if (provider.authMode !in availableModes) {
@@ -475,7 +601,7 @@ private fun GoogleAuthConsole(
     autoStartOAuth: Boolean,
     onAutoStartConsumed: () -> Unit,
 ) {
-    ProviderPillSeg(
+    ProviderConfigCapsule(
         options = listOf(
             ProviderSegOption(GoogleAuthMode.API_KEY, "API Key"),
             ProviderSegOption(GoogleAuthMode.GEMINI_CODE_ASSIST_OAUTH, "Code Assist"),
@@ -483,7 +609,6 @@ private fun GoogleAuthConsole(
         ),
         selected = provider.authMode,
         onSelected = { mode -> onEdit(provider.switchGoogleAuthMode(mode)) },
-        mono = true,
     )
 
     when (provider.authMode) {
@@ -844,33 +969,66 @@ private fun ProviderConsoleActions(
         modifier = Modifier
             .fillMaxWidth()
             .padding(top = 8.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {
         Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+            horizontalArrangement = Arrangement.Start,
             verticalAlignment = Alignment.CenterVertically,
         ) {
             ProviderConnectionTester(internalProvider = provider)
-            Spacer(Modifier.weight(1f))
-            ProviderIconButton(
-                imageVector = Lucide.Trash2,
-                contentDescription = stringResource(R.string.delete),
-                tint = t.ink3,
-                onClick = onDelete,
-            )
-            ProviderIconButton(
-                imageVector = Lucide.RotateCw,
-                contentDescription = stringResource(R.string.setting_model_page_reset_to_default),
-                tint = if (provider.isUsingDefaultBaseUrl()) t.ink4 else t.ink3,
-                onClick = { if (!provider.isUsingDefaultBaseUrl()) onReset() },
+            Text(
+                text = stringResource(R.string.setting_provider_page_test_connection),
+                style = LocalAmberType.current.secondary.copy(fontWeight = FontWeight.SemiBold),
+                color = t.ink2,
+                modifier = Modifier.padding(start = 2.dp),
             )
         }
-        ProviderCommandButton(
+        ProviderConfigQuietAction(
+            text = stringResource(R.string.setting_model_page_reset_to_default),
+            enabled = !provider.isUsingDefaultBaseUrl(),
+            onClick = onReset,
+        )
+        ProviderConfigQuietAction(
+            text = stringResource(R.string.delete),
+            enabled = true,
+            onClick = onDelete,
+            danger = true,
+        )
+        BtnInk(
             text = stringResource(R.string.setting_provider_page_save),
-            accent = true,
             onClick = onSave,
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 8.dp),
+        )
+    }
+}
+
+@Composable
+private fun ProviderConfigQuietAction(
+    text: String,
+    enabled: Boolean = true,
+    danger: Boolean = false,
+    onClick: () -> Unit,
+) {
+    val t = LocalAmberTokens.current
+    val type = LocalAmberType.current
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 48.dp)
+            .then(if (enabled) Modifier.pressable(onClick = onClick) else Modifier),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = text,
+            style = type.secondary.copy(fontWeight = FontWeight.SemiBold),
+            color = when {
+                !enabled -> t.ink4
+                danger -> MaterialTheme.colorScheme.error
+                else -> t.ink2
+            },
         )
     }
 }

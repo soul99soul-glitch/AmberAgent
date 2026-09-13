@@ -134,9 +134,8 @@ class RunRecoveryService(
     }
 
     private suspend fun recoverInternal() {
-        // M1 retention: terminal effects older than 7 days are never needed
-        // again (no replay, no reconciliation) — prune them at cold start so
-        // the ledger does not keep full result payloads forever.
+        // Keep unfinished-run effects for replay and deduplication; prune
+        // other old terminal effects. FINISHED alone does not end replay.
         runCatching { ledger.deleteTerminalOlderThan(TERMINAL_EFFECT_RETENTION_MS) }
             .onFailure { error ->
                 Log.w(TAG, "recover: terminal effect cleanup failed", error)

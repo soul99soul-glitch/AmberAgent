@@ -1,8 +1,10 @@
 package app.amber.feature.ui.pages.setting
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -28,12 +30,11 @@ import com.composables.icons.lucide.RefreshCw
 import com.composables.icons.lucide.Sparkles
 import app.amber.agent.R
 import app.amber.agent.Screen
+import app.amber.feature.ui.components.ds.amberCanvas
 import app.amber.core.settings.AgentOperationPreviewMode
 import app.amber.core.settings.MAX_AGENT_TOOL_LOOP_STEPS
 import app.amber.core.settings.MIN_AGENT_TOOL_LOOP_STEPS
 import app.amber.feature.ui.components.nav.BackButton
-import app.amber.feature.ui.components.ds.SectionLabel
-import app.amber.feature.ui.components.ui.CardGroup
 import app.amber.feature.ui.components.ui.WorkspaceTopBar
 import app.amber.feature.ui.components.ui.workspaceColors
 import app.amber.feature.ui.components.ui.Select
@@ -62,17 +63,19 @@ fun SettingAgentExecutionPage(vm: SettingVM = koinViewModel()) {
                 scrollBehavior = scrollBehavior,
             )
         },
-        modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
-        containerColor = workspaceColors().canvas,
+        modifier = Modifier
+            .nestedScroll(scrollBehavior.nestedScrollConnection)
+            .amberCanvas(),
+        containerColor = androidx.compose.ui.graphics.Color.Transparent,
     ) { innerPadding ->
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
             contentPadding = innerPadding + PaddingValues(horizontal = SettingPageHorizontalInset, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(22.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             item {
-                CardGroup(
-                    title = { SectionLabel(stringResource(R.string.setting_agent_execution_environment_section)) },
+                SettingCardGroup(
+                    title = stringResource(R.string.setting_agent_execution_environment_section),
                 ) {
                     item(
                         onClick = { navController.navigate(Screen.SettingSandbox) },
@@ -91,40 +94,45 @@ fun SettingAgentExecutionPage(vm: SettingVM = koinViewModel()) {
                 }
             }
             item {
-                CardGroup(
-                    title = { SectionLabel(stringResource(R.string.setting_agent_execution_display_section)) },
+                SettingCardGroup(
+                    title = stringResource(R.string.setting_agent_execution_display_section),
                 ) {
                     item(
                         leadingContent = { SettingTileIcon(Lucide.SearchCheck) },
-                        supportingContent = { Text(stringResource(R.string.setting_page_agent_operation_preview_desc)) },
                         headlineContent = { Text(stringResource(R.string.setting_page_agent_operation_preview)) },
-                        trailingContent = {
-                            Select(
-                                options = operationPreviewModeOptions,
-                                selectedOption = settings.agentRuntime.operationPreviewMode,
-                                onOptionSelected = { mode ->
-                                    vm.updateSettings(
-                                        settings.copy(
-                                            agentRuntime = settings.agentRuntime.copy(
-                                                operationPreviewMode = mode
+                        supportingContent = {
+                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Text(stringResource(R.string.setting_page_agent_operation_preview_desc))
+                                SettingSegmentedChoice(
+                                    options = operationPreviewModeOptions,
+                                    selected = settings.agentRuntime.operationPreviewMode,
+                                    onSelected = { mode ->
+                                        vm.updateSettings(
+                                            settings.copy(
+                                                agentRuntime = settings.agentRuntime.copy(
+                                                    operationPreviewMode = mode
+                                                )
                                             )
                                         )
-                                    )
-                                },
-                                optionToString = { mode ->
-                                    when (mode) {
-                                        AgentOperationPreviewMode.ALWAYS ->
-                                            stringResource(R.string.setting_page_agent_operation_preview_always)
+                                    },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    label = { mode ->
+                                        Text(
+                                            when (mode) {
+                                                AgentOperationPreviewMode.ALWAYS ->
+                                                    stringResource(R.string.setting_page_agent_operation_preview_always)
 
-                                        AgentOperationPreviewMode.AUTO ->
-                                            stringResource(R.string.setting_page_agent_operation_preview_auto)
+                                                AgentOperationPreviewMode.AUTO ->
+                                                    stringResource(R.string.setting_page_agent_operation_preview_auto)
 
-                                        AgentOperationPreviewMode.HIDDEN ->
-                                            stringResource(R.string.setting_page_agent_operation_preview_hidden)
-                                    }
-                                },
-                                // V3 ValueChip 内容自适应,
-                            )
+                                                AgentOperationPreviewMode.HIDDEN ->
+                                                    stringResource(R.string.setting_page_agent_operation_preview_hidden)
+                                            },
+                                            maxLines = 1,
+                                        )
+                                    },
+                                )
+                            }
                         },
                     )
                     item(
@@ -177,8 +185,8 @@ fun SettingAgentExecutionPage(vm: SettingVM = koinViewModel()) {
             }
 
             item {
-                CardGroup(
-                    title = { SectionLabel(stringResource(R.string.setting_agent_execution_live_status_section)) },
+                SettingCardGroup(
+                    title = stringResource(R.string.setting_agent_execution_live_status_section),
                 ) {
                     item(
                         leadingContent = { SettingTileIcon(Lucide.Megaphone) },
@@ -222,8 +230,8 @@ fun SettingAgentExecutionPage(vm: SettingVM = koinViewModel()) {
             }
 
             item {
-                CardGroup(
-                    title = { SectionLabel(stringResource(R.string.setting_agent_execution_live_mode_section)) },
+                SettingCardGroup(
+                    title = stringResource(R.string.setting_agent_execution_live_mode_section),
                 ) {
                     item(
                         leadingContent = { SettingTileIcon(Lucide.Sparkles) },
@@ -321,8 +329,8 @@ fun SettingAgentExecutionPage(vm: SettingVM = koinViewModel()) {
             }
 
             item {
-                CardGroup(
-                    title = { SectionLabel(stringResource(R.string.setting_agent_execution_stability_section)) },
+                SettingCardGroup(
+                    title = stringResource(R.string.setting_agent_execution_stability_section),
                 ) {
                     item(
                         leadingContent = { SettingTileIcon(Lucide.CodeXml) },

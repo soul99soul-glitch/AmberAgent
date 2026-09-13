@@ -1,5 +1,7 @@
 package app.amber.feature.ui.pages.novel
 
+import androidx.compose.foundation.clickable
+
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -27,7 +29,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
@@ -50,8 +51,11 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -61,6 +65,7 @@ import app.amber.agent.Screen
 import app.amber.feature.novelworkspace.NovelWorkspaceBookExport
 import app.amber.feature.novelworkspace.NovelWorkspaceProjectSummary
 import app.amber.feature.ui.components.ds.AmberCard
+import app.amber.feature.ui.components.ds.amberCanvas
 import app.amber.feature.ui.components.nav.BackButton
 import app.amber.feature.ui.components.ui.WorkspaceStatusPill
 import app.amber.feature.ui.components.ui.WorkspaceTone
@@ -240,14 +245,16 @@ fun NovelProjectsPage(
     }
 
     Scaffold(
-        containerColor = workspace.canvas,
+        modifier = Modifier.amberCanvas(),
+        containerColor = Color.Transparent,
         topBar = {
             TopAppBar(
+                expandedHeight = 56.dp,
                 title = {
                     Column {
                         Text(
                             stringResource(R.string.novel_projects_title),
-                            fontWeight = FontWeight.Bold,
+                            style = type.screenTitle,
                             color = workspace.ink,
                         )
                         Text(
@@ -276,13 +283,15 @@ fun NovelProjectsPage(
         floatingActionButton = {
             FloatingActionButton(
                 onClick = { if (!state.busy) showCreate = true },
-                modifier = Modifier.widthIn(min = 152.dp),
+                modifier = Modifier
+                    .height(56.dp)
+                    .widthIn(min = 152.dp),
                 containerColor = tokens.accent,
                 contentColor = tokens.accentInk,
-                shape = CircleShape,
+                shape = RoundedCornerShape(999.dp),
             ) {
                 Row(
-                    modifier = Modifier.padding(horizontal = 18.dp),
+                    modifier = Modifier.padding(horizontal = 22.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
@@ -371,7 +380,10 @@ fun NovelProjectsPage(
                             item {
                                 NovelProjectsEyebrow(count = state.projects.size)
                             }
-                            itemsIndexed(state.projects, key = { _, project -> project.id }) { index, project ->
+                            itemsIndexed(
+                                state.projects,
+                                key = { _, project -> project.id },
+                            ) { index, project ->
                                 NovelProjectCard(
                                     project = project,
                                     busy = state.busy,
@@ -411,6 +423,7 @@ fun NovelProjectsPage(
     deleteTarget?.let { target ->
         AlertDialog(
             onDismissRequest = { if (!state.busy) deleteTarget = null },
+            shape = RoundedCornerShape(14.dp),
             title = {
                 Text(
                     stringResource(R.string.novel_delete_project_title),
@@ -454,6 +467,7 @@ fun NovelProjectsPage(
         var name by remember(target.id) { mutableStateOf(target.name) }
         AlertDialog(
             onDismissRequest = { if (!state.busy) renameTarget = null },
+            shape = RoundedCornerShape(14.dp),
             title = {
                 Text(
                     stringResource(R.string.novel_rename_project_title),
@@ -494,6 +508,7 @@ fun NovelProjectsPage(
     bookExportTarget?.let { target ->
         AlertDialog(
             onDismissRequest = { bookExportTarget = null },
+            shape = RoundedCornerShape(14.dp),
             containerColor = workspace.paper,
             title = {
                 Text(
@@ -542,7 +557,7 @@ private fun NovelProjectsEyebrow(count: Int) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(top = 20.dp, bottom = 10.dp),
+            .padding(top = 16.dp, bottom = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
@@ -552,14 +567,9 @@ private fun NovelProjectsEyebrow(count: Int) {
             color = tokens.accent,
         )
         Text(
-            text = stringResource(R.string.novel_projects_title),
+            text = stringResource(R.string.novel_projects_count, count),
             style = type.eyebrow,
             color = tokens.ink2,
-        )
-        Text(
-            text = count.toString(),
-            style = type.eyebrow,
-            color = tokens.ink3,
         )
         Box(
             modifier = Modifier
@@ -607,7 +617,7 @@ private fun NovelProjectCard(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            NovelIconCircle(icon = Lucide.BookOpenText)
+            NovelIconCircle(icon = Lucide.BookOpenText, accent = false)
             Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(
                     text = if (project.name.isBlank()) {
@@ -615,7 +625,7 @@ private fun NovelProjectCard(
                     } else {
                         project.name
                     },
-                    style = type.sessionTitle,
+                    style = type.body.copy(fontWeight = FontWeight.SemiBold),
                     color = workspace.ink,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -634,11 +644,20 @@ private fun NovelProjectCard(
                 tone = WorkspaceTone.Neutral,
             )
             Box {
-                NovelIconButton(
-                    icon = Lucide.EllipsisVertical,
-                    contentDescription = stringResource(R.string.novel_more_actions),
-                    onClick = { menuExpanded = true },
-                )
+                Box(
+                    modifier = Modifier
+                        .size(40.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .clickable(role = Role.Button) { menuExpanded = true },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        imageVector = Lucide.EllipsisVertical,
+                        contentDescription = stringResource(R.string.novel_more_actions),
+                        tint = workspace.muted,
+                        modifier = Modifier.size(18.dp),
+                    )
+                }
                 DropdownMenu(
                     expanded = menuExpanded,
                     onDismissRequest = { menuExpanded = false },
@@ -689,6 +708,9 @@ private fun NovelProjectCard(
     }
 
     if (grouped) {
+        // Keep each row virtualized while sharing one visual surface. Matching
+        // outer corners on the first/last row and hairlines between rows gives
+        // the same continuous group without eagerly composing every project.
         val shape = when {
             groupStart && groupEnd -> RoundedCornerShape(14.dp)
             groupStart -> RoundedCornerShape(topStart = 14.dp, topEnd = 14.dp)
@@ -732,6 +754,7 @@ private fun NovelCreateProjectDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
+        shape = RoundedCornerShape(14.dp),
         containerColor = workspace.paper,
         title = {
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {

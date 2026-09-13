@@ -14,13 +14,16 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
@@ -134,6 +137,7 @@ import app.amber.feature.ui.components.ai.ChatInput
 import app.amber.feature.ui.components.ai.SandboxActivitySheet
 import app.amber.feature.ui.components.ai.TopModelMenu
 import app.amber.feature.ui.components.ds.BlinkingCursor
+import app.amber.feature.ui.components.ds.amberCanvas
 import app.amber.feature.ui.components.ds.Hairline
 import app.amber.feature.ui.theme.LocalAmberTokens
 import app.amber.feature.ui.theme.LocalAmberType
@@ -196,6 +200,9 @@ fun ChatPage(
             parametersOf(id.toString())
         }
     )
+    LaunchedEffect(vm) {
+        vm.onChatVisible()
+    }
     val toaster = LocalToaster.current
     val savedToWorkspaceText = stringResource(R.string.chat_page_saved_to_workspace)
     val filesManager: FilesManager = koinInject()
@@ -624,10 +631,9 @@ private fun ChatPageContent(
     // 硬编码 Color.White (WorkspaceStyle.kt:107)，会把 Paper #FDFAF3 / Plain #FFFFFF 都
     // 强行变白，导致用户切到 Paper 看到的还是白底。
     val chatThemeForBg = app.amber.feature.ui.pages.chat.LocalChatTheme.current
-    val chatThemeBg = chatThemeForBg.bg
     // Graphite TopModelMenu: header 下方卷帘下拉的开合状态（顶栏触发器 + 内容区 overlay 共享）
     var modelMenuOpen by remember { mutableStateOf(false) }
-    Box(modifier = Modifier.fillMaxSize().background(chatThemeBg)) {
+    Box(modifier = Modifier.fillMaxSize().amberCanvas()) {
         // V3 Whisper：空白态满强度 bloom；进入对话按设计稿"蓝光晕去掉 → 干净浅灰白"。
         // 转场用 700ms tween 缓慢淡出，避免发送瞬间硬切。
         // Paper/Midnight 设计稿 (themes.jsx haloConvo) 要求对话态保留 faint 底光氛围
@@ -678,9 +684,6 @@ private fun ChatPageContent(
                     },
                     currentChatModel = currentChatModel,
                     previewMode = previewMode,
-                    onNewChat = {
-                        navigateToChatPage(navController)
-                    },
                     onClickMenu = {
                         previewMode = !previewMode
                     },
@@ -1099,7 +1102,11 @@ private fun ChatPageContent(
                             textAlign = androidx.compose.ui.text.style.TextAlign.Center,
                         )
                     }
-                    if (loadingJob == null) {
+                    val imeVisible = WindowInsets.isImeVisible
+                    val inputHasContent = inputState.textContent.text.isNotEmpty() ||
+                        inputState.messageContent.isNotEmpty() ||
+                        inputState.attachmentImports.isNotEmpty()
+                    if (loadingJob == null && !imeVisible && !inputHasContent) {
                         EmptyChatSuggestions(
                             modifier = Modifier
                                 .align(Alignment.BottomCenter)
@@ -1198,24 +1205,23 @@ private fun EmptyChatSuggestions(
         stringResource(R.string.amber_redesign_suggestion_reply),
         stringResource(R.string.amber_redesign_suggestion_concept),
     )
-    Column(
+    FlowRow(
         modifier = modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         suggestions.forEach { suggestion ->
             Surface(
                 onClick = { onSelect(suggestion) },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(32.dp),
-                shape = RoundedCornerShape(14.dp),
+                modifier = Modifier.heightIn(min = 40.dp),
+                shape = CircleShape,
                 color = Color.Transparent,
                 contentColor = tokens.ink2,
                 border = BorderStroke(1.dp, tokens.line),
                 tonalElevation = 0.dp,
             ) {
                 Box(
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
                     contentAlignment = Alignment.Center,
                 ) {
                     Text(
@@ -1831,7 +1837,6 @@ private fun TopBar(
     currentChatModel: Model?,
     previewMode: Boolean,
     onClickMenu: () -> Unit,
-    onNewChat: () -> Unit,
     onUpdateChatModel: (Model) -> Unit,
     onUpdateTitle: (String) -> Unit,
     modelMenuOpen: Boolean,
@@ -1909,9 +1914,8 @@ private fun TopBar(
                                 ?: stringResource(R.string.model_list_select_model),
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
-                            // 字号收到 10.5：进一步弱化 model、强化标题层级
                             style = amberType.meta.copy(
-                                fontSize = 12.sp,
+                                fontSize = 11.sp,
                                 fontWeight = FontWeight.Medium,
                             ),
                             // ink3↔ink2 中点：ink3 偏淡、ink2 偏深，取中间的暖中灰
@@ -1930,10 +1934,9 @@ private fun TopBar(
                     }
                 }
 
-                Row(
+                Box(
                     modifier = Modifier.widthIn(min = 48.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.End,
+                    contentAlignment = Alignment.Center,
                 ) {
                 // V3 Whisper：进入对话后顶栏右侧多出 22dp Context Ring（仅有消息时）。
                 // 真实 used/total —— 取最后一条 assistant 消息的 usage
@@ -2011,19 +2014,6 @@ private fun TopBar(
                         lastTurnElapsedMs = elapsedMs,
                     )
                 }
-                // V3 Whisper：phone-screen.jsx 注释 "naked compose icon — no
-                // surrounding circle"，仅渲染 26dp ink 描线图标，无背景圆。
-                Box(
-                    modifier = Modifier
-                        .size(48.dp)
-                        // V3: ripple 改圆形
-                        .clip(androidx.compose.foundation.shape.CircleShape)
-                        .clickable { onNewChat() },
-                    contentAlignment = Alignment.Center,
-                ) {
-                    // 极简 + 标记，与左侧抽象汉堡同一套 1.6dp 细线语言
-                    AmberHeaderPlus()
-                }
             }
             }
             Hairline()
@@ -2032,7 +2022,7 @@ private fun TopBar(
 }
 
 /**
- * 顶栏返回箭头：延续抽象细线语言（1.6dp 圆帽 ink 线，同 [AmberHeaderPlus] 的 +）。
+ * 顶栏返回箭头：延续抽象细线语言（1.6dp 圆帽 ink 线）。
  * 顶栏左上一度是汉堡（三条横线，开 ChatDrawer），侧边栏被 Session 首页取代后
  * 改为返回箭头，与当前顶栏的细线语言保持一致。
  */
@@ -2050,29 +2040,6 @@ private fun AmberHeaderBackArrow() {
         drawLine(ink, Offset(w * 0.86f, cy), Offset(w * 0.18f, cy), strokeWidth = strokeWidth, cap = StrokeCap.Round)
         drawLine(ink, Offset(w * 0.18f, cy), Offset(w * 0.48f, h * 0.22f), strokeWidth = strokeWidth, cap = StrokeCap.Round)
         drawLine(ink, Offset(w * 0.18f, cy), Offset(w * 0.48f, h * 0.78f), strokeWidth = strokeWidth, cap = StrokeCap.Round)
-    }
-}
-
-/**
- * “新会话”极简标记：1.6dp 圆角 ink 细条交叉成一个 +，与顶栏箭头/细线元素同一套
- * 抽象细线语言，与返回箭头和其他顶栏元素保持一致。
- */
-@Composable
-private fun AmberHeaderPlus(arm: androidx.compose.ui.unit.Dp = 18.dp) {
-    val ink = LocalChatTheme.current.ink
-    Box(contentAlignment = Alignment.Center) {
-        Box(
-            modifier = Modifier
-                .width(arm)
-                .height(1.6.dp)
-                .background(ink, RoundedCornerShape(1.dp))
-        )
-        Box(
-            modifier = Modifier
-                .width(1.6.dp)
-                .height(arm)
-                .background(ink, RoundedCornerShape(1.dp))
-        )
     }
 }
 

@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
@@ -20,8 +21,8 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
@@ -43,7 +44,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.util.fastForEach
+import androidx.compose.ui.unit.sp
 import app.amber.agent.R
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.amber.core.ai.mcp.McpImportPreview
@@ -57,7 +58,10 @@ import com.composables.icons.lucide.Lucide
 import com.composables.icons.lucide.Plus
 import com.composables.icons.lucide.Trash2
 import app.amber.feature.ui.components.nav.BackButton
+import app.amber.feature.ui.components.ds.AmberCard
+import app.amber.feature.ui.components.ds.Hairline
 import app.amber.feature.ui.components.ds.SectionLabel
+import app.amber.feature.ui.components.ds.amberCanvas
 import app.amber.feature.ui.components.ui.ConfirmDialog
 import app.amber.feature.ui.components.ui.WorkspaceIconButton
 import app.amber.feature.ui.components.ui.WorkspaceLeadingIcon
@@ -65,9 +69,9 @@ import app.amber.feature.ui.components.ui.WorkspaceStatusPill
 import app.amber.feature.ui.components.ui.WorkspaceTextButton
 import app.amber.feature.ui.components.ui.WorkspaceTone
 import app.amber.feature.ui.components.ui.WorkspaceTopBar
-import app.amber.feature.ui.components.ui.workspaceBorder
-import app.amber.feature.ui.components.ui.workspaceColors
 import app.amber.feature.ui.context.LocalToaster
+import app.amber.feature.ui.theme.LocalAmberTokens
+import app.amber.feature.ui.theme.LocalAmberType
 import app.amber.core.utils.plus
 import org.koin.androidx.compose.koinViewModel
 import kotlinx.coroutines.CancellationException
@@ -97,15 +101,19 @@ fun SkillDetailPage(skillName: String) {
                 scrollBehavior = scrollBehavior,
             )
         },
-        modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
-        containerColor = workspaceColors().canvas,
+        modifier = Modifier
+            .amberCanvas()
+            .nestedScroll(scrollBehavior.nestedScrollConnection),
+        containerColor = Color.Transparent,
     ) { innerPadding ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .verticalScroll(rememberScrollState())
-                .padding(innerPadding + PaddingValues(horizontal = 16.dp, vertical = 12.dp)),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
+                .padding(
+                    innerPadding + PaddingValues(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 24.dp)
+                ),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             mcpConfig?.let { state ->
                 SectionLabel(
@@ -211,17 +219,17 @@ private fun SkillMcpConfigCard(
     state: SkillMcpConfigState,
     onImport: () -> Unit,
 ) {
-    val colors = workspaceColors()
-    Surface(
+    val tokens = LocalAmberTokens.current
+    val type = LocalAmberType.current
+    AmberCard(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(14.dp),
-        color = colors.paper,
-        border = workspaceBorder(),
+        containerColor = tokens.surface,
+        borderColor = tokens.line,
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 14.dp, vertical = 12.dp),
+                .padding(horizontal = 16.dp, vertical = 16.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
@@ -232,16 +240,16 @@ private fun SkillMcpConfigCard(
             ) {
                 Text(
                     text = stringResource(R.string.skill_detail_page_mcp_config_title),
-                    style = MaterialTheme.typography.titleSmall,
-                    color = colors.ink,
+                    style = type.body.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold),
+                    color = tokens.ink,
                 )
                 Text(
                     text = state.error ?: stringResource(
                         R.string.skill_detail_page_mcp_config_desc,
                         state.serverCount,
                     ),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = colors.muted,
+                    style = type.secondary,
+                    color = tokens.ink2,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
@@ -270,65 +278,63 @@ private fun SkillFilesPanel(
     onEdit: (SkillFile) -> Unit,
     onDelete: (SkillFile) -> Unit,
 ) {
-    val colors = workspaceColors()
-    Surface(
+    val tokens = LocalAmberTokens.current
+    val type = LocalAmberType.current
+    AmberCard(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(14.dp),
-        color = colors.paper,
-        border = workspaceBorder(),
+        containerColor = tokens.surface,
+        borderColor = tokens.line,
     ) {
-        Column(modifier = Modifier.padding(vertical = 6.dp)) {
-            Row(
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 16.dp, end = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(9.dp),
+        ) {
+            Text(
+                text = stringResource(R.string.setting_skill_detail_files_title),
+                style = type.sessionTitle,
+                color = tokens.ink,
+            )
+            Text(
+                text = stringResource(R.string.setting_skill_detail_file_count, fileCount),
+                style = type.meta,
+                color = tokens.ink2,
+                modifier = Modifier.weight(1f),
+            )
+            TextButton(
+                onClick = onAdd,
+                contentPadding = PaddingValues(horizontal = 6.dp),
+            ) {
+                Text(
+                    text = "+ " + stringResource(R.string.skill_detail_page_new_file),
+                    style = type.tinyTag,
+                    color = tokens.accent,
+                )
+            }
+        }
+        Hairline()
+        if (nodes.isEmpty()) {
+            Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 14.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    .padding(horizontal = 16.dp, vertical = 24.dp),
+                contentAlignment = Alignment.Center,
             ) {
-                Column(
-                    modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(2.dp),
-                ) {
-                    Text(
-                        text = stringResource(R.string.setting_skill_detail_files_title),
-                        style = MaterialTheme.typography.titleSmall,
-                        color = colors.ink,
-                    )
-                    Text(
-                        text = stringResource(R.string.setting_skill_detail_file_count, fileCount),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = colors.muted,
-                    )
-                }
-                WorkspaceIconButton(
-                    onClick = onAdd,
-                    icon = Lucide.Plus,
-                    contentDescription = stringResource(R.string.skill_detail_page_new_file),
-                    tone = WorkspaceTone.Accent,
-                    // V3: 去掉 colors.blueContainer 硬编码, 让 tone=Accent 自己映射 scheme.primaryContainer (跟主题)
+                Text(
+                    text = stringResource(R.string.setting_files_page_no_files),
+                    style = type.secondary,
+                    color = tokens.ink2,
                 )
             }
-            if (nodes.isEmpty()) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 14.dp, vertical = 24.dp),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text(
-                        text = stringResource(R.string.setting_files_page_no_files),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = colors.muted,
-                    )
-                }
-            } else {
-                FileTree(
-                    nodes = nodes,
-                    depth = 0,
-                    onEdit = onEdit,
-                    onDelete = onDelete,
-                )
-            }
+        } else {
+            FileTree(
+                nodes = nodes,
+                depth = 0,
+                onEdit = onEdit,
+                onDelete = onDelete,
+            )
         }
     }
 }
@@ -340,7 +346,8 @@ private fun FileTree(
     onEdit: (SkillFile) -> Unit,
     onDelete: (SkillFile) -> Unit,
 ) {
-    nodes.fastForEach { node ->
+    nodes.forEachIndexed { index, node ->
+        if (index > 0) Hairline()
         when (node) {
             is SkillFileNode.FileNode -> FileItem(
                 skillFile = node.skillFile,
@@ -366,37 +373,35 @@ private fun FileItem(
     onEdit: () -> Unit,
     onDelete: () -> Unit,
 ) {
-    val colors = workspaceColors()
-    Surface(
+    val tokens = LocalAmberTokens.current
+    val type = LocalAmberType.current
+    Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(6.dp))
             .clickable(onClick = onEdit),
-        color = Color.Transparent,
+        verticalAlignment = Alignment.CenterVertically,
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(start = (14 + depth * 18).dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
+                .heightIn(min = 40.dp)
+                .padding(start = (16 + depth * 18).dp, end = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(9.dp),
         ) {
-            WorkspaceLeadingIcon(
-                icon = Lucide.FileText,
-                size = 24.dp,
-                iconSize = 15.dp,
-                tone = WorkspaceTone.Accent,
+            Icon(
+                imageVector = Lucide.FileText,
+                contentDescription = null,
+                modifier = Modifier.size(18.dp),
+                tint = tokens.ink2,
             )
             Text(
                 text = skillFile.file.name,
-                style = MaterialTheme.typography.bodyMedium,
-                fontFamily = FontFamily.Monospace,
-                color = colors.ink,
+                style = type.meta.copy(fontSize = 13.sp, lineHeight = 18.sp),
+                color = tokens.ink,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
-                modifier = Modifier
-                    .weight(1f)
-                    .padding(end = 4.dp),
+                modifier = Modifier.weight(1f),
             )
             WorkspaceStatusPill(text = "${skillFile.file.length()} B")
             WorkspaceIconButton(
@@ -432,54 +437,47 @@ private fun DirItem(
     onDelete: (SkillFile) -> Unit,
 ) {
     var expanded by rememberSaveable(node.relativePath) { mutableStateOf(false) }
-    val colors = workspaceColors()
+    val tokens = LocalAmberTokens.current
+    val type = LocalAmberType.current
 
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        color = Color.Transparent,
-    ) {
-        Column {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(6.dp))
-                    .clickable { expanded = !expanded }
-                    .padding(start = (14 + depth * 18).dp, end = 14.dp, top = 8.dp, bottom = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                Icon(
-                    imageVector = if (expanded) Lucide.ChevronDown else Lucide.ChevronRight,
-                    contentDescription = null,
-                    modifier = Modifier.size(14.dp),
-                    tint = colors.faint,
-                )
-                WorkspaceLeadingIcon(
-                    icon = if (expanded) Lucide.FolderOpen else Lucide.Folder,
-                    size = 24.dp,
-                    iconSize = 15.dp,
-                    tone = WorkspaceTone.Warning,
-                )
-                Text(
-                    text = node.name,
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontFamily = FontFamily.Monospace,
-                    color = colors.ink,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f),
-                )
-            }
-            AnimatedVisibility(visible = expanded) {
-                Column {
-                    FileTree(
-                        nodes = node.children,
-                        depth = depth + 1,
-                        onEdit = onEdit,
-                        onDelete = onDelete,
-                    )
-                }
-            }
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = 40.dp)
+                .clickable { expanded = !expanded }
+                .padding(start = (16 + depth * 18).dp, end = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Icon(
+                imageVector = if (expanded) Lucide.ChevronDown else Lucide.ChevronRight,
+                contentDescription = null,
+                modifier = Modifier.size(14.dp),
+                tint = tokens.ink3,
+            )
+            Icon(
+                imageVector = if (expanded) Lucide.FolderOpen else Lucide.Folder,
+                contentDescription = null,
+                modifier = Modifier.size(18.dp),
+                tint = tokens.ink2,
+            )
+            Text(
+                text = node.name,
+                style = type.meta.copy(fontSize = 13.sp, lineHeight = 18.sp),
+                color = tokens.ink,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+        }
+        AnimatedVisibility(visible = expanded) {
+            FileTree(
+                nodes = node.children,
+                depth = depth + 1,
+                onEdit = onEdit,
+                onDelete = onDelete,
+            )
         }
     }
 }
@@ -492,10 +490,14 @@ private fun EditFileDialog(
     onConfirm: (content: String) -> Unit,
 ) {
     var content by rememberSaveable(skillFile.relativePath) { mutableStateOf(initialContent) }
+    val tokens = LocalAmberTokens.current
+    val type = LocalAmberType.current
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(skillFile.relativePath, fontFamily = FontFamily.Monospace) },
+        shape = RoundedCornerShape(14.dp),
+        containerColor = tokens.raised,
+        title = { Text(skillFile.relativePath, style = type.sessionTitle.copy(fontFamily = FontFamily.Monospace)) },
         text = {
             OutlinedTextField(
                 value = content,
@@ -505,6 +507,8 @@ private fun EditFileDialog(
                 maxLines = 20,
                 textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
                 modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp),
+                colors = skillDetailFieldColors(),
             )
         },
         confirmButton = {
@@ -550,10 +554,14 @@ private fun AddFileDialog(
     var fileName by rememberSaveable { mutableStateOf("") }
     var content by rememberSaveable { mutableStateOf("") }
     val fileNameError = fileName.isNotBlank() && (fileName.contains('\\'))
+    val tokens = LocalAmberTokens.current
+    val type = LocalAmberType.current
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(stringResource(R.string.skill_detail_page_new_file)) },
+        shape = RoundedCornerShape(14.dp),
+        containerColor = tokens.raised,
+        title = { Text(stringResource(R.string.skill_detail_page_new_file), style = type.sessionTitle) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 OutlinedTextField(
@@ -572,6 +580,8 @@ private fun AddFileDialog(
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
                     textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
                     modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = skillDetailFieldColors(),
                 )
                 OutlinedTextField(
                     value = content,
@@ -581,6 +591,8 @@ private fun AddFileDialog(
                     maxLines = 14,
                     textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
                     modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = skillDetailFieldColors(),
                 )
             }
         },
@@ -597,3 +609,16 @@ private fun AddFileDialog(
         },
     )
 }
+
+@Composable
+private fun skillDetailFieldColors() = OutlinedTextFieldDefaults.colors(
+    focusedContainerColor = LocalAmberTokens.current.surface2,
+    unfocusedContainerColor = LocalAmberTokens.current.surface2,
+    focusedBorderColor = LocalAmberTokens.current.accent,
+    unfocusedBorderColor = LocalAmberTokens.current.line,
+    focusedLabelColor = LocalAmberTokens.current.accent,
+    unfocusedLabelColor = LocalAmberTokens.current.ink3,
+    focusedTextColor = LocalAmberTokens.current.ink,
+    unfocusedTextColor = LocalAmberTokens.current.ink,
+    cursorColor = LocalAmberTokens.current.accent,
+)

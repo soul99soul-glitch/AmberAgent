@@ -54,15 +54,16 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -71,6 +72,7 @@ import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.layout.heightIn
 import coil3.compose.AsyncImage
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
@@ -109,11 +111,13 @@ import app.amber.feature.ui.components.message.LocalStripUnverifiedLinks
 import app.amber.feature.ui.components.message.SearchSourcesRegistry
 import app.amber.feature.ui.components.message.SourceRef
 import app.amber.feature.ui.components.message.normalizeSearchSourceHost
+import app.amber.feature.ui.components.ds.amberCanvas
 import app.amber.core.settings.prefs.SettingsAggregator
 import app.amber.core.font.SlidesFontRepository
 import app.amber.feature.ui.components.richtext.MarkdownNew
 import app.amber.feature.ui.theme.LocalDarkMode
 import app.amber.feature.ui.theme.LocalAmberTokens
+import app.amber.feature.ui.theme.LocalAmberType
 import app.amber.feature.ui.context.LocalNavController
 import app.amber.core.utils.appLocale
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -122,6 +126,7 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import org.koin.compose.koinInject
 import com.composables.icons.lucide.ArrowLeft
+import com.composables.icons.lucide.ArrowRight
 import com.composables.icons.lucide.Lucide
 
 @Composable
@@ -254,7 +259,7 @@ fun DeepReadScreen(
     val initialDisplayError = (runError ?: sectionFailureMessage)
         ?.takeIf { !generating && (output == null || !output.hasAnyReadySection()) }
 
-    Box(Modifier.fillMaxSize().background(palette.background)) {
+    Box(Modifier.fillMaxSize().amberCanvas()) {
         when {
             !confirmed -> DeepReadConfirmation(
                 modifier = Modifier.statusBarsPadding().navigationBarsPadding(),
@@ -547,17 +552,19 @@ private fun RunningStageNotice(
     progress: app.amber.feature.board.hotlist.deepread.DeepReadProgressSnapshot,
     modifier: Modifier = Modifier,
 ) {
+    val tokens = LocalAmberTokens.current
     Surface(
         modifier = modifier,
         shape = RoundedCornerShape(50),
-        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f),
-        shadowElevation = 4.dp,
+        color = tokens.surface.copy(alpha = 0.96f),
+        border = androidx.compose.foundation.BorderStroke(1.dp, tokens.line2),
+        tonalElevation = 0.dp,
     ) {
         Text(
             "${progress.label} ${progress.percent}%",
             modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurface,
+            style = LocalAmberType.current.meta.copy(fontSize = 11.sp),
+            color = tokens.ink2,
         )
     }
 }
@@ -569,11 +576,13 @@ private fun DeepReadPartialErrorNotice(
     modifier: Modifier = Modifier,
     retryLabel: String? = null,
 ) {
+    val tokens = LocalAmberTokens.current
     Surface(
         modifier = modifier,
         shape = RoundedCornerShape(22.dp),
-        color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.96f),
-        shadowElevation = 4.dp,
+        color = tokens.surface2,
+        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.42f)),
+        tonalElevation = 0.dp,
     ) {
         Row(
             modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
@@ -586,15 +595,13 @@ private fun DeepReadPartialErrorNotice(
                 },
                 modifier = Modifier.weight(1f),
                 style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onErrorContainer,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
+                color = MaterialTheme.colorScheme.error,
             )
-            Button(
+            androidx.compose.material3.TextButton(
                 onClick = onRetry,
                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
             ) {
-                Text(retryLabel ?: stringResource(R.string.retry))
+                Text(retryLabel ?: stringResource(R.string.retry), color = tokens.accent)
             }
         }
     }
@@ -602,16 +609,19 @@ private fun DeepReadPartialErrorNotice(
 
 @Composable
 private fun TemplateFallbackNotice(message: String, modifier: Modifier = Modifier) {
+    val tokens = LocalAmberTokens.current
     Surface(
         modifier = modifier,
         shape = RoundedCornerShape(50),
-        color = MaterialTheme.colorScheme.errorContainer,
+        color = tokens.surface2,
+        border = androidx.compose.foundation.BorderStroke(1.dp, tokens.line2),
+        tonalElevation = 0.dp,
     ) {
         Text(
             message,
             modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onErrorContainer,
+            style = LocalAmberType.current.meta.copy(fontSize = 11.sp),
+            color = tokens.ink2,
         )
     }
 }
@@ -628,7 +638,9 @@ private fun DeepReadTemplateArticle(
     fallback: @Composable () -> Unit,
 ) {
     val uriHandler = LocalUriHandler.current
-    val darkTheme = LocalDarkMode.current
+    // Deep Read is a reading surface: the article paper stays light while
+    // app chrome and progress overlays follow the active theme.
+    val darkTheme = false
     var failedImageUrls by remember(output) { mutableStateOf<Set<String>>(emptySet()) }
     val displayOutput = remember(output, failedImageUrls) {
         output.withoutTemplateImages(failedImageUrls)
@@ -816,83 +828,86 @@ private fun DeepReadArticle(
         LocalStripUnverifiedLinks provides sourceRegistry.isNotEmpty,
     ) {
         DeepReadScaledText(fontScale) {
-        LazyColumn(
-            state = listState,
-            modifier = Modifier
-                .fillMaxSize()
-                .background(palette.background)
-                .navigationBarsPadding(),
-            contentPadding = PaddingValues(
-                top = 8.dp,
-                bottom = 40.dp,
-            ),
-            verticalArrangement = Arrangement.spacedBy(48.dp),
-        ) {
-            item {
-                MagazineHeroFrame(
-                    title = title,
-                    output = output,
-                    status = output.statusOf(DeepReadGenerationStage.OVERVIEW),
-                    errorMessage = output.errorOf(DeepReadGenerationStage.OVERVIEW),
-                    onRetry = { onRetrySection(DeepReadGenerationStage.OVERVIEW) },
-                    palette = palette,
-                    fontFamily = fontFamily,
-                )
-            }
-
-            item {
-                ArticleInset {
-                    NarrativeFrame(
-                        output = output,
-                        verifiedImageUrls = verifiedImageUrls,
-                        status = output.statusOf(DeepReadGenerationStage.NARRATIVE),
-                        errorMessage = output.errorOf(DeepReadGenerationStage.NARRATIVE),
-                        onRetry = { onRetrySection(DeepReadGenerationStage.NARRATIVE) },
-                        palette = palette,
-                        fontFamily = fontFamily,
-                    )
+            LazyColumn(
+                state = listState,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(palette.background)
+                    .navigationBarsPadding(),
+                contentPadding = PaddingValues(
+                    top = 8.dp,
+                    bottom = 40.dp,
+                ),
+                verticalArrangement = Arrangement.spacedBy(48.dp),
+            ) {
+                item {
+                    Column {
+                        MagazineHeroFrame(
+                            title = title,
+                            output = output,
+                            status = output.statusOf(DeepReadGenerationStage.OVERVIEW),
+                            errorMessage = output.errorOf(DeepReadGenerationStage.OVERVIEW),
+                            onRetry = { onRetrySection(DeepReadGenerationStage.OVERVIEW) },
+                            palette = palette,
+                            fontFamily = fontFamily,
+                        )
+                        DeepReadArticleMeta(output = output, palette = palette)
+                    }
                 }
-            }
 
-            output.diagram?.takeIf { it.nodes.size >= 2 }?.let { diagram ->
                 item {
                     ArticleInset {
-                        DiagramSection(
-                            diagram = diagram,
+                        NarrativeFrame(
+                            output = output,
+                            verifiedImageUrls = verifiedImageUrls,
+                            status = output.statusOf(DeepReadGenerationStage.NARRATIVE),
+                            errorMessage = output.errorOf(DeepReadGenerationStage.NARRATIVE),
+                            onRetry = { onRetrySection(DeepReadGenerationStage.NARRATIVE) },
+                            palette = palette,
+                            fontFamily = fontFamily,
+                        )
+                    }
+                }
+
+                output.diagram?.takeIf { it.nodes.size >= 2 }?.let { diagram ->
+                    item {
+                        ArticleInset {
+                            DiagramSection(
+                                diagram = diagram,
+                                palette = palette,
+                                fontFamily = fontFamily,
+                            )
+                        }
+                    }
+                }
+
+                item {
+                    ArticleInset {
+                        AnalysisFrame(
+                            analysis = output.analysis,
+                            status = output.statusOf(DeepReadGenerationStage.ANALYSIS),
+                            errorMessage = output.errorOf(DeepReadGenerationStage.ANALYSIS),
+                            onRetry = { onRetrySection(DeepReadGenerationStage.ANALYSIS) },
+                            palette = palette,
+                            fontFamily = fontFamily,
+                        )
+                    }
+                }
+
+                item {
+                    ArticleInset {
+                        ReadingFrame(
+                            links = output.extendedReading,
+                            status = output.statusOf(DeepReadGenerationStage.EXTENDED_READING),
+                            errorMessage = output.errorOf(DeepReadGenerationStage.EXTENDED_READING),
+                            onRetry = { onRetrySection(DeepReadGenerationStage.EXTENDED_READING) },
                             palette = palette,
                             fontFamily = fontFamily,
                         )
                     }
                 }
             }
-
-            item {
-                ArticleInset {
-                    AnalysisFrame(
-                        analysis = output.analysis,
-                        status = output.statusOf(DeepReadGenerationStage.ANALYSIS),
-                        errorMessage = output.errorOf(DeepReadGenerationStage.ANALYSIS),
-                        onRetry = { onRetrySection(DeepReadGenerationStage.ANALYSIS) },
-                        palette = palette,
-                        fontFamily = fontFamily,
-                    )
-                }
-            }
-
-            item {
-                ArticleInset {
-                    ReadingFrame(
-                        links = output.extendedReading,
-                        status = output.statusOf(DeepReadGenerationStage.EXTENDED_READING),
-                        errorMessage = output.errorOf(DeepReadGenerationStage.EXTENDED_READING),
-                        onRetry = { onRetrySection(DeepReadGenerationStage.EXTENDED_READING) },
-                        palette = palette,
-                        fontFamily = fontFamily,
-                    )
-                }
-            }
         }
-    }
     }
 }
 
@@ -1200,10 +1215,13 @@ private fun SectionErrorCard(
     fontFamily: FontFamily?,
     modifier: Modifier = Modifier,
 ) {
+    val tokens = LocalAmberTokens.current
     Surface(
         modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(18.dp),
-        color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.6f),
+        shape = RoundedCornerShape(14.dp),
+        color = palette.surface,
+        border = androidx.compose.foundation.BorderStroke(1.dp, tokens.accent.copy(alpha = 0.42f)),
+        tonalElevation = 0.dp,
     ) {
         Column(
             modifier = Modifier.padding(horizontal = 18.dp, vertical = 16.dp),
@@ -1211,23 +1229,21 @@ private fun SectionErrorCard(
         ) {
             Text(
                 label,
-                style = MaterialTheme.typography.titleSmall.withReadingFont(fontFamily),
-                color = MaterialTheme.colorScheme.onErrorContainer,
+                style = LocalAmberType.current.sessionTitle.withReadingFont(fontFamily),
+                color = palette.ink,
             )
             if (!errorMessage.isNullOrBlank()) {
                 Text(
                     errorMessage,
-                    style = MaterialTheme.typography.bodySmall.withReadingFont(fontFamily),
-                    color = MaterialTheme.colorScheme.onErrorContainer,
-                    maxLines = 4,
-                    overflow = TextOverflow.Ellipsis,
+                    style = LocalAmberType.current.secondary.withReadingFont(fontFamily),
+                    color = palette.muted,
                 )
             }
-            Button(
+            androidx.compose.material3.TextButton(
                 onClick = onRetry,
                 contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp),
             ) {
-                Text(stringResource(R.string.deep_read_retry_section))
+                Text(stringResource(R.string.deep_read_retry_section), color = tokens.accent)
             }
         }
     }
@@ -1241,8 +1257,10 @@ private fun SectionPlaceholder(
 ) {
     Surface(
         modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(12.dp),
-        color = palette.surface.copy(alpha = 0.5f),
+        shape = RoundedCornerShape(10.dp),
+        color = palette.surface,
+        border = androidx.compose.foundation.BorderStroke(1.dp, palette.line),
+        tonalElevation = 0.dp,
     ) {
         Text(
             label,
@@ -1261,6 +1279,35 @@ private fun ArticleInset(content: @Composable () -> Unit) {
             .padding(horizontal = 30.dp),
     ) {
         content()
+    }
+}
+
+@Composable
+private fun DeepReadArticleMeta(
+    output: DeepReadOutput,
+    palette: MagazinePalette,
+) {
+    val sourceCount = remember(output.references, output.extendedReading) {
+        deepReadSourceCount(output)
+    }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 30.dp, top = 26.dp, end = 30.dp),
+        horizontalArrangement = Arrangement.spacedBy(9.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            output.topicType.uppercase(),
+            style = LocalAmberType.current.meta.copy(fontSize = 11.sp),
+            color = palette.muted,
+        )
+        Box(Modifier.size(3.dp).background(palette.line, CircleShape))
+        Text(
+            if (sourceCount > 0) "$sourceCount SOURCES" else "DEEP READ",
+            style = LocalAmberType.current.meta.copy(fontSize = 11.sp),
+            color = palette.muted,
+        )
     }
 }
 
@@ -1334,7 +1381,6 @@ private fun MagazineHero(
                         style = MaterialTheme.typography.labelSmall.withReadingFont(fontFamily),
                         color = palette.muted,
                         maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
                     )
                 }
             }
@@ -1370,47 +1416,80 @@ private fun TextOnlyHero(
     val sourceCount = remember(output.references, output.extendedReading) {
         deepReadSourceCount(output)
     }
-    Column(
+    Box(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(start = 30.dp, top = 36.dp, end = 30.dp),
-        verticalArrangement = Arrangement.spacedBy(24.dp),
+            .background(palette.heroBackground),
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                "DEEP READ",
-                style = MaterialTheme.typography.labelSmall.copy(
-                    letterSpacing = 3.2.sp,
-                    fontWeight = FontWeight.Light,
-                    color = palette.accent,
+        Canvas(Modifier.matchParentSize()) {
+            drawRect(
+                brush = Brush.linearGradient(
+                    colors = listOf(
+                        palette.heroSurface,
+                        palette.heroBackground,
+                        palette.heroBackground,
+                    ),
+                    start = Offset(size.width, 0f),
+                    end = Offset(0f, size.height),
                 ),
             )
-            Text(
-                if (sourceCount > 0) "$sourceCount SOURCES" else "CHINESE REWRITE",
-                style = MaterialTheme.typography.labelSmall.copy(
-                    letterSpacing = 2.6.sp,
-                    fontWeight = FontWeight.Light,
-                    color = palette.muted,
-                ),
+            drawCircle(
+                color = palette.accent.copy(alpha = if (palette.isDark) 0.16f else 0.12f),
+                radius = 118.dp.toPx(),
+                center = Offset(size.width * 0.88f, 42.dp.toPx()),
+            )
+            drawLine(
+                color = palette.heroInk.copy(alpha = 0.10f),
+                start = Offset(size.width * 0.1f, 0f),
+                end = Offset(size.width, size.height * 0.58f),
+                strokeWidth = 1.dp.toPx(),
             )
         }
-        Spacer(
-            Modifier
-                .width(126.dp)
-                .height(1.dp)
-                .background(palette.line),
-        )
-        HeroTextBlock(
-            modifier = Modifier.fillMaxWidth(),
-            title = title,
-            output = output,
-            palette = palette,
-            fontFamily = fontFamily,
-        )
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 30.dp, top = 36.dp, end = 30.dp, bottom = 40.dp),
+            verticalArrangement = Arrangement.spacedBy(24.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    "DEEP READ",
+                    style = LocalAmberType.current.meta.copy(
+                        fontSize = 11.sp,
+                        letterSpacing = 3.2.sp,
+                        fontWeight = FontWeight.Light,
+                    ),
+                    color = palette.accent,
+                )
+                Text(
+                    if (sourceCount > 0) "$sourceCount SOURCES" else "DEEP READ",
+                    style = LocalAmberType.current.meta.copy(
+                        fontSize = 11.sp,
+                        letterSpacing = 2.6.sp,
+                        fontWeight = FontWeight.Light,
+                    ),
+                    color = palette.heroMuted,
+                )
+            }
+            Spacer(
+                Modifier
+                    .width(126.dp)
+                    .height(1.dp)
+                    .background(palette.heroInk.copy(alpha = 0.24f)),
+            )
+            HeroTextBlock(
+                modifier = Modifier.fillMaxWidth(),
+                title = title,
+                output = output,
+                palette = palette,
+                fontFamily = fontFamily,
+                hero = true,
+            )
+        }
     }
 }
 
@@ -1423,7 +1502,10 @@ private fun HeroTextBlock(
     palette: MagazinePalette,
     fontFamily: FontFamily?,
     showKicker: Boolean = true,
+    hero: Boolean = false,
 ) {
+    val ink = if (hero) palette.heroInk else palette.ink
+    val muted = if (hero) palette.heroMuted else palette.muted
     Column(modifier, verticalArrangement = Arrangement.spacedBy(20.dp)) {
         if (showKicker) {
             Text(
@@ -1431,7 +1513,7 @@ private fun HeroTextBlock(
                 style = MaterialTheme.typography.labelSmall.copy(
                     letterSpacing = 3.sp,
                     fontWeight = FontWeight.Light,
-                    color = palette.muted,
+                    color = muted,
                 ),
             )
         }
@@ -1441,7 +1523,7 @@ private fun HeroTextBlock(
                 fontSize = 32.sp,
                 lineHeight = 38.sp,
                 fontWeight = FontWeight.Bold,
-                color = palette.ink,
+                color = ink,
             ).withReadingFont(fontFamily),
         )
         DeepReadMarkdownText(
@@ -1449,7 +1531,7 @@ private fun HeroTextBlock(
             style = MaterialTheme.typography.bodyLarge.copy(
                 fontSize = 15.sp,
                 lineHeight = 23.sp,
-                color = palette.ink,
+                color = ink,
             ).withReadingFont(fontFamily),
         )
         if (output.keyEntities.isNotEmpty()) {
@@ -1458,7 +1540,7 @@ private fun HeroTextBlock(
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 output.keyEntities.take(4).forEach { entity ->
-                    EntityPill(entity, palette)
+                    EntityPill(entity, palette, hero = hero)
                 }
             }
         }
@@ -1494,7 +1576,6 @@ private fun SlantedHeroMeta(
                 color = palette.muted,
             ),
             maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
         )
     }
 }
@@ -1522,23 +1603,49 @@ private fun TimelineSection(
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(20.dp)) {
         SectionKicker(stringResource(R.string.deep_read_timeline), palette)
-        events.forEach { event ->
-            Row(horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.Top) {
-                TimelineMarker(highlight = event.isHighlight, palette = palette)
-                Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                    Text(event.date, style = MaterialTheme.typography.labelMedium, color = palette.muted)
-                    DeepReadMarkdownText(
-                        text = event.event,
-                        style = MaterialTheme.typography.bodyLarge.copy(lineHeight = 25.sp, color = palette.ink)
-                            .withReadingFont(fontFamily),
-                    )
-                    event.imageUrl?.takeIf { it in verifiedImageUrls }?.let { image ->
-                        EditorialImage(
-                            imageUrl = image,
-                            caption = event.imageCaption,
-                            palette = palette,
-                            fontFamily = fontFamily,
+        Column(
+            modifier = Modifier.drawBehind {
+                val x = 9.dp.toPx()
+                drawLine(
+                    color = palette.line,
+                    start = Offset(x, 0f),
+                    end = Offset(x, size.height),
+                    strokeWidth = 1.dp.toPx(),
+                )
+            },
+            verticalArrangement = Arrangement.spacedBy(0.dp),
+        ) {
+            events.forEachIndexed { index, event ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = if (index == events.lastIndex) 0.dp else 20.dp),
+                    horizontalArrangement = Arrangement.spacedBy(14.dp),
+                    verticalAlignment = Alignment.Top,
+                ) {
+                    TimelineMarker(highlight = event.isHighlight, palette = palette)
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(5.dp),
+                    ) {
+                        Text(
+                            event.date,
+                            style = LocalAmberType.current.meta.copy(fontSize = 11.sp),
+                            color = palette.accent,
                         )
+                        DeepReadMarkdownText(
+                            text = event.event,
+                            style = MaterialTheme.typography.bodyLarge.copy(lineHeight = 25.sp, color = palette.ink)
+                                .withReadingFont(fontFamily),
+                        )
+                        event.imageUrl?.takeIf { it in verifiedImageUrls }?.let { image ->
+                            EditorialImage(
+                                imageUrl = image,
+                                caption = event.imageCaption,
+                                palette = palette,
+                                fontFamily = fontFamily,
+                            )
+                        }
                     }
                 }
             }
@@ -1548,14 +1655,8 @@ private fun TimelineSection(
 
 @Composable
 private fun TimelineMarker(highlight: Boolean, palette: MagazinePalette) {
-    Box(Modifier.width(18.dp).height(54.dp), contentAlignment = Alignment.TopCenter) {
+    Box(Modifier.width(18.dp).heightIn(min = 54.dp), contentAlignment = Alignment.TopCenter) {
         Canvas(Modifier.fillMaxSize()) {
-            drawLine(
-                color = palette.line,
-                start = Offset(size.width / 2f, 0f),
-                end = Offset(size.width / 2f, size.height),
-                strokeWidth = 1.dp.toPx(),
-            )
             drawCircle(
                 color = if (highlight) palette.accent else palette.line,
                 radius = if (highlight) 5.dp.toPx() else 3.dp.toPx(),
@@ -1579,19 +1680,40 @@ private fun CorePointsSection(
         "opinion" -> stringResource(R.string.deep_read_core_points_opinion)
         else -> stringResource(R.string.deep_read_core_points_default)
     }
-    Column(verticalArrangement = Arrangement.spacedBy(18.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(0.dp)) {
         SectionKicker(title, palette)
         points.forEachIndexed { index, point ->
-            Row(horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.Top) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 14.dp)
+                    .then(
+                        if (index == 0) Modifier else Modifier.drawBehind {
+                            drawLine(
+                                color = palette.line,
+                                start = Offset(0f, 0f),
+                                end = Offset(size.width, 0f),
+                                strokeWidth = 1.dp.toPx(),
+                            )
+                        }
+                    ),
+                horizontalArrangement = Arrangement.spacedBy(14.dp),
+                verticalAlignment = Alignment.Top,
+            ) {
                 Text(
                     "%02d".format(index + 1),
-                    style = MaterialTheme.typography.labelMedium.copy(letterSpacing = 2.sp),
+                    style = LocalAmberType.current.meta.copy(fontSize = 11.sp, letterSpacing = 1.6.sp),
                     color = palette.accent,
                 )
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     DeepReadMarkdownText(
                         text = point.point,
-                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Light, color = palette.ink)
+                        style = MaterialTheme.typography.titleMedium.copy(
+                            fontSize = 17.sp,
+                            lineHeight = 24.sp,
+                            fontWeight = FontWeight.Light,
+                            color = palette.ink,
+                        )
                             .withReadingFont(fontFamily),
                     )
                     val pointSupporting = point.supporting
@@ -1641,7 +1763,8 @@ private fun DiagramSection(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(palette.surface.copy(alpha = 0.56f), RoundedCornerShape(8.dp))
+                .background(palette.surface)
+                .border(1.dp, palette.line)
                 .padding(14.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
@@ -1746,8 +1869,6 @@ private fun EditorialImage(
                 it,
                 style = MaterialTheme.typography.labelSmall.withReadingFont(fontFamily),
                 color = palette.muted,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
             )
         }
     }
@@ -1802,7 +1923,22 @@ private fun PerspectiveRow(perspective: Perspective, palette: MagazinePalette, f
 
 @Composable
 private fun QuoteBlock(text: String, attribution: String?, palette: MagazinePalette, fontFamily: FontFamily?) {
-    Row(horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.Top) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 8.dp)
+            .drawBehind {
+                drawLine(
+                    color = palette.accent,
+                    start = Offset(0f, 0f),
+                    end = Offset(0f, size.height),
+                    strokeWidth = 2.dp.toPx(),
+                )
+            }
+            .padding(start = 16.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.Top,
+    ) {
         Text("“", style = MaterialTheme.typography.displaySmall.copy(fontWeight = FontWeight.Light, color = palette.accent))
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(
@@ -1859,11 +1995,15 @@ private fun ReadingSection(links: List<ReadingLink>, palette: MagazinePalette, f
                             lineHeight = 20.sp,
                             color = palette.ink,
                         ).withReadingFont(fontFamily),
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
                     )
                     Text(link.source ?: link.url, style = MaterialTheme.typography.labelSmall, color = palette.muted)
                 }
+                Icon(
+                    imageVector = Lucide.ArrowRight,
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp),
+                    tint = palette.muted,
+                )
             }
             if (index != visibleLinks.lastIndex) {
                 Spacer(
@@ -1878,27 +2018,48 @@ private fun ReadingSection(links: List<ReadingLink>, palette: MagazinePalette, f
 }
 
 @Composable
-private fun EntityPill(text: String, palette: MagazinePalette) {
-    Surface(shape = RoundedCornerShape(50), color = palette.surface) {
+private fun EntityPill(text: String, palette: MagazinePalette, hero: Boolean = false) {
+    Surface(
+        shape = RoundedCornerShape(50),
+        color = if (hero) palette.heroSurface else palette.surface,
+        border = androidx.compose.foundation.BorderStroke(
+            1.dp,
+            if (hero) palette.heroInk.copy(alpha = 0.22f) else palette.line,
+        ),
+    ) {
         Text(
             text,
             modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
             style = MaterialTheme.typography.labelSmall,
-            color = palette.muted,
+            color = if (hero) palette.heroInk else palette.muted,
         )
     }
 }
 
 @Composable
 private fun SectionKicker(text: String, palette: MagazinePalette) {
-    Text(
-        text.uppercase(),
-        style = MaterialTheme.typography.labelMedium.copy(
-            letterSpacing = 3.5.sp,
-            fontWeight = FontWeight.Light,
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(9.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            "//",
+            style = LocalAmberType.current.eyebrow.copy(fontSize = 11.sp),
+            color = palette.accent,
+        )
+        Text(
+            text.uppercase(),
+            style = LocalAmberType.current.eyebrow.copy(fontSize = 11.sp),
             color = palette.muted,
-        ),
-    )
+        )
+        Box(
+            Modifier
+                .weight(1f)
+                .height(1.dp)
+                .background(palette.line),
+        )
+    }
 }
 
 
@@ -1910,6 +2071,7 @@ private fun DeepReadError(
     retryLabel: String? = null,
 ) {
     val ui = formatDeepReadError(error)
+    val tokens = LocalAmberTokens.current
     Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Column(
             modifier = Modifier
@@ -1921,8 +2083,8 @@ private fun DeepReadError(
         ) {
             Text(
                 ui.title,
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.onSurface,
+                style = LocalAmberType.current.sessionTitle,
+                color = tokens.ink,
             )
             ui.reason?.let {
                 Text(
@@ -1934,15 +2096,17 @@ private fun DeepReadError(
             if (ui.detail.isNotBlank()) {
                 Surface(
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp),
-                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                    shape = RoundedCornerShape(14.dp),
+                    color = tokens.surface2,
+                    border = androidx.compose.foundation.BorderStroke(1.dp, tokens.line),
+                    tonalElevation = 0.dp,
                 ) {
                     SelectionContainer {
                         Text(
                             ui.detail,
                             modifier = Modifier.padding(14.dp),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = LocalAmberType.current.secondary,
+                            color = tokens.ink2,
                         )
                     }
                 }
@@ -1950,12 +2114,12 @@ private fun DeepReadError(
             ui.suggestion?.let {
                 Text(
                     it,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = LocalAmberType.current.secondary,
+                    color = tokens.ink2,
                 )
             }
-            Button(onClick = onRetry) {
-                Text(retryLabel ?: stringResource(R.string.retry))
+            androidx.compose.material3.TextButton(onClick = onRetry) {
+                Text(retryLabel ?: stringResource(R.string.retry), color = tokens.accent)
             }
         }
     }
@@ -2048,6 +2212,11 @@ private fun magazinePalette(): MagazinePalette {
         muted = Color(0xFF57534B),
         line = Color(0xFFE9E5DC),
         accent = tokens.accent,
+        heroBackground = if (tokens.isDark) tokens.bg else tokens.surface2,
+        heroSurface = if (tokens.isDark) tokens.surface else tokens.raised,
+        heroInk = if (tokens.isDark) tokens.ink else tokens.ink,
+        heroMuted = if (tokens.isDark) tokens.ink2 else tokens.ink2,
+        isDark = tokens.isDark,
     )
 }
 
@@ -2058,4 +2227,9 @@ private data class MagazinePalette(
     val muted: Color,
     val line: Color,
     val accent: Color,
+    val heroBackground: Color,
+    val heroSurface: Color,
+    val heroInk: Color,
+    val heroMuted: Color,
+    val isDark: Boolean,
 )

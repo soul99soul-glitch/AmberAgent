@@ -170,7 +170,7 @@ fun SettingExperimentalWebMountPage(
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
             contentPadding = innerPadding + PaddingValues(horizontal = SettingPageHorizontalInset, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             item {
                 ExperimentHeroCard(
@@ -653,8 +653,8 @@ private fun UserSiteCard(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Surface(
-                modifier = Modifier.size(34.dp),
-                shape = RoundedCornerShape(8.dp),
+                modifier = Modifier.size(32.dp),
+                shape = RoundedCornerShape(9.dp),
                 color = workspace.row,
                 contentColor = workspace.muted,
             ) {
@@ -668,14 +668,14 @@ private fun UserSiteCard(
             ) {
                 Text(
                     text = site.displayName,
-                    style = MaterialTheme.typography.bodyLarge,
+                    style = app.amber.feature.ui.theme.LocalAmberType.current.body,
                     color = workspace.ink,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
                 Text(
                     text = site.homepageUrl,
-                    style = MaterialTheme.typography.bodySmall,
+                    style = app.amber.feature.ui.theme.LocalAmberType.current.meta,
                     color = workspace.faint,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -800,9 +800,9 @@ private fun SiteStatusPill(
     ) {
         Text(
             text = stringResource(labelRes),
-            style = MaterialTheme.typography.labelSmall,
+            style = app.amber.feature.ui.theme.LocalAmberType.current.meta,
             maxLines = 1,
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
         )
     }
 }

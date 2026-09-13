@@ -289,6 +289,37 @@ class MemoryRecallStoreTest {
         assertTrue(ranked.isEmpty())
     }
 
+    @Test
+    fun oversizedFirstRecordDoesNotBypassPromptBudget() {
+        val now = day("2026-08-01")
+        val ranked = MemoryRecallStore.rankRecords(
+            settings = Settings(
+                agentRuntime = AgentRuntimeSetting(
+                    memoryRecall = MemoryRecallSetting(maxItems = 2, maxPromptChars = 256),
+                )
+            ),
+            messages = listOf(UIMessage.user("继续 AmberAgent 项目")),
+            records = listOf(
+                record(
+                    id = 1,
+                    content = "继续 AmberAgent 项目 " + "x".repeat(600),
+                    scope = MemoryScope.CORE,
+                    kind = MemoryKind.NOTE,
+                ).copy(pinned = true),
+                record(
+                    id = 2,
+                    content = "继续 AmberAgent 项目。",
+                    scope = MemoryScope.SHORT_TERM,
+                    kind = MemoryKind.PROJECT,
+                    updatedAt = now,
+                ),
+            ),
+            now = now,
+        )
+
+        assertEquals(listOf(2), ranked.map { it.record.id })
+    }
+
     private fun settings(maxItems: Int): Settings =
         Settings(
             agentRuntime = AgentRuntimeSetting(

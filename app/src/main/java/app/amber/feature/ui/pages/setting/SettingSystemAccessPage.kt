@@ -45,6 +45,7 @@ import com.composables.icons.lucide.TriangleAlert
 import com.composables.icons.lucide.FileText
 import com.composables.icons.lucide.Settings
 import app.amber.agent.R
+import app.amber.feature.ui.components.ds.amberCanvas
 import app.amber.core.localization.PermissionDisplayLocalizer
 import app.amber.feature.system.AgentPermissionBroker
 import app.amber.feature.system.AgentPermissionCapability
@@ -52,9 +53,9 @@ import app.amber.feature.system.AgentPermissionRisk
 import app.amber.feature.system.AgentPermissionStatus
 import app.amber.core.settings.prefs.SettingsAggregator
 import app.amber.feature.ui.components.nav.BackButton
-import app.amber.feature.ui.components.ds.SectionLabel
-import app.amber.feature.ui.components.ui.CardGroup
 import app.amber.feature.ui.components.ui.WorkspaceTopBar
+import app.amber.feature.ui.components.ui.WorkspaceStatusPill
+import app.amber.feature.ui.components.ui.WorkspaceTone
 import app.amber.feature.ui.components.ui.workspaceColors
 import app.amber.feature.ui.components.ui.CardGroupScope
 import app.amber.feature.ui.theme.CustomColors
@@ -124,16 +125,18 @@ fun SettingSystemAccessPage(
                 scrollBehavior = scrollBehavior,
             )
         },
-        modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
-        containerColor = workspaceColors().canvas,
+        modifier = Modifier
+            .nestedScroll(scrollBehavior.nestedScrollConnection)
+            .amberCanvas(),
+        containerColor = androidx.compose.ui.graphics.Color.Transparent,
     ) { innerPadding ->
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
             contentPadding = innerPadding + PaddingValues(horizontal = SettingPageHorizontalInset, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(22.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             item("summary") {
-                CardGroup(title = { SectionLabel(stringResource(R.string.setting_system_access_center)) }) {
+                SettingCardGroup(title = stringResource(R.string.setting_system_access_center)) {
                     item(
                         leadingContent = { SettingTileIcon(Lucide.Settings) },
                         headlineContent = { Text(stringResource(R.string.setting_system_access_core_runtime_title)) },
@@ -169,7 +172,7 @@ fun SettingSystemAccessPage(
             }
 
             item("runtime") {
-                CardGroup(title = { SectionLabel(stringResource(R.string.setting_system_access_runtime_section)) }) {
+                SettingCardGroup(title = stringResource(R.string.setting_system_access_runtime_section)) {
                     capabilities
                         .filter { (capability, _) -> capability.specialAccess == null }
                         .forEach { (capability, status) ->
@@ -194,7 +197,7 @@ fun SettingSystemAccessPage(
             }
 
             item("special") {
-                CardGroup(title = { SectionLabel(stringResource(R.string.setting_system_access_special_section)) }) {
+                SettingCardGroup(title = stringResource(R.string.setting_system_access_special_section)) {
                     capabilities
                         .filter { (capability, _) -> capability.specialAccess != null }
                         .forEach { (capability, status) ->
@@ -219,93 +222,11 @@ fun SettingSystemAccessPage(
             }
 
             item("external_file_access") {
-                CardGroup(title = { SectionLabel(stringResource(R.string.setting_system_access_external_section)) }) {
+                SettingCardGroup(title = stringResource(R.string.setting_system_access_external_section)) {
                     item(
                         leadingContent = { SettingTileIcon(Lucide.FileText) },
                         headlineContent = { Text(stringResource(R.string.setting_system_access_external_title)) },
-                        supportingContent = {
-                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Text(stringResource(R.string.setting_system_access_external_desc))
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                ) {
-                                    Text(
-                                        text = stringResource(
-                                            if (externalAccess.enabled) {
-                                                R.string.prompt_page_enabled
-                                            } else {
-                                                R.string.prompt_page_disabled
-                                            },
-                                        ),
-                                        color = if (externalAccess.enabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
-                                    )
-                                    Text(
-                                        stringResource(
-                                            R.string.setting_system_access_root_count,
-                                            externalAccess.roots.size,
-                                        )
-                                    )
-                                }
-                                OutlinedTextField(
-                                    value = externalRootInput,
-                                    onValueChange = { externalRootInput = it },
-                                    modifier = Modifier.fillMaxWidth(),
-                                    singleLine = true,
-                                    label = { Text(stringResource(R.string.setting_system_access_path_label)) },
-                                    supportingText = { Text(stringResource(R.string.setting_system_access_path_hint)) },
-                                )
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                ) {
-                                    Button(
-                                        onClick = {
-                                            val root = externalRootInput.trim()
-                                            scope.launch {
-                                                settingsStore.update { current ->
-                                                    current.copy(
-                                                        agentRuntime = current.agentRuntime.copy(
-                                                            externalFileAccess = current.agentRuntime.externalFileAccess.copy(
-                                                                enabled = true,
-                                                                roots = (current.agentRuntime.externalFileAccess.roots + root)
-                                                                    .map { it.trim() }
-                                                                    .filter { it.isNotBlank() }
-                                                                    .distinct(),
-                                                            )
-                                                        )
-                                                    )
-                                                }
-                                            }
-                                        },
-                                        enabled = externalRootInput.isNotBlank(),
-                                    ) {
-                                        Text(stringResource(R.string.setting_system_access_add_enable), maxLines = 1)
-                                    }
-                                    OutlinedButton(
-                                        onClick = {
-                                            scope.launch {
-                                                settingsStore.update { current ->
-                                                    current.copy(
-                                                        agentRuntime = current.agentRuntime.copy(
-                                                            externalFileAccess = current.agentRuntime.externalFileAccess.copy(
-                                                                enabled = false,
-                                                                roots = emptyList(),
-                                                            )
-                                                        )
-                                                    )
-                                                }
-                                            }
-                                        },
-                                    ) {
-                                        Text(stringResource(R.string.clear), maxLines = 1)
-                                    }
-                                }
-                                if (externalAccess.roots.isNotEmpty()) {
-                                    Text(externalAccess.roots.joinToString("\n"))
-                                }
-                            }
-                        },
+                        supportingContent = { Text(stringResource(R.string.setting_system_access_external_desc)) },
                         trailingContent = {
                             Switch(
                                 checked = externalAccess.enabled,
@@ -323,6 +244,103 @@ fun SettingSystemAccessPage(
                             )
                         },
                     )
+                    item(
+                        leadingContent = { SettingTileIcon(Lucide.FileText) },
+                        headlineContent = { Text(stringResource(R.string.setting_system_access_path_label)) },
+                        supportingContent = {
+                            Text(
+                                stringResource(
+                                    R.string.setting_system_access_root_count,
+                                    externalAccess.roots.size,
+                                ),
+                            )
+                        },
+                        trailingContent = {
+                            WorkspaceStatusPill(
+                                text = stringResource(
+                                    if (externalAccess.enabled) {
+                                        R.string.prompt_page_enabled
+                                    } else {
+                                        R.string.prompt_page_disabled
+                                    },
+                                ),
+                                tone = if (externalAccess.enabled) {
+                                    WorkspaceTone.Success
+                                } else {
+                                    WorkspaceTone.Neutral
+                                },
+                            )
+                        },
+                    )
+                    item {
+                        OutlinedTextField(
+                            value = externalRootInput,
+                            onValueChange = { externalRootInput = it },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            label = { Text(stringResource(R.string.setting_system_access_path_label)) },
+                            supportingText = { Text(stringResource(R.string.setting_system_access_path_hint)) },
+                        )
+                    }
+                    item {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            Button(
+                                onClick = {
+                                    val root = externalRootInput.trim()
+                                    scope.launch {
+                                        settingsStore.update { current ->
+                                            current.copy(
+                                                agentRuntime = current.agentRuntime.copy(
+                                                    externalFileAccess = current.agentRuntime.externalFileAccess.copy(
+                                                        enabled = true,
+                                                        roots = (current.agentRuntime.externalFileAccess.roots + root)
+                                                            .map { it.trim() }
+                                                            .filter { it.isNotBlank() }
+                                                            .distinct(),
+                                                    )
+                                                )
+                                            )
+                                        }
+                                    }
+                                },
+                                enabled = externalRootInput.isNotBlank(),
+                            ) {
+                                Text(stringResource(R.string.setting_system_access_add_enable), maxLines = 1)
+                            }
+                            OutlinedButton(
+                                onClick = {
+                                    scope.launch {
+                                        settingsStore.update { current ->
+                                            current.copy(
+                                                agentRuntime = current.agentRuntime.copy(
+                                                    externalFileAccess = current.agentRuntime.externalFileAccess.copy(
+                                                        enabled = false,
+                                                        roots = emptyList(),
+                                                    )
+                                                )
+                                            )
+                                        }
+                                    }
+                                },
+                            ) {
+                                Text(stringResource(R.string.clear), maxLines = 1)
+                            }
+                        }
+                    }
+                    externalAccess.roots.forEach { root ->
+                        item(
+                            leadingContent = { SettingTileIcon(Lucide.FileText) },
+                            headlineContent = {
+                                Text(
+                                    root,
+                                    style = app.amber.feature.ui.theme.LocalAmberType.current.meta,
+                                )
+                            },
+                        )
+                    }
                 }
             }
         }
@@ -337,6 +355,7 @@ private fun CardGroupScope.permissionItem(
     onClick: () -> Unit,
     action: @Composable () -> Unit,
 ) {
+    val colors = workspaceColors()
     item(
         onClick = onClick,
         leadingContent = {
@@ -348,9 +367,10 @@ private fun CardGroupScope.permissionItem(
                 },
                 contentDescription = null,
                 tint = when (capability.risk) {
-                    AgentPermissionRisk.High -> MaterialTheme.colorScheme.error
-                    AgentPermissionRisk.Sensitive -> MaterialTheme.colorScheme.tertiary
-                    AgentPermissionRisk.Normal -> MaterialTheme.colorScheme.primary
+                    AgentPermissionRisk.High -> colors.red
+                    AgentPermissionRisk.Sensitive,
+                    AgentPermissionRisk.Normal,
+                    -> colors.muted
                 },
             )
         },
@@ -359,20 +379,22 @@ private fun CardGroupScope.permissionItem(
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(PermissionDisplayLocalizer.description(displayContext, capability))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(
+                    WorkspaceStatusPill(
                         text = status.label(),
-                        color = when (status) {
-                            AgentPermissionStatus.Granted -> MaterialTheme.colorScheme.primary
-                            AgentPermissionStatus.Unsupported -> MaterialTheme.colorScheme.outline
-                            else -> MaterialTheme.colorScheme.error
+                        tone = when (status) {
+                            AgentPermissionStatus.Granted -> WorkspaceTone.Success
+                            AgentPermissionStatus.Unsupported -> WorkspaceTone.Neutral
+                            AgentPermissionStatus.Denied,
+                            AgentPermissionStatus.SpecialNeeded,
+                            -> WorkspaceTone.Danger
                         },
                     )
-                    Text(
+                    WorkspaceStatusPill(
                         text = capability.risk.label(),
-                        color = when (capability.risk) {
-                            AgentPermissionRisk.High -> MaterialTheme.colorScheme.error
-                            AgentPermissionRisk.Sensitive -> MaterialTheme.colorScheme.tertiary
-                            AgentPermissionRisk.Normal -> MaterialTheme.colorScheme.outline
+                        tone = when (capability.risk) {
+                            AgentPermissionRisk.High -> WorkspaceTone.Danger
+                            AgentPermissionRisk.Sensitive -> WorkspaceTone.Warning
+                            AgentPermissionRisk.Normal -> WorkspaceTone.Neutral
                         },
                     )
                 }
@@ -397,13 +419,13 @@ private fun PermissionAction(
     onClick: () -> Unit,
 ) {
     when (status) {
-        AgentPermissionStatus.Granted -> Text(
-            stringResource(R.string.setting_system_access_status_granted),
-            color = MaterialTheme.colorScheme.primary,
+        AgentPermissionStatus.Granted -> WorkspaceStatusPill(
+            text = stringResource(R.string.setting_system_access_status_granted),
+            tone = WorkspaceTone.Success,
         )
-        AgentPermissionStatus.Unsupported -> Text(
-            stringResource(R.string.setting_system_access_status_unsupported),
-            color = MaterialTheme.colorScheme.outline,
+        AgentPermissionStatus.Unsupported -> WorkspaceStatusPill(
+            text = stringResource(R.string.setting_system_access_status_unsupported),
+            tone = WorkspaceTone.Neutral,
         )
         AgentPermissionStatus.Denied,
         AgentPermissionStatus.SpecialNeeded -> {

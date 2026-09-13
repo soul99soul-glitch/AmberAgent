@@ -1,13 +1,17 @@
 package app.amber.feature.ui.pages.setting
 
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
@@ -27,6 +31,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import app.amber.feature.ui.components.ui.Switch
+import app.amber.feature.ui.components.ui.SwitchSize
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
@@ -46,25 +51,30 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.util.fastForEach
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.dokar.sonner.ToastType
 import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.ChevronRight
+import com.composables.icons.lucide.FileText
+import com.composables.icons.lucide.Maximize
 import com.composables.icons.lucide.Plus
+import com.composables.icons.lucide.Smartphone
+import com.composables.icons.lucide.Sparkles
 import com.composables.icons.lucide.Trash2
 import com.composables.icons.lucide.Pencil
 import com.composables.icons.lucide.Play
 import app.amber.agent.R
 import app.amber.agent.Screen
+import app.amber.feature.ui.components.ds.amberCanvas
 import app.amber.core.settings.AgentRuntimeSetting
 import app.amber.core.settings.Settings
 import app.amber.core.memory.dream.PersistedMemoryDreamPlan
@@ -104,17 +114,26 @@ fun SettingAgentMemoryPage(
     } else {
         remember { mutableStateOf<Map<String, Int>>(emptyMap()) }
     }
-    val memories by if (subpage == MemorySettingsSubpage.Library) {
+    val memories by if (
+        subpage == MemorySettingsSubpage.Library ||
+        subpage == MemorySettingsSubpage.Overview
+    ) {
         vm.memories.collectAsStateWithLifecycle()
     } else {
         remember { mutableStateOf(emptyList<AssistantMemory>()) }
     }
-    val shortTermMemories by if (subpage == MemorySettingsSubpage.Library) {
+    val shortTermMemories by if (
+        subpage == MemorySettingsSubpage.Library ||
+        subpage == MemorySettingsSubpage.Overview
+    ) {
         vm.shortTermMemories.collectAsStateWithLifecycle()
     } else {
         remember { mutableStateOf(emptyList<AssistantMemory>()) }
     }
-    val longTermMemories by if (subpage == MemorySettingsSubpage.Library) {
+    val longTermMemories by if (
+        subpage == MemorySettingsSubpage.Library ||
+        subpage == MemorySettingsSubpage.Overview
+    ) {
         vm.longTermMemories.collectAsStateWithLifecycle()
     } else {
         remember { mutableStateOf(emptyList<AssistantMemory>()) }
@@ -319,8 +338,10 @@ fun SettingAgentMemoryPage(
                 scrollBehavior = scrollBehavior,
             )
         },
-        modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
-        containerColor = workspaceColors().canvas,
+        modifier = Modifier
+            .nestedScroll(scrollBehavior.nestedScrollConnection)
+            .amberCanvas(),
+        containerColor = androidx.compose.ui.graphics.Color.Transparent,
     ) { innerPadding ->
         if (subpage == MemorySettingsSubpage.Library) {
             MemoryLibrarySubpage(
@@ -359,7 +380,7 @@ fun SettingAgentMemoryPage(
                     .padding(horizontal = SettingPageHorizontalInset, vertical = 8.dp)
                     .verticalScroll(rememberScrollState())
                     .imePadding(),
-                verticalArrangement = Arrangement.spacedBy(16.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 when (subpage) {
                 MemorySettingsSubpage.Overview -> {
@@ -375,6 +396,9 @@ fun SettingAgentMemoryPage(
                         shortCount = memoryCounts[MemoryRepository.SHORT_TERM_MEMORY_ID] ?: 0,
                         longCount = memoryCounts[MemoryRepository.LONG_TERM_MEMORY_ID] ?: 0,
                         hasPendingDreamPlan = dreamPlan != null,
+                        coreMemories = memories,
+                        shortTermMemories = shortTermMemories,
+                        longTermMemories = longTermMemories,
                         onOpen = { target -> navController.navigate(target.toScreen()) },
                     )
                 }
@@ -876,13 +900,17 @@ private fun MemoryOverviewEntries(
     shortCount: Int,
     longCount: Int,
     hasPendingDreamPlan: Boolean,
+    coreMemories: List<AssistantMemory>,
+    shortTermMemories: List<AssistantMemory>,
+    longTermMemories: List<AssistantMemory>,
     onOpen: (MemorySettingsSubpage) -> Unit,
 ) {
-    CardGroup {
+    SettingCardGroup(title = stringResource(R.string.chat_message_tool_kind_memory)) {
         item(
             onClick = { onOpen(MemorySettingsSubpage.Recall) },
             headlineContent = { Text(stringResource(R.string.memory_recall_title)) },
-            supportingContent = { Text(stringResource(R.string.memory_recall_desc)) },
+            supportingContent = { MemoryRowSubtitle(stringResource(R.string.memory_recall_desc)) },
+            trailingContent = { MemoryChevron() },
         )
         item(
             onClick = { onOpen(MemorySettingsSubpage.Worker) },
@@ -893,20 +921,127 @@ private fun MemoryOverviewEntries(
                 } else {
                     stringResource(R.string.memory_worker_pending_suffix, pendingCandidateCount)
                 }
-                Text(stringResource(R.string.memory_worker_desc, suffix))
+                MemoryRowSubtitle(stringResource(R.string.memory_worker_desc, suffix))
             },
+            trailingContent = { MemoryChevron() },
         )
         item(
             onClick = { onOpen(MemorySettingsSubpage.Compaction) },
             headlineContent = { Text(stringResource(R.string.memory_compaction_title)) },
-            supportingContent = { Text(stringResource(R.string.memory_compaction_desc)) },
+            supportingContent = { MemoryRowSubtitle(stringResource(R.string.memory_compaction_desc)) },
+            trailingContent = { MemoryChevron() },
         )
         item(
             onClick = { onOpen(MemorySettingsSubpage.Library) },
             headlineContent = { Text(stringResource(R.string.memory_library_title)) },
             supportingContent = {
-                Text(stringResource(R.string.memory_library_desc, coreCount, shortCount, longCount, pendingCandidateCount))
+                MemoryRowSubtitle(
+                    stringResource(
+                        R.string.memory_library_desc,
+                        coreCount,
+                        shortCount,
+                        longCount,
+                        pendingCandidateCount,
+                    )
+                )
             },
+            trailingContent = { MemoryChevron() },
+        )
+    }
+    Spacer(Modifier.height(12.dp))
+    MemoryOverviewPreview(
+        coreMemories = coreMemories,
+        shortTermMemories = shortTermMemories,
+        longTermMemories = longTermMemories,
+    )
+}
+
+@Composable
+private fun MemoryChevron() {
+    Icon(
+        imageVector = Lucide.ChevronRight,
+        contentDescription = null,
+        modifier = Modifier.size(18.dp),
+        tint = LocalAmberTokens.current.ink3,
+    )
+}
+
+@Composable
+private fun MemoryRowSubtitle(
+    text: String,
+    mono: Boolean = true,
+) {
+    val tokens = LocalAmberTokens.current
+    val type = LocalAmberType.current
+    Text(
+        text = text,
+        style = if (mono) {
+            type.meta.copy(fontSize = 12.sp, lineHeight = 16.sp)
+        } else {
+            type.secondary.copy(fontSize = 13.sp, lineHeight = 18.sp)
+        },
+        color = tokens.ink3,
+    )
+}
+
+@Composable
+private fun MemoryOverviewPreview(
+    coreMemories: List<AssistantMemory>,
+    shortTermMemories: List<AssistantMemory>,
+    longTermMemories: List<AssistantMemory>,
+) {
+    val previewMemories = (coreMemories + shortTermMemories + longTermMemories)
+        .filter { !it.archived && !it.isSummarySensitive() }
+        .distinctBy { it.id }
+        .take(3)
+    SettingCardGroup(title = stringResource(R.string.redesign_memory_library_preview)) {
+        if (previewMemories.isEmpty()) {
+            item(
+                headlineContent = { Text(stringResource(R.string.memory_summary_empty)) },
+            )
+        } else {
+            previewMemories.forEach { memory ->
+                item(
+                    headlineContent = {
+                        Text(
+                            text = memory.content,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    },
+                    leadingContent = {
+                        SettingTileIcon(
+                            when (memory.kind) {
+                                MemoryKind.USER, MemoryKind.FEEDBACK -> Lucide.Sparkles
+                                MemoryKind.PROJECT, MemoryKind.REFERENCE -> Lucide.Smartphone
+                                else -> Lucide.Maximize
+                            },
+                        )
+                    },
+                    trailingContent = {
+                        MemoryScopePill(memoryScopeLabel(memory.scope))
+                    },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun MemoryScopePill(text: String) {
+    val tokens = LocalAmberTokens.current
+    Box(
+        modifier = Modifier
+            .clip(CircleShape)
+            .background(tokens.surface2)
+            .border(1.dp, tokens.line, CircleShape)
+            .padding(horizontal = 8.dp, vertical = 3.dp),
+    ) {
+        Text(
+            text = text,
+            style = LocalAmberType.current.meta.copy(fontSize = 10.5.sp, lineHeight = 13.sp),
+            color = tokens.ink2,
+            maxLines = 1,
         )
     }
 }
@@ -916,10 +1051,10 @@ private fun MemoryRecallSubpage(
     settings: Settings,
     onUpdate: ((AgentRuntimeSetting) -> AgentRuntimeSetting) -> Unit,
 ) {
-    CardGroup {
+    SettingCardGroup(title = stringResource(R.string.chat_message_tool_kind_memory)) {
         item(
             headlineContent = { Text(stringResource(R.string.setting_agent_memory_core_title)) },
-            supportingContent = { Text(stringResource(R.string.setting_agent_memory_core_desc)) },
+            supportingContent = { MemoryRowSubtitle(stringResource(R.string.setting_agent_memory_core_desc)) },
             trailingContent = {
                 Switch(
                     checked = settings.agentRuntime.enableCoreMemory,
@@ -929,7 +1064,7 @@ private fun MemoryRecallSubpage(
         )
         item(
             headlineContent = { Text(stringResource(R.string.setting_agent_memory_short_term_title)) },
-            supportingContent = { Text(stringResource(R.string.setting_agent_memory_short_term_desc)) },
+            supportingContent = { MemoryRowSubtitle(stringResource(R.string.setting_agent_memory_short_term_desc)) },
             trailingContent = {
                 Switch(
                     checked = settings.agentRuntime.enableShortTermMemory,
@@ -939,7 +1074,7 @@ private fun MemoryRecallSubpage(
         )
         item(
             headlineContent = { Text(stringResource(R.string.setting_agent_memory_long_term_title)) },
-            supportingContent = { Text(stringResource(R.string.setting_agent_memory_long_term_desc)) },
+            supportingContent = { MemoryRowSubtitle(stringResource(R.string.setting_agent_memory_long_term_desc)) },
             trailingContent = {
                 Switch(
                     checked = settings.agentRuntime.enableLongTermMemory,
@@ -949,7 +1084,7 @@ private fun MemoryRecallSubpage(
         )
         item(
             headlineContent = { Text(stringResource(R.string.setting_agent_memory_recent_chats_title)) },
-            supportingContent = { Text(stringResource(R.string.setting_agent_memory_recent_chats_desc)) },
+            supportingContent = { MemoryRowSubtitle(stringResource(R.string.setting_agent_memory_recent_chats_desc)) },
             trailingContent = {
                 Switch(
                     checked = settings.agentRuntime.enableRecentChatsReference,
@@ -959,7 +1094,7 @@ private fun MemoryRecallSubpage(
         )
         item(
             headlineContent = { Text(stringResource(R.string.setting_agent_memory_time_reminder_title)) },
-            supportingContent = { Text(stringResource(R.string.setting_agent_memory_time_reminder_desc)) },
+            supportingContent = { MemoryRowSubtitle(stringResource(R.string.setting_agent_memory_time_reminder_desc)) },
             trailingContent = {
                 Switch(
                     checked = settings.agentRuntime.enableTimeReminder,
@@ -970,7 +1105,7 @@ private fun MemoryRecallSubpage(
         item(
             headlineContent = { Text(stringResource(R.string.memory_selective_recall_title)) },
             supportingContent = {
-                Text(
+                MemoryRowSubtitle(
                     stringResource(
                         R.string.memory_selective_recall_desc,
                         settings.agentRuntime.memoryRecall.maxItems,
@@ -1008,17 +1143,19 @@ private fun MemoryWorkerSubpage(
         item(
             headlineContent = { Text(stringResource(R.string.memory_local_maintenance_title)) },
             supportingContent = {
-                Text(
+                MemoryRowSubtitle(
                     stringResource(
                         R.string.memory_local_maintenance_desc,
                         pendingCandidateCount,
                         eventCount,
-                    )
+                    ),
+                    mono = false,
                 )
             },
             trailingContent = {
                 Switch(
                     checked = worker.dreamMaintenanceEnabled,
+                    size = SwitchSize.Small,
                     onCheckedChange = { enabled ->
                         onUpdate {
                             it.copy(
@@ -1035,11 +1172,15 @@ private fun MemoryWorkerSubpage(
         item(
             headlineContent = { Text(stringResource(R.string.memory_llm_maintenance_title)) },
             supportingContent = {
-                Text(stringResource(R.string.memory_llm_maintenance_desc))
+                MemoryRowSubtitle(
+                    stringResource(R.string.memory_llm_maintenance_desc),
+                    mono = false,
+                )
             },
             trailingContent = {
                 Switch(
                     checked = worker.dreamModelEnabled,
+                    size = SwitchSize.Small,
                     onCheckedChange = { enabled ->
                         onUpdate {
                             it.copy(
@@ -1055,10 +1196,16 @@ private fun MemoryWorkerSubpage(
         )
         item(
             headlineContent = { Text(stringResource(R.string.memory_idle_only_title)) },
-            supportingContent = { Text(stringResource(R.string.memory_idle_only_desc)) },
+            supportingContent = {
+                MemoryRowSubtitle(
+                    stringResource(R.string.memory_idle_only_desc),
+                    mono = false,
+                )
+            },
             trailingContent = {
                 Switch(
                     checked = worker.runOnlyOnIdle,
+                    size = SwitchSize.Small,
                     onCheckedChange = { enabled ->
                         onUpdate { it.copy(memoryWorker = it.memoryWorker.copy(runOnlyOnIdle = enabled)) }
                     },
@@ -1079,6 +1226,7 @@ private fun MemoryWorkerSubpage(
         // Manual "立即运行一次" → moved to toolbar play icon.
     }
 
+    Spacer(Modifier.height(26.dp))
     DreamReviewSection(
         plan = dreamPlan,
         running = running,
@@ -1094,52 +1242,63 @@ private fun MemoryCompactionSubpage(
     onUpdate: ((AgentRuntimeSetting) -> AgentRuntimeSetting) -> Unit,
 ) {
     val compaction = settings.agentRuntime.contextCompaction
-    CardGroup(title = { SectionLabel(stringResource(R.string.setting_agent_memory_context_mode_section)) }) {
+    CardGroup {
         item(
             headlineContent = { Text(stringResource(R.string.setting_agent_memory_context_compaction_title)) },
             supportingContent = {
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text(stringResource(R.string.setting_agent_memory_context_compaction_desc))
-                    Text(
-                        text = stringResource(R.string.setting_agent_memory_context_compaction_defaults),
-                        style = LocalAmberType.current.secondary,
-                        color = workspaceColors().muted,
+                    MemoryRowSubtitle(
+                        stringResource(R.string.setting_agent_memory_context_compaction_desc)
+                    )
+                    MemoryRowSubtitle(
+                        stringResource(R.string.setting_agent_memory_context_compaction_defaults)
                     )
                 }
             },
             trailingContent = {
                 Switch(
                     checked = settings.agentRuntime.contextCompaction.enabled,
+                    size = SwitchSize.Small,
                     onCheckedChange = { enabled ->
-                        onUpdate { it.copy(contextCompaction = it.contextCompaction.copy(enabled = enabled)) }
+                        onUpdate {
+                            it.copy(
+                                contextCompaction = it.contextCompaction.copy(
+                                    enabled = enabled,
+                                    notifyOnly = if (enabled) false else it.contextCompaction.notifyOnly,
+                                )
+                            )
+                        }
                     },
                 )
             },
         )
         item(
             headlineContent = { Text(stringResource(R.string.setting_agent_memory_context_compaction_notify_title)) },
-            supportingContent = { Text(stringResource(R.string.setting_agent_memory_context_compaction_notify_desc)) },
+            supportingContent = {
+                MemoryRowSubtitle(
+                    stringResource(R.string.setting_agent_memory_context_compaction_notify_desc)
+                )
+            },
             trailingContent = {
                 Switch(
                     checked = settings.agentRuntime.contextCompaction.notifyOnly,
+                    size = SwitchSize.Small,
                     onCheckedChange = { enabled ->
-                        onUpdate { it.copy(contextCompaction = it.contextCompaction.copy(notifyOnly = enabled)) }
+                        onUpdate {
+                            it.copy(
+                                contextCompaction = it.contextCompaction.copy(
+                                    notifyOnly = enabled,
+                                    enabled = if (enabled) false else it.contextCompaction.enabled,
+                                )
+                            )
+                        }
                     },
                 )
             },
         )
     }
-    CardGroup(title = { SectionLabel(stringResource(R.string.setting_agent_memory_context_threshold_section)) }) {
-        item(
-            headlineContent = { Text(stringResource(R.string.setting_agent_memory_context_precompact_threshold_title)) },
-            trailingContent = {
-                Text(
-                    text = "${(compaction.precompactRatio * 100f).toInt()}%",
-                    style = LocalAmberType.current.meta,
-                    color = workspaceColors().muted,
-                )
-            },
-        )
+    Spacer(Modifier.height(12.dp))
+    SettingCardGroup(title = stringResource(R.string.setting_agent_memory_context_threshold_section)) {
         item(
             headlineContent = { Text(stringResource(R.string.setting_agent_memory_context_force_threshold_title)) },
             trailingContent = {
@@ -1150,8 +1309,19 @@ private fun MemoryCompactionSubpage(
                 )
             },
         )
+        item(
+            headlineContent = { Text(stringResource(R.string.setting_agent_memory_context_precompact_threshold_title)) },
+            trailingContent = {
+                Text(
+                    text = "${(compaction.precompactRatio * 100f).toInt()}%",
+                    style = LocalAmberType.current.meta,
+                    color = workspaceColors().muted,
+                )
+            },
+        )
     }
-    CardGroup(title = { SectionLabel(stringResource(R.string.setting_agent_memory_context_protect_section)) }) {
+    Spacer(Modifier.height(12.dp))
+    SettingCardGroup(title = stringResource(R.string.setting_agent_memory_context_protect_section)) {
         item(
             headlineContent = { Text(stringResource(R.string.setting_agent_memory_context_protect_turns_title)) },
             trailingContent = {
@@ -1202,8 +1372,6 @@ private fun MemoryLibrarySubpage(
 ) {
     var showPortabilityDialog by remember { mutableStateOf(false) }
     var showEventsDialog by remember { mutableStateOf(false) }
-    // 设计稿默认展示候选审核区，真实候选仍由仓库状态决定；空列表时继续显示空态。
-    var showCandidates by remember { mutableStateOf(true) }
     val coreMemoryTitle = stringResource(R.string.memory_core_title)
     val coreMemoryEmptyText = stringResource(R.string.setting_agent_memory_empty)
     val coreMemoryInfoTitle = stringResource(R.string.memory_core_info_title)
@@ -1220,7 +1388,7 @@ private fun MemoryLibrarySubpage(
     LazyColumn(
         modifier = modifier,
         state = rememberLazyListState(),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        verticalArrangement = Arrangement.spacedBy(28.dp),
     ) {
         item("memory_summary") {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -1233,25 +1401,12 @@ private fun MemoryLibrarySubpage(
             }
         }
 
-        item("memory_candidate_inbox") {
-            MemoryCandidateInboxEntry(
-                candidateCount = pendingCandidates.size,
-                lowConfidenceCount = pendingCandidates.count {
-                    it.confidence < LOW_CONFIDENCE_CANDIDATE_THRESHOLD
-                },
-                expanded = showCandidates,
-                onToggle = { showCandidates = !showCandidates },
-            )
-        }
-
-        if (showCandidates) {
-            memoryCandidatesSection(
-                candidates = pendingCandidates,
-                onAccept = onAcceptCandidate,
-                onIgnore = onIgnoreCandidate,
-                onIgnoreLowConfidence = onIgnoreLowConfidenceCandidates,
-            )
-        }
+        memoryCandidatesSection(
+            candidates = pendingCandidates,
+            onAccept = onAcceptCandidate,
+            onIgnore = onIgnoreCandidate,
+            onIgnoreLowConfidence = onIgnoreLowConfidenceCandidates,
+        )
 
         memoryRecordsSection(
             title = coreMemoryTitle,
@@ -1338,65 +1493,49 @@ private fun AgentSoulCard(
 ) {
     var showEditor by remember { mutableStateOf(false) }
     var draft by remember(value) { mutableStateOf(value) }
-    val previewText = if (value.isBlank()) {
-        stringResource(R.string.setting_agent_memory_soul_empty_preview)
-    } else {
-        value
+    val tokens = LocalAmberTokens.current
+    val type = LocalAmberType.current
+    val openEditor = {
+        draft = value
+        showEditor = true
     }
-
-    // V3: 强制跟 chatTheme.surface (即使 dynamicColor 开了 Material You, 这里也跟主题色, 不出现浅蓝底)
-    val agentMemorySoulTheme = app.amber.feature.ui.pages.chat.LocalChatTheme.current
     Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable {
-                draft = value
-                showEditor = true
-            },
-        colors = CardDefaults.cardColors(containerColor = agentMemorySoulTheme.surface),
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(14.dp),
+        colors = CardDefaults.cardColors(containerColor = tokens.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+        border = BorderStroke(1.dp, tokens.line),
     ) {
-        Column(
+        Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
+                .clickable(onClick = openEditor)
+                .padding(horizontal = 14.dp, vertical = 10.dp),
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(
-                text = stringResource(R.string.setting_agent_memory_soul_title),
-                style = LocalAmberType.current.body.copy(fontWeight = FontWeight.SemiBold),
-                color = workspaceColors().ink,
-            )
-            Text(
-                text = stringResource(R.string.setting_agent_memory_soul_desc),
-                style = LocalAmberType.current.secondary,
-                color = workspaceColors().muted,
-            )
-            Text(
-                text = previewText,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(16.dp))
-                    .border(
-                        width = 1.dp,
-                        color = workspaceColors().hairline,
-                        shape = RoundedCornerShape(16.dp),
-                    )
-                    .padding(14.dp),
-                maxLines = 4,
-                overflow = TextOverflow.Ellipsis,
-                // Graphite §3: agents.md preview is machine-fact text → MONO token.
-                style = LocalAmberType.current.meta,
-                color = if (value.isBlank()) {
-                    workspaceColors().muted
-                } else {
-                    workspaceColors().ink
-                },
-            )
-            Text(
-                text = stringResource(R.string.setting_agent_memory_soul_edit_hint),
-                style = LocalAmberType.current.secondary,
-                color = MaterialTheme.colorScheme.primary,
-            )
+            SettingTileIcon(Lucide.FileText)
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                Text(
+                    text = "agents.md",
+                    style = type.meta.copy(fontWeight = FontWeight.SemiBold),
+                    color = tokens.ink,
+                    maxLines = 1,
+                )
+                Text(
+                    text = stringResource(R.string.setting_agent_memory_soul_desc),
+                    style = type.secondary,
+                    color = tokens.ink2,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            TextButton(onClick = openEditor) {
+                Text(stringResource(R.string.edit), style = type.secondary)
+            }
         }
     }
 
@@ -1471,106 +1610,72 @@ private fun MemorySummarySection(
                 memory.kind == MemoryKind.PROJECT
         }
 
-    SectionLabel(
+    val emptyValue = stringResource(R.string.memory_summary_empty)
+    val facts = listOf(
+        SummaryFact(
+            label = stringResource(R.string.memory_summary_stable_preferences),
+            value = stableMemories.firstOrNull()?.content ?: emptyValue,
+            memory = stableMemories.firstOrNull(),
+        ),
+        SummaryFact(
+            label = stringResource(R.string.memory_summary_long_term_projects),
+            value = longTermProjects.firstOrNull()?.content ?: emptyValue,
+            memory = longTermProjects.firstOrNull(),
+        ),
+        SummaryFact(
+            label = stringResource(R.string.memory_summary_current_short_term),
+            value = currentProjects.firstOrNull()?.content ?: emptyValue,
+            memory = currentProjects.firstOrNull(),
+        ),
+    )
+
+    SettingSectionTitle(
         text = stringResource(R.string.memory_summary_title),
-        modifier = Modifier.padding(horizontal = 8.dp),
+        modifier = Modifier.padding(start = 2.dp, top = 8.dp, end = 2.dp),
     )
     AmberCard(
         modifier = Modifier.fillMaxWidth(),
     ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            val hasContent = stableMemories.isNotEmpty() ||
-                longTermProjects.isNotEmpty() ||
-                currentProjects.isNotEmpty()
-            if (!hasContent) {
+        facts.forEachIndexed { index, fact ->
+            if (index > 0) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 14.dp)
+                        .height(1.dp)
+                        .background(LocalAmberTokens.current.line),
+                )
+            }
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .then(fact.memory?.let { memory -> Modifier.clickable { onEditMemory(memory) } } ?: Modifier)
+                    .padding(horizontal = 14.dp, vertical = 10.dp)
+                    .heightIn(min = 64.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
                 Text(
-                    text = stringResource(R.string.memory_summary_empty),
-                    style = LocalAmberType.current.secondary,
-                    color = workspaceColors().muted,
+                    text = fact.label,
+                    style = LocalAmberType.current.meta,
+                    color = LocalAmberTokens.current.ink3,
                 )
-            } else {
-                MemorySummaryGroup(
-                    title = stringResource(R.string.memory_summary_stable_preferences),
-                    memories = stableMemories,
-                    onEditMemory = onEditMemory,
-                )
-                MemorySummaryGroup(
-                    title = stringResource(R.string.memory_summary_long_term_projects),
-                    memories = longTermProjects,
-                    onEditMemory = onEditMemory,
-                )
-                MemorySummaryGroup(
-                    title = stringResource(R.string.memory_summary_current_short_term),
-                    memories = currentProjects,
-                    onEditMemory = onEditMemory,
+                Text(
+                    text = fact.value,
+                    style = LocalAmberType.current.body.copy(fontWeight = FontWeight.SemiBold),
+                    color = LocalAmberTokens.current.ink,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
         }
     }
 }
 
-@Composable
-private fun MemorySummaryGroup(
-    title: String,
-    memories: List<AssistantMemory>,
-    onEditMemory: (AssistantMemory) -> Unit,
-) {
-    if (memories.isEmpty()) return
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Text(
-            text = title,
-            style = LocalAmberType.current.secondary.copy(fontWeight = FontWeight.SemiBold),
-            color = LocalAmberTokens.current.accent,
-        )
-        memories.take(6).fastForEach { memory ->
-            Text(
-                text = "#${memory.id} [${memory.scope.wireName}/${memory.kind.wireName}] ${memory.content}",
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { onEditMemory(memory) },
-                style = LocalAmberType.current.secondary,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-    }
-}
-
-@Composable
-private fun MemoryCandidateInboxEntry(
-    candidateCount: Int,
-    lowConfidenceCount: Int,
-    expanded: Boolean,
-    onToggle: () -> Unit,
-) {
-    CardGroup {
-        item(
-            onClick = onToggle,
-            headlineContent = { Text(stringResource(R.string.memory_candidate_review_title)) },
-            supportingContent = {
-                Text(
-                    if (candidateCount == 0) {
-                        stringResource(R.string.memory_candidate_empty)
-                    } else {
-                        stringResource(
-                            R.string.memory_candidate_counts,
-                            candidateCount,
-                            lowConfidenceCount,
-                            if (expanded) {
-                                stringResource(R.string.memory_collapse)
-                            } else {
-                                stringResource(R.string.memory_expand)
-                            },
-                        )
-                    }
-                )
-            },
-        )
-    }
-}
+private data class SummaryFact(
+    val label: String,
+    val value: String,
+    val memory: AssistantMemory?,
+)
 
 private fun AssistantMemory.isSummarySensitive(): Boolean {
     return isSensitiveMemoryContent(content)
@@ -1582,44 +1687,57 @@ private fun LazyListScope.memoryCandidatesSection(
     onIgnore: (String) -> Unit,
     onIgnoreLowConfidence: () -> Unit,
 ) {
-    item("memory_candidate_section_label") {
-        SectionLabel(
-            text = stringResource(R.string.memory_candidate_review_title),
-            modifier = Modifier.padding(horizontal = 8.dp),
-        )
-    }
-    if (candidates.isEmpty()) {
-        item("memory_candidate_empty") {
-            Text(
-                text = stringResource(R.string.memory_candidate_empty),
-                style = LocalAmberType.current.secondary,
-                color = workspaceColors().muted,
-                modifier = Modifier.padding(horizontal = 8.dp),
-            )
-        }
-        return
-    }
-    val lowConfidenceCount = candidates.count { it.confidence < LOW_CONFIDENCE_CANDIDATE_THRESHOLD }
-    if (lowConfidenceCount > 0) {
-        item("memory_candidate_low_confidence") {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 8.dp),
-                horizontalArrangement = Arrangement.End,
-            ) {
-                TextButton(onClick = onIgnoreLowConfidence) {
-                    Text(stringResource(R.string.memory_ignore_low_confidence, lowConfidenceCount))
+    item("memory_candidate_section") {
+        val lowConfidenceCount = candidates.count { it.confidence < LOW_CONFIDENCE_CANDIDATE_THRESHOLD }
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            SettingSectionTitle(stringResource(R.string.memory_candidate_review_title))
+            AmberCard(modifier = Modifier.fillMaxWidth()) {
+                if (candidates.isEmpty()) {
+                    Text(
+                        text = stringResource(R.string.memory_candidate_empty),
+                        style = LocalAmberType.current.secondary,
+                        color = LocalAmberTokens.current.ink3,
+                        modifier = Modifier.padding(16.dp),
+                    )
+                } else {
+                    candidates.forEachIndexed { index, candidate ->
+                        if (index > 0) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 14.dp)
+                                    .height(1.dp)
+                                    .background(LocalAmberTokens.current.line),
+                            )
+                        }
+                        MemoryCandidateCard(
+                            candidate = candidate,
+                            onAccept = { onAccept(candidate.id) },
+                            onIgnore = { onIgnore(candidate.id) },
+                        )
+                    }
+                    if (lowConfidenceCount > 0) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 14.dp)
+                                .height(1.dp)
+                                .background(LocalAmberTokens.current.line),
+                        )
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 14.dp),
+                            horizontalArrangement = Arrangement.End,
+                        ) {
+                            TextButton(onClick = onIgnoreLowConfidence) {
+                                Text(stringResource(R.string.memory_ignore_low_confidence, lowConfidenceCount))
+                            }
+                        }
+                    }
                 }
             }
         }
-    }
-    items(candidates, key = { "memory_candidate_${it.id}" }) { candidate ->
-        MemoryCandidateCard(
-            candidate = candidate,
-            onAccept = { onAccept(candidate.id) },
-            onIgnore = { onIgnore(candidate.id) },
-        )
     }
 }
 
@@ -1629,52 +1747,50 @@ private fun MemoryCandidateCard(
     onAccept: () -> Unit,
     onIgnore: () -> Unit,
 ) {
-    AmberCard(
-        modifier = Modifier.fillMaxWidth(),
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            val reviewSuffix = if (candidate.confidence >= LOW_CONFIDENCE_CANDIDATE_THRESHOLD) {
-                stringResource(R.string.memory_recommend_manual_review)
-            } else {
-                ""
-            }
+        val reviewSuffix = if (candidate.confidence >= LOW_CONFIDENCE_CANDIDATE_THRESHOLD) {
+            stringResource(R.string.memory_recommend_manual_review)
+        } else {
+            ""
+        }
+        Text(
+            text = stringResource(
+                R.string.memory_candidate_meta,
+                candidate.scope.wireName,
+                candidate.kind.wireName,
+                "%.2f".format(candidate.confidence),
+                reviewSuffix,
+            ),
+            // Graphite §3: scope/kind tags + confidence value are machine-facts → MONO.
+            style = LocalAmberType.current.meta,
+            color = LocalAmberTokens.current.accent,
+        )
+        Text(
+            text = candidate.content,
+            style = LocalAmberType.current.body,
+            maxLines = 4,
+            overflow = TextOverflow.Ellipsis,
+        )
+        if (candidate.reason.isNotBlank()) {
             Text(
-                text = stringResource(
-                    R.string.memory_candidate_meta,
-                    candidate.scope.wireName,
-                    candidate.kind.wireName,
-                    "%.2f".format(candidate.confidence),
-                    reviewSuffix,
-                ),
-                // Graphite §3: scope/kind tags + confidence value are machine-facts → MONO.
-                style = LocalAmberType.current.meta,
-                color = LocalAmberTokens.current.accent,
-            )
-            Text(
-                text = candidate.content,
-                style = LocalAmberType.current.body,
-                maxLines = 4,
+                text = candidate.reason,
+                style = LocalAmberType.current.secondary,
+                color = workspaceColors().muted,
+                maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
-            if (candidate.reason.isNotBlank()) {
-                Text(
-                    text = candidate.reason,
-                    style = LocalAmberType.current.secondary,
-                    color = workspaceColors().muted,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            TextButton(onClick = onAccept) {
+                Text(stringResource(R.string.memory_accept))
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                TextButton(onClick = onAccept) {
-                    Text(stringResource(R.string.memory_accept))
-                }
-                TextButton(onClick = onIgnore) {
-                    Text(stringResource(R.string.memory_ignore))
-                }
+            TextButton(onClick = onIgnore) {
+                Text(stringResource(R.string.memory_ignore))
             }
         }
     }
@@ -1688,124 +1804,175 @@ private fun DreamReviewSection(
     onApply: () -> Unit,
     onDismiss: () -> Unit,
 ) {
-    AmberCard(
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
+    val tokens = LocalAmberTokens.current
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        SettingSectionTitle(stringResource(R.string.memory_manual_review_title))
+        AmberCard(
+            modifier = Modifier.fillMaxWidth(),
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        stringResource(R.string.memory_manual_review_title),
-                        style = LocalAmberType.current.body.copy(fontWeight = FontWeight.SemiBold),
-                        color = workspaceColors().ink,
-                    )
-                    Text(
-                        stringResource(R.string.memory_manual_review_desc),
-                        style = LocalAmberType.current.secondary,
-                        color = workspaceColors().muted,
-                    )
-                }
-                if (running) {
-                    CircularWavyProgressIndicator(modifier = Modifier.size(24.dp))
-                }
-            }
-
-            plan?.let { persisted ->
-                val current = persisted.plan
-                val summary = stringResource(
-                    R.string.memory_dream_summary,
-                    current.mergeSuggestions.size,
-                    current.promoteMemoryIds.size,
-                    current.archiveMemoryIds.size,
-                    current.supersedeSuggestions.size,
-                    current.ignoreCandidateIds.size,
-                )
-                // Graphite §3: dream-plan summary is a count-dense machine-fact → MONO.
-                Text(
-                    summary,
-                    style = LocalAmberType.current.meta,
-                    color = workspaceColors().ink,
-                )
-                Text(
-                    text = stringResource(
-                        R.string.memory_dream_source,
-                        if (persisted.source.name == "AUTO") {
-                            stringResource(R.string.memory_dream_source_auto)
-                        } else {
-                            stringResource(R.string.memory_dream_source_manual)
-                        },
-                    ),
-                    style = LocalAmberType.current.secondary,
-                    color = workspaceColors().muted,
-                )
-                current.notes.take(4).forEach { note ->
-                    Text(
-                        text = "• $note",
-                        style = LocalAmberType.current.secondary,
-                        color = workspaceColors().muted,
-                    )
-                }
-                current.mergeSuggestions.take(5).forEach { suggestion ->
-                    // Graphite §3: merge suggestion = #id references → MONO.
-                    Text(
-                        text = stringResource(
-                            R.string.memory_dream_merge,
-                            suggestion.targetMemoryId,
-                            suggestion.duplicateMemoryIds.joinToString(","),
-                        ),
-                        style = LocalAmberType.current.meta,
-                        color = workspaceColors().ink,
-                    )
-                }
-                current.supersedeSuggestions.take(5).forEach { suggestion ->
-                    val reasonSuffix = if (suggestion.reason.isNotBlank()) {
-                        stringResource(R.string.memory_dream_reason_suffix, suggestion.reason)
-                    } else {
-                        ""
+            if (plan == null) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(40.dp)
+                            .clip(CircleShape)
+                            .background(tokens.surface2)
+                            .border(1.dp, tokens.line, CircleShape),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            imageVector = Lucide.Sparkles,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp),
+                            tint = tokens.ink2,
+                        )
                     }
                     Text(
+                        text = stringResource(R.string.memory_no_manual_plan),
+                        style = LocalAmberType.current.body.copy(fontWeight = FontWeight.SemiBold),
+                        color = tokens.ink,
+                        textAlign = TextAlign.Center,
+                    )
+                    Text(
+                        text = stringResource(R.string.memory_manual_review_desc),
+                        style = LocalAmberType.current.secondary,
+                        color = tokens.ink2,
+                        textAlign = TextAlign.Center,
+                    )
+                    TextButton(
+                        enabled = !running,
+                        onClick = onPlan,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 48.dp)
+                            .clip(RoundedCornerShape(15.dp))
+                            .background(tokens.surface2)
+                            .border(1.dp, tokens.line, RoundedCornerShape(15.dp)),
+                    ) {
+                        if (running) {
+                            CircularWavyProgressIndicator(modifier = Modifier.size(18.dp))
+                        } else {
+                            Text(stringResource(R.string.memory_generate_suggestion))
+                        }
+                    }
+                }
+            } else {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                stringResource(R.string.memory_manual_review_title),
+                                style = LocalAmberType.current.body.copy(fontWeight = FontWeight.SemiBold),
+                                color = tokens.ink,
+                            )
+                            Text(
+                                stringResource(R.string.memory_manual_review_desc),
+                                style = LocalAmberType.current.secondary,
+                                color = tokens.ink2,
+                            )
+                        }
+                        if (running) {
+                            CircularWavyProgressIndicator(modifier = Modifier.size(24.dp))
+                        }
+                    }
+
+                    val persisted = plan
+                    val current = persisted.plan
+                    val summary = stringResource(
+                        R.string.memory_dream_summary,
+                        current.mergeSuggestions.size,
+                        current.promoteMemoryIds.size,
+                        current.archiveMemoryIds.size,
+                        current.supersedeSuggestions.size,
+                        current.ignoreCandidateIds.size,
+                    )
+                    // Graphite §3: dream-plan summary is a count-dense machine-fact → MONO.
+                    Text(
+                        summary,
+                        style = LocalAmberType.current.meta,
+                        color = tokens.ink,
+                    )
+                    Text(
                         text = stringResource(
-                            R.string.memory_dream_replace,
-                            suggestion.oldMemoryIds.joinToString(","),
-                            suggestion.newContent,
-                            reasonSuffix,
+                            R.string.memory_dream_source,
+                            if (persisted.source.name == "AUTO") {
+                                stringResource(R.string.memory_dream_source_auto)
+                            } else {
+                                stringResource(R.string.memory_dream_source_manual)
+                            },
                         ),
                         style = LocalAmberType.current.secondary,
-                        maxLines = 3,
-                        overflow = TextOverflow.Ellipsis,
+                        color = tokens.ink2,
                     )
-                }
-            } ?: Text(
-                text = stringResource(R.string.memory_no_manual_plan),
-                style = LocalAmberType.current.secondary,
-                color = workspaceColors().muted,
-            )
+                    current.notes.take(4).forEach { note ->
+                        Text(
+                            text = "• $note",
+                            style = LocalAmberType.current.secondary,
+                            color = tokens.ink2,
+                        )
+                    }
+                    current.mergeSuggestions.take(5).forEach { suggestion ->
+                        // Graphite §3: merge suggestion = #id references → MONO.
+                        Text(
+                            text = stringResource(
+                                R.string.memory_dream_merge,
+                                suggestion.targetMemoryId,
+                                suggestion.duplicateMemoryIds.joinToString(","),
+                            ),
+                            style = LocalAmberType.current.meta,
+                            color = tokens.ink,
+                        )
+                    }
+                    current.supersedeSuggestions.take(5).forEach { suggestion ->
+                        val reasonSuffix = if (suggestion.reason.isNotBlank()) {
+                            stringResource(R.string.memory_dream_reason_suffix, suggestion.reason)
+                        } else {
+                            ""
+                        }
+                        Text(
+                            text = stringResource(
+                                R.string.memory_dream_replace,
+                                suggestion.oldMemoryIds.joinToString(","),
+                                suggestion.newContent,
+                                reasonSuffix,
+                            ),
+                            style = LocalAmberType.current.secondary,
+                            maxLines = 3,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
 
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                TextButton(
-                    enabled = !running,
-                    onClick = onPlan,
-                ) {
-                    Text(stringResource(R.string.memory_generate_suggestion))
-                }
-                TextButton(
-                    enabled = !running && plan?.plan?.hasChanges == true,
-                    onClick = onApply,
-                ) {
-                    Text(stringResource(R.string.memory_apply_suggestion))
-                }
-                TextButton(
-                    enabled = !running && plan != null,
-                    onClick = onDismiss,
-                ) {
-                    Text(stringResource(R.string.memory_clear_suggestion))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        TextButton(
+                            enabled = !running,
+                            onClick = onPlan,
+                        ) {
+                            Text(stringResource(R.string.memory_generate_suggestion))
+                        }
+                        TextButton(
+                            enabled = !running && persisted.plan.hasChanges,
+                            onClick = onApply,
+                        ) {
+                            Text(stringResource(R.string.memory_apply_suggestion))
+                        }
+                        TextButton(
+                            enabled = !running,
+                            onClick = onDismiss,
+                        ) {
+                            Text(stringResource(R.string.memory_clear_suggestion))
+                        }
+                    }
                 }
             }
         }
@@ -1863,7 +2030,7 @@ private fun MemoryMaintenanceSection(
     onOpenPortability: () -> Unit,
     onOpenEvents: () -> Unit,
 ) {
-    CardGroup(title = { SectionLabel(stringResource(R.string.memory_maintenance_tools_title)) }) {
+    SettingCardGroup(title = stringResource(R.string.memory_maintenance_tools_title)) {
         item(
             onClick = onOpenPortability,
             headlineContent = { Text(stringResource(R.string.memory_import_export_title)) },
@@ -1916,32 +2083,42 @@ private fun LazyListScope.memoryRecordsSection(
     onEditMemory: (AssistantMemory) -> Unit,
     onDeleteMemory: (AssistantMemory) -> Unit,
 ) {
-    item("memory_records_header_$title") {
-        MemoryRecordsHeader(
-            title = title,
-            infoTitle = infoTitle,
-            infoText = infoText,
-            onInfoClick = onInfoClick,
-            onAddMemory = onAddMemory,
-        )
-    }
-
-    if (memories.isEmpty()) {
-        item("memory_records_empty_$title") {
-            Text(
-                text = emptyText,
-                style = LocalAmberType.current.secondary,
-                color = workspaceColors().muted,
-                modifier = Modifier.padding(horizontal = 8.dp),
+    item("memory_records_section_$title") {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            MemoryRecordsHeader(
+                title = title,
+                infoTitle = infoTitle,
+                infoText = infoText,
+                onInfoClick = onInfoClick,
+                onAddMemory = onAddMemory,
             )
-        }
-    } else {
-        items(memories, key = { "memory_record_${it.id}" }) { memory ->
-            MemoryItem(
-                memory = memory,
-                onEditMemory = onEditMemory,
-                onDeleteMemory = onDeleteMemory,
-            )
+            AmberCard(modifier = Modifier.fillMaxWidth()) {
+                if (memories.isEmpty()) {
+                    Text(
+                        text = emptyText,
+                        style = LocalAmberType.current.secondary,
+                        color = workspaceColors().muted,
+                        modifier = Modifier.padding(16.dp),
+                    )
+                } else {
+                    memories.forEachIndexed { index, memory ->
+                        if (index > 0) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 14.dp)
+                                    .height(1.dp)
+                                    .background(LocalAmberTokens.current.line),
+                            )
+                        }
+                        MemoryItem(
+                            memory = memory,
+                            onEditMemory = onEditMemory,
+                            onDeleteMemory = onDeleteMemory,
+                        )
+                    }
+                }
+            }
         }
     }
 }
@@ -1954,6 +2131,7 @@ private fun MemoryRecordsHeader(
     onInfoClick: ((String, String) -> Unit)?,
     onAddMemory: (() -> Unit)?,
 ) {
+    val tokens = LocalAmberTokens.current
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -1966,9 +2144,13 @@ private fun MemoryRecordsHeader(
         ) {
             SectionLabel(
                 text = title,
+                modifier = Modifier.padding(bottom = 8.dp),
+            )
+            Box(
                 modifier = Modifier
                     .weight(1f)
-                    .padding(bottom = 8.dp),
+                    .height(1.dp)
+                    .background(tokens.line),
             )
             Row(
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
@@ -2027,43 +2209,31 @@ private fun MemoryItem(
     onEditMemory: (AssistantMemory) -> Unit,
     onDeleteMemory: (AssistantMemory) -> Unit,
 ) {
-    AmberCard(
-        modifier = Modifier.fillMaxWidth(),
+    val tokens = LocalAmberTokens.current
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 52.dp)
+            .padding(horizontal = 14.dp, vertical = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column(
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(4.dp),
-            ) {
-                Text(
-                    // Graphite §3: memory entry id is a machine-fact → MONO.
-                    text = "#${memory.id}",
-                    style = LocalAmberType.current.meta,
-                    color = LocalAmberTokens.current.ink,
-                )
-                Text(
-                    text = memory.content,
-                    maxLines = 5,
-                    overflow = TextOverflow.Ellipsis,
-                    style = LocalAmberType.current.body,
-                )
-            }
-            IconButton(onClick = { onEditMemory(memory) }) {
-                Icon(Lucide.Pencil, contentDescription = null, modifier = Modifier.size(20.dp))
-            }
-            IconButton(onClick = { onDeleteMemory(memory) }) {
-                Icon(
-                    Lucide.Trash2,
-                    contentDescription = stringResource(R.string.delete),
-                    modifier = Modifier.size(20.dp),
-                )
-            }
+        Text(
+            text = memory.content,
+            modifier = Modifier.weight(1f),
+            style = LocalAmberType.current.body,
+            color = tokens.ink,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
+        TextButton(onClick = { onEditMemory(memory) }) {
+            Text(stringResource(R.string.edit))
+        }
+        TextButton(onClick = { onDeleteMemory(memory) }) {
+            Text(
+                text = stringResource(R.string.delete),
+                color = MaterialTheme.colorScheme.error,
+            )
         }
     }
 }

@@ -2,6 +2,7 @@ package app.amber.feature.ui.components.ui
 
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -261,6 +262,8 @@ interface ChainOfThoughtScope {
         /** true 时 content 起始 X 跟 step icon center (12dp) 对齐 (而非默认 32dp label 缩进).
          *  reasoning step 用 true, 让 ReasoningContent 引用竖线 X = wrapper timeline X. */
         flushContent: Boolean = false,
+        /** true 时为该步骤绘制思考外框；普通工具步骤保持无框。 */
+        framed: Boolean = false,
         content: (@Composable () -> Unit)? = null,
     )
 }
@@ -300,6 +303,7 @@ private class ChainOfThoughtScopeImpl : ChainOfThoughtScope {
         collapsedAdaptiveWidth: Boolean,
         contentVisible: Boolean,
         flushContent: Boolean,
+        framed: Boolean,
         content: @Composable (() -> Unit)?
     ) {
         ChainOfThoughtStepContent(
@@ -312,6 +316,7 @@ private class ChainOfThoughtScopeImpl : ChainOfThoughtScope {
             onExpandedChange = onExpandedChange,
             contentVisible = contentVisible,
             flushContent = flushContent,
+            framed = framed,
             content = content,
         )
     }
@@ -327,13 +332,26 @@ private class ChainOfThoughtScopeImpl : ChainOfThoughtScope {
         onExpandedChange: (Boolean) -> Unit,
         contentVisible: Boolean,
         flushContent: Boolean = false,
+        framed: Boolean = false,
         content: @Composable (() -> Unit)?
     ) {
         val hasContent = content != null
         val shouldFillMaxWidth = !collapsedAdaptiveWidth || contentVisible
+        val frameTokens = app.amber.feature.ui.theme.LocalAmberTokens.current
+        val frameShape = RoundedCornerShape(18.dp)
+        val stepBackground = if (framed) frameTokens.surface2 else LocalCardColor.current
+        val frameModifier = if (framed) {
+            Modifier
+                .clip(frameShape)
+                .background(frameTokens.surface2, frameShape)
+                .border(1.dp, frameTokens.line, frameShape)
+                .padding(horizontal = 8.dp)
+        } else {
+            Modifier
+        }
 
         Column(
-            modifier = Modifier.then(
+            modifier = frameModifier.then(
                 if (shouldFillMaxWidth) {
                     Modifier.fillMaxWidth()
                 } else {
@@ -384,7 +402,7 @@ private class ChainOfThoughtScopeImpl : ChainOfThoughtScope {
                         Box(
                             modifier = Modifier
                                 .size(20.dp)
-                                .background(LocalCardColor.current),
+                                .background(stepBackground),
                             contentAlignment = Alignment.Center,
                         ) {
                             if (icon != null) {

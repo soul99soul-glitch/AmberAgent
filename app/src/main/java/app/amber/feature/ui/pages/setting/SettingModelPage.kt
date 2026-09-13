@@ -1,7 +1,11 @@
 package app.amber.feature.ui.pages.setting
 
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.layout.size
+
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -10,23 +14,25 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.Button
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
-import app.amber.feature.ui.components.ui.Switch
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
@@ -38,6 +44,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
@@ -68,6 +75,9 @@ import com.composables.icons.lucide.MessagesSquare
 import com.composables.icons.lucide.NotebookTabs
 import com.composables.icons.lucide.Settings
 import com.composables.icons.lucide.Eye
+import com.composables.icons.lucide.ChevronRight
+import com.composables.icons.lucide.ArrowDown
+import com.composables.icons.lucide.X
 import app.amber.agent.R
 import app.amber.core.ai.vision.VisionModelHealthChecker
 import app.amber.core.ai.vision.VisionModelHealthStrings
@@ -91,17 +101,21 @@ import app.amber.ai.provider.hasUsableAuth
 import app.amber.feature.ui.components.ds.AmberCard
 import app.amber.feature.ui.components.ds.Hairline
 import app.amber.feature.ui.components.ds.SectionLabel
+import app.amber.feature.ui.components.ds.amberCanvas
+import app.amber.feature.ui.components.ds.pressable
 import app.amber.feature.ui.components.nav.BackButton
-import app.amber.feature.ui.components.ui.WorkspaceDivider
-import app.amber.feature.ui.components.ui.WorkspaceLeadingIcon
-import app.amber.feature.ui.components.ui.WorkspaceStatusPill
-import app.amber.feature.ui.components.ui.WorkspaceTextButton
 import app.amber.feature.ui.components.ui.WorkspaceTone
 import app.amber.feature.ui.components.ui.WorkspaceTopBar
-import app.amber.feature.ui.components.ui.workspaceColors
 import app.amber.feature.ui.theme.LocalAmberType
 import app.amber.feature.ui.theme.LocalAmberTokens
 import app.amber.core.utils.plus
+import app.amber.feature.ui.pages.setting.components.ProviderFieldLabel
+import app.amber.feature.ui.pages.setting.components.ProviderCommandButton
+import app.amber.feature.ui.pages.setting.components.ProviderGhostButton
+import app.amber.feature.ui.pages.setting.components.ProviderSheetGrabber
+import app.amber.feature.ui.pages.setting.components.ProviderTextField
+import app.amber.feature.ui.pages.setting.components.ProviderToggle
+import app.amber.feature.ui.pages.setting.components.providerSlugLabel
 import org.koin.androidx.compose.koinViewModel
 import org.koin.compose.koinInject
 
@@ -109,10 +123,12 @@ import org.koin.compose.koinInject
 fun SettingModelPage(vm: SettingVM = koinViewModel()) {
     val settings by vm.settings.collectAsStateWithLifecycle()
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
-    val tokens = LocalAmberTokens.current
     var showGroupDefaults by remember { mutableStateOf(false) }
 
     Scaffold(
+        modifier = Modifier
+            .amberCanvas()
+            .nestedScroll(scrollBehavior.nestedScrollConnection),
         topBar = {
             WorkspaceTopBar(
                 title = stringResource(R.string.setting_model_page_title),
@@ -120,12 +136,11 @@ fun SettingModelPage(vm: SettingVM = koinViewModel()) {
                 scrollBehavior = scrollBehavior,
             )
         },
-        modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
-        containerColor = tokens.bg,
+        containerColor = Color.Transparent,
     ) { contentPadding ->
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
-            contentPadding = contentPadding + PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+            contentPadding = contentPadding + PaddingValues(horizontal = 16.dp, vertical = 10.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             item("chat") {
@@ -193,14 +208,13 @@ private fun DefaultChatModelSetting(
         description = stringResource(R.string.setting_model_page_chat_model_desc),
         icon = Lucide.MessageCircle,
         trailing = {
-            WorkspaceTextButton(
+            ModelParameterButton(
                 text = stringResource(R.string.setting_model_page_parameters),
                 onClick = {
                     draftPrompt = settings.systemPrompt
                     draftReasoningLevel = settings.reasoningLevel
                     showParams = true
                 },
-                tone = WorkspaceTone.Accent,
             )
         },
     ) {
@@ -251,10 +265,9 @@ private fun DefaultImageGenerationModelSetting(
         description = stringResource(R.string.setting_model_page_image_gen_model_desc),
         icon = Lucide.WandSparkles,
         trailing = {
-            WorkspaceTextButton(
+            ModelParameterButton(
                 text = stringResource(R.string.setting_model_page_prompt),
                 onClick = { showPromptSheet = true },
-                tone = WorkspaceTone.Accent,
             )
         },
     ) {
@@ -296,7 +309,8 @@ private fun ImagePromptInjectionSheet(
     promptConfigRepository: AgentPromptConfigRepository = koinInject(),
     onDismissRequest: () -> Unit,
 ) {
-    val workspace = workspaceColors()
+    val t = LocalAmberTokens.current
+    val type = LocalAmberType.current
     val scope = rememberCoroutineScope()
     val loaded by produceState<ImagePromptInjectionConfig?>(initialValue = null) {
         value = promptConfigRepository.readImageConfig()
@@ -304,8 +318,9 @@ private fun ImagePromptInjectionSheet(
     ModalBottomSheet(
         onDismissRequest = onDismissRequest,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        containerColor = workspace.paper,
-        contentColor = workspace.ink,
+        containerColor = t.raised,
+        contentColor = t.ink,
+        dragHandle = { ProviderSheetGrabber() },
     ) {
         val config = loaded
         if (config == null) {
@@ -315,7 +330,11 @@ private fun ImagePromptInjectionSheet(
                     .padding(24.dp),
                 contentAlignment = Alignment.Center,
             ) {
-                Text(stringResource(R.string.setting_model_page_image_prompt_loading), color = workspace.muted)
+                Text(
+                    stringResource(R.string.setting_model_page_image_prompt_loading),
+                    style = type.secondary,
+                    color = t.ink3,
+                )
             }
             return@ModalBottomSheet
         }
@@ -325,20 +344,25 @@ private fun ImagePromptInjectionSheet(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .fillMaxHeight(0.92f)
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = 20.dp)
-                .padding(bottom = 28.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
+                .padding(horizontal = 16.dp)
+                .padding(bottom = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Column(
+                modifier = Modifier.padding(top = 4.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
                 Text(
                     text = stringResource(R.string.setting_model_page_image_prompt_title),
-                    style = MaterialTheme.typography.titleLarge,
+                    style = type.screenTitle,
+                    color = t.ink,
                 )
                 Text(
                     text = stringResource(R.string.setting_model_page_image_prompt_desc),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = workspace.muted,
+                    style = type.secondary,
+                    color = t.ink3,
                 )
             }
             Row(
@@ -349,93 +373,54 @@ private fun ImagePromptInjectionSheet(
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = stringResource(R.string.setting_model_page_image_prompt_enable),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = workspace.ink,
+                        style = type.body,
+                        color = t.ink,
                     )
                     Text(
                         text = stringResource(R.string.setting_model_page_image_prompt_enable_desc),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = workspace.muted,
+                        style = type.secondary,
+                        color = t.ink3,
                     )
                 }
-                Switch(checked = enabled, onCheckedChange = { enabled = it })
+                ProviderToggle(checked = enabled, onCheckedChange = { enabled = it })
             }
-            TextField(
+            ProviderFieldLabel(stringResource(R.string.setting_model_page_image_prompt_default_label))
+            ProviderTextField(
                 value = prompt,
                 onValueChange = { prompt = it.take(4_000) },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(min = 120.dp),
-                minLines = 4,
-                maxLines = 8,
-                shape = RoundedCornerShape(10.dp),
-                label = { Text(stringResource(R.string.setting_model_page_image_prompt_default_label)) },
-                colors = TextFieldDefaults.colors(
-                    focusedContainerColor = workspace.note,
-                    unfocusedContainerColor = workspace.note,
-                    focusedIndicatorColor = workspace.hairline,
-                    unfocusedIndicatorColor = workspace.hairline,
-                    focusedTextColor = workspace.ink,
-                    unfocusedTextColor = workspace.ink,
-                    focusedLabelColor = workspace.blue,
-                    unfocusedLabelColor = workspace.muted,
-                ),
+                singleLine = false,
+                minHeight = 126.dp,
             )
-            TextField(
+            ProviderFieldLabel(stringResource(R.string.setting_model_page_image_prompt_negative_label))
+            ProviderTextField(
                 value = negativePrompt,
                 onValueChange = { negativePrompt = it.take(4_000) },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(min = 120.dp),
-                minLines = 4,
-                maxLines = 8,
-                shape = RoundedCornerShape(10.dp),
-                label = { Text(stringResource(R.string.setting_model_page_image_prompt_negative_label)) },
-                colors = TextFieldDefaults.colors(
-                    focusedContainerColor = workspace.note,
-                    unfocusedContainerColor = workspace.note,
-                    focusedIndicatorColor = workspace.hairline,
-                    unfocusedIndicatorColor = workspace.hairline,
-                    focusedTextColor = workspace.ink,
-                    unfocusedTextColor = workspace.ink,
-                    focusedLabelColor = workspace.blue,
-                    unfocusedLabelColor = workspace.muted,
-                ),
+                singleLine = false,
+                minHeight = 126.dp,
             )
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.End,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                TextButton(
-                    onClick = {
-                        enabled = true
-                        prompt = DEFAULT_IMAGE_PROMPT_INJECTION
-                        negativePrompt = DEFAULT_IMAGE_NEGATIVE_PROMPT_INJECTION
-                    },
-                ) {
-                    Text(stringResource(R.string.setting_model_page_reset_to_default))
-                }
-                TextButton(onClick = onDismissRequest) {
-                    Text(stringResource(R.string.cancel))
-                }
-                TextButton(
-                    onClick = {
-                        scope.launch {
-                            promptConfigRepository.writeImageConfig(
-                                ImagePromptInjectionConfig(
-                                    enabled = enabled,
-                                    defaultPrompt = prompt,
-                                    negativePrompt = negativePrompt,
-                                )
+            ModelPromptActionBar(
+                resetText = stringResource(R.string.setting_model_page_reset_to_default),
+                onReset = {
+                    enabled = true
+                    prompt = DEFAULT_IMAGE_PROMPT_INJECTION
+                    negativePrompt = DEFAULT_IMAGE_NEGATIVE_PROMPT_INJECTION
+                },
+                cancelText = stringResource(R.string.cancel),
+                onCancel = onDismissRequest,
+                confirmText = stringResource(R.string.common_save),
+                onConfirm = {
+                    scope.launch {
+                        promptConfigRepository.writeImageConfig(
+                            ImagePromptInjectionConfig(
+                                enabled = enabled,
+                                defaultPrompt = prompt,
+                                negativePrompt = negativePrompt,
                             )
-                            onDismissRequest()
-                        }
-                    },
-                ) {
-                    Text(stringResource(R.string.common_save))
-                }
-            }
+                        )
+                        onDismissRequest()
+                    }
+                },
+            )
         }
     }
 }
@@ -748,10 +733,9 @@ private fun ModelTaskSetting(
         description = description,
         icon = icon,
         trailing = {
-            WorkspaceTextButton(
+            ModelParameterButton(
                 text = stringResource(R.string.setting_model_page_parameters),
                 onClick = onOpenParams,
-                tone = WorkspaceTone.Accent,
             )
         },
     ) {
@@ -773,6 +757,29 @@ private fun ModelTaskSetting(
             preferredInputModality = preferredInputModality,
             onClear = onClear,
             onSelect = onSelect,
+        )
+    }
+}
+
+@Composable
+private fun ModelParameterButton(
+    text: String,
+    onClick: () -> Unit,
+) {
+    val t = LocalAmberTokens.current
+    val type = LocalAmberType.current
+    Box(
+        modifier = Modifier
+            .widthIn(min = 40.dp)
+            .heightIn(min = 40.dp)
+            .pressable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = text,
+            style = type.meta.copy(fontSize = 12.sp, fontWeight = FontWeight.SemiBold),
+            color = t.accent,
+            maxLines = 1,
         )
     }
 }
@@ -834,6 +841,24 @@ private fun ModelPickerRow(
 ) {
     // Compact single-line trigger from models-prompts.html. Descriptions remain
     // available to callers for fallback states but do not inflate the row.
+    val t = LocalAmberTokens.current
+    val type = LocalAmberType.current
+    val selectedModel = remember(providers, modelId, modelType) {
+        modelId?.let { id ->
+            providers.asSequence()
+                .flatMap { provider -> provider.models.asSequence() }
+                .firstOrNull { model -> model.id == id && model.type == modelType }
+        }
+    }
+    val selectedProvider = remember(providers, selectedModel) {
+        selectedModel?.let { model ->
+            providers.firstOrNull { provider -> provider.models.any { it.id == model.id } }
+        }
+    }
+    val selectedLabel = selectedModel?.modelId ?: emptyLabel
+        ?: stringResource(R.string.model_list_select_model)
+    val followSelection = selectedModel == null && !emptyLabel.isNullOrBlank()
+    val triggerShape = RoundedCornerShape(9.dp)
     Column(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.Center,
@@ -849,8 +874,69 @@ private fun ModelPickerRow(
             clearContentDescription = clearContentDescription,
             preferredInputModality = preferredInputModality,
             onClear = onClear,
-            modifier = Modifier
-                .fillMaxWidth(),
+            customTrigger = { openPicker ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(36.dp)
+                        .clip(triggerShape)
+                        .background(t.surface2)
+                        .border(1.dp, t.line, triggerShape)
+                        .pressable(onClick = openPicker)
+                        .padding(start = 11.dp, end = 5.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(7.dp),
+                ) {
+                    Text(
+                        text = selectedLabel,
+                        style = type.meta.copy(
+                            fontSize = 12.5.sp,
+                            fontWeight = FontWeight.Medium,
+                            fontStyle = if (followSelection) androidx.compose.ui.text.font.FontStyle.Italic else androidx.compose.ui.text.font.FontStyle.Normal,
+                        ),
+                        color = if (followSelection) t.ink3 else t.ink,
+                        modifier = Modifier.weight(1f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    selectedProvider?.let { provider ->
+                        Box(
+                            modifier = Modifier
+                                .size(3.dp)
+                                .clip(androidx.compose.foundation.shape.CircleShape)
+                                .background(t.ink4),
+                        )
+                        Text(
+                            text = provider.providerSlugLabel(),
+                            style = type.meta.copy(fontSize = 11.5.sp),
+                            color = t.ink3,
+                            maxLines = 1,
+                        )
+                    }
+                    Icon(
+                        imageVector = Lucide.ArrowDown,
+                        contentDescription = null,
+                        tint = t.ink3,
+                        modifier = Modifier.size(14.dp),
+                    )
+                    if (allowClear && selectedModel != null) {
+                        Box(
+                            modifier = Modifier
+                                .size(32.dp)
+                                .pressable(onClick = { onClear?.invoke() ?: onSelect(Model()) }),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(
+                                imageVector = Lucide.X,
+                                contentDescription = clearContentDescription
+                                    ?: stringResource(R.string.clear),
+                                tint = t.ink4,
+                                modifier = Modifier.size(14.dp),
+                            )
+                        }
+                    }
+                }
+            },
         )
     }
 }
@@ -886,21 +972,26 @@ private fun ModelPromptSheet(
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         containerColor = t.raised,
         contentColor = t.ink,
+        dragHandle = { ProviderSheetGrabber() },
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 20.dp)
-                .padding(bottom = 28.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
+                .fillMaxHeight(0.92f)
+                .padding(horizontal = 16.dp)
+                .padding(bottom = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Column(
                 modifier = Modifier
                     .weight(1f, fill = false)
                     .verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(14.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Column(
+                    modifier = Modifier.padding(top = 4.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
                     Text(
                         text = title,
                         style = type.screenTitle,
@@ -938,50 +1029,69 @@ private fun ModelPromptSheet(
                     }
                 }
 
-                TextField(
+                ProviderFieldLabel(stringResource(R.string.setting_model_page_prompt))
+                ProviderTextField(
                     value = prompt,
                     onValueChange = onPromptChange,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(min = 140.dp),
-                    minLines = 5,
-                    maxLines = 10,
-                    shape = RoundedCornerShape(10.dp),
-                    label = {
-                        Text(stringResource(R.string.setting_model_page_prompt))
-                    },
-                    colors = TextFieldDefaults.colors(
-                        focusedContainerColor = t.surface2,
-                        unfocusedContainerColor = t.surface2,
-                        focusedIndicatorColor = t.line2,
-                        unfocusedIndicatorColor = t.line,
-                        focusedTextColor = t.ink,
-                        unfocusedTextColor = t.ink,
-                        focusedLabelColor = t.accent,
-                        unfocusedLabelColor = t.ink3,
-                    ),
+                    singleLine = false,
+                    minHeight = 150.dp,
                 )
             }
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.End,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                TextButton(onClick = onReset) {
-                    Text(stringResource(R.string.setting_model_page_reset_to_default))
-                }
-                Button(
-                    onClick = {
-                        onSave?.invoke()
-                        onDismissRequest()
-                    },
-                ) {
-                    Text(
-                        if (onSave == null) "完成" else stringResource(R.string.common_save),
-                    )
-                }
-            }
+            ProviderGhostButton(
+                text = stringResource(R.string.setting_model_page_reset_to_default),
+                onClick = onReset,
+                accent = false,
+                modifier = Modifier.align(Alignment.End),
+            )
+            ModelPromptActionBar(
+                resetText = stringResource(R.string.setting_model_page_reset_to_default),
+                onReset = onReset,
+                cancelText = stringResource(R.string.cancel),
+                onCancel = onDismissRequest,
+                confirmText = if (onSave == null) {
+                    stringResource(R.string.confirm)
+                } else {
+                    stringResource(R.string.common_save)
+                },
+                onConfirm = {
+                    onSave?.invoke()
+                    onDismissRequest()
+                },
+            )
         }
+    }
+}
+
+@Composable
+private fun ModelPromptActionBar(
+    resetText: String,
+    onReset: () -> Unit,
+    cancelText: String,
+    onCancel: () -> Unit,
+    confirmText: String,
+    onConfirm: () -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        ProviderGhostButton(
+            text = resetText,
+            onClick = onReset,
+            accent = false,
+        )
+        Spacer(Modifier.weight(1f))
+        ProviderGhostButton(
+            text = cancelText,
+            onClick = onCancel,
+            accent = false,
+        )
+        ProviderCommandButton(
+            text = confirmText,
+            onClick = onConfirm,
+            accent = true,
+        )
     }
 }
 
@@ -991,7 +1101,16 @@ private fun ModelGroupSessionDefaultsSheet(
     vm: SettingVM,
     onDismissRequest: () -> Unit,
 ) {
-    val workspace = workspaceColors()
+    val t = LocalAmberTokens.current
+    val type = LocalAmberType.current
+    var contextDrafts by remember {
+        mutableStateOf(
+            ModelRegistry.SESSION_DEFAULT_GROUPS.associate { group ->
+                val current = settings.modelGroupSessionDefaults.firstOrNull { it.groupId == group.id }
+                group.id to (current?.contextMessageSize?.takeIf { it > 0 }?.toString().orEmpty())
+            }
+        )
+    }
 
     fun updateDefault(groupId: String, block: (ModelGroupSessionDefault) -> ModelGroupSessionDefault) {
         val existing = settings.modelGroupSessionDefaults.firstOrNull { it.groupId == groupId }
@@ -1008,26 +1127,32 @@ private fun ModelGroupSessionDefaultsSheet(
     ModalBottomSheet(
         onDismissRequest = onDismissRequest,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        containerColor = workspace.paper,
-        contentColor = workspace.ink,
+        containerColor = t.raised,
+        contentColor = t.ink,
+        dragHandle = { ProviderSheetGrabber() },
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .fillMaxHeight(0.92f)
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = 20.dp)
-                .padding(bottom = 28.dp),
+                .padding(horizontal = 16.dp)
+                .padding(bottom = 12.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Column(
+                modifier = Modifier.padding(top = 4.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
                 Text(
                     text = stringResource(R.string.setting_model_page_group_session_defaults),
-                    style = MaterialTheme.typography.titleLarge,
+                    style = type.screenTitle,
+                    color = t.ink,
                 )
                 Text(
                     text = stringResource(R.string.setting_model_page_group_session_defaults_desc),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = workspace.muted,
+                    style = type.secondary,
+                    color = t.ink3,
                 )
             }
 
@@ -1037,8 +1162,8 @@ private fun ModelGroupSessionDefaultsSheet(
                 Surface(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(10.dp),
-                    color = workspace.note,
-                    border = BorderStroke(1.dp, workspace.hairline),
+                    color = t.surface,
+                    border = BorderStroke(1.dp, t.line),
                 ) {
                     Column(
                         modifier = Modifier.padding(12.dp),
@@ -1047,12 +1172,13 @@ private fun ModelGroupSessionDefaultsSheet(
                         Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
                             Text(
                                 text = group.label,
-                                style = MaterialTheme.typography.titleMedium,
+                                style = type.body.copy(fontWeight = FontWeight.SemiBold),
+                                color = t.ink,
                             )
                             Text(
                                 text = stringResource(R.string.setting_model_page_group_session_defaults_group_desc),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = workspace.muted,
+                                style = type.secondary,
+                                color = t.ink3,
                             )
                         }
                         NotionReasoningSelector(
@@ -1064,14 +1190,15 @@ private fun ModelGroupSessionDefaultsSheet(
                             },
                         )
                         TextField(
-                            value = current.contextMessageSize.takeIf { it > 0 }?.toString().orEmpty(),
+                            value = contextDrafts[group.id].orEmpty(),
                             onValueChange = { text ->
-                                updateDefault(group.id) {
-                                    it.copy(
-                                        contextMessageSize = text.toIntOrNull()
-                                            ?.takeIf { size -> size > 0 }
-                                            ?: 0
-                                    )
+                                contextDrafts = contextDrafts + (group.id to text)
+                                val size = text.toIntOrNull()
+                                if (text.isEmpty() || size != null) {
+                                    updateDefault(group.id) {
+                                        // Zero remains the existing unlimited-context value.
+                                        it.copy(contextMessageSize = size?.coerceAtLeast(0) ?: 0)
+                                    }
                                 }
                             },
                             modifier = Modifier.fillMaxWidth(),
@@ -1087,14 +1214,14 @@ private fun ModelGroupSessionDefaultsSheet(
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                             singleLine = true,
                             colors = TextFieldDefaults.colors(
-                                focusedContainerColor = workspace.paper,
-                                unfocusedContainerColor = workspace.paper,
-                                focusedIndicatorColor = workspace.hairline,
-                                unfocusedIndicatorColor = workspace.hairline,
-                                focusedTextColor = workspace.ink,
-                                unfocusedTextColor = workspace.ink,
-                                focusedLabelColor = workspace.blue,
-                                unfocusedLabelColor = workspace.muted,
+                                focusedContainerColor = t.surface2,
+                                unfocusedContainerColor = t.surface2,
+                                focusedIndicatorColor = t.line2,
+                                unfocusedIndicatorColor = t.line,
+                                focusedTextColor = t.ink,
+                                unfocusedTextColor = t.ink,
+                                focusedLabelColor = t.accent,
+                                unfocusedLabelColor = t.ink3,
                             ),
                         )
                     }
@@ -1111,8 +1238,20 @@ private fun ModelSection(
 ) {
     val t = LocalAmberTokens.current
     Column {
-        Box(modifier = Modifier.padding(start = 2.dp, top = 2.dp, bottom = 8.dp)) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 2.dp, top = 2.dp, bottom = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             title()
+            Spacer(Modifier.width(8.dp))
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .height(1.dp)
+                    .background(t.line),
+            )
         }
         AmberCard(modifier = Modifier.fillMaxWidth()) {
             Column(
@@ -1165,16 +1304,17 @@ private fun NotionReasoningChip(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val workspace = workspaceColors()
+    val t = LocalAmberTokens.current
+    val type = LocalAmberType.current
     Surface(
         onClick = onClick,
         modifier = modifier,
         shape = RoundedCornerShape(7.dp),
-        color = if (selected) workspace.blueContainer else workspace.paper,
-        contentColor = if (selected) workspace.blue else workspace.ink,
+        color = if (selected) t.accent.copy(alpha = 0.14f) else t.surface2,
+        contentColor = if (selected) t.accent else t.ink2,
         border = BorderStroke(
             width = 1.dp,
-            color = if (selected) workspace.blue.copy(alpha = 0.22f) else workspace.hairline,
+            color = if (selected) t.accent.copy(alpha = 0.42f) else t.line,
         ),
     ) {
         Box(
@@ -1183,7 +1323,7 @@ private fun NotionReasoningChip(
         ) {
             Text(
                 text = level.settingLabel(),
-                style = MaterialTheme.typography.labelMedium,
+                style = type.meta.copy(fontSize = 11.sp),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -1206,40 +1346,35 @@ private fun ReasoningLevel.settingLabel(): String = when (this) {
 private fun GroupDefaultsEntry(
     onClick: () -> Unit,
 ) {
+    val t = LocalAmberTokens.current
+    val type = LocalAmberType.current
     Surface(
         onClick = onClick,
-        color = workspaceColors().paper,
-        contentColor = workspaceColors().ink,
+        color = Color.Transparent,
+        contentColor = t.ink,
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 14.dp),
+                .heightIn(min = 52.dp)
+                .padding(horizontal = 14.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             SettingModelLeadingIcon(Lucide.Settings)
-            Column(
+            Text(
+                text = stringResource(R.string.setting_model_page_group_session_defaults),
                 modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(3.dp),
-            ) {
-                Text(
-                    text = stringResource(R.string.setting_model_page_group_session_defaults),
-                    style = MaterialTheme.typography.titleMedium,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Text(
-                    text = stringResource(R.string.setting_model_page_group_session_defaults_desc),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = workspaceColors().muted,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-            WorkspaceStatusPill(
-                text = stringResource(R.string.setting_model_page_configure),
-                tone = WorkspaceTone.Accent,
+                style = type.body,
+                color = t.ink,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Icon(
+                imageVector = Lucide.ChevronRight,
+                contentDescription = null,
+                tint = t.ink3,
+                modifier = Modifier.size(18.dp),
             )
         }
     }
@@ -1250,12 +1385,21 @@ private fun SettingModelLeadingIcon(
     icon: ImageVector,
     tone: WorkspaceTone = WorkspaceTone.Neutral,
 ) {
-    WorkspaceLeadingIcon(
-        icon = icon,
-        size = 30.dp,
-        iconSize = 15.dp,
-        tone = tone,
-    )
+    val t = LocalAmberTokens.current
+    Box(
+        modifier = Modifier
+            .size(32.dp)
+            .clip(RoundedCornerShape(9.dp))
+            .background(t.surface2),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = if (tone == WorkspaceTone.Accent) t.accent else t.ink2,
+            modifier = Modifier.size(16.dp),
+        )
+    }
 }
 
 /**

@@ -30,6 +30,7 @@ import app.amber.ai.ui.withStreamArgsReplace
 import app.amber.ai.util.HttpException
 import app.amber.ai.util.KeyRoulette
 import app.amber.ai.util.configureReferHeaders
+import app.amber.ai.util.configureOpenCodeSessionHeader
 import app.amber.ai.util.encodeBase64
 import app.amber.ai.util.json
 import app.amber.ai.util.mergeCustomBody
@@ -120,6 +121,7 @@ class ResponseAPI(
         val request = Request.Builder()
             .url("${providerSetting.baseUrl}/responses")
             .headers(params.customHeaders.toHeaders())
+            .configureOpenCodeSessionHeader(providerSetting.baseUrl, params)
             .post(json.encodeToString(requestBody).toRequestBody("application/json".toMediaType()))
             .addHeader(
                 "Authorization",
@@ -213,6 +215,7 @@ class ResponseAPI(
         val request = Request.Builder()
             .url("${providerSetting.baseUrl}/responses")
             .headers(params.customHeaders.toHeaders())
+            .configureOpenCodeSessionHeader(providerSetting.baseUrl, params)
             .post(json.encodeToString(requestBody).toRequestBody("application/json".toMediaType()))
             .addHeader(
                 "Authorization",
@@ -631,12 +634,17 @@ class ResponseAPI(
             }
             if (params.maxTokens != null) put("max_output_tokens", params.maxTokens)
 
-            // system instructions
+            // system instructions: Responses has one instructions field, so preserve
+            // every system message/part in source order instead of silently dropping
+            // compaction, capability, or retry instructions after the first one.
             if (messages.any { it.role == MessageRole.SYSTEM }) {
-                val parts = messages.first { it.role == MessageRole.SYSTEM }.parts
-                put(
-                    "instructions",
-                    parts.filterIsInstance<UIMessagePart.Text>().joinToString("\n\n") { it.text })
+                val systemText = messages.asSequence()
+                    .filter { it.role == MessageRole.SYSTEM }
+                    .flatMap { message ->
+                        message.parts.asSequence().filterIsInstance<UIMessagePart.Text>()
+                    }
+                    .joinToString("\n\n") { it.text }
+                put("instructions", systemText)
             }
 
             // messages

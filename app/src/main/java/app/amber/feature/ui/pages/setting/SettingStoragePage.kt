@@ -44,12 +44,11 @@ import app.amber.core.conversation.exchange.ConversationExchangePendingImport
 import app.amber.agent.R
 import app.amber.core.storage.CleanupDryRun
 import app.amber.core.storage.StorageBreakdown
+import app.amber.feature.ui.components.ds.amberCanvas
 import app.amber.core.utils.UiState
 import app.amber.core.utils.appLocale
 import app.amber.feature.ui.components.ds.Hairline
-import app.amber.feature.ui.components.ds.SectionLabel
 import app.amber.feature.ui.components.nav.BackButton
-import app.amber.feature.ui.components.ui.CardGroup
 import app.amber.feature.ui.components.ui.WorkspaceTopBar
 import app.amber.feature.ui.components.ui.workspaceColors
 import app.amber.feature.ui.theme.LocalAmberTokens
@@ -134,8 +133,10 @@ fun SettingStoragePage(
                 scrollBehavior = scrollBehavior,
             )
         },
-        modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
-        containerColor = workspaceColors().canvas,
+        modifier = Modifier
+            .nestedScroll(scrollBehavior.nestedScrollConnection)
+            .amberCanvas(),
+        containerColor = androidx.compose.ui.graphics.Color.Transparent,
     ) { innerPadding ->
         Column(
             modifier = Modifier
@@ -143,7 +144,7 @@ fun SettingStoragePage(
                 .padding(innerPadding)
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = SettingPageHorizontalInset, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             StorageUsageCard(breakdown, appLocale, onRefresh = { vm.refresh() })
             ConversationExchangeCard(
@@ -265,7 +266,7 @@ private fun ConversationExchangeCard(
     onExport: () -> Unit,
     onImport: () -> Unit,
 ) {
-    CardGroup(title = { SectionLabel("会话交换") }) {
+    SettingCardGroup(title = "会话交换") {
         rawItem {
             Text(
                 "可与 iOS 交换普通会话；线程关系、禁用/受污染记忆模式暂不支持。本机附件不会随文件传输。",
@@ -394,7 +395,7 @@ private fun StorageUsageCard(
     locale: Locale,
     onRefresh: () -> Unit,
 ) {
-    CardGroup(title = { SectionLabel(stringResource(R.string.setting_storage_usage_title)) }) {
+    SettingCardGroup(title = stringResource(R.string.setting_storage_usage_title)) {
         when (breakdown) {
             is UiState.Loading -> rawItem {
                 Row(
@@ -489,7 +490,7 @@ private fun CleanupCard(
     onDaysChange: (Int) -> Unit,
     onPreview: () -> Unit,
 ) {
-    CardGroup(title = { SectionLabel(stringResource(R.string.setting_storage_cleanup_title)) }) {
+    SettingCardGroup(title = stringResource(R.string.setting_storage_cleanup_title)) {
         rawItem {
             FlowRow(
                 modifier = Modifier.fillMaxWidth(),
@@ -498,6 +499,7 @@ private fun CleanupCard(
             ) {
                 listOf(7, 30, 90).forEach { candidate ->
                     FilterChip(
+                        modifier = Modifier.height(32.dp),
                         selected = days == candidate,
                         onClick = { onDaysChange(candidate) },
                         label = {

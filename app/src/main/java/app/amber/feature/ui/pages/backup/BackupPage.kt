@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
@@ -41,6 +42,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -78,11 +80,11 @@ import java.util.Locale
 import android.provider.OpenableColumns
 import app.amber.feature.ui.components.ds.Hairline
 import app.amber.feature.ui.components.ds.SectionLabel
+import app.amber.feature.ui.components.ds.amberCanvas
 import app.amber.feature.ui.components.nav.BackButton
 import app.amber.feature.ui.pages.setting.SettingTileIcon
 import app.amber.feature.ui.components.ui.CardGroup
 import app.amber.feature.ui.components.ui.WorkspaceTopBar
-import app.amber.feature.ui.components.ui.workspaceColors
 import app.amber.feature.ui.theme.LocalAmberTokens
 import app.amber.feature.ui.theme.LocalAmberType
 import app.amber.core.utils.UiState
@@ -384,8 +386,10 @@ fun BackupPage(vm: BackupVM = koinViewModel()) {
                 scrollBehavior = scrollBehavior,
             )
         },
-        modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
-        containerColor = workspaceColors().canvas,
+        modifier = Modifier
+            .nestedScroll(scrollBehavior.nestedScrollConnection)
+            .amberCanvas(),
+        containerColor = androidx.compose.ui.graphics.Color.Transparent,
     ) { innerPadding ->
         Column(
             modifier = Modifier
@@ -473,56 +477,51 @@ fun BackupPage(vm: BackupVM = koinViewModel()) {
                         }
                     },
                 )
-                item(
-                    onClick = if (googleAvailable) {
-                        {
-                            if (googleSession == null) {
-                                pendingGoogleAction = GoogleSyncAction.Upload
-                                vm.connectGoogle()
-                            } else {
-                                vm.requestExport(ExportSource.Google)
-                            }
+                rawItem {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Button(
+                            onClick = {
+                                if (googleSession == null) {
+                                    pendingGoogleAction = GoogleSyncAction.Upload
+                                    vm.connectGoogle()
+                                } else {
+                                    vm.requestExport(ExportSource.Google)
+                                }
+                            },
+                            enabled = googleAvailable,
+                            modifier = Modifier
+                                .weight(1f)
+                                .heightIn(min = 48.dp),
+                            shape = RoundedCornerShape(15.dp),
+                        ) {
+                            Icon(Lucide.Upload, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.size(6.dp))
+                            Text(stringResource(R.string.backup_upload))
                         }
-                    } else {
-                        null
-                    },
-                    leadingContent = { SettingTileIcon(Lucide.Upload) },
-                    headlineContent = { Text(stringResource(R.string.backup_upload)) },
-                    supportingContent = {
-                        Text(
-                            if (googleAvailable) {
-                                stringResource(R.string.backup_google_upload_desc)
-                            } else {
-                                stringResource(R.string.backup_google_not_configured)
-                            }
-                        )
-                    }
-                )
-                item(
-                    onClick = if (googleAvailable) {
-                        {
-                            if (googleSession == null) {
-                                pendingGoogleAction = GoogleSyncAction.Download
-                                vm.connectGoogle()
-                            } else {
-                                vm.downloadGooglePreview()
-                            }
+                        Button(
+                            onClick = {
+                                if (googleSession == null) {
+                                    pendingGoogleAction = GoogleSyncAction.Download
+                                    vm.connectGoogle()
+                                } else {
+                                    vm.downloadGooglePreview()
+                                }
+                            },
+                            enabled = googleAvailable,
+                            modifier = Modifier
+                                .weight(1f)
+                                .heightIn(min = 48.dp),
+                            shape = RoundedCornerShape(15.dp),
+                        ) {
+                            Icon(Lucide.CloudDownload, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.size(6.dp))
+                            Text(stringResource(R.string.backup_download))
                         }
-                    } else {
-                        null
-                    },
-                    leadingContent = { SettingTileIcon(Lucide.CloudDownload) },
-                    headlineContent = { Text(stringResource(R.string.backup_download)) },
-                    supportingContent = {
-                        Text(
-                            if (googleAvailable) {
-                                stringResource(R.string.backup_google_download_desc)
-                            } else {
-                                stringResource(R.string.backup_google_not_configured)
-                            }
-                        )
                     }
-                )
+                }
             }
 
             if (providerV2Enabled) {
@@ -541,6 +540,7 @@ fun BackupPage(vm: BackupVM = koinViewModel()) {
                                     label = { Text(stringResource(R.string.backup_server_address)) },
                                     singleLine = true,
                                     modifier = Modifier.fillMaxWidth(),
+                                    shape = RoundedCornerShape(12.dp),
                                 )
                                 OutlinedTextField(
                                     value = webDavUsername,
@@ -551,6 +551,7 @@ fun BackupPage(vm: BackupVM = koinViewModel()) {
                                     label = { Text(stringResource(R.string.backup_username)) },
                                     singleLine = true,
                                     modifier = Modifier.fillMaxWidth(),
+                                    shape = RoundedCornerShape(12.dp),
                                 )
                                 OutlinedTextField(
                                     value = webDavPassword,
@@ -562,6 +563,7 @@ fun BackupPage(vm: BackupVM = koinViewModel()) {
                                     singleLine = true,
                                     visualTransformation = PasswordVisualTransformation(),
                                     modifier = Modifier.fillMaxWidth(),
+                                    shape = RoundedCornerShape(12.dp),
                                 )
                                 OutlinedTextField(
                                     value = webDavPath,
@@ -572,6 +574,7 @@ fun BackupPage(vm: BackupVM = koinViewModel()) {
                                     label = { Text(stringResource(R.string.backup_directory)) },
                                     singleLine = true,
                                     modifier = Modifier.fillMaxWidth(),
+                                    shape = RoundedCornerShape(12.dp),
                                 )
                                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                     Button(
@@ -582,6 +585,8 @@ fun BackupPage(vm: BackupVM = koinViewModel()) {
                                             webDavPasswordDirty = false
                                             webDavPathDirty = false
                                         },
+                                        modifier = Modifier.heightIn(min = 48.dp),
+                                        shape = RoundedCornerShape(15.dp),
                                     ) { Text(stringResource(R.string.backup_save_config)) }
                                     TextButton(onClick = { vm.refreshWebDavSnapshots() }) {
                                         Text(stringResource(R.string.backup_read_snapshots))

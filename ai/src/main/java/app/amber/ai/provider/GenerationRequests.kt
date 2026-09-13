@@ -6,6 +6,7 @@ import app.amber.ai.ui.ImageAspectRatio
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.Transient
 import kotlinx.serialization.json.JsonElement
+import kotlin.uuid.Uuid
 
 @Serializable
 data class TextGenerationParams(
@@ -19,6 +20,9 @@ data class TextGenerationParams(
     val customBody: List<CustomBody> = emptyList(),
     @Transient
     val responsesResume: ResponsesResumeRequest? = null,
+    // Conversation owners supply their durable ID; standalone requests get an ID
+    // once per params instance so copies and transport retries keep the same session.
+    val sessionId: String = Uuid.random().toString(),
 )
 
 @Serializable

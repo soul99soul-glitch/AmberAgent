@@ -2,11 +2,16 @@ package app.amber.feature.ui.pages.setting
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.windowInsetsPadding
@@ -23,6 +28,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -37,11 +43,13 @@ import app.amber.agent.R
 import app.amber.feature.ui.components.nav.BackButton
 import app.amber.feature.ui.components.ui.ShareSheet
 import app.amber.feature.ui.components.ui.rememberShareSheetState
+import app.amber.feature.ui.components.ds.amberCanvas
+import app.amber.feature.ui.components.ds.pressable
 import app.amber.feature.ui.context.LocalNavController
 import app.amber.feature.ui.context.LocalToaster
 import app.amber.feature.ui.pages.setting.components.ProviderGhostButton
+import app.amber.feature.ui.pages.setting.components.ProviderHairline
 import app.amber.feature.ui.pages.setting.components.ProviderLiveDot
-import app.amber.feature.ui.pages.setting.components.ProviderUnderlineTabs
 import app.amber.feature.ui.pages.setting.components.providerAuthLabel
 import app.amber.feature.ui.pages.setting.components.providerSlugLabel
 import app.amber.feature.ui.theme.LocalAmberTokens
@@ -85,81 +93,104 @@ fun SettingProviderDetailPage(id: Uuid, vm: SettingVM = koinViewModel()) {
     ShareSheet(shareSheetState)
 
     Scaffold(
+        modifier = Modifier.amberCanvas(),
         topBar = {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(t.bg)
                     .windowInsetsPadding(WindowInsets.statusBars),
             ) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(start = 6.dp, end = 14.dp, top = 2.dp),
+                        .height(56.dp)
+                        .padding(start = 4.dp, end = 10.dp),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     BackButton()
-                    Column(
-                        modifier = Modifier.weight(1f),
-                        verticalArrangement = Arrangement.spacedBy(2.dp),
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(7.dp),
-                        ) {
-                            Text("//", style = type.eyebrow, color = t.accent)
-                            Text(
-                                stringResource(R.string.setting_page_providers),
-                                style = type.eyebrow,
-                                color = t.ink3,
-                            )
-                        }
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(7.dp),
-                        ) {
-                            Text(
-                                text = provider.providerSlugLabel(),
-                                style = type.meta.copy(fontSize = 16.sp, fontWeight = FontWeight.Bold),
-                                color = t.ink,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                            if (provider.enabled) {
-                                ProviderLiveDot()
-                            }
-                            Text(
-                                text = "${provider.name} · ${provider.providerAuthLabel()} · " +
-                                    stringResource(
-                                        R.string.setting_provider_page_model_count,
-                                        provider.models.size,
-                                    ),
-                                style = type.meta.copy(fontSize = 10.5.sp),
-                                color = t.ink3,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.weight(1f, fill = false),
-                            )
-                        }
-                    }
+                    Spacer(modifier = Modifier.weight(1f))
                     ProviderGhostButton(
                         text = stringResource(R.string.export_title),
                         onClick = { shareSheetState.show(provider) },
                     )
                 }
-                ProviderUnderlineTabs(
-                    tabs = listOf(
-                        stringResource(id = R.string.setting_provider_page_configuration),
-                        stringResource(id = R.string.setting_provider_page_models),
-                    ),
-                    selected = pager.currentPage,
-                    onSelect = { page -> scope.launch { pager.animateScrollToPage(page) } },
-                    modifier = Modifier.padding(top = 8.dp),
-                )
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp),
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(7.dp),
+                    ) {
+                        Text("//", style = type.eyebrow, color = t.accent)
+                        Text(
+                            stringResource(R.string.setting_page_providers),
+                            style = type.eyebrow,
+                            color = t.ink2,
+                        )
+                    }
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(9.dp),
+                    ) {
+                        Text(
+                            text = provider.providerSlugLabel(),
+                            style = type.meta.copy(
+                                fontSize = 24.sp,
+                                lineHeight = 29.sp,
+                                fontWeight = FontWeight.Bold,
+                            ),
+                            color = t.ink,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        if (provider.enabled) {
+                            ProviderLiveDot(size = 8.dp)
+                        }
+                    }
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(7.dp),
+                    ) {
+                        Text(
+                            text = provider.name,
+                            style = type.secondary,
+                            color = t.ink,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Text("·", style = type.meta, color = t.ink4)
+                        Text(
+                            text = provider.providerAuthLabel(),
+                            style = type.meta.copy(fontSize = 10.5.sp),
+                            color = t.ink2,
+                            maxLines = 1,
+                        )
+                        Text("·", style = type.meta, color = t.ink4)
+                        Text(
+                            text = stringResource(
+                                R.string.setting_provider_page_model_count,
+                                provider.models.size,
+                            ),
+                            style = type.meta.copy(fontSize = 10.5.sp),
+                            color = t.ink2,
+                            maxLines = 1,
+                        )
+                    }
+                    ProviderDetailTabs(
+                        tabs = listOf(
+                            stringResource(id = R.string.setting_provider_page_configuration),
+                            stringResource(id = R.string.setting_provider_page_models),
+                        ),
+                        selected = pager.currentPage,
+                        onSelect = { page -> scope.launch { pager.animateScrollToPage(page) } },
+                    )
+                }
             }
         },
-        containerColor = t.bg,
+        containerColor = Color.Transparent,
     ) {
         HorizontalPager(
             state = pager,
@@ -205,5 +236,57 @@ fun SettingProviderDetailPage(id: Uuid, vm: SettingVM = koinViewModel()) {
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun ProviderDetailTabs(
+    tabs: List<String>,
+    selected: Int,
+    onSelect: (Int) -> Unit,
+) {
+    val t = LocalAmberTokens.current
+    val type = LocalAmberType.current
+    Column(modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth().height(44.dp),
+            horizontalArrangement = Arrangement.spacedBy(20.dp),
+            verticalAlignment = Alignment.Bottom,
+        ) {
+            tabs.forEachIndexed { index, label ->
+                val isSelected = index == selected
+                Column(
+                    modifier = Modifier
+                        .width(IntrinsicSize.Max)
+                        .height(44.dp)
+                        .pressable(onClick = { onSelect(index) }),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(horizontal = 4.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            text = label,
+                            style = type.secondary.copy(
+                                fontSize = 14.5.sp,
+                                fontWeight = FontWeight.SemiBold,
+                            ),
+                            color = if (isSelected) t.ink else t.ink3,
+                            maxLines = 1,
+                        )
+                    }
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(2.dp)
+                            .background(if (isSelected) t.accent else Color.Transparent),
+                    )
+                }
+            }
+        }
+        ProviderHairline()
     }
 }

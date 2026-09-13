@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -60,6 +61,7 @@ import com.composables.icons.lucide.Minus
 import com.composables.icons.lucide.Plus
 import app.amber.agent.R
 import app.amber.core.settings.Settings
+import app.amber.feature.ui.components.ds.SectionLabel
 import app.amber.feature.ui.components.ui.AutoAIIcon
 import app.amber.feature.ui.components.ui.Switch
 import app.amber.feature.ui.components.ui.workspaceColors
@@ -401,6 +403,7 @@ private fun ServiceRowV2(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
+                .heightIn(min = if (description != null) 64.dp else 52.dp)
                 .padding(horizontal = 16.dp, vertical = 10.dp),
             horizontalArrangement = Arrangement.spacedBy(10.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -546,15 +549,13 @@ private fun SubGroupLabel(
             .padding(start = 16.dp, end = 16.dp, top = 14.dp, bottom = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(
-            text = text.uppercase(),
-            fontSize = 11.sp,
-            letterSpacing = 1.4.sp,
-            fontWeight = FontWeight.Medium,
-            color = t.inkFaint,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f),
+        SectionLabel(text)
+        Spacer(
+            modifier = Modifier
+                .weight(1f)
+                .padding(horizontal = 10.dp)
+                .height(1.dp)
+                .background(t.hair),
         )
         if (trailing != null) {
             Icon(

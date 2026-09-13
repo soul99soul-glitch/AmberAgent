@@ -25,6 +25,7 @@ import kotlinx.coroutines.launch
 import com.composables.icons.lucide.Lucide
 import com.composables.icons.lucide.Plus
 import app.amber.agent.R
+import app.amber.feature.ui.components.ds.amberCanvas
 import app.amber.feature.ui.components.nav.BackButton
 import app.amber.feature.ui.components.ui.WorkspaceTopBar
 import app.amber.feature.ui.components.ui.workspaceColors
@@ -63,8 +64,10 @@ fun SettingSearchPage(vm: SettingVM = koinViewModel()) {
                 scrollBehavior = scrollBehavior,
             )
         },
-        modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
-        containerColor = workspaceColors().canvas,
+        modifier = Modifier
+            .nestedScroll(scrollBehavior.nestedScrollConnection)
+            .amberCanvas(),
+        containerColor = androidx.compose.ui.graphics.Color.Transparent,
     ) { contentPadding ->
         fun moveSearchService(fromIndex: Int, toIndex: Int) {
             if (fromIndex !in settings.searchServices.indices || toIndex !in settings.searchServices.indices) return
@@ -106,7 +109,7 @@ fun SettingSearchPage(vm: SettingVM = koinViewModel()) {
                 .fillMaxSize()
                 .imePadding(),
             contentPadding = contentPadding + PaddingValues(horizontal = SettingPageHorizontalInset, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(22.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
             state = lazyListState,
         ) {
             item("agent_search_enable") {

@@ -5,6 +5,7 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import app.amber.ai.provider.CustomBody
 import app.amber.ai.provider.CustomHeader
+import app.amber.ai.provider.TextGenerationParams
 import okhttp3.Headers
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.Request
@@ -36,6 +37,18 @@ fun Request.Builder.configureReferHeaders(url: String): Request.Builder {
 
         else -> this
     }
+}
+
+fun Request.Builder.configureOpenCodeSessionHeader(
+    url: String,
+    params: TextGenerationParams,
+): Request.Builder = apply {
+    if (url.toHttpUrl().host != "opencode.ai") return@apply
+
+    val configuredSession = params.customHeaders.lastOrNull {
+        it.name.equals("x-opencode-session", ignoreCase = true) && it.value.isNotBlank()
+    }?.value
+    header("x-opencode-session", configuredSession ?: params.sessionId)
 }
 
 fun ResponseBody.stringSafe(): String? {

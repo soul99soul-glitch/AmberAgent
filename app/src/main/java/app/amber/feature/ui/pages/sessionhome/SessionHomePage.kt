@@ -61,9 +61,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.dropShadow
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.shadow.Shadow
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -75,6 +77,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -167,8 +170,7 @@ fun SessionHomePage() {
     val hasContinueError = vm.hasContinueError.collectAsStateWithLifecycle().value
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
-    // A full-height radius clamps to exactly half the measured height, including pixel rounding.
-    val fabShape = AmberContinuousShape(cornerRadius = 44.dp)
+    val fabShape = CircleShape
     val fabInteractionSource = remember { MutableInteractionSource() }
     val operationError = stringResource(R.string.error_title_operation)
 
@@ -461,7 +463,7 @@ fun SessionHomePage() {
             modifier = Modifier
                 .align(Alignment.BottomEnd)
                 .windowInsetsPadding(WindowInsets.navigationBars)
-                .padding(end = 18.dp, bottom = 18.dp)
+                .padding(end = 26.dp, bottom = 26.dp)
                 .height(48.dp)
                 .clickable(
                     interactionSource = fabInteractionSource,
@@ -478,15 +480,16 @@ fun SessionHomePage() {
             Box(
                 modifier = Modifier
                     .height(40.dp)
-                    .shadow(
-                        elevation = 6.dp,
+                    .dropShadow(
                         shape = fabShape,
-                        ambientColor = tokens.accent.copy(alpha = 0.24f),
-                        spotColor = tokens.accent.copy(alpha = 0.20f),
+                        shadow = Shadow(
+                            radius = 12.dp,
+                            color = Color.Black.copy(alpha = if (tokens.isDark) 0.24f else 0.14f),
+                            offset = DpOffset(x = 0.dp, y = 4.dp),
+                        ),
                     )
                     .clip(fabShape)
                     .background(tokens.accent)
-                    .border(0.5.dp, tokens.accentInk.copy(alpha = 0.16f), fabShape)
                     .indication(fabInteractionSource, ripple(bounded = false))
                     .padding(horizontal = 14.dp),
                 contentAlignment = Alignment.Center,

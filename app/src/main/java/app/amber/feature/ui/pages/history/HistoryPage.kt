@@ -4,6 +4,7 @@ import com.composables.icons.lucide.Lucide
 import com.composables.icons.lucide.Pin
 import com.composables.icons.lucide.PinOff
 import com.composables.icons.lucide.ScanSearch
+import com.composables.icons.lucide.Search
 import com.composables.icons.lucide.Trash2
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -13,6 +14,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
@@ -61,6 +63,8 @@ import app.amber.agent.Screen
 import app.amber.core.model.Conversation
 import app.amber.feature.ui.components.nav.BackButton
 import app.amber.feature.ui.components.ds.SectionLabel
+import app.amber.feature.ui.components.ds.amberCanvas
+import app.amber.feature.ui.components.ds.pressable
 import app.amber.feature.ui.components.ui.workspaceBorder
 import app.amber.feature.ui.components.ui.workspaceColors
 import app.amber.feature.ui.components.ui.WorkspaceTopBar
@@ -89,7 +93,10 @@ fun HistoryPage(vm: HistoryVM = koinViewModel()) {
     val isRefreshLoading = conversations.loadState.refresh is LoadState.Loading
 
     Scaffold(
-        containerColor = workspace.canvas,
+        containerColor = androidx.compose.ui.graphics.Color.Transparent,
+        modifier = Modifier
+            .nestedScroll(scrollBehavior.nestedScrollConnection)
+            .amberCanvas(),
         topBar = {
             WorkspaceTopBar(
                 title = stringResource(R.string.history_page_title),
@@ -116,7 +123,6 @@ fun HistoryPage(vm: HistoryVM = koinViewModel()) {
                 }
             )
         },
-        modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
         snackbarHost = {
             SnackbarHost(hostState = snackbarHostState)
         }
@@ -132,6 +138,40 @@ fun HistoryPage(vm: HistoryVM = koinViewModel()) {
                     text = stringResource(R.string.history_page_title),
                     modifier = Modifier.padding(top = 8.dp),
                 )
+            }
+            item(key = "history_search_entry") {
+                val searchLabel = stringResource(R.string.history_page_search_messages)
+                Surface(
+                    color = workspace.paper,
+                    border = workspaceBorder(),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(44.dp)
+                        .pressable(onClick = { navController.navigate(Screen.MessageSearch) }),
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(horizontal = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        Icon(
+                            imageVector = Lucide.Search,
+                            contentDescription = null,
+                            tint = workspace.muted,
+                            modifier = Modifier.size(18.dp),
+                        )
+                        Text(
+                            text = searchLabel,
+                            style = LocalAmberType.current.secondary,
+                            color = workspace.muted,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
             }
             when {
                 hasUpstreamError && conversations.itemCount == 0 -> {

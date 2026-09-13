@@ -28,12 +28,11 @@ import com.composables.icons.lucide.Layers
 import com.composables.icons.lucide.Settings
 import com.composables.icons.lucide.Zap
 import app.amber.agent.R
+import app.amber.feature.ui.components.ds.amberCanvas
 import app.amber.agent.Screen
 import app.amber.core.settings.Capability
 import app.amber.core.settings.CapabilityFlags
 import app.amber.feature.ui.components.nav.BackButton
-import app.amber.feature.ui.components.ds.SectionLabel
-import app.amber.feature.ui.components.ui.CardGroup
 import app.amber.feature.ui.components.ui.WorkspaceTopBar
 import app.amber.feature.ui.components.ui.workspaceColors
 import app.amber.feature.ui.components.ui.Switch
@@ -67,13 +66,13 @@ fun SettingAgentPermissionsPage(vm: SettingVM = koinViewModel()) {
                 Button(
                     onClick = {
                         showHighRiskAutoApproveDialog = false
-                        vm.updateSettings(
-                            settings.copy(
-                                agentRuntime = settings.agentRuntime.copy(
+                        vm.updateSettings { current ->
+                            current.copy(
+                                agentRuntime = current.agentRuntime.copy(
                                     autoApproveHighRiskToolCalls = true
                                 )
                             )
-                        )
+                        }
                     }
                 ) {
                     Text(stringResource(R.string.confirm))
@@ -95,17 +94,19 @@ fun SettingAgentPermissionsPage(vm: SettingVM = koinViewModel()) {
                 scrollBehavior = scrollBehavior,
             )
         },
-        modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
-        containerColor = workspaceColors().canvas,
+        modifier = Modifier
+            .nestedScroll(scrollBehavior.nestedScrollConnection)
+            .amberCanvas(),
+        containerColor = androidx.compose.ui.graphics.Color.Transparent,
     ) { innerPadding ->
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
             contentPadding = innerPadding + PaddingValues(horizontal = SettingPageHorizontalInset, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(22.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             item {
-                CardGroup(
-                    title = { SectionLabel(stringResource(R.string.setting_agent_permissions_access_section)) },
+                SettingCardGroup(
+                    title = stringResource(R.string.setting_agent_permissions_access_section),
                 ) {
                     item(
                         onClick = { navController.navigate(Screen.SettingSystemAccess) },
@@ -125,8 +126,8 @@ fun SettingAgentPermissionsPage(vm: SettingVM = koinViewModel()) {
             }
 
             item {
-                CardGroup(
-                    title = { SectionLabel(stringResource(R.string.setting_agent_permissions_approval_section)) },
+                SettingCardGroup(
+                    title = stringResource(R.string.setting_agent_permissions_approval_section),
                 ) {
                     item(
                         leadingContent = { SettingTileIcon(Lucide.Zap) },
@@ -135,14 +136,15 @@ fun SettingAgentPermissionsPage(vm: SettingVM = koinViewModel()) {
                         trailingContent = {
                             Switch(
                                 checked = settings.agentRuntime.autoApproveAllToolCalls,
+                                enabled = !settings.init,
                                 onCheckedChange = { checked ->
-                                    vm.updateSettings(
-                                        settings.copy(
-                                            agentRuntime = settings.agentRuntime.copy(
+                                    vm.updateSettings { current ->
+                                        current.copy(
+                                            agentRuntime = current.agentRuntime.copy(
                                                 autoApproveAllToolCalls = checked
                                             )
                                         )
-                                    )
+                                    }
                                 }
                             )
                         },
@@ -154,17 +156,18 @@ fun SettingAgentPermissionsPage(vm: SettingVM = koinViewModel()) {
                         trailingContent = {
                             Switch(
                                 checked = settings.agentRuntime.autoApproveHighRiskToolCalls,
+                                enabled = !settings.init,
                                 onCheckedChange = { checked ->
                                     if (checked) {
                                         showHighRiskAutoApproveDialog = true
                                     } else {
-                                        vm.updateSettings(
-                                            settings.copy(
-                                                agentRuntime = settings.agentRuntime.copy(
+                                        vm.updateSettings { current ->
+                                            current.copy(
+                                                agentRuntime = current.agentRuntime.copy(
                                                     autoApproveHighRiskToolCalls = false
                                                 )
                                             )
-                                        )
+                                        }
                                     }
                                 }
                             )

@@ -6,6 +6,7 @@ import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -102,6 +103,7 @@ import app.amber.feature.ui.hooks.ChatInputAttachmentImportStatus
 import app.amber.feature.ui.hooks.ChatInputAttachmentKind
 import app.amber.feature.ui.hooks.ChatInputState
 import app.amber.feature.ui.pages.chat.LocalChatTheme
+import app.amber.feature.ui.theme.LocalAmberTokens
 import org.koin.compose.koinInject
 import java.io.File
 
@@ -426,15 +428,14 @@ private fun AttachmentChip(
     onRetry: (() -> Unit)? = null,
     onRemove: () -> Unit,
 ) {
-    val chatTheme = LocalChatTheme.current
-    val chipBg = if (chatTheme.isDark) chatTheme.toolPillBg else chatTheme.accentTint
-    val chipInk = if (chatTheme.isDark) chatTheme.accent else chatTheme.accentDeep
+    val tokens = LocalAmberTokens.current
     Surface(
         shape = RoundedCornerShape(50),
         tonalElevation = 0.dp,
         shadowElevation = 0.dp,
-        color = chipBg,
-        contentColor = chipInk,
+        color = tokens.surface2,
+        contentColor = tokens.ink,
+        border = BorderStroke(1.dp, tokens.line),
     ) {
         ProvideTextStyle(MaterialTheme.typography.labelSmall) {
             Row(
@@ -481,7 +482,7 @@ private fun AttachmentChip(
                         Icon(
                             imageVector = Lucide.RefreshCw,
                             contentDescription = stringResource(R.string.parity_attachment_retry),
-                            tint = chipInk.copy(alpha = 0.82f),
+                            tint = tokens.ink2.copy(alpha = 0.82f),
                             modifier = Modifier.size(15.dp),
                         )
                     }
@@ -496,7 +497,7 @@ private fun AttachmentChip(
                     Icon(
                         imageVector = Lucide.X,
                         contentDescription = stringResource(R.string.chat_input_remove_attachment),
-                        tint = chipInk.copy(alpha = 0.72f),
+                        tint = tokens.ink2.copy(alpha = 0.72f),
                         modifier = Modifier.size(14.dp)
                     )
                 }
@@ -509,10 +510,11 @@ private fun AttachmentChip(
 private fun AttachmentLeadingIcon(
     icon: ImageVector,
 ) {
+    val tokens = LocalAmberTokens.current
     Icon(
         imageVector = icon,
         contentDescription = null,
-        tint = LocalChatTheme.current.let { if (it.isDark) it.accent else it.accentDeep },
+        tint = tokens.ink2,
         modifier = Modifier.size(20.dp),
     )
 }

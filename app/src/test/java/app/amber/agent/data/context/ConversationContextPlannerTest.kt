@@ -210,6 +210,34 @@ class ConversationContextPlannerTest {
     }
 
     @Test
+    fun staleCompletedCompactDoesNotBlockFreshCompactionPlan() {
+        val nodes = List(20) { MessageNode.of(UIMessage.user("history $it " + "x".repeat(1_000))) }
+        val staleCompact = ConversationCompact(
+            id = "stale-summary",
+            conversationId = "conversation",
+            summary = "{\"facts\":[\"old fact\"]}",
+            level = 1,
+            sourceStartIndex = 0,
+            sourceEndIndex = 10,
+            sourceMessageIds = nodes.take(3).map { it.currentMessage.id.toString() } + "missing-message-id",
+            tokenEstimate = 100,
+            createdAt = 1,
+            updatedAt = 1,
+            status = "completed",
+        )
+
+        val plan = ConversationContextPlanner.planCompaction(
+            nodes = nodes,
+            activeCompacts = listOf(staleCompact),
+            policy = CompactPolicy(precompactRatio = 0.40f, forceRatio = 0.80f, keepRecentTurns = 2),
+            modelContextWindowTokens = 2_000,
+        )
+
+        assertTrue(plan.shouldCompact)
+        assertEquals(0, plan.sourceStartIndex)
+    }
+
+    @Test
     fun extraTokenEstimateContributesToCompactionPressure() {
         val nodes = List(4) { MessageNode.of(UIMessage.user("short $it")) }
 

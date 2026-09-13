@@ -12,6 +12,11 @@ import app.amber.core.agent.utils.JsonInstant
 import app.amber.core.infra.AppScope
 import app.amber.core.settings.PreferencesKeys
 import app.amber.core.settings.Settings
+import app.amber.core.settings.AgentRuntimeSetting
+import app.amber.core.settings.DEFAULT_AMBER_SYSTEM_PROMPT
+import app.amber.core.settings.DEFAULT_AGENT_SOUL_MARKDOWN
+import app.amber.core.settings.PREVIOUS_DEFAULT_AMBER_SYSTEM_PROMPT
+import app.amber.core.settings.PREVIOUS_DEFAULT_AGENT_SOUL_MARKDOWN
 import app.amber.core.settings.secret.SecretDescriptor
 import app.amber.core.settings.secret.SecretRedactor
 import app.amber.core.settings.secret.SecretReference
@@ -197,6 +202,56 @@ class SecretPrefsChainRoundTripTest {
         assertEquals(
             "sk-changed-credential-22",
             (afterCredentialSave.providers.single() as ProviderSetting.OpenAI).apiKey,
+        )
+    }
+
+    @Test
+    fun `saved factory prompts upgrade on read and persist with the next settings update`() = runBlocking {
+        dataStore.edit { prefs ->
+            prefs[PreferencesKeys.AMBER_SYSTEM_PROMPT] = PREVIOUS_DEFAULT_AMBER_SYSTEM_PROMPT
+            prefs[PreferencesKeys.AGENT_RUNTIME] = JsonInstant.encodeToString(
+                AgentRuntimeSetting(agentSoulMarkdown = PREVIOUS_DEFAULT_AGENT_SOUL_MARKDOWN),
+            )
+        }
+        val aggregator = buildAggregator()
+        val loaded = aggregator.settingsFlow.awaitUntil { !it.init }
+        assertEquals(DEFAULT_AMBER_SYSTEM_PROMPT, loaded.systemPrompt)
+        assertEquals(DEFAULT_AGENT_SOUL_MARKDOWN, loaded.agentRuntime.agentSoulMarkdown)
+
+        aggregator.update { it.copy(contextMessageSize = 321) }
+
+        val persisted = dataStore.data.first()
+        assertEquals(DEFAULT_AMBER_SYSTEM_PROMPT, persisted[PreferencesKeys.AMBER_SYSTEM_PROMPT])
+        assertEquals(
+            DEFAULT_AGENT_SOUL_MARKDOWN,
+            JsonInstant.decodeFromString<AgentRuntimeSetting>(persisted[PreferencesKeys.AGENT_RUNTIME]!!)
+                .agentSoulMarkdown,
+        )
+        assertEquals(321, persisted[PreferencesKeys.AMBER_CONTEXT_MESSAGE_SIZE])
+    }
+
+    @Test
+    fun `custom system and deliberately empty soul survive reading and saving`() = runBlocking {
+        val customPrompt = "My task-specific instructions.\n  Preserve this formatting.\n"
+        dataStore.edit { prefs ->
+            prefs[PreferencesKeys.AMBER_SYSTEM_PROMPT] = customPrompt
+            prefs[PreferencesKeys.AGENT_RUNTIME] = JsonInstant.encodeToString(
+                AgentRuntimeSetting(agentSoulMarkdown = ""),
+            )
+        }
+        val aggregator = buildAggregator()
+        val loaded = aggregator.settingsFlow.awaitUntil { !it.init }
+        assertEquals(customPrompt, loaded.systemPrompt)
+        assertEquals("", loaded.agentRuntime.agentSoulMarkdown)
+
+        aggregator.update { it.copy(contextMessageSize = 123) }
+
+        val persisted = dataStore.data.first()
+        assertEquals(customPrompt, persisted[PreferencesKeys.AMBER_SYSTEM_PROMPT])
+        assertEquals(
+            "",
+            JsonInstant.decodeFromString<AgentRuntimeSetting>(persisted[PreferencesKeys.AGENT_RUNTIME]!!)
+                .agentSoulMarkdown,
         )
     }
 

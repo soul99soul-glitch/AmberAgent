@@ -48,6 +48,7 @@ import app.amber.ai.ui.hasExplicitReasoningContentField
 import app.amber.ai.ui.reasoningContentPresentMetadata
 import app.amber.ai.util.KeyRoulette
 import app.amber.ai.util.configureReferHeaders
+import app.amber.ai.util.configureOpenCodeSessionHeader
 import app.amber.ai.util.encodeBase64
 import app.amber.ai.util.json
 import app.amber.ai.util.mergeCustomBody
@@ -122,6 +123,7 @@ class ChatCompletionsAPI(
         val request = Request.Builder()
             .url("${providerSetting.baseUrl}${providerSetting.chatCompletionsPath}")
             .headers(params.customHeaders.toHeaders())
+            .configureOpenCodeSessionHeader(providerSetting.baseUrl, params)
             .post(json.encodeToString(requestBody).toRequestBody("application/json".toMediaType()))
             .addOpenAICompatibleAuthHeader(providerSetting, token)
             .configureReferHeaders(providerSetting.baseUrl)
@@ -180,6 +182,7 @@ class ChatCompletionsAPI(
         val request = Request.Builder()
             .url("${providerSetting.baseUrl}${providerSetting.chatCompletionsPath}")
             .headers(params.customHeaders.toHeaders())
+            .configureOpenCodeSessionHeader(providerSetting.baseUrl, params)
             .post(json.encodeToString(requestBody).toRequestBody("application/json".toMediaType()))
             .addOpenAICompatibleAuthHeader(providerSetting, token)
             .addHeader("Content-Type", "application/json")

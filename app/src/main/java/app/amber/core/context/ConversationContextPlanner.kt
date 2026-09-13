@@ -44,8 +44,14 @@ object ConversationContextPlanner {
             return CompactPlan(false, "not_enough_history", estimatedTokens, contextWindow, 0, -1, emptyList())
         }
 
-        val latestCoveredEnd = activeCompacts
-            .filter { it.status == "completed" }
+        // Keep planning in lockstep with prepareMessages: a completed compact
+        // whose source IDs no longer exist must not advance the covered range,
+        // otherwise it can suppress a fresh compact while no summary is sent.
+        val validCompletedCompacts = CompactSummaryPayloads.validCompletedCompacts(
+            activeCompacts = activeCompacts,
+            existingMessageIds = messages.map { it.id.toString() }.toSet(),
+        )
+        val latestCoveredEnd = validCompletedCompacts
             .maxOfOrNull { it.sourceEndIndex }
             ?: -1
         if (latestCoveredEnd >= sourceEnd) {

@@ -1,19 +1,19 @@
 package app.amber.feature.ui.pages.extensions
 
+import app.amber.feature.ui.components.ds.Hairline
+
 import com.composables.icons.lucide.Lucide
-import com.composables.icons.lucide.Book
 import com.composables.icons.lucide.ArrowDown
-import com.composables.icons.lucide.Download
-import com.composables.icons.lucide.FileDown
 import com.composables.icons.lucide.FileInput
+import com.composables.icons.lucide.GripVertical
 import com.composables.icons.lucide.Plus
 import com.composables.icons.lucide.Pencil
 import com.composables.icons.lucide.Share2
 import com.composables.icons.lucide.Trash2
-import com.composables.icons.lucide.WandSparkles
 import com.composables.icons.lucide.X
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -21,34 +21,27 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilledIconButton
-import androidx.compose.material3.FloatingToolbarDefaults.ScreenOffset
-import androidx.compose.material3.FloatingToolbarDefaults.floatingToolbarVerticalNestedScroll
-import androidx.compose.material3.HorizontalFloatingToolbar
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.InputChip
@@ -59,6 +52,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.SwipeToDismissBox
 import app.amber.feature.ui.components.ui.Switch
+import app.amber.feature.ui.components.ui.SwitchSize
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
@@ -70,7 +64,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -81,6 +74,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
 import app.amber.ai.core.MessageRole
@@ -93,20 +87,18 @@ import app.amber.core.model.InjectionPosition
 import app.amber.core.model.Lorebook
 import app.amber.core.model.PromptInjection
 import app.amber.feature.ui.components.ds.SectionLabel
+import app.amber.feature.ui.components.ds.amberCanvas
 import app.amber.feature.ui.components.nav.BackButton
 import app.amber.feature.ui.components.ui.ExportDialog
 import app.amber.feature.ui.components.ui.FormItem
 import app.amber.feature.ui.components.ui.Select
-import app.amber.feature.ui.components.ui.Tag
-import app.amber.feature.ui.components.ui.TagType
+import app.amber.feature.ui.components.ui.WorkspaceStatusPill
+import app.amber.feature.ui.components.ui.WorkspaceTone
 import app.amber.feature.ui.components.ui.WorkspaceTopBar
-import app.amber.feature.ui.components.ui.workspaceColors
 import app.amber.feature.ui.context.LocalToaster
 import app.amber.feature.ui.hooks.useEditState
-import app.amber.feature.ui.theme.CustomColors
 import app.amber.feature.ui.theme.LocalAmberTokens
 import app.amber.feature.ui.theme.LocalAmberType
-import app.amber.core.utils.plus
 import org.koin.androidx.compose.koinViewModel
 import sh.calvin.reorderable.ReorderableItem
 import sh.calvin.reorderable.rememberReorderableLazyListState
@@ -126,8 +118,10 @@ fun PromptPage(vm: PromptVM = koinViewModel()) {
                 scrollBehavior = scrollBehavior,
             )
         },
-        modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
-        containerColor = workspaceColors().canvas,
+        modifier = Modifier
+            .amberCanvas()
+            .nestedScroll(scrollBehavior.nestedScrollConnection),
+        containerColor = androidx.compose.ui.graphics.Color.Transparent,
     ) { innerPadding ->
         Column(
             modifier = Modifier
@@ -171,19 +165,24 @@ private fun PromptTabs(
     Surface(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 8.dp),
-        shape = RoundedCornerShape(12.dp),
+            .height(36.dp)
+            .padding(horizontal = 16.dp, vertical = 0.dp),
+        shape = RoundedCornerShape(10.dp),
         color = tokens.surface2,
+        border = BorderStroke(1.dp, tokens.line),
+        tonalElevation = 0.dp,
+        shadowElevation = 0.dp,
     ) {
-        Row(modifier = Modifier.padding(3.dp)) {
+        Row(modifier = Modifier.padding(2.dp)) {
             labels.forEachIndexed { index, label ->
                 Box(
                     modifier = Modifier
                         .weight(1f)
-                        .clip(RoundedCornerShape(9.dp))
+                        .height(30.dp)
+                        .clip(RoundedCornerShape(8.dp))
                         .background(if (selected == index) tokens.raised else androidx.compose.ui.graphics.Color.Transparent)
                         .clickable { onSelect(index) }
-                        .padding(vertical = 9.dp),
+                        .padding(horizontal = 8.dp),
                     contentAlignment = Alignment.Center,
                 ) {
                     Text(
@@ -198,11 +197,72 @@ private fun PromptTabs(
 }
 
 @Composable
+private fun PromptDock(
+    label: String,
+    onImport: () -> Unit,
+    onAdd: () -> Unit,
+) {
+    val tokens = LocalAmberTokens.current
+    Box(modifier = Modifier.fillMaxSize()) {
+        Surface(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .height(56.dp)
+                .padding(horizontal = 16.dp),
+            shape = CircleShape,
+            color = tokens.surface,
+            border = BorderStroke(1.dp, tokens.line),
+            tonalElevation = 0.dp,
+            shadowElevation = 0.dp,
+        ) {
+            Row(
+                modifier = Modifier.padding(3.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                IconButton(
+                    onClick = onImport,
+                    modifier = Modifier.size(48.dp),
+                ) {
+                    Icon(
+                        imageVector = Lucide.FileInput,
+                        contentDescription = null,
+                        modifier = Modifier.size(20.dp),
+                        tint = tokens.ink2,
+                    )
+                }
+                Box(
+                    modifier = Modifier
+                        .size(width = 1.dp, height = 20.dp)
+                        .background(tokens.line),
+                )
+                TextButton(
+                    onClick = onAdd,
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(48.dp),
+                    contentPadding = PaddingValues(horizontal = 16.dp),
+                ) {
+                    Text(
+                        text = label,
+                        color = tokens.accent,
+                        style = LocalAmberType.current.body.copy(
+                            fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold,
+                        ),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun ModeInjectionTab(
     modeInjections: List<PromptInjection.ModeInjection>,
     onUpdate: (List<PromptInjection.ModeInjection>) -> Unit
 ) {
-    var expanded by rememberSaveable { mutableStateOf(true) }
     val lazyListState = rememberLazyListState()
     val toaster = LocalToaster.current
     val currentModeInjections by rememberUpdatedState(modeInjections)
@@ -234,14 +294,9 @@ private fun ModeInjectionTab(
     Box(modifier = Modifier.fillMaxSize()) {
         LazyColumn(
             modifier = Modifier
-                .fillMaxSize()
-                .floatingToolbarVerticalNestedScroll(
-                    expanded = expanded,
-                    onExpand = { expanded = true },
-                    onCollapse = { expanded = false }
-                ),
-            contentPadding = PaddingValues(16.dp) + PaddingValues(bottom = 128.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+                .fillMaxSize(),
+            contentPadding = PaddingValues(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 112.dp),
+            verticalArrangement = Arrangement.spacedBy(0.dp),
             state = lazyListState
         ) {
             item {
@@ -272,55 +327,46 @@ private fun ModeInjectionTab(
                     }
                 }
             } else {
-                items(modeInjections, key = { it.id }) { injection ->
+                itemsIndexed(modeInjections, key = { _, injection -> injection.id }) { index, injection ->
                     ReorderableItem(
                         state = reorderableState,
                         key = injection.id
                     ) { isDragging ->
-                        ModeInjectionCard(
-                            injection = injection,
-                            modifier = Modifier
-                                .longPressDraggableHandle()
-                                .graphicsLayer {
-                                    if (isDragging) {
-                                        scaleX = 1.05f
-                                        scaleY = 1.05f
-                                    }
+                        Column(modifier = Modifier.fillMaxWidth()) {
+                            if (index > 0) Hairline()
+                            ModeInjectionCard(
+                                injection = injection,
+                                groupedFirst = index == 0,
+                                groupedLast = index == modeInjections.lastIndex,
+                                modifier = Modifier
+                                    .longPressDraggableHandle()
+                                    .graphicsLayer {
+                                        if (isDragging) {
+                                            scaleX = 1.05f
+                                            scaleY = 1.05f
+                                        }
+                                    },
+                                onEdit = { editState.open(injection) },
+                                onToggle = {
+                                    onUpdate(
+                                        modeInjections.map { item ->
+                                            if (item.id == injection.id) item.copy(enabled = !item.enabled) else item
+                                        }
+                                    )
                                 },
-                            onEdit = { editState.open(injection) },
-                            onDelete = { onUpdate(modeInjections - injection) }
-                        )
-                    }
-                }
-            }
-        }
-
-        HorizontalFloatingToolbar(
-            expanded = expanded,
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .offset(y = -ScreenOffset),
-            leadingContent = {
-                IconButton(onClick = { importer.importFromFile() }) {
-                    Icon(Lucide.FileInput, null)
-                }
-            },
-        ) {
-            Button(onClick = { editState.open(PromptInjection.ModeInjection()) }) {
-                Row(
-                    horizontalArrangement = Arrangement.Center,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(Lucide.Plus, null)
-                    AnimatedVisibility(expanded) {
-                        Row {
-                            Spacer(modifier = Modifier.size(8.dp))
-                            Text(stringResource(R.string.prompt_page_add_mode_injection))
+                                onDelete = { onUpdate(modeInjections - injection) }
+                            )
                         }
                     }
                 }
             }
         }
+
+        PromptDock(
+            label = stringResource(R.string.prompt_page_add_mode_injection),
+            onImport = { importer.importFromFile() },
+            onAdd = { editState.open(PromptInjection.ModeInjection()) },
+        )
     }
 
     if (editState.isEditing) {
@@ -339,13 +385,24 @@ private fun ModeInjectionTab(
 private fun ModeInjectionCard(
     injection: PromptInjection.ModeInjection,
     modifier: Modifier = Modifier,
+    groupedFirst: Boolean,
+    groupedLast: Boolean,
     onEdit: () -> Unit,
+    onToggle: () -> Unit,
     onDelete: () -> Unit
 ) {
     val swipeState = rememberSwipeToDismissBoxState()
     val scope = rememberCoroutineScope()
     var showExportDialog by remember { mutableStateOf(false) }
     val exporter = rememberExporter(injection, ModeInjectionSerializer)
+    val tokens = LocalAmberTokens.current
+    val type = LocalAmberType.current
+    val rowShape = RoundedCornerShape(
+        topStart = if (groupedFirst) 14.dp else 0.dp,
+        topEnd = if (groupedFirst) 14.dp else 0.dp,
+        bottomStart = if (groupedLast) 14.dp else 0.dp,
+        bottomEnd = if (groupedLast) 14.dp else 0.dp,
+    )
 
     SwipeToDismissBox(
         state = swipeState,
@@ -373,46 +430,81 @@ private fun ModeInjectionCard(
         enableDismissFromStartToEnd = false,
         modifier = modifier
     ) {
-        Card(
-            shape = RoundedCornerShape(14.dp),
-            border = BorderStroke(1.dp, LocalAmberTokens.current.line),
-            colors = CardDefaults.cardColors(
-                containerColor = CustomColors.listItemColors.containerColor
-            )
+        Surface(
+            shape = rowShape,
+            border = BorderStroke(1.dp, tokens.line),
+            color = tokens.surface,
+            tonalElevation = 0.dp,
+            shadowElevation = 0.dp,
         ) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 12.dp),
-                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                    .padding(horizontal = 8.dp, vertical = 12.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
+                Box(
+                    modifier = Modifier.size(40.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(32.dp)
+                            .background(tokens.surface2, RoundedCornerShape(9.dp))
+                            .border(1.dp, tokens.line, RoundedCornerShape(9.dp)),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            imageVector = Lucide.GripVertical,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp),
+                            tint = tokens.ink3,
+                        )
+                    }
+                }
                 Column(
                     modifier = Modifier.weight(1f),
                     verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
-                    Text(
-                        text = injection.name.ifEmpty { stringResource(R.string.prompt_page_unnamed) },
-                        style = MaterialTheme.typography.titleSmall,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
                     Row(
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Tag(type = TagType.INFO) {
-                            Text(getPositionLabel(injection.position))
-                        }
-                        Tag(type = TagType.DEFAULT) {
-                            Text(stringResource(R.string.prompt_page_priority_format, injection.priority))
-                        }
+                        Text(
+                            text = injection.name.ifEmpty { stringResource(R.string.prompt_page_unnamed) },
+                            modifier = Modifier.weight(1f),
+                            style = type.body.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold),
+                            color = tokens.ink,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
                         if (!injection.enabled) {
-                            Tag(type = TagType.WARNING) {
-                                Text(stringResource(R.string.prompt_page_disabled))
-                            }
+                            WorkspaceStatusPill(
+                                text = stringResource(R.string.prompt_page_disabled),
+                                tone = WorkspaceTone.Neutral,
+                            )
                         }
                     }
+                    Text(
+                        text = stringResource(R.string.prompt_page_priority_format, injection.priority) +
+                            " · " + getPositionLabel(injection.position),
+                        style = type.meta.copy(fontSize = 12.sp, lineHeight = 16.sp),
+                        color = tokens.ink3,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
                 }
+                Switch(
+                    checked = injection.enabled,
+                    onCheckedChange = { onToggle() },
+                    size = SwitchSize.Small,
+                    trackColor = tokens.accent,
+                    trackColorUnchecked = tokens.surface2,
+                    thumbColor = tokens.accentInk,
+                    thumbColorUnchecked = tokens.ink2,
+                )
                 IconButton(onClick = { showExportDialog = true }) {
                     Icon(Lucide.Share2, stringResource(R.string.export_title))
                 }
@@ -440,11 +532,15 @@ private fun ModeInjectionEditSheet(
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val scope = rememberCoroutineScope()
+    val tokens = LocalAmberTokens.current
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
         sheetGesturesEnabled = false,
+        containerColor = tokens.raised,
+        contentColor = tokens.ink,
+        tonalElevation = 0.dp,
         dragHandle = {
             IconButton(onClick = {
                 scope.launch {
@@ -609,7 +705,6 @@ private fun LorebookTab(
     lorebooks: List<Lorebook>,
     onUpdate: (List<Lorebook>) -> Unit
 ) {
-    var expanded by rememberSaveable { mutableStateOf(true) }
     val lazyListState = rememberLazyListState()
     val toaster = LocalToaster.current
     val currentLorebooks by rememberUpdatedState(lorebooks)
@@ -641,14 +736,9 @@ private fun LorebookTab(
     Box(modifier = Modifier.fillMaxSize()) {
         LazyColumn(
             modifier = Modifier
-                .fillMaxSize()
-                .floatingToolbarVerticalNestedScroll(
-                    expanded = expanded,
-                    onExpand = { expanded = true },
-                    onCollapse = { expanded = false }
-                ),
-            contentPadding = PaddingValues(16.dp) + PaddingValues(bottom = 128.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+                .fillMaxSize(),
+            contentPadding = PaddingValues(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 112.dp),
+            verticalArrangement = Arrangement.spacedBy(0.dp),
             state = lazyListState
         ) {
             item {
@@ -679,55 +769,39 @@ private fun LorebookTab(
                     }
                 }
             } else {
-                items(lorebooks, key = { it.id }) { book ->
+                itemsIndexed(lorebooks, key = { _, book -> book.id }) { index, book ->
                     ReorderableItem(
                         state = reorderableState,
                         key = book.id
                     ) { isDragging ->
-                        LorebookCard(
-                            book = book,
-                            modifier = Modifier
-                                .longPressDraggableHandle()
-                                .graphicsLayer {
-                                    if (isDragging) {
-                                        scaleX = 1.05f
-                                        scaleY = 1.05f
-                                    }
-                                },
-                            onEdit = { editState.open(book) },
-                            onDelete = { onUpdate(lorebooks - book) }
-                        )
-                    }
-                }
-            }
-        }
-
-        HorizontalFloatingToolbar(
-            expanded = expanded,
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .offset(y = -ScreenOffset),
-            leadingContent = {
-                IconButton(onClick = { importer.importFromFile() }) {
-                    Icon(Lucide.FileInput, null)
-                }
-            },
-        ) {
-            Button(onClick = { editState.open(Lorebook()) }) {
-                Row(
-                    horizontalArrangement = Arrangement.Center,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(Lucide.Plus, null)
-                    AnimatedVisibility(expanded) {
-                        Row {
-                            Spacer(modifier = Modifier.size(8.dp))
-                            Text(stringResource(R.string.prompt_page_add_lorebook))
+                        Column(modifier = Modifier.fillMaxWidth()) {
+                            if (index > 0) Hairline()
+                            LorebookCard(
+                                book = book,
+                                groupedFirst = index == 0,
+                                groupedLast = index == lorebooks.lastIndex,
+                                modifier = Modifier
+                                    .longPressDraggableHandle()
+                                    .graphicsLayer {
+                                        if (isDragging) {
+                                            scaleX = 1.05f
+                                            scaleY = 1.05f
+                                        }
+                                    },
+                                onEdit = { editState.open(book) },
+                                onDelete = { onUpdate(lorebooks - book) }
+                            )
                         }
                     }
                 }
             }
         }
+
+        PromptDock(
+            label = stringResource(R.string.prompt_page_add_lorebook),
+            onImport = { importer.importFromFile() },
+            onAdd = { editState.open(Lorebook()) },
+        )
     }
 
     if (editState.isEditing) {
@@ -746,6 +820,8 @@ private fun LorebookTab(
 private fun LorebookCard(
     book: Lorebook,
     modifier: Modifier = Modifier,
+    groupedFirst: Boolean,
+    groupedLast: Boolean,
     onEdit: () -> Unit,
     onDelete: () -> Unit
 ) {
@@ -753,6 +829,14 @@ private fun LorebookCard(
     val scope = rememberCoroutineScope()
     var showExportDialog by remember { mutableStateOf(false) }
     val exporter = rememberExporter(book, LorebookSerializer)
+    val tokens = LocalAmberTokens.current
+    val type = LocalAmberType.current
+    val rowShape = RoundedCornerShape(
+        topStart = if (groupedFirst) 14.dp else 0.dp,
+        topEnd = if (groupedFirst) 14.dp else 0.dp,
+        bottomStart = if (groupedLast) 14.dp else 0.dp,
+        bottomEnd = if (groupedLast) 14.dp else 0.dp,
+    )
 
     SwipeToDismissBox(
         state = swipeState,
@@ -780,12 +864,12 @@ private fun LorebookCard(
         enableDismissFromStartToEnd = false,
         modifier = modifier
     ) {
-        Card(
-            shape = RoundedCornerShape(14.dp),
-            border = BorderStroke(1.dp, LocalAmberTokens.current.line),
-            colors = CardDefaults.cardColors(
-                containerColor = CustomColors.listItemColors.containerColor
-            )
+        Surface(
+            shape = rowShape,
+            border = BorderStroke(1.dp, tokens.line),
+            color = tokens.surface,
+            tonalElevation = 0.dp,
+            shadowElevation = 0.dp,
         ) {
             Row(
                 modifier = Modifier
@@ -800,15 +884,16 @@ private fun LorebookCard(
                 ) {
                     Text(
                         text = book.name.ifEmpty { stringResource(R.string.prompt_page_unnamed_lorebook) },
-                        style = MaterialTheme.typography.titleSmall,
+                        style = type.body.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold),
+                        color = tokens.ink,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
                     if (book.description.isNotEmpty()) {
                         Text(
                             text = book.description,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = type.secondary,
+                            color = tokens.ink2,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
@@ -816,18 +901,18 @@ private fun LorebookCard(
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
-                        Tag(type = TagType.INFO) {
-                            Text(
-                                stringResource(
-                                    R.string.prompt_page_entries_count_format,
-                                    book.entries.size
-                                )
-                            )
-                        }
+                        WorkspaceStatusPill(
+                            text = stringResource(
+                                R.string.prompt_page_entries_count_format,
+                                book.entries.size,
+                            ),
+                            tone = WorkspaceTone.Neutral,
+                        )
                         if (!book.enabled) {
-                            Tag(type = TagType.WARNING) {
-                                Text(stringResource(R.string.prompt_page_disabled))
-                            }
+                            WorkspaceStatusPill(
+                                text = stringResource(R.string.prompt_page_disabled),
+                                tone = WorkspaceTone.Neutral,
+                            )
                         }
                     }
                 }
@@ -858,6 +943,7 @@ private fun LorebookEditSheet(
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val scope = rememberCoroutineScope()
+    val tokens = LocalAmberTokens.current
     val entryEditState = useEditState<PromptInjection.RegexInjection> { edited ->
         val index = book.entries.indexOfFirst { it.id == edited.id }
         if (index >= 0) {
@@ -871,6 +957,9 @@ private fun LorebookEditSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
         sheetGesturesEnabled = false,
+        containerColor = tokens.raised,
+        contentColor = tokens.ink,
+        tonalElevation = 0.dp,
         dragHandle = {
             IconButton(onClick = {
                 scope.launch {
@@ -985,11 +1074,15 @@ private fun RegexInjectionEntryCard(
     onEdit: () -> Unit,
     onDelete: () -> Unit
 ) {
-    Card(
+    val tokens = LocalAmberTokens.current
+    val type = LocalAmberType.current
+    Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(14.dp),
-        border = BorderStroke(1.dp, LocalAmberTokens.current.line),
-        colors = CardDefaults.cardColors(containerColor = CustomColors.listItemColors.containerColor),
+        border = BorderStroke(1.dp, tokens.line),
+        color = tokens.surface,
+        tonalElevation = 0.dp,
+        shadowElevation = 0.dp,
     ) {
         Row(
             modifier = Modifier
@@ -1004,13 +1097,14 @@ private fun RegexInjectionEntryCard(
             ) {
                 Text(
                     text = entry.name.ifEmpty { stringResource(R.string.prompt_page_unnamed_entry) },
-                    style = MaterialTheme.typography.bodyMedium
+                    style = type.body.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold),
+                    color = tokens.ink,
                 )
                 if (entry.keywords.isNotEmpty()) {
                     Text(
                         text = stringResource(R.string.prompt_page_keywords_format, entry.keywords.joinToString(", ")),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = type.secondary,
+                        color = tokens.ink2,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
@@ -1019,9 +1113,10 @@ private fun RegexInjectionEntryCard(
                     horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
                     if (!entry.enabled) {
-                        Tag(type = TagType.WARNING) {
-                            Text(stringResource(R.string.prompt_page_disabled))
-                        }
+                        WorkspaceStatusPill(
+                            text = stringResource(R.string.prompt_page_disabled),
+                            tone = WorkspaceTone.Neutral,
+                        )
                     }
                 }
             }
@@ -1044,10 +1139,14 @@ private fun RegexInjectionEditDialog(
     onEdit: (PromptInjection.RegexInjection) -> Unit
 ) {
     var newKeyword by remember { mutableStateOf("") }
+    val tokens = LocalAmberTokens.current
+    val type = LocalAmberType.current
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(stringResource(R.string.prompt_page_edit_entry)) },
+        shape = RoundedCornerShape(14.dp),
+        containerColor = tokens.raised,
+        title = { Text(stringResource(R.string.prompt_page_edit_entry), style = type.sessionTitle) },
         text = {
             Column(
                 modifier = Modifier

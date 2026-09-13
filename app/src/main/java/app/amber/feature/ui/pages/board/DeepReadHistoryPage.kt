@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -26,8 +27,6 @@ import app.amber.feature.ui.theme.LocalAmberTokens
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -45,6 +44,8 @@ import app.amber.agent.R
 import app.amber.feature.board.hotlist.DeepReadHistoryItem
 import app.amber.feature.board.hotlist.HotListRepository
 import app.amber.feature.ui.components.nav.BackButton
+import app.amber.feature.ui.components.ds.amberCanvas
+import app.amber.feature.ui.components.ui.WorkspaceTopBar
 import app.amber.feature.ui.components.ui.workspaceColors
 import app.amber.feature.ui.context.LocalNavController
 import app.amber.core.utils.plus
@@ -65,19 +66,14 @@ fun DeepReadHistoryPage(
     val scope = rememberCoroutineScope()
 
     Scaffold(
+        modifier = Modifier.amberCanvas(),
         topBar = {
-            TopAppBar(
-                title = { Text(stringResource(R.string.deep_read_history_title)) },
+            WorkspaceTopBar(
+                title = stringResource(R.string.deep_read_history_title),
                 navigationIcon = { BackButton() },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = tokens.bg,
-                    scrolledContainerColor = tokens.bg,
-                    titleContentColor = tokens.ink,
-                    navigationIconContentColor = tokens.ink2,
-                ),
             )
         },
-        containerColor = tokens.bg,
+        containerColor = androidx.compose.ui.graphics.Color.Transparent,
     ) { innerPadding ->
         if (history.isEmpty()) {
             Box(
@@ -146,7 +142,7 @@ private fun DeepReadHistoryRow(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick)
-            .padding(vertical = 0.dp),
+            .heightIn(min = 64.dp),
         horizontalArrangement = Arrangement.spacedBy(10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -164,15 +160,11 @@ private fun DeepReadHistoryRow(
                 text = item.title,
                 style = LocalAmberType.current.sessionTitle.copy(fontWeight = FontWeight.Bold, fontSize = 15.sp),
                 color = tokens.ink,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
             )
             Text(
                 text = formatHistoryTime(item.updatedAt),
                 style = LocalAmberType.current.meta,
                 color = tokens.ink3,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
             )
         }
         Column(
@@ -218,12 +210,13 @@ private fun DeepReadHistoryStatus(text: String, tone: HistoryTone) {
         HistoryTone.Warning -> MaterialTheme.colorScheme.tertiary
     }
     Surface(
+        modifier = Modifier.height(22.dp),
         shape = CircleShape,
         color = base.copy(alpha = 0.14f),
         border = androidx.compose.foundation.BorderStroke(1.dp, base.copy(alpha = 0.38f)),
     ) {
         Row(
-            Modifier.padding(horizontal = 7.dp, vertical = 3.dp),
+            Modifier.padding(horizontal = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(5.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {

@@ -1,5 +1,7 @@
 package app.amber.feature.ui.pages.board
 
+import com.composables.icons.lucide.BotMessageSquare
+
 import android.Manifest
 import android.content.pm.PackageManager
 import androidx.compose.animation.AnimatedVisibility
@@ -15,6 +17,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -40,9 +43,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.serialization.encodeToString
@@ -78,6 +81,8 @@ import app.amber.feature.ui.components.ai.ProviderAccordionModelPicker
 import app.amber.feature.ui.components.ui.NotionSlider
 import app.amber.feature.ui.components.ui.Switch
 import app.amber.feature.ui.components.ui.workspaceColors
+import app.amber.feature.ui.components.ui.WorkspaceLeadingIcon
+import app.amber.feature.ui.components.ds.amberCanvas
 import app.amber.feature.ui.context.LocalNavController
 import app.amber.feature.ui.pages.setting.ExperimentalSettingsScaffold
 import app.amber.feature.ui.pages.setting.SettingVM
@@ -89,7 +94,18 @@ import org.koin.compose.koinInject
 import kotlin.math.roundToInt
 import kotlin.uuid.Uuid
 import com.composables.icons.lucide.ChevronRight
+import com.composables.icons.lucide.AlarmClock
+import com.composables.icons.lucide.BookOpenText
+import com.composables.icons.lucide.Cloud
+import com.composables.icons.lucide.Clock
+import com.composables.icons.lucide.FileText
+import com.composables.icons.lucide.LayoutDashboard
 import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.MessageSquare
+import com.composables.icons.lucide.MessagesSquare
+import com.composables.icons.lucide.Megaphone
+import com.composables.icons.lucide.RotateCw
+import com.composables.icons.lucide.SlidersHorizontal
 
 @Composable
 fun SettingTodayBoardPage(
@@ -239,21 +255,27 @@ fun SettingTodayBoardPage(
         title = pane.localizedTitle(),
     ) { innerPadding ->
         LazyColumn(
-            Modifier.fillMaxSize(),
-            contentPadding = innerPadding + PaddingValues(horizontal = 12.dp, vertical = 10.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
+            Modifier.fillMaxSize().amberCanvas(),
+            contentPadding = innerPadding + PaddingValues(horizontal = 16.dp, vertical = 0.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             when (pane) {
                 TodayBoardSettingsPane.ROOT -> {
                     item {
                         BoardSectionCard(title = stringResource(R.string.board_settings_general)) {
-                            SourceSwitch(stringResource(R.string.board_enable_title), stringResource(R.string.board_enable_description), board.enabled) {
+                            SourceSwitch(
+                                title = stringResource(R.string.board_enable_title),
+                                description = stringResource(R.string.board_enable_description),
+                                checked = board.enabled,
+                                icon = Lucide.LayoutDashboard,
+                            ) {
                                 update { it.copy(enabled = !it.enabled) }
                             }
                             BoardDivider()
                             DetailNavigationRow(
                                 title = stringResource(R.string.board_model_background),
-                                description = "${board.modelSummary(settings)} · ${board.backgroundStrategy.label()}",
+                                description = null,
+                                icon = Lucide.RotateCw,
                                 onClick = {
                                     navController.navigate(Screen.SettingTodayBoardDetail(TodayBoardSettingsPane.GENERAL.route))
                                 },
@@ -267,13 +289,19 @@ fun SettingTodayBoardPage(
                                 update { it.copy(hotListRefreshIntervalMinutes = value) }
                             }
                             BoardDivider()
-                            SourceSwitch(stringResource(R.string.board_wifi_only), stringResource(R.string.board_wifi_only_description), board.hotListWifiOnly) {
+                            SourceSwitch(
+                                title = stringResource(R.string.board_wifi_only),
+                                description = stringResource(R.string.board_wifi_only_description),
+                                checked = board.hotListWifiOnly,
+                                icon = Lucide.Cloud,
+                            ) {
                                 update { it.copy(hotListWifiOnly = !it.hotListWifiOnly) }
                             }
                             BoardDivider()
                             DetailNavigationRow(
                                 title = stringResource(R.string.board_sources_focus_deep_read),
-                                description = hotListSummary(board, customHotListSources, settings),
+                                description = null,
+                                icon = Lucide.BookOpenText,
                                 onClick = {
                                     navController.navigate(Screen.SettingTodayBoardDetail(TodayBoardSettingsPane.HOT_LIST.route))
                                 },
@@ -285,7 +313,8 @@ fun SettingTodayBoardPage(
                         BoardSectionCard(title = stringResource(R.string.board_daily_review)) {
                             DetailNavigationRow(
                                 title = stringResource(R.string.board_signal_sources_focus),
-                                description = reviewSummary(board, focusRules),
+                                description = null,
+                                icon = Lucide.SlidersHorizontal,
                                 onClick = {
                                     navController.navigate(Screen.SettingTodayBoardDetail(TodayBoardSettingsPane.REVIEW.route))
                                 },
@@ -308,28 +337,29 @@ fun SettingTodayBoardPage(
 
                 TodayBoardSettingsPane.HOT_LIST -> {
                     item {
-                        BoardSectionCard(title = stringResource(R.string.board_hotlist_sources)) {
-                            HotListSourceSettings(
-                                enabledBuiltIns = board.hotListEnabledSources,
-                                customSources = customHotListSources,
-                                onToggleBuiltIn = { source ->
-                                    update {
-                                        it.copy(
-                                            hotListEnabledSources = if (source in it.hotListEnabledSources) {
-                                                it.hotListEnabledSources - source
-                                            } else {
-                                                it.hotListEnabledSources + source
-                                            }
-                                        )
-                                    }
-                                    hotListScheduler.runOnce()
-                                },
-                                onToggleCustom = ::toggleCustomHotListSource,
-                                onDeleteCustom = ::deleteCustomHotListSource,
-                                onAddNewsNowPresets = ::addNewsNowPresets,
-                                onSaveCustom = ::saveCustomHotListSource,
-                            )
-                            BoardDivider()
+                        HotListSourceSettings(
+                            enabledBuiltIns = board.hotListEnabledSources,
+                            customSources = customHotListSources,
+                            onToggleBuiltIn = { source ->
+                                update {
+                                    it.copy(
+                                        hotListEnabledSources = if (source in it.hotListEnabledSources) {
+                                            it.hotListEnabledSources - source
+                                        } else {
+                                            it.hotListEnabledSources + source
+                                        }
+                                    )
+                                }
+                                hotListScheduler.runOnce()
+                            },
+                            onToggleCustom = ::toggleCustomHotListSource,
+                            onDeleteCustom = ::deleteCustomHotListSource,
+                            onAddNewsNowPresets = ::addNewsNowPresets,
+                            onSaveCustom = ::saveCustomHotListSource,
+                        )
+                    }
+                    item {
+                        BoardSectionCard(title = stringResource(R.string.board_search_title)) {
                             SearchServiceSummary(
                                 enabledCount = settings.searchEnabledServiceIds.size,
                                 totalCount = settings.searchServices.size,
@@ -351,29 +381,30 @@ fun SettingTodayBoardPage(
                             ReadingFontRow(board = board, fontStates = fontStates, update = ::update)
                             BoardDivider()
                             DeepReadCacheTtlRow(board = board, update = ::update)
-                            BoardDivider()
-                            DeepReadTemplateSettingsRow(
-                                board = board,
-                                customTemplates = customDeepReadTemplates,
-                                invalidTemplateCount = invalidDeepReadTemplateCount,
-                                fontCss = templateFontCss,
-                                fontRepository = fontRepository,
-                                onSelect = { templateId -> update { it.copy(deepReadTemplateId = templateId) } },
-                                onDelete = { template ->
-                                    scope.launch {
-                                        deepReadTemplateRepository.deleteTemplate(template.id)
-                                        if (board.deepReadTemplateId == template.id) {
-                                            update {
-                                                it.copy(
-                                                    deepReadTemplateId = app.amber.feature.board.DeepReadTemplateIds.COMPOSE_MAGAZINE
-                                                )
-                                            }
+                        }
+                    }
+                    item {
+                        DeepReadTemplateSettingsRow(
+                            board = board,
+                            customTemplates = customDeepReadTemplates,
+                            invalidTemplateCount = invalidDeepReadTemplateCount,
+                            fontCss = templateFontCss,
+                            fontRepository = fontRepository,
+                            onSelect = { templateId -> update { it.copy(deepReadTemplateId = templateId) } },
+                            onDelete = { template ->
+                                scope.launch {
+                                    deepReadTemplateRepository.deleteTemplate(template.id)
+                                    if (board.deepReadTemplateId == template.id) {
+                                        update {
+                                            it.copy(
+                                                deepReadTemplateId = app.amber.feature.board.DeepReadTemplateIds.COMPOSE_MAGAZINE
+                                            )
                                         }
                                     }
-                                },
-                                onCreateTemplate = { navController.navigate(Screen.DeepReadTemplateWorkbench) },
-                            )
-                        }
+                                }
+                            },
+                            onCreateTemplate = { navController.navigate(Screen.DeepReadTemplateWorkbench) },
+                        )
                     }
                 }
 
@@ -397,6 +428,7 @@ fun SettingTodayBoardPage(
                                 if (notifPermissionOk) stringResource(R.string.board_signal_notification_description)
                                 else stringResource(R.string.board_signal_notification_permission),
                                 BoardSignalSourceType.NOTIFICATION in board.enabledSources,
+                                icon = Lucide.Megaphone,
                             ) { toggleSignalSource(BoardSignalSourceType.NOTIFICATION, ::update) }
                             BoardDivider()
                             SourceSwitch(
@@ -404,17 +436,18 @@ fun SettingTodayBoardPage(
                                 if (calendarPermissionOk) stringResource(R.string.board_signal_calendar_description)
                                 else stringResource(R.string.board_signal_calendar_permission),
                                 BoardSignalSourceType.CALENDAR in board.enabledSources,
+                                icon = Lucide.AlarmClock,
                             ) { toggleSignalSource(BoardSignalSourceType.CALENDAR, ::update) }
                             BoardDivider()
-                            SourceSwitch(stringResource(R.string.board_signal_feishu_messages), stringResource(R.string.board_signal_feishu_messages_description), BoardSignalSourceType.FEISHU_MSG in board.enabledSources) {
+                            SourceSwitch(stringResource(R.string.board_signal_feishu_messages), stringResource(R.string.board_signal_feishu_messages_description), BoardSignalSourceType.FEISHU_MSG in board.enabledSources, icon = Lucide.MessagesSquare) {
                                 toggleSignalSource(BoardSignalSourceType.FEISHU_MSG, ::update)
                             }
                             BoardDivider()
-                            SourceSwitch(stringResource(R.string.board_signal_feishu_docs), stringResource(R.string.board_signal_feishu_docs_description), BoardSignalSourceType.FEISHU_DOC in board.enabledSources) {
+                            SourceSwitch(stringResource(R.string.board_signal_feishu_docs), stringResource(R.string.board_signal_feishu_docs_description), BoardSignalSourceType.FEISHU_DOC in board.enabledSources, icon = Lucide.FileText) {
                                 toggleSignalSource(BoardSignalSourceType.FEISHU_DOC, ::update)
                             }
                             BoardDivider()
-                            SourceSwitch(stringResource(R.string.board_signal_chat_history), stringResource(R.string.board_signal_chat_history_description), BoardSignalSourceType.CHAT_HISTORY in board.enabledSources) {
+                            SourceSwitch(stringResource(R.string.board_signal_chat_history), stringResource(R.string.board_signal_chat_history_description), BoardSignalSourceType.CHAT_HISTORY in board.enabledSources, icon = Lucide.MessageSquare) {
                                 toggleSignalSource(BoardSignalSourceType.CHAT_HISTORY, ::update)
                             }
                         }
@@ -472,8 +505,9 @@ private fun BoardSectionCard(
 ) {
     val tokens = LocalAmberTokens.current
     Column(
-        Modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
+        Modifier
+            .fillMaxWidth()
+            .padding(top = 16.dp),
     ) {
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 2.dp),
@@ -491,11 +525,7 @@ private fun BoardSectionCard(
             contentColor = tokens.ink,
             border = androidx.compose.foundation.BorderStroke(1.dp, tokens.line),
         ) {
-            Column(
-                Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-                content = content,
-            )
+            Column(Modifier.fillMaxWidth(), content = content)
         }
     }
 }
@@ -512,7 +542,8 @@ private fun BoardDivider() {
 @Composable
 private fun DetailNavigationRow(
     title: String,
-    description: String,
+    description: String? = null,
+    icon: ImageVector? = null,
     onClick: () -> Unit,
 ) {
     val tokens = LocalAmberTokens.current
@@ -520,10 +551,14 @@ private fun DetailNavigationRow(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick)
-            .padding(horizontal = 12.dp, vertical = 10.dp),
+            .heightIn(min = 52.dp)
+            .padding(horizontal = 14.dp),
         horizontalArrangement = Arrangement.spacedBy(12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        icon?.let {
+            WorkspaceLeadingIcon(icon = it, size = 32.dp, iconSize = 17.dp)
+        }
         Column(
             modifier = Modifier.weight(1f),
             verticalArrangement = Arrangement.spacedBy(3.dp),
@@ -532,16 +567,14 @@ private fun DetailNavigationRow(
                 text = title,
                 style = LocalAmberType.current.body.copy(fontWeight = FontWeight.SemiBold),
                 color = tokens.ink,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
             )
-            Text(
-                text = description,
-                style = LocalAmberType.current.secondary,
-                color = tokens.ink3,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
+            description?.takeIf { it.isNotBlank() }?.let {
+                Text(
+                    text = it,
+                    style = LocalAmberType.current.secondary,
+                    color = tokens.ink3,
+                )
+            }
         }
         Icon(
             Lucide.ChevronRight,
@@ -550,48 +583,6 @@ private fun DetailNavigationRow(
             tint = tokens.ink3,
         )
     }
-}
-
-@Composable
-private fun TodayBoardSetting.modelSummary(settings: app.amber.core.settings.Settings): String {
-    val boardModelUuid = boardModelId?.let { runCatching { Uuid.parse(it) }.getOrNull() }
-    val boardModel = boardModelUuid?.let { uuid -> settings.findModelById(uuid) }
-    return boardModel?.displayName ?: stringResource(R.string.board_follow_main_model)
-}
-
-@Composable
-private fun hotListSummary(
-    board: TodayBoardSetting,
-    customSources: List<HotListSourceEntity>,
-    settings: app.amber.core.settings.Settings,
-): String {
-    val enabledSources = board.hotListEnabledSources.size + customSources.count { it.enabled }
-    val searchSummary = if (settings.searchEnabledServiceIds.isNotEmpty()) {
-        stringResource(R.string.board_search_count, settings.searchEnabledServiceIds.size, settings.searchServices.size)
-    } else {
-        stringResource(R.string.board_search_disabled)
-    }
-    return stringResource(
-        R.string.board_hotlist_summary,
-        enabledSources,
-        board.hotListFilterMode.label(),
-        searchSummary,
-    )
-}
-
-@Composable
-private fun reviewSummary(
-    board: TodayBoardSetting,
-    focusRules: List<BoardFocusRuleEntity>,
-): String {
-    val enabledSourceCount = board.enabledSources.count { it in REVIEW_SIGNAL_SOURCES }
-    val activeRuleCount = focusRules.count { it.active }
-    return stringResource(
-        R.string.board_review_summary,
-        enabledSourceCount,
-        activeRuleCount,
-        board.incrementalSignalThreshold,
-    )
 }
 
 @Composable
@@ -638,6 +629,13 @@ private fun HotListFocusKeywordEditor(
             placeholder = { Text(stringResource(R.string.board_focus_placeholder)) },
             minLines = 2,
             maxLines = 4,
+            colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
+                focusedBorderColor = LocalAmberTokens.current.accent,
+                unfocusedBorderColor = LocalAmberTokens.current.line,
+                focusedContainerColor = LocalAmberTokens.current.raised,
+                unfocusedContainerColor = LocalAmberTokens.current.surface2,
+                cursorColor = LocalAmberTokens.current.accent,
+            ),
         )
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
             TextButton(
@@ -799,32 +797,23 @@ private fun BoardModelRow(
             horizontalArrangement = Arrangement.spacedBy(10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Box(Modifier.size(20.dp).padding(2.dp)) {
-                Surface(
-                    Modifier.fillMaxSize(),
-                    RoundedCornerShape(50),
-                    color = if (boardModel == null) {
-                        MaterialTheme.colorScheme.outline
-                    } else {
-                        MaterialTheme.colorScheme.primary
-                    },
-                    content = {},
-                )
-            }
+            WorkspaceLeadingIcon(
+                icon = Lucide.BotMessageSquare,
+                size = 32.dp,
+                iconSize = 17.dp,
+                tone = if (boardModel == null) app.amber.feature.ui.components.ui.WorkspaceTone.Neutral
+                else app.amber.feature.ui.components.ui.WorkspaceTone.Accent,
+            )
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text(
                     text = boardModel?.displayName ?: stringResource(R.string.board_follow_main_model),
                     style = MaterialTheme.typography.bodyMedium,
                     color = workspaceColors().ink,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
                 )
                 Text(
                     text = selectedProvider?.name ?: stringResource(R.string.board_using_current_model),
                     style = MaterialTheme.typography.bodySmall,
                     color = workspaceColors().muted,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
                 )
             }
             Text(
@@ -865,16 +854,40 @@ private fun BoardModelRow(
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun IntervalRow(current: Int, onChange: (Int) -> Unit) {
-    Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text(stringResource(R.string.board_refresh_interval), style = MaterialTheme.typography.titleSmall)
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    Column(Modifier.fillMaxWidth()) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .heightIn(min = 52.dp)
+                .padding(horizontal = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            WorkspaceLeadingIcon(icon = Lucide.Clock, size = 32.dp, iconSize = 17.dp)
+            Text(
+                stringResource(R.string.board_refresh_interval),
+                style = LocalAmberType.current.body.copy(fontWeight = FontWeight.Medium),
+                color = LocalAmberTokens.current.ink,
+            )
+        }
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .padding(start = 14.dp, end = 14.dp, bottom = 14.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
             listOf(
                 30 to stringResource(R.string.board_interval_30_minutes),
                 60 to stringResource(R.string.board_interval_1_hour),
                 120 to stringResource(R.string.board_interval_2_hours),
                 240 to stringResource(R.string.board_interval_4_hours),
             ).forEach { (value, label) ->
-                ChoiceChip(selected = current == value, label = label, onClick = { onChange(value) })
+                ChoiceChip(
+                    selected = current == value,
+                    label = label,
+                    onClick = { onChange(value) },
+                    modifier = Modifier.weight(1f),
+                )
             }
         }
     }
@@ -917,6 +930,13 @@ private fun FocusRulesEditor(
                 modifier = Modifier.weight(1f),
                 placeholder = { Text(stringResource(R.string.board_focus_example)) },
                 maxLines = 2,
+                colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = LocalAmberTokens.current.accent,
+                    unfocusedBorderColor = LocalAmberTokens.current.line,
+                    focusedContainerColor = LocalAmberTokens.current.raised,
+                    unfocusedContainerColor = LocalAmberTokens.current.surface2,
+                    cursorColor = LocalAmberTokens.current.accent,
+                ),
             )
             TextButton(
                 enabled = input.trim().isNotEmpty(),
@@ -971,16 +991,39 @@ private fun SourceWeightsEditor(weights: Map<String, Int>, onChange: (sourceType
 }
 
 @Composable
-private fun SourceSwitch(title: String, description: String, checked: Boolean, onToggle: () -> Unit) {
+private fun SourceSwitch(
+    title: String,
+    description: String,
+    checked: Boolean,
+    icon: ImageVector? = null,
+    onToggle: () -> Unit,
+) {
+    val tokens = LocalAmberTokens.current
     Row(
-        Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
+        Modifier
+            .fillMaxWidth()
+            .heightIn(min = if (description.isBlank()) 52.dp else 64.dp)
+            .padding(horizontal = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Column(Modifier.weight(1f)) {
-            Text(title, style = MaterialTheme.typography.titleSmall)
-            Text(description, style = MaterialTheme.typography.bodySmall, color = workspaceColors().muted)
+        icon?.let {
+            WorkspaceLeadingIcon(icon = it, size = 32.dp, iconSize = 17.dp)
         }
-        Switch(checked = checked, onCheckedChange = { onToggle() })
+        Column(Modifier.weight(1f)) {
+            Text(title, style = LocalAmberType.current.body.copy(fontWeight = FontWeight.Medium), color = tokens.ink)
+            if (description.isNotBlank()) {
+                Text(description, style = LocalAmberType.current.secondary, color = tokens.ink2)
+            }
+        }
+        Switch(
+            checked = checked,
+            onCheckedChange = { onToggle() },
+            trackColor = tokens.accent,
+            trackColorUnchecked = tokens.surface2,
+            thumbColor = tokens.accentInk,
+            thumbColorUnchecked = tokens.ink2,
+        )
     }
 }
 
@@ -1028,6 +1071,7 @@ private fun BackgroundStrategyRow(current: TodayBoardBackgroundStrategy, onChang
 
 @Composable
 private fun RadioRow(selected: Boolean, label: String, description: String, onClick: () -> Unit) {
+    val tokens = LocalAmberTokens.current
     Row(
         Modifier.fillMaxWidth().clickable { onClick() }.padding(vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -1037,7 +1081,7 @@ private fun RadioRow(selected: Boolean, label: String, description: String, onCl
             Surface(
                 Modifier.fillMaxSize(),
                 RoundedCornerShape(50),
-                color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
+                color = if (selected) tokens.accent else tokens.ink3,
                 content = {},
             )
         }
@@ -1049,13 +1093,23 @@ private fun RadioRow(selected: Boolean, label: String, description: String, onCl
 }
 
 @Composable
-private fun ChoiceChip(selected: Boolean, label: String, onClick: () -> Unit) {
+private fun ChoiceChip(
+    selected: Boolean,
+    label: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val tokens = LocalAmberTokens.current
     Surface(
         shape = RoundedCornerShape(50),
-        color = if (selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
-        modifier = Modifier.clickable { onClick() },
+        color = if (selected) tokens.accent else tokens.surface2,
+        contentColor = if (selected) tokens.accentInk else tokens.ink2,
+        border = androidx.compose.foundation.BorderStroke(1.dp, if (selected) tokens.accent else tokens.line2),
+        modifier = modifier
+            .heightIn(min = 32.dp)
+            .clickable { onClick() },
     ) {
-        Text(label, modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp), style = MaterialTheme.typography.labelMedium)
+        Text(label, modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp), style = LocalAmberType.current.secondary.copy(fontSize = 13.sp))
     }
 }
 

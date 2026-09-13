@@ -21,6 +21,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.util.fastForEach
 import app.amber.ai.core.MessageRole
 import app.amber.ai.provider.Model
@@ -246,7 +247,7 @@ internal fun Modifier.animateContentSizeIf(enabled: Boolean): Modifier =
 internal fun rememberChatMessageTextStyle(): androidx.compose.ui.text.TextStyle {
     val settings = LocalSettings.current.displaySetting
     return LocalTextStyle.current.copy(
-        fontSize = LocalTextStyle.current.fontSize * settings.fontSizeRatio,
+        fontSize = 14.sp * settings.fontSizeRatio,
         lineHeight = LocalTextStyle.current.lineHeight * settings.fontSizeRatio,
         fontFamily = when (settings.chatFontFamily) {
             ChatFontFamily.DEFAULT -> FontFamily.Default

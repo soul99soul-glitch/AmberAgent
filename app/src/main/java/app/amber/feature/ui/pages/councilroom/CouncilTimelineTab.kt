@@ -16,6 +16,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.scrollBy
@@ -33,6 +34,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.lazy.LazyColumn
@@ -72,7 +74,9 @@ import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.launch
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import app.amber.feature.modelcouncil.COUNCIL_ROOM_HOST_ID
 import app.amber.feature.modelcouncil.CouncilRoomMode
 import app.amber.feature.modelcouncil.COUNCIL_ROOM_USER_ID
@@ -93,6 +97,8 @@ import app.amber.feature.ui.components.ui.SubAgentAvatar
 import app.amber.feature.ui.components.ui.workspaceBorder
 import app.amber.feature.ui.components.ui.workspaceColors
 import app.amber.feature.ui.pages.chat.LocalChatTheme
+import app.amber.feature.ui.theme.LocalAmberTokens
+import app.amber.feature.ui.theme.LocalAmberType
 
 /**
  * One entry in the merged timeline (a message or a phase marker), with a stable
@@ -572,7 +578,7 @@ fun CouncilTimelineTab(
                 },
             // Extra bottom headroom so the streaming tail (and a freshly appended
             // line) stays comfortably above the composer instead of hugging the edge.
-            contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 18.dp, bottom = 64.dp),
+            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 64.dp),
             // Per-item spacing (not spacedBy): the chat page uses spacedBy(0) +
             // per-item padding because spacedBy's uniform spacing is managed by
             // the LazyList and, combined with a streaming item whose height
@@ -818,7 +824,7 @@ private fun PhaseDivider(marker: CouncilPhaseMarker) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 8.dp),
+            .padding(top = 12.dp, bottom = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
@@ -913,7 +919,7 @@ private fun TimelineMessageRow(
                 tonalElevation = 0.dp,
                 shadowElevation = 0.dp,
             ) {
-                Column(modifier = Modifier.padding(horizontal = 18.dp, vertical = 10.dp)) {
+                Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp)) {
                     if (isTopic) {
                         Text(
                             text = stringResource(R.string.council_room_topic_author),
@@ -947,59 +953,70 @@ private fun TimelineMessageRow(
         val modelLabel = remember(room.participants, msg.authorId) {
             room.participantById(msg.authorId)?.modelLabel().orEmpty()
         }
-        // Member / host turn: header (avatar + identity + model) on top, then a
-        // FULL-WIDTH bubble flush to the content margins (left margin = right
-        // margin). The bubble's top-left corner is squared, mirroring the user
-        // bubble's squared bottom-right — each notch points back at its sender.
+        // Member / host turn: keep the identity and bubble in a compact message
+        // column beside the avatar. The reference room uses a 300dp message
+        // measure so the timeline retains a readable editorial edge on phones.
         val bubbleShape = RoundedCornerShape(
             topStart = 5.dp,
             topEnd = 16.dp,
             bottomEnd = 16.dp,
             bottomStart = 16.dp,
         )
-        Column(modifier = Modifier.fillMaxWidth()) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                modifier = Modifier.padding(bottom = 6.dp),
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.Top,
+            horizontalArrangement = Arrangement.spacedBy(11.dp),
+        ) {
+            CouncilMemberAvatar(msg = msg, isHost = isHost)
+            Column(
+                modifier = Modifier
+                    .widthIn(max = 300.dp)
+                    .weight(1f),
+                verticalArrangement = Arrangement.spacedBy(7.dp),
             ) {
-                SubAgentAvatar(id = msg.authorId, name = msg.authorName, avatarSize = 34.dp)
-                AuthorLabel(msg, isHost, modelLabel)
-            }
-            if (isSynthesis) {
-                Text(
-                    text = stringResource(R.string.council_room_host_summary),
-                    style = MaterialTheme.typography.labelSmall,
-                    fontWeight = FontWeight.SemiBold,
-                    color = chatTheme.accent,
-                    modifier = Modifier.padding(bottom = 6.dp),
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    CouncilMemberTag(msg = msg, isHost = isHost, modelLabel = modelLabel)
+                    if (msg.role.isNotBlank() && msg.role != msg.authorName) {
+                        CouncilRolePill(text = msg.role, isHost = isHost)
+                    }
+                }
+                if (isSynthesis) {
+                    Text(
+                        text = stringResource(R.string.council_room_host_summary),
+                        style = LocalAmberType.current.tinyTag,
+                        fontWeight = FontWeight.SemiBold,
+                        color = chatTheme.accent,
+                    )
+                }
+                MessageBubble(
+                    msg = msg,
+                    container = when {
+                        isSynthesis -> chatTheme.surface
+                        isHost -> chatTheme.accentSoft
+                        else -> chatTheme.surface
+                    },
+                    content = when {
+                        isSynthesis -> chatTheme.ink
+                        isHost -> chatTheme.accentDeep
+                        else -> chatTheme.ink
+                    },
+                    borderColor = when {
+                        isSynthesis -> chatTheme.accent
+                        isHost -> chatTheme.accentTint
+                        else -> chatTheme.surfaceEdge
+                    },
+                    shape = bubbleShape,
+                    // Forwarded from CouncilTimelineTab: only the actively-streaming
+                    // turn supplies non-null callbacks, so the renderer's frame
+                    // release drives bottom-follow in phase with visible characters.
+                    onStreamingVisibleFrame = onStreamingVisibleFrame,
+                    onStreamingVisualActiveChange = onStreamingVisualActiveChange,
                 )
+                ReferenceFootnotes(msg, room, alignEnd = false)
             }
-            MessageBubble(
-                msg = msg,
-                container = when {
-                    isSynthesis -> chatTheme.surface
-                    isHost -> chatTheme.accentSoft
-                    else -> chatTheme.surface
-                },
-                content = when {
-                    isSynthesis -> chatTheme.ink
-                    isHost -> chatTheme.accentDeep
-                    else -> chatTheme.ink
-                },
-                borderColor = when {
-                    isSynthesis -> chatTheme.accent
-                    isHost -> chatTheme.accentTint
-                    else -> chatTheme.surfaceEdge
-                },
-                shape = bubbleShape,
-                // Forwarded from CouncilTimelineTab: only the actively-streaming
-                // turn supplies non-null callbacks, so the renderer's frame
-                // release drives bottom-follow in phase with visible characters.
-                onStreamingVisibleFrame = onStreamingVisibleFrame,
-                onStreamingVisualActiveChange = onStreamingVisualActiveChange,
-            )
-            ReferenceFootnotes(msg, room, alignEnd = false)
         }
     }
 }
@@ -1035,27 +1052,80 @@ private fun CouncilBubbleAttachments(attachments: List<UIMessagePart>, modifier:
 }
 
 @Composable
-private fun AuthorLabel(msg: CouncilMessage, isHost: Boolean, modelLabel: String) {
-    val workspace = workspaceColors()
-    Column(modifier = Modifier.padding(bottom = 4.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+private fun CouncilMemberAvatar(msg: CouncilMessage, isHost: Boolean) {
+    val tokens = LocalAmberTokens.current
+    val chatTheme = LocalChatTheme.current
+    val shape = CircleShape
+    Box(
+        modifier = Modifier
+            .size(32.dp)
+            .clip(shape)
+            .background(
+                if (isHost) chatTheme.accent.copy(alpha = 0.14f) else tokens.surface2,
+            )
+            .border(
+                1.dp,
+                if (isHost) chatTheme.accent.copy(alpha = 0.42f) else tokens.line,
+                shape,
+            ),
+        contentAlignment = Alignment.Center,
+    ) {
+        SubAgentAvatar(
+            id = msg.authorId,
+            name = msg.authorName,
+            avatarSize = 24.dp,
+        )
+    }
+}
+
+/** Identity tag keeps human names sans and model ids mono, as in the reference room. */
+@Composable
+private fun CouncilMemberTag(msg: CouncilMessage, isHost: Boolean, modelLabel: String) {
+    val tokens = LocalAmberTokens.current
+    val chatTheme = LocalChatTheme.current
+    val type = LocalAmberType.current
+    val shape = RoundedCornerShape(999.dp)
+    Surface(
+        shape = shape,
+        color = if (isHost) chatTheme.accent.copy(alpha = 0.12f) else tokens.surface2,
+        border = BorderStroke(
+            1.dp,
+            if (isHost) chatTheme.accent.copy(alpha = 0.38f) else tokens.line,
+        ),
+    ) {
+        Row(
+            modifier = Modifier
+                .height(22.dp)
+                .padding(horizontal = 9.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(7.dp),
+        ) {
             Text(
                 text = msg.authorName.ifBlank { msg.authorId },
-                style = MaterialTheme.typography.labelMedium,
-                fontWeight = FontWeight.SemiBold,
-                color = if (isHost) workspace.amber else workspace.ink,
+                style = type.tinyTag.copy(
+                    fontSize = 12.sp,
+                    lineHeight = 14.sp,
+                    fontWeight = FontWeight.SemiBold,
+                ),
+                color = if (isHost) chatTheme.accent else tokens.ink,
+                maxLines = 1,
             )
-            val displayRole = if (isHost) stringResource(R.string.council_room_host_status) else msg.role
-            if (displayRole.isNotBlank() && displayRole != msg.authorName) {
-                CouncilRolePill(text = displayRole, isHost = isHost)
+            if (modelLabel.isNotBlank()) {
+                Box(
+                    modifier = Modifier
+                        .height(14.dp)
+                        .width(1.dp)
+                        .background(if (isHost) chatTheme.accent.copy(alpha = 0.34f) else tokens.line2),
+                )
+                Text(
+                    text = modelLabel,
+                    modifier = Modifier.widthIn(max = 180.dp),
+                    style = type.meta.copy(fontSize = 10.5.sp, lineHeight = 13.sp),
+                    color = if (isHost) chatTheme.accent.copy(alpha = 0.82f) else tokens.ink2,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
             }
-        }
-        if (modelLabel.isNotBlank()) {
-            Text(
-                text = modelLabel,
-                style = MaterialTheme.typography.labelSmall,
-                color = workspace.faint,
-            )
         }
     }
 }
@@ -1098,7 +1168,7 @@ private fun MessageBubble(
         contentColor = content,
         border = BorderStroke(1.dp, borderColor),
     ) {
-        Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+        Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp)) {
             if (msg.text.isNotBlank()) {
                 MarkdownBlock(
                     content = msg.text,

@@ -12,9 +12,9 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemColors
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
@@ -105,10 +105,14 @@ private fun CardGroupListItem(
     defaultColors: ListItemColors?,
 ) {
     val interactionSource = remember { MutableInteractionSource() }
-    ListItem(
-        headlineContent = item.headlineContent,
+    val colors = item.colors ?: defaultColors ?: CustomColors.listItemColors
+    val type = LocalAmberType.current
+    val hasSecondaryText = item.supportingContent != null || item.overlineContent != null
+    Row(
         modifier = item.modifier
             .fillMaxWidth()
+            .heightIn(min = if (hasSecondaryText) 56.dp else 48.dp)
+            .background(colors.containerColor)
             .then(
                 if (item.onClick != null) {
                     Modifier.clickable(
@@ -117,13 +121,40 @@ private fun CardGroupListItem(
                         onClick = item.onClick,
                     )
                 } else Modifier
-            ),
-        overlineContent = item.overlineContent,
-        supportingContent = item.supportingContent,
-        leadingContent = item.leadingContent,
-        trailingContent = item.trailingContent,
-        colors = item.colors ?: defaultColors ?: CustomColors.listItemColors,
-    )
+            )
+            .padding(horizontal = 12.dp, vertical = if (hasSecondaryText) 6.dp else 0.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        item.leadingContent?.let { leading ->
+            CompositionLocalProvider(LocalContentColor provides colors.leadingContentColor) {
+                leading()
+            }
+        }
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            item.overlineContent?.let { overline ->
+                CompositionLocalProvider(LocalContentColor provides colors.overlineContentColor) {
+                    ProvideTextStyle(type.meta, overline)
+                }
+            }
+            CompositionLocalProvider(LocalContentColor provides colors.contentColor) {
+                ProvideTextStyle(type.body, item.headlineContent)
+            }
+            item.supportingContent?.let { supporting ->
+                CompositionLocalProvider(LocalContentColor provides colors.supportingContentColor) {
+                    ProvideTextStyle(type.secondary, supporting)
+                }
+            }
+        }
+        item.trailingContent?.let { trailing ->
+            CompositionLocalProvider(LocalContentColor provides colors.trailingContentColor) {
+                ProvideTextStyle(type.meta, trailing)
+            }
+        }
+    }
 }
 
 @Composable
@@ -143,7 +174,7 @@ fun CardGroup(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(start = 2.dp, top = 8.dp, bottom = 10.dp),
+                            .padding(start = 2.dp, top = 6.dp, bottom = 8.dp),
                         horizontalArrangement = Arrangement.spacedBy(10.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {

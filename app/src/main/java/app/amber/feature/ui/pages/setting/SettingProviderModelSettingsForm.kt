@@ -6,15 +6,21 @@ import com.composables.icons.lucide.Pencil
 import com.composables.icons.lucide.X
 import com.composables.icons.lucide.Trash2
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
@@ -48,6 +54,7 @@ import app.amber.ai.provider.ProviderSetting
 import app.amber.ai.registry.ModelRegistry
 import app.amber.agent.R
 import app.amber.feature.ui.pages.setting.components.ProviderCommandButton
+import app.amber.feature.ui.pages.setting.components.ProviderCard
 import app.amber.feature.ui.pages.setting.components.ProviderGhostButton
 import app.amber.feature.ui.pages.setting.components.ProviderHairline
 import app.amber.feature.ui.pages.setting.components.ProviderLedgerRow
@@ -57,6 +64,9 @@ import app.amber.feature.ui.pages.setting.components.ProviderSmallIconButton
 import app.amber.feature.ui.pages.setting.components.ProviderSplitBar
 import app.amber.feature.ui.pages.setting.components.ProviderSquareTag
 import app.amber.feature.ui.pages.setting.components.ProviderTextField
+import app.amber.feature.ui.pages.setting.components.ProviderToggle
+import app.amber.feature.ui.pages.setting.components.providerSlugLabel
+import app.amber.feature.ui.components.ds.pressable
 import app.amber.feature.ui.pages.setting.components.ProviderUnderlineTabs
 import app.amber.feature.ui.pages.setting.components.toProviderMonogram
 import app.amber.feature.ui.theme.LocalAmberTokens
@@ -132,7 +142,7 @@ internal fun ModelEditorSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
         sheetGesturesEnabled = false,
-        containerColor = t.bg,
+        containerColor = t.raised,
         dragHandle = { ProviderSheetGrabber() },
     ) {
         Column(
@@ -255,121 +265,152 @@ internal fun ModelSettingsForm(
         ) { page ->
             when (page) {
                 0 -> {
-                    // 基本设置页面
+                    // 基本设置：身份、能力、上下文与模型类型/模态仍全部可编辑。
                     Column(
                         modifier = Modifier
                             .fillMaxSize()
                             .verticalScroll(rememberScrollState())
-                            .padding(top = 8.dp, bottom = 16.dp)
+                            .padding(top = 8.dp, bottom = 16.dp),
+                        verticalArrangement = Arrangement.spacedBy(16.dp),
                     ) {
-                        ProviderLedgerRow("model_id") {
-                            ProviderTextField(
-                                value = model.modelId,
-                                onValueChange = {
-                                    if (!isEdit) {
-                                        setModelId(it.trim())
-                                    }
-                                },
-                                placeholder = stringResource(R.string.setting_provider_page_model_id_placeholder),
-                                mono = true,
-                                readOnly = isEdit,
-                            )
-                        }
+                        ModelEditorIdentityCard(
+                            model = model,
+                            isEdit = isEdit,
+                            parentProvider = parentProvider,
+                            onModelIdChange = { setModelId(it.trim()) },
+                            onDisplayNameChange = { onModelChange(model.copy(displayName = it)) },
+                        )
 
-                        ProviderLedgerRow("display_name") {
-                            ProviderTextField(
-                                value = model.displayName,
-                                onValueChange = {
-                                    onModelChange(model.copy(displayName = it.trim()))
-                                },
-                                placeholder = stringResource(R.string.setting_provider_page_model_display_name_placeholder),
-                            )
-                        }
-
-                        if (model.type == ModelType.CHAT) {
-                            ProviderLedgerRow("context_length") {
-                                ProviderTextField(
-                                    value = contextWindowInput,
-                                    onValueChange = {
-                                        contextWindowInput = it
-                                        onModelChange(model.copy(contextWindowTokens = parseContextWindowInput(it)))
+                        ModelEditorSection("能力") {
+                            ProviderCard(modifier = Modifier.fillMaxWidth()) {
+                                ModelCapabilitySwitchRow(
+                                    title = "视觉",
+                                    machineLabel = "vision",
+                                    checked = Modality.IMAGE in model.inputModalities,
+                                    onCheckedChange = { enabled ->
+                                        onModelChange(
+                                            model.copy(
+                                                inputModalities = model.inputModalities.withModality(
+                                                    Modality.IMAGE,
+                                                    enabled,
+                                                )
+                                            )
+                                        )
                                     },
-                                    placeholder = stringResource(R.string.setting_provider_page_model_context_window_placeholder),
-                                    mono = true,
+                                )
+                                ProviderHairline()
+                                ModelCapabilitySwitchRow(
+                                    title = "工具",
+                                    machineLabel = "tools",
+                                    checked = ModelAbility.TOOL in model.abilities,
+                                    onCheckedChange = { enabled ->
+                                        onModelChange(
+                                            model.copy(
+                                                abilities = model.abilities.withAbility(
+                                                    ModelAbility.TOOL,
+                                                    enabled,
+                                                )
+                                            )
+                                        )
+                                    },
+                                )
+                                ProviderHairline()
+                                ModelCapabilitySwitchRow(
+                                    title = "推理",
+                                    machineLabel = "reasoning",
+                                    checked = ModelAbility.REASONING in model.abilities,
+                                    onCheckedChange = { enabled ->
+                                        onModelChange(
+                                            model.copy(
+                                                abilities = model.abilities.withAbility(
+                                                    ModelAbility.REASONING,
+                                                    enabled,
+                                                )
+                                            )
+                                        )
+                                    },
+                                )
+                                ProviderHairline()
+                                ModelCapabilitySwitchRow(
+                                    title = "图像",
+                                    machineLabel = "image",
+                                    checked = Modality.IMAGE in model.outputModalities,
+                                    onCheckedChange = { enabled ->
+                                        onModelChange(
+                                            model.copy(
+                                                outputModalities = model.outputModalities.withModality(
+                                                    Modality.IMAGE,
+                                                    enabled,
+                                                )
+                                            )
+                                        )
+                                    },
                                 )
                             }
                         }
 
-                        ProviderLedgerRow("model_type") {
-                            FlowRow(
-                                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                verticalArrangement = Arrangement.spacedBy(6.dp),
-                            ) {
-                                ModelType.entries.forEach { type ->
-                                    ProviderSquareTag(
-                                        text = type.name.lowercase(),
-                                        selected = model.type == type,
-                                        onClick = { onModelChange(model.copy(type = type)) },
-                                    )
+                        if (model.type == ModelType.CHAT) {
+                            ModelEditorSection(stringResource(R.string.setting_provider_page_model_context_window)) {
+                                ProviderCard(modifier = Modifier.fillMaxWidth()) {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 14.dp, vertical = 8.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                    ) {
+                                        Text(
+                                            text = stringResource(R.string.setting_provider_page_model_context_window),
+                                            style = LocalAmberType.current.body,
+                                            color = LocalAmberTokens.current.ink,
+                                            modifier = Modifier.weight(1f),
+                                        )
+                                        Box(Modifier.width(132.dp)) {
+                                            ProviderTextField(
+                                                value = contextWindowInput,
+                                                onValueChange = {
+                                                    contextWindowInput = it
+                                                    onModelChange(model.copy(contextWindowTokens = parseContextWindowInput(it)))
+                                                },
+                                                placeholder = stringResource(R.string.setting_provider_page_model_context_window_placeholder),
+                                                mono = true,
+                                            )
+                                        }
+                                    }
                                 }
                             }
                         }
 
-                        if (model.type == ModelType.CHAT) {
-                            ProviderLedgerRow("input_modalities") {
-                                ModalityTagRow(
-                                    selected = model.inputModalities,
-                                    onToggle = { modality ->
-                                        onModelChange(
-                                            model.copy(
-                                                inputModalities =
-                                                if (modality in model.inputModalities) {
-                                                    model.inputModalities - modality
-                                                } else {
-                                                    model.inputModalities + modality
-                                                }
+                        ModelEditorSection(stringResource(R.string.setting_provider_page_basic_settings)) {
+                            ProviderCard(modifier = Modifier.fillMaxWidth()) {
+                                ProviderLedgerRow("model_type") {
+                                    FlowRow(
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                                    ) {
+                                        ModelType.entries.forEach { type ->
+                                            ProviderSquareTag(
+                                                text = type.name.lowercase(),
+                                                selected = model.type == type,
+                                                onClick = { onModelChange(model.copy(type = type)) },
                                             )
+                                        }
+                                    }
+                                }
+                                if (model.type == ModelType.CHAT) {
+                                    ProviderLedgerRow("input_modalities") {
+                                        ModalityTagRow(
+                                            selected = model.inputModalities,
+                                            onToggle = { modality ->
+                                                onModelChange(model.copy(inputModalities = model.inputModalities.withModality(modality, modality !in model.inputModalities)))
+                                            },
                                         )
-                                    },
-                                )
-                            }
-                            ProviderLedgerRow("output_modalities") {
-                                ModalityTagRow(
-                                    selected = model.outputModalities,
-                                    onToggle = { modality ->
-                                        onModelChange(
-                                            model.copy(
-                                                outputModalities =
-                                                if (modality in model.outputModalities) {
-                                                    model.outputModalities - modality
-                                                } else {
-                                                    model.outputModalities + modality
-                                                }
-                                            )
-                                        )
-                                    },
-                                )
-                            }
-                            ProviderLedgerRow("abilities") {
-                                FlowRow(
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                    verticalArrangement = Arrangement.spacedBy(6.dp),
-                                ) {
-                                    ModelAbility.entries.forEach { ability ->
-                                        ProviderSquareTag(
-                                            text = ability.name.lowercase(),
-                                            selected = ability in model.abilities,
-                                            onClick = {
-                                                onModelChange(
-                                                    model.copy(
-                                                        abilities =
-                                                        if (ability in model.abilities) {
-                                                            model.abilities - ability
-                                                        } else {
-                                                            model.abilities + ability
-                                                        }
-                                                    )
-                                                )
+                                    }
+                                    ProviderLedgerRow("output_modalities") {
+                                        ModalityTagRow(
+                                            selected = model.outputModalities,
+                                            onToggle = { modality ->
+                                                onModelChange(model.copy(outputModalities = model.outputModalities.withModality(modality, modality !in model.outputModalities)))
                                             },
                                         )
                                     }
@@ -425,6 +466,161 @@ internal fun ModelSettingsForm(
         }
     }
 }
+
+@Composable
+private fun ModelEditorIdentityCard(
+    model: Model,
+    isEdit: Boolean,
+    parentProvider: ProviderSetting? = null,
+    onModelIdChange: (String) -> Unit,
+    onDisplayNameChange: (String) -> Unit,
+) {
+    val t = LocalAmberTokens.current
+    val type = LocalAmberType.current
+    ProviderCard(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(
+                text = model.modelId.ifBlank { "new-model" },
+                style = type.meta.copy(fontSize = 18.sp, lineHeight = 24.sp, fontWeight = FontWeight.Bold),
+                color = t.ink,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(7.dp),
+            ) {
+                parentProvider?.let { provider ->
+                    Text(
+                        text = provider.providerSlugLabel(),
+                        style = type.meta.copy(fontSize = 12.sp),
+                        color = t.ink2,
+                        maxLines = 1,
+                    )
+                    Text("·", style = type.meta, color = t.ink4)
+                }
+                parentProvider?.let { provider ->
+                    Text(
+                        text = if (provider.enabled) "已启用" else "未启用",
+                        style = type.meta.copy(fontSize = 10.5.sp, fontWeight = FontWeight.SemiBold),
+                        color = if (provider.enabled) t.signal else t.ink3,
+                    )
+                }
+            }
+            ModelEditorFieldLabel("model_id")
+            ProviderTextField(
+                value = model.modelId,
+                onValueChange = { if (!isEdit) onModelIdChange(it) },
+                placeholder = stringResource(R.string.setting_provider_page_model_id_placeholder),
+                mono = true,
+                readOnly = isEdit,
+            )
+            ModelEditorFieldLabel("display_name")
+            ProviderTextField(
+                value = model.displayName,
+                onValueChange = onDisplayNameChange,
+                placeholder = stringResource(R.string.setting_provider_page_model_display_name_placeholder),
+            )
+        }
+    }
+}
+
+@Composable
+private fun ModelEditorFieldLabel(text: String) {
+    val t = LocalAmberTokens.current
+    val type = LocalAmberType.current
+    Text(
+        text = text.uppercase(),
+        style = type.meta.copy(fontSize = 10.5.sp, fontWeight = FontWeight.SemiBold),
+        color = t.ink3,
+    )
+}
+
+@Composable
+private fun ModelEditorSection(
+    title: String,
+    content: @Composable () -> Unit,
+) {
+    val t = LocalAmberTokens.current
+    val type = LocalAmberType.current
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 2.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text("//", style = type.eyebrow, color = t.accent)
+            Text(
+                text = title.uppercase(),
+                style = type.eyebrow,
+                color = t.ink2,
+                maxLines = 1,
+            )
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .height(1.dp)
+                    .background(t.line),
+            )
+        }
+        content()
+    }
+}
+
+@Composable
+private fun ModelCapabilitySwitchRow(
+    title: String,
+    machineLabel: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+) {
+    val t = LocalAmberTokens.current
+    val type = LocalAmberType.current
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 52.dp)
+            .pressable(onClick = { onCheckedChange(!checked) })
+            .padding(horizontal = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(
+                text = title,
+                style = type.body,
+                color = t.ink,
+                maxLines = 1,
+            )
+            Text(
+                text = machineLabel,
+                style = type.meta.copy(fontSize = 12.sp),
+                color = t.ink3,
+                maxLines = 1,
+            )
+        }
+        ProviderToggle(checked = checked, onCheckedChange = onCheckedChange)
+    }
+}
+
+private fun List<Modality>.withModality(modality: Modality, enabled: Boolean): List<Modality> =
+    if (enabled) {
+        if (modality in this) this else this + modality
+    } else {
+        filterNot { it == modality }
+    }
+
+private fun List<ModelAbility>.withAbility(ability: ModelAbility, enabled: Boolean): List<ModelAbility> =
+    if (enabled) {
+        if (ability in this) this else this + ability
+    } else {
+        filterNot { it == ability }
+    }
 
 @Composable
 private fun ModalityTagRow(
@@ -885,7 +1081,7 @@ private fun ProviderOverrideSettings(
                 ) {
                     Text(
                         text = stringResource(R.string.setting_provider_page_configure_provider_override),
-                        style = type.screenTitle.copy(fontSize = 20.sp),
+                        style = type.screenTitle,
                         color = t.ink,
                     )
 

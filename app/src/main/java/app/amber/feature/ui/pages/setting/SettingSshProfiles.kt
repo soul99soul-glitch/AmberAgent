@@ -1,52 +1,62 @@
 package app.amber.feature.ui.pages.setting
 
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.FlowRow
-import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.AssistChip
-import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.composables.icons.lucide.CircleAlert
+import com.composables.icons.lucide.ChevronRight
 import com.composables.icons.lucide.CircleCheck
+import com.composables.icons.lucide.Check
+import com.composables.icons.lucide.EllipsisVertical
 import com.composables.icons.lucide.Eye
 import com.composables.icons.lucide.EyeOff
 import com.composables.icons.lucide.Lucide
@@ -69,11 +79,9 @@ import app.amber.feature.terminal.TerminalJobSnapshot
 import app.amber.feature.terminal.TerminalJobStatus
 import app.amber.feature.terminal.TerminalRuntime
 import app.amber.feature.terminal.TerminalRuntimeKind
-import app.amber.feature.ui.components.ui.CardGroup
-import app.amber.feature.ui.components.ds.SectionLabel
-import app.amber.feature.ui.components.ui.Select
 import app.amber.feature.ui.context.LocalToaster
-import app.amber.feature.ui.theme.CustomColors
+import app.amber.feature.ui.components.ui.workspaceColors
+import app.amber.feature.ui.theme.LocalAmberType
 import com.dokar.sonner.ToastType
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.catch
@@ -83,10 +91,13 @@ import kotlinx.coroutines.launch
 import kotlin.uuid.Uuid
 import org.koin.compose.koinInject
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingSshProfilesSection(
     terminalRuntime: TerminalRuntime = koinInject(),
     sshProfileStore: SshProfileStore = koinInject(),
+    moreBusy: Boolean = false,
+    moreSettings: @Composable ColumnScope.() -> Unit = {},
 ) {
     val profileLoadFlow = remember(sshProfileStore) {
         sshProfileStore.state
@@ -121,6 +132,7 @@ fun SettingSshProfilesSection(
     var pendingTrust by remember { mutableStateOf<PendingHostKeyTrust?>(null) }
     var selectedProfileId by remember { mutableStateOf<String?>(null) }
     var command by remember { mutableStateOf("") }
+    var showMoreSettings by rememberSaveable { mutableStateOf(false) }
     var jobActionBusy by remember { mutableStateOf(false) }
     var jobSnapshot by remember { mutableStateOf<TerminalJobSnapshot?>(null) }
 
@@ -158,55 +170,49 @@ fun SettingSshProfilesSection(
         loadError?.let { showError(it) }
     }
 
-    CardGroup(title = { SectionLabel(stringResource(R.string.setting_sandbox_ssh_section)) }) {
-        rawItem {
-            Column(
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
+    val colors = workspaceColors()
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        SandboxCard {
+            SandboxSettingsRow(
+                title = stringResource(R.string.setting_sandbox_ssh_section),
+                trailing = {
+                    SandboxAction(
+                        label = stringResource(R.string.setting_sandbox_ssh_add),
+                        onClick = { editorRequest = SshProfileEditorRequest.new() },
+                        enabled = ready && !operationBusy,
+                        primary = true,
+                        compact = true,
+                        icon = Lucide.Plus,
+                    )
+                },
+            )
+            HorizontalDivider(
+                modifier = Modifier.padding(horizontal = 12.dp),
+                color = colors.hairline.copy(alpha = 0.55f),
+            )
+            if (!ready || profiles.isEmpty()) {
                 Text(
-                    text = stringResource(R.string.setting_sandbox_ssh_desc),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                if (!ready) {
-                    Text(
-                        text = if (loadError == null) {
+                    text = if (!ready) {
+                        if (loadError == null) {
                             stringResource(R.string.setting_sandbox_ssh_loading)
                         } else {
                             stringResource(
                                 R.string.setting_sandbox_ssh_load_failed,
                                 loadError.message ?: loadError::class.java.simpleName,
                             )
-                        },
-                        style = MaterialTheme.typography.bodySmall,
-                        color = if (loadError == null) {
-                            MaterialTheme.colorScheme.onSurfaceVariant
-                        } else {
-                            MaterialTheme.colorScheme.error
-                        },
-                    )
-                } else if (profiles.isEmpty()) {
-                    Text(
-                        text = stringResource(R.string.setting_sandbox_ssh_empty),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                Button(
-                    onClick = { editorRequest = SshProfileEditorRequest.new() },
-                    enabled = ready && !operationBusy,
-                    contentPadding = PaddingValues(horizontal = 18.dp, vertical = 10.dp),
-                ) {
-                    Icon(Lucide.Plus, contentDescription = null)
-                    Text(
-                        text = stringResource(R.string.setting_sandbox_ssh_add),
-                        modifier = Modifier.padding(start = 8.dp),
-                    )
-                }
+                        }
+                    } else {
+                        stringResource(R.string.setting_sandbox_ssh_empty)
+                    },
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                    style = LocalAmberType.current.secondary,
+                    color = if (loadError != null) colors.red else colors.muted,
+                )
             }
-        }
-        profiles.forEach { profile ->
-            rawItem {
+            profiles.forEachIndexed { index, profile ->
                 SshProfileCard(
                     profile = profile,
                     isDefault = profile.id == defaultId,
@@ -255,65 +261,106 @@ fun SettingSshProfilesSection(
                         }
                     },
                 )
+                if (index != profiles.lastIndex) {
+                    HorizontalDivider(
+                        modifier = Modifier.padding(horizontal = 12.dp),
+                        color = colors.hairline.copy(alpha = 0.55f),
+                    )
+                }
+            }
+        }
+
+        TextButton(
+            onClick = { showMoreSettings = true },
+            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+        ) {
+            Text(stringResource(R.string.setting_sandbox_more_settings), style = LocalAmberType.current.body)
+            if (jobSnapshot?.running == true || jobActionBusy || moreBusy) {
+                CircularProgressIndicator(Modifier.padding(start = 8.dp).size(14.dp), strokeWidth = 1.5.dp)
+            } else {
+                Icon(Lucide.ChevronRight, null, Modifier.padding(start = 6.dp).size(16.dp))
             }
         }
     }
 
-    if (ready && selectedProfile != null) {
-        SshCommandPanel(
-            profiles = profiles,
-            selectedProfile = selectedProfile,
-            command = command,
-            snapshot = jobSnapshot,
-            actionBusy = jobActionBusy,
-            onProfileSelected = { selectedProfileId = it.id },
-            onCommandChanged = { command = it },
-            onRun = {
-                if (!jobActionBusy) {
-                    jobActionBusy = true
-                    scope.launch {
-                        try {
-                            val current = profiles.firstOrNull { it.id == selectedProfile.id }
-                                ?: error(profileMissingText)
-                            check(
-                                SshTrustPolicy.evaluate(
-                                    current,
-                                    current.acceptedHostKeyFingerprint,
-                                ) is SshHostTrust.Trusted,
-                            ) { untrustedText }
-                            check(command.isNotBlank()) { noCommandText }
-                            jobSnapshot = terminalRuntime.startJob(
-                                command = command.trim(),
-                                runtime = TerminalRuntimeKind.REMOTE_SSH,
-                                sshProfileId = current.id,
-                                timeoutMillis = SSH_COMMAND_TIMEOUT_MS,
-                            )
-                        } catch (error: Throwable) {
-                            if (error is CancellationException) throw error
-                            showError(error)
-                        } finally {
-                            jobActionBusy = false
-                        }
-                    }
+    LaunchedEffect(jobSnapshot?.running, jobActionBusy, moreBusy) {
+        if (jobSnapshot?.running == true || jobActionBusy || moreBusy) showMoreSettings = true
+    }
+    if (showMoreSettings) {
+        ModalBottomSheet(
+            onDismissRequest = { showMoreSettings = false },
+            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+            containerColor = colors.canvas,
+        ) {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState())
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Text(
+                    stringResource(R.string.setting_sandbox_more_settings),
+                    style = LocalAmberType.current.screenTitle,
+                    modifier = Modifier.padding(bottom = 4.dp),
+                )
+                if (selectedProfile != null || jobSnapshot?.running == true || jobActionBusy) {
+                    SshCommandPanel(
+                        profiles = profiles,
+                        selectedProfile = selectedProfile,
+                        command = command,
+                        snapshot = jobSnapshot,
+                        actionBusy = jobActionBusy,
+                        onProfileSelected = { selectedProfileId = it.id },
+                        onCommandChanged = { command = it },
+                        onRun = {
+                            if (selectedProfile != null && !jobActionBusy) {
+                                jobActionBusy = true
+                                scope.launch {
+                                    try {
+                                        val current = profiles.firstOrNull { it.id == selectedProfile.id }
+                                            ?: error(profileMissingText)
+                                        check(
+                                            SshTrustPolicy.evaluate(
+                                                current,
+                                                current.acceptedHostKeyFingerprint,
+                                            ) is SshHostTrust.Trusted,
+                                        ) { untrustedText }
+                                        check(command.isNotBlank()) { noCommandText }
+                                        jobSnapshot = terminalRuntime.startJob(
+                                            command = command.trim(),
+                                            runtime = TerminalRuntimeKind.REMOTE_SSH,
+                                            sshProfileId = current.id,
+                                            timeoutMillis = SSH_COMMAND_TIMEOUT_MS,
+                                        )
+                                    } catch (error: Throwable) {
+                                        if (error is CancellationException) throw error
+                                        showError(error)
+                                    } finally {
+                                        jobActionBusy = false
+                                    }
+                                }
+                            }
+                        },
+                        onStop = {
+                            val id = jobSnapshot?.jobId
+                            if (id != null && jobSnapshot?.running == true && !jobActionBusy) {
+                                jobActionBusy = true
+                                scope.launch {
+                                    try {
+                                        jobSnapshot = terminalRuntime.stopJob(id)
+                                    } catch (error: Throwable) {
+                                        if (error is CancellationException) throw error
+                                        showError(error)
+                                    } finally {
+                                        jobActionBusy = false
+                                    }
+                                }
+                            }
+                        },
+                    )
                 }
-            },
-            onStop = {
-                val id = jobSnapshot?.jobId
-                if (id != null && jobSnapshot?.running == true && !jobActionBusy) {
-                    jobActionBusy = true
-                    scope.launch {
-                        try {
-                            jobSnapshot = terminalRuntime.stopJob(id)
-                        } catch (error: Throwable) {
-                            if (error is CancellationException) throw error
-                            showError(error)
-                        } finally {
-                            jobActionBusy = false
-                        }
-                    }
-                }
-            },
-        )
+                moreSettings()
+            }
+        }
     }
 
     editorRequest?.let { request ->
@@ -349,7 +396,8 @@ fun SettingSshProfilesSection(
                 title = { Text(stringResource(R.string.setting_sandbox_ssh_delete_title)) },
                 text = { Text(stringResource(R.string.setting_sandbox_ssh_delete_message, profile.name)) },
                 confirmButton = {
-                    TextButton(
+                    SandboxAction(
+                        label = stringResource(R.string.setting_sandbox_ssh_delete_confirm),
                         onClick = {
                             if (!operationBusy) {
                                 operationBusy = true
@@ -369,13 +417,15 @@ fun SettingSshProfilesSection(
                             }
                         },
                         enabled = !operationBusy,
-                    ) { Text(stringResource(R.string.setting_sandbox_ssh_delete_confirm)) }
+                        icon = Lucide.Trash2,
+                    )
                 },
                 dismissButton = {
-                    TextButton(
+                    SandboxAction(
+                        label = stringResource(R.string.setting_sandbox_ssh_cancel),
                         onClick = { pendingDelete = null },
                         enabled = !operationBusy,
-                    ) { Text(stringResource(R.string.setting_sandbox_ssh_cancel)) }
+                    )
                 },
             )
         }
@@ -408,7 +458,7 @@ fun SettingSshProfilesSection(
 }
 
 @Composable
-private fun SshProfileCard(
+internal fun SshProfileCard(
     profile: SshProfile,
     isDefault: Boolean,
     isSelected: Boolean,
@@ -419,119 +469,145 @@ private fun SshProfileCard(
     onMakeDefault: () -> Unit,
     onProbe: () -> Unit,
 ) {
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 6.dp)
-            .clickable(enabled = enabled, onClick = onSelect),
-        colors = CardDefaults.cardColors(containerColor = CustomColors.listItemColors.containerColor),
-    ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = profile.name,
-                        style = MaterialTheme.typography.titleMedium,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    Text(
-                        text = "${profile.username}@${profile.host}:${profile.port}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-                if (isDefault) {
-                    AssistChip(
-                        onClick = onSelect,
-                        enabled = enabled,
-                        label = { Text(stringResource(R.string.setting_sandbox_ssh_default)) },
-                    )
-                }
-            }
+    val colors = workspaceColors()
+    val trusted = SshTrustPolicy.evaluate(
+        profile,
+        profile.acceptedHostKeyFingerprint,
+    ) is SshHostTrust.Trusted
+    val trustDescription = stringResource(
+        if (trusted) R.string.setting_sandbox_ssh_host_key_trusted
+        else R.string.setting_sandbox_ssh_host_key_untrusted,
+    )
+    val authDescription = stringResource(
+        if (profile.authMethod == SshAuthMethod.PASSWORD) {
+            R.string.setting_sandbox_ssh_auth_password
+        } else {
+            R.string.setting_sandbox_ssh_auth_private_key
+        },
+    )
+    var actionsExpanded by remember(profile.id) { mutableStateOf(false) }
+
+    SandboxSettingsRow(
+        title = profile.name,
+        summary = "${profile.username}@${profile.host}:${profile.port}",
+        modifier = (if (isSelected) {
+            Modifier.background(colors.blueContainer.copy(alpha = 0.32f))
+        } else {
+            Modifier
+        }).semantics { selected = isSelected },
+        leading = Lucide.Server,
+        onClick = onSelect,
+        enabled = enabled,
+        trailing = {
             Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(2.dp),
             ) {
-                val trusted = SshTrustPolicy.evaluate(
-                    profile,
-                    profile.acceptedHostKeyFingerprint,
-                ) is SshHostTrust.Trusted
-                Icon(
-                    imageVector = if (trusted) Lucide.CircleCheck else Lucide.CircleAlert,
-                    contentDescription = null,
-                    tint = if (trusted) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
-                )
-                Text(
-                    text = stringResource(
-                        if (trusted) R.string.setting_sandbox_ssh_host_key_trusted
-                        else R.string.setting_sandbox_ssh_host_key_untrusted,
-                    ),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.weight(1f),
-                )
-                Text(
-                    text = stringResource(
-                        if (profile.authMethod == SshAuthMethod.PASSWORD) {
-                            R.string.setting_sandbox_ssh_auth_password
-                        } else {
-                            R.string.setting_sandbox_ssh_auth_private_key
-                        },
-                    ),
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            FlowRow(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp),
-            ) {
-                OutlinedButton(
-                    onClick = onProbe,
-                    enabled = enabled,
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
-                ) {
-                    Icon(Lucide.RefreshCw, contentDescription = null)
-                    Text(
-                        stringResource(R.string.setting_sandbox_ssh_probe),
-                        modifier = Modifier.padding(start = 6.dp),
-                    )
-                }
-                if (!isDefault) {
-                    TextButton(onClick = onMakeDefault, enabled = enabled) {
-                        Text(stringResource(R.string.setting_sandbox_ssh_make_default))
+                if (isDefault) {
+                    Surface(
+                        color = colors.blueContainer,
+                        contentColor = colors.blue,
+                        shape = MaterialTheme.shapes.small,
+                    ) {
+                        Text(
+                            text = stringResource(R.string.setting_sandbox_ssh_default),
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                            style = LocalAmberType.current.tinyTag,
+                        )
                     }
                 }
-                IconButton(onClick = onEdit, enabled = enabled) {
-                    Icon(Lucide.Pencil, stringResource(R.string.setting_sandbox_ssh_edit))
-                }
-                IconButton(onClick = onDelete, enabled = enabled) {
-                    Icon(Lucide.Trash2, stringResource(R.string.setting_sandbox_ssh_delete))
-                }
-            }
-            if (isSelected) {
-                Text(
-                    text = stringResource(R.string.setting_sandbox_ssh_selected),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.primary,
+                Icon(
+                    imageVector = if (trusted) Lucide.CircleCheck else Lucide.CircleAlert,
+                    contentDescription = trustDescription,
+                    modifier = Modifier.size(18.dp),
+                    tint = if (trusted) colors.green else colors.red,
                 )
+                Box {
+                    IconButton(
+                        onClick = { actionsExpanded = true },
+                        enabled = enabled,
+                    ) {
+                        Icon(
+                            imageVector = Lucide.EllipsisVertical,
+                            contentDescription = stringResource(R.string.skills_page_more_actions),
+                        )
+                    }
+                    DropdownMenu(
+                        expanded = actionsExpanded,
+                        onDismissRequest = { actionsExpanded = false },
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                            verticalArrangement = Arrangement.spacedBy(3.dp),
+                        ) {
+                            Text(
+                                text = profile.name,
+                                style = LocalAmberType.current.body,
+                            )
+                            Text(
+                                text = "${profile.username}@${profile.host}:${profile.port}",
+                                style = LocalAmberType.current.meta,
+                                color = colors.muted,
+                            )
+                            Text(
+                                text = "$trustDescription · $authDescription",
+                                style = LocalAmberType.current.secondary,
+                                color = if (trusted) colors.green else colors.red,
+                            )
+                        }
+                        HorizontalDivider(
+                            modifier = Modifier.padding(horizontal = 12.dp),
+                            color = colors.hairline.copy(alpha = 0.55f),
+                        )
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.setting_sandbox_ssh_probe)) },
+                            leadingIcon = { Icon(Lucide.RefreshCw, null) },
+                            enabled = enabled,
+                            onClick = {
+                                actionsExpanded = false
+                                onProbe()
+                            },
+                        )
+                        if (!isDefault) {
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.setting_sandbox_ssh_make_default)) },
+                                leadingIcon = { Icon(Lucide.Check, null) },
+                                enabled = enabled,
+                                onClick = {
+                                    actionsExpanded = false
+                                    onMakeDefault()
+                                },
+                            )
+                        }
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.setting_sandbox_ssh_edit)) },
+                            leadingIcon = { Icon(Lucide.Pencil, null) },
+                            enabled = enabled,
+                            onClick = {
+                                actionsExpanded = false
+                                onEdit()
+                            },
+                        )
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.setting_sandbox_ssh_delete)) },
+                            leadingIcon = { Icon(Lucide.Trash2, null, tint = colors.red) },
+                            enabled = enabled,
+                            onClick = {
+                                actionsExpanded = false
+                                onDelete()
+                            },
+                        )
+                    }
+                }
             }
-        }
-    }
+        },
+    )
 }
 
 @Composable
 private fun SshCommandPanel(
     profiles: List<SshProfile>,
-    selectedProfile: SshProfile,
+    selectedProfile: SshProfile?,
     command: String,
     snapshot: TerminalJobSnapshot?,
     actionBusy: Boolean,
@@ -540,63 +616,63 @@ private fun SshCommandPanel(
     onRun: () -> Unit,
     onStop: () -> Unit,
 ) {
-    CardGroup(title = { SectionLabel(stringResource(R.string.setting_sandbox_ssh_command_title)) }) {
-        rawItem {
-            Column(
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                Text(
-                    text = stringResource(R.string.setting_sandbox_ssh_command_desc),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Select(
+    SandboxDisclosure(
+        title = stringResource(R.string.setting_sandbox_ssh_command_title),
+        summary = selectedProfile?.name,
+        forceExpanded = snapshot?.running == true || actionBusy,
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            if (profiles.isNotEmpty() && selectedProfile != null) {
+                SandboxSelect(
                     options = profiles,
                     selectedOption = selectedProfile,
                     onOptionSelected = onProfileSelected,
                     modifier = Modifier.fillMaxWidth(),
-                    optionToString = { "${it.name} (${it.host}:${it.port})" },
-                    leading = { Icon(Lucide.Server, contentDescription = null) },
+                    optionToString = { it.name },
+                    leading = { Icon(Lucide.Server, contentDescription = null, modifier = Modifier.size(16.dp)) },
                 )
-                OutlinedTextField(
-                    value = command,
-                    onValueChange = onCommandChanged,
-                    modifier = Modifier.fillMaxWidth(),
-                    label = { Text(stringResource(R.string.setting_sandbox_ssh_command_label)) },
-                    placeholder = { Text(stringResource(R.string.setting_sandbox_ssh_command_hint)) },
-                    singleLine = true,
-                    enabled = !actionBusy,
-                )
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(
-                        onClick = onRun,
-                        enabled = command.isNotBlank() && !actionBusy && snapshot?.running != true,
-                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
-                    ) {
-                        Icon(Lucide.Play, contentDescription = null)
-                        Text(stringResource(R.string.setting_sandbox_ssh_run), Modifier.padding(start = 6.dp))
-                    }
-                    OutlinedButton(
-                        onClick = onStop,
-                        enabled = snapshot?.running == true && !actionBusy,
-                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
-                    ) {
-                        Icon(Lucide.Square, contentDescription = null)
-                        Text(stringResource(R.string.setting_sandbox_ssh_stop), Modifier.padding(start = 6.dp))
-                    }
-                }
-                snapshot?.let { SshJobOutput(it) }
             }
+            OutlinedTextField(
+                value = command,
+                onValueChange = onCommandChanged,
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text(stringResource(R.string.setting_sandbox_ssh_command_label), style = LocalAmberType.current.secondary) },
+                placeholder = { Text(stringResource(R.string.setting_sandbox_ssh_command_hint), style = LocalAmberType.current.secondary) },
+                textStyle = LocalAmberType.current.body.copy(fontSize = 13.sp, fontFamily = FontFamily.Monospace),
+                shape = RoundedCornerShape(12.dp),
+                singleLine = true,
+                enabled = selectedProfile != null && !actionBusy,
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                SandboxAction(
+                    label = stringResource(R.string.setting_sandbox_ssh_run),
+                    onClick = onRun,
+                    enabled = selectedProfile != null && command.isNotBlank() &&
+                        !actionBusy && snapshot?.running != true,
+                    primary = true,
+                    icon = Lucide.Play,
+                )
+                SandboxAction(
+                    label = stringResource(R.string.setting_sandbox_ssh_stop),
+                    onClick = onStop,
+                    enabled = snapshot?.running == true && !actionBusy,
+                    icon = Lucide.Square,
+                )
+            }
+            snapshot?.let { SshJobOutput(it) }
         }
     }
 }
 
 @Composable
 private fun SshJobOutput(snapshot: TerminalJobSnapshot) {
+    val colors = workspaceColors()
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
+        color = colors.row,
         shape = MaterialTheme.shapes.medium,
     ) {
         Column(
@@ -605,18 +681,19 @@ private fun SshJobOutput(snapshot: TerminalJobSnapshot) {
         ) {
             Text(
                 stringResource(R.string.setting_sandbox_ssh_job_status, jobStatusLabel(snapshot.status)),
-                style = MaterialTheme.typography.labelMedium,
+                style = LocalAmberType.current.secondary,
+                color = colors.ink,
             )
             snapshot.error?.takeIf { it.isNotBlank() }?.let {
-                Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                Text(it, color = colors.red, style = LocalAmberType.current.secondary)
             }
             Text(
                 snapshot.outputTail.ifBlank { stringResource(R.string.setting_sandbox_ssh_job_no_output) },
                 modifier = Modifier
                     .heightIn(max = 260.dp)
                     .verticalScroll(rememberScrollState()),
-                style = MaterialTheme.typography.bodySmall,
-                fontFamily = FontFamily.Monospace,
+                style = LocalAmberType.current.meta,
+                color = colors.ink,
             )
         }
     }
@@ -660,8 +737,7 @@ private fun HostKeyTrustDialog(
                             R.string.setting_sandbox_ssh_probe_old_fingerprint,
                             displayFingerprintSafely(mismatch.acceptedFingerprint),
                         ),
-                        style = MaterialTheme.typography.bodySmall,
-                        fontFamily = FontFamily.Monospace,
+                        style = LocalAmberType.current.meta,
                     )
                 }
                 Text(
@@ -669,25 +745,28 @@ private fun HostKeyTrustDialog(
                         R.string.setting_sandbox_ssh_probe_new_fingerprint,
                         displayFingerprintSafely(pending.probe.fingerprint),
                     ),
-                    style = MaterialTheme.typography.bodySmall,
-                    fontFamily = FontFamily.Monospace,
+                    style = LocalAmberType.current.meta,
                 )
             }
         },
         confirmButton = {
-            Button(onClick = onAccept, enabled = !accepting) {
-                Text(
-                    stringResource(
-                        if (mismatch == null) R.string.setting_sandbox_ssh_probe_accept
-                        else R.string.setting_sandbox_ssh_probe_accept_new,
-                    ),
-                )
-            }
+            SandboxAction(
+                label = stringResource(
+                    if (mismatch == null) R.string.setting_sandbox_ssh_probe_accept
+                    else R.string.setting_sandbox_ssh_probe_accept_new,
+                ),
+                onClick = onAccept,
+                enabled = !accepting,
+                primary = true,
+                icon = Lucide.CircleCheck,
+            )
         },
         dismissButton = {
-            TextButton(onClick = onDismiss, enabled = !accepting) {
-                Text(stringResource(R.string.setting_sandbox_ssh_cancel))
-            }
+            SandboxAction(
+                label = stringResource(R.string.setting_sandbox_ssh_cancel),
+                onClick = onDismiss,
+                enabled = !accepting,
+            )
         },
     )
 }
@@ -881,9 +960,10 @@ private fun SshProfileEditorDialog(
             }
         },
         confirmButton = {
-            Button(
+            SandboxAction(
+                label = stringResource(R.string.setting_sandbox_ssh_save),
                 onClick = {
-                    val portNumber = parsedPort ?: return@Button
+                    val portNumber = parsedPort ?: return@SandboxAction
                     val now = System.currentTimeMillis()
                     val endpointChanged = existing != null &&
                         (existing.host != host.trim() || existing.port != portNumber)
@@ -907,7 +987,7 @@ private fun SshProfileEditorDialog(
                     )
                     }.getOrElse {
                         formError = invalidProfileMessage
-                        return@Button
+                        return@SandboxAction
                     }
                     val newPassword = password.takeIf { it.isNotEmpty() }
                     val newPrivateKey = privateKey.takeIf { it.isNotEmpty() }
@@ -920,10 +1000,12 @@ private fun SshProfileEditorDialog(
                     onSave(saved, newPassword, newPrivateKey, newPassphrase)
                 },
                 enabled = validationMessage == null && !saving,
-            ) { Text(stringResource(R.string.setting_sandbox_ssh_save)) }
+                primary = true,
+            )
         },
         dismissButton = {
-            TextButton(
+            SandboxAction(
+                label = stringResource(R.string.setting_sandbox_ssh_cancel),
                 onClick = {
                     if (!saving) {
                         clearSecrets()
@@ -931,7 +1013,7 @@ private fun SshProfileEditorDialog(
                     }
                 },
                 enabled = !saving,
-            ) { Text(stringResource(R.string.setting_sandbox_ssh_cancel)) }
+            )
         },
     )
 }

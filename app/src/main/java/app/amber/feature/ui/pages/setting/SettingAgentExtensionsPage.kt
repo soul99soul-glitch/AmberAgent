@@ -38,16 +38,18 @@ import com.composables.icons.lucide.Trash2
 import com.composables.icons.lucide.ServerCog
 import com.composables.icons.lucide.EllipsisVertical
 import com.composables.icons.lucide.Package
+import com.composables.icons.lucide.FileCode2
+import com.composables.icons.lucide.Type
 import com.composables.icons.lucide.Play
 import app.amber.agent.R
 import app.amber.agent.Screen
+import app.amber.feature.ui.components.ds.amberCanvas
+import app.amber.feature.ui.components.ui.CardGroup
 import app.amber.feature.cron.AgentCronManager
 import app.amber.feature.cron.AgentCronTask
 import app.amber.feature.task.AgentTaskScheduler
 import app.amber.feature.task.AgentTaskSnapshot
 import app.amber.feature.ui.components.nav.BackButton
-import app.amber.feature.ui.components.ds.SectionLabel
-import app.amber.feature.ui.components.ui.CardGroup
 import app.amber.feature.ui.components.ui.WorkspaceTopBar
 import app.amber.feature.ui.components.ui.workspaceColors
 import app.amber.feature.ui.context.LocalNavController
@@ -72,17 +74,19 @@ fun SettingAgentExtensionsPage() {
                 scrollBehavior = scrollBehavior,
             )
         },
-        modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
-        containerColor = workspaceColors().canvas,
+        modifier = Modifier
+            .nestedScroll(scrollBehavior.nestedScrollConnection)
+            .amberCanvas(),
+        containerColor = androidx.compose.ui.graphics.Color.Transparent,
     ) { innerPadding ->
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
             contentPadding = innerPadding + PaddingValues(horizontal = SettingPageHorizontalInset, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(22.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             item {
-                CardGroup(
-                    title = { SectionLabel(stringResource(R.string.setting_agent_extensions_page_title)) },
+                SettingCardGroup(
+                    title = stringResource(R.string.setting_agent_extensions_page_title),
                 ) {
                     item(
                         onClick = { navController.navigate(Screen.Skills) },
@@ -92,7 +96,7 @@ fun SettingAgentExtensionsPage() {
                     )
                     item(
                         onClick = { navController.navigate(Screen.Extensions) },
-                        leadingContent = { SettingTileIcon(Lucide.Package) },
+                        leadingContent = { SettingTileIcon(Lucide.FileCode2) },
                         supportingContent = { Text(stringResource(R.string.setting_page_extensions_desc)) },
                         headlineContent = { Text(stringResource(R.string.setting_page_extensions)) },
                     )
@@ -110,7 +114,7 @@ fun SettingAgentExtensionsPage() {
                     )
                     item(
                         onClick = { navController.navigate(Screen.SettingSlidesFonts) },
-                        leadingContent = { SettingTileIcon(Lucide.Package) },
+                        leadingContent = { SettingTileIcon(Lucide.Type) },
                         supportingContent = { Text(stringResource(R.string.setting_slides_fonts_desc)) },
                         headlineContent = { Text(stringResource(R.string.setting_slides_fonts_title)) },
                     )
@@ -143,17 +147,19 @@ fun SettingAgentRuntimeTasksPage(
                 scrollBehavior = scrollBehavior,
             )
         },
-        modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
-        containerColor = workspaceColors().canvas,
+        modifier = Modifier
+            .nestedScroll(scrollBehavior.nestedScrollConnection)
+            .amberCanvas(),
+        containerColor = androidx.compose.ui.graphics.Color.Transparent,
     ) { innerPadding ->
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
             contentPadding = innerPadding + PaddingValues(horizontal = SettingPageHorizontalInset, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(22.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             item {
-                CardGroup(
-                    title = { SectionLabel(stringResource(R.string.setting_agent_runtime_tasks_page_title)) },
+                SettingCardGroup(
+                    title = stringResource(R.string.setting_agent_runtime_tasks_page_title),
                 ) {
                     item(
                         headlineContent = { Text(stringResource(R.string.setting_agent_runtime_tasks_scope_title)) },
@@ -336,17 +342,19 @@ fun SettingCronTasksPage(
                 scrollBehavior = scrollBehavior,
             )
         },
-        modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
-        containerColor = workspaceColors().canvas,
+        modifier = Modifier
+            .nestedScroll(scrollBehavior.nestedScrollConnection)
+            .amberCanvas(),
+        containerColor = androidx.compose.ui.graphics.Color.Transparent,
     ) { innerPadding ->
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
             contentPadding = innerPadding + PaddingValues(horizontal = SettingPageHorizontalInset, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(22.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             item {
-                CardGroup(
-                    title = { SectionLabel(stringResource(R.string.setting_cron_tasks_page_title)) },
+                SettingCardGroup(
+                    title = stringResource(R.string.setting_cron_tasks_page_title),
                 ) {
                     item(
                         headlineContent = { Text(stringResource(R.string.setting_cron_tasks_scope_title)) },

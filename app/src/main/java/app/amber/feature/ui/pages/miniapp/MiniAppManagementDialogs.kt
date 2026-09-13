@@ -8,14 +8,16 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -29,6 +31,10 @@ import androidx.compose.ui.unit.dp
 import app.amber.agent.R
 import app.amber.agent.data.db.entity.MiniAppEntity
 import app.amber.agent.data.db.entity.MiniAppVersionEntity
+import app.amber.feature.ui.components.ds.AmberCard
+import app.amber.feature.ui.components.ds.Hairline
+import app.amber.feature.ui.theme.LocalAmberTokens
+import app.amber.feature.ui.theme.LocalAmberType
 import app.amber.feature.ui.theme.JetbrainsMono
 
 @Composable
@@ -40,10 +46,14 @@ fun MiniAppRenameDialog(
     var title by remember(app.id) { mutableStateOf(app.title) }
     var description by remember(app.id) { mutableStateOf(app.description) }
     val normalizedTitle = title.trim()
+    val tokens = LocalAmberTokens.current
+    val type = LocalAmberType.current
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(stringResource(R.string.miniapp_rename_title)) },
+        shape = androidx.compose.foundation.shape.RoundedCornerShape(14.dp),
+        containerColor = tokens.raised,
+        title = { Text(stringResource(R.string.miniapp_rename_title), style = type.sessionTitle) },
         text = {
             Column {
                 OutlinedTextField(
@@ -52,6 +62,8 @@ fun MiniAppRenameDialog(
                     label = { Text(stringResource(R.string.miniapp_name_label)) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
+                    shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
+                    colors = miniAppFieldColors(),
                 )
                 OutlinedTextField(
                     value = description,
@@ -62,6 +74,8 @@ fun MiniAppRenameDialog(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(top = 12.dp),
+                    shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
+                    colors = miniAppFieldColors(),
                 )
             }
         },
@@ -87,10 +101,14 @@ fun MiniAppDeleteDialog(
     onDismiss: () -> Unit,
     onConfirm: () -> Unit,
 ) {
+    val tokens = LocalAmberTokens.current
+    val type = LocalAmberType.current
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(stringResource(R.string.miniapp_delete_title)) },
-        text = { Text(stringResource(R.string.miniapp_delete_message, app.title)) },
+        shape = androidx.compose.foundation.shape.RoundedCornerShape(14.dp),
+        containerColor = tokens.raised,
+        title = { Text(stringResource(R.string.miniapp_delete_title), style = type.sessionTitle) },
+        text = { Text(stringResource(R.string.miniapp_delete_message, app.title), style = type.body) },
         confirmButton = {
             TextButton(onClick = onConfirm) {
                 Text(stringResource(R.string.delete), color = MaterialTheme.colorScheme.error)
@@ -141,20 +159,32 @@ fun MiniAppVersionHistoryDialog(
     onDismiss: () -> Unit,
     onRestore: (MiniAppVersionEntity) -> Unit,
 ) {
+    val tokens = LocalAmberTokens.current
+    val type = LocalAmberType.current
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(stringResource(R.string.miniapp_version_history)) },
+        shape = androidx.compose.foundation.shape.RoundedCornerShape(14.dp),
+        containerColor = tokens.raised,
+        title = { Text(stringResource(R.string.miniapp_version_history), style = type.sessionTitle) },
         text = {
-            Column(
+            AmberCard(
                 modifier = Modifier
                     .fillMaxWidth()
                     .heightIn(max = 420.dp)
                     .verticalScroll(rememberScrollState()),
             ) {
-                versions.forEach { version ->
-                    ListItem(
-                        headlineContent = { Text("v${version.versionNumber}") },
-                        supportingContent = {
+                versions.forEachIndexed { index, version ->
+                    if (index > 0) Hairline()
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 52.dp)
+                            .padding(horizontal = 16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+                    ) {
+                        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text("v${version.versionNumber}", style = type.body.copy(fontFamily = JetbrainsMono))
                             Text(
                                 version.changeNote ?: stringResource(
                                     if (version.versionNumber == app.version) {
@@ -162,18 +192,16 @@ fun MiniAppVersionHistoryDialog(
                                     } else {
                                         R.string.miniapp_historical_version
                                     },
-                                )
+                                ),
+                                style = type.secondary,
+                                color = tokens.ink2,
                             )
-                        },
-                        trailingContent = {
-                            TextButton(
-                                enabled = version.versionNumber != app.version,
-                                onClick = { onRestore(version) },
-                            ) {
-                                Text(stringResource(R.string.miniapp_restore))
-                            }
-                        },
-                    )
+                        }
+                        TextButton(
+                            enabled = version.versionNumber != app.version,
+                            onClick = { onRestore(version) },
+                        ) { Text(stringResource(R.string.miniapp_restore), color = tokens.accent) }
+                    }
                 }
             }
         },
@@ -184,6 +212,19 @@ fun MiniAppVersionHistoryDialog(
         },
     )
 }
+
+@Composable
+private fun miniAppFieldColors() = OutlinedTextFieldDefaults.colors(
+    focusedContainerColor = LocalAmberTokens.current.surface2,
+    unfocusedContainerColor = LocalAmberTokens.current.surface2,
+    focusedBorderColor = LocalAmberTokens.current.accent,
+    unfocusedBorderColor = LocalAmberTokens.current.line,
+    focusedLabelColor = LocalAmberTokens.current.accent,
+    unfocusedLabelColor = LocalAmberTokens.current.ink3,
+    focusedTextColor = LocalAmberTokens.current.ink,
+    unfocusedTextColor = LocalAmberTokens.current.ink,
+    cursorColor = LocalAmberTokens.current.accent,
+)
 
 private fun String.safeExportName(): String {
     return trim()

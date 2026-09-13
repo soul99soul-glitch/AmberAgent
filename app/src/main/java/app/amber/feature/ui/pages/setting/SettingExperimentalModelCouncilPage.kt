@@ -1,21 +1,17 @@
 package app.amber.feature.ui.pages.setting
 
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
@@ -159,8 +155,8 @@ fun SettingExperimentalModelCouncilPage(
     ) { innerPadding ->
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
-            contentPadding = innerPadding + PaddingValues(horizontal = 16.dp, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(18.dp),
+            contentPadding = innerPadding + PaddingValues(horizontal = SettingPageHorizontalInset, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             item {
                 CouncilHeroCard(
@@ -178,43 +174,44 @@ fun SettingExperimentalModelCouncilPage(
                 CouncilSectionCard(title = stringResource(R.string.setting_model_council_runtime_section)) {
                     Text(
                         text = stringResource(R.string.setting_model_council_runtime_note),
-                        style = MaterialTheme.typography.bodySmall,
+                        style = LocalAmberType.current.secondary,
                         color = workspaceColors().muted,
                     )
                     ModelCouncilPropertyRow(label = councilPowerModeLabel) {
-                        Select(
+                        SettingSegmentedChoice(
                             options = powerModeOptions,
-                            selectedOption = council.councilPowerMode,
-                            onOptionSelected = { mode ->
+                            selected = council.councilPowerMode,
+                            onSelected = { mode ->
                                 update { it.copy(councilPowerMode = mode) }
                             },
-                            optionToString = { mode ->
-                                when (mode) {
-                                    CouncilPowerMode.STANDARD -> councilPowerModeStandardLabel
-                                    CouncilPowerMode.FULL -> councilPowerModeFullLabel
-                                }
-                            },
                             modifier = Modifier.fillMaxWidth(),
+                            label = { mode ->
+                                Text(
+                                    when (mode) {
+                                        CouncilPowerMode.STANDARD -> councilPowerModeStandardLabel
+                                        CouncilPowerMode.FULL -> councilPowerModeFullLabel
+                                    },
+                                    style = LocalAmberType.current.body,
+                                    maxLines = 1,
+                                )
+                            },
                         )
                     }
                     Text(
                         text = councilPowerModeDescription,
-                        style = MaterialTheme.typography.bodySmall,
+                        style = LocalAmberType.current.secondary,
                         color = workspaceColors().muted,
                     )
-                    Text(
-                        text = councilHostModelLabel,
-                        style = MaterialTheme.typography.labelMedium,
-                        color = workspaceColors().faint,
-                    )
-                    ModelSelector(
-                        modelId = council.hostModelId ?: settings.chatModelId,
-                        providers = settings.providers,
-                        type = ModelType.CHAT,
-                        compact = true,
-                        modifier = Modifier.fillMaxWidth(),
-                        onSelect = { model -> update { it.copy(hostModelId = model.id) } },
-                    )
+                    ModelCouncilPropertyRow(label = councilHostModelLabel) {
+                        ModelSelector(
+                            modelId = council.hostModelId ?: settings.chatModelId,
+                            providers = settings.providers,
+                            type = ModelType.CHAT,
+                            compact = true,
+                            modifier = Modifier.fillMaxWidth(),
+                            onSelect = { model -> update { it.copy(hostModelId = model.id) } },
+                        )
+                    }
                     ModelCouncilPropertyRow(label = councilHostReasoningLabel) {
                         Select(
                             options = reasoningLevelOptions,
@@ -229,15 +226,16 @@ fun SettingExperimentalModelCouncilPage(
                     OutlinedTextField(
                         value = council.hostSystemPrompt,
                         onValueChange = { value -> update { it.copy(hostSystemPrompt = value.take(2_000)) } },
-                        label = { Text(councilHostPromptLabel) },
-                        placeholder = { Text(councilHostPromptPlaceholder) },
+                        label = { Text(councilHostPromptLabel, style = LocalAmberType.current.body) },
+                        placeholder = { Text(councilHostPromptPlaceholder, style = LocalAmberType.current.secondary) },
                         minLines = 2,
                         maxLines = 5,
+                        textStyle = LocalAmberType.current.body,
                         modifier = Modifier.fillMaxWidth(),
                     )
                     Text(
                         text = councilHostNote,
-                        style = MaterialTheme.typography.bodySmall,
+                        style = LocalAmberType.current.secondary,
                         color = workspaceColors().muted,
                     )
                 }
@@ -388,9 +386,9 @@ private fun CouncilHeroCard(
         border = BorderStroke(1.dp, tokens.line),
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(14.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Column(
                 modifier = Modifier.weight(1f),
@@ -418,33 +416,11 @@ private fun CouncilSectionCard(
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val tokens = LocalAmberTokens.current
-    val type = LocalAmberType.current
     Column(
         modifier = Modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            Text(
-                text = "//",
-                style = type.eyebrow,
-                color = tokens.accent,
-            )
-            Text(
-                text = title,
-                style = type.eyebrow,
-                color = tokens.ink2,
-            )
-            Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .height(1.dp)
-                    .background(tokens.line),
-            )
-        }
+        SettingSectionTitle(title, modifier = Modifier.padding(top = 10.dp))
         Surface(
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(14.dp),
@@ -453,8 +429,8 @@ private fun CouncilSectionCard(
             border = BorderStroke(1.dp, tokens.line),
         ) {
             Column(
-                modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
                 content = content,
             )
         }
@@ -517,7 +493,7 @@ private fun ModelCouncilSeatEditor(
     ) {
         Column(
             modifier = Modifier.padding(horizontal = 12.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -549,7 +525,7 @@ private fun ModelCouncilSeatEditor(
                     )
                     Text(
                         text = if (seat.runnerType == ModelCouncilSeatRunner.EXTERNAL_CLI) externalSeatSummary else modelSeatSummary,
-                        style = MaterialTheme.typography.bodySmall,
+                        style = LocalAmberType.current.secondary,
                         color = workspace.muted,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
@@ -565,8 +541,9 @@ private fun ModelCouncilSeatEditor(
             OutlinedTextField(
                 value = seat.name,
                 onValueChange = { value -> onSeatChanged(seat.copy(name = value.take(40))) },
-                label = { Text(seatNameLabel) },
+                label = { Text(seatNameLabel, style = LocalAmberType.current.body) },
                 singleLine = true,
+                textStyle = LocalAmberType.current.body,
                 modifier = Modifier.fillMaxWidth(),
             )
 
@@ -683,9 +660,10 @@ private fun ModelCouncilSeatEditor(
                 OutlinedTextField(
                     value = seat.externalModel,
                     onValueChange = { value -> onSeatChanged(seat.copy(externalModel = value.take(120))) },
-                    label = { Text(cliModelParameterLabel) },
-                    placeholder = { Text(selectedExternalTool.modelPlaceholder) },
+                    label = { Text(cliModelParameterLabel, style = LocalAmberType.current.body) },
+                    placeholder = { Text(selectedExternalTool.modelPlaceholder, style = LocalAmberType.current.secondary) },
                     singleLine = true,
+                    textStyle = LocalAmberType.current.body,
                     modifier = Modifier.fillMaxWidth(),
                 )
                 ExperimentNote(text = externalRuntimeNote)
@@ -694,9 +672,10 @@ private fun ModelCouncilSeatEditor(
             OutlinedTextField(
                 value = seat.systemPrompt,
                 onValueChange = { value -> onSeatChanged(seat.copy(systemPrompt = value.take(2_000))) },
-                label = { Text(seatPromptLabel) },
+                label = { Text(seatPromptLabel, style = LocalAmberType.current.body) },
                 minLines = 3,
                 maxLines = 6,
+                textStyle = LocalAmberType.current.body,
                 modifier = Modifier.fillMaxWidth(),
             )
         }
@@ -709,13 +688,14 @@ private fun ModelCouncilPropertyRow(
     content: @Composable () -> Unit,
 ) {
     val workspace = workspaceColors()
+    val type = LocalAmberType.current
     Column(
         modifier = Modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(5.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         Text(
             text = label,
-            style = MaterialTheme.typography.labelSmall,
+            style = type.secondary,
             color = workspace.faint,
         )
         content()
@@ -738,7 +718,7 @@ private fun <T> ModelCouncilSelectRow(
         Text(
             text = label,
             modifier = Modifier.weight(1f),
-            style = MaterialTheme.typography.bodyMedium,
+            style = LocalAmberType.current.body,
             color = workspaceColors().ink,
         )
         Select(

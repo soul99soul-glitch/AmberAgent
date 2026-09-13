@@ -38,19 +38,19 @@ data class AmberTextStyles(
     val tinyTag: TextStyle,
 )
 
-/** Scale from design §3 (px @ 380-wide). Mono styles enable tabular + slashed-zero. */
+/** Compact UI scale; small metadata stays legible. Mono enables tabular + slashed-zero. */
 fun defaultAmberTextStyles(): AmberTextStyles = AmberTextStyles(
     screenTitle = TextStyle(
-        fontFamily = AmberSans, fontWeight = FontWeight.Bold, fontSize = 19.sp, lineHeight = 25.sp,
+        fontFamily = AmberSans, fontWeight = FontWeight.Bold, fontSize = 17.sp, lineHeight = 23.sp,
     ),
     sessionTitle = TextStyle(
         fontFamily = AmberSans, fontWeight = FontWeight.Bold, fontSize = 16.sp, lineHeight = 21.sp,
     ),
     body = TextStyle(
-        fontFamily = AmberSans, fontWeight = FontWeight.Normal, fontSize = 15.sp, lineHeight = 22.sp,
+        fontFamily = AmberSans, fontWeight = FontWeight.Normal, fontSize = 14.sp, lineHeight = 20.sp,
     ),
     secondary = TextStyle(
-        fontFamily = AmberSans, fontWeight = FontWeight.Normal, fontSize = 13.sp, lineHeight = 18.sp,
+        fontFamily = AmberSans, fontWeight = FontWeight.Normal, fontSize = 12.sp, lineHeight = 17.sp,
     ),
     meta = TextStyle(
         fontFamily = AmberMono, fontWeight = FontWeight.Normal, fontSize = 12.sp, lineHeight = 16.sp,

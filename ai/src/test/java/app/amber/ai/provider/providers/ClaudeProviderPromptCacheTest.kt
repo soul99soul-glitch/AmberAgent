@@ -146,6 +146,56 @@ class ClaudeProviderPromptCacheTest {
     }
 
     @Test
+    fun `multiple system messages preserve order and cache markers`() {
+        val providerSetting = ProviderSetting.Claude(promptCaching = true)
+        val messages = listOf(
+            UIMessage(
+                role = MessageRole.SYSTEM,
+                parts = listOf(
+                    UIMessagePart.Text(
+                        text = "first static",
+                        metadata = buildJsonObject {
+                            put(SYSTEM_PROMPT_CACHE_CONTROL_METADATA, SYSTEM_PROMPT_CACHE_EPHEMERAL)
+                        },
+                    ),
+                    UIMessagePart.Text("first dynamic"),
+                ),
+            ),
+            UIMessage(
+                role = MessageRole.SYSTEM,
+                parts = listOf(
+                    UIMessagePart.Text("second dynamic"),
+                    UIMessagePart.Text(
+                        text = "second static",
+                        metadata = buildJsonObject {
+                            put(SYSTEM_PROMPT_CACHE_CONTROL_METADATA, SYSTEM_PROMPT_CACHE_EPHEMERAL)
+                        },
+                    ),
+                ),
+            ),
+            UIMessage.user("hello"),
+        )
+
+        val request = buildRequest(providerSetting, messages, TextGenerationParams(
+            model = Model(modelId = "claude-test"),
+        ))
+        val system = request["system"]!!.jsonArray
+
+        assertEquals(
+            listOf("first static", "first dynamic", "second dynamic", "second static"),
+            system.map { it.jsonObject["text"]!!.jsonPrimitive.content },
+        )
+        // encodeSystem keeps the last marked cache boundary across all parts.
+        assertNull(system[0].jsonObject["cache_control"])
+        assertNull(system[1].jsonObject["cache_control"])
+        assertNull(system[2].jsonObject["cache_control"])
+        assertEquals(
+            "ephemeral",
+            system[3].jsonObject["cache_control"]!!.jsonObject["type"]!!.jsonPrimitive.content,
+        )
+    }
+
+    @Test
     fun `promptCaching=true should disable system cache when disabled marker exists`() {
         val providerSetting = ProviderSetting.Claude(promptCaching = true)
         val messages = listOf(

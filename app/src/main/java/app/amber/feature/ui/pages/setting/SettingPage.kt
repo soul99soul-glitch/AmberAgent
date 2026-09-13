@@ -16,7 +16,6 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -30,10 +29,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.Info
 import com.composables.icons.lucide.BookOpenText
 import com.composables.icons.lucide.Brain
 import com.composables.icons.lucide.ChartNoAxesColumnIncreasing
@@ -60,10 +62,10 @@ import com.composables.icons.lucide.WandSparkles
 import com.composables.icons.lucide.Wrench
 import app.amber.agent.R
 import app.amber.agent.Screen
+import app.amber.feature.ui.components.ds.amberCanvas
 import app.amber.core.settings.isNotConfigured
 import app.amber.core.files.FilesManager
 import app.amber.feature.ui.components.nav.BackButton
-import app.amber.feature.ui.components.ui.CardGroup
 import app.amber.feature.ui.components.ui.Select
 import app.amber.feature.ui.components.ui.UIAvatar
 import app.amber.feature.ui.components.ui.WorkspaceLeadingIcon
@@ -87,14 +89,7 @@ fun SettingPage(vm: SettingVM = koinViewModel()) {
     val settings by vm.settings.collectAsStateWithLifecycle()
     val filesManager: FilesManager = koinInject()
     val workspace = workspaceColors()
-    val settingListColors = ListItemDefaults.colors(
-        containerColor = workspace.paper,
-        headlineColor = workspace.ink,
-        supportingColor = workspace.muted,
-        leadingIconColor = workspace.muted,
-        trailingIconColor = workspace.muted,
-    )
-
+    val profileLabel = stringResource(R.string.profile_title)
     Scaffold(
         topBar = {
             WorkspaceTopBar(
@@ -111,6 +106,7 @@ fun SettingPage(vm: SettingVM = koinViewModel()) {
                         }
                     }
                     IconButton(
+                        modifier = Modifier.semantics { contentDescription = profileLabel },
                         onClick = { navController.navigate(Screen.Profile) }
                     ) {
                         UIAvatar(
@@ -126,13 +122,15 @@ fun SettingPage(vm: SettingVM = koinViewModel()) {
                 scrollBehavior = scrollBehavior,
             )
         },
-        modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
-        containerColor = workspace.canvas
+        modifier = Modifier
+            .nestedScroll(scrollBehavior.nestedScrollConnection)
+            .amberCanvas(),
+        containerColor = androidx.compose.ui.graphics.Color.Transparent
     ) { innerPadding ->
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
             contentPadding = innerPadding + PaddingValues(horizontal = SettingPageHorizontalInset, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(22.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             if (settings.isNotConfigured()) {
                 item {
@@ -142,11 +140,11 @@ fun SettingPage(vm: SettingVM = koinViewModel()) {
 
             item("generalSettings") {
                 var colorMode by rememberColorMode()
-                SettingSectionTitle(stringResource(R.string.setting_page_general_settings))
-                CardGroup(
-                    colors = settingListColors,
+                SettingCardGroup(
+                    title = stringResource(R.string.setting_page_general_settings),
                 ) {
                     item(
+                        modifier = Modifier.settingSingleLine(),
                         leadingContent = { SettingLeadingIcon(Lucide.Sun) },
                         trailingContent = {
                             Select(
@@ -172,6 +170,7 @@ fun SettingPage(vm: SettingVM = koinViewModel()) {
                         headlineContent = { SettingRowTitle(stringResource(R.string.setting_page_appearance)) },
                     )
                     item(
+                        modifier = Modifier.settingSingleLine(),
                         onClick = { navController.navigate(Screen.SettingDisplay) },
                         leadingContent = { SettingLeadingIcon(Lucide.Settings) },
                         headlineContent = { Text(stringResource(R.string.setting_page_display_setting)) },
@@ -181,35 +180,39 @@ fun SettingPage(vm: SettingVM = koinViewModel()) {
             }
 
             item("agentRuntimeSettings") {
-                SettingSectionTitle(stringResource(R.string.setting_page_agent_runtime))
-                CardGroup(
-                    colors = settingListColors,
+                SettingCardGroup(
+                    title = stringResource(R.string.setting_page_agent_runtime),
                 ) {
                     item(
+                        modifier = Modifier.settingSingleLine(),
                         onClick = { navController.navigate(Screen.SettingAgentMemory) },
                         leadingContent = { SettingLeadingIcon(Lucide.Brain) },
                         headlineContent = { Text(stringResource(R.string.setting_page_agent_memory)) },
                         trailingContent = { SettingChevron() },
                     )
                     item(
+                        modifier = Modifier.settingSingleLine(),
                         onClick = { navController.navigate(Screen.SettingAgentExecution) },
                         leadingContent = { SettingLeadingIcon(Lucide.CodeXml) },
                         headlineContent = { Text(stringResource(R.string.setting_page_agent_execution)) },
                         trailingContent = { SettingChevron() },
                     )
                     item(
+                        modifier = Modifier.settingSingleLine(),
                         onClick = { navController.navigate(Screen.SettingTts) },
                         leadingContent = { SettingLeadingIcon(Lucide.AudioLines) },
                         headlineContent = { Text(stringResource(R.string.setting_page_tts)) },
                         trailingContent = { SettingChevron() },
                     )
                     item(
+                        modifier = Modifier.settingSingleLine(),
                         onClick = { navController.navigate(Screen.SettingAgentExtensions) },
                         leadingContent = { SettingLeadingIcon(Lucide.Wrench) },
                         headlineContent = { Text(stringResource(R.string.setting_page_agent_extensions)) },
                         trailingContent = { SettingChevron() },
                     )
                     item(
+                        modifier = Modifier.settingSingleLine(),
                         onClick = { navController.navigate(Screen.SettingAgentPermissions) },
                         leadingContent = { SettingLeadingIcon(Lucide.TriangleAlert) },
                         headlineContent = { Text(stringResource(R.string.setting_page_agent_permissions)) },
@@ -219,23 +222,25 @@ fun SettingPage(vm: SettingVM = koinViewModel()) {
             }
 
             item("modelServices") {
-                SettingSectionTitle(stringResource(R.string.setting_page_model_and_services))
-                CardGroup(
-                    colors = settingListColors,
+                SettingCardGroup(
+                    title = stringResource(R.string.setting_page_model_and_services),
                 ) {
                     item(
+                        modifier = Modifier.settingSingleLine(),
                         onClick = { navController.navigate(Screen.SettingProvider) },
                         leadingContent = { SettingLeadingIcon(Lucide.Cpu) },
                         headlineContent = { Text(stringResource(R.string.setting_page_providers)) },
                         trailingContent = { SettingChevron() },
                     )
                     item(
+                        modifier = Modifier.settingSingleLine(),
                         onClick = { navController.navigate(Screen.SettingModels) },
                         leadingContent = { SettingLeadingIcon(Lucide.WandSparkles) },
                         headlineContent = { Text(stringResource(R.string.setting_page_default_model)) },
                         trailingContent = { SettingChevron() },
                     )
                     item(
+                        modifier = Modifier.settingSingleLine(),
                         onClick = { navController.navigate(Screen.SettingSearch) },
                         leadingContent = { SettingLeadingIcon(Lucide.ScanSearch) },
                         headlineContent = { Text(stringResource(R.string.setting_page_search_service)) },
@@ -245,59 +250,67 @@ fun SettingPage(vm: SettingVM = koinViewModel()) {
             }
 
             item("advancedFeatures") {
-                SettingSectionTitle(stringResource(R.string.setting_page_advanced_features))
-                CardGroup(
-                    colors = settingListColors,
+                SettingCardGroup(
+                    title = stringResource(R.string.setting_page_advanced_features),
                 ) {
                     item(
+                        modifier = Modifier.settingSingleLine(),
                         onClick = { navController.navigate(Screen.SettingExperimentalWebMount) },
                         leadingContent = { SettingLeadingIcon(Lucide.Globe) },
                         headlineContent = { Text(stringResource(R.string.setting_page_webmount)) },
                         trailingContent = { SettingChevron() },
                     )
                     item(
+                        modifier = Modifier.settingSingleLine(),
                         onClick = { navController.navigate(Screen.SettingExperimentalSubAgent) },
                         leadingContent = { SettingLeadingIcon(Lucide.Users) },
                         headlineContent = { Text(stringResource(R.string.setting_subagent_title)) },
                         trailingContent = { SettingChevron() },
                     )
                     item(
+                        modifier = Modifier.settingSingleLine(),
                         onClick = { navController.navigate(Screen.SettingExperimentalModelCouncil) },
                         leadingContent = { SettingLeadingIcon(Lucide.MessageCircle) },
                         headlineContent = { Text(stringResource(R.string.setting_page_model_council)) },
                         trailingContent = { SettingChevron() },
                     )
                     item(
+                        modifier = Modifier.settingSingleLine(),
                         onClick = { navController.navigate(Screen.MiniAppList) },
                         leadingContent = { SettingLeadingIcon(Lucide.Grid2x2) },
                         headlineContent = { Text(stringResource(R.string.setting_page_miniapp)) },
                         trailingContent = { SettingChevron() },
                     )
                     item(
+                        modifier = Modifier.settingSingleLine(),
                         onClick = { navController.navigate(Screen.NovelProjects) },
                         leadingContent = { SettingLeadingIcon(Lucide.Pen) },
                         headlineContent = { Text(stringResource(R.string.setting_page_novel)) },
                         trailingContent = { SettingChevron() },
                     )
                     item(
+                        modifier = Modifier.settingSingleLine(),
                         onClick = { navController.navigate(Screen.TodayBoard) },
                         leadingContent = { SettingLeadingIcon(Lucide.BookOpenText) },
                         headlineContent = { Text(stringResource(R.string.setting_page_deep_read)) },
                         trailingContent = { SettingChevron() },
                     )
                     item(
+                        modifier = Modifier.settingSingleLine(),
                         onClick = { navController.navigate(Screen.SettingExperimentalICloud) },
                         leadingContent = { SettingLeadingIcon(Lucide.Cloud) },
                         headlineContent = { Text(stringResource(R.string.setting_icloud_title)) },
                         trailingContent = { SettingChevron() },
                     )
                     item(
+                        modifier = Modifier.settingSingleLine(),
                         onClick = { navController.navigate(Screen.SynaraCompanion) },
                         leadingContent = { SettingLeadingIcon(Lucide.Server) },
                         headlineContent = { Text(stringResource(R.string.setting_page_synara)) },
                         trailingContent = { SettingChevron() },
                     )
                     item(
+                        modifier = Modifier.settingSingleLine(),
                         onClick = { navController.navigate(Screen.ZCode) },
                         leadingContent = { SettingLeadingIcon(Lucide.Braces) },
                         headlineContent = { Text(stringResource(R.string.setting_page_zcode)) },
@@ -310,24 +323,26 @@ fun SettingPage(vm: SettingVM = koinViewModel()) {
                 val storageState by produceState(-1 to 0L) {
                     value = filesManager.countChatFiles()
                 }
-                SettingSectionTitle(stringResource(R.string.setting_page_data_settings))
-                CardGroup(
-                    colors = settingListColors,
+                SettingCardGroup(
+                    title = stringResource(R.string.setting_page_data_settings),
                 ) {
                     item(
+                        modifier = Modifier.settingSingleLine(),
                         onClick = { navController.navigate(Screen.Backup) },
                         leadingContent = { SettingLeadingIcon(Lucide.DatabaseZap) },
                         headlineContent = { Text(stringResource(R.string.setting_page_backup)) },
                         trailingContent = { SettingChevron() },
                     )
                     item(
+                        modifier = Modifier.settingSingleLine(),
                         onClick = { navController.navigate(Screen.SettingStorage) },
                         leadingContent = { SettingLeadingIcon(Lucide.ChartNoAxesColumnIncreasing) },
                         headlineContent = { Text(stringResource(R.string.setting_page_storage_cleanup)) },
                         trailingContent = { SettingChevron() },
                     )
                     item(
-                        onClick = { navController.navigate(Screen.SettingFiles) },
+                        modifier = Modifier.settingSingleLine(),
+                        onClick = { navController.navigate(Screen.SettingChatStorage) },
                         leadingContent = { SettingLeadingIcon(Lucide.ImageUp) },
                         trailingContent = {
                             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -357,6 +372,17 @@ fun SettingPage(vm: SettingVM = koinViewModel()) {
                     )
                 }
             }
+            item("about") {
+                SettingCardGroup(title = stringResource(R.string.app_name)) {
+                    item(
+                        modifier = Modifier.settingSingleLine(),
+                        onClick = { navController.navigate(Screen.SettingAbout) },
+                        leadingContent = { SettingLeadingIcon(Lucide.Info) },
+                        headlineContent = { Text(stringResource(R.string.about_page_title)) },
+                        trailingContent = { SettingChevron() },
+                    )
+                }
+            }
         }
     }
 }
@@ -376,7 +402,7 @@ private fun SettingLeadingIcon(
     icon: ImageVector,
     tone: WorkspaceTone = WorkspaceTone.Neutral,
 ) {
-    WorkspaceLeadingIcon(icon = icon, size = 32.dp, iconSize = 17.dp, tone = tone)
+    WorkspaceLeadingIcon(icon = icon, tone = tone)
 }
 
 @Composable
@@ -389,16 +415,17 @@ private fun ProviderConfigWarningCard(navController: Navigator) {
     val workspace = workspaceColors()
     Card(
         modifier = Modifier.padding(2.dp),
-        shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp),
+        shape = androidx.compose.foundation.shape.RoundedCornerShape(14.dp),
         colors = CardDefaults.cardColors(
             containerColor = workspace.amberContainer
         ),
         border = BorderStroke(1.dp, workspace.amber.copy(alpha = 0.18f)),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(12.dp),
+                .padding(16.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(11.dp),
         ) {

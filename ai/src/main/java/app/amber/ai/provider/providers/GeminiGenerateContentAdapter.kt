@@ -49,11 +49,12 @@ internal class GeminiGenerateContentAdapter(
         params: TextGenerationParams,
         codeAssistTransport: Boolean,
     ): JsonObject = buildJsonObject {
-        val systemText = messages.firstOrNull { it.role == MessageRole.SYSTEM }
-            ?.parts
-            ?.filterIsInstance<UIMessagePart.Text>()
-            ?.joinToString("\n\n", transform = UIMessagePart.Text::text)
-            .orEmpty()
+        val systemText = messages.asSequence()
+            .filter { it.role == MessageRole.SYSTEM }
+            .flatMap { message ->
+                message.parts.asSequence().filterIsInstance<UIMessagePart.Text>()
+            }
+            .joinToString("\n\n", transform = UIMessagePart.Text::text)
         if (systemText.isNotEmpty() && Modality.IMAGE !in params.model.outputModalities) {
             put("systemInstruction", buildJsonObject {
                 put("parts", buildJsonArray {

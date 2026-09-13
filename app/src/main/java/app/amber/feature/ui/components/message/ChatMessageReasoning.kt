@@ -296,7 +296,7 @@ private fun ReasoningContent(
                     // behind the 2dp thinkRule left rule (drawn above).
                     style = LocalAmberType.current.secondary.copy(
                         color = app.amber.feature.ui.pages.chat.LocalChatTheme.current.thinkBodyInk,
-                        fontSize = 13.5.sp,
+                        fontSize = 12.5.sp,
                         lineHeight = 23.sp,
                         letterSpacing = 0.2.sp,
                     ),
@@ -317,6 +317,7 @@ fun ChainOfThoughtScope.ChatMessageReasoningStep(
     loading: Boolean,
     fadeHeight: Float = 64f,
     collapsedAdaptiveWidth: Boolean = false,
+    framed: Boolean = true,
 ) {
     val (state, reasoningLoading) = rememberReasoningState(reasoning, loading)
     val showReasoningDuration = reasoning.finishedAt != null || reasoningLoading
@@ -396,6 +397,7 @@ fun ChainOfThoughtScope.ChatMessageReasoningStep(
         collapsedAdaptiveWidth = collapsedAdaptiveWidth,
         contentVisible = state.expandState != ReasoningCardState.Collapsed,
         flushContent = true,  // V3: content 竖线 X 跟 step icon center 对齐
+        framed = framed,
         content = {
             ReasoningContent(
                 reasoning = reasoning,

@@ -52,6 +52,7 @@ import app.amber.agent.R
 import app.amber.feature.ui.components.ds.AmberCard
 import app.amber.feature.ui.components.ds.Hairline
 import app.amber.feature.ui.components.ds.SectionLabel
+import app.amber.feature.ui.components.ds.amberCanvas
 import app.amber.feature.ui.components.nav.BackButton
 import app.amber.feature.ui.theme.AmberMono
 import app.amber.feature.ui.theme.LocalAmberTokens
@@ -74,7 +75,9 @@ fun StatsPage(vm: StatsVM = koinViewModel()) {
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
 
     Scaffold(
-        modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
+        modifier = Modifier
+            .nestedScroll(scrollBehavior.nestedScrollConnection)
+            .amberCanvas(),
         topBar = {
             TopAppBar(
                 title = { Text(stringResource(R.string.stats_page_title), style = type.screenTitle, color = t.ink) },
@@ -88,7 +91,7 @@ fun StatsPage(vm: StatsVM = koinViewModel()) {
                 ),
             )
         },
-        containerColor = t.bg,
+        containerColor = Color.Transparent,
     ) { padding ->
         if (stats.isLoading) {
             Box(
@@ -433,29 +436,37 @@ private fun StatCard(
         modifier = modifier.padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
+        Box(
+            modifier = Modifier
+                .size(32.dp)
+                .clip(androidx.compose.foundation.shape.RoundedCornerShape(9.dp))
+                .background(t.surface2),
+            contentAlignment = Alignment.Center,
+        ) {
             Icon(
                 imageVector = icon,
                 contentDescription = null,
                 tint = t.accent,
                 modifier = Modifier.size(20.dp),
             )
-            // Graphite §3: the stat number is a machine-fact → MONO with tabular + slashed-zero.
-            // Keep headline size/weight so the visual hierarchy is unchanged; only the font swaps.
-            Text(
-                text = value,
-                style = type.screenTitle.copy(
-                    fontSize = 20.sp,
-                    fontFamily = AmberMono,
-                    fontFeatureSettings = "tnum, zero",
-                ),
-                color = t.ink,
-            )
-            // Human label stays sans.
-            Text(
-                text = label,
-                style = type.secondary,
-                color = t.ink3,
-            )
+        }
+        // Graphite §3: the stat number is a machine-fact → MONO with tabular + slashed-zero.
+        // Keep headline size/weight so the visual hierarchy is unchanged; only the font swaps.
+        Text(
+            text = value,
+            style = type.screenTitle.copy(
+                fontSize = 20.sp,
+                fontFamily = AmberMono,
+                fontFeatureSettings = "tnum, zero",
+            ),
+            color = t.ink,
+        )
+        // Human label stays sans.
+        Text(
+            text = label,
+            style = type.secondary,
+            color = t.ink3,
+        )
     }
 }
 

@@ -132,7 +132,10 @@ class MemoryExtractor(
                 val response = providerCatalog.text(provider).complete(
                     providerSetting = provider,
                     messages = listOf(UIMessage.user(prompt)),
-                    params = TextGenerationParams(model = model),
+                    params = TextGenerationParams(
+                        model = model,
+                        sessionId = conversationId,
+                    ),
                 )
                 val text = response.choices.firstOrNull()?.message?.toText().orEmpty()
                 val parsedCandidates = parseCandidates(

@@ -48,6 +48,10 @@ class ProviderModelCouncilTextRunner(
                 )
             )
         }
+        // Keep parameter fallback attempts in one provider session. This runner
+        // has no conversation owner in its public contract, so one generated
+        // ID per seat invocation is the narrowest stable scope.
+        val sessionId = Uuid.random().toString()
         suspend fun streamWith(candidateTemperature: Float?, reasoningLevel: ReasoningLevel): String {
             val params = TextGenerationParams(
                 model = model,
@@ -56,6 +60,7 @@ class ProviderModelCouncilTextRunner(
                 customHeaders = model.customHeaders,
                 customBody = model.customBodies,
                 temperature = candidateTemperature,
+                sessionId = sessionId,
             )
             // Streaming path: per-chunk MessageChunk.choices.first.delta is the delta; we
             // accumulate and emit the running text. Provider chunks can arrive faster than

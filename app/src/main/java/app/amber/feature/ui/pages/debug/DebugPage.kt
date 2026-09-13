@@ -1,25 +1,19 @@
 package app.amber.feature.ui.pages.debug
 
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -46,7 +40,6 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.dokar.sonner.ToastType
 import kotlinx.coroutines.launch
 import app.amber.agent.R
-import app.amber.common.android.Logging
 import app.amber.core.model.Avatar
 import app.amber.core.settings.Capability
 import app.amber.feature.ui.components.ui.UIAvatar
@@ -57,10 +50,10 @@ import app.amber.feature.ui.components.richtext.Mermaid
 import app.amber.feature.ui.components.ds.AmberCard
 import app.amber.feature.ui.components.ds.Hairline
 import app.amber.feature.ui.components.ds.SectionLabel
+import app.amber.feature.ui.components.ds.amberCanvas
 import app.amber.feature.ui.components.ds.pressable
 import app.amber.feature.ui.context.LocalSettings
 import app.amber.feature.ui.context.LocalToaster
-import app.amber.feature.ui.theme.JetbrainsMono
 import app.amber.feature.ui.theme.LocalAmberTokens
 import app.amber.feature.ui.theme.LocalAmberType
 import org.koin.androidx.compose.koinViewModel
@@ -76,7 +69,7 @@ fun DebugPage(vm: DebugVM = koinViewModel()) {
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Debug Mode", style = type.screenTitle, color = t.ink) },
+                title = { Text(stringResource(R.string.redesign_debug_mode), style = type.screenTitle, color = t.ink) },
                 navigationIcon = { BackButton() },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = t.bg,
@@ -86,7 +79,8 @@ fun DebugPage(vm: DebugVM = koinViewModel()) {
                 ),
             )
         },
-        containerColor = t.bg,
+        modifier = Modifier.amberCanvas(),
+        containerColor = androidx.compose.ui.graphics.Color.Transparent,
     ) { contentPadding ->
         val state = rememberPagerState { 2 }
         Column(
@@ -96,6 +90,7 @@ fun DebugPage(vm: DebugVM = koinViewModel()) {
         ) {
             SecondaryTabRow(
                 selectedTabIndex = state.currentPage,
+                containerColor = androidx.compose.ui.graphics.Color.Transparent,
             ) {
                 Tab(
                     selected = state.currentPage == 0,
@@ -105,7 +100,11 @@ fun DebugPage(vm: DebugVM = koinViewModel()) {
                         }
                     },
                     text = {
-                        Text("Main")
+                        Text(
+                            stringResource(R.string.redesign_debug_main),
+                            style = type.secondary,
+                            color = if (state.currentPage == 0) t.ink else t.ink3,
+                        )
                     }
                 )
                 Tab(
@@ -116,7 +115,11 @@ fun DebugPage(vm: DebugVM = koinViewModel()) {
                         }
                     },
                     text = {
-                        Text("Logging")
+                        Text(
+                            stringResource(R.string.redesign_logs),
+                            style = type.secondary,
+                            color = if (state.currentPage == 1) t.ink else t.ink3,
+                        )
                     }
                 )
             }
@@ -144,7 +147,6 @@ private fun MainPage(vm: DebugVM) {
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(t.bg)
             .padding(horizontal = 16.dp, vertical = 12.dp)
             .verticalScroll(rememberScrollState())
             .imePadding(),
@@ -153,7 +155,7 @@ private fun MainPage(vm: DebugVM) {
         var avatar: Avatar by remember { mutableStateOf(Avatar.Emoji("😎")) }
         val toaster = LocalToaster.current
         var toastCounter by remember { mutableIntStateOf(0) }
-        SectionLabel("DEBUG TOOLS")
+        SectionLabel(stringResource(R.string.redesign_debug_tools))
         AmberCard {
             Column {
                 DebugActionRow("头像编辑器") {
@@ -215,7 +217,7 @@ private fun MainPage(vm: DebugVM) {
             }
         }
 
-        SectionLabel("CAPABILITY FLAGS")
+        SectionLabel(stringResource(R.string.redesign_capability_flags))
         val capabilities by vm.capabilities.collectAsStateWithLifecycle()
         AmberCard {
             Column {
@@ -245,7 +247,7 @@ private fun MainPage(vm: DebugVM) {
             }
         }
 
-        SectionLabel("RUNTIME")
+        SectionLabel(stringResource(R.string.setting_sandbox_runtime_section))
         AmberCard {
             Column {
                 DebugFactRow("schema version", vm.secretMigrationVersion.toString())
@@ -261,7 +263,7 @@ private fun MainPage(vm: DebugVM) {
         // P1-04: final token fit receipts — what was trimmed from the last
         // provider-bound requests and why.
         val tokenFitReceipts by vm.tokenFitReceipts.collectAsStateWithLifecycle()
-        SectionLabel("FINAL TOKEN FIT · LAST ${tokenFitReceipts.size}")
+        SectionLabel(stringResource(R.string.redesign_token_fit_recent, tokenFitReceipts.size))
         AmberCard {
             Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (tokenFitReceipts.isEmpty()) {
@@ -293,7 +295,7 @@ private fun MainPage(vm: DebugVM) {
             }
         }
 
-        SectionLabel("LAUNCH STATS")
+        SectionLabel(stringResource(R.string.redesign_launch_stats))
         AmberCard {
             Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text("launchCount", style = type.meta, color = t.ink2)
@@ -314,7 +316,7 @@ private fun MainPage(vm: DebugVM) {
             }
         }
 
-        SectionLabel("RICH TEXT PREVIEW")
+        SectionLabel(stringResource(R.string.redesign_rich_text_preview))
         var markdown by remember { mutableStateOf("") }
         AmberCard {
             Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -382,10 +384,10 @@ private fun DebugLoggingPage() {
     val t = LocalAmberTokens.current
     val type = LocalAmberType.current
     Column(
-        modifier = Modifier.fillMaxSize().background(t.bg).padding(16.dp),
+        modifier = Modifier.fillMaxSize().padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        SectionLabel("LOGGING")
+        SectionLabel(stringResource(R.string.redesign_logs))
         AmberCard {
             Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("日志入口", style = type.body, color = t.ink)

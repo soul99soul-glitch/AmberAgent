@@ -11,12 +11,17 @@ import android.webkit.WebViewClient
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
@@ -29,7 +34,10 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -64,6 +72,10 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.TriangleAlert
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.viewinterop.AndroidView
 import kotlinx.coroutines.CancellationException
@@ -77,9 +89,11 @@ import app.amber.feature.miniapp.MiniAppRepository
 import app.amber.feature.miniapp.MiniAppSandbox
 import app.amber.feature.miniapp.MiniAppShell
 import app.amber.feature.miniapp.MiniAppSourceChecks
+import app.amber.feature.ui.components.ds.Hairline
 import app.amber.feature.ui.theme.JetbrainsMono
 import app.amber.feature.ui.theme.AmberTokens
 import app.amber.feature.ui.theme.LocalAmberTokens
+import app.amber.feature.ui.theme.LocalAmberType
 import org.koin.compose.koinInject
 import java.io.ByteArrayInputStream
 import kotlin.math.roundToInt
@@ -109,6 +123,7 @@ fun MiniAppSourceEditorDialog(
     var showDiscardConfirmation by remember { mutableStateOf(false) }
     val saveFailedMessage = stringResource(R.string.miniapp_save_failed)
     val tokens = LocalAmberTokens.current
+    val type = LocalAmberType.current
     val codeScrollState = remember(app.id) { ScrollState(0) }
 
     fun requestDismiss() {
@@ -127,185 +142,193 @@ fun MiniAppSourceEditorDialog(
         }
     }
 
-    AlertDialog(
+    Dialog(
         onDismissRequest = ::requestDismiss,
-        shape = RoundedCornerShape(18.dp),
-        containerColor = tokens.raised,
-        title = {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(
-                    text = stringResource(R.string.miniapp_source_title, app.title, app.version),
-                    modifier = Modifier.weight(1f),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                if (unsaved) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp),
-                    ) {
-                        // 未保存状态指示
-                        androidx.compose.foundation.layout.Box(
-                            modifier = Modifier
-                                .size(8.dp)
-                                .background(MaterialTheme.colorScheme.error, CircleShape),
-                        )
-                        Text(
-                            text = stringResource(R.string.miniapp_unsaved),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.error,
-                        )
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth(0.92f)
+                .fillMaxHeight(0.8f),
+            shape = RoundedCornerShape(18.dp),
+            color = tokens.raised,
+            border = androidx.compose.foundation.BorderStroke(1.dp, tokens.line2),
+            tonalElevation = 0.dp,
+            shadowElevation = 16.dp,
+        ) {
+            Column(modifier = Modifier.fillMaxSize()) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(56.dp)
+                        .padding(horizontal = 16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text(
+                        text = stringResource(R.string.miniapp_source_title, app.title, app.version),
+                        modifier = Modifier.weight(1f),
+                        style = type.sessionTitle,
+                        color = tokens.ink,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    if (unsaved) {
+                        MiniAppUnsavedBadge()
                     }
                 }
-            }
-        },
-        text = {
-            Column(
-                modifier = Modifier
-                    .heightIn(max = 420.dp)
-                    .verticalScroll(rememberScrollState())
-                    .imePadding(),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                when (mode) {
-                    MODE_VIEW -> {
-                        MiniAppCodeEditor(
-                            source = editorText,
-                            editable = false,
-                            onSourceChange = {},
-                            enabled = false,
-                            scrollState = codeScrollState,
-                        )
-                        Text(
-                            text = stringResource(R.string.miniapp_source_view_only_description),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-
-                    MODE_EDIT -> {
-                        MiniAppCodeEditor(
-                            source = editorText,
-                            editable = true,
-                            onSourceChange = {
-                                editorText = it
-                                issues = null
-                            },
-                            enabled = !saving,
-                            scrollState = codeScrollState,
-                        )
-                        issues?.let { found ->
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(horizontal = 16.dp, vertical = 8.dp)
+                        .imePadding(),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    when (mode) {
+                        MODE_VIEW -> {
+                            MiniAppCodeEditor(
+                                source = editorText,
+                                editable = false,
+                                onSourceChange = {},
+                                enabled = false,
+                                scrollState = codeScrollState,
+                            )
                             Text(
-                                text = found.joinToString("\n") { "• ${it.message}" },
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.error,
+                                text = stringResource(R.string.miniapp_source_view_only_description),
+                                style = type.tinyTag,
+                                color = tokens.ink2,
                             )
                         }
+
+                        MODE_EDIT -> {
+                            MiniAppCodeEditor(
+                                source = editorText,
+                                editable = true,
+                                onSourceChange = {
+                                    editorText = it
+                                    issues = null
+                                },
+                                enabled = !saving,
+                                scrollState = codeScrollState,
+                            )
+                            issues?.takeIf { it.isNotEmpty() }?.let { found ->
+                                MiniAppSourceIssuePanel(found)
+                            }
+                        }
+
+                        else -> MiniAppSourcePreview(
+                            html = editorText,
+                            app = app,
+                            repository = repository,
+                            settingsStore = settingsStore,
+                        )
                     }
-
-                    else -> MiniAppSourcePreview(
-                        html = editorText,
-                        app = app,
-                        repository = repository,
-                        settingsStore = settingsStore,
-                    )
                 }
-            }
-        },
-        confirmButton = {
-            when (mode) {
-                MODE_VIEW -> TextButton(
-                    onClick = { mode = MODE_EDIT },
-                    enabled = !saving,
-                ) { Text(stringResource(R.string.edit)) }
+                Hairline()
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 8.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    when (mode) {
+                        MODE_VIEW -> {
+                            TextButton(onClick = ::requestDismiss, enabled = !saving) {
+                                Text(stringResource(R.string.update_card_close))
+                            }
+                            Spacer(modifier = Modifier.weight(1f))
+                            Button(
+                                onClick = { mode = MODE_EDIT },
+                                enabled = !saving,
+                                shape = RoundedCornerShape(15.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = tokens.accent,
+                                    contentColor = tokens.accentInk,
+                                ),
+                            ) { Text(stringResource(R.string.edit)) }
+                        }
 
-                MODE_EDIT -> Row {
-                    TextButton(
-                        enabled = !saving,
-                        onClick = {
-                            scope.launch {
-                                val found = MiniAppSourceChecks.issues(editorText, context)
-                                if (found.isNotEmpty()) {
-                                    issues = found
-                                    return@launch
-                                }
-                                saving = true
-                                try {
-                                    repository.saveNewVersion(
-                                        app = app,
-                                        htmlContent = editorText,
-                                        changeNote = "Edited in source editor",
-                                    )
-                                    saving = false
-                                    onDismiss()
-                                } catch (error: CancellationException) {
-                                    throw error
-                                } catch (error: Throwable) {
-                                    saving = false
-                                    issues = listOf(
-                                        MiniAppSourceChecks.Issue(error.message ?: saveFailedMessage)
-                                    )
+                        MODE_EDIT -> {
+                            TextButton(
+                                enabled = !saving,
+                                onClick = {
+                                    if (unsaved) {
+                                        editorText = app.htmlContent
+                                        issues = null
+                                        Toast.makeText(context, R.string.miniapp_discarded, Toast.LENGTH_SHORT).show()
+                                    }
+                                    mode = MODE_VIEW
+                                },
+                            ) { Text(stringResource(R.string.miniapp_discard_changes)) }
+                            Spacer(modifier = Modifier.weight(1f))
+                            TextButton(
+                                enabled = !saving,
+                                onClick = { mode = MODE_PREVIEW },
+                            ) { Text(stringResource(R.string.code_block_preview)) }
+                            Button(
+                                onClick = {
+                                    scope.launch {
+                                        val found = MiniAppSourceChecks.issues(editorText, context)
+                                        if (found.isNotEmpty()) {
+                                            issues = found
+                                            return@launch
+                                        }
+                                        saving = true
+                                        try {
+                                            repository.saveNewVersion(
+                                                app = app,
+                                                htmlContent = editorText,
+                                                changeNote = "Edited in source editor",
+                                            )
+                                            saving = false
+                                            onDismiss()
+                                        } catch (error: CancellationException) {
+                                            throw error
+                                        } catch (error: Throwable) {
+                                            saving = false
+                                            issues = listOf(
+                                                MiniAppSourceChecks.Issue(error.message ?: saveFailedMessage)
+                                            )
+                                        }
+                                    }
+                                },
+                                enabled = !saving,
+                                shape = RoundedCornerShape(15.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = tokens.accent,
+                                    contentColor = tokens.accentInk,
+                                ),
+                            ) {
+                                if (saving) {
+                                    CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                                } else {
+                                    Text(stringResource(R.string.common_save))
                                 }
                             }
-                        },
-                    ) {
-                        if (saving) {
-                            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
-                        } else {
-                            Text(stringResource(R.string.common_save))
+                        }
+
+                        else -> {
+                            TextButton(
+                                enabled = !saving,
+                                onClick = {
+                                    if (unsaved) {
+                                        editorText = app.htmlContent
+                                        issues = null
+                                        Toast.makeText(context, R.string.miniapp_discarded, Toast.LENGTH_SHORT).show()
+                                    }
+                                    mode = MODE_EDIT
+                                },
+                            ) { Text(stringResource(R.string.miniapp_back_to_edit)) }
+                            Spacer(modifier = Modifier.weight(1f))
+                            TextButton(onClick = ::requestDismiss, enabled = !saving) {
+                                Text(stringResource(R.string.update_card_close))
+                            }
                         }
                     }
                 }
-
-                else -> TextButton(
-                    onClick = { mode = MODE_EDIT },
-                    enabled = !saving,
-                ) { Text(stringResource(R.string.miniapp_back_to_edit)) }
             }
-        },
-        dismissButton = {
-            when (mode) {
-                MODE_VIEW -> TextButton(
-                    onClick = ::requestDismiss,
-                    enabled = !saving,
-                ) { Text(stringResource(R.string.update_card_close)) }
-                MODE_EDIT -> Row {
-                    TextButton(
-                        enabled = !saving,
-                        onClick = {
-                            if (unsaved) {
-                                editorText = app.htmlContent
-                                issues = null
-                                Toast.makeText(context, R.string.miniapp_discarded, Toast.LENGTH_SHORT).show()
-                            }
-                            mode = MODE_VIEW
-                        },
-                    ) { Text(stringResource(R.string.miniapp_discard_changes)) }
-                    TextButton(
-                        enabled = !saving,
-                        onClick = { mode = MODE_PREVIEW },
-                    ) { Text(stringResource(R.string.code_block_preview)) }
-                }
-                else -> Row {
-                    TextButton(
-                        enabled = !saving,
-                        onClick = {
-                            if (unsaved) {
-                                editorText = app.htmlContent
-                                issues = null
-                                Toast.makeText(context, R.string.miniapp_discarded, Toast.LENGTH_SHORT).show()
-                            }
-                            mode = MODE_EDIT
-                        },
-                    ) { Text(stringResource(R.string.miniapp_discard_changes)) }
-                    TextButton(
-                        onClick = ::requestDismiss,
-                        enabled = !saving,
-                    ) { Text(stringResource(R.string.update_card_close)) }
-                }
-            }
-        },
-    )
+        }
+    }
 
     if (showDiscardConfirmation) {
         AlertDialog(
@@ -334,6 +357,63 @@ fun MiniAppSourceEditorDialog(
         )
     }
 
+}
+
+@Composable
+private fun MiniAppUnsavedBadge() {
+    val type = LocalAmberType.current
+    val error = MaterialTheme.colorScheme.error
+    Surface(
+        shape = CircleShape,
+        color = error.copy(alpha = 0.12f),
+        border = BorderStroke(1.dp, error.copy(alpha = 0.3f)),
+    ) {
+        Row(
+            modifier = Modifier.padding(start = 7.dp, end = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(6.dp)
+                    .background(error, CircleShape),
+            )
+            Text(
+                text = stringResource(R.string.miniapp_unsaved),
+                style = type.tinyTag,
+                color = error,
+            )
+        }
+    }
+}
+
+@Composable
+private fun MiniAppSourceIssuePanel(issues: List<MiniAppSourceChecks.Issue>) {
+    val error = MaterialTheme.colorScheme.error
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.72f),
+        border = BorderStroke(1.dp, error.copy(alpha = 0.28f)),
+        shape = RoundedCornerShape(10.dp),
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.Top,
+        ) {
+            Icon(
+                imageVector = Lucide.TriangleAlert,
+                contentDescription = null,
+                modifier = Modifier.size(16.dp),
+                tint = error,
+            )
+            Text(
+                text = issues.joinToString("\n") { it.message },
+                style = LocalAmberType.current.tinyTag,
+                color = error,
+            )
+        }
+    }
 }
 
 private const val MODE_VIEW = 0

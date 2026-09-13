@@ -41,6 +41,7 @@ import app.amber.core.memory.recall.MemoryRecallStore
 import app.amber.core.repository.ConversationRepository
 import app.amber.agent.R
 import kotlinx.serialization.json.Json
+import kotlin.uuid.Uuid
 
 private const val TAG = "GenerationRoundEngine"
 // 2026-05-15 — flush cadence rationale.
@@ -265,6 +266,8 @@ class ChatGenerationRoundEngine(
                 addAll(model.customBodies)
             },
             responsesResume = responsesResume,
+            // Stable conversation owner; standalone calls get a fresh UUID here.
+            sessionId = conversation?.id?.toString() ?: Uuid.random().toString(),
         )
         val generativeUiWidgetRequirement =
             GenerativeUiPlanner.widgetRequirement(settings.agentRuntime.generativeUi, messages)

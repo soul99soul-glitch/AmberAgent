@@ -18,6 +18,19 @@ class CapabilityPermissionResolverTest {
 
     private val resolver = PermissionDecisionResolver()
 
+    @Test
+    fun capabilityAutoDoesNotBlockExplicitHighRiskAutoApprovalForMandatoryTools() {
+        val decision = resolver.resolve(
+            toolDef = tool("wm_eval", needsApproval = true, allowsAutoApproval = false)
+                .copy(mandatoryApproval = true),
+            tool = toolCall("wm_eval"),
+            autoApproveTools = true,
+            autoApproveHighRiskTools = true,
+            capabilityPermissions = state(Capability.NETWORK_CONNECT to CapabilityPolicy.AUTO),
+        )
+        assertEquals(PermissionDecisionAction.ALLOW, decision.action)
+    }
+
     private fun tool(
         name: String,
         needsApproval: Boolean = false,

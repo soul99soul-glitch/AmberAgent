@@ -61,6 +61,7 @@ import app.amber.feature.ui.components.ds.AmberCard
 import app.amber.feature.ui.components.ds.Hairline
 import app.amber.feature.ui.components.ds.LiveDot
 import app.amber.feature.ui.components.ds.SectionLabel
+import app.amber.feature.ui.components.ds.amberCanvas
 import app.amber.feature.ui.components.ds.pressable
 import app.amber.feature.ui.context.LocalNavController
 import app.amber.feature.ui.theme.LocalAmberTokens
@@ -107,13 +108,13 @@ fun LiveCompanionPage(vm: LiveCompanionVM = koinViewModel()) {
                 onSettings = { navController.navigate(Screen.SettingAgentExecution) },
             )
         },
-        containerColor = tokens.bg,
+        modifier = Modifier.amberCanvas(),
+        containerColor = Color.Transparent,
     ) { paddingValues ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(paddingValues)
-                .background(tokens.bg)
                 .verticalScroll(scrollState)
                 .padding(horizontal = 16.dp, vertical = 14.dp),
             verticalArrangement = Arrangement.spacedBy(20.dp),
@@ -216,7 +217,6 @@ private fun LiveHeader(live: Boolean, onBack: () -> Unit, onSettings: () -> Unit
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .background(t.bg)
             .statusBarsPadding(),
     ) {
         Row(

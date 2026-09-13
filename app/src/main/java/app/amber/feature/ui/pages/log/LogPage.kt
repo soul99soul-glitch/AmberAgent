@@ -2,9 +2,7 @@ package app.amber.feature.ui.pages.log
 
 import com.composables.icons.lucide.Lucide
 import com.composables.icons.lucide.Trash2
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.text.selection.SelectionContainer
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -14,7 +12,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.Card
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -51,8 +48,8 @@ import app.amber.core.settings.settingsStore
 import app.amber.feature.ui.components.nav.BackButton
 import app.amber.feature.ui.components.ui.JsonTree
 import app.amber.feature.ui.components.ds.AmberCard
-import app.amber.feature.ui.components.ds.Hairline
 import app.amber.feature.ui.components.ds.SectionLabel
+import app.amber.feature.ui.components.ds.amberCanvas
 import app.amber.feature.ui.components.ds.pressable
 import app.amber.feature.ui.theme.LocalAmberTokens
 import app.amber.feature.ui.theme.LocalAmberType
@@ -72,7 +69,7 @@ fun LogPage() {
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("日志", style = type.screenTitle, color = t.ink) },
+                title = { Text(stringResource(R.string.redesign_logs), style = type.screenTitle, color = t.ink) },
                 navigationIcon = { BackButton() },
                 actions = {
                     IconButton(
@@ -94,8 +91,10 @@ fun LogPage() {
                 ),
             )
         },
-        modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
-        containerColor = t.bg,
+        modifier = Modifier
+            .nestedScroll(scrollBehavior.nestedScrollConnection)
+            .amberCanvas(),
+        containerColor = androidx.compose.ui.graphics.Color.Transparent,
     ) { contentPadding ->
         UnifiedLogList(
             logs = logs,
@@ -114,7 +113,7 @@ private fun UnifiedLogList(logs: List<LogEntry>, modifier: Modifier = Modifier) 
     val sortedLogs = remember(logs) { logs.sortedByDescending { it.timestamp } }
 
     LazyColumn(
-        modifier = modifier.background(LocalAmberTokens.current.bg),
+        modifier = modifier,
         verticalArrangement = Arrangement.spacedBy(8.dp),
         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
     ) {
@@ -244,7 +243,7 @@ private fun RequestLogCard(log: LogEntry.RequestLog, onClick: () -> Unit) {
             ) {
                 log.responseCode?.let { code ->
                     Text(
-                        text = "Status: $code",
+                        text = "${stringResource(R.string.setting_webmount_global_status_label)}：$code",
                         style = type.meta,
                         color = if (code in 200..299) t.signal else MaterialTheme.colorScheme.error,
                     )
@@ -260,7 +259,7 @@ private fun RequestLogCard(log: LogEntry.RequestLog, onClick: () -> Unit) {
 
             log.error?.let { error ->
                 Text(
-                    text = "Error: $error",
+                    text = stringResource(R.string.setting_cron_tasks_error_value, error),
                     style = type.meta,
                     color = MaterialTheme.colorScheme.error,
                 )
@@ -284,14 +283,18 @@ private fun RequestLogDetail(log: LogEntry.RequestLog) {
         ) {
             item {
                 Text(
-                    text = "Request Details",
-                    style = MaterialTheme.typography.titleMedium,
+                    text = stringResource(R.string.redesign_request_details),
+                    style = LocalAmberType.current.sessionTitle,
+                    color = LocalAmberTokens.current.ink,
                     fontWeight = FontWeight.Bold
                 )
             }
 
             item {
-                DetailSection("Time", dateFormat.format(Date(log.timestamp)))
+                DetailSection(
+                    stringResource(R.string.placeholder_current_time),
+                    dateFormat.format(Date(log.timestamp)),
+                )
             }
 
             item {
@@ -299,24 +302,24 @@ private fun RequestLogDetail(log: LogEntry.RequestLog) {
             }
 
             item {
-                DetailSection("Method", log.method)
+                DetailSection(stringResource(R.string.redesign_method), log.method)
             }
 
             log.responseCode?.let { code ->
                 item {
-                    DetailSection("Status Code", code.toString())
+                    DetailSection(stringResource(R.string.redesign_status_code), code.toString())
                 }
             }
 
             log.durationMs?.let { duration ->
                 item {
-                    DetailSection("Duration", "${duration}ms")
+                    DetailSection(stringResource(R.string.redesign_duration), "${duration}ms")
                 }
             }
 
             log.error?.let { error ->
                 item {
-                    DetailSection("Error", error)
+                    DetailSection(stringResource(R.string.setting_webmount_pill_error), error)
                 }
             }
 
@@ -324,8 +327,9 @@ private fun RequestLogDetail(log: LogEntry.RequestLog) {
                 item {
                     HorizontalDivider()
                     Text(
-                        text = "Request Headers",
-                        style = MaterialTheme.typography.titleSmall,
+                        text = stringResource(R.string.redesign_request_headers),
+                        style = LocalAmberType.current.body.copy(fontWeight = FontWeight.SemiBold),
+                        color = LocalAmberTokens.current.ink,
                         fontWeight = FontWeight.Bold,
                         modifier = Modifier.padding(top = 8.dp)
                     )
@@ -341,8 +345,9 @@ private fun RequestLogDetail(log: LogEntry.RequestLog) {
                 item {
                     HorizontalDivider()
                     Text(
-                        text = "Request Body",
-                        style = MaterialTheme.typography.titleSmall,
+                        text = stringResource(R.string.redesign_request_body),
+                        style = LocalAmberType.current.body.copy(fontWeight = FontWeight.SemiBold),
+                        color = LocalAmberTokens.current.ink,
                         fontWeight = FontWeight.Bold,
                         modifier = Modifier.padding(top = 8.dp)
                     )
@@ -369,8 +374,9 @@ private fun RequestLogDetail(log: LogEntry.RequestLog) {
                 item {
                     HorizontalDivider()
                     Text(
-                        text = "Response Headers",
-                        style = MaterialTheme.typography.titleSmall,
+                        text = stringResource(R.string.redesign_response_headers),
+                        style = LocalAmberType.current.body.copy(fontWeight = FontWeight.SemiBold),
+                        color = LocalAmberTokens.current.ink,
                         fontWeight = FontWeight.Bold,
                         modifier = Modifier.padding(top = 8.dp)
                     )

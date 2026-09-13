@@ -1,6 +1,8 @@
 package app.amber.feature.ui.pages.miniapp.components
 
 import android.widget.Toast
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -51,9 +53,9 @@ import app.amber.agent.data.db.entity.MiniAppEntity
 import app.amber.feature.ui.pages.miniapp.MiniAppSourceEditorDialog
 import app.amber.feature.ui.pages.miniapp.MiniAppVersionHistoryDialog
 import app.amber.feature.ui.pages.miniapp.rememberMiniAppHtmlExporter
-import app.amber.feature.ui.components.ui.workspaceBorder
-import app.amber.feature.ui.components.ui.workspaceColors
+import app.amber.feature.ui.components.ds.AmberCard
 import app.amber.feature.ui.theme.LocalAmberTokens
+import app.amber.feature.ui.theme.LocalAmberType
 import org.koin.compose.koinInject
 
 @Composable
@@ -71,7 +73,6 @@ fun MiniAppChatCard(
     val appSettings by settingsStore.settingsFlow.collectAsStateWithLifecycle()
     val showSourceButton = appSettings.agentRuntime.miniApp.showSourceButton
     val exportMiniApp = rememberMiniAppHtmlExporter()
-    val workspace = workspaceColors()
     val tokens = LocalAmberTokens.current
     var menuExpanded by remember { mutableStateOf(false) }
     var sourceTarget by remember { mutableStateOf<MiniAppEntity?>(null) }
@@ -90,51 +91,70 @@ fun MiniAppChatCard(
         }
     }
 
-    Surface(
+    AmberCard(
         modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(14.dp),
-        color = workspace.paper,
-        border = workspaceBorder(),
-        tonalElevation = 0.dp,
+        containerColor = tokens.surface,
+        borderColor = tokens.line,
     ) {
         Column(
-            modifier = Modifier.padding(14.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(part.iconEmoji ?: "▣", style = MaterialTheme.typography.titleMedium)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(40.dp)
+                        .background(tokens.surface2, RoundedCornerShape(12.dp))
+                        .border(1.dp, tokens.line, RoundedCornerShape(12.dp)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(part.iconEmoji ?: "▣", style = MaterialTheme.typography.titleMedium)
+                }
                 Text(
                     text = part.title,
-                    style = MaterialTheme.typography.titleMedium,
+                    style = LocalAmberType.current.body.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold),
+                    color = tokens.ink,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
                 )
             }
             Text(
                 text = part.description,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = LocalAmberType.current.secondary,
+                color = tokens.ink2,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                 Button(
                     onClick = onRun,
                     colors = ButtonDefaults.buttonColors(
                         containerColor = tokens.accent,
                         contentColor = tokens.accentInk,
                     ),
+                    shape = RoundedCornerShape(15.dp),
                 ) {
                     Text(stringResource(R.string.miniapp_run))
                 }
                 OutlinedButton(
-                    border = BorderStroke(1.dp, workspace.hairline),
+                    border = BorderStroke(1.dp, tokens.line),
                     onClick = {
                         withCurrentApp {
                             modifyTarget = it
                             modifyRequest = ""
                         }
                     },
+                    shape = RoundedCornerShape(15.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = tokens.ink2),
                 ) {
                     Text(stringResource(R.string.miniapp_modify))
                 }
@@ -148,7 +168,7 @@ fun MiniAppChatCard(
                         imageVector = Lucide.EllipsisVertical,
                         contentDescription = stringResource(R.string.miniapp_more_actions),
                         modifier = Modifier.size(18.dp),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        tint = tokens.ink3,
                     )
                     DropdownMenu(
                         expanded = menuExpanded,
@@ -232,13 +252,15 @@ fun MiniAppChatCard(
     modifyTarget?.let { target ->
         AlertDialog(
             onDismissRequest = { modifyTarget = null },
+            shape = RoundedCornerShape(14.dp),
+            containerColor = tokens.raised,
             title = { Text(stringResource(R.string.miniapp_modify_title)) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text(
                         text = stringResource(R.string.miniapp_modify_description, target.title, target.version),
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = tokens.ink2,
                     )
                     OutlinedTextField(
                         value = modifyRequest,

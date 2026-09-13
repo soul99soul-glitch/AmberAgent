@@ -40,6 +40,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -47,15 +49,14 @@ import androidx.compose.foundation.verticalScroll
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.amber.agent.R
 import app.amber.agent.LAUNCH_START_MODE_PREF
+import app.amber.feature.ui.components.ds.amberCanvas
 import app.amber.agent.LEGACY_CREATE_NEW_CONVERSATION_ON_START_PREF
 import app.amber.agent.LaunchStartMode
 import app.amber.core.settings.ChatFontFamily
 import app.amber.core.settings.DisplaySetting
 import app.amber.agent.migrateLaunchStartMode
-import app.amber.feature.ui.components.ds.SectionLabel
 import app.amber.feature.ui.components.nav.BackButton
 import app.amber.feature.ui.components.richtext.MarkdownBlock
-import app.amber.feature.ui.components.ui.CardGroup
 import app.amber.feature.ui.components.ui.Switch
 import app.amber.feature.ui.components.ui.permission.PermissionManager
 import app.amber.feature.ui.components.ui.permission.PermissionNotification
@@ -156,22 +157,25 @@ fun SettingDisplayPage(vm: SettingVM = koinViewModel()) {
                 scrollBehavior = scrollBehavior,
             )
         },
-        modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
-        containerColor = workspace.canvas
+        modifier = Modifier
+            .nestedScroll(scrollBehavior.nestedScrollConnection)
+            .amberCanvas(),
+        containerColor = androidx.compose.ui.graphics.Color.Transparent
     ) { contentPadding ->
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
             contentPadding = contentPadding + PaddingValues(horizontal = SettingPageHorizontalInset, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(22.dp)
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             item {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    SettingSectionTitle(stringResource(R.string.setting_page_theme_setting))
-                    // Graphite (D2/D3): base family (Warm/Sage) + independent accent. Light/dark
-                    // follows the global color mode; the 9 legacy themes are replaced.
-                    val baseFamily = displaySetting.amberBaseFamily
-                    CardGroup {
+                // Graphite (D2/D3): base family (Warm/Sage) + independent accent. Light/dark
+                // follows the global color mode; the 9 legacy themes are replaced.
+                val baseFamily = displaySetting.amberBaseFamily
+                SettingCardGroup(
+                    title = stringResource(R.string.setting_page_theme_setting),
+                ) {
                         item(
+                            modifier = Modifier.settingSingleLine(),
                             headlineContent = { Text(stringResource(R.string.setting_display_page_base_family_title)) },
                             trailingContent = {
                                 WorkspaceSegmentedChoice(
@@ -191,6 +195,7 @@ fun SettingDisplayPage(vm: SettingVM = koinViewModel()) {
                             },
                         )
                         item(
+                            modifier = Modifier.settingSingleLine(),
                             headlineContent = { Text(stringResource(R.string.setting_display_page_accent_color_title)) },
                             trailingContent = {
                                 Row(
@@ -202,25 +207,36 @@ fun SettingDisplayPage(vm: SettingVM = koinViewModel()) {
                                         val selected = displaySetting.accentColor.equals(hex, ignoreCase = true)
                                         Box(
                                             modifier = Modifier
-                                                .size(26.dp)
-                                                .clip(androidx.compose.foundation.shape.CircleShape)
-                                                .background(acc.hex)
-                                                .border(
-                                                    width = if (selected) 2.dp else 1.dp,
-                                                    color = if (selected) workspace.ink else workspace.hairline,
-                                                    shape = androidx.compose.foundation.shape.CircleShape,
-                                                )
-                                                .clickable { updateDisplaySetting(displaySetting.copy(accentColor = hex)) },
-                                        )
+                                                .size(40.dp)
+                                                .clickable { updateDisplaySetting(displaySetting.copy(accentColor = hex)) }
+                                                .semantics {
+                                                    contentDescription = acc.label
+                                                },
+                                            contentAlignment = Alignment.Center,
+                                        ) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(26.dp)
+                                                    .clip(androidx.compose.foundation.shape.CircleShape)
+                                                    .background(acc.hex)
+                                                    .border(
+                                                        width = if (selected) 2.dp else 1.dp,
+                                                        color = if (selected) workspace.ink else workspace.hairline,
+                                                        shape = androidx.compose.foundation.shape.CircleShape,
+                                                    ),
+                                            )
+                                        }
                                     }
                                 }
                             },
                         )
                         item(
+                            modifier = Modifier.settingSingleLine(),
                             headlineContent = { Text(stringResource(R.string.setting_display_page_amoled_dark_mode_title)) },
                             trailingContent = { Switch(checked = amoledDarkMode, onCheckedChange = { amoledDarkMode = it }) },
                         )
                         item(
+                            modifier = Modifier.settingSingleLine(),
                             onClick = { showThemeLibrary = true },
                             headlineContent = { Text(stringResource(R.string.setting_theme_library_title)) },
                             trailingContent = {
@@ -231,7 +247,6 @@ fun SettingDisplayPage(vm: SettingVM = koinViewModel()) {
                                 )
                             },
                         )
-                    }
                 }
             }
 
@@ -248,8 +263,8 @@ fun SettingDisplayPage(vm: SettingVM = koinViewModel()) {
                     storedMode = launchStartModeRaw,
                     legacyCreateNewConversationOnStart = legacyCreateNewConversationOnStart,
                 )
-                CardGroup(
-                    title = { SectionLabel(stringResource(R.string.setting_page_general_settings)) },
+                SettingCardGroup(
+                    title = stringResource(R.string.setting_page_general_settings),
                 ) {
                     item(
                         headlineContent = { Text(stringResource(R.string.setting_display_page_launch_start_mode_title)) },
@@ -280,6 +295,7 @@ fun SettingDisplayPage(vm: SettingVM = koinViewModel()) {
                         },
                     )
                     item(
+                        modifier = Modifier.settingTwoLine(),
                         headlineContent = { Text(stringResource(R.string.setting_display_page_notification_message_generated)) },
                         supportingContent = { Text(stringResource(R.string.setting_display_page_notification_message_generated_desc)) },
                         trailingContent = {
@@ -298,14 +314,12 @@ fun SettingDisplayPage(vm: SettingVM = koinViewModel()) {
             }
 
             item {
-                Column(
-                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                SettingCardGroup(
+                    title = stringResource(R.string.setting_page_message_display_settings),
                 ) {
-                    CardGroup(
-                        title = { SectionLabel(stringResource(R.string.setting_page_message_display_settings)) },
-                    ) {
                         // V3: 聊天主题切换器已移到顶部 (替代旧 "Notion style" 项), 这里去除重复
                         item(
+                            modifier = Modifier.settingTwoLine(),
                             headlineContent = { Text(stringResource(R.string.setting_display_page_show_user_avatar_title)) },
                             supportingContent = { Text(stringResource(R.string.setting_display_page_show_user_avatar_desc)) },
                             trailingContent = {
@@ -318,6 +332,7 @@ fun SettingDisplayPage(vm: SettingVM = koinViewModel()) {
                             },
                         )
                         item(
+                            modifier = Modifier.settingTwoLine(),
                             headlineContent = { Text(stringResource(R.string.setting_display_page_show_assistant_bubble_title)) },
                             supportingContent = { Text(stringResource(R.string.setting_display_page_show_assistant_bubble_desc)) },
                             trailingContent = {
@@ -330,6 +345,7 @@ fun SettingDisplayPage(vm: SettingVM = koinViewModel()) {
                             },
                         )
                         item(
+                            modifier = Modifier.settingTwoLine(),
                             headlineContent = { Text(stringResource(R.string.setting_display_page_chat_list_model_icon_title)) },
                             supportingContent = { Text(stringResource(R.string.setting_display_page_chat_list_model_icon_desc)) },
                             trailingContent = {
@@ -342,6 +358,7 @@ fun SettingDisplayPage(vm: SettingVM = koinViewModel()) {
                             },
                         )
                         item(
+                            modifier = Modifier.settingTwoLine(),
                             headlineContent = { Text(stringResource(R.string.setting_display_page_show_model_name_title)) },
                             supportingContent = { Text(stringResource(R.string.setting_display_page_show_model_name_desc)) },
                             trailingContent = {
@@ -354,6 +371,7 @@ fun SettingDisplayPage(vm: SettingVM = koinViewModel()) {
                             },
                         )
                         item(
+                            modifier = Modifier.settingTwoLine(),
                             headlineContent = { Text(stringResource(R.string.setting_display_page_show_date_below_name_title)) },
                             supportingContent = { Text(stringResource(R.string.setting_display_page_show_date_below_name_desc)) },
                             trailingContent = {
@@ -366,6 +384,7 @@ fun SettingDisplayPage(vm: SettingVM = koinViewModel()) {
                             },
                         )
                         item(
+                            modifier = Modifier.settingTwoLine(),
                             headlineContent = { Text(stringResource(R.string.setting_display_page_show_thinking_content_title)) },
                             supportingContent = { Text(stringResource(R.string.setting_display_page_show_thinking_content_desc)) },
                             trailingContent = {
@@ -378,6 +397,7 @@ fun SettingDisplayPage(vm: SettingVM = koinViewModel()) {
                             },
                         )
                         item(
+                            modifier = Modifier.settingTwoLine(),
                             headlineContent = { Text(stringResource(R.string.setting_display_page_auto_collapse_thinking_title)) },
                             supportingContent = { Text(stringResource(R.string.setting_display_page_auto_collapse_thinking_desc)) },
                             trailingContent = {
@@ -390,6 +410,7 @@ fun SettingDisplayPage(vm: SettingVM = koinViewModel()) {
                             },
                         )
                         item(
+                            modifier = Modifier.settingTwoLine(),
                             headlineContent = { Text(stringResource(R.string.setting_display_page_enable_latex_rendering_title)) },
                             supportingContent = { Text(stringResource(R.string.setting_display_page_enable_latex_rendering_desc)) },
                             trailingContent = {
@@ -462,16 +483,16 @@ fun SettingDisplayPage(vm: SettingVM = koinViewModel()) {
                                 }
                             }
                         )
-                    }
                 }
             }
 
             item {
-                CardGroup(
-                    title = { SectionLabel(stringResource(R.string.setting_page_code_display_settings)) },
+                SettingCardGroup(
+                    title = stringResource(R.string.setting_page_code_display_settings),
                 ) {
-                    item(
-                        headlineContent = { Text(stringResource(R.string.setting_display_page_code_block_auto_wrap_title)) },
+                        item(
+                            modifier = Modifier.settingTwoLine(),
+                            headlineContent = { Text(stringResource(R.string.setting_display_page_code_block_auto_wrap_title)) },
                         supportingContent = { Text(stringResource(R.string.setting_display_page_code_block_auto_wrap_desc)) },
                         trailingContent = {
                             Switch(
@@ -482,8 +503,9 @@ fun SettingDisplayPage(vm: SettingVM = koinViewModel()) {
                             )
                         },
                     )
-                    item(
-                        headlineContent = { Text(stringResource(R.string.setting_display_page_code_block_auto_collapse_title)) },
+                        item(
+                            modifier = Modifier.settingTwoLine(),
+                            headlineContent = { Text(stringResource(R.string.setting_display_page_code_block_auto_collapse_title)) },
                         supportingContent = { Text(stringResource(R.string.setting_display_page_code_block_auto_collapse_desc)) },
                         trailingContent = {
                             Switch(
@@ -494,8 +516,9 @@ fun SettingDisplayPage(vm: SettingVM = koinViewModel()) {
                             )
                         },
                     )
-                    item(
-                        headlineContent = { Text(stringResource(R.string.setting_display_page_show_line_numbers_title)) },
+                        item(
+                            modifier = Modifier.settingTwoLine(),
+                            headlineContent = { Text(stringResource(R.string.setting_display_page_show_line_numbers_title)) },
                         supportingContent = { Text(stringResource(R.string.setting_display_page_show_line_numbers_desc)) },
                         trailingContent = {
                             Switch(
@@ -510,13 +533,11 @@ fun SettingDisplayPage(vm: SettingVM = koinViewModel()) {
             }
 
             item {
-                Column(
-                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                SettingCardGroup(
+                    title = stringResource(R.string.setting_page_interaction_notification_settings),
                 ) {
-                    CardGroup(
-                        title = { SectionLabel(stringResource(R.string.setting_page_interaction_notification_settings)) },
-                    ) {
                         item(
+                            modifier = Modifier.settingTwoLine(),
                             headlineContent = { Text(stringResource(R.string.setting_display_page_send_on_enter_title)) },
                             supportingContent = { Text(stringResource(R.string.setting_display_page_send_on_enter_desc)) },
                             trailingContent = {
@@ -529,6 +550,7 @@ fun SettingDisplayPage(vm: SettingVM = koinViewModel()) {
                             },
                         )
                         item(
+                            modifier = Modifier.settingTwoLine(),
                             headlineContent = { Text(stringResource(R.string.setting_display_page_show_message_jumper_title)) },
                             supportingContent = { Text(stringResource(R.string.setting_display_page_show_message_jumper_desc)) },
                             trailingContent = {
@@ -542,6 +564,7 @@ fun SettingDisplayPage(vm: SettingVM = koinViewModel()) {
                         )
                         if (displaySetting.showMessageJumper) {
                             item(
+                                modifier = Modifier.settingTwoLine(),
                                 headlineContent = { Text(stringResource(R.string.setting_display_page_message_jumper_position_title)) },
                                 supportingContent = { Text(stringResource(R.string.setting_display_page_message_jumper_position_desc)) },
                                 trailingContent = {
@@ -555,6 +578,7 @@ fun SettingDisplayPage(vm: SettingVM = koinViewModel()) {
                             )
                         }
                         item(
+                            modifier = Modifier.settingTwoLine(),
                             headlineContent = { Text(stringResource(R.string.setting_display_page_enable_auto_scroll_title)) },
                             supportingContent = { Text(stringResource(R.string.setting_display_page_enable_auto_scroll_desc)) },
                             trailingContent = {
@@ -567,6 +591,7 @@ fun SettingDisplayPage(vm: SettingVM = koinViewModel()) {
                             },
                         )
                         item(
+                            modifier = Modifier.settingTwoLine(),
                             headlineContent = { Text(stringResource(R.string.setting_display_page_bottom_follow_animation_title)) },
                             supportingContent = { Text(stringResource(R.string.setting_display_page_bottom_follow_animation_desc)) },
                             trailingContent = {
@@ -579,6 +604,7 @@ fun SettingDisplayPage(vm: SettingVM = koinViewModel()) {
                             },
                         )
                         item(
+                            modifier = Modifier.settingTwoLine(),
                             headlineContent = { Text(stringResource(R.string.setting_display_page_enable_message_generation_haptic_effect_title)) },
                             supportingContent = { Text(stringResource(R.string.setting_display_page_enable_message_generation_haptic_effect_desc)) },
                             trailingContent = {
@@ -591,6 +617,7 @@ fun SettingDisplayPage(vm: SettingVM = koinViewModel()) {
                             },
                         )
                         item(
+                            modifier = Modifier.settingTwoLine(),
                             headlineContent = { Text(stringResource(R.string.setting_display_page_skip_crop_image_title)) },
                             supportingContent = { Text(stringResource(R.string.setting_display_page_skip_crop_image_desc)) },
                             trailingContent = {
@@ -603,6 +630,7 @@ fun SettingDisplayPage(vm: SettingVM = koinViewModel()) {
                             },
                         )
                         item(
+                            modifier = Modifier.settingTwoLine(),
                             headlineContent = { Text(stringResource(R.string.setting_display_page_paste_long_text_as_file_title)) },
                             supportingContent = { Text(stringResource(R.string.setting_display_page_paste_long_text_as_file_desc)) },
                             trailingContent = {
@@ -616,6 +644,7 @@ fun SettingDisplayPage(vm: SettingVM = koinViewModel()) {
                         )
                         if (displaySetting.pasteLongTextAsFile) {
                             item(
+                                modifier = Modifier.settingTwoLine(),
                                 headlineContent = { Text(stringResource(R.string.setting_display_page_paste_long_text_threshold_title)) },
                                 supportingContent = {
                                     // Range 100..10000 chars, 100-char step. Single int value
@@ -634,6 +663,7 @@ fun SettingDisplayPage(vm: SettingVM = koinViewModel()) {
                             )
                         }
                         item(
+                            modifier = Modifier.settingTwoLine(),
                             headlineContent = { Text(stringResource(R.string.setting_display_page_volume_key_scroll_title)) },
                             supportingContent = { Text(stringResource(R.string.setting_display_page_volume_key_scroll_desc)) },
                             trailingContent = {
@@ -662,7 +692,6 @@ fun SettingDisplayPage(vm: SettingVM = koinViewModel()) {
                                 }
                             )
                         }
-                    }
                 }
             }
 
@@ -680,7 +709,12 @@ fun SettingDisplayPage(vm: SettingVM = koinViewModel()) {
                     .verticalScroll(rememberScrollState())
                     .padding(horizontal = SettingPageHorizontalInset, vertical = 8.dp),
             ) {
-                ThemeLibrarySection(displaySetting = displaySetting)
+                ThemeLibrarySection(
+                    displaySetting = displaySetting,
+                    onBaseFamilyChange = { family ->
+                        updateDisplaySetting(displaySetting.copy(amberBaseFamily = family))
+                    },
+                )
             }
         }
     }

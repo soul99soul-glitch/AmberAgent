@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.lazy.staggeredgrid.LazyVerticalStaggeredGrid
@@ -50,6 +51,7 @@ import coil3.compose.AsyncImage
 import kotlinx.coroutines.launch
 import app.amber.agent.data.db.entity.ManagedFileEntity
 import app.amber.agent.R
+import app.amber.feature.ui.components.ds.amberCanvas
 import app.amber.core.files.FileFolders
 import app.amber.core.files.FilesManager
 import app.amber.feature.ui.components.nav.BackButton
@@ -119,8 +121,10 @@ fun SettingFilesPage(
                 scrollBehavior = scrollBehavior,
             )
         },
-        modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
-        containerColor = workspaceColors().canvas
+        modifier = Modifier
+            .nestedScroll(scrollBehavior.nestedScrollConnection)
+            .amberCanvas(),
+        containerColor = androidx.compose.ui.graphics.Color.Transparent
     ) { innerPadding ->
         Column(
             modifier = Modifier
@@ -128,7 +132,10 @@ fun SettingFilesPage(
                 .padding(innerPadding)
                 .padding(horizontal = SettingPageHorizontalInset, vertical = 8.dp)
         ) {
-            SettingSectionTitle("${stringResource(R.string.setting_files_page_title)} · ${files.size}")
+            SettingSectionTitle(
+                text = "${stringResource(R.string.setting_files_page_title)} · ${files.size}",
+                modifier = Modifier.padding(top = 6.dp),
+            )
             FolderRow(
                 folders = folders,
                 selectedFolder = selectedFolder,
@@ -180,6 +187,7 @@ private fun FolderRow(
     ) {
         folders.forEach { folder ->
             FilterChip(
+                modifier = Modifier.height(32.dp),
                 selected = selectedFolder == folder,
                 onClick = { onFolderSelected(folder) },
                 label = { Text(folderDisplayName(folder)) }
@@ -205,6 +213,7 @@ private fun FileItem(
         shape = RoundedCornerShape(14.dp),
         border = BorderStroke(1.dp, workspaceColors().hairline),
         colors = CardDefaults.cardColors(containerColor = workspaceColors().paper),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
     ) {
         Column {
             Box(

@@ -177,8 +177,8 @@ interface ToolEffectLedger {
 
     /**
      * Retention (P1-02): delete terminal effects (FINISHED / FAILED /
-     * RECONCILED, incl. abandoned) not touched for more than [maxAgeMs].
-     * Called at cold start so the ledger never grows unbounded.
+     * RECONCILED, incl. abandoned) not touched for more than [maxAgeMs],
+     * excluding unfinished runs that still need replay or deduplication.
      */
     suspend fun deleteTerminalOlderThan(maxAgeMs: Long): Int
 

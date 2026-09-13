@@ -170,6 +170,7 @@ internal fun MessagePartsBlock(
                                         model = model,
                                         regexes = regexes,
                                         loading = loading,
+                                        framed = true,
                                         collapsedAdaptiveWidth = isReasoningOnlyBlock,
                                     )
                                 }
@@ -232,17 +233,17 @@ internal fun MessagePartsBlock(
                                     // (复制/全选/朗读/搜索) ——避免跟我们的 menu sheet 两个面板同时出现.
                                     androidx.compose.foundation.text.selection.DisableSelection {
                                     // Graphite §6.2 "User bubble": userBg fill, userInk text,
-                                    // asymmetric radius 16/16/5/16 (topStart/topEnd/bottomEnd/
-                                    // bottomStart), right-aligned, max-width ~82% of available.
-                                    // The bottomEnd 5dp notch points the bubble back at the
-                                    // sender (right side); other corners stay 16dp.
+                                    // asymmetric radius 23/23/14/23 (topStart/topEnd/bottomEnd/
+                                    // bottomStart), right-aligned, max-width ~92% of available.
+                                    // The bottomEnd corner keeps the same 14dp radius as the
+                                    // right-side prototype; the entire bubble stays softly round.
                                     val userBubbleShape = androidx.compose.foundation.shape.RoundedCornerShape(
-                                        topStart = 16.dp,
-                                        topEnd = 16.dp,
-                                        bottomEnd = 5.dp,
-                                        bottomStart = 16.dp,
+                                        topStart = 23.dp,
+                                        topEnd = 23.dp,
+                                        bottomEnd = 14.dp,
+                                        bottomStart = 23.dp,
                                     )
-                                    // §6.2 max-width = 82% of available width. BoxWithConstraints
+                                    // §6.2 max-width = 92% of available width. BoxWithConstraints
                                     // is the in-repo idiom for a fraction-of-parent cap (see
                                     // GeneratedImageCarousel / GenerativeWidgetCard); it only adds
                                     // a measuring frame — the Surface + every branch below is
@@ -264,9 +265,9 @@ internal fun MessagePartsBlock(
                                                 onLongClick = { onUserMessageLongClick?.invoke() },
                                             ),
                                         shape = userBubbleShape,
-                                        color = app.amber.feature.ui.pages.chat.LocalChatTheme.current.userBubble,
-                                        // 深底用户气泡 → 浅色文字 userBubbleInk（之前误用 ink 造成黑底黑字）
-                                        contentColor = app.amber.feature.ui.pages.chat.LocalChatTheme.current.userBubbleInk,
+                                        color = LocalAmberTokens.current.userBg,
+                                        // 深底用户气泡 → 浅色文字 userInk（之前误用 ink 造成黑底黑字）
+                                        contentColor = LocalAmberTokens.current.userInk,
                                         tonalElevation = 0.dp,
                                         shadowElevation = 0.dp,
                                     ) {

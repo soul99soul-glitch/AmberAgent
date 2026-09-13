@@ -34,6 +34,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import app.amber.feature.ui.theme.LocalAmberTokens
@@ -119,6 +120,7 @@ fun WorkspaceStatusPill(
     modifier: Modifier = Modifier,
     tone: WorkspaceTone = WorkspaceTone.Neutral,
     maxWidth: Dp = Dp.Unspecified,
+    textStyle: TextStyle = LocalAmberType.current.meta,
 ) {
     val colors = workspaceColors()
     // Accent tone follows the active Amber accent instead of a fixed blue.
@@ -140,7 +142,7 @@ fun WorkspaceStatusPill(
         Text(
             text = text,
             modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
-            style = LocalAmberType.current.meta,
+            style = textStyle,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
@@ -151,8 +153,8 @@ fun WorkspaceStatusPill(
 fun WorkspaceLeadingIcon(
     icon: ImageVector,
     modifier: Modifier = Modifier,
-    size: Dp = 32.dp,
-    iconSize: Dp = 17.dp,
+    size: Dp = 28.dp,
+    iconSize: Dp = 16.dp,
     tone: WorkspaceTone = WorkspaceTone.Neutral,
 ) {
     val colors = workspaceColors()
@@ -275,7 +277,7 @@ fun WorkspaceTextButton(
     }
 }
 
-/** Shared 56dp header from the Android redesign, with native status-bar insets. */
+/** Compact header with native status-bar insets and full-size action touch targets. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun WorkspaceTopBar(
@@ -300,7 +302,7 @@ fun WorkspaceTopBar(
         navigationIcon = navigationIcon,
         actions = actions,
         scrollBehavior = scrollBehavior,
-        expandedHeight = 56.dp,
+        expandedHeight = 52.dp,
         colors = TopAppBarDefaults.topAppBarColors(
             containerColor = workspace.canvas,
             scrolledContainerColor = workspace.canvas,

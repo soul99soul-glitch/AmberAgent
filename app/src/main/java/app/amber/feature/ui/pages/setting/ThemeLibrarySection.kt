@@ -12,6 +12,10 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -34,9 +38,9 @@ import androidx.compose.ui.unit.dp
 import app.amber.agent.R
 import app.amber.core.settings.DisplaySetting
 import app.amber.core.utils.JsonInstant
-import app.amber.feature.ui.components.ds.SectionLabel
-import app.amber.feature.ui.components.ui.CardGroup
 import app.amber.feature.ui.components.ui.workspaceColors
+import app.amber.feature.ui.components.ui.WorkspaceStatusPill
+import app.amber.feature.ui.components.ui.WorkspaceTone
 import app.amber.feature.ui.context.LocalToaster
 import app.amber.feature.ui.theme.ThemePackage
 import app.amber.feature.ui.theme.ThemePackageApplyResult
@@ -59,6 +63,7 @@ import org.koin.compose.koinInject
 @Composable
 fun ThemeLibrarySection(
     displaySetting: DisplaySetting,
+    onBaseFamilyChange: (String) -> Unit,
     modifier: Modifier = Modifier,
     manager: ThemePackageManager = koinInject(),
 ) {
@@ -121,10 +126,19 @@ fun ThemeLibrarySection(
         }
     }
 
-    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(2.dp)) {
-        CardGroup(
-            title = { SectionLabel(stringResource(R.string.setting_theme_library_title)) },
+    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        SettingCardGroup(
+            title = stringResource(R.string.setting_theme_library_title),
         ) {
+            item(
+                headlineContent = { Text(stringResource(R.string.setting_display_page_base_family_title)) },
+                trailingContent = {
+                    ThemeFamilyChoice(
+                        selected = displaySetting.amberBaseFamily,
+                        onSelected = onBaseFamilyChange,
+                    )
+                },
+            )
             item(
                 headlineContent = { Text(stringResource(R.string.setting_theme_library_export_current_title)) },
                 supportingContent = { Text(stringResource(R.string.setting_theme_library_export_current_desc)) },
@@ -144,7 +158,11 @@ fun ThemeLibrarySection(
                 },
             )
 
-            // 内置主题
+        }
+
+        SettingCardGroup(
+            title = stringResource(R.string.setting_theme_library_builtin_desc),
+        ) {
             listOf(
                 "WARM" to R.string.setting_theme_library_builtin_warm,
                 "SAGE" to R.string.setting_theme_library_builtin_sage,
@@ -188,7 +206,11 @@ fun ThemeLibrarySection(
                 )
             }
 
-            // 导入的主题包
+        }
+
+        SettingCardGroup(
+            title = stringResource(R.string.setting_theme_library_import_title),
+        ) {
             importedPackages.forEach { entity ->
                 val applied = displaySetting.appliedThemePackageId == entity.id
                 item(
@@ -332,6 +354,41 @@ fun ThemeLibrarySection(
     }
 }
 
+@Composable
+private fun ThemeFamilyChoice(
+    selected: String,
+    onSelected: (String) -> Unit,
+) {
+    val colors = workspaceColors()
+    val options = listOf(
+        "WARM" to stringResource(R.string.setting_display_page_base_family_warm),
+        "SAGE" to stringResource(R.string.setting_display_page_base_family_sage),
+    )
+    Row(
+        modifier = Modifier
+            .clip(CircleShape)
+            .background(colors.row)
+            .border(1.dp, colors.hairline, CircleShape)
+            .padding(3.dp),
+        horizontalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        options.forEach { (family, label) ->
+            Box(
+                modifier = Modifier
+                    .clip(CircleShape)
+                    .clickable { onSelected(family) }
+                    .background(
+                        if (family == selected) colors.paper else androidx.compose.ui.graphics.Color.Transparent,
+                    )
+                    .padding(horizontal = 10.dp, vertical = 7.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(label, style = app.amber.feature.ui.theme.LocalAmberType.current.meta)
+            }
+        }
+    }
+}
+
 /** 只用 Android 已支持的 base/accent tokens，避免把 iOS 专属槽位冒充成 Android 能力。 */
 @Composable
 private fun ThemePackageTokenPreview(displaySetting: DisplaySetting) {
@@ -378,16 +435,8 @@ private fun ThemePackageTokenPreview(displaySetting: DisplaySetting) {
 
 @Composable
 private fun BuiltinActiveTag() {
-    val workspace = workspaceColors()
-    Box(
-        modifier = Modifier
-            .padding(horizontal = 6.dp, vertical = 2.dp),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(
-            text = stringResource(R.string.setting_theme_library_active),
-            style = MaterialTheme.typography.labelSmall,
-            color = workspace.ink,
-        )
-    }
+    WorkspaceStatusPill(
+        text = stringResource(R.string.setting_theme_library_active),
+        tone = WorkspaceTone.Accent,
+    )
 }

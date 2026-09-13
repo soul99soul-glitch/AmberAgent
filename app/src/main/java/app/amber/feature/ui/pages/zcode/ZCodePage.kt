@@ -3,13 +3,14 @@ package app.amber.feature.ui.pages.zcode
 import androidx.annotation.StringRes
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
@@ -37,6 +38,7 @@ import app.amber.core.utils.plus
 import app.amber.feature.ui.components.nav.BackButton
 import app.amber.feature.ui.components.ds.AmberCard
 import app.amber.feature.ui.components.ds.SectionLabel
+import app.amber.feature.ui.components.ds.amberCanvas
 import app.amber.feature.ui.components.ui.WorkspaceTopBar
 import app.amber.feature.ui.context.LocalNavController
 import app.amber.feature.ui.context.LocalToaster
@@ -131,12 +133,12 @@ fun ZCodePage(
                 navigationIcon = { BackButton() },
             )
         },
-        containerColor = t.bg,
+        modifier = Modifier.amberCanvas(),
+        containerColor = androidx.compose.ui.graphics.Color.Transparent,
     ) { innerPadding ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .background(t.bg)
                 .verticalScroll(rememberScrollState())
                 .padding(innerPadding + PaddingValues(horizontal = 16.dp, vertical = 12.dp)),
             verticalArrangement = Arrangement.spacedBy(16.dp),
@@ -160,6 +162,7 @@ fun ZCodePage(
                         placeholder = { Text("https://…") },
                         singleLine = true,
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+                        shape = RoundedCornerShape(12.dp),
                         trailingIcon = {
                             IconButton(onClick = { scanQrCodeLauncher.launch(null) }) {
                                 Icon(
@@ -179,7 +182,10 @@ fun ZCodePage(
                     Button(
                         onClick = { openZCodeUrl(draft) },
                         enabled = draft.isNotBlank(),
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 48.dp),
+                        shape = RoundedCornerShape(15.dp),
                     ) { Text(stringResource(R.string.zcode_open)) }
                 }
             }

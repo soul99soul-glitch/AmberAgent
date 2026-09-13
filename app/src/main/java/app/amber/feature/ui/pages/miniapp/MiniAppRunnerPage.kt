@@ -84,8 +84,8 @@ import app.amber.core.settings.prefs.SettingsAggregator
 import app.amber.agent.data.db.entity.MiniAppEntity
 import app.amber.feature.ui.context.LocalNavController
 import app.amber.feature.ui.components.nav.BackButton
+import app.amber.feature.ui.components.ds.amberCanvas
 import app.amber.feature.ui.components.ui.WorkspaceTopBar
-import app.amber.feature.ui.components.ui.workspaceColors
 import app.amber.core.utils.writeClipboardText
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import org.koin.compose.koinInject
@@ -115,7 +115,7 @@ fun MiniAppRunnerPage(
 
     MiniAppImmersiveWindowEffect()
 
-    Box(modifier = Modifier.fillMaxSize()) {
+    Box(modifier = Modifier.fillMaxSize().amberCanvas()) {
         when (val current = state) {
             MiniAppRunnerState.Loading -> MiniAppRunnerChrome(
                 title = stringResource(R.string.miniapp_title),
@@ -176,12 +176,11 @@ private fun MiniAppRunnerChrome(
     title: String,
     content: @Composable BoxScope.() -> Unit,
 ) {
-    val colors = workspaceColors()
     Column(
         modifier = Modifier
             .fillMaxSize()
             .statusBarsPadding()
-            .background(colors.canvas),
+            .amberCanvas(),
     ) {
         WorkspaceTopBar(
             title = title,

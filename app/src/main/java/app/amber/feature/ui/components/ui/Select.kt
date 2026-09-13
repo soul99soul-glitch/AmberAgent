@@ -25,6 +25,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.util.fastForEach
 import com.composables.icons.lucide.Lucide
@@ -41,7 +43,8 @@ fun <T> Select(
     optionToString: @Composable (T) -> String = { it.toString() },
     optionLeading: @Composable ((T) -> Unit)? = null,
     leading: @Composable () -> Unit = {},
-    trailing: @Composable () -> Unit = {}
+    labelMaxWidth: Dp? = null,
+    trailing: @Composable () -> Unit = {},
 ) {
     var expanded by remember { mutableStateOf(false) }
     // V3 设计稿：方框 → 胶囊 + 主题色 (不再固定蓝色 workspace.blueContainer)
@@ -77,8 +80,10 @@ fun <T> Select(
                 leading()
                 Text(
                     text = optionToString(selectedOption),
+                    modifier = labelMaxWidth?.let { Modifier.widthIn(max = it) } ?: Modifier,
                     style = MaterialTheme.typography.labelMedium,
                     maxLines = 1,
+                    overflow = if (labelMaxWidth != null) TextOverflow.Ellipsis else TextOverflow.Clip,
                 )
                 trailing()
                 Icon(

@@ -56,6 +56,17 @@ private const val PERF_TAG = "AmberChatPerf"
 /** Wire reason carried by [GenerationTerminal.GuardStopped]. */
 private const val DUPLICATE_TOOL_CALL_GUARD_REASON = "duplicate_tool_call"
 
+// These observations may change between model steps. Keep this explicit:
+// the ledger's READ_ONLY class also covers execution tools, not just reads.
+private val REPEATABLE_OBSERVATION_TOOLS = setOf(
+    "file_read", "file_list", "file_search",
+    "terminal_job_wait", "terminal_job_read", "terminal_session_read",
+    "subagent_wait", "subagent_read", "model_council_wait", "model_council_read",
+    "js_cell_wait", "webview_wait_for_load", "webview_read", "webview_find_text", "webview_links",
+    "wm_wait", "wm_observe", "wm_state", "wm_extract", "wm_get", "wm_find", "wm_network_inspect",
+    "wm_screenshot", "wm_visual_snapshot",
+)
+
 /** Failure-class tool-output statuses — mirrors the UI failure classifier (ChatMessageTools.toolHasFailure). */
 private val FAILURE_TOOL_STATUSES = setOf("failed", "error", "denied", "timed_out", "interrupted", "policy_denied")
 
@@ -150,6 +161,17 @@ class DefaultRunKernel(
 
         var messages: List<UIMessage> = session.messages
         val toolExposure = ToolExposureState.from(session.tools)
+        // A setting change can resume a run that was already parked at the
+        // approval gate. Keep the original Pending set separate from tools
+        // emitted by the current provider round: only the former may be
+        // re-evaluated here, and only once at the beginning of this kernel
+        // invocation. A composite tool that pauses again later must return to
+        // WaitingUser instead of being retried in a loop.
+        val initialPendingToolCallIds = messages.lastOrNull()
+            ?.getTools()
+            ?.filter { it.isPending && !it.isExecuted }
+            ?.mapTo(mutableSetOf()) { it.toolCallId }
+            .orEmpty()
         var terminal: GenerationTerminal? = null
         var brokeEarly = false
 
@@ -189,14 +211,54 @@ class DefaultRunKernel(
             // while their outer call is already executing. Persisted pending
             // state must stop the loop before another model request, just as
             // a model-produced approval does.
-            val waitingTools = messages.lastOrNull()?.getTools()?.filter { it.isPending }.orEmpty()
-            if (waitingTools.isNotEmpty()) {
-                terminal = GenerationTerminal.WaitingUser
-                brokeEarly = true
-                break
+            val waitingTools = messages.lastOrNull()?.getTools()
+                ?.filter { it.isPending }
+                .orEmpty()
+            // Keep definitions for already-persisted calls visible to this
+            // step even when the lazy tool catalog has not exposed them yet.
+            // They are needed only for the local approval re-check below; no
+            // provider request is made until all waiting tools are settled.
+            toolExposure.exposeToolNames((pendingTools + waitingTools).map { it.toolName })
+            val exposedTools = toolExposure.toolsForStep()
+            val toolDefinitionsForPending = exposedTools.associateBy { it.name }
+            val autoResumablePendingTools = if (
+                stepIndex == 0 && autoApproveHighRiskTools && initialPendingToolCallIds.isNotEmpty()
+            ) {
+                waitingTools
+                    .filter { it.toolCallId in initialPendingToolCallIds }
+                    .mapNotNull { tool ->
+                        val toolDef = toolDefinitionsForPending[tool.toolName] ?: return@mapNotNull null
+                        // PermissionDecisionResolver treats non-Auto states as
+                        // already decided. Re-check a transient Auto copy so
+                        // current capability/tool policy is actually applied,
+                        // without persisting a synthetic user Approved state.
+                        val decision = toolDispatcher.resolveDecision(
+                            toolDef = toolDef,
+                            tool = tool.copy(approvalState = ToolApprovalState.Auto),
+                            autoApproveTools = autoApproveTools,
+                            autoApproveHighRiskTools = autoApproveHighRiskTools,
+                            autoApprovedToolNames = autoApprovedToolNames,
+                            invocationContext = invocationContext,
+                            capabilityPermissions = capabilityState,
+                            permissionContext = permissionContext,
+                        )
+                        if (decision.action == app.amber.feature.runtime.PermissionDecisionAction.ALLOW) {
+                            // Auto does not satisfy canResumeExecution, so this
+                            // copy must be placed directly in toolsToProcess.
+                            tool.copy(approvalState = ToolApprovalState.Auto)
+                        } else {
+                            null
+                        }
+                    }
+                    // Preserve the normal all-or-wait batch boundary: a
+                    // human answer (or stricter policy) may affect the other
+                    // calls, so do not execute them before it is resolved.
+                    .takeIf { it.size == waitingTools.size }
+                    .orEmpty()
+            } else {
+                emptyList()
             }
-            toolExposure.exposeToolNames(pendingTools.map { it.toolName })
-            val hasResumableTools = pendingTools.isNotEmpty()
+            val hasResumableTools = pendingTools.isNotEmpty() || autoResumablePendingTools.isNotEmpty()
             val loopBudgetPrompt = AgentLoopBudgetPrompt.build(stepIndex = stepIndex, maxSteps = maxSteps)
             val shouldHideToolsForBudget = AgentLoopBudgetPrompt.shouldHideTools(
                 stepIndex = stepIndex,
@@ -209,7 +271,7 @@ class DefaultRunKernel(
                     if (shouldHideToolsForBudget) {
                         emptyList()
                     } else {
-                        toolExposure.toolsForStep()
+                        exposedTools
                     }
                 )
             }
@@ -246,8 +308,19 @@ class DefaultRunKernel(
             var preparedEffects: Map<String, ToolEffect> = emptyMap()
             var protocolFailures: List<UIMessagePart.Tool> = emptyList()
 
+            // A newly enabled high-risk setting may release a Pending call
+            // from the session snapshot. Execute that transient Auto copy
+            // before considering a provider request. Any Pending tool that
+            // remains here still owns the run's human-input gate.
+            if (autoResumablePendingTools.isNotEmpty()) {
+                Log.i(TAG, "rechecking ${autoResumablePendingTools.size} persisted tool approvals")
+                toolsToProcess = autoResumablePendingTools
+            } else if (waitingTools.isNotEmpty()) {
+                terminal = GenerationTerminal.WaitingUser
+                brokeEarly = true
+                break
             // Skip generation if we have approved/denied tool calls to handle
-            if (pendingTools.isEmpty()) {
+            } else if (pendingTools.isEmpty()) {
                 var streamingVisualBaselineReady = false
                 val roundOutcome = roundEngine.generateRound(
                     GenerationRoundRequest(
@@ -506,12 +579,11 @@ class DefaultRunKernel(
                 toolsToProcess = pendingTools
             }
 
-            // Duplicate-tool-call guard (aligned with the iOS ToolLoopGuard):
-            // classify this step's calls against the in-memory signature
-            // table BEFORE anything executes — 1st occurrence runs, 2nd is
-            // skipped with a structured reminder the model sees through the
-            // tool result, 3rd stops the loop entirely.
-            val classification = classifyDuplicates(toolsToProcess, executedSignatures, runKernelMessages)
+            // Guard duplicate actions before execution, while allowing fresh
+            // observation calls to see changes made since a previous step.
+            val classification = classifyDuplicates(
+                toolsToProcess, executedSignatures, countedToolCallIds, runKernelMessages,
+            )
             val stoppingTool = classification.stopping
             // Durable path: terminalize the write-ahead effects of the calls
             // the guard rejects. Skipped/stopped calls never reach the
@@ -550,9 +622,17 @@ class DefaultRunKernel(
             // dispatches EVEN when the guard found a stopping call — the
             // first occurrence of the stopping signature is a legitimate
             // call ("本批首个执行"); the stop lands after its result settled.
+            val toolDefinitionsForBatch = if (autoResumablePendingTools.isNotEmpty()) {
+                // Budget hiding applies to provider exposure only. The
+                // already-persisted call still needs its current definition
+                // for this local resume execution.
+                toolDefinitionsForPending
+            } else {
+                toolsInternal.associateBy { it.name }
+            }
             val executedTools = protocolFailures + classification.skipped + toolDispatcher.executeBatch(
                 tools = classification.toExecute,
-                toolDefinitions = toolsInternal.associateBy { it.name },
+                toolDefinitions = toolDefinitionsForBatch,
                 autoApproveTools = autoApproveTools,
                 autoApproveHighRiskTools = autoApproveHighRiskTools,
                 autoApprovedToolNames = autoApprovedToolNames,
@@ -703,9 +783,9 @@ class DefaultRunKernel(
      * stop, the same as the third across steps: first executes, second is
      * skipped, third stops the run.
      *
-     * There is deliberately NO per-toolCallId exemption anymore: a counted
-     * callId re-entering the guard is routed through the signature table like
-     * any other call. Approval/crash resume never needs an exemption — those
+     * Fresh observation callIds may ignore earlier steps' signature counts;
+     * already-counted callIds still go through the guard. Approval/crash
+     * resume never needs this exception — those
      * flows re-enter run() with PREPARED/RECONCILED effects, which are never
      * counted (only FINISHED, non-failure executions count), so a resumed
      * emission reaches the table with a null count and executes. A FINISHED
@@ -721,6 +801,7 @@ class DefaultRunKernel(
     private fun classifyDuplicates(
         tools: List<UIMessagePart.Tool>,
         executedSignatures: Map<Pair<String, String>, Int>,
+        countedToolCallIds: Set<String>,
         runKernelMessages: RunKernelMessages,
     ): Duplicates {
         val toExecute = mutableListOf<UIMessagePart.Tool>()
@@ -730,7 +811,10 @@ class DefaultRunKernel(
         for (tool in tools) {
             val signature = tool.toolName to argsDigest(tool.input)
             val batchSeen = batchSeenCounts[signature] ?: 0
-            val occurrence = (executedSignatures[signature] ?: 0) + batchSeen + 1
+            val freshObservation = tool.toolName in REPEATABLE_OBSERVATION_TOOLS &&
+                tool.toolCallId !in countedToolCallIds
+            val priorOccurrences = if (freshObservation) 0 else executedSignatures[signature] ?: 0
+            val occurrence = priorOccurrences + batchSeen + 1
             when {
                 occurrence == 1 -> {
                     batchSeenCounts[signature] = batchSeen + 1

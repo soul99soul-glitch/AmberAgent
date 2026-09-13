@@ -23,6 +23,7 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -31,18 +32,24 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalUriHandler
-import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.composables.icons.lucide.EllipsisVertical
+import app.amber.agent.R
 import app.amber.feature.ui.components.nav.BackButton
+import app.amber.feature.ui.components.ds.amberCanvas
 import app.amber.feature.ui.components.webview.WebView
 import app.amber.feature.ui.components.webview.rememberWebViewState
+import app.amber.feature.ui.theme.LocalAmberTokens
+import app.amber.feature.ui.theme.LocalAmberType
 import app.amber.feature.ui.theme.JetbrainsMono
 import app.amber.core.utils.base64Decode
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun WebViewPage(url: String, content: String) {
+    val tokens = LocalAmberTokens.current
+    val type = LocalAmberType.current
     val state = if (url.isNotEmpty()) {
         rememberWebViewState(
             url = url,
@@ -71,6 +78,8 @@ fun WebViewPage(url: String, content: String) {
     }
 
     Scaffold(
+        modifier = Modifier.amberCanvas(),
+        containerColor = androidx.compose.ui.graphics.Color.Transparent,
         topBar = {
             TopAppBar(
                 title = {
@@ -78,7 +87,8 @@ fun WebViewPage(url: String, content: String) {
                         text = state.pageTitle?.takeIf { it.isNotEmpty() } ?: state.currentUrl
                         ?: "",
                         maxLines = 1,
-                        style = MaterialTheme.typography.titleSmall
+                        style = type.screenTitle,
+                        color = tokens.ink,
                     )
                 },
                 navigationIcon = {
@@ -86,28 +96,40 @@ fun WebViewPage(url: String, content: String) {
                 },
                 actions = {
                     IconButton(onClick = { state.reload() }) {
-                        Icon(Lucide.RefreshCw, contentDescription = "Refresh")
+                        Icon(
+                            Lucide.RefreshCw,
+                            contentDescription = stringResource(R.string.chat_input_usage_refresh),
+                            tint = tokens.ink2,
+                        )
                     }
 
                     IconButton(
                         onClick = { state.goForward() },
                         enabled = state.canGoForward
                     ) {
-                        Icon(Lucide.ArrowRight, contentDescription = "Forward")
+                        Icon(
+                            Lucide.ArrowRight,
+                            contentDescription = stringResource(R.string.redesign_forward),
+                            tint = tokens.ink2,
+                        )
                     }
 
                     val urlHandler = LocalUriHandler.current
                     IconButton(
                         onClick = { showDropdown = true }
                     ) {
-                        Icon(Lucide.EllipsisVertical, contentDescription = "More options")
+                        Icon(
+                            Lucide.EllipsisVertical,
+                            contentDescription = stringResource(R.string.more_options),
+                            tint = tokens.ink2,
+                        )
 
                         DropdownMenu(
                             expanded = showDropdown,
                             onDismissRequest = { showDropdown = false }
                         ) {
                             DropdownMenuItem(
-                                text = { Text("Open in Browser") },
+                                text = { Text(stringResource(R.string.redesign_open_in_browser)) },
                                 leadingIcon = { Icon(Lucide.Earth, contentDescription = null) },
                                 onClick = {
                                     showDropdown = false
@@ -119,7 +141,7 @@ fun WebViewPage(url: String, content: String) {
                                 }
                             )
                             DropdownMenuItem(
-                                text = { Text("Console Logs") },
+                                text = { Text(stringResource(R.string.redesign_console_logs)) },
                                 leadingIcon = { Icon(Lucide.Bug, contentDescription = null) },
                                 onClick = {
                                     showDropdown = false
@@ -128,7 +150,14 @@ fun WebViewPage(url: String, content: String) {
                             )
                         }
                     }
-                }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = androidx.compose.ui.graphics.Color.Transparent,
+                    scrolledContainerColor = androidx.compose.ui.graphics.Color.Transparent,
+                    titleContentColor = tokens.ink,
+                    navigationIconContentColor = tokens.ink2,
+                    actionIconContentColor = tokens.ink2,
+                ),
             )
         }
     ) {
@@ -151,8 +180,9 @@ fun WebViewPage(url: String, content: String) {
                     .padding(16.dp)
             ) {
                 Text(
-                    text = "Console Logs",
-                    style = MaterialTheme.typography.headlineSmall,
+                    text = stringResource(R.string.redesign_console_logs),
+                    style = type.sessionTitle,
+                    color = tokens.ink,
                     modifier = Modifier.padding(bottom = 16.dp)
                 )
 
@@ -169,8 +199,8 @@ fun WebViewPage(url: String, content: String) {
                                     .padding(vertical = 4.dp),
                                 color = when (message.messageLevel().name) {
                                     "ERROR" -> MaterialTheme.colorScheme.error
-                                    "WARNING" -> MaterialTheme.colorScheme.secondary
-                                    else -> MaterialTheme.colorScheme.onSurface
+                                    "WARNING" -> tokens.accent
+                                    else -> tokens.ink
                                 }
                             )
                         }
@@ -179,9 +209,9 @@ fun WebViewPage(url: String, content: String) {
 
                 if (state.consoleMessages.isEmpty()) {
                     Text(
-                        text = "No console messages",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        text = stringResource(R.string.redesign_no_console_messages),
+                        style = type.secondary,
+                        color = tokens.ink3,
                         modifier = Modifier.padding(16.dp)
                     )
                 }

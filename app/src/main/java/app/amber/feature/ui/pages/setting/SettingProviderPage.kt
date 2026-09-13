@@ -7,9 +7,12 @@ import com.composables.icons.lucide.Image
 import com.composables.icons.lucide.Plus
 import com.composables.icons.lucide.ChartNoAxesCombined
 import com.composables.icons.lucide.Share
+import com.composables.icons.lucide.Search
+import com.composables.icons.lucide.X
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
@@ -29,10 +32,10 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.CornerRadius
@@ -51,14 +54,15 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.CircleShape
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.dokar.sonner.ToastType
 import io.github.g00fy2.quickie.QRResult
@@ -68,21 +72,20 @@ import app.amber.agent.R
 import app.amber.agent.Screen
 import app.amber.feature.ui.components.nav.BackButton
 import app.amber.feature.ui.components.ui.decodeProviderSetting
+import app.amber.feature.ui.components.ds.BlinkingCursor
+import app.amber.feature.ui.components.ds.amberCanvas
 import app.amber.feature.ui.components.ds.pressable
 import app.amber.feature.ui.context.LocalNavController
 import app.amber.feature.ui.context.LocalToaster
-import app.amber.feature.ui.pages.setting.components.ProviderAuthBadge
 import app.amber.feature.ui.pages.setting.components.ProviderCard
 import app.amber.feature.ui.pages.setting.components.ProviderCommandButton
 import app.amber.feature.ui.pages.setting.components.ProviderGhostButton
 import app.amber.feature.ui.pages.setting.components.ProviderIconButton
 import app.amber.feature.ui.pages.setting.components.ProviderLiveDot
 import app.amber.feature.ui.pages.setting.components.ProviderMonogram
-import app.amber.feature.ui.pages.setting.components.ProviderSectionLabel
 import app.amber.feature.ui.pages.setting.components.ProviderSheetGrabber
 import app.amber.feature.ui.pages.setting.components.ProviderSplitBar
 import app.amber.feature.ui.pages.setting.components.ProviderTemplatePickerSheet
-import app.amber.feature.ui.pages.setting.components.ProviderTerminalFilter
 import app.amber.feature.ui.pages.setting.components.ProviderHairline
 import app.amber.feature.ui.pages.setting.components.providerAuthLabel
 import app.amber.feature.ui.pages.setting.components.providerSlugLabel
@@ -118,13 +121,11 @@ fun SettingProviderPage(vm: SettingVM = koinViewModel()) {
     val disabledProviders = remember(filteredProviders) { filteredProviders.filterNot { it.enabled } }
     val totalModelCount = remember(settings.providers) { settings.providers.sumOf { it.models.size } }
     val onlineCount = remember(settings.providers) { settings.providers.count { it.enabled } }
-    val t = LocalAmberTokens.current
-
     Scaffold(
+        modifier = Modifier.amberCanvas(),
         topBar = {
             ProviderRegistryTopBar(
                 title = stringResource(R.string.setting_page_providers),
-                onBack = { navController.popBackStack() },
                 actions = {
                     ImportProviderButton(
                         existingProviders = settings.providers,
@@ -150,7 +151,7 @@ fun SettingProviderPage(vm: SettingVM = koinViewModel()) {
                 },
             )
         },
-        containerColor = t.bg,
+        containerColor = Color.Transparent,
     ) { innerPadding ->
         Column(
             modifier = Modifier
@@ -163,14 +164,14 @@ fun SettingProviderPage(vm: SettingVM = koinViewModel()) {
                 onlineCount = onlineCount,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 18.dp)
-                    .padding(top = 10.dp, bottom = 2.dp),
+                    .padding(horizontal = 16.dp)
+                    .padding(top = 8.dp),
             )
-            ProviderTerminalFilter(
+            ProviderRegistryFilter(
                 value = searchQuery,
                 onValueChange = { searchQuery = it },
                 placeholder = stringResource(R.string.setting_provider_page_filter_placeholder),
-                modifier = Modifier.padding(horizontal = 18.dp, vertical = 8.dp),
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
             )
 
             LazyColumn(
@@ -178,12 +179,12 @@ fun SettingProviderPage(vm: SettingVM = koinViewModel()) {
                     .fillMaxWidth()
                     .weight(1f)
                     .imePadding(),
-                contentPadding = PaddingValues(horizontal = 18.dp, vertical = 2.dp),
+                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 2.dp),
                 state = lazyListState,
             ) {
                 if (onlineProviders.isNotEmpty()) {
                     item("online_label") {
-                        ProviderSectionLabel(
+                        ProviderRegistrySectionLabel(
                             stringResource(R.string.setting_provider_page_online),
                             count = onlineProviders.size,
                         )
@@ -211,7 +212,7 @@ fun SettingProviderPage(vm: SettingVM = koinViewModel()) {
                 }
                 if (disabledProviders.isNotEmpty()) {
                     item("disabled_label") {
-                        ProviderSectionLabel(
+                        ProviderRegistrySectionLabel(
                             stringResource(R.string.setting_provider_page_disabled),
                             count = disabledProviders.size,
                         )
@@ -224,8 +225,7 @@ fun SettingProviderPage(vm: SettingVM = koinViewModel()) {
                             index = index,
                             lastIndex = disabledProviders.lastIndex,
                             modifier = Modifier
-                                .padding(bottom = if (index == disabledProviders.lastIndex) 18.dp else 0.dp)
-                                .alpha(0.62f),
+                                .padding(bottom = if (index == disabledProviders.lastIndex) 18.dp else 0.dp),
                         ) {
                             ProviderItem(
                                 modifier = Modifier.fillMaxWidth(),
@@ -237,6 +237,117 @@ fun SettingProviderPage(vm: SettingVM = koinViewModel()) {
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ProviderRegistrySectionLabel(
+    text: String,
+    count: Int? = null,
+) {
+    val t = LocalAmberTokens.current
+    val type = LocalAmberType.current
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 22.dp, bottom = 11.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(7.dp),
+    ) {
+        Text("//", style = type.eyebrow, color = t.accent)
+        Text(
+            text.uppercase(),
+            style = type.eyebrow,
+            color = t.ink2,
+            maxLines = 1,
+        )
+        Spacer(Modifier.width(3.dp))
+        Box(
+            Modifier
+                .weight(1f)
+                .height(1.dp)
+                .background(t.line)
+        )
+        count?.let {
+            Text(
+                text = it.toString(),
+                style = type.meta.copy(fontSize = 11.sp),
+                color = t.ink3,
+            )
+        }
+    }
+}
+
+@Composable
+private fun ProviderRegistryFilter(
+    value: String,
+    onValueChange: (String) -> Unit,
+    placeholder: String,
+    modifier: Modifier = Modifier,
+) {
+    val t = LocalAmberTokens.current
+    val type = LocalAmberType.current
+    val shape = RoundedCornerShape(22.dp)
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(44.dp)
+            .clip(shape)
+            .background(t.surface2)
+            .border(1.dp, t.line, shape)
+            .padding(horizontal = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(9.dp),
+    ) {
+        Icon(
+            imageVector = Lucide.Search,
+            contentDescription = null,
+            tint = t.ink3,
+            modifier = Modifier.size(17.dp),
+        )
+        Box(
+            modifier = Modifier.weight(1f),
+            contentAlignment = Alignment.CenterStart,
+        ) {
+            BasicTextField(
+                value = value,
+                onValueChange = onValueChange,
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                textStyle = type.meta.copy(fontSize = 12.sp, color = t.ink),
+                decorationBox = { innerTextField ->
+                    if (value.isEmpty()) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(5.dp),
+                        ) {
+                            Text(
+                                text = placeholder,
+                                style = type.meta.copy(fontSize = 12.sp),
+                                color = t.ink3,
+                            )
+                            BlinkingCursor(width = 6.dp, height = 17.dp)
+                        }
+                    }
+                    innerTextField()
+                },
+            )
+        }
+        if (value.isNotEmpty()) {
+            Box(
+                modifier = Modifier
+                    .size(28.dp)
+                    .pressable(onClick = { onValueChange("") }),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector = Lucide.X,
+                    contentDescription = stringResource(R.string.provider_filter_clear),
+                    tint = t.ink3,
+                    modifier = Modifier.size(16.dp),
+                )
             }
         }
     }
@@ -286,7 +397,6 @@ private fun ProviderGroupRow(
 @Composable
 private fun ProviderRegistryTopBar(
     title: String,
-    onBack: () -> Unit,
     actions: @Composable RowScope.() -> Unit,
 ) {
     val t = LocalAmberTokens.current
@@ -294,14 +404,13 @@ private fun ProviderRegistryTopBar(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .background(t.bg)
             .windowInsetsPadding(WindowInsets.statusBars),
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(54.dp)
-                .padding(start = 6.dp, end = 12.dp),
+                .height(56.dp)
+                .padding(start = 4.dp, end = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             BackButton()
@@ -330,15 +439,14 @@ private fun ProviderAggregateStrip(
     modifier: Modifier = Modifier,
 ) {
     val t = LocalAmberTokens.current
-    val type = LocalAmberType.current
     Row(
-        modifier = modifier.padding(vertical = 12.dp),
+        modifier = modifier.height(36.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(
             imageVector = Lucide.ChartNoAxesCombined,
             contentDescription = null,
-            tint = t.accent,
+            tint = t.ink3,
             modifier = Modifier.size(14.dp),
         )
         Spacer(Modifier.width(9.dp))
@@ -567,50 +675,55 @@ private fun ProviderImportDialog(
 ) {
     val t = LocalAmberTokens.current
     val type = LocalAmberType.current
-    Dialog(onDismissRequest = onDismiss) {
-        ProviderCard(
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        containerColor = t.raised,
+        dragHandle = { ProviderSheetGrabber() },
+    ) {
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 10.dp),
+                .padding(horizontal = 16.dp)
+                .padding(bottom = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Column(
-                modifier = Modifier.padding(18.dp),
-                verticalArrangement = Arrangement.spacedBy(14.dp),
-            ) {
-                Text(
-                    text = stringResource(R.string.setting_provider_page_import_dialog_title),
-                    style = type.body.copy(fontWeight = FontWeight.Bold),
-                    color = t.ink,
-                )
-                Text(
-                    text = stringResource(R.string.setting_provider_page_import_dialog_message),
-                    style = type.secondary,
-                    color = t.ink3,
-                )
-                ProviderCommandButton(
-                    text = stringResource(R.string.setting_provider_page_scan_qr_code),
-                    imageVector = Lucide.Camera,
-                    onClick = onScanQr,
-                    accent = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                ProviderCommandButton(
-                    text = stringResource(R.string.setting_provider_page_select_from_gallery),
-                    imageVector = Lucide.Image,
-                    onClick = onPickImage,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                ProviderCommandButton(
-                    text = stringResource(R.string.provider_file_import_select),
-                    onClick = onPickFile,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                ProviderCommandButton(
-                    text = stringResource(R.string.cancel),
-                    onClick = onDismiss,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-            }
+            Text(
+                text = stringResource(R.string.setting_provider_page_import_dialog_title),
+                style = type.screenTitle,
+                color = t.ink,
+                modifier = Modifier.padding(top = 4.dp),
+            )
+            Text(
+                text = stringResource(R.string.setting_provider_page_import_dialog_message),
+                style = type.secondary,
+                color = t.ink3,
+                modifier = Modifier.padding(bottom = 4.dp),
+            )
+            ProviderCommandButton(
+                text = stringResource(R.string.setting_provider_page_scan_qr_code),
+                imageVector = Lucide.Camera,
+                onClick = onScanQr,
+                accent = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            ProviderCommandButton(
+                text = stringResource(R.string.setting_provider_page_select_from_gallery),
+                imageVector = Lucide.Image,
+                onClick = onPickImage,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            ProviderCommandButton(
+                text = stringResource(R.string.provider_file_import_select),
+                onClick = onPickFile,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            ProviderGhostButton(
+                text = stringResource(R.string.cancel),
+                onClick = onDismiss,
+                accent = false,
+                modifier = Modifier.align(Alignment.End),
+            )
         }
     }
 }
@@ -633,14 +746,14 @@ private fun ProviderEditorSheet(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
-        containerColor = t.bg,
+        containerColor = t.raised,
         dragHandle = { ProviderSheetGrabber() },
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .fillMaxHeight(0.92f)
-                .padding(horizontal = 18.dp),
+                .padding(horizontal = 16.dp),
         ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
@@ -655,7 +768,7 @@ private fun ProviderEditorSheet(
             }
             Text(
                 text = title,
-                style = type.screenTitle.copy(fontSize = 20.sp),
+                style = type.screenTitle,
                 color = t.ink,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -740,13 +853,13 @@ private fun ProviderItem(
         modifier = modifier
             .fillMaxWidth()
             .pressable(onClick = onEdit)
-            .padding(horizontal = 4.dp, vertical = 11.dp),
+            .padding(horizontal = 14.dp, vertical = 12.dp),
         horizontalArrangement = Arrangement.spacedBy(12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         ProviderMonogram(
             text = provider.name.toProviderMonogram(),
-            size = 32.dp,
+            size = 40.dp,
             enabled = provider.enabled,
         )
         Column(
@@ -765,7 +878,7 @@ private fun ProviderItem(
                     overflow = TextOverflow.Ellipsis,
                 )
                 if (provider.enabled) {
-                    ProviderLiveDot()
+                    ProviderLiveDot(size = 7.dp)
                 }
             }
             Text(
@@ -780,7 +893,7 @@ private fun ProviderItem(
             horizontalAlignment = Alignment.End,
             verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-            ProviderAuthBadge(provider.providerAuthLabel())
+            ProviderRegistryAuthBadge(provider.providerAuthLabel())
             Text(
                 text = stringResource(
                     R.string.setting_provider_page_model_count,
@@ -791,5 +904,26 @@ private fun ProviderItem(
                 maxLines = 1,
             )
         }
+    }
+}
+
+@Composable
+private fun ProviderRegistryAuthBadge(text: String) {
+    val t = LocalAmberTokens.current
+    val type = LocalAmberType.current
+    Box(
+        modifier = Modifier
+            .clip(CircleShape)
+            .background(t.surface2)
+            .border(1.dp, t.line, CircleShape)
+            .padding(horizontal = 8.dp, vertical = 3.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = text,
+            style = type.meta.copy(fontSize = 10.5.sp, fontWeight = FontWeight.SemiBold),
+            color = if (text == "—") t.ink4 else t.ink2,
+            maxLines = 1,
+        )
     }
 }

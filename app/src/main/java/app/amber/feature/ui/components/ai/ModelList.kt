@@ -29,6 +29,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AssistChip
@@ -87,6 +88,7 @@ import app.amber.ai.provider.OpenAIAuthMode
 import app.amber.ai.provider.ProviderSetting
 import app.amber.ai.provider.providers.isCodexOAuthReviewModel
 import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.Check
 import com.composables.icons.lucide.WandSparkles
 import com.composables.icons.lucide.ArrowDown
 import com.composables.icons.lucide.ArrowRight
@@ -110,10 +112,12 @@ import app.amber.feature.ui.components.ui.Tag
 import app.amber.feature.ui.components.ui.TagType
 import app.amber.feature.ui.components.ui.icons.HeartIcon
 import app.amber.feature.ui.components.ui.workspaceColors
+import app.amber.feature.ui.components.ds.pressable
 import app.amber.feature.ui.context.LocalNavController
 import app.amber.feature.ui.theme.LocalAmberTokens
 import app.amber.feature.ui.theme.LocalAmberType
 import app.amber.feature.ui.theme.extendColors
+import app.amber.feature.ui.pages.setting.components.providerSlugLabel
 import app.amber.core.utils.formatNumber
 import app.amber.core.utils.toDp
 import org.koin.compose.koinInject
@@ -337,13 +341,8 @@ fun ModelSelector(
                 it.enabled && it.models.fastAny { model -> model.type == type }
             }
         }
-        // Amber Redesign §2: shell 22dp top radius. §6: terracotta `//` signboard
-        // (the ONE allowed terminal glyph) + cn title + mono count.
-        val totalModels = remember(filteredProviderSettings) {
-            filteredProviderSettings.sumOf { provider ->
-                provider.models.count { it.type == type && !provider.isHiddenCodexOAuthModel(it) }
-            }
-        }
+        // Selector shell follows the raised sheet/card treatment in the model
+        // picker reference; search and favorites remain available to callers.
         ModalBottomSheet(
             onDismissRequest = { popup = false },
             sheetState = state,
@@ -367,41 +366,30 @@ fun ModelSelector(
         ) {
             Column(
                 modifier = Modifier
-                    .fillMaxHeight(0.8f)
+                    .fillMaxHeight(0.7f)
                     .imePadding(),
             ) {
-                // ── Title row: // 招牌 + 选择模型 + 右对齐计数 ──────────────
-                Row(
-                    verticalAlignment = Alignment.Bottom,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 22.dp)
-                        .padding(top = 6.dp, bottom = 14.dp),
+                        .padding(horizontal = 16.dp)
+                        .padding(top = 8.dp, bottom = 4.dp),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
                 ) {
                     Text(
-                        text = "//",
-                        style = LocalAmberType.current.meta.copy(
-                            fontSize = 17.sp,
-                            fontWeight = FontWeight.Bold,
-                        ),
-                        color = tokens.accent,
-                    )
-                    Text(
                         text = stringResource(R.string.model_list_select_model),
-                        style = MaterialTheme.typography.titleLarge.copy(
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 18.sp,
-                        ),
+                        style = LocalAmberType.current.screenTitle,
                         color = tokens.ink,
                     )
-                    Spacer(Modifier.weight(1f))
                     Text(
-                        text = "$totalModels · ${filteredProviderSettings.size}",
-                        style = LocalAmberType.current.meta.copy(
-                            fontSize = 11.sp,
-                            fontFeatureSettings = "tnum",
+                        text = stringResource(
+                            when (type) {
+                                ModelType.CHAT -> R.string.setting_model_page_chat_model
+                                ModelType.IMAGE -> R.string.setting_model_page_image_gen_model
+                                ModelType.EMBEDDING -> R.string.setting_provider_page_embedding_model
+                            }
                         ),
+                        style = LocalAmberType.current.meta.copy(fontSize = 12.sp),
                         color = tokens.ink3,
                     )
                 }
@@ -537,6 +525,14 @@ private fun ColumnScope.ModelList(
     val hasSearchResults = favoriteModels.isNotEmpty() ||
         searchFilteredModelsByProvider.values.any { it.isNotEmpty() }
 
+    // Keep accordion state outside LazyList items so every model can remain an
+    // independently composed Lazy item. Search starts with matching groups open;
+    // an explicit tap then owns that provider's state until the query changes.
+    var expandedProviders by remember { mutableStateOf<Map<Uuid, Boolean>>(emptyMap()) }
+    LaunchedEffect(searchKeywords, providers) {
+        expandedProviders = emptyMap()
+    }
+
     // 计算当前选中模型的位置
     val selectedModelPosition = remember(currentModel, favoriteModels, providers, typeFilteredModelsByProvider) {
         if (currentModel == null) return@remember 0
@@ -613,7 +609,13 @@ private fun ColumnScope.ModelList(
     }
     val haptic = LocalHapticFeedback.current
 
-    val providerPositions = remember(providers, favoriteModels, searchFilteredModelsByProvider) {
+    val providerPositions = remember(
+        providers,
+        favoriteModels,
+        searchFilteredModelsByProvider,
+        expandedProviders,
+        searchKeywords,
+    ) {
         var currentIndex = 0
         if (providers.isEmpty()) {
             currentIndex = 1 // no providers item
@@ -623,10 +625,18 @@ private fun ColumnScope.ModelList(
             currentIndex += favoriteModels.size // favorite models
         }
 
-        providers.map { provider ->
+        var hasProviderGroup = false
+        providers.mapNotNull { provider ->
+            val groupModels = searchFilteredModelsByProvider[provider.id].orEmpty()
+            if (groupModels.isEmpty()) return@mapNotNull null
+            if (hasProviderGroup || favoriteModels.isNotEmpty()) currentIndex += 1 // group gap
             val position = currentIndex
             currentIndex += 1 // provider header
-            currentIndex += searchFilteredModelsByProvider[provider.id].orEmpty().size
+            val expanded = expandedProviders[provider.id]
+                ?: searchKeywords.isNotBlank()
+                || groupModels.any { it.id == currentModel }
+            if (expanded) currentIndex += groupModels.size
+            hasProviderGroup = true
             provider.id to position
         }.toMap()
     }
@@ -640,7 +650,7 @@ private fun ColumnScope.ModelList(
         border = androidx.compose.foundation.BorderStroke(1.dp, tokens.line),
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 22.dp)
+            .padding(horizontal = 16.dp)
             .padding(bottom = 4.dp),
     ) {
         Row(
@@ -698,7 +708,7 @@ private fun ColumnScope.ModelList(
     LazyColumn(
         state = lazyListState,
         verticalArrangement = Arrangement.spacedBy(0.dp),
-        contentPadding = PaddingValues(horizontal = 22.dp, vertical = 4.dp),
+        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
         modifier = Modifier
             .weight(1f)
             .fillMaxWidth(),
@@ -780,114 +790,65 @@ private fun ColumnScope.ModelList(
             }
         }
 
-        // Amber Redesign §3: provider groups are full-bleed flat sections (no
-        // Card/border/16dp). Group-to-group separation = 1px hairline at the TOP
-        // of each group (except the first). Row-to-row = hairline between models.
-        // One layer of separation per level — no "bordered card + inner hairline".
+        // Provider groups use one neutral card surface with hairline-separated
+        // model rows. Keep every model in its own Lazy item for long catalogs.
         providers.forEachIndexed { providerIndex, providerSetting ->
             val groupModels = searchFilteredModelsByProvider[providerSetting.id].orEmpty()
             if (groupModels.isEmpty()) return@forEachIndexed
 
             val providerActive = groupModels.fastAny { it.id == currentModel }
+            val expanded = expandedProviders[providerSetting.id]
+                ?: searchKeywords.isNotBlank()
+                || providerActive
+            if (providerIndex > 0 || favoriteModels.isNotEmpty()) {
+                item(key = "group-gap:${providerSetting.id}") {
+                    Spacer(Modifier.height(8.dp))
+                }
+            }
 
             item(key = "group:${providerSetting.id}") {
                 val tokens = LocalAmberTokens.current
-                // Default-expand a provider while searching, or the one holding the active
-                // model; collapsed otherwise. Re-keyed by search term so a query opens matches.
-                var expanded by remember(providerSetting.id, searchKeywords) {
-                    mutableStateOf(searchKeywords.isNotBlank() || providerActive)
-                }
                 Column(modifier = Modifier.animateItem()) {
-                    // Group separator: hairline above each provider EXCEPT the first
-                    // (the favorite section or the first provider sits flush at top).
-                    if (providerIndex > 0 || favoriteModels.isNotEmpty()) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(1.dp)
-                                .background(tokens.line),
-                        )
-                    }
-                    // Accordion header: cn provider name (accent when active) +
-                    // mono model count + chevron. No card, no border, full-bleed.
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { expanded = !expanded }
-                            .padding(vertical = 13.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    ) {
-                        Text(
-                            text = providerSetting.name,
-                            style = MaterialTheme.typography.bodyLarge.copy(
-                                fontSize = 14.5.sp,
-                                fontWeight = if (providerActive) FontWeight.SemiBold else FontWeight.Medium,
-                            ),
-                            color = if (providerActive) tokens.accent else tokens.ink,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f),
-                        )
-                        // mono model count
-                        Text(
-                            text = groupModels.size.toString(),
-                            style = LocalAmberType.current.meta.copy(
-                                fontSize = 11.sp,
-                                fontFeatureSettings = "tnum",
-                            ),
-                            color = tokens.ink3,
-                        )
-                        // chevron: rotates -90°→0° on expand (like the HTML sample)
-                        Icon(
-                            imageVector = Lucide.ArrowDown,
-                            contentDescription = null,
-                            tint = tokens.ink3,
-                            modifier = Modifier
-                                .size(17.dp)
-                                .graphicsLayer {
-                                    rotationZ = if (expanded) 0f else -90f
-                                },
-                        )
-                    }
-                    androidx.compose.animation.AnimatedVisibility(visible = expanded) {
-                        Column {
-                            groupModels.fastForEach { model ->
-                                val isActive = model.id == currentModel
-                                // Row separator: hairline between models (full-bleed, left-aligned)
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .height(1.dp)
-                                        .background(tokens.line),
-                                )
-                                val favorite = settings.value.favoriteModels.contains(model.id)
-                                ModelItemRow(
-                                    model = model,
-                                    providerSetting = providerSetting,
-                                    isActive = isActive,
-                                    onSelect = onSelect,
-                                    onDismiss = onDismiss,
-                                    startPadding = 16.dp,
-                                    endPadding = 2.dp,
-                                    tail = {
-                                        FavoriteToggleIcon(
-                                            favorite = favorite,
-                                            isActive = isActive,
-                                            onToggle = {
-                                                coroutineScope.launch {
-                                                    settingsStore.update { s ->
-                                                        if (favorite) s.copy(favoriteModels = s.favoriteModels.filter { it != model.id })
-                                                        else s.copy(favoriteModels = s.favoriteModels + model.id)
-                                                    }
-                                                }
-                                            },
-                                        )
-                                    },
-                                )
+                    PickerProviderHeader(
+                        provider = providerSetting,
+                        modelCount = groupModels.size,
+                        active = providerActive,
+                        expanded = expanded,
+                        onClick = {
+                            expandedProviders = expandedProviders +
+                                (providerSetting.id to !expanded)
+                        },
+                        showTopCorners = true,
+                    )
+                }
+            }
+            if (expanded) {
+                itemsIndexed(
+                    items = groupModels,
+                    key = { _, model -> "group:${providerSetting.id}:model:${model.id}" },
+                ) { index, model ->
+                    val isActive = model.id == currentModel
+                    val favorite = settings.value.favoriteModels.contains(model.id)
+                    PickerModelRow(
+                        model = model,
+                        providerSetting = providerSetting,
+                        isActive = isActive,
+                        onSelect = onSelect,
+                        onDismiss = onDismiss,
+                        isLast = index == groupModels.lastIndex,
+                        favorite = favorite,
+                        onToggleFavorite = {
+                            coroutineScope.launch {
+                                settingsStore.update { s ->
+                                    if (favorite) {
+                                        s.copy(favoriteModels = s.favoriteModels.filter { it != model.id })
+                                    } else {
+                                        s.copy(favoriteModels = s.favoriteModels + model.id)
+                                    }
+                                }
                             }
-                        }
-                    }
+                        },
+                    )
                 }
             }
         }
@@ -928,7 +889,7 @@ private fun ColumnScope.ModelList(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(top = 10.dp, bottom = 14.dp),
-                contentPadding = PaddingValues(horizontal = 22.dp),
+                contentPadding = PaddingValues(horizontal = 16.dp),
                 state = providerBadgeListState,
             ) {
                 items(providers) { provider ->
@@ -1087,6 +1048,126 @@ fun ProviderAccordionModelPicker(
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun PickerProviderHeader(
+    provider: ProviderSetting,
+    modelCount: Int,
+    active: Boolean,
+    expanded: Boolean,
+    onClick: () -> Unit,
+    showTopCorners: Boolean,
+) {
+    val t = LocalAmberTokens.current
+    val type = LocalAmberType.current
+    val accent = app.amber.feature.ui.pages.chat.LocalChatTheme.current.accent
+    val shape = RoundedCornerShape(
+        topStart = if (showTopCorners) 14.dp else 0.dp,
+        topEnd = if (showTopCorners) 14.dp else 0.dp,
+        bottomStart = if (expanded) 0.dp else 14.dp,
+        bottomEnd = if (expanded) 0.dp else 14.dp,
+    )
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .background(t.surface)
+            .border(1.dp, t.line, shape)
+            .pressable(onClick = onClick)
+            .padding(horizontal = 14.dp, vertical = 13.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Text(
+            text = provider.providerSlugLabel(),
+            style = type.meta.copy(
+                fontSize = 13.sp,
+                fontWeight = if (active) FontWeight.SemiBold else FontWeight.Medium,
+            ),
+            color = if (active) accent else t.ink,
+            modifier = Modifier.weight(1f),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Text(
+            text = modelCount.toString(),
+            style = type.meta.copy(fontSize = 11.sp, fontFeatureSettings = "tnum"),
+            color = t.ink3,
+            maxLines = 1,
+        )
+        Icon(
+            imageVector = Lucide.ArrowRight,
+            contentDescription = null,
+            tint = t.ink3,
+            modifier = Modifier
+                .size(18.dp)
+                .graphicsLayer { rotationZ = if (expanded) 90f else 0f },
+        )
+    }
+}
+
+@Composable
+private fun PickerModelRow(
+    model: Model,
+    providerSetting: ProviderSetting,
+    isActive: Boolean,
+    onSelect: (Model) -> Unit,
+    onDismiss: () -> Unit,
+    isLast: Boolean,
+    favorite: Boolean,
+    onToggleFavorite: () -> Unit,
+) {
+    val t = LocalAmberTokens.current
+    val shape = RoundedCornerShape(
+        bottomStart = if (isLast) 14.dp else 0.dp,
+        bottomEnd = if (isLast) 14.dp else 0.dp,
+    )
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .background(t.surface)
+            .border(1.dp, t.line, shape),
+    ) {
+        ModelItemRow(
+            model = model,
+            providerSetting = providerSetting,
+            isActive = isActive,
+            onSelect = onSelect,
+            onDismiss = onDismiss,
+            startPadding = 14.dp,
+            endPadding = 2.dp,
+            tail = {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    if (isActive) {
+                        Icon(
+                            imageVector = Lucide.Check,
+                            contentDescription = null,
+                            tint = t.accent,
+                            modifier = Modifier.size(18.dp),
+                        )
+                    }
+                    FavoriteToggleIcon(
+                        favorite = favorite,
+                        isActive = isActive,
+                        onToggle = onToggleFavorite,
+                    )
+                }
+            },
+        )
+        if (!isLast) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(1.dp)
+                    .background(t.line),
+            )
         }
     }
 }

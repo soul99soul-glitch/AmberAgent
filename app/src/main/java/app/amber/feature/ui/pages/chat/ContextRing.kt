@@ -1,5 +1,15 @@
 package app.amber.feature.ui.pages.chat
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.core.CubicBezierEasing
+import androidx.compose.animation.core.MutableTransitionState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -19,11 +29,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -41,18 +47,20 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.window.Popup
 import app.amber.feature.ui.theme.LocalAmberType
 import androidx.compose.ui.window.PopupPositionProvider
 import androidx.compose.ui.window.PopupProperties
 import androidx.compose.ui.res.stringResource
 import app.amber.agent.R
-import kotlinx.coroutines.delay
 import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.sin
 
-private const val CONTEXT_USAGE_POPUP_EXIT_MS = 140
+private const val CONTEXT_USAGE_POPUP_ENTER_MS = 380
+private const val CONTEXT_USAGE_POPUP_EXIT_MS = 240
+private val ContextUsagePopupEasing = CubicBezierEasing(0.22f, 0.72f, 0.24f, 1f)
 
 /**
  * Number of filled bars (0..5) in the Graphite context meter for [used]/[total] tokens.
@@ -71,8 +79,8 @@ fun contextMeterFilledBars(used: Int, total: Int): Int {
  * 设计来源 convo-agent.jsx HeaderContextRing + ContextUsagePanel：
  *   - 22dp ring + 2.6dp stroke + leading head dot
  *   - 主题阈值色 (Paper 棕渐变 / 其他蓝-黄-红)
- *   - 点击展开 290dp 浮层：5h 额度 / 周额度 / Context / meta strip
- *   - 浮层位置：top right of screen，箭头指向 ring
+ *   - 点击展开 260dp 浮层：5h 额度 / 周额度 / Context / meta strip
+ *   - 浮层位置：贴 context trigger 的 top-right anchor，并自动避开屏幕边缘
  */
 @Composable
 fun ContextRing(
@@ -101,21 +109,17 @@ fun ContextRing(
     val ringSize = 22.dp
     val strokeDp = 2.6.dp
 
-    var expanded by remember { mutableStateOf(false) }
-    var popupMounted by remember { mutableStateOf(false) }
-    LaunchedEffect(expanded) {
-        if (expanded) {
-            popupMounted = true
-        } else if (popupMounted) {
-            delay(CONTEXT_USAGE_POPUP_EXIT_MS.toLong())
-            popupMounted = false
-        }
-    }
+    // Keep one transition state for both mounting and animation. The popup is
+    // mounted while the transition is running, so a quick reopen reverses the
+    // same transition instead of letting an old close delay remove it.
+    val popupVisibilityState = remember { MutableTransitionState(false) }
 
     Box(
         modifier = modifier
             .clip(RoundedCornerShape(8.dp))
-            .clickable { expanded = !expanded }
+            .clickable {
+                popupVisibilityState.targetState = !popupVisibilityState.targetState
+            }
             .padding(horizontal = 6.dp, vertical = 6.dp),
         contentAlignment = Alignment.Center,
     ) {
@@ -146,25 +150,28 @@ fun ContextRing(
             )
         }
 
-        if (popupMounted) {
+        if (!popupVisibilityState.isIdle ||
+            popupVisibilityState.currentState ||
+            popupVisibilityState.targetState
+        ) {
             ContextUsagePopup(
                 used = used,
                 total = total,
                 progressColor = color,
-                visible = expanded,
+                visibilityState = popupVisibilityState,
                 lastTurnTotalTokens = lastTurnTotalTokens,
                 lastTurnCompletionTokens = lastTurnCompletionTokens,
                 lastTurnCachedTokens = lastTurnCachedTokens,
                 lastTurnPromptTokens = lastTurnPromptTokens,
                 lastTurnElapsedMs = lastTurnElapsedMs,
-                onDismiss = { expanded = false },
+                onDismiss = { popupVisibilityState.targetState = false },
             )
         }
     }
 }
 
 /**
- * 用量与上下文 popup —— 290dp 宽，从 ring 下方 10dp 弹出，箭头指向 ring。
+ * 用量与上下文 popup —— 260dp 宽，从 ring 下方 10dp 弹出并贴近 trigger。
  *
  * 设计来源 convo-agent.jsx ContextUsagePanel:
  *   - 5h 额度 / 本周额度 (硬编码 placeholder，app 当前没追踪)
@@ -176,7 +183,7 @@ private fun ContextUsagePopup(
     used: Int,
     total: Int,
     progressColor: Color,
-    visible: Boolean,
+    visibilityState: MutableTransitionState<Boolean>,
     lastTurnTotalTokens: Int? = null,
     lastTurnCompletionTokens: Int? = null,
     lastTurnCachedTokens: Int? = null,
@@ -186,10 +193,15 @@ private fun ContextUsagePopup(
 ) {
     val theme = LocalChatTheme.current
     val popoverBg = if (theme.popoverBg.isSpecified()) theme.popoverBg else theme.surface
-    // panel 之前 290dp 顶到屏幕左边. 收到 260dp 留更多 margin.
-    val panelWidth = 260
-    val panelOffsetTop = 46  // 36dp ring 高 + 10dp gap
-    val panelOffsetRight = -8
+    val popoverShadow = if (theme.isDark) {
+        Color.Black.copy(alpha = 0.20f)
+    } else {
+        theme.ink.copy(alpha = 0.14f)
+    }
+    val panelWidth = 260.dp
+    val panelGap = 10.dp
+    val panelOffsetRight = (-8).dp
+    val panelEdgePadding = 8.dp
     // TODO: 当前 5h/周额度是真实接入前的预留 UI. Codex OAuth/Anthropic 限额查询
     //   需要 inject 额度 store + 当前 model 的 provider 类型判断. 接口未铺好之前
     //   默认 false, 只显示 Context 行. 接通 Codex 后传 true + 真数据.
@@ -198,9 +210,10 @@ private fun ContextUsagePopup(
     // V3 review P3: 之前 popupPositionProvider 用硬编码 *2.5f 和 *2 作为"density approx",
     // 只在 ~xhdpi (2x) / xxhdpi (2.5x ~ 3x) 设备正确. 改用 LocalDensity 在 PopupPositionProvider
     // 构造前算好 px, 让不同 dpi 设备 (hdpi 1.5x / xxxhdpi 4x / 折叠屏) 都一致.
-    val density = androidx.compose.ui.platform.LocalDensity.current.density
-    val panelOffsetRightPx = (panelOffsetRight * density).toInt()
-    val panelGapPx = ((panelOffsetTop - 36 + 10) * density).toInt()
+    val density = LocalDensity.current
+    val panelOffsetRightPx = with(density) { panelOffsetRight.roundToPx() }
+    val panelGapPx = with(density) { panelGap.roundToPx() }
+    val panelEdgePaddingPx = with(density) { panelEdgePadding.roundToPx() }
     Popup(
         properties = PopupProperties(focusable = true),
         onDismissRequest = onDismiss,
@@ -211,53 +224,84 @@ private fun ContextUsagePopup(
                 layoutDirection: LayoutDirection,
                 popupContentSize: IntSize,
             ): IntOffset {
-                // 紧贴 ring 下方 10dp，右边界对齐 ring 右 + 8dp 偏移
-                val x = anchorBounds.right + panelOffsetRightPx - popupContentSize.width
-                val y = anchorBounds.bottom + panelGapPx
+                // Keep the card close to the trigger, while clamping both axes
+                // to the popup window. If there is no room below the trigger,
+                // use the matching position above it before clamping.
+                val maxX = (windowSize.width - popupContentSize.width - panelEdgePaddingPx)
+                    .coerceAtLeast(panelEdgePaddingPx)
+                val x = (anchorBounds.right + panelOffsetRightPx - popupContentSize.width)
+                    .coerceIn(panelEdgePaddingPx, maxX)
+                val maxY = (windowSize.height - popupContentSize.height - panelEdgePaddingPx)
+                    .coerceAtLeast(panelEdgePaddingPx)
+                val belowY = anchorBounds.bottom + panelGapPx
+                val aboveY = anchorBounds.top - popupContentSize.height - panelGapPx
+                val y = when {
+                    belowY <= maxY -> belowY.coerceAtLeast(panelEdgePaddingPx)
+                    aboveY >= panelEdgePaddingPx -> aboveY
+                    else -> belowY.coerceIn(panelEdgePaddingPx, maxY)
+                }
                 return IntOffset(
-                    x.coerceAtLeast(8),
-                    y.coerceAtLeast(0),
+                    x,
+                    y,
                 )
             }
         },
     ) {
-        // Keep the Popup mounted through exit so dismiss feels like the slash panel,
-        // not an instant cut.
-        androidx.compose.animation.AnimatedVisibility(
-            visible = visible,
-            enter = androidx.compose.animation.fadeIn(
-                animationSpec = androidx.compose.animation.core.tween(120),
-            ) + androidx.compose.animation.scaleIn(
-                animationSpec = androidx.compose.animation.core.tween(
-                    durationMillis = 180,
-                    easing = androidx.compose.animation.core.FastOutSlowInEasing,
+        // AnimatedVisibility uses Compose's MotionDurationScale, so the Android
+        // animation-scale setting still snaps this transition when set to 0.
+        AnimatedVisibility(
+            visibleState = visibilityState,
+            enter = fadeIn(
+                animationSpec = tween(
+                    durationMillis = CONTEXT_USAGE_POPUP_ENTER_MS,
+                    easing = ContextUsagePopupEasing,
                 ),
-                initialScale = 0.96f,
-                transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0.92f, 0f),
+            ) + scaleIn(
+                animationSpec = tween(
+                    durationMillis = CONTEXT_USAGE_POPUP_ENTER_MS,
+                    easing = ContextUsagePopupEasing,
+                ),
+                initialScale = 0.92f,
+                transformOrigin = androidx.compose.ui.graphics.TransformOrigin(1f, 0f),
+            ) + slideInVertically(
+                animationSpec = tween(
+                    durationMillis = CONTEXT_USAGE_POPUP_ENTER_MS,
+                    easing = ContextUsagePopupEasing,
+                ),
+                initialOffsetY = { with(density) { -10.dp.roundToPx() } },
             ),
-            exit = androidx.compose.animation.fadeOut(
-                animationSpec = androidx.compose.animation.core.tween(CONTEXT_USAGE_POPUP_EXIT_MS),
-            ) + androidx.compose.animation.scaleOut(
-                animationSpec = androidx.compose.animation.core.tween(
+            exit = fadeOut(
+                animationSpec = tween(
                     durationMillis = CONTEXT_USAGE_POPUP_EXIT_MS,
-                    easing = androidx.compose.animation.core.FastOutSlowInEasing,
+                    easing = ContextUsagePopupEasing,
                 ),
-                targetScale = 0.96f,
-                transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0.92f, 0f),
+            ) + scaleOut(
+                animationSpec = tween(
+                    durationMillis = CONTEXT_USAGE_POPUP_EXIT_MS,
+                    easing = ContextUsagePopupEasing,
+                ),
+                targetScale = 0.92f,
+                transformOrigin = androidx.compose.ui.graphics.TransformOrigin(1f, 0f),
+            ) + slideOutVertically(
+                animationSpec = tween(
+                    durationMillis = CONTEXT_USAGE_POPUP_EXIT_MS,
+                    easing = ContextUsagePopupEasing,
+                ),
+                targetOffsetY = { with(density) { -10.dp.roundToPx() } },
             ),
         ) {
             // ── 主体卡片 (箭头已删, 不再 padding top)
             Surface(
                 modifier = Modifier
-                    .width(panelWidth.dp)
+                    .width(panelWidth)
                     .shadow(
-                        elevation = 18.dp,
-                        shape = RoundedCornerShape(18.dp),
+                        elevation = 10.dp,
+                        shape = RoundedCornerShape(20.dp),
                         clip = false,
-                        ambientColor = Color(0x330F1419),
-                        spotColor = Color(0x330F1419),
+                        ambientColor = popoverShadow,
+                        spotColor = popoverShadow,
                     ),
-                shape = RoundedCornerShape(18.dp),
+                shape = RoundedCornerShape(20.dp),
                 color = popoverBg,
                 border = BorderStroke(1.dp, theme.surfaceEdge),
                 tonalElevation = 0.dp,

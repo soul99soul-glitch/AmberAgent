@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.BottomSheetDefaults
+import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
@@ -38,6 +39,8 @@ import app.amber.feature.ui.components.ui.FormItem
 import app.amber.feature.ui.components.ui.Select
 import app.amber.feature.ui.components.ui.Tag
 import app.amber.feature.ui.components.ui.TagType
+import app.amber.feature.ui.theme.LocalAmberTokens
+import app.amber.feature.ui.theme.LocalAmberType
 import app.amber.search.SearchService
 import app.amber.search.SearchServiceOptions
 import kotlin.reflect.full.primaryConstructor
@@ -53,10 +56,14 @@ internal fun SearchServiceEditorSheet(
 ) {
     val bottomSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var options by remember(initialService) { mutableStateOf(initialService) }
+    val tokens = LocalAmberTokens.current
+    val type = LocalAmberType.current
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = bottomSheetState,
+        containerColor = tokens.raised,
+        contentColor = tokens.ink,
         dragHandle = {
             BottomSheetDefaults.DragHandle()
         }
@@ -64,13 +71,13 @@ internal fun SearchServiceEditorSheet(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .fillMaxHeight(0.86f)
-                .padding(16.dp),
+                .fillMaxHeight(0.92f)
+                .padding(horizontal = 16.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             Text(
                 text = title,
-                style = MaterialTheme.typography.headlineSmall,
+                style = type.screenTitle,
             )
 
             Column(
@@ -138,7 +145,7 @@ internal fun SearchServiceEditorSheet(
                     Text(stringResource(R.string.cancel))
                 }
 
-                TextButton(
+                Button(
                     onClick = {
                         onConfirm(options)
                     },

@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -70,7 +71,11 @@ fun HotListSourceSettings(
     }
     val tokens = LocalAmberTokens.current
     val cardShape = RoundedCornerShape(14.dp)
-    Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(20.dp)) {
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .padding(top = 16.dp, bottom = 4.dp),
+    ) {
         Surface(
             modifier = Modifier.fillMaxWidth(),
             shape = cardShape,
@@ -80,12 +85,17 @@ fun HotListSourceSettings(
             Row(
                 Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                    .heightIn(min = 52.dp)
+                    .padding(horizontal = 14.dp),
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Column(Modifier.weight(1f)) {
-                    Text(stringResource(R.string.board_sources_title), style = LocalAmberType.current.sessionTitle, color = tokens.ink)
+                    Text(
+                        stringResource(R.string.board_sources_title),
+                        style = LocalAmberType.current.body.copy(fontWeight = FontWeight.SemiBold),
+                        color = tokens.ink,
+                    )
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
                     SourceQuietAction("+ NewsNow") { showNewsNowDialog = true }
@@ -94,7 +104,9 @@ fun HotListSourceSettings(
             }
         }
 
+        Spacer(Modifier.height(28.dp))
         SourceSectionLabel(stringResource(R.string.board_hotlist_sources))
+        Spacer(Modifier.height(10.dp))
         Surface(
             modifier = Modifier.fillMaxWidth(),
             shape = cardShape,
@@ -120,7 +132,9 @@ fun HotListSourceSettings(
             }
         }
 
+        Spacer(Modifier.height(28.dp))
         SourceSectionLabel(stringResource(R.string.board_custom_sources))
+        Spacer(Modifier.height(10.dp))
         Surface(
             modifier = Modifier.fillMaxWidth(),
             shape = cardShape,
@@ -252,7 +266,7 @@ private fun CustomSourceRow(
         Row(
             Modifier
                 .fillMaxWidth()
-                .height(64.dp)
+                .heightIn(min = 64.dp)
                 .clickable(onClick = onToggle)
                 .padding(horizontal = 14.dp),
             horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -268,12 +282,11 @@ private fun CustomSourceRow(
                 Icon(Lucide.FileText, contentDescription = null, modifier = Modifier.size(17.dp), tint = tokens.ink2)
             }
             Column(Modifier.weight(1f)) {
-                Text(source.displayName, style = LocalAmberType.current.body.copy(fontWeight = FontWeight.SemiBold), color = tokens.ink, maxLines = 1)
+                Text(source.displayName, style = LocalAmberType.current.body.copy(fontWeight = FontWeight.SemiBold), color = tokens.ink)
                 Text(
                     "${source.sourceType.uppercase()} · ${source.url}",
                     style = LocalAmberType.current.meta.copy(fontSize = 11.sp),
                     color = tokens.ink3,
-                    maxLines = 1,
                 )
             }
             Switch(
@@ -450,12 +463,19 @@ private fun CustomHotListSourceDialog(
 
 @Composable
 private fun SourceChip(selected: Boolean, label: String, onClick: () -> Unit) {
+    val tokens = LocalAmberTokens.current
     Surface(
         shape = androidx.compose.foundation.shape.RoundedCornerShape(50),
-        color = if (selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
+        color = if (selected) tokens.accent else tokens.surface2,
+        contentColor = if (selected) tokens.accentInk else tokens.ink2,
+        border = androidx.compose.foundation.BorderStroke(1.dp, if (selected) tokens.accent else tokens.line2),
         modifier = Modifier.clickable { onClick() },
     ) {
-        Text(label, modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp), style = MaterialTheme.typography.labelMedium)
+        Text(
+            label,
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
+            style = LocalAmberType.current.secondary.copy(fontSize = 13.sp),
+        )
     }
 }
 

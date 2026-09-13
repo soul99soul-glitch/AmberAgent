@@ -81,13 +81,10 @@ import app.amber.core.ai.mcp.McpToolNamespace
 import app.amber.feature.ui.components.richtext.ZoomableAsyncImage
 import app.amber.feature.ui.components.ui.ChainOfThoughtScope
 import app.amber.feature.ui.components.ui.FaviconRow
-import app.amber.feature.ui.components.ui.WorkspaceIconButton
-import app.amber.feature.ui.components.ui.WorkspaceLeadingIcon
-import app.amber.feature.ui.components.ui.WorkspaceStatusPill
-import app.amber.feature.ui.components.ui.WorkspaceTone
 import app.amber.feature.ui.components.ui.workspaceColors
 import app.amber.feature.ui.modifier.shimmer
 import app.amber.core.utils.jsonPrimitiveOrNull
+import app.amber.feature.ui.theme.LocalAmberTokens
 
 internal object ToolNames {
     const val MEMORY = "memory_tool"
@@ -102,6 +99,7 @@ internal object ToolNames {
 internal enum class AgentToolStatus {
     RUNNING,
     WAITING_FOR_PERMISSION,
+    UNKNOWN,
     SUCCEEDED,
     FAILED,
     TIMED_OUT,
@@ -298,7 +296,7 @@ private fun toolHasFailure(content: JsonElement?, output: List<UIMessagePart>): 
     }
 }
 
-private fun toolStatusFromMessagePart(
+internal fun toolStatusFromMessagePart(
     tool: UIMessagePart.Tool,
     loading: Boolean,
     content: JsonElement?,
@@ -317,6 +315,10 @@ private fun toolStatusFromMessagePart(
         reportedStatus == "cancelled" -> AgentToolStatus.CANCELLED
         reportedStatus == "timed_out" -> AgentToolStatus.TIMED_OUT
         reportedStatus == "interrupted" -> AgentToolStatus.INTERRUPTED
+        // A WebMount action may have been dispatched even when its receipt or
+        // postcondition is unavailable. Keep that outcome distinct from both
+        // a verified success and a confirmed failure.
+        reportedStatus == "unknown" -> AgentToolStatus.UNKNOWN
         toolHasFailure(content = content, output = tool.output) -> AgentToolStatus.FAILED
         else -> AgentToolStatus.SUCCEEDED
     }
@@ -326,21 +328,12 @@ private fun toolStatusFromMessagePart(
 private fun toolStatusLabel(status: AgentToolStatus): String = when (status) {
     AgentToolStatus.RUNNING -> stringResource(R.string.chat_message_tool_status_running)
     AgentToolStatus.WAITING_FOR_PERMISSION -> stringResource(R.string.chat_message_tool_status_waiting_permission)
+    AgentToolStatus.UNKNOWN -> stringResource(R.string.chat_page_tool_result_unknown)
     AgentToolStatus.SUCCEEDED -> stringResource(R.string.chat_message_tool_status_succeeded)
     AgentToolStatus.FAILED -> stringResource(R.string.chat_message_tool_status_failed)
     AgentToolStatus.TIMED_OUT -> stringResource(R.string.chat_message_tool_status_timed_out)
     AgentToolStatus.INTERRUPTED -> stringResource(R.string.chat_message_tool_status_interrupted)
     AgentToolStatus.CANCELLED -> stringResource(R.string.chat_message_tool_status_cancelled)
-}
-
-private fun toolStatusTone(status: AgentToolStatus): WorkspaceTone = when (status) {
-    AgentToolStatus.RUNNING -> WorkspaceTone.Accent
-    AgentToolStatus.WAITING_FOR_PERMISSION -> WorkspaceTone.Warning
-    AgentToolStatus.SUCCEEDED -> WorkspaceTone.Success
-    AgentToolStatus.FAILED -> WorkspaceTone.Danger
-    AgentToolStatus.TIMED_OUT -> WorkspaceTone.Danger
-    AgentToolStatus.INTERRUPTED -> WorkspaceTone.Warning
-    AgentToolStatus.CANCELLED -> WorkspaceTone.Neutral
 }
 
 @Composable
@@ -356,18 +349,6 @@ private fun toolKindLabel(kind: AgentToolKind, toolName: String): String = when 
     // one of the categorized buckets. Plain "工具" reads cleaner and the
     // tool name still shows on the right of the dot.
     AgentToolKind.GENERIC -> stringResource(R.string.chat_message_tool_kind_generic)
-}
-
-@Composable
-private fun ToolStatusPill(
-    status: AgentToolStatus,
-    modifier: Modifier = Modifier,
-) {
-    WorkspaceStatusPill(
-        text = toolStatusLabel(status),
-        modifier = modifier,
-        tone = toolStatusTone(status),
-    )
 }
 
 @Composable
@@ -452,7 +433,7 @@ internal fun AgentToolCallCapsule(
                             text = displayText,
                             // §6.2 ToolCall row: tool name + args are machine-facts → mono (.meta),
                             // colored with accent (toolLabelInk).
-                            style = amberType.meta,
+                            style = amberType.meta.copy(fontSize = 11.sp),
                             fontWeight = androidx.compose.ui.text.font.FontWeight.Medium,
                             color = theme.toolLabelInk,
                             maxLines = 1,
@@ -522,6 +503,7 @@ private fun V3ToolStatusBadge(
         // 待授权/失败: 实心强调色底 + accentInk(随底色自适应黑/白)的图标 —— 与成功对勾共用同一套取色逻辑,
         // 避免出现"对勾黑、叉白"的不一致。
         AgentToolStatus.WAITING_FOR_PERMISSION -> theme.contextMid to theme.toolDoneBadgeInk
+        AgentToolStatus.UNKNOWN -> theme.contextMid to theme.toolDoneBadgeInk
         AgentToolStatus.FAILED -> theme.contextHigh to theme.toolDoneBadgeInk
         AgentToolStatus.TIMED_OUT -> theme.contextHigh to theme.toolDoneBadgeInk
         AgentToolStatus.INTERRUPTED -> theme.contextMid to theme.toolDoneBadgeInk
@@ -565,7 +547,10 @@ private fun V3ToolStatusBadge(
                     tint = ink,
                     modifier = Modifier.size(10.dp),
                 )
-            } else if (status == AgentToolStatus.WAITING_FOR_PERMISSION || status == AgentToolStatus.INTERRUPTED) {
+            } else if (status == AgentToolStatus.WAITING_FOR_PERMISSION ||
+                status == AgentToolStatus.UNKNOWN ||
+                status == AgentToolStatus.INTERRUPTED
+            ) {
                 Icon(
                     imageVector = Lucide.Clock,
                     contentDescription = null,
@@ -777,6 +762,7 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
     val title = toolDisplayTitle(tool.toolName, arguments, memoryAction)
     val status = toolStatusFromMessagePart(tool = tool, loading = loading, content = content)
     val workspace = workspaceColors()
+    val tokens = LocalAmberTokens.current
 
     val workspaceFilePath = remember(tool.toolName, status, content, arguments) {
         if (status != AgentToolStatus.SUCCEEDED) return@remember null
@@ -791,6 +777,7 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
     // (capsule + tiny thumb + big carousel).
     val isGenerateImage = tool.toolName == "generate_image"
     val hasExtraContent = isDenied || (images.isNotEmpty() && !isGenerateImage)
+    val toolKind = getToolKind(tool.toolName)
 
     Column(
         modifier = Modifier
@@ -799,45 +786,33 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
             .animateContentSize(animationSpec = MaterialTheme.motionScheme.defaultSpatialSpec()),
         verticalArrangement = Arrangement.spacedBy(3.dp),
     ) {
-        AgentToolCallCapsule(
-            title = title,
-            toolName = tool.toolName,
-            icon = getToolIcon(tool.toolName, memoryAction),
-            kind = getToolKind(tool.toolName),
-            status = status,
-            loading = loading,
-            onClick = { showResult = true },
-            approvalActions = if (isPending && onToolApproval != null) {
-                {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp),
-                    ) {
-                        ToolStatusPill(status = status)
-                        WorkspaceIconButton(
-                            onClick = { showDenyDialog = true },
-                            modifier = Modifier.size(48.dp),
-                            size = 24.dp,
-                            iconSize = 12.dp,
-                            tone = WorkspaceTone.Danger,
-                            icon = Lucide.X,
-                            contentDescription = stringResource(R.string.chat_message_tool_deny),
-                        )
-                        WorkspaceIconButton(
-                            onClick = { onToolApproval(tool.toolCallId, true, "") },
-                            modifier = Modifier.size(48.dp),
-                            size = 24.dp,
-                            iconSize = 12.dp,
-                            tone = WorkspaceTone.Success,
-                            icon = Lucide.Check,
-                            contentDescription = stringResource(R.string.chat_message_tool_approve),
-                        )
-                    }
-                }
-            } else {
-                null
-            },
-        )
+        if (isPending) {
+            ChatToolApprovalCard(
+                title = title,
+                toolName = tool.toolName,
+                kindLabel = toolKindLabel(toolKind, tool.toolName),
+                icon = getToolIcon(tool.toolName, memoryAction),
+                statusLabel = toolStatusLabel(status),
+                detailsLabel = stringResource(R.string.setting_cron_tasks_view_details),
+                denyLabel = stringResource(R.string.chat_message_tool_deny),
+                approveLabel = stringResource(R.string.chat_message_tool_approve),
+                onDetails = { showResult = true },
+                onDeny = { showDenyDialog = true },
+                onApprove = { onToolApproval?.invoke(tool.toolCallId, true, "") },
+                actionsEnabled = onToolApproval != null,
+            )
+        } else {
+            AgentToolCallCapsule(
+                title = title,
+                toolName = tool.toolName,
+                icon = getToolIcon(tool.toolName, memoryAction),
+                kind = toolKind,
+                status = status,
+                loading = loading,
+                onClick = { showResult = true },
+                approvalActions = null,
+            )
+        }
 
         // generate_image tool: pre-allocate the result area while the tool
         // is running so we can show an animated dot-grid placeholder card
@@ -930,16 +905,15 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
         if (hasExtraContent) {
             Surface(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(start = 32.dp),
-                shape = RoundedCornerShape(8.dp),
-                color = workspace.row,
-                contentColor = workspace.muted,
-                border = BorderStroke(1.dp, workspace.hairline),
+                    .fillMaxWidth(),
+                shape = RoundedCornerShape(14.dp),
+                color = tokens.surface,
+                contentColor = tokens.ink2,
+                border = BorderStroke(1.dp, tokens.line),
             ) {
                 Column(
-                    modifier = Modifier.padding(12.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     if (tool.toolName == ToolNames.MEMORY &&
                         memoryAction in listOf(MemoryActions.CREATE, MemoryActions.EDIT)

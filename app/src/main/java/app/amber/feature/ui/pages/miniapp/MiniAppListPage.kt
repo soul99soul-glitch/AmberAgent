@@ -22,6 +22,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
@@ -33,6 +34,8 @@ import app.amber.agent.Screen
 import app.amber.feature.miniapp.MiniAppRepository
 import app.amber.agent.data.db.entity.MiniAppEntity
 import app.amber.feature.ui.components.nav.BackButton
+import app.amber.feature.ui.components.ds.AmberCard
+import app.amber.feature.ui.components.ds.amberCanvas
 import app.amber.feature.ui.components.ds.SectionLabel
 import app.amber.feature.ui.components.ui.workspaceBorder
 import app.amber.feature.ui.components.ui.WorkspaceTopBar
@@ -68,7 +71,8 @@ fun MiniAppListPage(
                 },
             )
         },
-        containerColor = workspaceColors().canvas,
+        modifier = Modifier.amberCanvas(),
+        containerColor = Color.Transparent,
     ) { padding ->
         if (apps.isEmpty()) {
             Box(
@@ -77,17 +81,14 @@ fun MiniAppListPage(
                     .padding(padding),
                 contentAlignment = Alignment.Center
             ) {
-                androidx.compose.material3.Surface(
+                AmberCard(
                     modifier = Modifier.padding(16.dp),
-                    shape = androidx.compose.foundation.shape.RoundedCornerShape(14.dp),
-                    color = workspaceColors().paper,
-                    border = workspaceBorder(),
                 ) {
                     Text(
                         text = stringResource(R.string.miniapp_empty),
                         style = LocalAmberType.current.secondary,
                         color = workspaceColors().muted,
-                        modifier = Modifier.padding(18.dp),
+                        modifier = Modifier.padding(16.dp),
                     )
                 }
             }
@@ -104,7 +105,7 @@ fun MiniAppListPage(
                 item(span = { GridItemSpan(maxLineSpan) }) {
                     SectionLabel(
                         text = stringResource(R.string.miniapp_title),
-                        modifier = Modifier.padding(bottom = 4.dp),
+                        modifier = Modifier.padding(top = 8.dp, start = 2.dp, bottom = 2.dp),
                     )
                 }
                 items(apps, key = { it.id }) { app ->

@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Static starting-window brand composition. The runtime owns the blinking
+    cursor, loading copy, and progress state; this drawable only preserves the
+    stable mark that can be shown before the first frame.
+-->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item
+        android:drawable="@drawable/amber_wordmark"
+        android:gravity="left|center_vertical"
+        android:width="118dp"
+        android:height="30dp" />
+    <item
+        android:gravity="left|center_vertical"
+        android:left="126dp"
+        android:width="8dp"
+        android:height="18dp">
+        <shape android:shape="rectangle">
+            <solid android:color="#FFB8623A" />
+        </shape>
+    </item>
+</layer-list>

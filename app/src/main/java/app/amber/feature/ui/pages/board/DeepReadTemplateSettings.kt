@@ -9,16 +9,18 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -29,6 +31,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.res.stringResource
@@ -41,7 +44,6 @@ import app.amber.feature.board.hotlist.deepread.template.DeepReadRenderedTemplat
 import app.amber.feature.board.hotlist.deepread.template.DeepReadTemplateRenderer
 import app.amber.core.font.SlidesFontRepository
 import app.amber.feature.ui.components.ui.workspaceColors
-import app.amber.feature.ui.theme.LocalDarkMode
 import app.amber.feature.ui.theme.LocalAmberTokens
 import app.amber.feature.ui.theme.LocalAmberType
 import com.composables.icons.lucide.CodeXml
@@ -60,7 +62,9 @@ fun DeepReadTemplateSettingsRow(
     onCreateTemplate: () -> Unit,
 ) {
     var previewTarget by remember { mutableStateOf<TemplatePreviewTarget?>(null) }
-    val darkTheme = LocalDarkMode.current
+    // The preview represents the same light paper used by the reader in both
+    // app themes; only surrounding settings chrome follows the active theme.
+    val darkTheme = false
     val sampleTitle = stringResource(R.string.deep_read_sample_title)
     val templateUnavailableMessage = stringResource(R.string.deep_read_template_unavailable)
     val templatePreviewFailedTemplate = stringResource(
@@ -113,7 +117,11 @@ fun DeepReadTemplateSettingsRow(
     }
     val tokens = LocalAmberTokens.current
     val cardShape = RoundedCornerShape(14.dp)
-    Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(20.dp)) {
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .padding(top = 16.dp, bottom = 4.dp),
+    ) {
         Surface(
             modifier = Modifier.fillMaxWidth(),
             shape = cardShape,
@@ -121,12 +129,19 @@ fun DeepReadTemplateSettingsRow(
             border = androidx.compose.foundation.BorderStroke(1.dp, tokens.line),
         ) {
             Row(
-                Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp),
+                Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 64.dp)
+                    .padding(horizontal = 14.dp),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Column(Modifier.weight(1f)) {
-                    Text(stringResource(R.string.deep_read_template_title), style = LocalAmberType.current.sessionTitle, color = tokens.ink)
+                    Text(
+                        stringResource(R.string.deep_read_template_title),
+                        style = LocalAmberType.current.body.copy(fontWeight = FontWeight.SemiBold),
+                        color = tokens.ink,
+                    )
                     Text(
                         stringResource(R.string.deep_read_template_description),
                         style = LocalAmberType.current.secondary,
@@ -143,7 +158,9 @@ fun DeepReadTemplateSettingsRow(
             }
         }
 
+        Spacer(Modifier.height(28.dp))
         TemplateSectionLabel(stringResource(R.string.deep_read_template_default_magazine))
+        Spacer(Modifier.height(10.dp))
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             TemplateChip(
                 selected = board.deepReadTemplateId == DeepReadTemplateIds.COMPOSE_MAGAZINE,
@@ -156,17 +173,22 @@ fun DeepReadTemplateSettingsRow(
                 onClick = { onSelect(DeepReadTemplateIds.EDITORIAL_SLANT) },
             )
         }
-        OutlinedButton(
+        Spacer(Modifier.height(8.dp))
+        Button(
             onClick = { previewSelectedTemplate() },
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
             shape = RoundedCornerShape(15.dp),
-            colors = ButtonDefaults.outlinedButtonColors(contentColor = tokens.accent),
-            border = androidx.compose.foundation.BorderStroke(1.dp, tokens.accent.copy(alpha = 0.5f)),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = tokens.ink,
+                contentColor = tokens.bg,
+            ),
         ) {
             Text(stringResource(R.string.deep_read_template_preview, selectedTemplateName), style = LocalAmberType.current.secondary)
         }
 
+        Spacer(Modifier.height(28.dp))
         TemplateSectionLabel(stringResource(R.string.deep_read_template_custom))
+        Spacer(Modifier.height(10.dp))
         Surface(
             modifier = Modifier.fillMaxWidth(),
             shape = cardShape,
@@ -185,7 +207,8 @@ fun DeepReadTemplateSettingsRow(
                             Modifier
                                 .fillMaxWidth()
                                 .clickable { onSelect(template.id) }
-                                .padding(horizontal = 14.dp, vertical = 8.dp),
+                                .heightIn(min = 64.dp)
+                                .padding(horizontal = 14.dp),
                             horizontalArrangement = Arrangement.spacedBy(10.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
@@ -220,6 +243,7 @@ fun DeepReadTemplateSettingsRow(
             }
         }
         if (invalidTemplateCount > 0) {
+            Spacer(Modifier.height(8.dp))
             Text(
                 stringResource(R.string.deep_read_template_invalid_count, invalidTemplateCount),
                 style = LocalAmberType.current.secondary,
@@ -264,7 +288,9 @@ private fun TemplateChip(
         color = if (selected) tokens.accent else tokens.surface2,
         contentColor = if (selected) tokens.accentInk else tokens.ink2,
         border = androidx.compose.foundation.BorderStroke(1.dp, if (selected) tokens.accent else tokens.line2),
-        modifier = modifier.clickable { onClick() },
+        modifier = modifier
+            .heightIn(min = 32.dp)
+            .clickable { onClick() },
     ) {
         Text(label, modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp), style = LocalAmberType.current.secondary)
     }
@@ -294,7 +320,7 @@ private fun DeepReadTemplatePreviewDialog(
                     allowedImageUrls = target.allowedImageUrls,
                     fontRepository = fontRepository,
                     textScale = textScale,
-                    backgroundColor = MaterialTheme.colorScheme.surface,
+                    backgroundColor = Color(0xFFFAFAF8),
                 )
             }
         },

@@ -39,7 +39,9 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
 import okhttp3.OkHttpClient
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -75,6 +77,7 @@ class ChatGenerationRoundEngineTest : DurableRuntimeTestBase() {
         )
 
         val received = mutableListOf<List<UIMessage>>()
+        val receivedParams = mutableListOf<TextGenerationParams>()
         private var call = 0
 
         override suspend fun listModels(providerSetting: ProviderSetting.OpenAI): List<Model> = emptyList()
@@ -91,6 +94,7 @@ class ChatGenerationRoundEngineTest : DurableRuntimeTestBase() {
             params: TextGenerationParams,
         ): Flow<MessageChunk> = flow {
             received += messages
+            receivedParams += params
             val attempt = attempts.getOrNull(call++) ?: error("no script for wire attempt $call")
             attempt.chunks.forEach { emit(it) }
             attempt.errorAfterChunks?.let { throw it }
@@ -169,8 +173,14 @@ class ChatGenerationRoundEngineTest : DurableRuntimeTestBase() {
         )
     }
 
-    private suspend fun request(model: Model, settings: Settings, messages: List<UIMessage>) =
-        GenerationRoundRequest(
+    private suspend fun request(
+        model: Model,
+        settings: Settings,
+        messages: List<UIMessage>,
+        conversation: Conversation? = null,
+    ): GenerationRoundRequest {
+        val resolvedConversation = conversation ?: conversationFor(messages)
+        return GenerationRoundRequest(
             settings = settings,
             messages = messages,
             transformers = emptyList(),
@@ -179,11 +189,12 @@ class ChatGenerationRoundEngineTest : DurableRuntimeTestBase() {
             memories = emptyList(),
             stream = true,
             processingStatus = MutableStateFlow(null),
-            conversation = conversationFor(messages),
+            conversation = resolvedConversation,
             speculativeRunner = null,
             loopBudgetPrompt = "",
             responsesResume = null,
         )
+    }
 
     private suspend fun conversationFor(messages: List<UIMessage>): Conversation {
         val conversation = Conversation(
@@ -247,10 +258,15 @@ class ChatGenerationRoundEngineTest : DurableRuntimeTestBase() {
         )
         val settings = settings(model, providerSetting(model))
         val messages = listOf(imageUserMessage())
+        val generationRequest = request(model, settings, messages)
 
-        val outcome = engine(gateway).generateRound(request(model, settings, messages)) { }
+        val outcome = engine(gateway).generateRound(generationRequest) { }
 
         assertTrue("the vision fallback must have run", gateway.received.size == 2)
+        assertEquals(
+            listOf(generationRequest.conversation!!.id.toString(), generationRequest.conversation!!.id.toString()),
+            gateway.receivedParams.map { it.sessionId },
+        )
         assertFalse(
             "the abandoned attempt's `length` must not truncate the adopted output",
             outcome.outputLimitReached,
@@ -294,5 +310,53 @@ class ChatGenerationRoundEngineTest : DurableRuntimeTestBase() {
         val outcome = engine(gateway).generateRound(request(model, settings, messages)) { }
 
         assertFalse(outcome.outputLimitReached)
+    }
+
+    @Test
+    fun `conversation keeps one session across rounds and isolates another conversation`() = runBlocking {
+        val model = visionModel()
+        val gateway = ScriptedGateway(
+            listOf(
+                ScriptedGateway.Attempt(chunks = listOf(deltaChunk(text = "第一轮", finishReason = null))),
+                ScriptedGateway.Attempt(chunks = listOf(deltaChunk(text = "第二轮", finishReason = null))),
+                ScriptedGateway.Attempt(chunks = listOf(deltaChunk(text = "另一个会话", finishReason = null))),
+            ),
+        )
+        val settings = settings(model, providerSetting(model))
+        val firstConversation = conversationFor(listOf(UIMessage.user("同一会话")))
+        val secondConversation = conversationFor(listOf(UIMessage.user("另一个会话")))
+        val firstRound = request(
+            model,
+            settings,
+            listOf(UIMessage.user("第一轮")),
+            conversation = firstConversation,
+        )
+        val secondRound = request(
+            model,
+            settings,
+            listOf(UIMessage.user("第二轮")),
+            conversation = firstConversation,
+        )
+        val otherConversationRound = request(
+            model,
+            settings,
+            listOf(UIMessage.user("另一个会话")),
+            conversation = secondConversation,
+        )
+        val roundEngine = engine(gateway)
+
+        roundEngine.generateRound(firstRound) { }
+        roundEngine.generateRound(secondRound) { }
+        roundEngine.generateRound(otherConversationRound) { }
+
+        assertEquals(
+            listOf(
+                firstConversation.id.toString(),
+                firstConversation.id.toString(),
+                secondConversation.id.toString(),
+            ),
+            gateway.receivedParams.map { it.sessionId },
+        )
+        assertNotEquals(firstConversation.id.toString(), secondConversation.id.toString())
     }
 }

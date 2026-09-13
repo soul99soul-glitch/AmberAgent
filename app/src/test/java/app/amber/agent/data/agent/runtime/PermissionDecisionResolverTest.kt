@@ -15,6 +15,26 @@ class PermissionDecisionResolverTest {
     private val resolver = PermissionDecisionResolver()
 
     @Test
+    fun highRiskAutoApprovalWorksWithoutTheRegularAutoApprovalSwitch() {
+        val calls = listOf(
+            "terminal_execute" to """{"runtime":"remote_ssh","command":"pwd"}""",
+            "file_write" to "{}",
+            "mcp__server__tool" to "{}",
+            "sms_send" to "{}",
+        )
+        calls.forEach { (name, input) ->
+            val decision = resolver.resolve(
+                toolDef = approvalTool(name, allowsAutoApproval = false),
+                tool = toolCall(name, input),
+                autoApproveTools = false,
+                autoApproveHighRiskTools = true,
+            )
+            assertEquals(name, PermissionDecisionAction.ALLOW, decision.action)
+            assertEquals(name, "settings_unattended", decision.source)
+        }
+    }
+
+    @Test
     fun traceExplainsCronApprovalHold() {
         val decision = resolver.resolve(
             toolDef = approvalTool("cron_task_create", allowsAutoApproval = false),
@@ -403,7 +423,7 @@ class PermissionDecisionResolverTest {
     fun mandatoryApprovalCanBeBypassedByExplicitHighRiskAutoApprove() {
         // The high-risk toggle is intentionally the broad "run unattended"
         // switch. mandatoryApproval still blocks regular auto approval and
-        // run-trust, but users who enable both toggles have opted into it.
+        // run-trust, but the explicit high-risk switch opts into it.
         val decision = resolver.resolve(
             toolDef = mandatoryTool("wm_eval"),
             tool = toolCall("wm_eval"),

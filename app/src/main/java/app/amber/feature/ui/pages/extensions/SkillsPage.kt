@@ -1,23 +1,30 @@
 package app.amber.feature.ui.pages.extensions
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -34,6 +41,7 @@ import androidx.compose.runtime.mutableStateOf
 import com.composables.icons.lucide.EllipsisVertical
 import androidx.compose.runtime.remember
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -46,6 +54,9 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.amber.agent.R
 import com.composables.icons.lucide.Lucide
@@ -63,6 +74,10 @@ import app.amber.core.files.SkillMetadata
 import app.amber.core.files.SkillScanIssue
 import app.amber.agent.Screen
 import app.amber.feature.ui.components.ds.SectionLabel
+import app.amber.feature.ui.components.ds.AmberCard
+import app.amber.feature.ui.components.ds.Hairline
+import app.amber.feature.ui.components.ds.amberCanvas
+import app.amber.feature.ui.components.ds.pressable
 import app.amber.feature.ui.components.nav.BackButton
 import app.amber.feature.ui.components.ui.ConfirmDialog
 import app.amber.feature.ui.components.ui.WorkspaceLeadingIcon
@@ -70,10 +85,10 @@ import app.amber.feature.ui.components.ui.WorkspaceStatusPill
 import app.amber.feature.ui.components.ui.WorkspaceTextButton
 import app.amber.feature.ui.components.ui.WorkspaceTone
 import app.amber.feature.ui.components.ui.WorkspaceTopBar
-import app.amber.feature.ui.components.ui.workspaceBorder
-import app.amber.feature.ui.components.ui.workspaceColors
 import app.amber.feature.ui.context.LocalNavController
 import app.amber.feature.ui.context.LocalToaster
+import app.amber.feature.ui.theme.LocalAmberTokens
+import app.amber.feature.ui.theme.LocalAmberType
 import app.amber.core.utils.navigateToChatPage
 import app.amber.core.utils.plus
 import org.koin.androidx.compose.koinViewModel
@@ -101,8 +116,10 @@ fun SkillsPage() {
                 scrollBehavior = scrollBehavior,
             )
         },
-        modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
-        containerColor = workspaceColors().canvas,
+        modifier = Modifier
+            .amberCanvas()
+            .nestedScroll(scrollBehavior.nestedScrollConnection),
+        containerColor = Color.Transparent,
     ) { innerPadding ->
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
@@ -169,22 +186,32 @@ fun SkillsPage() {
                 }
             }
 
-            items(skills, key = { it.name }) { skill ->
-                SkillCard(
-                    skill = skill,
-                    enabled = skill.name in enabledSkillNames,
-                    onClick = { navController.navigate(Screen.SkillDetail(skill.name)) },
-                    onOptimize = {
-                        navigateToChatPage(
-                            navigator = navController,
-                            initText = buildOptimizeSkillPrompt(skill.name),
+            if (skills.isNotEmpty()) {
+                itemsIndexed(
+                    items = skills,
+                    key = { _, skill -> skill.name },
+                ) { index, skill ->
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        if (index > 0) Hairline()
+                        SkillCard(
+                            skill = skill,
+                            enabled = skill.name in enabledSkillNames,
+                            groupedFirst = index == 0,
+                            groupedLast = index == skills.lastIndex,
+                            onClick = { navController.navigate(Screen.SkillDetail(skill.name)) },
+                            onOptimize = {
+                                navigateToChatPage(
+                                    navigator = navController,
+                                    initText = buildOptimizeSkillPrompt(skill.name),
+                                )
+                            },
+                            onToggle = {
+                                vm.setSkillEnabled(skill.name, skill.name !in enabledSkillNames)
+                            },
+                            onDelete = { deleteTarget = skill },
                         )
-                    },
-                    onToggle = {
-                        vm.setSkillEnabled(skill.name, skill.name !in enabledSkillNames)
-                    },
-                    onDelete = { deleteTarget = skill },
-                )
+                    }
+                }
             }
         }
     }
@@ -249,14 +276,12 @@ private fun SkillLibraryStatusCard(
     onRefresh: () -> Unit,
     onOptimizeAll: () -> Unit,
 ) {
-    val colors = workspaceColors()
-    Surface(
+    val tokens = LocalAmberTokens.current
+    val type = LocalAmberType.current
+    AmberCard(
         modifier = Modifier.fillMaxWidth(),
-        // V3 settings-skills.jsx Skill 库 card 圆角 18dp
-        shape = RoundedCornerShape(18.dp),
-        color = colors.paper,
-        contentColor = colors.ink,
-        border = workspaceBorder(),
+        containerColor = tokens.surface,
+        borderColor = tokens.line,
     ) {
         Column(
             modifier = Modifier
@@ -281,7 +306,8 @@ private fun SkillLibraryStatusCard(
                 ) {
                     Text(
                         text = stringResource(R.string.skills_page_library_title),
-                        style = MaterialTheme.typography.titleMedium,
+                        style = type.sessionTitle,
+                        color = tokens.ink,
                     )
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         // V3 settings-skills.jsx: 三 pill 中只有"已启用"用 accentSoft + accent，
@@ -302,16 +328,17 @@ private fun SkillLibraryStatusCard(
             if (issueCount > 0) {
                 Text(
                     text = stringResource(R.string.skills_page_issue_count, issueCount),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = colors.red,
+                    style = type.secondary,
+                    color = MaterialTheme.colorScheme.error,
                 )
             } else {
                 Text(
                     text = stringResource(R.string.skills_page_scan_hint),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = colors.muted,
+                    style = type.secondary,
+                    color = tokens.ink2,
                 )
             }
+            Hairline()
             Row(
                 modifier = Modifier.horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -353,34 +380,39 @@ private fun SkillActionButton(
     onClick: () -> Unit,
     accent: Boolean = false,
 ) {
-    val colors = workspaceColors()
-    Surface(
-        onClick = onClick,
-        shape = RoundedCornerShape(999.dp),
-        color = if (accent) MaterialTheme.colorScheme.primaryContainer else colors.row,
-        contentColor = if (accent) MaterialTheme.colorScheme.primary else colors.muted,
-        border = workspaceBorder(),
+    val tokens = LocalAmberTokens.current
+    val type = LocalAmberType.current
+    Row(
+        modifier = Modifier
+            .heightIn(min = 48.dp)
+            .pressable(onClick = onClick)
+            .padding(horizontal = 2.dp),
+        horizontalArrangement = Arrangement.spacedBy(7.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(icon, contentDescription = null, modifier = Modifier.size(15.dp))
-            Text(label, style = MaterialTheme.typography.labelSmall, maxLines = 1)
-        }
+        Icon(
+            icon,
+            contentDescription = null,
+            modifier = Modifier.size(20.dp),
+            tint = if (accent) tokens.accent else tokens.ink2,
+        )
+        Text(
+            label,
+            style = type.tinyTag,
+            color = if (accent) tokens.accent else tokens.ink2,
+            maxLines = 1,
+        )
     }
 }
 
 @Composable
 private fun SkillIssueCard(issue: SkillScanIssue) {
-    val colors = workspaceColors()
-    Surface(
+    val tokens = LocalAmberTokens.current
+    val type = LocalAmberType.current
+    AmberCard(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(8.dp),
-        color = colors.redContainer.copy(alpha = 0.55f),
-        contentColor = colors.ink,
-        border = workspaceBorder(),
+        containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.55f),
+        borderColor = MaterialTheme.colorScheme.error.copy(alpha = 0.28f),
     ) {
         Row(
             modifier = Modifier
@@ -402,12 +434,13 @@ private fun SkillIssueCard(issue: SkillScanIssue) {
             ) {
                 Text(
                     text = issue.directoryName,
-                    style = MaterialTheme.typography.titleSmallEmphasized,
+                    style = type.body.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold),
+                    color = tokens.ink,
                 )
                 Text(
                     text = issue.reason,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = colors.red,
+                    style = type.secondary,
+                    color = MaterialTheme.colorScheme.error,
                 )
             }
         }
@@ -418,149 +451,143 @@ private fun SkillIssueCard(issue: SkillScanIssue) {
 private fun SkillCard(
     skill: SkillMetadata,
     enabled: Boolean,
+    groupedFirst: Boolean,
+    groupedLast: Boolean,
     onClick: () -> Unit,
     onOptimize: () -> Unit,
     onToggle: () -> Unit,
     onDelete: () -> Unit,
 ) {
-    val colors = workspaceColors()
-    val chatTheme = app.amber.feature.ui.pages.chat.LocalChatTheme.current
-    // V3 settings-skills.jsx: 单 Skill 卡 18dp 圆角 + surface 底 + hair 边线
-    Surface(
-        onClick = onClick,
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(18.dp),
-        color = chatTheme.surface,
-        contentColor = chatTheme.ink,
-        border = androidx.compose.foundation.BorderStroke(1.dp, chatTheme.hair),
+    val tokens = LocalAmberTokens.current
+    val type = LocalAmberType.current
+    val hasMcp = skill.skillDir.resolve("mcp.json").exists()
+    var showMenu by remember { mutableStateOf(false) }
+    val rowShape = RoundedCornerShape(
+        topStart = if (groupedFirst) 14.dp else 0.dp,
+        topEnd = if (groupedFirst) 14.dp else 0.dp,
+        bottomStart = if (groupedLast) 14.dp else 0.dp,
+        bottomEnd = if (groupedLast) 14.dp else 0.dp,
+    )
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 64.dp)
+            .background(tokens.surface, rowShape)
+            .border(1.dp, tokens.line, rowShape)
+            .pressable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 14.dp, vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically,
+        WorkspaceLeadingIcon(
+            icon = Lucide.Puzzle,
+            tone = WorkspaceTone.Neutral,
+            size = 40.dp,
+            iconSize = 20.dp,
+        )
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {
-            WorkspaceLeadingIcon(
-                icon = Lucide.Puzzle,
-                tone = WorkspaceTone.Neutral,
-                size = 34.dp,
-                iconSize = 20.dp,
+            Text(
+                text = skill.name,
+                style = type.body.copy(
+                    fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold,
+                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                ),
+                color = tokens.ink,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
-            Column(
-                modifier = Modifier
-                    .weight(1f)
-                    .padding(start = 14.dp, end = 8.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp),
-            ) {
+            Text(
+                text = skill.description.ifBlank { stringResource(R.string.skills_page_no_description) },
+                style = type.secondary,
+                color = tokens.ink2,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (!skill.compatibility.isNullOrBlank()) {
                 Text(
-                    text = skill.name,
-                    style = MaterialTheme.typography.titleSmallEmphasized,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
+                    text = skill.compatibility,
+                    style = type.meta.copy(fontSize = 12.sp, lineHeight = 16.sp),
+                    color = tokens.ink3,
                 )
-                Text(
-                    text = skill.description.ifBlank {
-                        stringResource(R.string.skills_page_no_description)
-                    },
-                    style = MaterialTheme.typography.bodySmall,
-                    color = colors.muted,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                if (!skill.compatibility.isNullOrBlank()) {
-                    Text(
-                        text = skill.compatibility,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = colors.faint,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-                // V3 settings-skills.jsx: 仅 disabled 行显示"未启用"小灰胶囊；MCP skill 显示 accent "MCP" 胶囊
-                if (!enabled || skill.skillDir.resolve("mcp.json").exists()) {
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        if (!enabled) {
-                            WorkspaceStatusPill(
-                                text = stringResource(R.string.skills_page_disabled),
-                                tone = WorkspaceTone.Neutral,
-                            )
-                        }
-                        if (skill.skillDir.resolve("mcp.json").exists()) {
-                            WorkspaceStatusPill(
-                                text = "MCP",
-                                tone = WorkspaceTone.Accent,
-                            )
-                        }
+            }
+            if (!enabled || hasMcp) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    if (!enabled) {
+                        WorkspaceStatusPill(
+                            text = stringResource(R.string.skills_page_disabled),
+                            tone = WorkspaceTone.Neutral,
+                        )
+                    }
+                    if (hasMcp) {
+                        WorkspaceStatusPill(text = "MCP", tone = WorkspaceTone.Accent)
                     }
                 }
             }
-            // V3 settings-skills.jsx: 单行右侧仅 chevron-right；操作（规整化/删除）改用 overflow 菜单
-            var showMenu by remember { mutableStateOf(false) }
-            Box {
-                Box(
-                    modifier = Modifier
-                        .size(48.dp)
-                        .clickable { showMenu = true },
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(
-                        imageVector = Lucide.EllipsisVertical,
-                        contentDescription = stringResource(R.string.skills_page_more_actions),
-                        tint = chatTheme.inkSoft,
-                        modifier = Modifier.size(20.dp),
-                    )
-                }
-                DropdownMenu(
-                    expanded = showMenu,
-                    onDismissRequest = { showMenu = false },
-                ) {
-                    DropdownMenuItem(
-                        text = {
-                            Text(
-                                stringResource(
-                                    if (enabled) R.string.skills_page_disable else R.string.skills_page_enable,
-                                )
-                            )
-                        },
-                        onClick = {
-                            showMenu = false
-                            onToggle()
-                        },
-                    )
-                    DropdownMenuItem(
-                        text = { Text(stringResource(R.string.skills_page_optimize)) },
-                        leadingIcon = {
-                            Icon(
-                                imageVector = Lucide.WandSparkles,
-                                contentDescription = null,
-                                modifier = Modifier.size(18.dp),
-                                tint = chatTheme.accent,
-                            )
-                        },
-                        onClick = {
-                            showMenu = false
-                            onOptimize()
-                        },
-                    )
-                    DropdownMenuItem(
-                        text = { Text(stringResource(R.string.delete)) },
-                        leadingIcon = {
-                            Icon(
-                                imageVector = Lucide.Trash2,
-                                contentDescription = null,
-                                modifier = Modifier.size(18.dp),
-                                tint = colors.red,
-                            )
-                        },
-                        onClick = {
-                            showMenu = false
-                            onDelete()
-                        },
-                    )
-                }
+        }
+        Box {
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .clickable { showMenu = true },
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector = Lucide.EllipsisVertical,
+                    contentDescription = stringResource(R.string.skills_page_more_actions),
+                    tint = tokens.ink3,
+                    modifier = Modifier.size(20.dp),
+                )
+            }
+            DropdownMenu(
+                expanded = showMenu,
+                onDismissRequest = { showMenu = false },
+            ) {
+                DropdownMenuItem(
+                    text = {
+                        Text(stringResource(if (enabled) R.string.skills_page_disable else R.string.skills_page_enable))
+                    },
+                    onClick = {
+                        showMenu = false
+                        onToggle()
+                    },
+                )
+                DropdownMenuItem(
+                    text = { Text(stringResource(R.string.skills_page_optimize)) },
+                    leadingIcon = {
+                        Icon(
+                            imageVector = Lucide.WandSparkles,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp),
+                            tint = tokens.accent,
+                        )
+                    },
+                    onClick = {
+                        showMenu = false
+                        onOptimize()
+                    },
+                )
+                DropdownMenuItem(
+                    text = { Text(stringResource(R.string.delete)) },
+                    leadingIcon = {
+                        Icon(
+                            imageVector = Lucide.Trash2,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp),
+                            tint = MaterialTheme.colorScheme.error,
+                        )
+                    },
+                    onClick = {
+                        showMenu = false
+                        onDelete()
+                    },
+                )
             }
         }
     }
@@ -616,74 +643,122 @@ private fun AddSkillDialog(
         SkillFrontmatterParser.parse(content)["name"]?.trim() ?: ""
     }
     val nameError = content.isNotBlank() && name.isBlank()
+    val tokens = LocalAmberTokens.current
+    val type = LocalAmberType.current
 
-    AlertDialog(
+    Dialog(
         onDismissRequest = onDismiss,
-        title = { Text(stringResource(R.string.skills_page_add_title)) },
-        text = {
-            if (manualMode) {
-                OutlinedTextField(
-                    value = content,
-                    onValueChange = { content = it },
-                    label = { Text(stringResource(R.string.skills_page_skill_content_label)) },
-                    placeholder = {
-                        Text(
-                            "---\nname: my-skill\ndescription: \"...\"\n---\n\n指令内容...",
-                            fontFamily = FontFamily.Monospace,
-                        )
-                    },
-                    supportingText = {
-                        if (nameError) Text(
-                            stringResource(R.string.skills_page_name_error),
-                            color = MaterialTheme.colorScheme.error
-                        )
-                        else if (name.isNotBlank()) Text(stringResource(R.string.skills_page_skill_name, name))
-                        else Text(stringResource(R.string.skills_page_paste_hint))
-                    },
-                    isError = nameError,
-                    minLines = 8,
-                    maxLines = 14,
-                    textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
-                    modifier = Modifier.fillMaxWidth(),
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth(0.92f)
+                .fillMaxHeight(0.8f),
+            shape = RoundedCornerShape(18.dp),
+            color = tokens.raised,
+            border = androidx.compose.foundation.BorderStroke(1.dp, tokens.line2),
+            tonalElevation = 0.dp,
+            shadowElevation = 16.dp,
+        ) {
+            Column(modifier = Modifier.fillMaxSize()) {
+                Text(
+                    text = stringResource(R.string.skills_page_add_title),
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 16.dp),
+                    style = type.sessionTitle,
+                    color = tokens.ink,
                 )
-            } else {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text(
-                        text = stringResource(R.string.skills_page_paste_hint),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    SkillAddOptionRow(
-                        icon = Lucide.Download,
-                        title = stringResource(R.string.skills_page_import_from_github),
-                        description = stringResource(R.string.skills_page_import_description),
-                        onClick = onImportGitHub,
-                    )
-                    SkillAddOptionRow(
-                        icon = Lucide.FileText,
-                        title = stringResource(R.string.skills_page_add_title),
-                        description = stringResource(R.string.skills_page_skill_content_label),
-                        onClick = { manualMode = true },
-                    )
-                }
-            }
-        },
-        confirmButton = {
-            if (manualMode) {
-                TextButton(
-                    onClick = { onConfirm(name, content) },
-                    enabled = name.isNotBlank() && !nameError,
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .verticalScroll(rememberScrollState())
+                        .padding(horizontal = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
-                    Text(stringResource(R.string.skills_page_save))
+                    if (manualMode) {
+                        OutlinedTextField(
+                            value = content,
+                            onValueChange = { content = it },
+                            label = { Text(stringResource(R.string.skills_page_skill_content_label)) },
+                            placeholder = {
+                                Text(
+                                    "---\nname: my-skill\ndescription: \"...\"\n---\n\n指令内容...",
+                                    fontFamily = FontFamily.Monospace,
+                                )
+                            },
+                            supportingText = {
+                                if (nameError) Text(
+                                    stringResource(R.string.skills_page_name_error),
+                                    color = MaterialTheme.colorScheme.error,
+                                ) else if (name.isNotBlank()) {
+                                    Text(stringResource(R.string.skills_page_skill_name, name))
+                                } else {
+                                    Text(stringResource(R.string.skills_page_paste_hint))
+                                }
+                            },
+                            isError = nameError,
+                            minLines = 8,
+                            maxLines = 14,
+                            textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = skillsFieldColors(),
+                        )
+                    } else {
+                        Text(
+                            text = stringResource(R.string.skills_page_paste_hint),
+                            style = type.secondary,
+                            color = tokens.ink2,
+                        )
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(tokens.surface, RoundedCornerShape(14.dp))
+                                .border(1.dp, tokens.line, RoundedCornerShape(14.dp)),
+                        ) {
+                            SkillAddOptionRow(
+                                icon = Lucide.Download,
+                                title = stringResource(R.string.skills_page_import_from_github),
+                                description = stringResource(R.string.skills_page_import_description),
+                                onClick = onImportGitHub,
+                            )
+                            Hairline()
+                            SkillAddOptionRow(
+                                icon = Lucide.FileText,
+                                title = stringResource(R.string.skills_page_add_title),
+                                description = stringResource(R.string.skills_page_skill_content_label),
+                                onClick = { manualMode = true },
+                            )
+                        }
+                    }
+                }
+                Hairline()
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 8.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    TextButton(
+                        onClick = { if (manualMode) manualMode = false else onDismiss() },
+                    ) {
+                        Text(if (manualMode) stringResource(R.string.back) else stringResource(R.string.cancel))
+                    }
+                    if (manualMode) {
+                        Button(
+                            onClick = { onConfirm(name, content) },
+                            enabled = name.isNotBlank() && !nameError,
+                            shape = RoundedCornerShape(15.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = tokens.accent,
+                                contentColor = tokens.accentInk,
+                            ),
+                        ) { Text(stringResource(R.string.skills_page_save)) }
+                    }
                 }
             }
-        },
-        dismissButton = {
-            TextButton(onClick = { if (manualMode) manualMode = false else onDismiss() }) {
-                Text(if (manualMode) stringResource(R.string.back) else stringResource(R.string.cancel))
-            }
-        },
-    )
+        }
+    }
 }
 
 @Composable
@@ -693,32 +768,38 @@ private fun SkillAddOptionRow(
     description: String,
     onClick: () -> Unit,
 ) {
-    val colors = workspaceColors()
-    Surface(
-        onClick = onClick,
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(14.dp),
-        color = colors.paper,
-        border = workspaceBorder(),
+    val tokens = LocalAmberTokens.current
+    val type = LocalAmberType.current
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 64.dp)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            WorkspaceLeadingIcon(icon = icon, tone = WorkspaceTone.Accent)
-            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text(title, style = MaterialTheme.typography.titleSmall)
-                Text(
-                    description,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = colors.muted,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-            Icon(Lucide.ChevronRight, contentDescription = null, tint = colors.faint)
+        WorkspaceLeadingIcon(
+            icon = icon,
+            tone = WorkspaceTone.Neutral,
+            size = 32.dp,
+            iconSize = 18.dp,
+        )
+        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(
+                title,
+                style = type.body.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold),
+                color = tokens.ink,
+            )
+            Text(
+                description,
+                style = type.secondary,
+                color = tokens.ink2,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
         }
+        Icon(Lucide.ChevronRight, contentDescription = null, tint = tokens.ink3)
     }
 }
 
@@ -729,10 +810,14 @@ private fun ImportSkillDialog(
 ) {
     var url by rememberSaveable { mutableStateOf("") }
     var loading by remember { mutableStateOf(false) }
+    val tokens = LocalAmberTokens.current
+    val type = LocalAmberType.current
 
     AlertDialog(
         onDismissRequest = { if (!loading) onDismiss() },
-        title = { Text(stringResource(R.string.skills_page_import_from_github)) },
+        shape = RoundedCornerShape(14.dp),
+        containerColor = tokens.raised,
+        title = { Text(stringResource(R.string.skills_page_import_from_github), style = type.sessionTitle) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(
@@ -750,6 +835,8 @@ private fun ImportSkillDialog(
                     enabled = !loading,
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
                     modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = skillsFieldColors(),
                 )
                 if (loading) {
                     Row(
@@ -781,3 +868,16 @@ private fun ImportSkillDialog(
         },
     )
 }
+
+@Composable
+private fun skillsFieldColors() = OutlinedTextFieldDefaults.colors(
+    focusedContainerColor = LocalAmberTokens.current.surface2,
+    unfocusedContainerColor = LocalAmberTokens.current.surface2,
+    focusedBorderColor = LocalAmberTokens.current.accent,
+    unfocusedBorderColor = LocalAmberTokens.current.line,
+    focusedLabelColor = LocalAmberTokens.current.accent,
+    unfocusedLabelColor = LocalAmberTokens.current.ink3,
+    focusedTextColor = LocalAmberTokens.current.ink,
+    unfocusedTextColor = LocalAmberTokens.current.ink,
+    cursorColor = LocalAmberTokens.current.accent,
+)

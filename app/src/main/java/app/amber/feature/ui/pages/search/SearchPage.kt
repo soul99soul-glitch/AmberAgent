@@ -2,6 +2,8 @@ package app.amber.feature.ui.pages.search
 
 import com.composables.icons.lucide.Lucide
 import com.composables.icons.lucide.RefreshCw
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -10,19 +12,18 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.TopAppBarDefaults
@@ -33,28 +34,29 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.res.stringResource
 import app.amber.agent.R
 import app.amber.agent.data.db.fts.MessageSearchResult
 import app.amber.agent.data.db.fts.SearchHitSource
 import app.amber.core.model.Conversation
-import app.amber.feature.ui.components.ds.SectionLabel
+import app.amber.feature.ui.components.ds.amberCanvas
 import app.amber.feature.ui.components.nav.BackButton
 import app.amber.feature.ui.components.ui.WorkspaceSearchField
 import app.amber.feature.ui.components.ui.WorkspaceTopBar
-import app.amber.feature.ui.components.ui.workspaceBorder
-import app.amber.feature.ui.components.ui.workspaceColors
 import app.amber.feature.ui.context.LocalNavController
 import app.amber.feature.ui.theme.LocalAmberTokens
 import app.amber.feature.ui.theme.LocalAmberType
 import app.amber.core.utils.navigateToChatPage
-import app.amber.core.utils.plus
 import app.amber.core.utils.toLocalDateTime
 import org.koin.androidx.compose.koinViewModel
 import kotlin.uuid.Uuid
@@ -113,20 +115,22 @@ fun SearchPage(vm: SearchVM = koinViewModel()) {
                 scrollBehavior = scrollBehavior,
             )
         },
-        modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
-        containerColor = workspaceColors().canvas,
+        modifier = Modifier
+            .amberCanvas()
+            .nestedScroll(scrollBehavior.nestedScrollConnection),
+        containerColor = Color.Transparent,
     ) { contentPadding ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(contentPadding)
+                .padding(contentPadding),
         ) {
             WorkspaceSearchField(
                 value = vm.searchQuery,
                 onValueChange = { vm.onQueryChange(it) },
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                    .padding(start = 16.dp, top = 8.dp, end = 16.dp, bottom = 4.dp),
                 placeholder = stringResource(R.string.search_page_placeholder),
                 onSubmit = { vm.search() },
             )
@@ -135,14 +139,14 @@ fun SearchPage(vm: SearchVM = koinViewModel()) {
                 modifier = Modifier
                     .fillMaxWidth()
                     .horizontalScroll(rememberScrollState())
-                    .padding(horizontal = 16.dp),
+                    .padding(start = 16.dp, top = 4.dp, end = 16.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 SearchFilter.values().forEach { filter ->
-                    FilterChip(
+                    SearchFilterChip(
                         selected = vm.searchFilter == filter,
                         onClick = { vm.onFilterChange(filter) },
-                        label = { Text(stringResource(filter.labelRes())) },
+                        label = stringResource(filter.labelRes()),
                     )
                 }
             }
@@ -165,8 +169,8 @@ fun SearchPage(vm: SearchVM = koinViewModel()) {
                                     current,
                                     total
                                 ) else stringResource(R.string.search_page_rebuilding_simple),
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                style = LocalAmberType.current.body,
+                                color = LocalAmberTokens.current.ink2,
                             )
                         }
                     }
@@ -191,21 +195,22 @@ fun SearchPage(vm: SearchVM = koinViewModel()) {
                                     )
                                 }
                                 LazyColumn(
-                                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
-                                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                                    contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 24.dp),
                                     modifier = Modifier.weight(1f),
                                 ) {
-                                    item {
-                                        SectionLabel(
+                                    item(key = "search_recent_header") {
+                                        SearchSectionHeader(
                                             text = stringResource(R.string.search_page_recent_conversations),
                                         )
                                     }
-                                    items(
+                                    itemsIndexed(
                                         items = vm.recentConversations,
-                                        key = { it.id.toString() },
-                                    ) { conversation ->
+                                        key = { _, conversation -> conversation.id.toString() },
+                                    ) { index, conversation ->
                                         RecentConversationItem(
                                             conversation = conversation,
+                                            isFirst = index == 0,
+                                            isLast = index == vm.recentConversations.lastIndex,
                                             onClick = {
                                                 navigateToChatPage(navController, conversation.id)
                                             },
@@ -224,8 +229,8 @@ fun SearchPage(vm: SearchVM = koinViewModel()) {
                                     } else {
                                         stringResource(R.string.parity_search_no_recent_conversations)
                                     },
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    style = LocalAmberType.current.body,
+                                    color = LocalAmberTokens.current.ink3,
                                 )
                             }
                         }
@@ -238,8 +243,8 @@ fun SearchPage(vm: SearchVM = koinViewModel()) {
                         ) {
                             Text(
                                 text = stringResource(R.string.search_page_no_results),
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                style = LocalAmberType.current.body,
+                                color = LocalAmberTokens.current.ink3,
                             )
                         }
                     }
@@ -254,16 +259,25 @@ fun SearchPage(vm: SearchVM = koinViewModel()) {
                                 )
                             }
                             LazyColumn(
-                                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
-                                verticalArrangement = Arrangement.spacedBy(8.dp),
+                                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 24.dp),
                                 modifier = Modifier.weight(1f),
                             ) {
-                                item {
-                                    SectionLabel(text = stringResource(R.string.search_page_title))
+                                item(key = "search_results_header") {
+                                    SearchSectionHeader(
+                                        text = stringResource(
+                                            R.string.chat_message_tool_search_results_count,
+                                            vm.visibleResults.size,
+                                        ),
+                                    )
                                 }
-                                items(vm.visibleResults) { result ->
+                                itemsIndexed(
+                                    items = vm.visibleResults,
+                                    key = { _, result -> result.stableKey() },
+                                ) { index, result ->
                                     SearchResultItem(
                                         result = result,
+                                        isFirst = index == 0,
+                                        isLast = index == vm.visibleResults.lastIndex,
                                         onClick = {
                                             // P8-04: 标题命中（nodeId 为 null）打开会话；
                                             // 正文命中继续跳转具体消息（复用现有跳转）。
@@ -277,7 +291,7 @@ fun SearchPage(vm: SearchVM = koinViewModel()) {
                                             } else {
                                                 navigateToChatPage(navController, chatId = chatId)
                                             }
-                                        }
+                                        },
                                     )
                                 }
                             }
@@ -295,12 +309,80 @@ private fun SearchErrorKind.messageRes(): Int = when (this) {
     SearchErrorKind.INDEX_REBUILD -> R.string.parity_search_rebuild_error
 }
 
+private fun MessageSearchResult.stableKey(): String = buildString {
+    append(conversationId)
+    append(':')
+    append(nodeId.orEmpty())
+    append(':')
+    append(messageId.orEmpty())
+    append(':')
+    append(hitSource.name)
+}
+
+@Composable
+private fun SearchFilterChip(
+    selected: Boolean,
+    onClick: () -> Unit,
+    label: String,
+) {
+    val tokens = LocalAmberTokens.current
+    val type = LocalAmberType.current
+    Surface(
+        modifier = Modifier.height(32.dp),
+        onClick = onClick,
+        shape = RoundedCornerShape(16.dp),
+        color = if (selected) tokens.accent else Color.Transparent,
+        contentColor = if (selected) tokens.accentInk else tokens.ink2,
+        border = BorderStroke(1.dp, if (selected) tokens.accent else tokens.line2),
+    ) {
+        Box(
+            modifier = Modifier.padding(horizontal = 14.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                text = label,
+                style = type.secondary.copy(
+                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+                ),
+                maxLines = 1,
+            )
+        }
+    }
+}
+
+@Composable
+private fun SearchSectionHeader(
+    text: String,
+    modifier: Modifier = Modifier,
+) {
+    val tokens = LocalAmberTokens.current
+    val type = LocalAmberType.current
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(top = 28.dp, bottom = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Text("//", style = type.eyebrow, color = tokens.accent)
+        Text(text, style = type.eyebrow, color = tokens.ink2)
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .height(1.dp)
+                .background(tokens.line),
+        )
+    }
+}
+
 @Composable
 private fun SearchErrorState(
     message: String,
     retryLabel: String,
     onRetry: () -> Unit,
 ) {
+    val tokens = LocalAmberTokens.current
+    val type = LocalAmberType.current
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -310,8 +392,8 @@ private fun SearchErrorState(
     ) {
         Text(
             text = message,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            style = type.body,
+            color = tokens.ink2,
         )
         TextButton(onClick = onRetry) {
             Text(retryLabel)
@@ -325,6 +407,8 @@ private fun SearchInlineError(
     retryLabel: String,
     onRetry: () -> Unit,
 ) {
+    val tokens = LocalAmberTokens.current
+    val type = LocalAmberType.current
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -337,8 +421,8 @@ private fun SearchInlineError(
             modifier = Modifier
                 .weight(1f)
                 .padding(end = 8.dp),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            style = type.secondary,
+            color = tokens.ink2,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
         )
@@ -351,42 +435,67 @@ private fun SearchInlineError(
 @Composable
 private fun RecentConversationItem(
     conversation: Conversation,
+    isFirst: Boolean,
+    isLast: Boolean,
     onClick: () -> Unit,
 ) {
+    val tokens = LocalAmberTokens.current
+    val type = LocalAmberType.current
     val untitled = stringResource(R.string.search_page_untitled)
     val formattedTime = remember(conversation.updateAt) {
         conversation.updateAt.toLocalDateTime()
     }
-    Surface(
-        onClick = onClick,
-        color = workspaceColors().paper,
-        border = workspaceBorder(),
-        shape = RoundedCornerShape(14.dp),
+    val rowShape = RoundedCornerShape(
+        topStart = if (isFirst) 14.dp else 0.dp,
+        topEnd = if (isFirst) 14.dp else 0.dp,
+        bottomStart = if (isLast) 14.dp else 0.dp,
+        bottomEnd = if (isLast) 14.dp else 0.dp,
+    )
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(rowShape)
+            .background(tokens.surface),
     ) {
-        Column(
-            modifier = Modifier
-                .padding(16.dp)
-                .fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
+        Surface(
+            onClick = onClick,
+            modifier = Modifier.fillMaxWidth(),
+            color = Color.Transparent,
         ) {
-            Text(
-                text = conversation.title.ifBlank { untitled },
-                style = LocalAmberType.current.sessionTitle,
-                color = LocalAmberTokens.current.ink,
-            )
-            if (conversation.lastMessagePreview.isNotBlank()) {
+            Column(
+                modifier = Modifier
+                    .padding(16.dp)
+                    .fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
                 Text(
-                    text = conversation.lastMessagePreview,
-                    style = LocalAmberType.current.secondary,
-                    color = LocalAmberTokens.current.ink2,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
+                    text = conversation.title.ifBlank { untitled },
+                    style = type.body.copy(fontWeight = FontWeight.SemiBold),
+                    color = tokens.ink,
+                )
+                if (conversation.lastMessagePreview.isNotBlank()) {
+                    Text(
+                        text = conversation.lastMessagePreview,
+                        style = type.secondary,
+                        color = tokens.ink2,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                Text(
+                    text = formattedTime,
+                    style = type.meta,
+                    color = tokens.ink3,
                 )
             }
-            Text(
-                text = formattedTime,
-                style = LocalAmberType.current.meta,
-                color = LocalAmberTokens.current.ink3,
+        }
+        if (!isLast) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp)
+                    .height(1.dp)
+                    .background(tokens.line),
             )
         }
     }
@@ -395,9 +504,13 @@ private fun RecentConversationItem(
 @Composable
 private fun SearchResultItem(
     result: MessageSearchResult,
+    isFirst: Boolean,
+    isLast: Boolean,
     onClick: () -> Unit,
 ) {
-    val highlightColor = LocalAmberTokens.current.accent.copy(alpha = 0.22f)
+    val tokens = LocalAmberTokens.current
+    val type = LocalAmberType.current
+    val highlightColor = tokens.accent.copy(alpha = 0.22f)
     val untitled = stringResource(R.string.search_page_untitled)
     val snippetText = buildAnnotatedString {
         val snippet = result.snippet
@@ -427,57 +540,79 @@ private fun SearchResultItem(
         result.updateAt.toLocalDateTime()
     }
 
-    Surface(
-        onClick = onClick,
-        color = workspaceColors().paper,
-        border = workspaceBorder(),
-        shape = RoundedCornerShape(14.dp),
+    val rowShape = RoundedCornerShape(
+        topStart = if (isFirst) 14.dp else 0.dp,
+        topEnd = if (isFirst) 14.dp else 0.dp,
+        bottomStart = if (isLast) 14.dp else 0.dp,
+        bottomEnd = if (isLast) 14.dp else 0.dp,
+    )
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(rowShape)
+            .background(tokens.surface),
     ) {
-        Column(
-            modifier = Modifier
-                .padding(16.dp)
-                .fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(4.dp)
+        Surface(
+            onClick = onClick,
+            modifier = Modifier.fillMaxWidth(),
+            color = Color.Transparent,
         ) {
-            // Graphite §3: conversation title is human prose → SANS (sessionTitle), full ink.
-            Text(
-                text = result.title.ifBlank { untitled },
-                style = LocalAmberType.current.sessionTitle,
-                color = LocalAmberTokens.current.ink,
-            )
-            // Graphite §3: snippet/preview → SANS secondary, secondary ink.
-            Text(
-                text = snippetText,
-                style = LocalAmberType.current.secondary,
-                color = LocalAmberTokens.current.ink2,
-            )
-            // Graphite §3: timestamp is a machine-fact → MONO (meta), muted ink.
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically,
+            Column(
+                modifier = Modifier
+                    .padding(16.dp)
+                    .fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
+                // Graphite §3: conversation title is human prose → SANS (sessionTitle), full ink.
                 Text(
-                    text = formattedTime,
-                    style = LocalAmberType.current.meta,
-                    color = LocalAmberTokens.current.ink3,
-                    maxLines = 1,
+                    text = result.title.ifBlank { untitled },
+                    style = type.body.copy(fontWeight = FontWeight.SemiBold),
+                    color = tokens.ink,
                 )
-                // P8-04: 命中来源标记（标题/正文）。
+                // Graphite §3: snippet/preview → SANS secondary, secondary ink.
                 Text(
-                    text = when {
-                        result.titleMatched && result.hitSource == SearchHitSource.BODY ->
-                            stringResource(R.string.search_page_hit_title_and_body)
-                        result.titleMatched -> stringResource(R.string.search_page_hit_title)
-                        else -> stringResource(R.string.search_page_hit_body)
-                    },
-                    style = LocalAmberType.current.meta,
-                    color = LocalAmberTokens.current.ink3,
-                    modifier = Modifier.weight(1f),
-                    maxLines = 1,
+                    text = snippetText,
+                    style = type.secondary,
+                    color = tokens.ink2,
+                    maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
+                // Graphite §3: timestamp is a machine-fact → MONO (meta), muted ink.
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = when {
+                            result.titleMatched && result.hitSource == SearchHitSource.BODY ->
+                                stringResource(R.string.search_page_hit_title_and_body)
+                            result.titleMatched -> stringResource(R.string.search_page_hit_title)
+                            else -> stringResource(R.string.search_page_hit_body)
+                        },
+                        style = type.meta.copy(fontSize = 10.5.sp, fontWeight = FontWeight.SemiBold),
+                        color = tokens.ink3,
+                        modifier = Modifier.weight(1f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        text = formattedTime,
+                        style = type.meta,
+                        color = tokens.ink3,
+                        maxLines = 1,
+                    )
+                }
             }
+        }
+        if (!isLast) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp)
+                    .height(1.dp)
+                    .background(tokens.line),
+            )
         }
     }
 }

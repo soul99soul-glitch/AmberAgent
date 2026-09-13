@@ -78,6 +78,8 @@ import app.amber.feature.ui.context.LocalSettings
 import app.amber.feature.ui.hooks.ChatInputAttachmentKind
 import app.amber.feature.ui.hooks.ChatInputState
 import app.amber.core.utils.appLocale
+import app.amber.feature.ui.theme.LocalAmberTokens
+import app.amber.feature.ui.theme.LocalAmberType
 import org.koin.compose.koinInject
 
 /**
@@ -134,6 +136,8 @@ internal fun TextInputRow(
     val webMountManager: WebMountManager = koinInject()
     val webMountEnabled by webMountManager.globalEnabledFlow.collectAsStateWithLifecycle()
     val workspace = workspaceColors()
+    val amberTokens = LocalAmberTokens.current
+    val amberType = LocalAmberType.current
     val slashCommandLabels = SlashCommandLabels(
         clearDescription = stringResource(R.string.chat_input_slash_clear_description),
         compactDescription = stringResource(R.string.chat_input_slash_compact_description),
@@ -495,6 +499,7 @@ internal fun TextInputRow(
                 TextFieldDefaults.contentPaddingWithoutLabel()
             },
             shape = if (minimalChrome) RoundedCornerShape(0.dp) else RoundedCornerShape(8.dp),
+            textStyle = amberType.body,
             placeholder = {
                 if (!hidePlaceholder) {
                     Text(
@@ -503,7 +508,7 @@ internal fun TextInputRow(
                         } else {
                             stringResource(R.string.chat_input_placeholder)
                         },
-                        color = workspace.faint,
+                        color = if (minimalChrome) amberTokens.ink3 else workspace.faint,
                     )
                 }
             },
@@ -521,10 +526,10 @@ internal fun TextInputRow(
                 focusedIndicatorColor = Color.Transparent,
                 focusedContainerColor = if (minimalChrome) Color.Transparent else workspace.paper,
                 unfocusedContainerColor = if (minimalChrome) Color.Transparent else workspace.paper,
-                focusedTextColor = workspace.ink,
-                unfocusedTextColor = workspace.ink,
-                focusedPlaceholderColor = workspace.faint,
-                unfocusedPlaceholderColor = workspace.faint,
+                focusedTextColor = if (minimalChrome) amberTokens.ink else workspace.ink,
+                unfocusedTextColor = if (minimalChrome) amberTokens.ink else workspace.ink,
+                focusedPlaceholderColor = if (minimalChrome) amberTokens.ink3 else workspace.faint,
+                unfocusedPlaceholderColor = if (minimalChrome) amberTokens.ink3 else workspace.faint,
             ),
             trailingIcon = if (isFocused && !minimalChrome) {
                 {

@@ -16,6 +16,8 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.filterNot
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
@@ -180,6 +182,18 @@ class ChatVM(
 
         // 记住对话ID, 方便下次启动恢复
         context.writeStringPreference(LAST_CONVERSATION_ID_PREF, _conversationId.toString())
+    }
+
+    /** Called only while this conversation page enters composition. */
+    fun onChatVisible() {
+        viewModelScope.launch {
+            val settings = settingsStore.settingsFlow.filterNot { it.init }.first()
+            if (!settings.agentRuntime.autoApproveHighRiskToolCalls) return@launch
+            // Reuse ChatService's per-conversation init mutex so a visible
+            // page cannot resume against an initialization-era snapshot.
+            chatService.initializeConversation(_conversationId)
+            chatService.resumePendingToolsWithCurrentApprovalSettings(_conversationId)
+        }
     }
 
     // P1-02: OutcomeUnknown prompts for this conversation — a non-idempotent

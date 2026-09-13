@@ -11,15 +11,6 @@ import app.amber.feature.board.hotlist.deepread.DeepReadSectionState
 import app.amber.feature.board.hotlist.deepread.DeepReadSectionStatus
 import android.graphics.Bitmap
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.Outline
-import androidx.compose.ui.graphics.Shape
-import androidx.compose.ui.graphics.asAndroidPath
-import androidx.compose.ui.unit.Density
-import androidx.compose.ui.unit.LayoutDirection
-import androidx.compose.ui.unit.dp
-import android.graphics.Region
-import app.amber.feature.ui.pages.sessionhome.AmberContinuousShape
 import androidx.compose.ui.test.SemanticsNodeInteraction
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.click
@@ -277,7 +268,7 @@ class UiRefreshDeviceSmokeTest {
             val newChat = compose.onNodeWithContentDescription(targetContext.getString(R.string.chat_page_new_message))
             assertPressedShape(settings, "12-settings-pressed", visualHeightDp = 32f, visualWidthDp = 32f)
             assertPressedShape(search, "13-search-pressed", visualHeightDp = 32f)
-            assertPressedShape(newChat, "14-new-chat-pressed", visualHeightDp = 40f, shape = AmberContinuousShape(44.dp))
+            assertPressedShape(newChat, "14-new-chat-pressed", visualHeightDp = 40f)
 
             // The extra space outside the visible 32dp shape remains a working touch target.
             search.performTouchInput { click(Offset(center.x, 2f)) }
@@ -297,7 +288,6 @@ class UiRefreshDeviceSmokeTest {
         screenshot: String,
         visualHeightDp: Float? = null,
         visualWidthDp: Float? = null,
-        shape: Shape? = null,
     ) {
         button.assertIsDisplayed()
         capture("$screenshot-idle")
@@ -305,12 +295,6 @@ class UiRefreshDeviceSmokeTest {
         val density = targetContext.resources.displayMetrics.density
         val height = visualHeightDp?.times(density) ?: bounds.height
         val width = visualWidthDp?.times(density) ?: bounds.width
-        val shapeRegion = shape?.let {
-            val outline = it.createOutline(Size(width, height), LayoutDirection.Ltr, Density(density)) as Outline.Generic
-            Region().apply {
-                setPath(outline.path.asAndroidPath(), Region(0, 0, width.toInt(), height.toInt()))
-            }
-        }
         val radius = height / 2f
         val leftCircleX = bounds.center.x - width / 2f + radius
         val rightCircleX = bounds.center.x + width / 2f - radius
@@ -330,21 +314,11 @@ class UiRefreshDeviceSmokeTest {
                             abs(PixelColor.green(old) - PixelColor.green(current)) +
                             abs(PixelColor.blue(old) - PixelColor.blue(current))
                         if (delta <= 12) continue
-                        if (shapeRegion != null) {
-                            val localX = (x - bounds.center.x + width / 2f).toInt()
-                            val localY = (y - bounds.center.y + height / 2f).toInt()
-                            val samples = listOf(-2, 0, 2).flatMap { dy ->
-                                listOf(-2, 0, 2).map { dx -> shapeRegion.contains(localX + dx, localY + dy) }
-                            }
-                            if (samples.none { it }) changedOutside++
-                            if (samples.all { it }) changedInside++
-                        } else {
-                            val dx = x - x.toFloat().coerceIn(leftCircleX, rightCircleX)
-                            val dy = y - bounds.center.y
-                            val distanceSquared = dx * dx + dy * dy
-                            if (distanceSquared > (radius + 2f) * (radius + 2f)) changedOutside++
-                            if (distanceSquared < (radius - 2f) * (radius - 2f)) changedInside++
-                        }
+                        val dx = x - x.toFloat().coerceIn(leftCircleX, rightCircleX)
+                        val dy = y - bounds.center.y
+                        val distanceSquared = dx * dx + dy * dy
+                        if (distanceSquared > (radius + 2f) * (radius + 2f)) changedOutside++
+                        if (distanceSquared < (radius - 2f) * (radius - 2f)) changedInside++
                     }
                 }
             } finally {

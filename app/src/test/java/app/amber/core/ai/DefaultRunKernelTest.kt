@@ -71,6 +71,42 @@ class DefaultRunKernelTest {
 
     private val json = Json { ignoreUnknownKeys = true }
 
+    @Test
+    fun `high risk auto approval executes consecutive SSH and file calls without a user pause`() = runTest {
+        val executions = mutableListOf<String>()
+        val tools = listOf("terminal_execute", "file_write").map { name ->
+            Tool(
+                name = name,
+                description = "approval-required test tool",
+                needsApproval = true,
+                allowsAutoApproval = false,
+                execute = {
+                    executions += name
+                    listOf(UIMessagePart.Text("done"))
+                },
+            )
+        }
+        val engine = FakeRoundEngine(listOf(
+            { toolCallAssistant("ssh_1", "terminal_execute", """{"runtime":"remote_ssh","command":"pwd"}""") },
+            { toolCallAssistant("write_1", "file_write") },
+            { textAssistant("已完成") },
+        ))
+        val terminals = mutableListOf<GenerationTerminal>()
+        val chunks = kernel(engine).run(
+            session(
+                listOf(UIMessage.user("执行任务")), tools, terminals = terminals,
+                autoApproveHighRiskTools = true,
+            ),
+        ).toList()
+
+        assertEquals(listOf("terminal_execute", "file_write"), executions)
+        assertEquals(3, engine.requests.size)
+        assertTrue(terminals.isEmpty())
+        assertTrue(chunks.filterIsInstance<GenerationChunk.Messages>().none { chunk ->
+            chunk.messages.any { message -> message.getTools().any { it.isPending } }
+        })
+    }
+
     private fun kernel(engine: GenerationRoundEngine): DefaultRunKernel = DefaultRunKernel(
         context = testContext(),
         toolDispatcher = AgentToolDispatcher(json, PermissionDecisionResolver()),
@@ -97,6 +133,7 @@ class DefaultRunKernelTest {
             app.amber.feature.runtime.ExecutionPolicy.permissive(),
         settings: Settings = Settings(),
         responsesResume: ResponsesResumeRequest? = null,
+        autoApproveHighRiskTools: Boolean = false,
     ): GenerationRunSession {
         var pendingSteer = steer
         return GenerationRunSession(
@@ -113,6 +150,7 @@ class DefaultRunKernelTest {
             onTerminal = { terminals += it },
             executionPolicy = executionPolicy,
             responsesResume = responsesResume,
+            autoApproveHighRiskTools = autoApproveHighRiskTools,
         )
     }
 
@@ -345,6 +383,94 @@ class DefaultRunKernelTest {
     }
 
     @Test
+    fun `high risk auto approval rechecks persisted SSH pending and continues`() = runTest {
+        val executions = AtomicInteger(0)
+        val ssh = Tool(
+            name = "terminal_execute",
+            description = "SSH command",
+            needsApproval = true,
+            allowsAutoApproval = false,
+            execute = {
+                executions.incrementAndGet()
+                listOf(UIMessagePart.Text("ssh-ok"))
+            },
+        )
+        val engine = FakeRoundEngine(listOf({ textAssistant("继续完成") }))
+        val terminals = mutableListOf<GenerationTerminal>()
+        val chunks = kernel(engine).run(
+            session(
+                messages = listOf(
+                    UIMessage.user("检查 SSH"),
+                    toolCallAssistant(
+                        callId = "ssh-pending",
+                        toolName = "terminal_execute",
+                        input = """{"runtime":"remote_ssh","command":"pwd"}""",
+                        approvalState = ToolApprovalState.Pending,
+                    ),
+                ),
+                tools = listOf(ssh),
+                terminals = terminals,
+                autoApproveHighRiskTools = true,
+            ),
+        ).toList()
+
+        assertEquals(1, executions.get())
+        assertEquals("the resumed call goes through one fresh model round", 1, engine.requests.size)
+        assertTrue(terminals.isEmpty())
+        val resumedTool = engine.requests.single().messages.last().getTools().single()
+        assertTrue(resumedTool.isExecuted)
+        assertTrue("the kernel must not forge a user Approved state", resumedTool.approvalState != ToolApprovalState.Approved)
+        assertEquals("继续完成", (lastMessages(chunks).last().parts.last() as UIMessagePart.Text).text)
+    }
+
+    @Test
+    fun `high risk auto approval waits for a human answer before releasing a pending batch`() = runTest {
+        val executions = AtomicInteger(0)
+        val askUser = Tool(
+            name = "ask_user",
+            description = "human answer",
+            needsApproval = true,
+            allowsAutoApproval = false,
+            execute = {
+                executions.incrementAndGet()
+                listOf(UIMessagePart.Text("must not execute"))
+            },
+        )
+        val engine = FakeRoundEngine(emptyList())
+        val terminals = mutableListOf<GenerationTerminal>()
+        val chunks = kernel(engine).run(
+            session(
+                messages = listOf(
+                    UIMessage.user("询问用户"),
+                    toolCallAssistant(
+                        callId = "ask-pending",
+                        toolName = "ask_user",
+                        input = """{"question":"继续吗？"}""",
+                        approvalState = ToolApprovalState.Pending,
+                    ).let { message ->
+                        message.copy(parts = listOf(
+                            UIMessagePart.Tool(
+                                toolCallId = "ssh-pending",
+                                toolName = "terminal_execute",
+                                input = """{"runtime":"remote_ssh","command":"pwd"}""",
+                                approvalState = ToolApprovalState.Pending,
+                            ),
+                        ) + message.parts)
+                    },
+                ),
+                tools = listOf(askUser, askUser.copy(name = "terminal_execute")),
+                terminals = terminals,
+                autoApproveHighRiskTools = true,
+            ),
+        ).toList()
+
+        assertEquals(0, executions.get())
+        assertEquals(0, engine.requests.size)
+        assertEquals(listOf(GenerationTerminal.WaitingUser), terminals)
+        assertTrue("unchanged human-input state needs no replacement messages", chunks.isEmpty())
+    }
+
+    @Test
     fun `truncated reply with a tool call executes nothing and settles as OutputLimit`() = runTest {
         val executions = AtomicInteger(0)
         val readOnly = Tool(
@@ -402,6 +528,63 @@ class DefaultRunKernelTest {
         val parts = lastMessages(chunks).last().parts
         assertEquals("写到一半的回答", (parts.first() as UIMessagePart.Text).text)
         assertEquals("模型回复达到输出上限，请重试。", (parts.last() as UIMessagePart.Text).text)
+    }
+
+    @Test
+    fun `fresh wait calls keep observing until the job completes`() = runTest {
+        val observations = mutableListOf<String>()
+        val wait = Tool(
+            name = "terminal_job_wait",
+            description = "observe a running job",
+            execute = {
+                val status = if (observations.size < 2) "running" else "completed"
+                observations += status
+                listOf(UIMessagePart.Text("""{"status":"$status"}"""))
+            },
+        )
+        val engine = FakeRoundEngine(listOf(
+            { toolCallAssistant("wait_1", wait.name, """{"job_id":"job_1","timeout_ms":60000}""") },
+            { toolCallAssistant("wait_2", wait.name, """{"job_id":"job_1","timeout_ms":60000}""") },
+            { toolCallAssistant("wait_3", wait.name, """{"job_id":"job_1","timeout_ms":60000}""") },
+            { textAssistant("任务已完成") },
+        ))
+        val terminals = mutableListOf<GenerationTerminal>()
+
+        val chunks = kernel(engine).run(session(
+            listOf(UIMessage.user("等待任务完成")), listOf(wait), terminals = terminals,
+        )).toList()
+
+        assertEquals(listOf("running", "running", "completed"), observations)
+        assertTrue(terminals.isEmpty())
+        assertEquals("任务已完成", (lastMessages(chunks).last().parts.last() as UIMessagePart.Text).text)
+    }
+
+    @Test
+    fun `reading a file after editing it observes the new contents`() = runTest {
+        var contents = "before"
+        val reads = mutableListOf<String>()
+        val read = Tool(name = "file_read", description = "read file", execute = {
+            reads += contents
+            listOf(UIMessagePart.Text(contents))
+        })
+        val edit = Tool(name = "file_edit", description = "edit file", execute = {
+            contents = "after"
+            listOf(UIMessagePart.Text("edited"))
+        })
+        val engine = FakeRoundEngine(listOf(
+            { toolCallAssistant("read_1", read.name, """{"path":"/workspace/a.txt"}""") },
+            { toolCallAssistant("edit_1", edit.name) },
+            { toolCallAssistant("read_2", read.name, """{"path":"/workspace/a.txt"}""") },
+            { textAssistant("验证完成") },
+        ))
+
+        kernel(engine).run(session(
+            listOf(UIMessage.user("修改文件并检查")), listOf(read, edit), autoApproveHighRiskTools = true,
+        )).toList()
+
+        assertEquals(listOf("before", "after"), reads)
+        val verification = engine.requests.last().messages.last().getTools().single()
+        assertEquals("after", verification.output.filterIsInstance<UIMessagePart.Text>().single().text)
     }
 
     @Test
@@ -643,7 +826,7 @@ class DefaultRunKernelTest {
     fun `same toolCallId re-emitted in the same run is a duplicate and is not re-executed`() = runTest {
         val executions = AtomicInteger(0)
         val readOnly = Tool(
-            name = "read_thing",
+            name = "file_read",
             description = "read-only lookup",
             execute = {
                 executions.incrementAndGet()
@@ -655,8 +838,8 @@ class DefaultRunKernelTest {
         // be signature-handled (skipped), not unconditionally re-executed.
         val engine = FakeRoundEngine(
             listOf(
-                { toolCallAssistant("call_1", "read_thing") },
-                { toolCallAssistant("call_1", "read_thing") },
+                { toolCallAssistant("call_1", "file_read") },
+                { toolCallAssistant("call_1", "file_read") },
                 { textAssistant("完成") },
             ),
         )

@@ -3,11 +3,14 @@ package app.amber.feature.ui.pages.setting
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
@@ -28,8 +31,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
@@ -120,7 +123,7 @@ fun SettingExperimentalSubAgentPage(
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
             contentPadding = innerPadding + PaddingValues(horizontal = SettingPageHorizontalInset, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             item {
                 ExperimentHeroCard(
@@ -138,33 +141,44 @@ fun SettingExperimentalSubAgentPage(
 
             item {
                 ExperimentSectionCard(title = stringResource(R.string.setting_subagent_section_runtime)) {
-                    SubAgentSelectRow(
-                        label = stringResource(R.string.setting_subagent_mode),
-                        options = modeOptions,
-                        selected = subAgent.mode,
-                        onSelected = { value ->
-                            update { current ->
-                                current.copy(
-                                    mode = value,
-                                    allowDynamicSubAgents = if (value == SubAgentMode.SMART_DYNAMIC) true
-                                    else current.allowDynamicSubAgents,
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(
+                            text = stringResource(R.string.setting_subagent_mode),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = workspaceColors().ink,
+                        )
+                        SettingSegmentedChoice(
+                            options = modeOptions,
+                            selected = subAgent.mode,
+                            onSelected = { value ->
+                                update { current ->
+                                    current.copy(
+                                        mode = value,
+                                        allowDynamicSubAgents = if (value == SubAgentMode.SMART_DYNAMIC) true
+                                        else current.allowDynamicSubAgents,
+                                    )
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            label = { value ->
+                                Text(
+                                    when (value) {
+                                        SubAgentMode.ROSTER -> stringResource(R.string.setting_subagent_mode_roster)
+                                        SubAgentMode.SMART_DYNAMIC -> stringResource(R.string.setting_subagent_mode_smart)
+                                    },
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    maxLines = 1,
                                 )
-                            }
-                        },
-                        optionToString = { value ->
-                            when (value) {
-                                SubAgentMode.ROSTER -> stringResource(R.string.setting_subagent_mode_roster)
-                                SubAgentMode.SMART_DYNAMIC -> stringResource(R.string.setting_subagent_mode_smart)
-                            }
-                        },
-                    )
+                            },
+                        )
+                    }
                     if (subAgent.mode == SubAgentMode.SMART_DYNAMIC) {
                         ExperimentNote(text = stringResource(R.string.setting_subagent_mode_smart_desc))
                     }
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
                         Column(
                             modifier = Modifier.weight(1f),
@@ -192,45 +206,61 @@ fun SettingExperimentalSubAgentPage(
 
             item {
                 ExperimentSectionCard(title = stringResource(R.string.setting_subagent_section_limits)) {
-                    SubAgentSelectRow(
-                        label = stringResource(R.string.setting_subagent_max_concurrent),
-                        options = concurrencyOptions,
-                        selected = subAgent.maxConcurrentRuns.coerceIn(1, 5),
-                        onSelected = { value -> update { it.copy(maxConcurrentRuns = value) } },
-                        optionToString = { it.toString() },
-                    )
-                    SubAgentSelectRow(
-                        label = stringResource(R.string.setting_subagent_max_turns),
-                        options = turnOptions,
-                        selected = subAgent.maxTurns.coerceIn(2, 8),
-                        onSelected = { value -> update { it.copy(maxTurns = value) } },
-                        optionToString = { it.toString() },
-                    )
-                    SubAgentSelectRow(
-                        label = stringResource(R.string.setting_subagent_timeout),
-                        options = timeoutOptions,
-                        selected = timeoutOptions.minBy { kotlin.math.abs(it - subAgent.timeoutMs) },
-                        onSelected = { value -> update { it.copy(timeoutMs = value) } },
-                        optionToString = { "${it / 60_000} min" },
-                    )
-                    SubAgentSelectRow(
-                        label = stringResource(R.string.setting_subagent_output_budget),
-                        options = budgetOptions,
-                        selected = budgetOptions.minBy { kotlin.math.abs(it - subAgent.outputBudgetChars) },
-                        onSelected = { value ->
-                            update { current ->
-                                current.copy(
-                                    outputBudgetChars = value,
-                                    timeoutMs = if (value >= EXTENDED_SUB_AGENT_OUTPUT_BUDGET_CHARS) {
-                                        maxOf(current.timeoutMs, EXTENDED_SUB_AGENT_TIMEOUT_MS)
-                                    } else {
-                                        current.timeoutMs
-                                    },
-                                )
-                            }
-                        },
-                        optionToString = { "${it / 1000}k" },
-                    )
+                    BoxWithConstraints(
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        val useTwoColumns = maxWidth >= 300.dp && LocalDensity.current.fontScale <= 1.2f
+                        FlowRow(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                            maxItemsInEachRow = if (useTwoColumns) 2 else 1,
+                        ) {
+                            SubAgentSelectRow(
+                                modifier = Modifier.weight(1f),
+                                label = stringResource(R.string.setting_subagent_max_concurrent),
+                                options = concurrencyOptions,
+                                selected = subAgent.maxConcurrentRuns.coerceIn(1, 5),
+                                onSelected = { value -> update { it.copy(maxConcurrentRuns = value) } },
+                                optionToString = { it.toString() },
+                            )
+                            SubAgentSelectRow(
+                                modifier = Modifier.weight(1f),
+                                label = stringResource(R.string.setting_subagent_max_turns),
+                                options = turnOptions,
+                                selected = subAgent.maxTurns.coerceIn(2, 8),
+                                onSelected = { value -> update { it.copy(maxTurns = value) } },
+                                optionToString = { it.toString() },
+                            )
+                            SubAgentSelectRow(
+                                modifier = Modifier.weight(1f),
+                                label = stringResource(R.string.setting_subagent_timeout),
+                                options = timeoutOptions,
+                                selected = timeoutOptions.minBy { kotlin.math.abs(it - subAgent.timeoutMs) },
+                                onSelected = { value -> update { it.copy(timeoutMs = value) } },
+                                optionToString = { "${it / 60_000} min" },
+                            )
+                            SubAgentSelectRow(
+                                modifier = Modifier.weight(1f),
+                                label = stringResource(R.string.setting_subagent_output_budget),
+                                options = budgetOptions,
+                                selected = budgetOptions.minBy { kotlin.math.abs(it - subAgent.outputBudgetChars) },
+                                onSelected = { value ->
+                                    update { current ->
+                                        current.copy(
+                                            outputBudgetChars = value,
+                                            timeoutMs = if (value >= EXTENDED_SUB_AGENT_OUTPUT_BUDGET_CHARS) {
+                                                maxOf(current.timeoutMs, EXTENDED_SUB_AGENT_TIMEOUT_MS)
+                                            } else {
+                                                current.timeoutMs
+                                            },
+                                        )
+                                    }
+                                },
+                                optionToString = { "${it / 1000}k" },
+                            )
+                        }
+                    }
                 }
             }
 
@@ -291,7 +321,7 @@ fun SettingExperimentalSubAgentPage(
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
                         Column(
                             modifier = Modifier.weight(1f),
@@ -338,6 +368,7 @@ fun SettingExperimentalSubAgentPage(
 
 @Composable
 private fun <T> SubAgentSelectRow(
+    modifier: Modifier = Modifier,
     label: String,
     options: List<T>,
     selected: T,
@@ -345,8 +376,10 @@ private fun <T> SubAgentSelectRow(
     optionToString: @Composable (T) -> String,
 ) {
     Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        modifier = modifier
+            .fillMaxWidth()
+            .heightIn(min = 48.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
@@ -417,8 +450,6 @@ private fun SubAgentBuiltInRow(
                         text = display.description,
                         style = MaterialTheme.typography.bodySmall,
                         color = ws.muted,
-                        maxLines = if (expanded) Int.MAX_VALUE else 2,
-                        overflow = TextOverflow.Ellipsis,
                     )
                     if (def.supportsModelOverride) {
                         val modelLabel = effectiveModel?.let { it.displayName.ifBlank { it.modelId } }
@@ -466,7 +497,7 @@ private fun SubAgentBuiltInRow(
                     )
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(

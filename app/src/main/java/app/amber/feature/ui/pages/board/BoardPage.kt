@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -28,10 +29,9 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -54,7 +54,6 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -81,10 +80,10 @@ import app.amber.feature.board.hotlist.HotListProviderSnapshot
 import app.amber.feature.board.hotlist.HotTopic
 import app.amber.feature.board.hotlist.presentationTitle
 import app.amber.feature.ui.components.ds.Hairline
-import app.amber.feature.ui.components.ds.SectionLabel
+import app.amber.feature.ui.components.ds.amberCanvas
 import app.amber.feature.ui.components.nav.BackButton
-import app.amber.feature.ui.components.ui.workspaceBorder
 import app.amber.feature.ui.components.ui.workspaceColors
+import app.amber.feature.ui.components.ui.WorkspaceTopBar
 import app.amber.feature.ui.components.ds.LiveDot
 import app.amber.feature.ui.context.LocalNavController
 import app.amber.feature.ui.theme.LocalAmberTokens
@@ -107,7 +106,6 @@ fun TodayBoardPage() {
     val uriHandler = LocalUriHandler.current
     val shareChooserTitle = stringResource(R.string.board_share_chooser)
     val sharePanelError = stringResource(R.string.board_share_panel_error)
-    val tokens = LocalAmberTokens.current
     var pendingDeepRead by remember { mutableStateOf<PendingDeepReadRequest?>(null) }
     var selectedTopic by remember { mutableStateOf<HotTopic?>(null) }
 
@@ -148,11 +146,10 @@ fun TodayBoardPage() {
     }
 
     Scaffold(
+        modifier = Modifier.amberCanvas(),
         topBar = {
-            TopAppBar(
-                title = {
-                    Text(stringResource(R.string.deep_read_title), fontWeight = FontWeight.Bold)
-                },
+            WorkspaceTopBar(
+                title = stringResource(R.string.deep_read_title),
                 navigationIcon = { BackButton() },
                 actions = {
                     IconButton(onClick = { navController.navigate(Screen.DeepReadHistory) }) {
@@ -162,18 +159,17 @@ fun TodayBoardPage() {
                         Icon(Lucide.Settings, contentDescription = stringResource(R.string.settings))
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = tokens.bg,
-                    scrolledContainerColor = tokens.bg,
-                    titleContentColor = tokens.ink,
-                    navigationIconContentColor = tokens.ink2,
-                    actionIconContentColor = tokens.ink2,
-                ),
             )
-        }
+        },
+        containerColor = Color.Transparent,
     ) { innerPadding ->
         if (!boardEnabled) {
-            Box(Modifier.fillMaxSize().padding(innerPadding), contentAlignment = Alignment.Center) {
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding),
+                contentAlignment = Alignment.Center,
+            ) {
                 Text(stringResource(R.string.board_disabled), style = LocalAmberType.current.body)
             }
             return@Scaffold
@@ -279,7 +275,7 @@ private fun HotListActionSheet(
             Box(
                 Modifier
                     .padding(top = 10.dp, bottom = 4.dp)
-                    .width(42.dp)
+                    .width(36.dp)
                     .height(4.dp)
                     .clip(RoundedCornerShape(2.dp))
                     .background(LocalAmberTokens.current.line2),
@@ -289,14 +285,12 @@ private fun HotListActionSheet(
         Column(
             Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 24.dp, vertical = 8.dp),
+                .padding(horizontal = 16.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             Text(
                 topic.title,
                 style = LocalAmberType.current.sessionTitle,
-                maxLines = 3,
-                overflow = TextOverflow.Ellipsis,
             )
             if (topic.sources.isNotEmpty()) {
                 val sourceLabels = mutableListOf<String>()
@@ -307,34 +301,44 @@ private fun HotListActionSheet(
                     sourceLabels.joinToString(" · "),
                     style = LocalAmberType.current.meta,
                     color = workspaceColors().muted,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
                 )
             }
-            Spacer(Modifier.height(8.dp))
-            Hairline()
-            TopicActionRow(
-                label = stringResource(R.string.deep_read_title),
-                icon = Lucide.NotebookTabs,
-                highlight = true,
-                onClick = onDeepRead,
-            )
-            TopicActionRow(
-                label = stringResource(R.string.regenerate),
-                icon = Lucide.RotateCw,
-                onClick = onRegenerate,
-            )
-            TopicActionRow(
-                label = stringResource(R.string.board_open_original),
-                icon = Lucide.ArrowRight,
-                enabled = topic.primaryUrl() != null,
-                onClick = onOpenOriginal,
-            )
-            TopicActionRow(
-                label = stringResource(R.string.share),
-                icon = Lucide.Share2,
-                onClick = onShare,
-            )
+            Spacer(Modifier.height(12.dp))
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(14.dp),
+                color = LocalAmberTokens.current.surface,
+                border = androidx.compose.foundation.BorderStroke(1.dp, LocalAmberTokens.current.line),
+                tonalElevation = 0.dp,
+            ) {
+                Column {
+                    TopicActionRow(
+                        label = stringResource(R.string.deep_read_title),
+                        icon = Lucide.NotebookTabs,
+                        highlight = true,
+                        onClick = onDeepRead,
+                    )
+                    Hairline()
+                    TopicActionRow(
+                        label = stringResource(R.string.regenerate),
+                        icon = Lucide.RotateCw,
+                        onClick = onRegenerate,
+                    )
+                    Hairline()
+                    TopicActionRow(
+                        label = stringResource(R.string.board_open_original),
+                        icon = Lucide.ArrowRight,
+                        enabled = topic.primaryUrl() != null,
+                        onClick = onOpenOriginal,
+                    )
+                    Hairline()
+                    TopicActionRow(
+                        label = stringResource(R.string.share),
+                        icon = Lucide.Share2,
+                        onClick = onShare,
+                    )
+                }
+            }
             Spacer(Modifier.height(20.dp))
         }
     }
@@ -359,7 +363,8 @@ private fun TopicActionRow(
             .fillMaxWidth()
             .clip(RoundedCornerShape(10.dp))
             .clickable(enabled = enabled, onClick = onClick)
-            .padding(vertical = 8.dp),
+            .heightIn(min = 52.dp)
+            .padding(horizontal = 14.dp),
         horizontalArrangement = Arrangement.spacedBy(14.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -419,7 +424,8 @@ private fun HotListTab(
             HotListSkeleton()
         } else {
             LazyColumn(
-                contentPadding = PaddingValues(horizontal = 18.dp, vertical = 0.dp),
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 0.dp),
             ) {
                 item {
                     Row(
@@ -447,6 +453,7 @@ private fun HotListTab(
                     RubricHead(
                         label = stringResource(R.string.board_combined_topics),
                         status = dashboard.lastUpdatedAt.takeIf { it > 0L }?.let { stringResource(R.string.board_updated_ago, timeAgo(it)) },
+                        first = true,
                     )
                 }
                 if (dashboard.topics.isEmpty()) {
@@ -486,6 +493,7 @@ private fun HotListTab(
                             label = hotListProviderName(provider.providerId, provider.providerName),
                             status = provider.error?.let { stringResource(R.string.board_provider_error_ago, timeAgo(provider.fetchedAt)) }
                                 ?: provider.fetchedAt.takeIf { it > 0L }?.let { timeAgo(it) },
+                            first = false,
                         )
                     }
                     val providerItems = provider.items.take(12)
@@ -602,12 +610,12 @@ private fun Meta(meta: MetaData, topPadding: Dp) {
 
 /** mono rubric label「// 综合热点」+ right-side live dot + status. */
 @Composable
-private fun RubricHead(label: String, status: String?) {
+private fun RubricHead(label: String, status: String?, first: Boolean) {
     val t = LocalAmberTokens.current
     Row(
         Modifier
             .fillMaxWidth()
-            .padding(top = 22.dp, bottom = 10.dp),
+            .padding(top = if (first) 16.dp else 28.dp, bottom = 10.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -636,27 +644,27 @@ private fun LeadStory(rank: Int, title: String, dek: String?, meta: MetaData, on
             .fillMaxWidth()
             .clickable(onClick = onClick)
             .bottomHairline(t.line)
-            .padding(top = 10.dp, bottom = 15.dp),
+            .padding(top = 16.dp, bottom = 15.dp),
         horizontalArrangement = Arrangement.spacedBy(14.dp),
         verticalAlignment = Alignment.Top,
     ) {
         Text(
             rank2(rank),
             style = LocalAmberType.current.meta.copy(
-                fontSize = 29.sp,
+                fontSize = 32.sp,
                 fontWeight = FontWeight.Bold,
-                lineHeight = 29.sp,
+                lineHeight = 34.sp,
             ),
             color = t.accent,
-            modifier = Modifier.padding(top = 2.dp),
+            modifier = Modifier.width(52.dp).padding(top = 2.dp),
         )
         Column(Modifier.weight(1f)) {
             Text(
                 title,
                 style = LocalAmberType.current.sessionTitle.copy(
-                    fontSize = 19.5.sp,
+                    fontSize = 20.sp,
                     fontWeight = FontWeight.Bold,
-                    lineHeight = 26.sp,
+                    lineHeight = 28.sp,
                 ),
                 color = t.ink,
             )
@@ -690,19 +698,17 @@ private fun IndexRow(rank: Int, title: String, meta: MetaData, onClick: () -> Un
             rank2(rank),
             style = LocalAmberType.current.meta.copy(fontSize = 13.sp, fontWeight = FontWeight.SemiBold),
             color = t.ink4,
-            modifier = Modifier.width(20.dp).padding(top = 1.dp),
+            modifier = Modifier.width(52.dp).padding(top = 1.dp),
         )
         Column(Modifier.weight(1f)) {
             Text(
                 title,
                 style = LocalAmberType.current.sessionTitle.copy(
-                    fontSize = 16.sp,
+                    fontSize = 15.sp,
                     fontWeight = FontWeight.SemiBold,
-                    lineHeight = 22.sp,
+                    lineHeight = 21.sp,
                 ),
                 color = t.ink,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
             )
             Meta(meta, topPadding = 6.dp)
         }
@@ -710,30 +716,42 @@ private fun IndexRow(rank: Int, title: String, meta: MetaData, onClick: () -> Un
 }
 
 @Composable
-private fun SectionTitle(title: String, subtitle: String? = null) {
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-        SectionLabel(title)
-        if (!subtitle.isNullOrBlank()) {
-            Text(subtitle, style = LocalAmberType.current.meta, color = workspaceColors().muted)
-        }
-    }
-}
-
-@Composable
 private fun HotListSkeleton() {
     LazyColumn(
-        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 18.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp),
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 0.dp),
     ) {
-        item { SectionTitle(stringResource(R.string.board_skeleton_title), stringResource(R.string.board_updating)) }
+        item {
+            RubricHead(
+                label = stringResource(R.string.board_skeleton_title),
+                status = stringResource(R.string.board_updating),
+                first = true,
+            )
+        }
         items(6) {
-            Box(
+            Column(
                 Modifier
                     .fillMaxWidth()
-                    .height(76.dp)
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)),
-            )
+                    .height(64.dp)
+                    .bottomHairline(LocalAmberTokens.current.line),
+                verticalArrangement = Arrangement.spacedBy(9.dp),
+            ) {
+                Box(
+                    Modifier
+                        .fillMaxWidth(0.84f)
+                        .height(14.dp)
+                        .padding(top = 8.dp)
+                        .clip(RoundedCornerShape(7.dp))
+                        .background(LocalAmberTokens.current.surface2),
+                )
+                Box(
+                    Modifier
+                        .fillMaxWidth(0.48f)
+                        .height(10.dp)
+                        .clip(RoundedCornerShape(5.dp))
+                        .background(LocalAmberTokens.current.surface2),
+                )
+            }
         }
     }
 }

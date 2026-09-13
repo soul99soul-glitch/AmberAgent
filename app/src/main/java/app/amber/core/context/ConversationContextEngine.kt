@@ -688,7 +688,12 @@ class ConversationContextEngine(
         providerHandler.stream(
             providerSetting = provider,
             messages = listOf(UIMessage.user(prompt)),
-            params = TextGenerationParams(model = compressionModel),
+            params = TextGenerationParams(
+                model = compressionModel,
+                // Both the initial summary and schema-repair retry belong to
+                // the same conversation-owned compaction session.
+                sessionId = conversationKey,
+            ),
         ).collect { chunk ->
             val deltaParts = chunk.choices.firstOrNull()?.let { choice ->
                 choice.delta?.parts ?: choice.message?.parts

@@ -6,7 +6,6 @@ import com.composables.icons.lucide.Plus
 import com.composables.icons.lucide.Trash2
 import com.composables.icons.lucide.X
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -29,6 +28,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.SwipeToDismissBox
+import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.rememberSwipeToDismissBoxState
@@ -44,6 +44,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.res.stringResource
@@ -65,13 +66,12 @@ import app.amber.ai.provider.providers.isCodexOAuthReviewModel
 import app.amber.ai.registry.ModelRegistry
 import app.amber.agent.R
 import app.amber.feature.ui.components.ds.pressable
+import app.amber.feature.ui.components.ds.amberCanvas
 import app.amber.feature.ui.hooks.useEditState
 import app.amber.feature.ui.pages.setting.components.ProviderCapFlags
 import app.amber.feature.ui.pages.setting.components.ProviderCard
-import app.amber.feature.ui.pages.setting.components.ProviderCommandButton
 import app.amber.feature.ui.pages.setting.components.ProviderGhostButton
 import app.amber.feature.ui.pages.setting.components.ProviderHairline
-import app.amber.feature.ui.pages.setting.components.ProviderMonogram
 import app.amber.feature.ui.pages.setting.components.ProviderSectionLabel
 import app.amber.feature.ui.pages.setting.components.ProviderSheetGrabber
 import app.amber.feature.ui.pages.setting.components.ProviderSplitBar
@@ -79,7 +79,6 @@ import app.amber.feature.ui.pages.setting.components.ProviderSquareTag
 import app.amber.feature.ui.pages.setting.components.ProviderTerminalFilter
 import app.amber.feature.ui.pages.setting.components.providerSlugLabel
 import app.amber.feature.ui.pages.setting.components.toContextLabel
-import app.amber.feature.ui.pages.setting.components.toProviderMonogram
 import app.amber.feature.ui.theme.LocalAmberTokens
 import app.amber.feature.ui.theme.LocalAmberType
 import app.amber.core.utils.plus
@@ -193,11 +192,11 @@ private fun ModelList(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(t.bg)
+            .background(Color.Transparent)
     ) {
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(horizontal = 18.dp, vertical = 12.dp) + PaddingValues(bottom = 88.dp),
+            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp) + PaddingValues(bottom = 88.dp),
             horizontalAlignment = Alignment.Start,
             state = lazyListState
         ) {
@@ -241,7 +240,7 @@ private fun ModelList(
                         key = item.id
                     ) { isDragging ->
                         Column {
-                            ModelRow(
+                            ProviderModelRow(
                                 model = item,
                                 isCurrent = item.type == ModelType.CHAT && item.id == currentModelId,
                                 onSetCurrent = { onSetCurrent(item) },
@@ -288,17 +287,12 @@ private fun ModelList(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
-                .background(t.bg),
+                .background(t.surface),
         ) {
             ProviderHairline()
-            ProviderCommandButton(
-                text = stringResource(R.string.setting_provider_page_add_model),
-                imageVector = Lucide.Plus,
-                accent = true,
+            ProviderAddModelButton(
                 onClick = { showPicker = true },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 18.dp, vertical = 12.dp),
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
             )
         }
     }
@@ -343,6 +337,39 @@ private fun ModelList(
                 onDismiss = { blankState.dismiss() },
             )
         }
+    }
+}
+
+@Composable
+private fun ProviderAddModelButton(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val t = LocalAmberTokens.current
+    val type = LocalAmberType.current
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(48.dp)
+            .clip(RoundedCornerShape(15.dp))
+            .background(t.ink)
+            .pressable(onClick = onClick)
+            .padding(horizontal = 18.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.Center,
+    ) {
+        Icon(
+            imageVector = Lucide.Plus,
+            contentDescription = null,
+            tint = t.bg,
+            modifier = Modifier.size(18.dp),
+        )
+        Text(
+            text = stringResource(R.string.setting_provider_page_add_model),
+            style = type.body.copy(fontWeight = FontWeight.SemiBold),
+            color = t.bg,
+            modifier = Modifier.padding(start = 8.dp),
+        )
     }
 }
 
@@ -458,7 +485,7 @@ private fun Model.withRegistryMetadata(): Model = copy(
 
 /* v5 ledger: flat model row inside SwipeToDismissBox (swipe delete + long-press drag kept) */
 @Composable
-private fun ModelRow(
+internal fun ProviderModelRow(
     model: Model,
     modifier: Modifier = Modifier,
     isCurrent: Boolean,
@@ -472,39 +499,41 @@ private fun ModelRow(
     SwipeToDismissBox(
         state = swipeToDismissBoxState,
         backgroundContent = {
-            val t = LocalAmberTokens.current
-            Row(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(8.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                IconButton(
-                    onClick = {
-                        scope.launch {
-                            swipeToDismissBoxState.reset()
-                        }
-                    }
+            if (swipeToDismissBoxState.dismissDirection != SwipeToDismissBoxValue.Settled) {
+                val t = LocalAmberTokens.current
+                Row(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Icon(
-                        Lucide.X,
-                        contentDescription = stringResource(R.string.cancel),
-                        tint = t.ink3,
-                    )
-                }
-                FilledIconButton(
-                    onClick = {
-                        scope.launch {
-                            onDelete()
-                            swipeToDismissBoxState.reset()
+                    IconButton(
+                        onClick = {
+                            scope.launch {
+                                swipeToDismissBoxState.reset()
+                            }
                         }
+                    ) {
+                        Icon(
+                            Lucide.X,
+                            contentDescription = stringResource(R.string.cancel),
+                            tint = t.ink3,
+                        )
                     }
-                ) {
-                    Icon(
-                        Lucide.Trash2,
-                        contentDescription = stringResource(R.string.chat_page_delete)
-                    )
+                    FilledIconButton(
+                        onClick = {
+                            scope.launch {
+                                onDelete()
+                                swipeToDismissBoxState.reset()
+                            }
+                        }
+                    ) {
+                        Icon(
+                            Lucide.Trash2,
+                            contentDescription = stringResource(R.string.chat_page_delete)
+                        )
+                    }
                 }
             }
         },
@@ -516,86 +545,66 @@ private fun ModelRow(
         val type = LocalAmberType.current
         val contextLabel = model.contextWindowTokens.toContextLabel()
         val openEditor = onOpenEditor
-        ProviderCard(modifier = Modifier.fillMaxWidth()) {
+        // The moving foreground must cover the swipe actions while keeping the canvas texture.
+        Column(modifier = Modifier.fillMaxWidth().amberCanvas()) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .heightIn(min = 64.dp)
                     .pressable(onClick = openEditor)
-                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                    .padding(vertical = 10.dp),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-            ProviderMonogram(
-                text = model.modelId.toProviderMonogram(),
-                size = 36.dp,
-            )
-            Column(
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(5.dp),
-            ) {
-                Text(
-                    text = model.modelId,
-                    style = type.meta.copy(fontSize = 12.sp, fontWeight = FontWeight.SemiBold),
-                    color = t.ink,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(3.dp),
                 ) {
+                    Text(
+                        text = model.modelId,
+                        style = type.meta.copy(fontSize = 14.sp, fontWeight = FontWeight.SemiBold),
+                        color = t.ink,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
                     ProviderCapFlags(
                         flags = model.capFlags(),
-                        modifier = Modifier.weight(1f),
+                        accentFirst = false,
                     )
+                }
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(9.dp),
+                ) {
                     if (contextLabel.isNotBlank()) {
                         Text(
                             text = contextLabel,
                             style = type.meta.copy(fontSize = 11.sp, fontWeight = FontWeight.SemiBold),
-                            color = t.ink3,
+                            color = t.ink2,
                             maxLines = 1,
                         )
                     }
-                }
-            }
-
-            if (model.type == ModelType.CHAT) {
-                Box(
-                    modifier = Modifier.heightIn(min = 48.dp)
-                        .pressable(onClick = onSetCurrent, enabled = !isCurrent),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    ProviderSquareTag(
-                    text = if (isCurrent) {
-                        "✓ ${stringResource(R.string.setting_provider_page_model_current)}"
-                    } else {
-                        stringResource(R.string.setting_provider_page_model_set_current)
-                    },
-                    selected = isCurrent,
-                    solid = true,
-                        onClick = null,
+                    if (model.type == ModelType.CHAT) {
+                        ProviderSquareTag(
+                            text = if (isCurrent) {
+                                "✓ ${stringResource(R.string.setting_provider_page_model_current)}"
+                            } else {
+                                stringResource(R.string.setting_provider_page_model_set_current)
+                            },
+                            selected = isCurrent,
+                            solid = false,
+                            onClick = if (isCurrent) null else onSetCurrent,
+                        )
+                    }
+                    Icon(
+                        imageVector = Lucide.ArrowRight,
+                        contentDescription = stringResource(R.string.setting_provider_page_edit_model),
+                        tint = t.ink3,
+                        modifier = Modifier.size(18.dp),
                     )
                 }
             }
-
-            Box(
-                modifier = Modifier
-                    .size(34.dp)
-                    .clip(RoundedCornerShape(9.dp))
-                    .background(t.surface2)
-                    .border(1.dp, t.line, RoundedCornerShape(9.dp))
-                    .pressable(onClick = openEditor),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(
-                    imageVector = Lucide.ArrowRight,
-                    contentDescription = stringResource(R.string.setting_provider_page_edit_model),
-                    tint = t.ink3,
-                    modifier = Modifier.size(16.dp),
-                )
-            }
-            }
+            ProviderHairline()
         }
     }
 }
@@ -616,7 +625,7 @@ internal fun ModelPickerSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         sheetGesturesEnabled = false,
-        containerColor = t.bg,
+        containerColor = t.raised,
         dragHandle = { ProviderSheetGrabber() },
     ) {
         var filterText by remember { mutableStateOf("") }

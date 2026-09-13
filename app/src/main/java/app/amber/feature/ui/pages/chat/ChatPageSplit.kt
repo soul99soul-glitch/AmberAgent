@@ -16,6 +16,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -73,6 +74,9 @@ fun ChatPageSplit(
     val vm: ChatVM = koinViewModel(
         parameters = { parametersOf(id.toString()) }
     )
+    LaunchedEffect(vm) {
+        vm.onChatVisible()
+    }
 
     Surface(
         modifier = Modifier.fillMaxSize(),

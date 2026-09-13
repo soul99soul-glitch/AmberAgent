@@ -43,10 +43,12 @@ internal class AnthropicMessagesAdapter(
         params: TextGenerationParams,
         streaming: Boolean,
     ): JsonObject {
-        val systemParts = messages.firstOrNull { it.role == MessageRole.SYSTEM }
-            ?.parts
-            ?.filterIsInstance<UIMessagePart.Text>()
-            .orEmpty()
+        val systemParts = messages.asSequence()
+            .filter { it.role == MessageRole.SYSTEM }
+            .flatMap { message ->
+                message.parts.asSequence().filterIsInstance<UIMessagePart.Text>()
+            }
+            .toList()
 
         return buildJsonObject {
             put("model", params.model.modelId)

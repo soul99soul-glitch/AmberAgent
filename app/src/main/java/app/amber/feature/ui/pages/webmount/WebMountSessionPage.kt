@@ -6,7 +6,6 @@ import android.view.ViewGroup
 import android.webkit.WebView
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -15,6 +14,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
@@ -51,8 +51,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.amber.agent.R
 import app.amber.feature.ui.components.nav.BackButton
 import app.amber.feature.ui.components.ds.AmberCard
-import app.amber.feature.ui.components.ds.Hairline
 import app.amber.feature.ui.components.ds.SectionLabel
+import app.amber.feature.ui.components.ds.amberCanvas
 import app.amber.feature.ui.context.LocalNavController
 import app.amber.feature.ui.theme.LocalAmberTokens
 import app.amber.feature.ui.theme.LocalAmberType
@@ -334,12 +334,12 @@ fun WebMountSessionPage(
                 ),
             )
         },
-        containerColor = t.bg,
+        modifier = Modifier.amberCanvas(),
+        containerColor = androidx.compose.ui.graphics.Color.Transparent,
     ) { innerPadding ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .background(t.bg)
                 .padding(innerPadding)
                 .imePadding(),
         ) {
@@ -447,7 +447,7 @@ private fun SessionHeader(
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 10.dp),
     ) {
-        SectionLabel("SESSION")
+        SectionLabel(stringResource(R.string.amber_redesign_conversations))
         AmberCard(modifier = Modifier.fillMaxWidth()) {
             Column(
                 modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
@@ -511,6 +511,7 @@ private fun SessionHeader(
                                 onClick = onReopen,
                                 enabled = !acquiring && !closing,
                                 modifier = Modifier.heightIn(min = 48.dp),
+                                shape = RoundedCornerShape(15.dp),
                             ) {
                                 Text(stringResource(R.string.parity_webmount_reopen_and_view))
                             }
@@ -519,6 +520,7 @@ private fun SessionHeader(
                                 onClick = onTakeover,
                                 enabled = !acquiring && !closing,
                                 modifier = Modifier.heightIn(min = 48.dp),
+                                shape = RoundedCornerShape(15.dp),
                             ) {
                                 Text(stringResource(R.string.parity_webmount_takeover))
                             }
@@ -637,15 +639,19 @@ private fun PooledWebView(
 @Composable
 private fun MissingSessionState(modifier: Modifier = Modifier) {
     Box(
-        modifier = modifier.fillMaxWidth(),
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(16.dp),
         contentAlignment = Alignment.Center,
     ) {
-        Text(
-            text = stringResource(R.string.parity_webmount_session_missing),
-            modifier = Modifier.padding(24.dp),
-            style = MaterialTheme.typography.bodyLarge,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+        AmberCard(modifier = Modifier.fillMaxWidth()) {
+            Text(
+                text = stringResource(R.string.parity_webmount_session_missing),
+                modifier = Modifier.padding(24.dp),
+                style = LocalAmberType.current.secondary,
+                color = LocalAmberTokens.current.ink3,
+            )
+        }
     }
 }
 
@@ -675,6 +681,7 @@ private fun JsDialog(
                         modifier = Modifier.fillMaxWidth(),
                         label = { Text(stringResource(R.string.parity_webmount_dialog_input_hint)) },
                         singleLine = false,
+                        shape = RoundedCornerShape(12.dp),
                     )
                 }
             }

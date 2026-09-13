@@ -2,17 +2,18 @@ package app.amber.feature.ui.pages.synara
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
@@ -29,7 +30,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
@@ -43,10 +43,12 @@ import app.amber.feature.ui.components.nav.BackButton
 import app.amber.feature.ui.components.ds.AmberCard
 import app.amber.feature.ui.components.ds.Hairline
 import app.amber.feature.ui.components.ds.SectionLabel
+import app.amber.feature.ui.components.ds.amberCanvas
 import app.amber.feature.ui.components.ui.WorkspaceTopBar
 import app.amber.feature.ui.context.LocalNavController
 import app.amber.feature.ui.theme.LocalAmberTokens
 import app.amber.feature.ui.theme.LocalAmberType
+import app.amber.feature.ui.theme.AmberMono
 import io.github.g00fy2.quickie.QRResult
 import io.github.g00fy2.quickie.ScanQRCode
 import com.composables.icons.lucide.Lucide
@@ -122,17 +124,17 @@ fun SynaraConnectPage(vm: SynaraVM = koinViewModel()) {
                 navigationIcon = { BackButton() },
             )
         },
-        containerColor = t.bg,
+        modifier = Modifier.amberCanvas(),
+        containerColor = androidx.compose.ui.graphics.Color.Transparent,
     ) { innerPadding ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .background(t.bg)
                 .verticalScroll(rememberScrollState())
                 .padding(innerPadding + PaddingValues(horizontal = 16.dp, vertical = 12.dp)),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            SectionLabel("PAIRING")
+            SectionLabel(stringResource(R.string.redesign_pairing))
             AmberCard {
                 Column(
                     modifier = Modifier.padding(16.dp),
@@ -142,7 +144,10 @@ fun SynaraConnectPage(vm: SynaraVM = koinViewModel()) {
                     Text(stringResource(R.string.synara_page_description), style = type.secondary, color = t.ink3)
                     Button(
                         onClick = { scanQrLauncher.launch(null) },
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 48.dp),
+                        shape = RoundedCornerShape(15.dp),
                         enabled = !ui.checking,
                     ) {
                         Icon(Lucide.ScanQrCode, contentDescription = null, modifier = Modifier.size(20.dp))
@@ -159,6 +164,7 @@ fun SynaraConnectPage(vm: SynaraVM = koinViewModel()) {
                         placeholder = { Text(stringResource(R.string.synara_mac_address_hint)) },
                         singleLine = true,
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+                        shape = RoundedCornerShape(12.dp),
                     )
                     OutlinedTextField(
                         value = draft.port.toString(),
@@ -171,6 +177,7 @@ fun SynaraConnectPage(vm: SynaraVM = koinViewModel()) {
                         placeholder = { Text("${SynaraConnection.DEFAULT_PORT}") },
                         singleLine = true,
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        shape = RoundedCornerShape(12.dp),
                     )
                     OutlinedTextField(
                         value = draft.token,
@@ -181,11 +188,12 @@ fun SynaraConnectPage(vm: SynaraVM = koinViewModel()) {
                         singleLine = true,
                         visualTransformation = PasswordVisualTransformation(),
                         supportingText = { Text(stringResource(R.string.synara_auth_token_supporting)) },
+                        shape = RoundedCornerShape(12.dp),
                     )
                     Text(
                         text = stringResource(R.string.synara_target, runCatching { draft.httpBaseUrl() }.getOrDefault("—")),
                         style = type.meta,
-                        fontFamily = FontFamily.Monospace,
+                        fontFamily = AmberMono,
                         color = t.ink3,
                     )
                     ui.lastCheckMessage?.let { message ->
@@ -203,7 +211,10 @@ fun SynaraConnectPage(vm: SynaraVM = koinViewModel()) {
                         OutlinedButton(
                             onClick = { vm.testConnection() },
                             enabled = !ui.checking,
-                            modifier = Modifier.weight(1f),
+                            modifier = Modifier
+                                .weight(1f)
+                                .heightIn(min = 48.dp),
+                            shape = RoundedCornerShape(15.dp),
                         ) {
                             if (ui.checking) CircularProgressIndicator(modifier = Modifier.padding(end = 8.dp).size(16.dp), strokeWidth = 2.dp)
                             Text(stringResource(R.string.synara_test_connection))
@@ -216,7 +227,10 @@ fun SynaraConnectPage(vm: SynaraVM = koinViewModel()) {
                                 }
                             },
                             enabled = !ui.checking && draft.isConfigured,
-                            modifier = Modifier.weight(1f),
+                            modifier = Modifier
+                                .weight(1f)
+                                .heightIn(min = 48.dp),
+                            shape = RoundedCornerShape(15.dp),
                         ) { Text(stringResource(R.string.synara_open_workbench)) }
                     }
                     TextButton(
@@ -230,13 +244,13 @@ fun SynaraConnectPage(vm: SynaraVM = koinViewModel()) {
                 }
             }
 
-            SectionLabel("QUICK START")
+            SectionLabel(stringResource(R.string.redesign_quick_start))
             AmberCard {
                 Text(
                     text = stringResource(R.string.synara_mac_quick_start),
                     modifier = Modifier.padding(16.dp),
                     style = type.meta,
-                    fontFamily = FontFamily.Monospace,
+                    fontFamily = AmberMono,
                     color = t.ink2,
                 )
             }

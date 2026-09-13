@@ -348,6 +348,33 @@ class GoogleProviderMessageTest {
     }
 
     @Test
+    fun `multiple system messages preserve order in system instruction`() {
+        val body = adapter.encodeRequest(
+            messages = listOf(
+                UIMessage.system("SYSTEM_ONE_SENTINEL"),
+                UIMessage(
+                    role = MessageRole.SYSTEM,
+                    parts = listOf(
+                        UIMessagePart.Text("SYSTEM_TWO_SENTINEL_PART_ONE"),
+                        UIMessagePart.Text("SYSTEM_TWO_SENTINEL_PART_TWO"),
+                    ),
+                ),
+                UIMessage.user("USER_SENTINEL"),
+            ),
+            params = TextGenerationParams(model = Model(modelId = "gemini-test")),
+            codeAssistTransport = false,
+        )
+
+        val systemParts = body["systemInstruction"]!!.jsonObject["parts"]!!.jsonArray
+        assertEquals(
+            listOf(
+                "SYSTEM_ONE_SENTINEL\n\nSYSTEM_TWO_SENTINEL_PART_ONE\n\nSYSTEM_TWO_SENTINEL_PART_TWO",
+            ),
+            systemParts.map { it.jsonObject["text"]!!.jsonPrimitive.content },
+        )
+    }
+
+    @Test
     fun `request keeps function tools when model also enables built in tools`() {
         val body = adapter.encodeRequest(
             messages = listOf(UIMessage.user("hello")),

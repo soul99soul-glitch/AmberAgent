@@ -67,7 +67,7 @@ fun SettingExperimentalICloudPage(
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
             contentPadding = innerPadding + PaddingValues(horizontal = SettingPageHorizontalInset, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             item {
                 ExperimentHeroCard(
@@ -117,6 +117,7 @@ fun SettingExperimentalICloudPage(
                         ExperimentActionButton(
                             text = stringResource(R.string.setting_icloud_login),
                             enabled = iCloudState.enabled,
+                            compact = true,
                             onClick = {
                                 iCloudLoginUrl = ICLOUD_GLOBAL_LOGIN_URL
                                 showICloudLogin = true
@@ -125,6 +126,7 @@ fun SettingExperimentalICloudPage(
                         ExperimentActionButton(
                             text = stringResource(R.string.setting_icloud_login_china),
                             enabled = iCloudState.enabled,
+                            compact = true,
                             onClick = {
                                 iCloudLoginUrl = ICLOUD_CHINA_LOGIN_URL
                                 showICloudLogin = true
@@ -133,6 +135,7 @@ fun SettingExperimentalICloudPage(
                         ExperimentActionButton(
                             text = stringResource(R.string.setting_icloud_probe),
                             enabled = iCloudState.enabled && !iCloudBusy,
+                            compact = true,
                             onClick = {
                                 iCloudBusy = true
                                 scope.launch {
@@ -144,6 +147,7 @@ fun SettingExperimentalICloudPage(
                         ExperimentActionButton(
                             text = stringResource(R.string.setting_icloud_write_probe),
                             enabled = iCloudState.enabled && !iCloudBusy,
+                            compact = true,
                             onClick = {
                                 iCloudBusy = true
                                 scope.launch {

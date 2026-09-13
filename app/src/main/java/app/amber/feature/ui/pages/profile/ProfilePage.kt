@@ -2,6 +2,7 @@ package app.amber.feature.ui.pages.profile
 
 import android.graphics.Paint
 import android.graphics.Typeface
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
@@ -13,9 +14,12 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -28,21 +32,30 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.material3.LocalContentColor
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.amber.feature.ui.components.nav.BackButton
 import app.amber.feature.ui.components.ds.SectionLabel
+import app.amber.feature.ui.components.ds.amberCanvas
 import app.amber.feature.ui.components.ui.UIAvatar
 import app.amber.feature.ui.components.ui.WorkspaceTopBar
 import app.amber.feature.ui.context.LocalSettings
-import app.amber.feature.ui.theme.JetBrainsMonoFamily
+import app.amber.feature.ui.theme.LocalAmberType
 import app.amber.feature.ui.theme.LocalAmberTokens
 import app.amber.feature.ui.pages.stats.StatsVM
 import app.amber.feature.ui.pages.sessionhome.SessionHomeVM
@@ -73,13 +86,14 @@ fun ProfilePage(
     val nickname = settings.displaySetting.userNickname.ifBlank { defaultNickname }
 
     Scaffold(
+        modifier = Modifier.amberCanvas(),
         topBar = {
             WorkspaceTopBar(
                 title = stringResource(R.string.profile_title),
                 navigationIcon = { BackButton() },
             )
         },
-        containerColor = tokens.bg,
+        containerColor = Color.Transparent,
     ) { innerPadding ->
         Column(
             modifier = Modifier
@@ -91,57 +105,92 @@ fun ProfilePage(
             Spacer(Modifier.height(16.dp))
 
             // 头像 + 昵称 + 徽章
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                UIAvatar(
-                    name = nickname,
-                    value = settings.displaySetting.userAvatar,
-                    size = 96.dp,
-                    containerColor = tokens.accent,
-                    editContainerColor = tokens.surface,
-                    editContentColor = tokens.accent,
-                    showEditBadge = false,
-                    onUpdate = { newAvatar ->
-                        sessionHomeVm.updateSettings(
-                            settings.copy(
-                                displaySetting = settings.displaySetting.copy(userAvatar = newAvatar)
-                            )
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(96.dp)
+                        .clip(CircleShape)
+                        .background(
+                            Brush.linearGradient(
+                                colors = listOf(
+                                    tokens.accent.copy(alpha = 0.54f).compositeOver(tokens.surface),
+                                    tokens.accent.copy(alpha = 0.26f).compositeOver(tokens.surface),
+                                ),
+                            ),
                         )
-                    },
-                )
-                Spacer(Modifier.height(16.dp))
+                        .border(1.dp, tokens.line2, CircleShape),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    CompositionLocalProvider(LocalContentColor provides tokens.ink) {
+                        UIAvatar(
+                            name = nickname,
+                            value = settings.displaySetting.userAvatar,
+                            modifier = Modifier.fillMaxSize(),
+                            size = 96.dp,
+                            containerColor = Color.Transparent,
+                            editContainerColor = tokens.surface,
+                            editContentColor = tokens.accent,
+                            showEditBadge = false,
+                            onUpdate = { newAvatar ->
+                                sessionHomeVm.updateSettings(
+                                    settings.copy(
+                                        displaySetting = settings.displaySetting.copy(userAvatar = newAvatar)
+                                    )
+                                )
+                            },
+                        )
+                    }
+                }
+                Spacer(Modifier.height(8.dp))
                 Text(
                     text = nickname,
                     fontSize = 24.sp,
-                    fontWeight = FontWeight.SemiBold,
+                    fontWeight = FontWeight.Bold,
                     color = tokens.ink,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
-                Spacer(Modifier.height(6.dp))
+                Spacer(Modifier.height(8.dp))
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     Text(
                         text = "@${nickname.lowercase(appLocale).replace(" ", "")}",
-                        fontSize = 13.sp,
-                        color = tokens.ink3,
+                        style = LocalAmberType.current.meta,
+                        color = tokens.ink2,
                     )
                     Box(
                         modifier = Modifier
-                            .clip(RoundedCornerShape(6.dp))
+                            .clip(CircleShape)
                             .background(tokens.surface2)
-                            .padding(horizontal = 8.dp, vertical = 2.dp),
+                            .border(1.dp, tokens.line, CircleShape)
+                            .padding(horizontal = 9.dp, vertical = 3.dp),
                     ) {
-                        Text(text = "Amber", fontSize = 11.sp, color = tokens.ink2)
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(5.dp),
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(5.dp)
+                                    .background(tokens.accent, CircleShape),
+                            )
+                            Text(text = "Amber", fontSize = 10.5.sp, color = tokens.ink)
+                        }
                     }
                 }
             }
 
-            Spacer(Modifier.height(32.dp))
+            Spacer(Modifier.height(28.dp))
 
             // 五项统计卡
             ProfileStatsCard(stats = stats)
 
-            Spacer(Modifier.height(32.dp))
+            Spacer(Modifier.height(28.dp))
 
             // 聊天活动热力图
             Row(
@@ -152,7 +201,7 @@ fun ProfilePage(
                 Spacer(Modifier.weight(1f))
                 Text(
                     text = "53 W",
-                    style = app.amber.feature.ui.theme.LocalAmberType.current.meta,
+                    style = LocalAmberType.current.meta,
                     color = tokens.ink3,
                 )
             }
@@ -162,7 +211,7 @@ fun ProfilePage(
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(120.dp)
+                        .height(160.dp)
                         .clip(RoundedCornerShape(14.dp))
                         .background(tokens.surface)
                         .border(1.dp, tokens.line, RoundedCornerShape(14.dp)),
@@ -172,7 +221,7 @@ fun ProfilePage(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(14.dp),
                     color = tokens.surface,
-                    border = androidx.compose.foundation.BorderStroke(1.dp, tokens.line),
+                    border = BorderStroke(1.dp, tokens.line),
                 ) {
                     Box(Modifier.padding(16.dp)) {
                         ActivityHeatmap(days = stats.conversationsPerDay)
@@ -188,6 +237,7 @@ fun ProfilePage(
 @Composable
 private fun ProfileStatsCard(stats: app.amber.feature.ui.pages.stats.AppStats) {
     val tokens = LocalAmberTokens.current
+    val type = LocalAmberType.current
     val totalTokens = stats.totalPromptTokens + stats.totalCompletionTokens
     val current = currentStreak(stats.conversationsPerDay)
     val longest = longestStreak(stats.conversationsPerDay)
@@ -200,13 +250,14 @@ private fun ProfileStatsCard(stats: app.amber.feature.ui.pages.stats.AppStats) {
         stringResource(R.string.profile_stats_days, longest) to stringResource(R.string.profile_stats_longest_streak),
     )
 
+    val shape = RoundedCornerShape(14.dp)
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(14.dp))
+            .heightIn(min = 64.dp)
+            .clip(shape)
             .background(tokens.surface)
-            .border(1.dp, tokens.line, RoundedCornerShape(14.dp))
-            .padding(vertical = 16.dp),
+            .border(1.dp, tokens.line, shape),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         items.forEachIndexed { index, (value, label) ->
@@ -219,24 +270,37 @@ private fun ProfileStatsCard(stats: app.amber.feature.ui.pages.stats.AppStats) {
                 )
             }
             Column(
-                modifier = Modifier.weight(1f),
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(horizontal = 2.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(6.dp),
+                verticalArrangement = Arrangement.spacedBy(7.dp, Alignment.CenterVertically),
             ) {
                 Text(
                     text = value,
-                    fontSize = 15.sp,
-                    fontWeight = FontWeight.SemiBold,
+                    style = type.meta.copy(
+                        fontSize = 15.sp,
+                        lineHeight = 17.sp,
+                        fontWeight = FontWeight.SemiBold,
+                    ),
                     color = tokens.ink,
-                    fontFamily = JetBrainsMonoFamily,
-                    maxLines = 1,
+                    textAlign = TextAlign.Center,
+                    maxLines = 2,
+                    softWrap = true,
+                    overflow = TextOverflow.Visible,
                 )
                 Text(
                     text = label,
-                    fontSize = 10.5.sp,
+                    modifier = Modifier.heightIn(min = 24.dp),
+                    style = type.tinyTag.copy(
+                        fontSize = 9.5.sp,
+                        lineHeight = 12.sp,
+                        fontWeight = FontWeight.Medium,
+                    ),
                     color = tokens.ink3,
-                    maxLines = 1,
-                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                    textAlign = TextAlign.Center,
+                    maxLines = 2,
+                    overflow = TextOverflow.Clip,
                 )
             }
         }
@@ -251,7 +315,9 @@ private fun ProfileStatsCard(stats: app.amber.feature.ui.pages.stats.AppStats) {
 @Composable
 private fun ActivityHeatmap(days: Map<LocalDate, Int>) {
     val tokens = LocalAmberTokens.current
+    val type = LocalAmberType.current
     val appLocale = LocalContext.current.appLocale()
+    val density = LocalDensity.current
     val monthLabelTemplate = stringResource(R.string.profile_heatmap_month_label)
 
     val today = LocalDate.now()
@@ -263,13 +329,26 @@ private fun ActivityHeatmap(days: Map<LocalDate, Int>) {
     val accentArgb = tokens.accent.toArgb()
     val labelColor = tokens.ink3.toArgb()
 
-    // 固定高度：7 行格子 + 底部标签；cell 边长由此推出，保证正方形
+    // 参照原型：月份在网格上方，格子固定为正方形并允许横向滚动。
     val cellDp = 13.dp
     val gapDp = 3.dp
-    val labelHeightDp = 18.dp
+    val labelGridGapDp = 7.dp
     val gridHeightDp = cellDp * 7 + gapDp * 6
-    val totalHeightDp = gridHeightDp + labelHeightDp
-    val totalWidthDp = (cellDp + gapDp) * weeks
+    // sp.toPx() includes the active fontScale. Derive the axis height from the same
+    // Paint metrics used to draw the labels so an enlarged font never crosses the top edge.
+    val monthTextSizePx = with(density) { 10.sp.toPx() }
+    val monthFontMetrics = Paint().apply {
+        isAntiAlias = true
+        textSize = monthTextSizePx
+        typeface = Typeface.DEFAULT
+    }.fontMetrics
+    val labelPaddingPx = with(density) { 2.dp.toPx() }
+    val labelHeightPx =
+        (monthFontMetrics.bottom - monthFontMetrics.top + labelPaddingPx * 2f)
+            .coerceAtLeast(0f)
+    val labelHeightDp = with(density) { labelHeightPx.toDp() }
+    val totalHeightDp = labelHeightDp + labelGridGapDp + gridHeightDp
+    val totalWidthDp = cellDp * weeks + gapDp * (weeks - 1)
 
     val hScroll = rememberScrollState()
     // 进入时定位到最右端（最近日期），往左滑才看历史
@@ -292,30 +371,45 @@ private fun ActivityHeatmap(days: Map<LocalDate, Int>) {
                 val cellPx = cellDp.toPx()
                 val gapPx = gapDp.toPx()
                 val stepPx = cellPx + gapPx
-                val labelY = gridHeightDp.toPx() + 12.dp.toPx()
+                val labelY = labelPaddingPx - monthFontMetrics.top
+                val gridTopPx = labelHeightPx + labelGridGapDp.toPx()
 
                 drawIntoCanvas { canvas ->
                     val paint = Paint().apply { isAntiAlias = true }
                     val textPaint = Paint().apply {
                         isAntiAlias = true
                         color = labelColor
-                        textSize = 10.sp.toPx()
+                        textSize = monthTextSizePx
                         typeface = Typeface.DEFAULT
                     }
                     val cornerPx = 2.dp.toPx()
 
                     var lastMonth = -1
+                    var lastLabelWeek = -99
                     for (w in 0 until weeks) {
                         val weekStart = start.plusDays((w * 7).toLong())
-                        val midDate = weekStart.plusDays(3)
-                        if (midDate.monthValue != lastMonth && !midDate.isAfter(today)) {
-                            lastMonth = midDate.monthValue
+                        if (
+                            weekStart.monthValue != lastMonth &&
+                            w - lastLabelWeek >= 3 &&
+                            !weekStart.isAfter(today)
+                        ) {
+                            lastMonth = weekStart.monthValue
+                            lastLabelWeek = w
+                            val monthLabel = String.format(
+                                appLocale,
+                                monthLabelTemplate,
+                                weekStart.monthValue,
+                            )
                             canvas.nativeCanvas.drawText(
-                                String.format(appLocale, monthLabelTemplate, midDate.monthValue),
-                                w * stepPx,
+                                monthLabel,
+                                (w * stepPx).coerceAtMost(
+                                    (size.width - textPaint.measureText(monthLabel)).coerceAtLeast(0f),
+                                ),
                                 labelY,
                                 textPaint,
                             )
+                        } else if (weekStart.monthValue != lastMonth) {
+                            lastMonth = weekStart.monthValue
                         }
                         for (d in 0 until 7) {
                             val date = weekStart.plusDays(d.toLong())
@@ -330,7 +424,7 @@ private fun ActivityHeatmap(days: Map<LocalDate, Int>) {
                                 }
                             }
                             val x = w * stepPx
-                            val y = d * stepPx
+                            val y = gridTopPx + d * stepPx
                             canvas.nativeCanvas.drawRoundRect(
                                 x, y, x + cellPx, y + cellPx,
                                 cornerPx, cornerPx, paint,
@@ -340,6 +434,40 @@ private fun ActivityHeatmap(days: Map<LocalDate, Int>) {
                 }
             }
         }
+    }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 12.dp),
+        horizontalArrangement = Arrangement.End,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = stringResource(R.string.stats_page_heatmap_less),
+            style = type.tinyTag.copy(fontSize = 9.5.sp, lineHeight = 13.sp),
+            color = tokens.ink3,
+        )
+        Spacer(Modifier.width(5.dp))
+        listOf(
+            tokens.line2,
+            tokens.accent.copy(alpha = 0.30f),
+            tokens.accent.copy(alpha = 0.52f),
+            tokens.accent.copy(alpha = 0.78f),
+            tokens.accent,
+        ).forEach { color ->
+            Box(
+                modifier = Modifier
+                    .size(11.dp)
+                    .clip(RoundedCornerShape(3.dp))
+                    .background(color),
+            )
+            Spacer(Modifier.width(5.dp))
+        }
+        Text(
+            text = stringResource(R.string.stats_page_heatmap_more),
+            style = type.tinyTag.copy(fontSize = 9.5.sp, lineHeight = 13.sp),
+            color = tokens.ink3,
+        )
     }
 }
 

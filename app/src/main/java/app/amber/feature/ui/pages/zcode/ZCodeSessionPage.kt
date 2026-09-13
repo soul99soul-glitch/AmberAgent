@@ -7,6 +7,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import app.amber.feature.ui.components.webview.WebView
 import app.amber.feature.ui.components.webview.rememberWebViewState
+import app.amber.feature.ui.components.ds.amberCanvas
 import app.amber.feature.ui.context.LocalNavController
 
 /**
@@ -34,11 +35,15 @@ fun ZCodeSessionPage(url: String) {
         }
     }
 
-    WebView(
-        state = state,
-        // 远程 ZCode 移动页自身不避让状态栏，WebView 顶部下移，否则页头被状态栏盖住、顶部按钮点不到
-        modifier = Modifier
-            .fillMaxSize()
-            .statusBarsPadding(),
-    )
+    androidx.compose.foundation.layout.Box(
+        modifier = Modifier.fillMaxSize().amberCanvas(),
+    ) {
+        WebView(
+            state = state,
+            // 远程 ZCode 移动页自身不避让状态栏，WebView 顶部下移，否则页头被状态栏盖住、顶部按钮点不到
+            modifier = Modifier
+                .fillMaxSize()
+                .statusBarsPadding(),
+        )
+    }
 }

@@ -21,11 +21,11 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -43,7 +43,11 @@ import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
 import app.amber.agent.Screen
 import app.amber.agent.R
+import app.amber.feature.ui.components.ds.AmberCard
+import app.amber.feature.ui.components.ds.amberCanvas
 import app.amber.feature.ui.context.LocalNavController
+import app.amber.feature.ui.theme.LocalAmberTokens
+import app.amber.feature.ui.theme.LocalAmberType
 
 private const val TAG = "SynaraWorkspace"
 
@@ -110,6 +114,8 @@ private fun String?.cleanSynaraError(): String? =
 @Composable
 fun SynaraWorkspacePage(connection: SynaraConnection) {
     val navController = LocalNavController.current
+    val tokens = LocalAmberTokens.current
+    val type = LocalAmberType.current
     val validationError = connection.validationError()
     val pageUrl = remember(connection) { connection.workspaceUrl() }
 
@@ -143,18 +149,20 @@ fun SynaraWorkspacePage(connection: SynaraConnection) {
         Box(
             modifier = Modifier
                 .fillMaxSize()
+                .amberCanvas()
                 .padding(24.dp),
             contentAlignment = Alignment.Center,
         ) {
             Text(
                 text = stringResource(validationError.resourceId()),
+                style = type.secondary,
                 color = MaterialTheme.colorScheme.error,
             )
         }
         return
     }
 
-    Box(modifier = Modifier.fillMaxSize()) {
+    Box(modifier = Modifier.fillMaxSize().amberCanvas()) {
         SynaraAndroidWebView(
             connection = connection,
             pageUrl = pageUrl,
@@ -180,23 +188,22 @@ fun SynaraWorkspacePage(connection: SynaraConnection) {
 
         when (val state = loadState) {
             is SynaraWorkspaceLoadState.Loading -> {
-                CircularProgressIndicator(
+                    CircularProgressIndicator(
                     modifier = Modifier
                         .align(Alignment.TopCenter)
                         .statusBarsPadding()
                         .padding(top = 12.dp)
                         .size(24.dp),
-                    strokeWidth = 2.dp,
+                        strokeWidth = 2.dp,
+                    color = tokens.accent,
                 )
             }
 
             is SynaraWorkspaceLoadState.Error -> {
-                Surface(
+                AmberCard(
                     modifier = Modifier
                         .align(Alignment.Center)
                         .padding(24.dp),
-                    tonalElevation = 4.dp,
-                    shape = MaterialTheme.shapes.large,
                 ) {
                     Column(
                         modifier = Modifier.padding(24.dp),
@@ -206,14 +213,15 @@ fun SynaraWorkspacePage(connection: SynaraConnection) {
                             text = androidx.compose.ui.res.stringResource(
                                 app.amber.agent.R.string.parity_synara_workspace_error_title,
                             ),
-                            style = MaterialTheme.typography.titleMedium,
+                            style = type.sessionTitle,
+                            color = tokens.ink,
                         )
                         Text(
                             text = state.message ?: androidx.compose.ui.res.stringResource(
                                 app.amber.agent.R.string.parity_synara_workspace_unknown_error,
                             ),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = type.secondary,
+                            color = tokens.ink3,
                         )
                         Button(
                             onClick = {
@@ -222,6 +230,7 @@ fun SynaraWorkspacePage(connection: SynaraConnection) {
                                 webViewRef?.loadUrl(pageUrl)
                             },
                             modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(15.dp),
                         ) {
                             Text(
                                 text = androidx.compose.ui.res.stringResource(
@@ -232,6 +241,7 @@ fun SynaraWorkspacePage(connection: SynaraConnection) {
                         OutlinedButton(
                             onClick = { navController.navigate(Screen.SynaraCompanion) },
                             modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(15.dp),
                         ) {
                             Text(
                                 text = androidx.compose.ui.res.stringResource(

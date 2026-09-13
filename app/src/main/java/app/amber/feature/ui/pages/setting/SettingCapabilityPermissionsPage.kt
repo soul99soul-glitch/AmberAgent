@@ -4,13 +4,19 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -23,18 +29,19 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.composables.icons.lucide.Lucide
 import com.composables.icons.lucide.CircleCheck
+import com.composables.icons.lucide.TriangleAlert
 import com.composables.icons.lucide.X
 import app.amber.agent.R
+import app.amber.feature.ui.components.ds.amberCanvas
 import app.amber.core.localization.PermissionDisplayLocalizer
 import app.amber.feature.runtime.ApprovalHistoryEntry
 import app.amber.feature.tools.Capability
 import app.amber.feature.tools.CapabilityPolicy
 import app.amber.feature.tools.ToolRisk
-import app.amber.feature.ui.components.ds.SectionLabel
 import app.amber.feature.ui.components.nav.BackButton
-import app.amber.feature.ui.components.ui.CardGroup
 import app.amber.feature.ui.components.ui.WorkspaceTopBar
 import app.amber.feature.ui.components.ui.workspaceColors
+import app.amber.feature.ui.theme.LocalAmberType
 import app.amber.core.utils.plus
 import org.koin.androidx.compose.koinViewModel
 import java.text.SimpleDateFormat
@@ -51,6 +58,7 @@ import java.util.Locale
 fun SettingCapabilityPermissionsPage(vm: SettingCapabilityPermissionsVM = koinViewModel()) {
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     val context = LocalContext.current
+    val workspace = workspaceColors()
     val policies by vm.policies.collectAsStateWithLifecycle()
     val history by vm.approvalHistory.collectAsStateWithLifecycle()
 
@@ -62,25 +70,44 @@ fun SettingCapabilityPermissionsPage(vm: SettingCapabilityPermissionsVM = koinVi
                 scrollBehavior = scrollBehavior,
             )
         },
-        modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
-        containerColor = workspaceColors().canvas,
+        modifier = Modifier
+            .nestedScroll(scrollBehavior.nestedScrollConnection)
+            .amberCanvas(),
+        containerColor = androidx.compose.ui.graphics.Color.Transparent,
     ) { innerPadding ->
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
             contentPadding = innerPadding + PaddingValues(horizontal = SettingPageHorizontalInset, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(22.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             item {
-                Text(
-                    stringResource(R.string.setting_capability_permissions_high_risk_note),
-                    style = MaterialTheme.typography.bodySmall,
-                    modifier = Modifier,
-                )
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(14.dp),
+                    color = workspace.row,
+                    contentColor = workspace.ink,
+                    border = BorderStroke(1.dp, workspace.hairline),
+                ) {
+                    Row(
+                        modifier = Modifier.padding(16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        Icon(
+                            imageVector = Lucide.TriangleAlert,
+                            contentDescription = null,
+                            tint = workspace.muted,
+                        )
+                        Text(
+                            stringResource(R.string.setting_capability_permissions_high_risk_note),
+                            style = LocalAmberType.current.secondary,
+                        )
+                    }
+                }
             }
 
             item {
-                CardGroup(
-                    title = { SectionLabel(stringResource(R.string.setting_capability_permissions_policy_section)) },
+                SettingCardGroup(
+                    title = stringResource(R.string.setting_capability_permissions_policy_section),
                 ) {
                     Capability.entries.forEach { capability ->
                         item(
@@ -92,7 +119,7 @@ fun SettingCapabilityPermissionsPage(vm: SettingCapabilityPermissionsVM = koinVi
                                             capability.id,
                                             capability.riskFloor.displayName(),
                                         ),
-                                        style = MaterialTheme.typography.bodySmall,
+                                        style = LocalAmberType.current.meta,
                                     )
                                     FlowRow(
                                         horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -120,8 +147,8 @@ fun SettingCapabilityPermissionsPage(vm: SettingCapabilityPermissionsVM = koinVi
             }
 
             item {
-                CardGroup(
-                    title = { SectionLabel(stringResource(R.string.setting_capability_permissions_recent_approval_section)) },
+                SettingCardGroup(
+                    title = stringResource(R.string.setting_capability_permissions_recent_approval_section),
                 ) {
                     if (history.isEmpty()) {
                         item(
@@ -147,7 +174,7 @@ fun SettingCapabilityPermissionsPage(vm: SettingCapabilityPermissionsVM = koinVi
                                             "${entry.capability?.let { PermissionDisplayLocalizer.capabilityLabel(context, it) }
                                                 ?: entry.capabilityId
                                                 ?: stringResource(R.string.setting_capability_permissions_unmapped)} · ${entry.source} · ${formatTime(entry.approvedAtMs)}",
-                                            style = MaterialTheme.typography.bodySmall,
+                                            style = LocalAmberType.current.meta,
                                         )
                                         Text(
                                             stringResource(
@@ -155,7 +182,7 @@ fun SettingCapabilityPermissionsPage(vm: SettingCapabilityPermissionsVM = koinVi
                                                 entry.argsDigest.take(12),
                                                 entry.effectId?.take(8) ?: "-",
                                             ),
-                                            style = MaterialTheme.typography.labelSmall,
+                                            style = LocalAmberType.current.meta,
                                         )
                                     }
                                 },
@@ -190,6 +217,7 @@ private fun policyChip(
     onSelect: (Capability, CapabilityPolicy?) -> Unit,
 ) {
     FilterChip(
+        modifier = Modifier.height(32.dp),
         selected = current == policy,
         onClick = { onSelect(capability, policy) },
         label = { Text(label) },

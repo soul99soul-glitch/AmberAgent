@@ -24,6 +24,7 @@ import app.amber.ai.ui.MessageChunk
 import app.amber.ai.ui.UIMessage
 import app.amber.ai.util.KeyRoulette
 import app.amber.ai.util.configureReferHeaders
+import app.amber.ai.util.configureOpenCodeSessionHeader
 import app.amber.ai.util.json
 import app.amber.ai.util.parseErrorDetail
 import app.amber.ai.util.stringSafe
@@ -95,6 +96,7 @@ class ClaudeProvider(
         val request = Request.Builder()
             .url("${providerSetting.baseUrl}/messages")
             .headers(params.customHeaders.toHeaders())
+            .configureOpenCodeSessionHeader(providerSetting.baseUrl, params)
             .post(json.encodeToString(requestBody).toRequestBody("application/json".toMediaType()))
             .addHeader("x-api-key", keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString()))
             .addHeader("anthropic-version", ANTHROPIC_VERSION)
@@ -123,6 +125,7 @@ class ClaudeProvider(
         val request = Request.Builder()
             .url("${providerSetting.baseUrl}/messages")
             .headers(params.customHeaders.toHeaders())
+            .configureOpenCodeSessionHeader(providerSetting.baseUrl, params)
             .post(json.encodeToString(requestBody).toRequestBody("application/json".toMediaType()))
             .addHeader("x-api-key", keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString()))
             .addHeader("anthropic-version", ANTHROPIC_VERSION)

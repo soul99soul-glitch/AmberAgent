@@ -48,7 +48,12 @@ interface ToolEffectDAO {
         limit: Int,
     ): List<ToolEffectConversationRow>
 
-    @Query("DELETE FROM tool_effect WHERE status IN (:statuses) AND updated_at_ms < :cutoffMs")
+    @Query(
+        "DELETE FROM tool_effect WHERE status IN (:statuses) AND updated_at_ms < :cutoffMs " +
+            "AND NOT EXISTS (SELECT 1 FROM run_terminal " +
+            "WHERE run_terminal.run_id = tool_effect.run_id " +
+            "AND run_terminal.state IN " + RUN_TERMINAL_LIVE_STATES + ")"
+    )
     suspend fun deleteTerminalOlderThan(statuses: List<String>, cutoffMs: Long): Int
 }
 

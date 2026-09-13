@@ -42,11 +42,12 @@ import com.composables.icons.lucide.Server
 import com.composables.icons.lucide.Users
 import app.amber.agent.R
 import app.amber.agent.Screen
+import app.amber.feature.ui.components.ds.amberCanvas
 import app.amber.feature.ui.components.nav.BackButton
-import app.amber.feature.ui.components.ui.CardGroup
 import app.amber.feature.ui.components.ui.WorkspaceTopBar
 import app.amber.feature.ui.components.ui.workspaceColors
 import app.amber.feature.ui.context.LocalNavController
+import app.amber.feature.ui.theme.LocalAmberType
 import app.amber.core.utils.base64Encode
 import app.amber.core.utils.navigateToChatPage
 import app.amber.core.utils.plus
@@ -61,7 +62,7 @@ fun SettingExperimentalPage() {
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
             contentPadding = innerPadding + PaddingValues(horizontal = SettingPageHorizontalInset, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             item {
                 ExperimentSectionCard(
@@ -133,9 +134,9 @@ internal fun ExperimentSectionCard(
     val workspace = workspaceColors()
     Column(
         modifier = Modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        SettingSectionTitle(title)
+        SettingSectionTitle(title, modifier = Modifier.padding(top = 10.dp))
         Surface(
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(14.dp),
@@ -144,8 +145,8 @@ internal fun ExperimentSectionCard(
             border = BorderStroke(1.dp, workspace.hairline),
         ) {
             Column(
-                modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
                 content = content,
             )
         }
@@ -160,25 +161,26 @@ internal fun ExperimentHeroCard(
     trailing: @Composable () -> Unit,
 ) {
     val workspace = workspaceColors()
+    val type = LocalAmberType.current
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(10.dp),
+        shape = RoundedCornerShape(14.dp),
         color = workspace.paper,
         contentColor = workspace.ink,
         border = BorderStroke(1.dp, workspace.hairline),
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
             verticalAlignment = Alignment.Top,
         ) {
             Surface(
-                modifier = Modifier.size(34.dp),
+                modifier = Modifier.size(28.dp),
                 shape = RoundedCornerShape(8.dp),
                 color = workspace.row,
                 contentColor = workspace.muted,
             ) {
-                Box(contentAlignment = Alignment.Center) {
+                Box(modifier = Modifier.padding(6.dp), contentAlignment = Alignment.Center) {
                     icon()
                 }
             }
@@ -188,14 +190,14 @@ internal fun ExperimentHeroCard(
             ) {
                 Text(
                     text = title,
-                    style = MaterialTheme.typography.bodyLarge,
+                    style = type.body.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold),
                     color = workspace.ink,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
                 Text(
                     text = description,
-                    style = MaterialTheme.typography.bodySmall,
+                    style = type.secondary,
                     color = workspace.muted,
                 )
             }
@@ -212,22 +214,23 @@ private fun ExperimentFeatureRow(
     description: String,
 ) {
     val workspace = workspaceColors()
+    val type = LocalAmberType.current
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .heightIn(min = 56.dp)
             .clickable(onClick = onClick)
-            .padding(vertical = 8.dp),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
+            .padding(vertical = 0.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Surface(
-            modifier = Modifier.size(34.dp),
+            modifier = Modifier.size(28.dp),
             shape = RoundedCornerShape(8.dp),
             color = workspace.row,
             contentColor = workspace.muted,
         ) {
-            Box(contentAlignment = Alignment.Center) {
+            Box(modifier = Modifier.padding(6.dp), contentAlignment = Alignment.Center) {
                 icon()
             }
         }
@@ -237,14 +240,14 @@ private fun ExperimentFeatureRow(
         ) {
             Text(
                 text = title,
-                style = MaterialTheme.typography.bodyLarge,
+                style = type.body,
                 color = workspace.ink,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
                 text = description,
-                style = MaterialTheme.typography.bodySmall,
+                style = type.secondary,
                 color = workspace.muted,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
@@ -284,9 +287,11 @@ internal fun ExperimentActionButton(
     text: String,
     enabled: Boolean,
     primary: Boolean = false,
+    compact: Boolean = false,
     onClick: () -> Unit,
 ) {
     val workspace = workspaceColors()
+    val type = LocalAmberType.current
     val scheme = MaterialTheme.colorScheme
     // V3: primary 按钮跟主题 (Paper 砖红 / Whisper 天蓝 / Plain 黑 / Midnight 靛蓝),
     // 不再硬编码 workspace.blue.
@@ -302,18 +307,25 @@ internal fun ExperimentActionButton(
     }
     Surface(
         modifier = Modifier
-            .heightIn(min = 48.dp)
+            .heightIn(min = if (compact) 32.dp else 48.dp)
             .clickable(enabled = enabled, onClick = onClick),
-        shape = RoundedCornerShape(8.dp),
+        shape = RoundedCornerShape(if (compact) 999.dp else 15.dp),
         color = container,
         contentColor = contentColor,
         border = if (primary || !enabled) null else BorderStroke(1.dp, workspace.hairline),
     ) {
         Text(
             text = text,
-            style = MaterialTheme.typography.labelLarge,
+            style = if (compact) {
+                type.tinyTag
+            } else {
+                type.body.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold)
+            },
             maxLines = 1,
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 9.dp),
+            modifier = Modifier.padding(
+                horizontal = if (compact) 12.dp else 14.dp,
+                vertical = if (compact) 5.dp else 9.dp,
+            ),
         )
     }
 }
@@ -324,20 +336,21 @@ internal fun ExperimentStatusRow(
     value: String,
 ) {
     val workspace = workspaceColors()
+    val type = LocalAmberType.current
     Row(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
             text = label,
-            style = MaterialTheme.typography.bodySmall,
+            style = type.secondary,
             color = workspace.faint,
             modifier = Modifier.weight(1f),
         )
         Text(
             text = value,
-            style = MaterialTheme.typography.bodySmall,
+            style = type.meta,
             color = workspace.muted,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
@@ -352,6 +365,7 @@ internal fun ExperimentBooleanPill(
 ) {
     val workspace = workspaceColors()
     val scheme = MaterialTheme.colorScheme
+    val type = LocalAmberType.current
     // V3: ready 跟主题 (Paper 砖红 / Whisper 天蓝 等), 不硬编码 workspace.blue
     Surface(
         shape = RoundedCornerShape(999.dp),
@@ -361,7 +375,7 @@ internal fun ExperimentBooleanPill(
     ) {
         Text(
             text = "$label ${if (ready) stringResource(R.string.setting_experimental_ready) else stringResource(R.string.setting_experimental_missing)}",
-            style = MaterialTheme.typography.labelSmall,
+            style = type.tinyTag,
             maxLines = 1,
             modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
         )
@@ -374,6 +388,7 @@ internal fun ExperimentNote(
     error: Boolean = false,
 ) {
     val workspace = workspaceColors()
+    val type = LocalAmberType.current
     Surface(
         shape = RoundedCornerShape(8.dp),
         color = if (error) MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.35f) else workspace.row,
@@ -382,7 +397,7 @@ internal fun ExperimentNote(
     ) {
         Text(
             text = text,
-            style = MaterialTheme.typography.bodySmall,
+            style = type.secondary,
             modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
         )
     }
@@ -395,7 +410,6 @@ internal fun ExperimentalSettingsScaffold(
     content: @Composable (PaddingValues) -> Unit,
 ) {
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
-    val workspace = workspaceColors()
     Scaffold(
         topBar = {
             WorkspaceTopBar(
@@ -404,8 +418,10 @@ internal fun ExperimentalSettingsScaffold(
                 scrollBehavior = scrollBehavior,
             )
         },
-        modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
-        containerColor = workspace.canvas,
+        modifier = Modifier
+            .nestedScroll(scrollBehavior.nestedScrollConnection)
+            .amberCanvas(),
+        containerColor = androidx.compose.ui.graphics.Color.Transparent,
     ) { innerPadding ->
         content(innerPadding)
     }

@@ -2,10 +2,13 @@ package app.amber.feature.ui.pages.councilroom
 
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.background
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -13,6 +16,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -26,6 +30,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -41,6 +46,7 @@ import app.amber.feature.ui.components.ui.WorkspaceStatusPill
 import app.amber.feature.ui.components.ui.WorkspaceTone
 import app.amber.feature.ui.components.ui.workspaceColors
 import app.amber.feature.ui.pages.chat.LocalChatTheme
+import app.amber.feature.ui.theme.LocalAmberType
 import com.composables.icons.lucide.Lucide
 import com.composables.icons.lucide.RefreshCw
 import com.composables.icons.lucide.X
@@ -75,7 +81,8 @@ fun CouncilMembersSheet(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
-        containerColor = chatTheme.bg,
+        shape = RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp),
+        containerColor = chatTheme.containerHighest,
     ) {
         LazyColumn(
             modifier = Modifier
@@ -86,20 +93,23 @@ fun CouncilMembersSheet(
             item(key = "header") {
                 Column(modifier = Modifier.padding(bottom = 8.dp)) {
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 4.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
                         Text(
-                            text = stringResource(R.string.council_room_topic_author)
-                                .substringBefore("·")
-                                .trim(),
-                            style = MaterialTheme.typography.labelMedium,
+                            text = "议题",
+                            style = LocalAmberType.current.eyebrow,
                             fontWeight = FontWeight.SemiBold,
-                            color = workspace.muted,
+                            color = chatTheme.accent,
                         )
                         Spacer(modifier = Modifier.weight(1f))
-                        IconButton(onClick = onDismiss) {
+                        IconButton(
+                            onClick = onDismiss,
+                            modifier = Modifier.size(40.dp),
+                        ) {
                             Icon(
                                 imageVector = Lucide.X,
                                 contentDescription = stringResource(R.string.cancel),
@@ -109,15 +119,14 @@ fun CouncilMembersSheet(
                     }
                     Text(
                         text = room.objective.ifBlank { defaultObjective },
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.Bold,
+                        style = LocalAmberType.current.screenTitle,
                         color = chatTheme.ink,
                     )
                     Text(
                         text = membersSubtitle(room),
-                        style = MaterialTheme.typography.labelSmall,
+                        style = LocalAmberType.current.meta,
                         color = workspace.faint,
-                        modifier = Modifier.padding(top = 8.dp),
+                        modifier = Modifier.padding(top = 6.dp),
                     )
                 }
             }
@@ -230,22 +239,24 @@ fun CouncilMembersSheet(
 @Composable
 private fun CouncilSheetEyebrow(text: String) {
     val chatTheme = LocalChatTheme.current
+    val type = LocalAmberType.current
+    val label = text.removePrefix("//").trim()
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(top = 16.dp, bottom = 10.dp),
+            .padding(top = 24.dp, bottom = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Text(
             text = "//",
-            style = MaterialTheme.typography.labelSmall,
+            style = type.eyebrow,
             fontWeight = FontWeight.SemiBold,
             color = chatTheme.accent,
         )
         Text(
-            text = text,
-            style = MaterialTheme.typography.labelSmall,
+            text = label,
+            style = type.eyebrow,
             fontWeight = FontWeight.SemiBold,
             color = chatTheme.inkFaint,
         )
@@ -260,7 +271,9 @@ private fun CouncilSheetEyebrow(text: String) {
 
 @Composable
 private fun membersSubtitle(room: CouncilRoom): String {
-    val hostName = room.host?.name?.ifBlank { "Host" } ?: "Host"
+    val hostName = room.host?.name?.ifBlank {
+        stringResource(R.string.council_room_host_status)
+    } ?: stringResource(R.string.council_room_host_status)
     val memberCount = room.participants.count { it.status != CouncilParticipantStatus.DISMISSED }
     val spoken = room.activeGuests.count { it.status == CouncilParticipantStatus.SPOKEN }
     val total = room.activeGuests.size
@@ -278,24 +291,52 @@ private fun membersSubtitle(room: CouncilRoom): String {
 @Composable
 private fun MemberRow(participant: CouncilParticipant, isHost: Boolean) {
     val workspace = workspaceColors()
+    val type = LocalAmberType.current
+    val chatTheme = LocalChatTheme.current
     val modelLabel = participant.modelName
         .ifBlank { participant.externalModel }
         .ifBlank { participant.providerName }
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 11.dp),
+            .heightIn(min = 64.dp)
+            .padding(horizontal = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(11.dp),
     ) {
-        SubAgentAvatar(id = participant.id, name = participant.name, avatarSize = 34.dp)
+        Box(
+            modifier = Modifier
+                .size(40.dp)
+                .clip(CircleShape)
+                .background(
+                    if (participant.status == CouncilParticipantStatus.SPEAKING) {
+                        chatTheme.accent.copy(alpha = 0.13f)
+                    } else {
+                        workspace.row
+                    },
+                )
+                .border(
+                    1.dp,
+                    if (participant.status == CouncilParticipantStatus.SPEAKING) {
+                        chatTheme.accent.copy(alpha = 0.38f)
+                    } else {
+                        workspace.hairline
+                    },
+                    CircleShape,
+                ),
+            contentAlignment = Alignment.Center,
+        ) {
+            SubAgentAvatar(id = participant.id, name = participant.name, avatarSize = 28.dp)
+        }
         Column(modifier = Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
                 Text(
                     text = participant.name.ifBlank { participant.id },
-                    style = MaterialTheme.typography.bodyMedium,
+                    style = type.body,
                     fontWeight = FontWeight.SemiBold,
                     color = workspace.ink,
+                    maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                 )
                 if (participant.role.isNotBlank() && participant.role != participant.name) {
                     CouncilRolePill(text = participant.role, isHost = isHost)
@@ -304,8 +345,10 @@ private fun MemberRow(participant: CouncilParticipant, isHost: Boolean) {
             if (modelLabel.isNotBlank()) {
                 Text(
                     text = modelLabel,
-                    style = MaterialTheme.typography.labelSmall,
+                    style = type.meta,
                     color = workspace.faint,
+                    maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                 )
             }
         }
@@ -315,12 +358,22 @@ private fun MemberRow(participant: CouncilParticipant, isHost: Boolean) {
 
 @Composable
 private fun MemberStatusPill(participant: CouncilParticipant, isHost: Boolean) {
+    if (participant.status == CouncilParticipantStatus.SPEAKING) {
+        WorkspaceStatusPill(
+            text = stringResource(R.string.council_room_status_speaking),
+            tone = WorkspaceTone.Accent,
+        )
+        return
+    }
     if (isHost) {
-        WorkspaceStatusPill(text = stringResource(R.string.council_room_host_status), tone = WorkspaceTone.Warning)
+        WorkspaceStatusPill(
+            text = stringResource(R.string.council_room_host_status),
+            tone = WorkspaceTone.Warning,
+        )
         return
     }
     val (label, tone) = when (participant.status) {
-        CouncilParticipantStatus.SPEAKING -> stringResource(R.string.council_room_status_speaking) to WorkspaceTone.Success
+        CouncilParticipantStatus.SPEAKING -> stringResource(R.string.council_room_status_speaking) to WorkspaceTone.Accent
         CouncilParticipantStatus.WAITING -> stringResource(R.string.council_room_status_waiting) to WorkspaceTone.Neutral
         CouncilParticipantStatus.SPOKEN -> stringResource(R.string.council_room_status_spoken) to WorkspaceTone.Neutral
         CouncilParticipantStatus.INVITED -> stringResource(R.string.council_room_status_invited) to WorkspaceTone.Accent

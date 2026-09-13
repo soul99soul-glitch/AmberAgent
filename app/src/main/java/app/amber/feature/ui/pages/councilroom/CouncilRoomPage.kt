@@ -52,10 +52,12 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.res.stringResource
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.amber.agent.R
@@ -66,11 +68,13 @@ import app.amber.feature.modelcouncil.CouncilRoomMode
 import app.amber.feature.modelcouncil.running
 import app.amber.feature.modelcouncil.terminal
 import app.amber.feature.ui.components.nav.BackButton
+import app.amber.feature.ui.components.ds.amberCanvas
 import app.amber.feature.ui.components.ui.workspaceColors
 import app.amber.feature.ui.context.LocalNavController
 import app.amber.feature.ui.context.LocalToaster
 import app.amber.feature.ui.pages.chat.LocalChatTheme
 import app.amber.feature.ui.theme.LocalAmberTokens
+import app.amber.feature.ui.theme.LocalAmberType
 import com.dokar.sonner.ToastType
 import com.composables.icons.lucide.Lucide
 import com.composables.icons.lucide.ArrowDown
@@ -111,14 +115,14 @@ fun CouncilRoomPage(
     // Only consume the status-bar inset here; the composer handles the bottom
     // (ime + nav) itself, so the keyboard lifts the input above it.
     Scaffold(
-        containerColor = chatTheme.bg,
+        modifier = Modifier.amberCanvas(),
+        containerColor = Color.Transparent,
         contentWindowInsets = WindowInsets.statusBars,
     ) { padding ->
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(padding)
-                .background(chatTheme.bg),
+                .padding(padding),
         ) {
             // Content state drives both the AnimatedContent transition and the
             // composition `key` for a live room. restart() flips isRestarting →
@@ -284,7 +288,8 @@ private fun CouncilRoomTopBar(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .heightIn(min = 56.dp)
+            .height(56.dp)
+            .background(chatTheme.bg)
             .padding(start = 4.dp, end = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -317,7 +322,7 @@ private fun CouncilRoomTopBar(
                     text = stringResource(R.string.setting_model_council_title),
                     color = chatTheme.ink,
                     fontWeight = FontWeight.SemiBold,
-                    style = MaterialTheme.typography.titleMedium,
+                    style = LocalAmberType.current.screenTitle,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
@@ -378,6 +383,7 @@ private fun CouncilRoomTopBar(
     if (confirmRestart && onRestart != null) {
         AlertDialog(
             onDismissRequest = { confirmRestart = false },
+            shape = RoundedCornerShape(14.dp),
             title = { Text(stringResource(R.string.council_room_restart_title)) },
             text = { Text(stringResource(R.string.council_room_restart_message)) },
             confirmButton = {
@@ -397,25 +403,26 @@ private fun CouncilRoomTopBar(
 private fun CouncilRoomSubtitle(room: CouncilRoom) {
     val chatTheme = LocalChatTheme.current
     val workspace = workspaceColors()
+    val type = LocalAmberType.current
     val memberCount = room.participants.count { it.status != CouncilParticipantStatus.DISMISSED }
     val round = room.round.coerceAtLeast(1)
     Row(verticalAlignment = Alignment.CenterVertically) {
         Text(
             text = room.mode.label(),
             color = chatTheme.accent,
-            style = MaterialTheme.typography.labelMedium,
+            style = type.secondary.copy(fontSize = 12.sp, lineHeight = 16.sp),
             fontWeight = FontWeight.Medium,
             maxLines = 1,
         )
         Text(
             text = "·",
             color = workspace.faint,
-            style = MaterialTheme.typography.labelMedium,
+            style = type.secondary.copy(fontSize = 12.sp, lineHeight = 16.sp),
         )
         Text(
             text = stringResource(R.string.council_room_subtitle, memberCount, round),
             color = workspace.muted,
-            style = MaterialTheme.typography.labelMedium,
+            style = type.secondary.copy(fontSize = 12.sp, lineHeight = 16.sp),
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
@@ -527,13 +534,13 @@ private fun CouncilModeRow(
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = title,
-                style = MaterialTheme.typography.bodyMedium,
+                style = LocalAmberType.current.body,
                 fontWeight = FontWeight.SemiBold,
                 color = if (active) chatTheme.accent else chatTheme.ink,
             )
             Text(
                 text = subtitle,
-                style = MaterialTheme.typography.labelSmall,
+                style = LocalAmberType.current.meta,
                 color = tokens.ink3,
             )
         }

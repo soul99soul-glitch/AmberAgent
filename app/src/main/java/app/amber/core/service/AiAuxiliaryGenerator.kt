@@ -65,6 +65,7 @@ class AiAuxiliaryGenerator(
                     reasoningLevel = ReasoningLevel.OFF,
                     customHeaders = model.customHeaders,
                     customBody = model.customBodies,
+                    sessionId = conversationId.toString(),
                 ),
             )
 
@@ -124,6 +125,7 @@ class AiAuxiliaryGenerator(
                     reasoningLevel = ReasoningLevel.OFF,
                     customHeaders = model.customHeaders,
                     customBody = model.customBodies,
+                    sessionId = conversationId.toString(),
                 ),
             )
             val suggestions =

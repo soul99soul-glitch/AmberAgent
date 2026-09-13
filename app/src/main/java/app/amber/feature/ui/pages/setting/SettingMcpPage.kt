@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -83,6 +84,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
 import app.amber.ai.core.InputSchema
 import app.amber.agent.R
+import app.amber.feature.ui.components.ds.amberCanvas
 import app.amber.feature.runtime.CapabilityBackedCasLedger
 import app.amber.core.ai.mcp.McpImportApplyResult
 import app.amber.core.ai.mcp.McpImportPreparation
@@ -100,6 +102,7 @@ import app.amber.feature.ui.components.ui.FormItem
 import app.amber.feature.ui.components.ui.Tag
 import app.amber.feature.ui.components.ui.TagType
 import app.amber.feature.ui.components.ui.WorkspaceTopBar
+import app.amber.feature.ui.components.ui.WorkspaceTone
 import app.amber.feature.ui.components.ui.workspaceColors
 import app.amber.feature.ui.hooks.EditState
 import app.amber.feature.ui.hooks.EditStateContent
@@ -183,8 +186,10 @@ fun SettingMcpPage(vm: SettingVM = koinViewModel()) {
                 scrollBehavior = scrollBehavior,
             )
         },
-        modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
-        containerColor = workspace.canvas
+        modifier = Modifier
+            .nestedScroll(scrollBehavior.nestedScrollConnection)
+            .amberCanvas(),
+        containerColor = androidx.compose.ui.graphics.Color.Transparent
     ) { innerPadding ->
         val mcpManager = koinInject<McpManager>()
         val status by mcpManager.syncingStatus.collectAsStateWithLifecycle()
@@ -205,9 +210,12 @@ fun SettingMcpPage(vm: SettingVM = koinViewModel()) {
             LazyColumn(
                 modifier = Modifier
                     .fillMaxSize(),
-                verticalArrangement = Arrangement.spacedBy(16.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
                 contentPadding = PaddingValues(horizontal = SettingPageHorizontalInset, vertical = 8.dp)
             ) {
+                item("mcp_servers_section") {
+                    SettingSectionTitle(stringResource(R.string.setting_mcp_page_title))
+                }
                 items(mcpConfigs, key = { it.id }) { mcpConfig ->
                     McpServerItem(
                         item = mcpConfig,
@@ -322,12 +330,13 @@ private fun McpServerItem(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
+                        .heightIn(min = 64.dp)
                         .padding(horizontal = 16.dp, vertical = 12.dp),
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Surface(
-                        modifier = Modifier.size(34.dp),
+                        modifier = Modifier.size(32.dp),
                         shape = RoundedCornerShape(8.dp),
                         color = workspace.row,
                         contentColor = workspace.muted,
@@ -374,7 +383,19 @@ private fun McpServerItem(
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             McpInlinePill(text = item.transportLabel())
-                            McpInlinePill(text = status.statusLabel())
+                            McpInlinePill(
+                                text = status.statusLabel(),
+                                tone = when (status) {
+                                    McpStatus.Connected -> WorkspaceTone.Success
+                                    is McpStatus.Error -> WorkspaceTone.Danger
+                                    McpStatus.Connecting,
+                                    is McpStatus.Reconnecting,
+                                    McpStatus.Authorizing,
+                                    McpStatus.NeedsAuthorization,
+                                    -> WorkspaceTone.Warning
+                                    McpStatus.Idle -> WorkspaceTone.Neutral
+                                },
+                            )
                         }
                     }
 
@@ -484,13 +505,24 @@ private fun McpOAuthSection(
 }
 
 @Composable
-private fun McpInlinePill(text: String) {
+private fun McpInlinePill(
+    text: String,
+    tone: WorkspaceTone = WorkspaceTone.Neutral,
+) {
     val workspace = workspaceColors()
+    val scheme = MaterialTheme.colorScheme
+    val (container, content) = when (tone) {
+        WorkspaceTone.Neutral -> workspace.row to workspace.muted
+        WorkspaceTone.Accent -> scheme.primaryContainer to scheme.primary
+        WorkspaceTone.Success -> workspace.greenContainer to workspace.green
+        WorkspaceTone.Warning -> workspace.amberContainer to workspace.amber
+        WorkspaceTone.Danger -> workspace.redContainer to workspace.red
+    }
     Surface(
         shape = RoundedCornerShape(999.dp),
-        color = workspace.row,
-        contentColor = workspace.muted,
-        border = BorderStroke(1.dp, workspace.hairline),
+        color = container,
+        contentColor = content,
+        border = BorderStroke(1.dp, content.copy(alpha = 0.18f)),
     ) {
         Text(
             text = text,

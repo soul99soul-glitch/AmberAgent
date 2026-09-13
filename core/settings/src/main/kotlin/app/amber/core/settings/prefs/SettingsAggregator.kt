@@ -35,6 +35,7 @@ import app.amber.core.settings.secret.SecretRedactor
 import app.amber.core.settings.secret.SecretReference
 import app.amber.core.agent.utils.JsonInstant
 import app.amber.core.settings.toMutableStateFlow
+import app.amber.core.settings.withMigratedPromptDefaults
 
 private const val TAG = "SettingsAggregator"
 
@@ -94,7 +95,7 @@ class SettingsAggregator(
             Log.w(TAG, "Cannot update dummy settings")
             return
         }
-        val settingsForWrite = settings.withMigratedMemoryDreamLegacy()
+        val settingsForWrite = settings.withMigratedMemoryDreamLegacy().withMigratedPromptDefaults()
         var legacyMigrationPending = false
         dataStore.edit { p ->
             legacyMigrationPending = hasPendingLegacyAssistantSettings(p)
@@ -445,7 +446,7 @@ internal fun applyBackfillAndSeed(it: Settings): Settings {
  * - Dedup modeInjections / lorebooks / quickMessages (by id)
  */
 internal fun applyCrossDomainConsistency(settings: Settings): Settings {
-    val migratedSettings = settings.withMigratedMemoryDreamLegacy()
+    val migratedSettings = settings.withMigratedMemoryDreamLegacy().withMigratedPromptDefaults()
     val validMcpServerIds = migratedSettings.mcpServers.map { it.id }.toSet()
     val validModeInjectionIds = migratedSettings.modeInjections.map { it.id }.toSet()
     val validLorebookIds = migratedSettings.lorebooks.map { it.id }.toSet()

@@ -2,11 +2,13 @@ package app.amber.feature.ui.pages.board
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -14,12 +16,13 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -38,8 +41,10 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.res.stringResource
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.CancellationException
@@ -55,10 +60,9 @@ import app.amber.feature.board.hotlist.deepread.template.DeepReadTemplateRendere
 import app.amber.feature.board.hotlist.deepread.template.DeepReadTemplateRepository
 import app.amber.core.settings.prefs.SettingsAggregator
 import app.amber.core.font.SlidesFontRepository
-import app.amber.feature.ui.components.ui.workspaceColors
+import app.amber.feature.ui.components.ds.amberCanvas
 import app.amber.feature.ui.context.LocalNavController
 import app.amber.feature.ui.pages.setting.SettingVM
-import app.amber.feature.ui.theme.LocalDarkMode
 import app.amber.feature.ui.theme.LocalAmberTokens
 import app.amber.feature.ui.theme.LocalAmberType
 import app.amber.core.utils.appLocale
@@ -67,6 +71,9 @@ import org.koin.compose.koinInject
 import java.net.URI
 import kotlin.uuid.Uuid
 import com.composables.icons.lucide.ArrowLeft
+import com.composables.icons.lucide.ArrowUp
+import com.composables.icons.lucide.ChevronDown
+import com.composables.icons.lucide.ChevronUp
 import com.composables.icons.lucide.Lucide
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -94,7 +101,8 @@ fun DeepReadTemplateWorkbenchPage(
     val templateSaveFailureMessage = stringResource(R.string.deep_read_template_save_failed)
     val demoTitleFallback = stringResource(R.string.deep_read_demo_title_fallback)
     val sampleOutput = remember(appLocale) { DeepReadTemplateRenderer.sampleOutput(appLocale) }
-    val darkTheme = LocalDarkMode.current
+    // The preview uses the reader's light paper in both app themes.
+    val darkTheme = false
     val tokens = LocalAmberTokens.current
     val fontCss = rememberDeepReadTemplateFontCss(
         mode = board.boardReadingFontMode,
@@ -220,6 +228,7 @@ fun DeepReadTemplateWorkbenchPage(
     BackHandler { requestExit() }
 
     Scaffold(
+        modifier = Modifier.amberCanvas(),
         topBar = {
             TopAppBar(
                 title = { Text(stringResource(R.string.deep_read_workbench_title), style = LocalAmberType.current.screenTitle, color = tokens.ink) },
@@ -260,12 +269,13 @@ fun DeepReadTemplateWorkbenchPage(
                 onSend = ::runAgent,
             )
         },
+        containerColor = Color.Transparent,
     ) { innerPadding ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
-                .background(tokens.bg),
+                .amberCanvas(),
         ) {
             if (busy || saving) {
                 LinearProgressIndicator(Modifier.fillMaxWidth())
@@ -279,7 +289,7 @@ fun DeepReadTemplateWorkbenchPage(
                         allowedImageUrls = if (demoPreviewUrl != null) template.allowedImageUrls else emptySet(),
                         fontRepository = fontRepository,
                         textScale = board.deepReadFontScale,
-                        backgroundColor = tokens.surface,
+                        backgroundColor = Color(0xFFFAFAF8),
                     )
                 } ?: Text(
                     stringResource(R.string.deep_read_template_preview_unavailable),
@@ -396,13 +406,18 @@ private fun TemplateWorkbenchComposer(
             error?.takeIf { it.isNotBlank() }?.let {
                 Text(it, style = LocalAmberType.current.secondary, color = MaterialTheme.colorScheme.error)
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.Bottom) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                 OutlinedTextField(
                     value = instruction,
                     onValueChange = onInstructionChange,
-                    modifier = Modifier.weight(1f),
-                    minLines = 2,
-                    maxLines = 5,
+                    modifier = Modifier
+                        .weight(1f)
+                        .heightIn(min = 44.dp, max = 56.dp),
+                    singleLine = true,
                     enabled = !busy,
                     shape = RoundedCornerShape(28.dp),
                     colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
@@ -414,33 +429,29 @@ private fun TemplateWorkbenchComposer(
                         unfocusedLabelColor = tokens.ink3,
                         cursorColor = tokens.accent,
                     ),
-                    label = {
-                        Text(
-                            when {
-                                previewUrl != null -> stringResource(R.string.deep_read_workbench_demo_label)
-                                hasDraft -> stringResource(R.string.deep_read_workbench_edit_label)
-                                else -> stringResource(R.string.deep_read_workbench_describe_label)
-                            }
-                        )
+                    placeholder = {
+                        Text(stringResource(R.string.deep_read_workbench_describe_label))
                     },
                 )
-                Button(
+                FilledIconButton(
                     enabled = instruction.trim().isNotEmpty() && !busy,
                     onClick = onSend,
-                    shape = RoundedCornerShape(28.dp),
-                    colors = ButtonDefaults.buttonColors(
+                    modifier = Modifier.size(44.dp),
+                    shape = CircleShape,
+                    colors = IconButtonDefaults.filledIconButtonColors(
                         containerColor = tokens.accent,
                         contentColor = tokens.accentInk,
                     ),
-                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 12.dp),
                 ) {
-                    Text(
-                        when {
+                    Icon(
+                        imageVector = Lucide.ArrowUp,
+                        contentDescription = when {
                             busy -> stringResource(R.string.deep_read_workbench_processing)
                             previewUrl != null -> stringResource(R.string.deep_read_workbench_preview)
                             hasDraft -> stringResource(R.string.deep_read_workbench_modify)
                             else -> stringResource(R.string.deep_read_workbench_generate)
-                        }
+                        },
+                        modifier = Modifier.size(18.dp),
                     )
                 }
             }
@@ -465,25 +476,54 @@ private fun SourcePanel(
         tonalElevation = 0.dp,
     ) {
         Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Text(stringResource(R.string.deep_read_workbench_source), style = LocalAmberType.current.body.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold), color = tokens.ink)
-                TextButton(enabled = editorText.isNotBlank(), onClick = onToggle) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 64.dp)
+                    .clickable(enabled = editorText.isNotBlank(), onClick = onToggle),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(32.dp)
+                        .background(tokens.surface2, RoundedCornerShape(9.dp))
+                        .border(1.dp, tokens.line, RoundedCornerShape(9.dp)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        imageVector = if (expanded) Lucide.ChevronUp else Lucide.ChevronDown,
+                        contentDescription = null,
+                        modifier = Modifier.size(17.dp),
+                        tint = tokens.ink2,
+                    )
+                }
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
                     Text(
-                        if (expanded) stringResource(R.string.deep_read_workbench_collapse)
-                        else stringResource(R.string.deep_read_workbench_view_tune),
+                        stringResource(R.string.deep_read_workbench_source),
+                        style = LocalAmberType.current.body.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold),
+                        color = tokens.ink,
+                    )
+                    Text(
+                        stringResource(R.string.deep_read_workbench_validation_hint),
                         style = LocalAmberType.current.secondary,
                         color = tokens.ink2,
                     )
                 }
+                Text(
+                    if (expanded) stringResource(R.string.deep_read_workbench_collapse)
+                    else stringResource(R.string.deep_read_workbench_view_tune),
+                    style = LocalAmberType.current.meta.copy(fontSize = 11.sp),
+                    color = tokens.ink2,
+                )
             }
             if (expanded) {
                 validationError?.takeIf { it.isNotBlank() }?.let {
                     Text(it, style = LocalAmberType.current.secondary, color = MaterialTheme.colorScheme.error)
-                } ?: Text(
-                    stringResource(R.string.deep_read_workbench_validation_hint),
-                    style = LocalAmberType.current.secondary,
-                    color = tokens.ink3,
-                )
+                }
                 OutlinedTextField(
                     value = editorText,
                     onValueChange = onTextChange,
@@ -492,6 +532,7 @@ private fun SourcePanel(
                         .heightIn(min = 160.dp, max = 260.dp),
                     enabled = enabled,
                     textStyle = LocalAmberType.current.meta,
+                    shape = RoundedCornerShape(14.dp),
                     colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
                         focusedBorderColor = tokens.line2,
                         unfocusedBorderColor = tokens.line,

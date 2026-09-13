@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.material3.Surface
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.Button
@@ -44,12 +45,11 @@ import kotlinx.coroutines.launch
 import com.composables.icons.lucide.Lucide
 import com.composables.icons.lucide.EllipsisVertical
 import app.amber.agent.R
+import app.amber.feature.ui.components.ds.amberCanvas
 import app.amber.core.font.FontPackCategory
 import app.amber.core.font.FontPackState
 import app.amber.core.font.SlidesFontRepository
 import app.amber.feature.ui.components.nav.BackButton
-import app.amber.feature.ui.components.ds.SectionLabel
-import app.amber.feature.ui.components.ui.CardGroup
 import app.amber.feature.ui.components.ui.WorkspaceTopBar
 import app.amber.feature.ui.components.ui.workspaceColors
 import app.amber.feature.ui.context.LocalToaster
@@ -83,17 +83,19 @@ fun SettingSlidesFontPage(
                 scrollBehavior = scrollBehavior,
             )
         },
-        modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
-        containerColor = workspaceColors().canvas,
+        modifier = Modifier
+            .nestedScroll(scrollBehavior.nestedScrollConnection)
+            .amberCanvas(),
+        containerColor = androidx.compose.ui.graphics.Color.Transparent,
     ) { innerPadding ->
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
             contentPadding = innerPadding + PaddingValues(horizontal = SettingPageHorizontalInset, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(22.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             item {
-                CardGroup(
-                    title = { SectionLabel(stringResource(R.string.setting_slides_font_downloadable_fonts)) },
+                SettingCardGroup(
+                    title = stringResource(R.string.setting_slides_font_downloadable_fonts),
                 ) {
                     fonts.forEach { state ->
                         key(state.pack.id) {
@@ -223,10 +225,12 @@ fun SettingSlidesFontPage(
 
 @Composable
 private fun StyleBadge(label: String) {
+    val colors = workspaceColors()
     Surface(
-        shape = RoundedCornerShape(4.dp),
-        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
-        contentColor = MaterialTheme.colorScheme.primary,
+        shape = RoundedCornerShape(999.dp),
+        color = colors.row,
+        contentColor = colors.muted,
+        border = BorderStroke(1.dp, colors.hairline),
     ) {
         Text(
             text = label,

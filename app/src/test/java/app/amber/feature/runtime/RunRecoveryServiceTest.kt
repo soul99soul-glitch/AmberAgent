@@ -108,12 +108,17 @@ class RunRecoveryServiceTest : DurableRuntimeTestBase() {
     }
 
     @Test
-    fun finishedEffectResultIsReplayedIntoConversationWithoutReExecution() = runBlocking {
+    fun finishedEffectOlderThanRetentionIsReplayedIntoConversationWithoutReExecution() = runBlocking {
         val conversationId = Uuid.random()
         runTerminalStore.begin("run_1", conversationId.toString(), null)
         val effect = effect("run_1")
         ledger.markStarted(effect.effectId, approvalDigest("run_1", "call_1", effect.argsDigest))
         ledger.finish(effect.effectId, listOf(UIMessagePart.Text("""{"status":"ok","data":42}""")))
+        database.toolEffectDao().upsert(
+            database.toolEffectDao().getByEffectId(effect.effectId)!!.copy(
+                updatedAtMs = System.currentTimeMillis() - 8L * 24 * 60 * 60 * 1000,
+            )
+        )
 
         val repo = conversationRepository()
         val tool = UIMessagePart.Tool(
@@ -182,6 +187,7 @@ class RunRecoveryServiceTest : DurableRuntimeTestBase() {
             database.toolEffectDao().getByEffectId(oldFinished.effectId)!!
                 .copy(updatedAtMs = nowMs - retentionMs - 3_600_000)
         )
+        runTerminalStore.finish("run_old", RunTerminalState.COMPLETED)
 
         runTerminalStore.begin("run_recent", conversationId.toString(), null)
         val recentFinished = effect("run_recent", toolCallId = "call_recent")
@@ -193,8 +199,8 @@ class RunRecoveryServiceTest : DurableRuntimeTestBase() {
         )
 
         // Non-terminal effects (still actionable) are never pruned by age.
-        val oldUnknown = effect("run_old", toolCallId = "call_unknown")
-        ledger.markStarted(oldUnknown.effectId, approvalDigest("run_old", "call_unknown", oldUnknown.argsDigest))
+        val oldUnknown = effect("run_recent", toolCallId = "call_unknown")
+        ledger.markStarted(oldUnknown.effectId, approvalDigest("run_recent", "call_unknown", oldUnknown.argsDigest))
         ledger.markOutcomeUnknown(oldUnknown.effectId, "interrupted_mid_execution")
         database.toolEffectDao().upsert(
             database.toolEffectDao().getByEffectId(oldUnknown.effectId)!!
@@ -203,8 +209,8 @@ class RunRecoveryServiceTest : DurableRuntimeTestBase() {
 
         recoveryService().recover()
 
-        // Terminal rows past the 7-day window are pruned at cold start; recent
-        // terminal rows and old non-terminal rows survive.
+        // Completed-run effects past the 7-day window are pruned; recent
+        // effects and unfinished-run reconciliation state survive.
         assertNull(ledger.get(oldFinished.effectId))
         assertEquals(ToolEffectStatus.FINISHED, ledger.get(recentFinished.effectId)!!.status)
         assertEquals(ToolEffectStatus.OUTCOME_UNKNOWN, ledger.get(oldUnknown.effectId)!!.status)

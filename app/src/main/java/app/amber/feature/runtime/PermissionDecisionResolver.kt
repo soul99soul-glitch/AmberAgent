@@ -119,7 +119,7 @@ data class PermissionDecisionStrings(
             themePackForeground = "Theme package import must be explicitly confirmed in the foreground.",
             askUser = "ask_user always needs a human answer.",
             capabilityPolicyBlocked = { capability -> "Capability $capability policy blocked this invocation." },
-            bothAutoApproval = "Both auto-approval toggles allow unattended tool execution.",
+            bothAutoApproval = "High-risk auto-approval allows unattended tool execution.",
             alwaysAsk = "Tool always requires explicit human approval.",
             mandatoryBypassed = "Mandatory approval was bypassed by explicit high-risk auto-approval settings.",
             mandatoryApproval = "Tool requires explicit human approval unless high-risk auto-approval is enabled.",
@@ -310,7 +310,9 @@ class PermissionDecisionResolver(
                 policy = adjustment.adjusted
             }
         }
-        if (autoApproveTools && autoApproveHighRiskTools) {
+        // This switch is itself explicit consent for unattended execution;
+        // it must not silently depend on the separate regular-tool switch.
+        if (autoApproveHighRiskTools) {
             return decision(
                 PermissionDecisionAction.ALLOW,
                 localized.bothAutoApproval,
@@ -322,19 +324,9 @@ class PermissionDecisionResolver(
             return decision(PermissionDecisionAction.ASK, localized.alwaysAsk, "always_ask", policy)
         }
         // Mandatory approval gate — stricter than regular auto-approval and
-        // prior in-run trust, but still respects the explicit "auto approve
-        // high-risk tools" setting. Users who enable both toggles are opting
-        // into unattended execution for tools like WebMount eval and external
-        // CLI council seats.
+        // prior in-run trust. Explicit high-risk auto-approval was handled
+        // above, including WebMount eval and external CLI council seats.
         if (policy.mandatoryApproval) {
-            if (autoApproveTools && autoApproveHighRiskTools) {
-                return decision(
-                    PermissionDecisionAction.ALLOW,
-                    localized.mandatoryBypassed,
-                    "settings_high_risk_mandatory",
-                    policy,
-                )
-            }
             return decision(
                 PermissionDecisionAction.ASK,
                 localized.mandatoryApproval,
@@ -355,19 +347,6 @@ class PermissionDecisionResolver(
                 )
             }
             if (policy.requiresSubAgentApproval()) {
-                if (
-                    autoApproveTools &&
-                    autoApproveHighRiskTools &&
-                    tool.toolName != ASK_USER_TOOL_NAME &&
-                    (policy.risk == ToolRisk.High || policy.mandatoryApproval)
-                ) {
-                    return decision(
-                        PermissionDecisionAction.ALLOW,
-                        localized.subagentBypassed,
-                        "settings_high_risk_subagent",
-                        policy,
-                    )
-                }
                 return decision(PermissionDecisionAction.ASK, localized.subagentCannotSilent, "subagent", policy)
             }
         }
@@ -379,9 +358,6 @@ class PermissionDecisionResolver(
         }
         if (tool.toolName in autoApprovedToolNames && tool.toolName != ASK_USER_TOOL_NAME && policy.risk != ToolRisk.High) {
             return decision(PermissionDecisionAction.ALLOW, localized.runTrust, "run_trust", policy)
-        }
-        if (autoApproveTools && autoApproveHighRiskTools && policy.risk == ToolRisk.High) {
-            return decision(PermissionDecisionAction.ALLOW, localized.highRiskAuto, "settings_high_risk", policy)
         }
         if (autoApproveTools && policy.autoApprovable) {
             return decision(PermissionDecisionAction.ALLOW, localized.globalAuto, "settings", policy)
@@ -398,7 +374,8 @@ class PermissionDecisionResolver(
      *  - DISABLED → hard DENY, regardless of global switches.
      *  - ASK → hard ASK, regardless of global switches.
      *  - AUTO → explicit per-capability auto-approval, but:
-     *      * tool-level hard gates (mandatoryApproval / alwaysAsk) still ASK;
+     *      * tool-level gates (mandatoryApproval / alwaysAsk) still ASK unless
+     *        explicit high-risk auto-approval is enabled;
      *      * a capability whose risk floor is High can only be let through by
      *        the explicit high-risk auto-approval setting (普通 auto 不放行
      *        mcp.import 类高风险).
@@ -451,7 +428,7 @@ class PermissionDecisionResolver(
             )
 
             CapabilityPolicy.AUTO -> {
-                if (policy.mandatoryApproval || policy.alwaysAsk) {
+                if ((policy.mandatoryApproval || policy.alwaysAsk) && !autoApproveHighRiskTools) {
                     CapabilityAdjustment(
                         PermissionDecisionAction.ASK,
                         strings.capabilityAutoMandatory(capability.id, strings.scope(selected.scope)),

@@ -362,6 +362,35 @@ class ResponseAPIMessageTest {
     }
 
     @Test
+    fun `multiple system messages preserve order in instructions`() {
+        val body = api.buildRequestBody(
+            providerSetting = ProviderSetting.OpenAI(
+                baseUrl = "https://api.openai.com/v1",
+                useResponseApi = true,
+            ),
+            messages = listOf(
+                UIMessage.system("SYSTEM_ONE_SENTINEL"),
+                UIMessage(
+                    role = MessageRole.SYSTEM,
+                    parts = listOf(
+                        UIMessagePart.Text("SYSTEM_TWO_SENTINEL_PART_ONE"),
+                        UIMessagePart.Text("SYSTEM_TWO_SENTINEL_PART_TWO"),
+                    ),
+                ),
+                UIMessage.user("USER_SENTINEL"),
+            ),
+            params = TextGenerationParams(model = Model(modelId = "responses-test")),
+            stream = false,
+        )
+
+        assertEquals(
+            "SYSTEM_ONE_SENTINEL\n\nSYSTEM_TWO_SENTINEL_PART_ONE\n\nSYSTEM_TWO_SENTINEL_PART_TWO",
+            body["instructions"]?.jsonPrimitive?.content,
+        )
+        assertFalse(body["input"].toString().contains("SYSTEM_TWO_SENTINEL"))
+    }
+
+    @Test
     fun `volc response api should keep reasoning effort when non auto`() {
         val providerSetting = ProviderSetting.OpenAI(
             baseUrl = "https://ark.cn-beijing.volces.com/api/v3"
