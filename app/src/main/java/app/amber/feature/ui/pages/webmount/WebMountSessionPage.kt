@@ -5,6 +5,16 @@ import android.view.View
 import android.view.ViewGroup
 import android.webkit.WebView
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.shape.RoundedCornerShape
+import app.amber.feature.ui.components.ds.AmberCard
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.layout.size
+import androidx.compose.material3.HorizontalDivider
+import com.composables.icons.lucide.Globe
+import com.composables.icons.lucide.Bot
+import com.composables.icons.lucide.Hand
+import com.composables.icons.lucide.CircleAlert
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -14,16 +24,13 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -50,13 +57,12 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.amber.agent.R
 import app.amber.feature.ui.components.nav.BackButton
-import app.amber.feature.ui.components.ds.AmberCard
-import app.amber.feature.ui.components.ds.SectionLabel
 import app.amber.feature.ui.components.ds.amberCanvas
 import app.amber.feature.ui.context.LocalNavController
 import app.amber.feature.ui.theme.LocalAmberTokens
 import app.amber.feature.ui.theme.LocalAmberType
 import app.amber.feature.webmount.primitives.SessionHandle
+import app.amber.feature.webmount.primitives.NetworkLog
 import app.amber.feature.webmount.primitives.WebMountLease
 import app.amber.feature.webmount.primitives.WebMountLeaseFailure
 import app.amber.feature.webmount.primitives.WebMountLeaseResult
@@ -272,6 +278,7 @@ fun WebMountSessionPage(
     Scaffold(
         topBar = {
             TopAppBar(
+                expandedHeight = 48.dp,
                 title = {
                     Text(
                         text = metadata?.title?.takeIf { it.isNotBlank() }
@@ -404,7 +411,7 @@ fun WebMountSessionPage(
 }
 
 @Composable
-private fun SessionHeader(
+internal fun SessionHeader(
     metadata: WebMountSessionMetadata?,
     loadState: SessionHandle.LoadState,
     selectedPopup: SessionHandle.PopupInfo?,
@@ -442,93 +449,86 @@ private fun SessionHeader(
         null -> null
     }
 
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 10.dp),
-    ) {
-        SectionLabel(stringResource(R.string.amber_redesign_conversations))
-        AmberCard(modifier = Modifier.fillMaxWidth()) {
-            Column(
-                modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp),
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+    val address = selectedPopup?.url
+        ?.takeIf { it.isNotBlank() }
+        ?.let(NetworkLog::redactedUrl)
+        ?: selectedPopup?.title?.takeIf { it.isNotBlank() }
+        ?: metadata?.redactedUrl?.takeIf { it.isNotBlank() }
+        ?: popupFallback
+    val addressScroll = rememberScrollState()
+    LaunchedEffect(address) { addressScroll.scrollTo(0) }
+    val needsReopen = metadata?.needsReopen == true || failure == WebMountLeaseFailure.NEEDS_REOPEN
+    val pageFailed = loadState.status == SessionHandle.LoadStatus.FAILED
+    val statusIcon = when {
+        needsReopen || pageFailed || metadata == null -> Lucide.CircleAlert
+        lease != null -> Lucide.Hand
+        metadata.owner == WebMountOwner.AGENT -> Lucide.Bot
+        else -> Lucide.Globe
+    }
+
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 16.dp, end = 8.dp)
+                .heightIn(min = 48.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Icon(
+                imageVector = statusIcon,
+                contentDescription = ownerText,
+                tint = if (needsReopen || pageFailed) MaterialTheme.colorScheme.error else t.ink2,
+                modifier = Modifier.size(18.dp),
+            )
+            Box(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = address,
+                    modifier = Modifier.horizontalScroll(addressScroll),
+                    maxLines = 1,
+                    softWrap = false,
+                    style = type.meta,
+                    color = t.ink2,
+                )
+            }
+            if (metadata != null) {
+                TextButton(
+                    onClick = when {
+                        lease != null -> onRelease
+                        needsReopen -> onReopen
+                        else -> onTakeover
+                    },
+                    enabled = !acquiring && !closing,
+                    modifier = Modifier.heightIn(min = 48.dp),
                 ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = ownerText,
-                            style = type.body,
-                            color = t.ink,
-                        )
-                        selectedPopup?.let { popup ->
-                            Text(
-                                text = popup.title?.takeIf { it.isNotBlank() }
-                                    ?: popup.url.orEmpty()
-                                        .ifBlank { popupFallback },
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                style = type.secondary,
-                                color = t.ink3,
-                            )
-                        }
-                        metadata?.redactedUrl?.let { origin ->
-                            if (selectedPopup == null) {
-                                Text(
-                                    text = origin,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                    style = type.meta,
-                                    color = t.ink3,
-                                )
-                            }
-                        }
-                    }
-                    if (lease != null) {
-                        TextButton(
-                            onClick = onRelease,
-                            enabled = !closing,
-                            modifier = Modifier.heightIn(min = 48.dp),
-                        ) {
-                            Text(stringResource(R.string.parity_webmount_release))
-                        }
-                    }
-                }
-                detail?.let { message ->
                     Text(
-                        text = message,
-                        style = type.secondary,
-                        color = MaterialTheme.colorScheme.error,
+                        text = stringResource(
+                            when {
+                                lease != null -> R.string.parity_webmount_release
+                                needsReopen -> R.string.parity_webmount_session_reopen
+                                else -> R.string.parity_webmount_takeover
+                            },
+                        ),
+                        maxLines = 1,
+                        softWrap = false,
                     )
-                }
-                if (lease == null && metadata != null) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        if (metadata.needsReopen || failure == WebMountLeaseFailure.NEEDS_REOPEN) {
-                            Button(
-                                onClick = onReopen,
-                                enabled = !acquiring && !closing,
-                                modifier = Modifier.heightIn(min = 48.dp),
-                                shape = RoundedCornerShape(15.dp),
-                            ) {
-                                Text(stringResource(R.string.parity_webmount_reopen_and_view))
-                            }
-                        } else {
-                            OutlinedButton(
-                                onClick = onTakeover,
-                                enabled = !acquiring && !closing,
-                                modifier = Modifier.heightIn(min = 48.dp),
-                                shape = RoundedCornerShape(15.dp),
-                            ) {
-                                Text(stringResource(R.string.parity_webmount_takeover))
-                            }
-                        }
-                    }
                 }
             }
         }
+        val notice = detail ?: when {
+            needsReopen -> stringResource(R.string.parity_webmount_session_needs_reopen)
+            pageFailed -> stringResource(R.string.parity_webmount_session_failed)
+            else -> null
+        }
+        notice?.let { message ->
+            Text(
+                text = message,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                style = type.secondary,
+                color = MaterialTheme.colorScheme.error,
+            )
+        }
+        HorizontalDivider(color = t.ink3.copy(alpha = 0.15f))
     }
 }
 

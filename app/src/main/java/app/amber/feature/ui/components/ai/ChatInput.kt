@@ -247,6 +247,8 @@ fun ChatInput(
     onPreviousSandbox: (() -> Unit)? = null,
     onNextSandbox: (() -> Unit)? = null,
     webMountSessions: List<WebMountSessionMetadata> = emptyList(),
+    webMountActivity: String? = null,
+    onDismissWebMount: () -> Unit = {},
     onOpenWebMountSession: (sessionId: String, reopen: Boolean) -> Unit = { _, _ -> },
     aboveComposerContent: @Composable () -> Unit = {},
     modifier: Modifier = Modifier,
@@ -931,6 +933,8 @@ fun ChatInput(
                 if (webMountSessions.isNotEmpty()) {
                     WebMountTaskCard(
                         sessions = webMountSessions,
+                        currentActivity = webMountActivity,
+                        onDismiss = onDismissWebMount,
                         onOpenSession = onOpenWebMountSession,
                         modifier = Modifier.fillMaxWidth(),
                     )

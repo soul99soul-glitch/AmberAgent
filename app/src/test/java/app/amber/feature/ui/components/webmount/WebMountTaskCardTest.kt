@@ -1,17 +1,29 @@
 package app.amber.feature.ui.components.webmount
 
 import android.app.Application
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.view.View
+import androidx.compose.ui.platform.LocalView
+import java.io.File
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotDisplayed
 import androidx.compose.ui.test.hasScrollAction
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.swipeDown
+import androidx.compose.ui.test.swipeUp
 import androidx.compose.ui.unit.Density
 import app.amber.feature.webmount.primitives.WebMountOwner
 import app.amber.feature.webmount.primitives.WebMountSessionMetadata
@@ -101,5 +113,63 @@ class WebMountTaskCardTest {
         compose.onNodeWithText("会话 7").assertIsNotDisplayed()
         compose.onNode(hasScrollAction()).performScrollToNode(hasText("会话 7"))
         compose.onNodeWithText("会话 7").assertIsDisplayed()
+    }
+
+    @Test
+    fun cardCanCollapseExpandAnimateActivityAndDismiss() {
+        val session = WebMountSessionMetadata(
+            sessionId = "wm_activity",
+            title = "云盘",
+            status = "ready",
+        )
+        var activity by mutableStateOf<String?>("打开云盘")
+        var dismissed = false
+        var renderedView: View? = null
+
+        compose.setContent {
+            renderedView = LocalView.current
+            MaterialTheme {
+                WebMountTaskCard(
+                    sessions = listOf(session),
+                    currentActivity = activity,
+                    onDismiss = { dismissed = true },
+                    onOpenSession = { _, _ -> },
+                )
+            }
+        }
+
+        compose.onNodeWithText("打开云盘").assertIsDisplayed()
+        File("build/reports/webmount-ui").mkdirs()
+        compose.runOnIdle {
+            val view = requireNotNull(renderedView)
+            val bitmap = Bitmap.createBitmap(view.width, view.height, Bitmap.Config.ARGB_8888)
+            view.draw(Canvas(bitmap))
+            File("build/reports/webmount-ui/task-card.png").outputStream().use {
+                bitmap.compress(Bitmap.CompressFormat.PNG, 100, it)
+            }
+        }
+        compose.onNodeWithContentDescription("折叠").performClick()
+        compose.onNodeWithText("打开云盘").assertIsDisplayed()
+
+        compose.runOnIdle {
+            val view = requireNotNull(renderedView)
+            val bitmap = Bitmap.createBitmap(view.width, view.height, Bitmap.Config.ARGB_8888)
+            view.draw(Canvas(bitmap))
+            File("build/reports/webmount-ui/task-strip.png").outputStream().use {
+                bitmap.compress(Bitmap.CompressFormat.PNG, 100, it)
+            }
+        }
+        compose.onNodeWithContentDescription("展开").performTouchInput { swipeUp() }
+        compose.onNodeWithText("浏览器任务").assertIsDisplayed()
+        compose.onNodeWithContentDescription("折叠").performTouchInput { swipeDown() }
+        compose.onNodeWithContentDescription("展开").assertIsDisplayed()
+
+        compose.runOnIdle { activity = "读取文件" }
+        compose.waitForIdle()
+        compose.onNodeWithText("读取文件").assertIsDisplayed()
+
+        compose.onNodeWithContentDescription("展开").performClick()
+        compose.onNodeWithContentDescription("关闭").performClick()
+        compose.runOnIdle { assertEquals(true, dismissed) }
     }
 }

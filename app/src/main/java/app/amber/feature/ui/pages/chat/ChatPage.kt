@@ -556,6 +556,12 @@ private fun ChatPageContent(
     val conversationWebMountSessions = webMountSessions.filter {
         it.conversationId == conversation.id.toString()
     }
+    var dismissedWebMountSessionIds by rememberSaveable(conversation.id) {
+        mutableStateOf(emptyList<String>())
+    }
+    val visibleWebMountSessions = conversationWebMountSessions.filterNot {
+        it.sessionId in dismissedWebMountSessionIds
+    }
     val conversationIdText = conversation.id.toString()
     val latestSandboxConversation by rememberUpdatedState(conversation)
     val latestSandboxLoading by rememberUpdatedState(loadingJob != null)
@@ -787,7 +793,9 @@ private fun ChatPageContent(
                     onToggleSearch = {
                         vm.updateSettings(setting.copy(enableWebSearch = !enableWebSearch))
                     },
-                    sandboxActivity = sandboxActivity,
+                    sandboxActivity = sandboxActivity?.takeUnless {
+                        it.runtime == "WebMount" && conversationWebMountSessions.isNotEmpty()
+                    },
                     onOpenSandbox = {
                         sandboxOverlayOpen = true
                     },
@@ -809,7 +817,13 @@ private fun ChatPageContent(
                     } else {
                         null
                     },
-                    webMountSessions = conversationWebMountSessions,
+                    webMountSessions = visibleWebMountSessions,
+                    webMountActivity = scopedLiveSandboxActivity
+                        ?.takeIf { it.runtime == "WebMount" && it.isActiveOperation() }
+                        ?.title,
+                    onDismissWebMount = {
+                        dismissedWebMountSessionIds = conversationWebMountSessions.map { it.sessionId }
+                    },
                     onOpenWebMountSession = { sessionId, reopen ->
                         navController.navigate(Screen.WebMountSession(sessionId = sessionId, reopen = reopen))
                     },
