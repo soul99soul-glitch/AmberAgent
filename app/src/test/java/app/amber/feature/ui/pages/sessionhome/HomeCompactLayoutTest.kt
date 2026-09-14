@@ -12,6 +12,8 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.rememberCoroutineScope
@@ -27,6 +29,7 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.unit.Density
@@ -142,22 +145,37 @@ class HomeCompactLayoutTest {
     }
 
     @Test
-    fun additionalContinueEntryOpensTheCandidatePicker() {
+    fun resumeCountBadgeSharesThePillWithoutAddingHeight() {
         var opened = 0
+        var resumed = 0
+        var count by mutableStateOf(1)
         content {
             HomeFeatureRail(
                 resumeCandidate = candidate(running = false),
-                additionalResumeCount = 2,
-                onOpenResume = {},
-                onOpenAdditionalResume = { opened++ },
+                resumeCount = count,
+                onOpenResume = { resumed++ },
+                onChooseResume = { opened++ },
                 onDeepRead = {}, onMiniApps = {}, onNovel = {}, onWebMount = {}, onCouncil = {},
             )
         }
-        compose.onNodeWithText(
-            "${context.getString(R.string.session_home_continue)} · 2",
-            useUnmergedTree = true,
-        ).performClick()
+        val label = context.getString(R.string.session_home_continue)
+        val initialHeight = compose.onRoot().fetchSemanticsNode().boundsInRoot.height
+        compose.onNodeWithText(label).performClick()
+        assertEquals(1, resumed)
+        assertEquals(0, opened)
+        compose.runOnIdle { count = 3 }
+        val continueText = compose.onNodeWithText(label, useUnmergedTree = true)
+        val countText = compose.onNodeWithText("3", useUnmergedTree = true)
+        assertEquals(initialHeight, compose.onRoot().fetchSemanticsNode().boundsInRoot.height, 0.5f)
+        assertEquals(
+            continueText.fetchSemanticsNode().boundsInRoot.center.y,
+            countText.fetchSemanticsNode().boundsInRoot.center.y,
+            0.5f,
+        )
+        compose.onNodeWithText("$label · 2").assertDoesNotExist()
+        compose.onNodeWithText(label).performClick()
         assertEquals(1, opened)
+        assertEquals(1, resumed)
     }
 
     @Test

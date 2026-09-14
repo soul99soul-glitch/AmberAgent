@@ -1,5 +1,7 @@
 package app.amber.feature.ui.pages.sessionhome
 
+import androidx.compose.ui.platform.LocalDensity
+
 import app.amber.feature.ui.utils.amberTraceMeasure
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -183,7 +185,7 @@ fun SessionHomePage() {
     val lastConversationId = rememberSharedPreferenceString(LAST_CONVERSATION_ID_PREF).value
     val listState = rememberLazyListState()
     val hazeState = rememberHazeState()
-    var showAdditionalContinueCandidates by rememberSaveable { mutableStateOf(false) }
+    var showResumePicker by rememberSaveable { mutableStateOf(false) }
     val hasTopOverflow by remember {
         derivedStateOf { listState.canScrollBackward }
     }
@@ -202,9 +204,6 @@ fun SessionHomePage() {
     val fabShape = CircleShape
     val fabInteractionSource = remember { MutableInteractionSource() }
     val operationError = stringResource(R.string.error_title_operation)
-    val additionalContinueCandidates = remember(continueCandidates) {
-        continueCandidates.drop(1)
-    }
 
     LaunchedEffect(homeSearchQuery, untitledConversationLabel) {
         vm.setHomeSearchQuery(homeSearchQuery, untitledConversationLabel)
@@ -382,9 +381,9 @@ fun SessionHomePage() {
                 item(key = "home_features") {
                     HomeFeatureRail(
                         resumeCandidate = continueCandidates.firstOrNull(),
-                        additionalResumeCount = additionalContinueCandidates.size,
+                        resumeCount = continueCandidates.size,
                         onOpenResume = openContinueCandidate,
-                        onOpenAdditionalResume = { showAdditionalContinueCandidates = true },
+                        onChooseResume = { showResumePicker = true },
                         onDeepRead = { navController.navigate(Screen.TodayBoard) },
                         onMiniApps = { navController.navigate(Screen.MiniAppList) },
                         onNovel = { navController.navigate(Screen.NovelProjects) },
@@ -553,14 +552,14 @@ fun SessionHomePage() {
         }
     }
 
-    if (showAdditionalContinueCandidates && additionalContinueCandidates.isNotEmpty()) {
+    if (showResumePicker && continueCandidates.isNotEmpty()) {
         ContinueCandidatesSheet(
-            candidates = additionalContinueCandidates,
+            candidates = continueCandidates,
             onOpen = { candidate ->
-                showAdditionalContinueCandidates = false
+                showResumePicker = false
                 openContinueCandidate(candidate)
             },
-            onDismiss = { showAdditionalContinueCandidates = false },
+            onDismiss = { showResumePicker = false },
         )
     }
 }
@@ -1169,9 +1168,9 @@ private fun HomeConversationHeader() {
 @Composable
 internal fun HomeFeatureRail(
     resumeCandidate: ContinueCandidate?,
-    additionalResumeCount: Int = 0,
+    resumeCount: Int = if (resumeCandidate == null) 0 else 1,
     onOpenResume: (ContinueCandidate) -> Unit,
-    onOpenAdditionalResume: () -> Unit = {},
+    onChooseResume: () -> Unit = {},
     onDeepRead: () -> Unit,
     onMiniApps: () -> Unit,
     onNovel: () -> Unit,
@@ -1179,6 +1178,7 @@ internal fun HomeFeatureRail(
     onCouncil: () -> Unit,
 ) {
     val tokens = LocalAmberTokens.current
+    val countBadgeSize = with(LocalDensity.current) { 16.dp * fontScale }
     val features = listOf(
         FeatureEntry(Lucide.BookOpenText, stringResource(R.string.session_home_feature_deep_read), onDeepRead),
         FeatureEntry(Lucide.Grid2x2, stringResource(R.string.session_home_feature_mini_apps), onMiniApps),
@@ -1245,33 +1245,42 @@ internal fun HomeFeatureRail(
                         fontSize = 10.5.sp,
                     )
                 }
-                Text(
-                    text = stringResource(R.string.session_home_continue),
-                    fontSize = 12.5.sp,
-                    lineHeight = 17.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = tokens.accent,
+                Row(
                     modifier = Modifier
                         .clip(androidx.compose.foundation.shape.RoundedCornerShape(18.dp))
                         .background(tokens.accent.copy(alpha = 0.14f))
+                        .clickable {
+                            if (resumeCount > 1) onChooseResume() else onOpenResume(candidate)
+                        }
                         .padding(horizontal = 14.dp, vertical = 6.dp),
-                )
-            }
-            if (additionalResumeCount > 0) {
-                TextButton(
-                    onClick = onOpenAdditionalResume,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(min = 40.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(5.dp),
                 ) {
                     Text(
-                        text = "${stringResource(R.string.session_home_continue)} · $additionalResumeCount",
-                        fontSize = 11.5.sp,
-                        lineHeight = 15.sp,
+                        text = stringResource(R.string.session_home_continue),
+                        fontSize = 12.5.sp,
+                        lineHeight = 17.sp,
+                        fontWeight = FontWeight.SemiBold,
                         color = tokens.accent,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
                     )
+                    if (resumeCount > 1) {
+                        Box(
+                            modifier = Modifier
+                                .size(countBadgeSize)
+                                .clip(CircleShape)
+                                .background(tokens.accent.copy(alpha = 0.16f)),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(
+                                text = resumeCount.toString(),
+                                fontSize = 9.sp,
+                                lineHeight = 10.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = tokens.accent,
+                                maxLines = 1,
+                            )
+                        }
+                    }
                 }
             }
             Box(
