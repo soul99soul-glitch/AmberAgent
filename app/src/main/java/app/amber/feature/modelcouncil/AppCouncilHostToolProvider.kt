@@ -148,6 +148,10 @@ class AppCouncilHostToolProvider(
                 customBody = model.customBodies,
             )
             val accumulator = MessageStreamAccumulator(messages, model)
+            // Same frame-scale coalescing as the member/host turns
+            // (ProviderModelCouncilTextRunner): each tick would otherwise do a
+            // full accumulator snapshot + room write per provider chunk.
+            val throttle = CumulativeTextThrottle(onChunk)
             val streamed = runCatching {
                 withTimeoutOrNull(timeoutMs) {
                     providerImpl.stream(provider, messages, params).collect { chunk ->
@@ -157,12 +161,13 @@ class AppCouncilHostToolProvider(
                             ?.filterIsInstance<UIMessagePart.Text>()
                             ?.sumOf { it.text.length } ?: 0
                         if (delta > 0) {
-                            val snap = accumulator.snapshot()
-                            val fullText = snap.lastOrNull()?.parts
-                                ?.filterIsInstance<UIMessagePart.Text>()
-                                ?.joinToString("") { it.text }
-                                .orEmpty()
-                            if (fullText.isNotEmpty()) onChunk(fullText.take(outputBudgetChars))
+                            throttle.offer {
+                                accumulator.snapshot().lastOrNull()?.parts
+                                    ?.filterIsInstance<UIMessagePart.Text>()
+                                    ?.joinToString("") { it.text }
+                                    .orEmpty()
+                                    .take(outputBudgetChars)
+                            }
                         }
                     }
                 }

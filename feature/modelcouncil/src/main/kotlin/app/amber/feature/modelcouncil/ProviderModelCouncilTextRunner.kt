@@ -52,11 +52,16 @@ class ProviderModelCouncilTextRunner(
         // has no conversation owner in its public contract, so one generated
         // ID per seat invocation is the narrowest stable scope.
         val sessionId = Uuid.random().toString()
-        suspend fun streamWith(candidateTemperature: Float?, reasoningLevel: ReasoningLevel): String {
+        val requestedReasoning = reasoningLevel ?: ReasoningLevel.OFF
+        val label = listOf(provider.name, model.displayName.ifBlank { model.modelId })
+            .filter { it.isNotBlank() }
+            .joinToString(" / ")
+        val warnings = mutableListOf<String>()
+        suspend fun streamWith(candidateTemperature: Float?, candidateReasoning: ReasoningLevel): String {
             val params = TextGenerationParams(
                 model = model,
                 tools = emptyList(),
-                reasoningLevel = reasoningLevel,
+                reasoningLevel = candidateReasoning,
                 customHeaders = model.customHeaders,
                 customBody = model.customBodies,
                 temperature = candidateTemperature,
@@ -67,43 +72,28 @@ class ProviderModelCouncilTextRunner(
             // Compose can render; coalesce live updates to a frame-scale cadence while still
             // forcing the final text through.
             val accumulated = StringBuilder()
-            var lastEmitNanos = 0L
-            var lastEmittedText = ""
             // Diagnostic counters for the "guest sometimes doesn't stream" issue.
             // Track how many raw chunks arrive, how many were non-empty deltas,
-            // how many emitLive calls were throttled/deduped away, and the wall
+            // how many emissions were throttled/deduped away, and the wall
             // time span of the stream — so a single log line per turn reveals
             // whether the provider sent few chunks (upstream), or we suppressed
             // them (our throttle). VERBOSE-only; guarded by a stable tag.
             var rawChunkCount = 0
             var nonEmptyDeltaCount = 0
-            var emitSkippedThrottle = 0
-            var emitSkippedNoChange = 0
-            var emitForwarded = 0
+            var truncatedByProvider = false
+            val throttle = CumulativeTextThrottle(onChunk)
             val streamStartNanos = System.nanoTime()
-            val runTag = "council-stream/${model.displayName.ifBlank { model.modelId }}/t=${candidateTemperature}/r=${reasoningLevel}"
-            fun emitLive(force: Boolean) {
-                val now = System.nanoTime()
-                if (!force && now - lastEmitNanos < MODEL_COUNCIL_LIVE_EMIT_INTERVAL_NANOS) {
-                    emitSkippedThrottle++
-                    return
-                }
-                val text = accumulated.toString().take(outputBudgetChars)
-                if (text != lastEmittedText) {
-                    lastEmittedText = text
-                    lastEmitNanos = now
-                    emitForwarded++
-                    onChunk(text)
-                } else {
-                    emitSkippedNoChange++
-                }
-            }
+            val runTag = "council-stream/${model.displayName.ifBlank { model.modelId }}/t=${candidateTemperature}/r=${candidateReasoning}"
             providerImpl.stream(
                 providerSetting = provider,
                 messages = messages,
                 params = params,
             ).collect { chunk ->
                 rawChunkCount++
+                val finishReason = chunk.choices.lastOrNull { it.finishReason != null }?.finishReason
+                if (finishReason?.trim()?.lowercase() in OUTPUT_LIMIT_FINISH_REASONS) {
+                    truncatedByProvider = true
+                }
                 val delta = chunk.choices.firstOrNull()?.delta?.parts
                     ?.filterIsInstance<UIMessagePart.Text>()
                     ?.joinToString("") { it.text }
@@ -111,33 +101,35 @@ class ProviderModelCouncilTextRunner(
                 if (delta.isNotEmpty()) {
                     nonEmptyDeltaCount++
                     accumulated.append(delta)
-                    emitLive(force = false)
+                    throttle.offer { accumulated.toString().take(outputBudgetChars) }
                 }
             }
-            emitLive(force = true)
+            throttle.offer(force = true) { accumulated.toString().take(outputBudgetChars) }
+            // A provider-side output-limit cut is a truncation, not a completion —
+            // surface it as a warning instead of silently treating the text as whole
+            // (mirrors the chat kernel's OUTPUT_LIMIT semantics; here the turn still
+            // completes, the warning rides the bubble).
+            if (truncatedByProvider) {
+                warnings += "$label reply was cut off by the provider output limit."
+            }
             val totalChars = accumulated.length
             val elapsedMs = (System.nanoTime() - streamStartNanos) / 1_000_000
             // One diagnostic line per turn. Patterns to watch for:
             //  - rawChunkCount <= 2 with large totalChars  → provider sent the whole
             //    reply in one shot (non-streaming fallback / local model batching);
             //    the "pop in whole" is upstream, not our throttle.
-            //  - emitSkippedThrottle high with rawChunkCount high → our 32ms cadence
+            //  - skippedByThrottle high with rawChunkCount high → our 32ms cadence
             //    is the culprit; lower the interval.
-            //  - emitForwarded high but user still sees a pop → rendering/Compose
+            //  - forwarded high but user still sees a pop → rendering/Compose
             //    side, not this runner.
             android.util.Log.i(
                 "CouncilRunner",
                 "$runTag done: chunks=$rawChunkCount nonEmpty=$nonEmptyDeltaCount " +
                     "chars=$totalChars elapsedMs=$elapsedMs " +
-                    "emit(fwd=$emitForwarded throttled=$emitSkippedThrottle noChange=$emitSkippedNoChange)",
+                    "emit(fwd=${throttle.forwarded} throttled=${throttle.skippedByThrottle} noChange=${throttle.skippedNoChange})",
             )
             return accumulated.toString().take(outputBudgetChars)
         }
-        val requestedReasoning = reasoningLevel ?: ReasoningLevel.OFF
-        val label = listOf(provider.name, model.displayName.ifBlank { model.modelId })
-            .filter { it.isNotBlank() }
-            .joinToString(" / ")
-        val warnings = mutableListOf<String>()
         suspend fun tryStream(candidateTemperature: Float?, candidateReasoning: ReasoningLevel): Result<String> =
             runCatching { streamWith(candidateTemperature, candidateReasoning) }.also { result ->
                 result.exceptionOrNull()?.let { if (it is CancellationException) throw it }
@@ -145,7 +137,7 @@ class ProviderModelCouncilTextRunner(
 
         val first = tryStream(temperature, requestedReasoning)
         if (first.isSuccess) {
-            return ModelCouncilTextResult(first.getOrThrow())
+            return ModelCouncilTextResult(first.getOrThrow(), warnings)
         }
         val firstError = first.exceptionOrNull()!!
         val candidates = buildList {
@@ -204,7 +196,8 @@ class ProviderModelCouncilTextRunner(
     }
 }
 
-private const val MODEL_COUNCIL_LIVE_EMIT_INTERVAL_NANOS = 32_000_000L
+/** Finish reasons meaning "the provider cut the reply at its output limit". Same set as the chat kernel's. */
+private val OUTPUT_LIMIT_FINISH_REASONS = setOf("length", "max_tokens", "max_output_tokens")
 
 private fun Throwable.isUnsupportedReasoningConfigError(): Boolean {
     val message = generateSequence(this) { it.cause }

@@ -128,9 +128,12 @@ class CouncilRoomExecutor(
         sink.upsertStreamingMessage(room.conversationId, streaming)
 
         val budget = guest.outputBudgetChars.coerceAtLeast(1_000)
+        // Last cumulative text the user saw; a timeout/failure finalizes the
+        // message WITH this partial instead of wiping the bubble to empty.
+        var streamedText = ""
         val result = runCatching {
             withTimeoutOrNull(room.seatTimeoutMs.coerceAtLeast(1_000L)) {
-                streamInto(room.conversationId, messageId) { onChunk ->
+                streamInto(room.conversationId, messageId, onProgress = { streamedText = it }) { onChunk ->
                     when (guest.runnerType) {
                         ModelCouncilSeatRunner.PROVIDER_MODEL -> {
                             val modelId = guest.modelId
@@ -167,7 +170,7 @@ class CouncilRoomExecutor(
                     conversationId = room.conversationId,
                     messageId = messageId,
                     status = CouncilMessageStatus.TIMED_OUT,
-                    text = "",
+                    text = streamedText,
                     warnings = emptyList(),
                     error = "Guest ${guest.name} timed out after ${room.seatTimeoutMs}ms.",
                     authorId = guest.id,
@@ -196,7 +199,7 @@ class CouncilRoomExecutor(
                     conversationId = room.conversationId,
                     messageId = messageId,
                     status = CouncilMessageStatus.FAILED,
-                    text = "",
+                    text = streamedText,
                     warnings = emptyList(),
                     error = error.message ?: error::class.java.simpleName,
                     authorId = guest.id,
@@ -257,11 +260,14 @@ class CouncilRoomExecutor(
             )
         }
 
+        // Last cumulative text the user saw; a timeout/failure finalizes WITH
+        // this partial instead of replacing the streamed conclusion wholesale.
+        var streamedText = ""
         val result = runCatching {
             withTimeoutOrNull(room.seatTimeoutMs.coerceAtLeast(1_000L)) {
                 if (host != null) {
                     // Stream live into the seeded row, exactly like a host turn.
-                    streamInto(room.conversationId, synthesisMessageId) { onChunk ->
+                    streamInto(room.conversationId, synthesisMessageId, onProgress = { streamedText = it }) { onChunk ->
                         modelRunner.generate(
                             settings = settings,
                             modelId = hostModelId,
@@ -288,7 +294,7 @@ class CouncilRoomExecutor(
                     )
                 }
             } ?: ModelCouncilTextResult(
-                text = "Synthesis timed out.",
+                text = streamedText.ifBlank { "Synthesis timed out." },
                 warnings = listOf("Host synthesis timed out after ${room.seatTimeoutMs}ms."),
             )
         }
@@ -306,7 +312,9 @@ class CouncilRoomExecutor(
                 sink.completeSynthesis(
                     conversationId = room.conversationId,
                     synthesisMessageId = synthesisMessageId,
-                    synthesis = "Synthesis failed: ${error.message ?: error::class.java.simpleName}",
+                    synthesis = streamedText.ifBlank {
+                        "Synthesis failed: ${error.message ?: error::class.java.simpleName}"
+                    },
                     warnings = listOf("Synthesis failed: ${error.message}"),
                 )
             },
@@ -355,9 +363,11 @@ class CouncilRoomExecutor(
         } else {
             "$systemPrompt\n\nHost supplement:\n${extraSystemPrompt.trim()}"
         }
+        // Last cumulative text the user saw; retained on timeout/failure.
+        var streamedText = ""
         val result = runCatching {
             withTimeoutOrNull(room.seatTimeoutMs.coerceAtLeast(1_000L)) {
-                streamInto(room.conversationId, messageId) { onChunk ->
+                streamInto(room.conversationId, messageId, onProgress = { streamedText = it }) { onChunk ->
                     modelRunner.generate(
                         settings = settings,
                         modelId = hostModelId,
@@ -375,7 +385,7 @@ class CouncilRoomExecutor(
                     conversationId = room.conversationId,
                     messageId = messageId,
                     status = CouncilMessageStatus.TIMED_OUT,
-                    text = "",
+                    text = streamedText,
                     warnings = emptyList(),
                     error = "Host turn timed out.",
                     authorId = host.id,
@@ -404,7 +414,7 @@ class CouncilRoomExecutor(
                     conversationId = room.conversationId,
                     messageId = messageId,
                     status = CouncilMessageStatus.FAILED,
-                    text = "",
+                    text = streamedText,
                     warnings = emptyList(),
                     error = error.message ?: error::class.java.simpleName,
                     authorId = host.id,
@@ -456,22 +466,29 @@ class CouncilRoomExecutor(
      * - An unbounded [Channel] absorbs the synchronous callbacks (so they never
      *   block, even on a single-threaded test scheduler).
      * - A consumer coroutine on [dispatcher] drains the channel and forwards each
-     *   cumulative text to [onCumulative] (which writes to the sink).
+     *   cumulative text to [streamingSafeUpdate] (which writes to the sink).
      * - [generate] receives the `onChunk` callback to hand to the runner. Whatever
      *   [generate] returns is the final result text; the channel is closed in its
      *   `finally` so the consumer drains remaining chunks before we return.
+     * - [onProgress] observes each cumulative text just before it is applied, so
+     *   callers can retain the last visible partial for the timeout/failure
+     *   finalize paths (a cancelled stream keeps whatever was already shown,
+     *   it does not wipe the bubble back to empty).
      *
-     * Used by both [generateGuestTurn] and [generateHostTurn] to collapse what was
-     * two copy-pasted `Channel + launch consumer + close + join` blocks.
+     * Used by the guest/host/synthesis turns here and by the manager's host
+     * tool turn ([CouncilRoomManager.runHostToolTurn]) to collapse what were
+     * copy-pasted `Channel + launch consumer + close + join` blocks.
      */
-    private suspend fun <T> streamInto(
+    suspend fun <T> streamInto(
         conversationId: Uuid,
         messageId: String,
+        onProgress: ((String) -> Unit)? = null,
         generate: suspend (onChunk: (String) -> Unit) -> T,
     ): T = coroutineScope {
         val chunkChannel = Channel<String>(Channel.UNLIMITED)
         val consumer = launch {
             for (cumulative in chunkChannel) {
+                onProgress?.invoke(cumulative)
                 streamingSafeUpdate(conversationId, messageId, cumulative)
             }
         }
@@ -510,7 +527,12 @@ class CouncilRoomExecutor(
                 outputBudgetChars = 800,
                 reasoningLevel = reasoningLevel,
                 temperature = null,
-                onChunk = onChunk,
+                // The review prompts instruct the host to emit
+                // [no_comment]/[ask_user] markers; they are control signals,
+                // never display content — strip them from the live text so the
+                // user never watches a marker type in. Sentinel detection in
+                // runHostReviewTurn uses the raw result text, not this copy.
+                onChunk = { cumulative -> onChunk(stripReviewSentinels(cumulative)) },
             )
         }
     }
@@ -534,6 +556,11 @@ class CouncilRoomExecutor(
 }
 
 private fun nowMs(): Long = System.currentTimeMillis()
+
+/** Remove the review control markers from a live cumulative text (display only). */
+private fun stripReviewSentinels(text: String): String = text
+    .replace(CouncilRoomPrompts.NO_COMMENT_SENTINEL, "")
+    .replace(CouncilRoomPrompts.ASK_USER_SENTINEL, "")
 
 /**
  * Resolve the host's model id for generation.

@@ -1022,9 +1022,15 @@ class CouncilRoomManager(
      *
      * Every step re-reads the room and bails on a terminal status, so [close]
      * (which cancels this job AND flips the room terminal) stops it promptly.
+     *
+     * Wall-clock budget: the whole loop is bounded by a deadline (see below),
+     * enforced cooperatively BETWEEN turns — an in-flight turn is bounded by its
+     * own seat timeout, so no cancellation sweep is ever needed.
      */
     private suspend fun runAutoOrchestration(conversationId: Uuid) {
-        val settings = settingsFlow.value
+        // Live settings: re-read at each round so mid-run changes (host model,
+        // power mode) take effect, honoring resolveHostModelId's live-first rule.
+        var settings = settingsFlow.value
         val initial = peekRoom(conversationId) ?: return
         val totalRounds = initial.maxRounds.coerceIn(1, MAX_ROUNDS_CAP)
 
@@ -1048,6 +1054,25 @@ class CouncilRoomManager(
             failActiveRoom(conversationId, "No council guests are available to run.")
             return
         }
+
+        // Total wall-clock budget. The configured totalTimeoutMs is only a floor
+        // alongside the realistic serial cost of the program — every guest turn
+        // (rounds × seats) and host turn (opening + per-round reviews + synthesis,
+        // plus FULL-mode pre-research rounds) is individually bounded by
+        // seatTimeoutMs, so a merely-slow council is never cut short and the net
+        // only catches true hangs. Mirrors the legacy batch manager's
+        // effectiveCouncilTotalTimeoutMs floor.
+        val seatTimeoutMs = seeded.seatTimeoutMs.coerceAtLeast(1_000L)
+        val researchRounds = if (
+            settings.agentRuntime.modelCouncil.councilPowerMode == CouncilPowerMode.FULL &&
+            toolProvider.isAvailable(settings) &&
+            initial.activeGuests.isEmpty() // research only runs for a not-yet-assembled roster
+        ) 5L else 0L // runPreTopicResearch: maxToolRounds(4) tool rounds + 1 final
+        val serialFloorMs = seatTimeoutMs *
+            (totalRounds * guestIds.size + (totalRounds + 1L) + researchRounds) +
+            COUNCIL_TOTAL_TIMEOUT_OVERHEAD_MS
+        val totalBudgetMs = maxOf(seeded.totalTimeoutMs.coerceAtLeast(10_000L), serialFloorMs)
+        var deadlineMs = System.currentTimeMillis() + totalBudgetMs
 
         // Interjection watermark = the topic message; anything the user sends AFTER
         // this is a mid-run interjection handled between turns.
@@ -1087,6 +1112,7 @@ class CouncilRoomManager(
         }
 
         for (round in 1..totalRounds) {
+            settings = settingsFlow.value
             val roundReady = mutateRoomOrNull(conversationId) { room ->
                 room.copy(
                     round = round,
@@ -1102,6 +1128,18 @@ class CouncilRoomManager(
             } ?: return // null = terminal/missing → stop
 
             for (gid in guestIds) {
+                // Budget check BETWEEN turns only: an in-flight turn is bounded
+                // by its own seat timeout; at this point nothing is STREAMING,
+                // so settling the room needs no sweep. (User-driven segments —
+                // ask_user waits, interjection replies — pause the deadline, so
+                // they neither trigger nor erode the budget.)
+                if (System.currentTimeMillis() > deadlineMs) {
+                    failActiveRoom(
+                        conversationId,
+                        "Council exceeded its total time budget (${totalBudgetMs / 1000}s); completed turns are kept.",
+                    )
+                    return
+                }
                 val current = peekRoom(conversationId) ?: return
                 if (current.status.terminal) return
                 val guest = current.participantById(gid) ?: continue
@@ -1118,7 +1156,10 @@ class CouncilRoomManager(
                 )
                 // Let the user steer between turns: @member → that member replies;
                 // no @ → the host produces a redirect the next members will see.
+                // User-driven segment: pause the budget while it runs.
+                val interjectionStartedAt = System.currentTimeMillis()
                 handleInterjections(conversationId, settings)
+                deadlineMs += System.currentTimeMillis() - interjectionStartedAt
             }
 
             // FULL mode end-of-round host review: after all guests have spoken,
@@ -1163,14 +1204,30 @@ class CouncilRoomManager(
                                 updatedAtMs = nowMs(),
                             )
                         } ?: return
+                        val waitStartedAt = System.currentTimeMillis()
                         awaitUserAnswer(conversationId)
+                        // User think-time must not consume the deliberation budget.
+                        deadlineMs += System.currentTimeMillis() - waitStartedAt
                     }
                 }
             }
         }
 
-        // Drain any final interjection before synthesizing.
+        // Drain any final interjection before synthesizing. User-driven segment:
+        // pause the budget while it runs.
+        val drainStartedAt = System.currentTimeMillis()
         handleInterjections(conversationId, settings)
+        deadlineMs += System.currentTimeMillis() - drainStartedAt
+
+        // Last budget check before committing to synthesis.
+        if (System.currentTimeMillis() > deadlineMs) {
+            failActiveRoom(
+                conversationId,
+                "Council exceeded its total time budget (${totalBudgetMs / 1000}s); completed turns are kept.",
+            )
+            return
+        }
+        settings = settingsFlow.value
 
         // Final synthesis — inline (awaited) in this same job so close() cancels
         // it too. We ALWAYS drive the room to a terminal state here (never leave it
@@ -1781,57 +1838,33 @@ class CouncilRoomManager(
             ),
         )
         val outcome = runCatching {
-            // Bridge the sync onChunk callback to the suspend sink via a channel +
-            // consumer coroutine, exactly like generateGuestTurn does. Avoids
-            // runBlocking on the generation dispatcher.
-            kotlinx.coroutines.coroutineScope {
-                val chunkChannel = kotlinx.coroutines.channels.Channel<String>(
-                    kotlinx.coroutines.channels.Channel.UNLIMITED,
+            // Same streaming spine as the guest/host turns: the executor bridges
+            // the sync onChunk callback onto the suspending sink.
+            executor.streamInto(conversationId, messageId) { onChunk ->
+                toolProvider.generateWithTools(
+                    settings = settings,
+                    modelId = hostModelId,
+                    systemPrompt = systemPrompt,
+                    userPrompt = userPrompt,
+                    reasoningLevel = councilSetting.hostReasoningLevel ?: ReasoningLevel.OFF,
+                    maxToolRounds = maxToolRounds,
+                    timeoutMs = room.seatTimeoutMs.coerceAtLeast(1_000L),
+                    outputBudgetChars = room.outputBudgetChars,
+                    onChunk = onChunk,
                 )
-                val consumer = launch {
-                    for (cumulative in chunkChannel) {
-                        runCatching {
-                            upsertStreamingMessage(
-                                conversationId,
-                                CouncilMessage(
-                                    id = messageId,
-                                    authorId = host.id,
-                                    authorName = host.name,
-                                    role = host.role,
-                                    round = room.round,
-                                    mode = room.mode,
-                                    text = cumulative,
-                                    createdAtMs = now,
-                                    status = CouncilMessageStatus.STREAMING,
-                                ),
-                            )
-                        }
-                    }
-                }
-                try {
-                    toolProvider.generateWithTools(
-                        settings = settings,
-                        modelId = hostModelId,
-                        systemPrompt = systemPrompt,
-                        userPrompt = userPrompt,
-                        reasoningLevel = councilSetting.hostReasoningLevel ?: ReasoningLevel.OFF,
-                        maxToolRounds = maxToolRounds,
-                        timeoutMs = room.seatTimeoutMs.coerceAtLeast(1_000L),
-                        outputBudgetChars = room.outputBudgetChars,
-                        onChunk = { cumulative -> chunkChannel.trySend(cumulative) },
-                    )
-                } finally {
-                    chunkChannel.close()
-                    consumer.join()
-                }
             }
         }.getOrElse { error ->
             if (error is kotlinx.coroutines.CancellationException) throw error
+            // Retain whatever the user already saw streaming (the last write the
+            // sink accepted) instead of wiping the bubble back to empty.
+            val partial = peekRoom(conversationId)?.messages
+                ?.firstOrNull { it.id == messageId && it.status == CouncilMessageStatus.STREAMING }
+                ?.text.orEmpty()
             completeMessage(
                 conversationId = conversationId,
                 messageId = messageId,
                 status = CouncilMessageStatus.FAILED,
-                text = "",
+                text = partial,
                 warnings = emptyList(),
                 error = "$kindLabel failed: ${error.message ?: error::class.java.simpleName}",
                 authorId = host.id,
@@ -2431,6 +2464,9 @@ class CouncilRoomManager(
         const val MAX_MESSAGE_CHARS = 12_000
         const val MAX_ROUNDS_CAP = 10
         const val MAX_PARTICIPANTS_CAP = 12
+
+        /** Slack added on top of the serial-turn floor when budgeting a whole run. */
+        private const val COUNCIL_TOTAL_TIMEOUT_OVERHEAD_MS = 30_000L
         private const val TAG = "CouncilRoomManager"
     }
 }

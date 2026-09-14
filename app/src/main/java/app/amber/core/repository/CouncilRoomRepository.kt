@@ -248,6 +248,9 @@ class CouncilRoomRepository(
         @Volatile var loaded: Boolean = false
         @Volatile var persistJob: Job? = null
 
+        /** Wall time the last SQLite write finished; 0 = never written. */
+        @Volatile var lastPersistAt: Long = 0L
+
         fun cancelPersist() {
             persistJob?.cancel()
             persistJob = null
@@ -260,14 +263,24 @@ class CouncilRoomRepository(
             expectedRestoreEpoch: Long?,
         ) {
             persistJob?.cancel()
+            // Max-delay cap: under a continuous chunk stream the 200ms trailing
+            // debounce starves forever (every upsert restarts the timer). Once
+            // the last durable write is older than PERSIST_MAX_DELAY_MS, write
+            // immediately so mid-stream progress still reaches SQLite — mirrors
+            // the chat path's 1s stream checkpoint.
+            val delayMs = if (
+                lastPersistAt == 0L ||
+                System.currentTimeMillis() - lastPersistAt >= PERSIST_MAX_DELAY_MS
+            ) 0L else PERSIST_DEBOUNCE_MS
             val context = expectedRestoreEpoch?.let(::SyncRestoreWriteEpoch)
             persistJob = scope.launch(Dispatchers.IO + (context ?: kotlin.coroutines.EmptyCoroutineContext)) {
-                delay(PERSIST_DEBOUNCE_MS)
+                delay(delayMs)
                 val currentJob = currentCoroutineContext()[Job]
                 if (persistJob === currentJob) {
                     persistJob = null
                 }
                 persistCurrent(dao, restoreWriteGate)
+                lastPersistAt = System.currentTimeMillis()
             }
         }
 
@@ -275,6 +288,7 @@ class CouncilRoomRepository(
             persistJob?.cancel()
             persistJob = null
             persistCurrent(dao)
+            lastPersistAt = System.currentTimeMillis()
         }
 
         private suspend fun persistCurrent(
@@ -303,5 +317,8 @@ class CouncilRoomRepository(
     companion object {
         /** Debounce window for SQLite writes during streaming. */
         private const val PERSIST_DEBOUNCE_MS = 200L
+
+        /** Max time a continuous stream may go without a durable SQLite write. */
+        private const val PERSIST_MAX_DELAY_MS = 1_000L
     }
 }
