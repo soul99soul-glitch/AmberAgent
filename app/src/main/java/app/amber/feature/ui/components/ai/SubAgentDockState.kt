@@ -10,6 +10,7 @@ import app.amber.feature.task.AgentTaskSnapshot
 import app.amber.feature.task.AgentTaskStatus
 import app.amber.feature.task.AgentTaskStore
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -86,6 +87,10 @@ class SubAgentDockState(
     private val tracker = SubAgentDockTracker()
     private val collectors = mutableMapOf<String, RunCollector>()
     private val liveRuns = mutableMapOf<String, SubAgentRun?>()
+    /** Approval survives in ThreadGraph while AgentTaskStore recovers its legacy RUNNING row. */
+    private val persistedStatuses = mutableMapOf<SubAgentDockRunKey, SubAgentRunStatus>()
+    private val persistedStatusJobs = mutableMapOf<SubAgentDockRunKey, Job>()
+    private val persistedStatusResolved = mutableSetOf<SubAgentDockRunKey>()
     // StateFlow conflates. Capture the already-loaded task-store baseline synchronously so a
     // generation registered after this singleton exists still qualifies for the dock even when
     // its register → terminal transition completes before the collector's first reduction.
@@ -120,6 +125,7 @@ class SubAgentDockState(
                 taskSnapshots = snapshots.filter { it.type == SUBAGENT_TASK_TYPE }
                 markProcessRunKeys()
                 reconcileRunCollectors()
+                reconcilePersistedStatuses()
                 publishAndReschedule()
             }
         }
@@ -204,6 +210,49 @@ class SubAgentDockState(
         }
     }
 
+    /**
+     * AgentTaskStore has no APPROVAL_REQUIRED value and restores an approval wait as
+     * INTERRUPTED. Read the existing thread-graph status only for that exact generation so a
+     * previous thread result cannot resurrect a replaced Dock row.
+     */
+    private fun reconcilePersistedStatuses() {
+        val currentKeys = taskSnapshots.mapTo(mutableSetOf()) { it.toDockRunKey() }
+        persistedStatuses.keys.retainAll(currentKeys)
+        persistedStatusResolved.retainAll(currentKeys)
+        persistedStatusJobs.entries.toList().forEach { (key, job) ->
+            if (key !in currentKeys) {
+                job.cancel()
+                persistedStatusJobs.remove(key)
+            }
+        }
+
+        taskSnapshots
+            .filter { it.status == AgentTaskStatus.INTERRUPTED }
+            .forEach { snapshot ->
+                val key = snapshot.toDockRunKey()
+                if (key in persistedStatusResolved || key in persistedStatusJobs) return@forEach
+                persistedStatusJobs[key] = appScope.launch {
+                    val state = try {
+                        subAgentManager.persistedState(key.taskId)
+                    } catch (error: CancellationException) {
+                        throw error
+                    } catch (_: Throwable) {
+                        null
+                    }
+                    if (
+                        state?.status == SubAgentRunStatus.APPROVAL_REQUIRED &&
+                            state.updatedAtMs >= key.createdAtMs &&
+                            taskSnapshots.any { it.toDockRunKey() == key }
+                    ) {
+                        persistedStatuses[key] = SubAgentRunStatus.APPROVAL_REQUIRED
+                    }
+                    persistedStatusResolved += key
+                    persistedStatusJobs.remove(key)
+                    publishAndReschedule()
+                }
+            }
+    }
+
     private fun publishAndReschedule() {
         tracker.dismissExpired(
             nowMs = System.currentTimeMillis(),
@@ -214,6 +263,7 @@ class SubAgentDockState(
             snapshots = taskSnapshots,
             liveRuns = liveRuns,
             processRunKeys = processRunKeys,
+            persistedStatuses = persistedStatuses,
         ).copy(enabled = dockEnabled)
         scheduleAutoHide()
     }
@@ -271,6 +321,8 @@ internal class SubAgentDockTracker {
         liveRuns: Map<String, SubAgentRun?>,
         /** Current-process runs admitted by the state holder's pre-collection baseline. */
         processRunKeys: Set<SubAgentDockRunKey> = emptySet(),
+        /** Persisted lifecycle overrides keyed to one exact task generation. */
+        persistedStatuses: Map<SubAgentDockRunKey, SubAgentRunStatus> = emptyMap(),
     ): SubAgentDockUiState {
         val subagentSnapshots = snapshots.filter { it.type == SUBAGENT_TASK_TYPE }
         val snapshotTaskIds = subagentSnapshots.mapTo(mutableSetOf()) { it.taskId }
@@ -285,10 +337,14 @@ internal class SubAgentDockTracker {
                 ?.takeIf { it.matches(snapshot) }
             // The durable task row is authoritative once terminal. A delayed old in-memory
             // RUNNING state must never resurrect a completed/interrupted task card.
-            val status = if (snapshot.status.keepsDockObserved) {
-                live?.status?.toDockStatus() ?: snapshot.status.toDockStatus()
-            } else {
-                snapshot.status.toDockStatus()
+            val persisted = persistedStatuses[key]
+            val status = when {
+                snapshot.status.keepsDockObserved ->
+                    live?.status?.toDockStatus() ?: snapshot.status.toDockStatus()
+                snapshot.status == AgentTaskStatus.INTERRUPTED &&
+                    persisted == SubAgentRunStatus.APPROVAL_REQUIRED ->
+                    SubAgentDockStatus.APPROVAL_REQUIRED
+                else -> snapshot.status.toDockStatus()
             }
 
             // A task-store row is replaced in place for a followup. Even if a very short

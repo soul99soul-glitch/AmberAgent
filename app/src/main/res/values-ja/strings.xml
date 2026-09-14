@@ -3347,4 +3347,9 @@
     <string name="subagent_dock_details_title">サブエージェントの詳細</string>
     <string name="subagent_dock_dismiss">このタスクを非表示</string>
     <string name="subagent_dock_status_queued">待機中</string>
+  <string name="zcode_agent_access_label">Amber が WebMount 経由でこの接続を使用することを許可</string>
+  <string name="zcode_agent_access_description">設定で WebMount を有効にしてから、Amber にこの保存済み ZCode 接続の使用を許可してください。Amber は WebMount の設定を自動的に変更しません。</string>
+  <string name="zcode_preparing_session">ZCode ブラウザセッションを準備しています…</string>
+  <string name="zcode_session_unavailable">ZCode ブラウザセッションを準備できませんでした。もう一度お試しください。</string>
+  <string name="zcode_connection_changed">開いている間に ZCode 接続が変更されました。接続ページに戻ってもう一度開いてください。</string>
 </resources>

@@ -309,7 +309,7 @@ fun ProfilePage(
 }
 
 @Composable
-private fun ProfileStatsCard(stats: app.amber.feature.ui.pages.stats.AppStats) {
+internal fun ProfileStatsCard(stats: app.amber.feature.ui.pages.stats.AppStats) {
     val tokens = LocalAmberTokens.current
     val type = LocalAmberType.current
     val totalTokens = stats.totalPromptTokens + stats.totalCompletionTokens
@@ -332,7 +332,7 @@ private fun ProfileStatsCard(stats: app.amber.feature.ui.pages.stats.AppStats) {
             .clip(shape)
             .background(tokens.surface)
             .border(1.dp, tokens.line, shape),
-        verticalAlignment = Alignment.CenterVertically,
+        verticalAlignment = Alignment.Top,
     ) {
         items.forEachIndexed { index, (value, label) ->
             if (index > 0) {
@@ -340,15 +340,16 @@ private fun ProfileStatsCard(stats: app.amber.feature.ui.pages.stats.AppStats) {
                     modifier = Modifier
                         .width(1.dp)
                         .height(40.dp)
+                        .align(Alignment.CenterVertically)
                         .background(tokens.line),
                 )
             }
             Column(
                 modifier = Modifier
                     .weight(1f)
-                    .padding(horizontal = 2.dp),
+                    .padding(horizontal = 2.dp, vertical = 8.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(7.dp, Alignment.CenterVertically),
+                verticalArrangement = Arrangement.spacedBy(7.dp),
             ) {
                 Text(
                     text = value,
@@ -373,8 +374,6 @@ private fun ProfileStatsCard(stats: app.amber.feature.ui.pages.stats.AppStats) {
                     ),
                     color = tokens.ink3,
                     textAlign = TextAlign.Center,
-                    maxLines = 2,
-                    overflow = TextOverflow.Clip,
                 )
             }
         }

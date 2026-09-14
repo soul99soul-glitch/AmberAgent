@@ -279,9 +279,20 @@ class ExecutionPolicyGateTest {
             "webview_open",
             "webview_open_link",
             "screen_open_url",
+            "wm_zcode_read",
+            "wm_zcode_ask",
         )) {
             assertGated(tool, """{"url":"https://blocked.io/page"}""", policy)
         }
+        // wm_zcode_open can be used as a discovery call without touching the
+        // browser when the optional origin is absent. If present, its
+        // model-supplied origin is still checked by the same domain gate.
+        assertAllowed("wm_zcode_open", "{}", policy)
+        assertGated("wm_zcode_open", """{"url":"https://blocked.io/page"}""", policy)
+        assertGated("wm_zcode_read", """{"session_id":"s"}""", policy)
+        assertGated("wm_zcode_ask", """{"session_id":"s"}""", policy)
+        assertAllowed("wm_zcode_read", """{"url":"https://example.com/page","session_id":"s"}""", policy)
+        assertAllowed("wm_zcode_ask", """{"url":"https://example.com/page","session_id":"s"}""", policy)
     }
 
     @Test

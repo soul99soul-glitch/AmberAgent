@@ -64,7 +64,7 @@ private val REPEATABLE_OBSERVATION_TOOLS = setOf(
     "subagent_wait", "subagent_read", "model_council_wait", "model_council_read",
     "js_cell_wait", "webview_wait_for_load", "webview_read", "webview_find_text", "webview_links",
     "wm_wait", "wm_observe", "wm_state", "wm_extract", "wm_get", "wm_find", "wm_network_inspect",
-    "wm_screenshot", "wm_visual_snapshot",
+    "wm_screenshot", "wm_visual_snapshot", "wm_zcode_read",
 )
 
 /** Failure-class tool-output statuses — mirrors the UI failure classifier (ChatMessageTools.toolHasFailure). */
@@ -163,7 +163,8 @@ class DefaultRunKernel(
         val toolExposure = ToolExposureState.from(session.tools)
         // A setting change can resume a run that was already parked at the
         // approval gate. Keep the original Pending set separate from tools
-        // emitted by the current provider round: only the former may be
+        // emitted by the current provider round: only this persisted assistant
+        // turn (and its deferred Auto siblings after a decision) may be
         // re-evaluated here, and only once at the beginning of this kernel
         // invocation. A composite tool that pauses again later must return to
         // WaitingUser instead of being retried in a loop.
@@ -214,51 +215,105 @@ class DefaultRunKernel(
             val waitingTools = messages.lastOrNull()?.getTools()
                 ?.filter { it.isPending }
                 .orEmpty()
-            // Keep definitions for already-persisted calls visible to this
-            // step even when the lazy tool catalog has not exposed them yet.
-            // They are needed only for the local approval re-check below; no
-            // provider request is made until all waiting tools are settled.
-            toolExposure.exposeToolNames((pendingTools + waitingTools).map { it.toolName })
-            val exposedTools = toolExposure.toolsForStep()
-            val toolDefinitionsForPending = exposedTools.associateBy { it.name }
-            val autoResumablePendingTools = if (
-                stepIndex == 0 && autoApproveHighRiskTools && initialPendingToolCallIds.isNotEmpty()
-            ) {
-                waitingTools
-                    .filter { it.toolCallId in initialPendingToolCallIds }
-                    .mapNotNull { tool ->
-                        val toolDef = toolDefinitionsForPending[tool.toolName] ?: return@mapNotNull null
-                        // PermissionDecisionResolver treats non-Auto states as
-                        // already decided. Re-check a transient Auto copy so
-                        // current capability/tool policy is actually applied,
-                        // without persisting a synthetic user Approved state.
-                        val decision = toolDispatcher.resolveDecision(
-                            toolDef = toolDef,
-                            tool = tool.copy(approvalState = ToolApprovalState.Auto),
-                            autoApproveTools = autoApproveTools,
-                            autoApproveHighRiskTools = autoApproveHighRiskTools,
-                            autoApprovedToolNames = autoApprovedToolNames,
-                            invocationContext = invocationContext,
-                            capabilityPermissions = capabilityState,
-                            permissionContext = permissionContext,
-                        )
-                        if (decision.action == app.amber.feature.runtime.PermissionDecisionAction.ALLOW) {
-                            // Auto does not satisfy canResumeExecution, so this
-                            // copy must be placed directly in toolsToProcess.
-                            tool.copy(approvalState = ToolApprovalState.Auto)
-                        } else {
-                            null
-                        }
+            // An Auto call can be deliberately deferred with a sibling that
+            // needs approval: a batch stays intact until the user decides the
+            // approval card. Only remember Auto calls when this same persisted
+            // assistant turn already carries a pending or decided sibling.
+            // A pure Auto turn may be a truncated provider emission, and must
+            // never be promoted into execution by a later kernel invocation.
+            val deferredAutoTools = if (pendingTools.isNotEmpty() || waitingTools.isNotEmpty()) {
+                messages.lastOrNull()?.getTools()
+                    ?.filter {
+                        !it.isExecuted && it.approvalState == ToolApprovalState.Auto
                     }
-                    // Preserve the normal all-or-wait batch boundary: a
-                    // human answer (or stricter policy) may affect the other
-                    // calls, so do not execute them before it is resolved.
-                    .takeIf { it.size == waitingTools.size }
                     .orEmpty()
             } else {
                 emptyList()
             }
-            val hasResumableTools = pendingTools.isNotEmpty() || autoResumablePendingTools.isNotEmpty()
+            // Keep definitions for already-persisted calls visible to this
+            // step even when the lazy tool catalog has not exposed them yet.
+            // They are needed only for the local approval re-check below; no
+            // provider request is made until all waiting tools are settled.
+            toolExposure.exposeToolNames((pendingTools + waitingTools + deferredAutoTools).map { it.toolName })
+            val exposedTools = toolExposure.toolsForStep()
+            val toolDefinitionsForPending = exposedTools.associateBy { it.name }
+            // Recheck Auto calls only after a sibling was already decided, or
+            // when the initial persisted approval is explicitly released by
+            // the high-risk setting. This preserves the all-or-wait boundary
+            // while preventing an Auto sibling from being stranded forever.
+            val canReleaseAllWaitingToolsWithHighRisk =
+                stepIndex == 0 &&
+                    autoApproveHighRiskTools &&
+                    initialPendingToolCallIds.isNotEmpty() &&
+                    waitingTools.isNotEmpty() &&
+                    waitingTools.all { it.toolCallId in initialPendingToolCallIds }
+            val autoToolsToRecheck = buildList {
+                if (pendingTools.isNotEmpty()) addAll(deferredAutoTools)
+                if (canReleaseAllWaitingToolsWithHighRisk) {
+                    addAll(waitingTools)
+                    addAll(deferredAutoTools)
+                }
+            }.distinctBy { it.toolCallId }
+            val recheckedAutoTools = autoToolsToRecheck.map { tool ->
+                // PermissionDecisionResolver treats non-Auto states as already
+                // decided. Re-check a transient Auto copy so current
+                // capability/tool policy is applied without inventing a user
+                // Approved state.
+                val decision = toolDispatcher.resolveDecision(
+                    toolDef = toolDefinitionsForPending[tool.toolName],
+                    tool = tool.copy(approvalState = ToolApprovalState.Auto),
+                    autoApproveTools = autoApproveTools,
+                    autoApproveHighRiskTools = autoApproveHighRiskTools,
+                    autoApprovedToolNames = autoApprovedToolNames,
+                    invocationContext = invocationContext,
+                    capabilityPermissions = capabilityState,
+                    permissionContext = permissionContext,
+                )
+                tool to decision
+            }
+            val recheckedToolsRequiringApproval = recheckedAutoTools.filter {
+                it.second.action == app.amber.feature.runtime.PermissionDecisionAction.ASK
+            }
+            if (recheckedToolsRequiringApproval.isNotEmpty()) {
+                // A high-risk setting can release one original Pending call
+                // while a sibling still needs human input. Persist the released
+                // call as Auto, not Approved, so the next resume rechecks its
+                // current policy after the human resolves the sibling.
+                val decisionsByCallId = recheckedAutoTools.associate { (tool, decision) ->
+                    tool.toolCallId to tool.copy(
+                        approvalState = if (
+                            decision.action == app.amber.feature.runtime.PermissionDecisionAction.ASK
+                        ) {
+                            ToolApprovalState.Pending
+                        } else {
+                            ToolApprovalState.Auto
+                        },
+                        metadata = mergeToolMetadata(
+                            tool.metadata,
+                            decision.trace.toJson(),
+                            JsonObject(emptyMap()),
+                        ),
+                    )
+                }
+                val assistantTurn = messages.last()
+                val approvalSnapshot = assistantTurn.copy(
+                    parts = assistantTurn.parts.map { part ->
+                        if (part is UIMessagePart.Tool) decisionsByCallId[part.toolCallId] ?: part else part
+                    },
+                )
+                messages = messages.dropLast(1) + approvalSnapshot
+                emit(GenerationChunk.Messages(messages))
+                terminal = GenerationTerminal.WaitingUser
+                brokeEarly = true
+                break
+            }
+            val autoToolsReadyForDispatch = recheckedAutoTools.map { (tool, _) ->
+                // Auto does not satisfy canResumeExecution, so place a
+                // rechecked call directly in this batch. The dispatcher
+                // resolves it again immediately before execution.
+                tool.copy(approvalState = ToolApprovalState.Auto)
+            }
+            val hasResumableTools = pendingTools.isNotEmpty() || autoToolsReadyForDispatch.isNotEmpty()
             val loopBudgetPrompt = AgentLoopBudgetPrompt.build(stepIndex = stepIndex, maxSteps = maxSteps)
             val shouldHideToolsForBudget = AgentLoopBudgetPrompt.shouldHideTools(
                 stepIndex = stepIndex,
@@ -309,12 +364,18 @@ class DefaultRunKernel(
             var protocolFailures: List<UIMessagePart.Tool> = emptyList()
 
             // A newly enabled high-risk setting may release a Pending call
-            // from the session snapshot. Execute that transient Auto copy
-            // before considering a provider request. Any Pending tool that
-            // remains here still owns the run's human-input gate.
-            if (autoResumablePendingTools.isNotEmpty()) {
-                Log.i(TAG, "rechecking ${autoResumablePendingTools.size} persisted tool approvals")
-                toolsToProcess = autoResumablePendingTools
+            // from the session snapshot. Deferred Auto siblings join the same
+            // rechecked batch; any newly Pending tool above keeps the entire
+            // batch at the human-input gate.
+            if (autoToolsReadyForDispatch.isNotEmpty() &&
+                (waitingTools.isEmpty() || canReleaseAllWaitingToolsWithHighRisk)
+            ) {
+                Log.i(TAG, "rechecking ${autoToolsReadyForDispatch.size} persisted tool approvals")
+                val dispatchableTools = (pendingTools + autoToolsReadyForDispatch)
+                    .associateBy { it.toolCallId }
+                toolsToProcess = messages.lastOrNull()?.getTools()
+                    ?.mapNotNull { tool -> dispatchableTools[tool.toolCallId] }
+                    .orEmpty()
             } else if (waitingTools.isNotEmpty()) {
                 terminal = GenerationTerminal.WaitingUser
                 brokeEarly = true
@@ -622,7 +683,7 @@ class DefaultRunKernel(
             // dispatches EVEN when the guard found a stopping call — the
             // first occurrence of the stopping signature is a legitimate
             // call ("本批首个执行"); the stop lands after its result settled.
-            val toolDefinitionsForBatch = if (autoResumablePendingTools.isNotEmpty()) {
+            val toolDefinitionsForBatch = if (autoToolsReadyForDispatch.isNotEmpty()) {
                 // Budget hiding applies to provider exposure only. The
                 // already-persisted call still needs its current definition
                 // for this local resume execution.

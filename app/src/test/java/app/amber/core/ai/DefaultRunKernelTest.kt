@@ -2,6 +2,7 @@ package app.amber.core.ai
 
 import android.content.Context
 import android.content.res.Configuration
+import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import app.amber.ai.core.MessageRole
 import app.amber.ai.core.Tool
 import app.amber.ai.provider.Model
@@ -12,9 +13,12 @@ import app.amber.ai.ui.UIMessage
 import app.amber.ai.ui.UIMessagePart
 import app.amber.ai.ui.ToolApprovalState
 import app.amber.core.settings.AgentRuntimeSetting
+import app.amber.core.settings.CapabilityFlags
 import app.amber.core.settings.Settings
 import app.amber.feature.runtime.AgentToolDispatcher
+import app.amber.feature.runtime.DurableRuntimeTestBase
 import app.amber.feature.runtime.PermissionDecisionResolver
+import app.amber.feature.runtime.ToolEffectStatus
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
@@ -27,18 +31,19 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import org.robolectric.RuntimeEnvironment
+import java.io.File
 import java.util.Locale
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * Loop-policy unit tests for [DefaultRunKernel] with a scripted
  * [GenerationRoundEngine] — the seam that makes the tool loop testable
- * without any provider streaming. The durable (ledger) path stays covered by
- * RuntimeChainCanaryTest with the real Room ledger.
+ * without any provider streaming. The focused durable mixed-batch regression
+ * reuses the real Room ledger; broader runtime wiring stays in canaries.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34], application = android.app.Application::class)
-class DefaultRunKernelTest {
+class DefaultRunKernelTest : DurableRuntimeTestBase() {
 
     /**
      * Engine that appends one scripted assistant message per round.
@@ -113,6 +118,23 @@ class DefaultRunKernelTest {
         roundEngine = engine,
     )
 
+    private fun durableKernel(
+        engine: GenerationRoundEngine,
+        flags: CapabilityFlags,
+    ): DefaultRunKernel = DefaultRunKernel(
+        context = testContext(),
+        toolDispatcher = AgentToolDispatcher(json, PermissionDecisionResolver()),
+        roundEngine = engine,
+        toolEffectLedger = ledger,
+        capabilityFlags = flags,
+    )
+
+    private fun durableFlags(): CapabilityFlags = CapabilityFlags(
+        PreferenceDataStoreFactory.create {
+            File(context.cacheDir, "kernel-mixed-batch-flags-${System.nanoTime()}.preferences_pb")
+        },
+    )
+
     /** Keep legacy copy assertions deterministic while production follows the app locale. */
     private fun testContext(): Context {
         val application = RuntimeEnvironment.getApplication()
@@ -134,6 +156,7 @@ class DefaultRunKernelTest {
         settings: Settings = Settings(),
         responsesResume: ResponsesResumeRequest? = null,
         autoApproveHighRiskTools: Boolean = false,
+        runId: String? = null,
     ): GenerationRunSession {
         var pendingSteer = steer
         return GenerationRunSession(
@@ -151,6 +174,7 @@ class DefaultRunKernelTest {
             executionPolicy = executionPolicy,
             responsesResume = responsesResume,
             autoApproveHighRiskTools = autoApproveHighRiskTools,
+            runId = runId,
         )
     }
 
@@ -383,16 +407,28 @@ class DefaultRunKernelTest {
     }
 
     @Test
-    fun `high risk auto approval rechecks persisted SSH pending and continues`() = runTest {
-        val executions = AtomicInteger(0)
+    fun `high risk auto approval rechecks the whole persisted mixed batch`() = runTest {
+        val sshExecutions = AtomicInteger(0)
+        val readExecutions = AtomicInteger(0)
+        val executionOrder = mutableListOf<String>()
         val ssh = Tool(
             name = "terminal_execute",
             description = "SSH command",
             needsApproval = true,
             allowsAutoApproval = false,
             execute = {
-                executions.incrementAndGet()
+                sshExecutions.incrementAndGet()
+                executionOrder += "terminal_execute"
                 listOf(UIMessagePart.Text("ssh-ok"))
+            },
+        )
+        val read = Tool(
+            name = "read_thing",
+            description = "read-only sibling",
+            execute = {
+                readExecutions.incrementAndGet()
+                executionOrder += "read_thing"
+                listOf(UIMessagePart.Text("read-ok"))
             },
         )
         val engine = FakeRoundEngine(listOf({ textAssistant("继续完成") }))
@@ -401,25 +437,40 @@ class DefaultRunKernelTest {
             session(
                 messages = listOf(
                     UIMessage.user("检查 SSH"),
-                    toolCallAssistant(
-                        callId = "ssh-pending",
-                        toolName = "terminal_execute",
-                        input = """{"runtime":"remote_ssh","command":"pwd"}""",
-                        approvalState = ToolApprovalState.Pending,
+                    UIMessage(
+                        role = MessageRole.ASSISTANT,
+                        parts = listOf(
+                            UIMessagePart.Tool(
+                                toolCallId = "read-deferred",
+                                toolName = "read_thing",
+                                input = "{}",
+                            ),
+                            UIMessagePart.Tool(
+                                toolCallId = "ssh-pending",
+                                toolName = "terminal_execute",
+                                input = """{"runtime":"remote_ssh","command":"pwd"}""",
+                                approvalState = ToolApprovalState.Pending,
+                            ),
+                        ),
                     ),
                 ),
-                tools = listOf(ssh),
+                tools = listOf(read, ssh),
                 terminals = terminals,
                 autoApproveHighRiskTools = true,
             ),
         ).toList()
 
-        assertEquals(1, executions.get())
-        assertEquals("the resumed call goes through one fresh model round", 1, engine.requests.size)
+        assertEquals(1, sshExecutions.get())
+        assertEquals(1, readExecutions.get())
+        assertEquals(listOf("read_thing", "terminal_execute"), executionOrder)
+        assertEquals("the resumed batch goes through one fresh model round", 1, engine.requests.size)
         assertTrue(terminals.isEmpty())
-        val resumedTool = engine.requests.single().messages.last().getTools().single()
-        assertTrue(resumedTool.isExecuted)
-        assertTrue("the kernel must not forge a user Approved state", resumedTool.approvalState != ToolApprovalState.Approved)
+        val resumedTools = engine.requests.single().messages.last().getTools()
+        assertTrue(resumedTools.all { it.isExecuted })
+        assertTrue(
+            "the kernel must not forge a user Approved state",
+            resumedTools.single { it.toolCallId == "ssh-pending" }.approvalState != ToolApprovalState.Approved,
+        )
         assertEquals("继续完成", (lastMessages(chunks).last().parts.last() as UIMessagePart.Text).text)
     }
 
@@ -467,7 +518,13 @@ class DefaultRunKernelTest {
         assertEquals(0, executions.get())
         assertEquals(0, engine.requests.size)
         assertEquals(listOf(GenerationTerminal.WaitingUser), terminals)
-        assertTrue("unchanged human-input state needs no replacement messages", chunks.isEmpty())
+        val pausedTools = lastMessages(chunks).last().getTools().associateBy { it.toolCallId }
+        assertEquals(
+            "the high-risk release remains Auto so it is rechecked after the human answer",
+            ToolApprovalState.Auto,
+            pausedTools.getValue("ssh-pending").approvalState,
+        )
+        assertEquals(ToolApprovalState.Pending, pausedTools.getValue("ask-pending").approvalState)
     }
 
     @Test
@@ -919,6 +976,199 @@ class DefaultRunKernelTest {
         assertEquals("the resumed emission executed once", 1, executions.get())
         assertEquals(1, resumeEngine.requests.size)
         assertEquals("写完了", (lastMessages(chunks).last().parts.last() as UIMessagePart.Text).text)
+    }
+
+    @Test
+    fun `approval resume dispatches deferred auto siblings from the same batch`() = runTest {
+        val readExecutions = AtomicInteger(0)
+        val writeExecutions = AtomicInteger(0)
+        val read = Tool(
+            name = "read_thing",
+            description = "read-only sibling",
+            execute = {
+                readExecutions.incrementAndGet()
+                listOf(UIMessagePart.Text("read"))
+            },
+        )
+        val write = Tool(
+            name = "write_thing",
+            description = "approval sibling",
+            needsApproval = true,
+            execute = {
+                writeExecutions.incrementAndGet()
+                listOf(UIMessagePart.Text("written"))
+            },
+        )
+        val parkEngine = FakeRoundEngine(
+            listOf({
+                UIMessage(
+                    role = MessageRole.ASSISTANT,
+                    parts = listOf(
+                        UIMessagePart.Tool("read_1", "read_thing", "{}"),
+                        UIMessagePart.Tool("write_1", "write_thing", "{}"),
+                    ),
+                )
+            }),
+        )
+        val firstRun = kernel(parkEngine).run(
+            session(
+                messages = listOf(UIMessage.user("读取后写入")),
+                tools = listOf(read, write),
+            ),
+        ).toList()
+        val parkedTools = lastMessages(firstRun).last().getTools().associateBy { it.toolCallId }
+        assertEquals(ToolApprovalState.Auto, parkedTools.getValue("read_1").approvalState)
+        assertEquals(ToolApprovalState.Pending, parkedTools.getValue("write_1").approvalState)
+
+        val approvedMessages = lastMessages(firstRun).map { message ->
+            message.copy(
+                parts = message.parts.map { part ->
+                    if (part is UIMessagePart.Tool && part.toolCallId == "write_1") {
+                        part.copy(approvalState = ToolApprovalState.Approved)
+                    } else {
+                        part
+                    }
+                },
+            )
+        }
+        val resumeEngine = FakeRoundEngine(listOf({ textAssistant("完成") }))
+        kernel(resumeEngine).run(
+            session(messages = approvedMessages, tools = listOf(read, write)),
+        ).toList()
+
+        assertEquals(1, readExecutions.get())
+        assertEquals(1, writeExecutions.get())
+        val resumedTools = resumeEngine.requests.single().messages.last().getTools()
+        assertTrue(resumedTools.all { it.isExecuted })
+    }
+
+    @Test
+    fun `durable mixed approval resume finalizes every prepared effect`() = runTest {
+        val readExecutions = AtomicInteger(0)
+        val writeExecutions = AtomicInteger(0)
+        val read = Tool(
+            name = "file_read",
+            description = "read-only sibling",
+            execute = {
+                readExecutions.incrementAndGet()
+                listOf(UIMessagePart.Text("read"))
+            },
+        )
+        val write = Tool(
+            name = "file_write",
+            description = "approval sibling",
+            needsApproval = true,
+            execute = {
+                writeExecutions.incrementAndGet()
+                listOf(UIMessagePart.Text("written"))
+            },
+        )
+        val runId = "run_durable_mixed_approval"
+        val flags = durableFlags()
+        val parkEngine = FakeRoundEngine(
+            listOf({
+                UIMessage(
+                    role = MessageRole.ASSISTANT,
+                    parts = listOf(
+                        UIMessagePart.Tool("read_1", "file_read", "{}"),
+                        UIMessagePart.Tool("write_1", "file_write", "{}"),
+                    ),
+                )
+            }),
+        )
+        val firstRun = durableKernel(parkEngine, flags).run(
+            session(
+                messages = listOf(UIMessage.user("读取后写入")),
+                tools = listOf(read, write),
+                runId = runId,
+            ),
+        ).toList()
+
+        assertEquals(ToolEffectStatus.PREPARED, ledger.getByToolCallId("read_1")!!.status)
+        assertEquals(ToolEffectStatus.PREPARED, ledger.getByToolCallId("write_1")!!.status)
+        val approvedMessages = lastMessages(firstRun).map { message ->
+            message.copy(
+                parts = message.parts.map { part ->
+                    if (part is UIMessagePart.Tool && part.toolCallId == "write_1") {
+                        part.copy(approvalState = ToolApprovalState.Approved)
+                    } else {
+                        part
+                    }
+                },
+            )
+        }
+        val resumeEngine = FakeRoundEngine(listOf({ textAssistant("完成") }))
+        durableKernel(resumeEngine, flags).run(
+            session(
+                messages = approvedMessages,
+                tools = listOf(read, write),
+                runId = runId,
+            ),
+        ).toList()
+
+        assertEquals(1, readExecutions.get())
+        assertEquals(1, writeExecutions.get())
+        assertEquals(ToolEffectStatus.FINISHED, ledger.getByToolCallId("read_1")!!.status)
+        assertEquals(ToolEffectStatus.FINISHED, ledger.getByToolCallId("write_1")!!.status)
+    }
+
+    @Test
+    fun `deferred auto tool that becomes approval gated keeps the mixed batch waiting`() = runTest {
+        val approvedExecutions = AtomicInteger(0)
+        val deferredExecutions = AtomicInteger(0)
+        val approved = Tool(
+            name = "write_thing",
+            description = "already approved sibling",
+            needsApproval = true,
+            execute = {
+                approvedExecutions.incrementAndGet()
+                listOf(UIMessagePart.Text("written"))
+            },
+        )
+        val deferred = Tool(
+            name = "http_request",
+            description = "now policy-gated sibling",
+            execute = {
+                deferredExecutions.incrementAndGet()
+                listOf(UIMessagePart.Text("must not run"))
+            },
+        )
+        val engine = FakeRoundEngine(emptyList())
+        val terminals = mutableListOf<GenerationTerminal>()
+
+        val chunks = kernel(engine).run(
+            session(
+                messages = listOf(
+                    UIMessage.user("继续"),
+                    UIMessage(
+                        role = MessageRole.ASSISTANT,
+                        parts = listOf(
+                            UIMessagePart.Tool(
+                                toolCallId = "write_approved",
+                                toolName = "write_thing",
+                                input = "{}",
+                                approvalState = ToolApprovalState.Approved,
+                            ),
+                            UIMessagePart.Tool(
+                                toolCallId = "post_deferred",
+                                toolName = "http_request",
+                                input = """{"method":"POST","url":"https://example.com"}""",
+                            ),
+                        ),
+                    ),
+                ),
+                tools = listOf(approved, deferred),
+                terminals = terminals,
+            ),
+        ).toList()
+
+        assertEquals(0, approvedExecutions.get())
+        assertEquals(0, deferredExecutions.get())
+        assertEquals(0, engine.requests.size)
+        assertEquals(listOf(GenerationTerminal.WaitingUser), terminals)
+        val tools = lastMessages(chunks).last().getTools().associateBy { it.toolCallId }
+        assertEquals(ToolApprovalState.Approved, tools.getValue("write_approved").approvalState)
+        assertEquals(ToolApprovalState.Pending, tools.getValue("post_deferred").approvalState)
     }
 
     @Test

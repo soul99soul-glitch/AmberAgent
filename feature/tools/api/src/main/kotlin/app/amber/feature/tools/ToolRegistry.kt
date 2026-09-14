@@ -374,6 +374,46 @@ fun Tool.invocationPolicy(input: JsonElement?): ToolInvocationPolicy {
             concurrencySafe = false
         }
 
+        "wm_zcode_open" -> {
+            // The URL and credential-bearing share link come from the host-owned
+            // ZCode connection store. Opening/resuming that browser is a
+            // navigation operation, not a remote-agent write. There is no
+            // model-supplied session_id in this tool's schema, so keep it out of
+            // the parallel fast path; the tool resolves the single saved
+            // session before it touches the WebView.
+            mutates = false
+            risk = ToolRisk.Normal
+            riskExplicit = true
+            needsApproval = false
+            autoApprovable = true
+            concurrencySafe = false
+        }
+
+        "wm_zcode_read" -> {
+            // Reading the rendered remote page is repeatable observation. The
+            // tool still carries the session id so the generic WebMount group
+            // serializes it with asks/actions for that same session.
+            mutates = false
+            risk = ToolRisk.Normal
+            riskExplicit = true
+            needsApproval = false
+            autoApprovable = true
+            concurrencySafe = true
+        }
+
+        "wm_zcode_ask" -> {
+            // Sending a prompt is an external, non-idempotent communication
+            // with the remote ZCode agent. A lost response must not trigger a
+            // blind resend; the effect ledger therefore needs the mutating
+            // classification and the tool-level mandatory approval gate.
+            mutates = true
+            risk = ToolRisk.High
+            riskExplicit = true
+            needsApproval = true
+            autoApprovable = false
+            concurrencySafe = false
+        }
+
         "wm_click", "wm_tap", "wm_type", "wm_keys", "wm_select" -> {
             // DOM mutation on a logged-in page — Sensitive by default; the
             // adapter system can pre-approve known-origin tools later.
@@ -578,7 +618,7 @@ private fun Tool.mutatesState(): Boolean {
         name == "conversation_compact" ||
         name == "deep_read_finish" ||
         name in setOf("subagent_start", "subagent_cancel") ||
-        name in setOf("wm_click", "wm_tap", "wm_type", "wm_keys", "wm_select", "wm_eval", "wm_site_remove") ||
+        name in setOf("wm_click", "wm_tap", "wm_type", "wm_keys", "wm_select", "wm_eval", "wm_site_remove", "wm_zcode_ask") ||
         name.startsWith("skill_enable") ||
         name.startsWith("skill_disable")
 }
@@ -605,7 +645,7 @@ private fun Tool.riskProfile(): RiskProfile = when {
     name == "http_request" -> RiskProfile(ToolRisk.High, explicit = true)
     name == "memory_tool" -> RiskProfile(ToolRisk.High, explicit = true)
     name == "mcp_call_tool" -> RiskProfile(ToolRisk.Sensitive, explicit = true)
-    name == "wm_eval" -> RiskProfile(ToolRisk.High, explicit = true)
+    name == "wm_eval" || name == "wm_zcode_ask" -> RiskProfile(ToolRisk.High, explicit = true)
     // Provider config writers rewrite persisted credentials / endpoints /
     // model slots — High risk so plain auto-approval can never silently run
     // them (provider.config capability floor keeps this true flag-off too).
@@ -691,7 +731,7 @@ private fun Tool.outputBudgetChars(): Int = when (name) {
     // 412×915 PNG ≈ 300 KB base64; JPEG q=85 ≈ 80 KB. Full-page screenshots
     // are best taken as JPEG.
     "wm_screenshot" -> 1_200_000
-    "wm_observe" -> 180_000
+    "wm_observe", "wm_zcode_read" -> 180_000
     "wm_fetch_replay" -> 220_000
     // Phase 2 M2.2: signed_fetch bodies can be ~1MB (cap in the shim).
     // Add headroom for the JSON envelope.

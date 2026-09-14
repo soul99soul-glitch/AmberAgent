@@ -3347,4 +3347,9 @@
     <string name="subagent_dock_details_title">하위 에이전트 세부 정보</string>
     <string name="subagent_dock_dismiss">이 작업 숨기기</string>
     <string name="subagent_dock_status_queued">대기 중</string>
+  <string name="zcode_agent_access_label">Amber가 WebMount를 통해 이 연결을 사용하도록 허용</string>
+  <string name="zcode_agent_access_description">설정에서 WebMount를 켠 다음 Amber가 이 저장된 ZCode 연결을 사용하도록 허용하세요. Amber는 WebMount 설정을 자동으로 변경하지 않습니다.</string>
+  <string name="zcode_preparing_session">ZCode 브라우저 세션 준비 중…</string>
+  <string name="zcode_session_unavailable">ZCode 브라우저 세션을 준비하지 못했습니다. 다시 시도하세요.</string>
+  <string name="zcode_connection_changed">여는 동안 ZCode 연결이 변경되었습니다. 연결 페이지로 돌아가 다시 여세요.</string>
 </resources>

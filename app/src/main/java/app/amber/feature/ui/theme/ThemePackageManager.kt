@@ -20,6 +20,10 @@ interface ThemeSettingsStore {
     val settingsFlow: Flow<Settings>
 
     suspend fun update(settings: Settings)
+
+    suspend fun update(transform: (Settings) -> Settings) {
+        update(transform(settingsFlow.first()))
+    }
 }
 
 class SettingsAggregatorThemeStore(
@@ -28,6 +32,8 @@ class SettingsAggregatorThemeStore(
     override val settingsFlow: Flow<Settings> = aggregator.settingsFlow
 
     override suspend fun update(settings: Settings) = aggregator.update(settings)
+
+    override suspend fun update(transform: (Settings) -> Settings) = aggregator.update(transform)
 }
 
 sealed interface ThemePackageImportResult {
@@ -235,7 +241,27 @@ class ThemePackageManager(
     /** 从主题库移除导入包（`builtin:` 条目不在库中，天然不可移除）。 */
     suspend fun remove(packageId: String): Boolean {
         return withThemeWrite {
+            val previousEntity = dao.getById(packageId) ?: return@withThemeWrite false
             val deleted = dao.delete(packageId) > 0
+            if (!deleted) return@withThemeWrite false
+            try {
+                // Remove only the marker from the latest settings snapshot. The transform
+                // avoids overwriting concurrent settings edits with the pre-delete snapshot.
+                settingsStore.update { latest ->
+                    if (latest.displaySetting.appliedThemePackageId == packageId) {
+                        latest.copy(
+                            displaySetting = latest.displaySetting.copy(
+                                appliedThemePackageId = null,
+                            ),
+                        )
+                    } else {
+                        latest
+                    }
+                }
+            } catch (error: Exception) {
+                restoreEntity(packageId, previousEntity)
+                throw error
+            }
             if (_tryOn.value?.pkg?.id == packageId) clearTryOn()
             deleted
         }

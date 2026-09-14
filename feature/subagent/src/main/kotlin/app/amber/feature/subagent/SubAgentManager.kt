@@ -74,6 +74,8 @@ class SubAgentManager(
     private val runDir = File(context.filesDir, "amberagent/subagents/runs").also { it.mkdirs() }
     private val runs = ConcurrentHashMap<String, RuntimeRun>()
     private val admissionLock = Any()
+    /** Followups reserve a global slot before their durable mailbox record is enqueued. */
+    private val pendingAdmissions = mutableMapOf<String, SubAgentDefinition>()
     /** Serialize lifecycle operations that can otherwise resurrect a thread. */
     private val threadOperationLocks = ConcurrentHashMap<String, Mutex>()
 
@@ -109,6 +111,42 @@ class SubAgentManager(
 
     private fun threadOperationLock(threadId: String): Mutex =
         threadOperationLocks.getOrPut(threadId) { Mutex() }
+
+    /** Caller must hold [admissionLock]. */
+    private fun admissionErrorLocked(
+        setting: SubAgentRuntimeSetting,
+        definition: SubAgentDefinition,
+    ): Pair<String, String>? {
+        val runLimit = setting.maxConcurrentRuns.coerceAtLeast(1)
+        val running = runs.values.count { it.snapshot.status.running } + pendingAdmissions.size
+        if (running >= runLimit) {
+            return "too_many_subagents" to "Subagent concurrency limit reached."
+        }
+        val dynamicRunning = runs.values.count {
+            it.snapshot.status.running && it.snapshot.definition.dynamic
+        } + pendingAdmissions.values.count { it.dynamic }
+        if (definition.dynamic && dynamicRunning >= runLimit) {
+            return "too_many_dynamic_subagents" to "Dynamic subagent per-turn limit reached."
+        }
+        return null
+    }
+
+    private fun reserveFollowupAdmission(
+        threadId: String,
+        setting: SubAgentRuntimeSetting,
+        definition: SubAgentDefinition,
+    ): Pair<String, String>? = synchronized(admissionLock) {
+        val error = admissionErrorLocked(setting, definition)
+        if (error != null) return@synchronized error
+        pendingAdmissions[threadId] = definition
+        null
+    }
+
+    private fun releaseFollowupAdmission(threadId: String) {
+        synchronized(admissionLock) {
+            pendingAdmissions.remove(threadId)
+        }
+    }
 
     suspend fun start(
         parentConversationId: Uuid,
@@ -233,28 +271,27 @@ class SubAgentManager(
             null
         }
         val admissionError = synchronized(admissionLock) {
-            val runLimit = subAgentSetting.maxConcurrentRuns.coerceAtLeast(1)
-            val running = runs.values.count { it.snapshot.status.running }
-            when {
-                running >= runLimit -> {
-                    "too_many_subagents" to "Subagent concurrency limit reached."
-                }
-
-                effectiveDefinition.dynamic &&
-                    runs.values.count { it.snapshot.status.running && it.snapshot.definition.dynamic } >= runLimit -> {
-                    "too_many_dynamic_subagents" to "Dynamic subagent per-turn limit reached."
-                }
-
-                else -> {
-                    runs[runId] = runtimeRun
-                    null
-                }
+            admissionErrorLocked(subAgentSetting, effectiveDefinition) ?: run {
+                runs[runId] = runtimeRun
+                null
             }
         }
         if (admissionError != null) {
             return@withContext errorPayload(admissionError.first, admissionError.second)
         }
         runStateFlows[runId] = MutableStateFlow(run)
+
+        // Publish the live flows before the task snapshot. The dock can open as soon as the
+        // snapshot reaches its process-wide collector; it must never bind to a permanent empty
+        // fallback during this small registration window.
+        val liveText = MutableStateFlow("")
+        val liveParts = MutableStateFlow<List<UIMessagePart>>(emptyList())
+        liveTextFlows[runId] = liveText
+        livePartsFlows[runId] = liveParts
+        capLiveTextFlows()
+        if (threadGraph) {
+            mailboxes[runId] = Channel(Channel.UNLIMITED)
+        }
         agentTaskStore.register(run.toAgentTaskSnapshot(), cancel = {
             cancel(runId)
             true
@@ -275,17 +312,7 @@ class SubAgentManager(
             }
         }
 
-        // Live text flow for UI subscribers — created BEFORE the runner starts so a sheet opened
-        // immediately after subagent_start sees the same flow that will be written to.
-        val liveText = MutableStateFlow("")
-        val liveParts = MutableStateFlow<List<UIMessagePart>>(emptyList())
-        liveTextFlows[runId] = liveText
-        livePartsFlows[runId] = liveParts
         runStateFlows.getOrPut(runId) { MutableStateFlow(run) }.value = run
-        capLiveTextFlows()
-        if (threadGraph) {
-            mailboxes[runId] = Channel(Channel.UNLIMITED)
-        }
 
         if (!launchTurn(
                 runtimeRun = runtimeRun,
@@ -377,9 +404,13 @@ class SubAgentManager(
                 // cancellation — a stale RUNNING/INTERRUPTED node becomes
                 // CANCELLED with a terminal result).
                 if (threadGraphEnabled()) {
-                    withContext(captureThreadGraphWriteContext()) {
+                    val writeContext = captureThreadGraphWriteContext()
+                    withContext(writeContext) {
                         threadGraphManager.cancelPersisted(runId)
-                    }?.let { return@withLock it }
+                    }?.let {
+                        syncCancelledTaskSnapshot(runId)
+                        return@withLock it
+                    }
                 }
                 readMissingRun(runId)
             }
@@ -434,6 +465,15 @@ class SubAgentManager(
             if (live?.status == SubAgentRunStatus.RUNNING || node?.status == SubAgentRunStatus.RUNNING) {
                 return@withLock errorPayload("thread_running", "Thread $threadId is still running; followup is only allowed on an idle thread.")
             }
+            if (
+                live?.status == SubAgentRunStatus.APPROVAL_REQUIRED ||
+                    node?.status == SubAgentRunStatus.APPROVAL_REQUIRED
+            ) {
+                return@withLock errorPayload(
+                    "thread_approval_required",
+                    "Thread $threadId is waiting for approval and cannot be continued with a followup.",
+                )
+            }
             if (live?.status == SubAgentRunStatus.CANCELLED || node?.status == SubAgentRunStatus.CANCELLED) {
                 return@withLock errorPayload("thread_cancelled", "Thread $threadId was cancelled and cannot be continued.")
             }
@@ -454,25 +494,38 @@ class SubAgentManager(
                     append(followupTask.context)
                 },
             )
-            val webMountScopeId = Uuid.random().toString()
-            val scopedParentTools = parentToolsForRun?.invoke(webMountScopeId) ?: parentTools
-            withContext(threadGraphWriteContext) {
-                threadGraphManager.enqueueFollowup(threadId, mergedTask)
-            }
-            launchFollowupGeneration(
-                parentConversationId = parentConversationId,
+            val admissionError = reserveFollowupAdmission(
                 threadId = threadId,
+                setting = subAgentSetting,
                 definition = restored.definition,
-                task = mergedTask,
-                parentTools = scopedParentTools,
-                parentRunId = parentRunId,
-                previousAnswer = restored.previousAnswer,
-                writeContext = threadGraphWriteContext,
-                webMountScopeId = webMountScopeId,
-                onRunFinished = onRunFinished,
-                parentPolicy = parentPolicy,
             )
-            withContext(threadGraphWriteContext) { read(threadId) }
+            if (admissionError != null) {
+                return@withLock errorPayload(admissionError.first, admissionError.second)
+            }
+            try {
+                val webMountScopeId = Uuid.random().toString()
+                val scopedParentTools = parentToolsForRun?.invoke(webMountScopeId) ?: parentTools
+                withContext(threadGraphWriteContext) {
+                    threadGraphManager.enqueueFollowup(threadId, mergedTask)
+                }
+                launchFollowupGeneration(
+                    parentConversationId = parentConversationId,
+                    threadId = threadId,
+                    definition = restored.definition,
+                    task = mergedTask,
+                    parentTools = scopedParentTools,
+                    parentRunId = parentRunId,
+                    previousAnswer = restored.previousAnswer,
+                    writeContext = threadGraphWriteContext,
+                    webMountScopeId = webMountScopeId,
+                    onRunFinished = onRunFinished,
+                    parentPolicy = parentPolicy,
+                )
+                withContext(threadGraphWriteContext) { read(threadId) }
+            } catch (error: Throwable) {
+                releaseFollowupAdmission(threadId)
+                throw error
+            }
         }
     }
 
@@ -617,8 +670,11 @@ class SubAgentManager(
                             )
                         )
                     } else {
-                        withContext(threadGraphWriteContext) {
+                        val payload = withContext(threadGraphWriteContext) {
                             threadGraphManager.cancelPersisted(node.threadId)
+                        }
+                        if (payload != null) {
+                            syncCancelledTaskSnapshot(node.threadId)
                         }
                     }
                     cancelled++
@@ -790,13 +846,14 @@ class SubAgentManager(
         result: SubAgentResult,
         displayText: String,
     ) {
+        val persistedDisplayText = terminalDisplayText(runtimeRun, displayText)
         try {
             if (threadGraphEnabled()) {
                 threadGraphManager.finishNode(
                     runId = next.runId,
                     status = result.status,
                     result = result,
-                    displayText = displayText.ifBlank { next.displayText },
+                    displayText = persistedDisplayText.ifBlank { next.displayText },
                 )
             }
         } finally {
@@ -841,13 +898,39 @@ class SubAgentManager(
         val cancellingApproval =
             current.status == SubAgentRunStatus.APPROVAL_REQUIRED && status == SubAgentRunStatus.CANCELLED
         if (!current.status.running && !cancellingApproval) return@synchronized null
+        val effectiveDisplayText = terminalDisplayText(runtimeRun, displayText)
         current.copy(
             status = status,
             result = result,
-            displayText = displayText.ifBlank { current.displayText },
+            displayText = effectiveDisplayText
+                .ifBlank { current.displayText.takeUnless { it == runtimeRun.previousAnswer }.orEmpty() },
             updatedAtMs = Instant.now().toEpochMilli(),
         ).also { runtimeRun.snapshot = it }
             .also { next -> runStateFlows[runtimeRun.snapshot.runId]?.value = next }
+    }
+
+    /**
+     * A followup seeds its live flow with the previous answer. If the new turn only emits tool
+     * parts and a structured report, that seed must not become this turn's terminal transcript.
+     * A real Text/Reasoning part keeps the candidate even when its text happens to equal the seed.
+     */
+    private fun terminalDisplayText(runtimeRun: RuntimeRun, candidate: String): String {
+        val previousAnswer = runtimeRun.previousAnswer
+        if (previousAnswer.isBlank()) {
+            return candidate.ifBlank { runtimeRun.snapshot.displayText }
+        }
+        val hasCurrentVisiblePart = livePartsFlows[runtimeRun.snapshot.runId]
+            ?.value
+            .orEmpty()
+            .any { part ->
+                when (part) {
+                    is UIMessagePart.Text -> part.text.isNotBlank()
+                    is UIMessagePart.Reasoning -> part.reasoning.isNotBlank()
+                    else -> false
+                }
+            }
+        if (!hasCurrentVisiblePart && (candidate.isBlank() || candidate == previousAnswer)) return ""
+        return candidate.ifBlank { runtimeRun.snapshot.displayText }
     }
 
     /**
@@ -957,17 +1040,24 @@ class SubAgentManager(
         )
         val runtimeRun = RuntimeRun(
             snapshot = run,
+            previousAnswer = previousAnswer,
             writeContext = writeContext,
             webMountScopeId = webMountScopeId,
             onRunFinished = onRunFinished,
         )
-        runs[threadId] = runtimeRun
-        agentTaskStore.register(run.toAgentTaskSnapshot(), cancel = {
-            cancel(threadId)
-            true
-        })
-        appendEvent(runtimeRun, "followup_started", runToPayload(run))
 
+        val admitted = synchronized(admissionLock) {
+            if (pendingAdmissions.remove(threadId) == null) {
+                false
+            } else {
+                runs[threadId] = runtimeRun
+                true
+            }
+        }
+        check(admitted) { "Followup admission was lost for thread $threadId" }
+
+        // Create all process-local streams before publishing the replacement task snapshot. The
+        // dock may open the new generation between register() and the first model chunk.
         val liveText = MutableStateFlow(previousAnswer)
         val liveParts = MutableStateFlow<List<UIMessagePart>>(emptyList())
         liveTextFlows[threadId] = liveText
@@ -975,6 +1065,11 @@ class SubAgentManager(
         runStateFlows.getOrPut(threadId) { MutableStateFlow(run) }.value = run
         capLiveTextFlows()
         mailboxes[threadId] = Channel(Channel.UNLIMITED)
+        agentTaskStore.register(run.toAgentTaskSnapshot(), cancel = {
+            cancel(threadId)
+            true
+        })
+        appendEvent(runtimeRun, "followup_started", runToPayload(run))
 
         // Write-ahead node + deliver queued messages (followup/send) before
         // the job launches — nothing waits in the void if the process dies.
@@ -1175,6 +1270,17 @@ class SubAgentManager(
         }
     }
 
+    /** Keep the process-level task projection in sync after a cold persisted cancellation. */
+    private suspend fun syncCancelledTaskSnapshot(taskId: String) {
+        agentTaskStore.update(
+            taskId = taskId,
+            status = AgentTaskStatus.CANCELLED,
+            cancelCapability = false,
+            clearError = true,
+            clearLastErrorCode = true,
+        )
+    }
+
     private fun appendEvent(runtimeRun: RuntimeRun, event: String, payload: JsonObject) {
         val line = buildJsonObject {
             put("event", event)
@@ -1233,6 +1339,7 @@ class SubAgentManager(
 
     private class RuntimeRun(
         @Volatile var snapshot: SubAgentRun,
+        val previousAnswer: String = "",
         /** Awaits the current turn's terminal/pause and settles the thread. */
         @Volatile var job: Job? = null,
         /** Run id of the in-flight generation turn (null between turns). */

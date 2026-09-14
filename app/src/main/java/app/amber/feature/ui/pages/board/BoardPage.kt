@@ -18,6 +18,8 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -256,7 +258,7 @@ private data class PendingDeepReadRequest(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun HotListActionSheet(
+internal fun HotListActionSheet(
     topic: HotTopic,
     onDismiss: () -> Unit,
     onDeepRead: () -> Unit,
@@ -285,6 +287,7 @@ private fun HotListActionSheet(
         Column(
             Modifier
                 .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
                 .padding(horizontal = 16.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {

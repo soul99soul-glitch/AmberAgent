@@ -13,6 +13,7 @@ import app.amber.core.infra.AppScope
 import app.amber.core.settings.PreferencesKeys
 import app.amber.core.settings.Settings
 import app.amber.core.settings.AgentRuntimeSetting
+import app.amber.core.settings.DisplaySetting
 import app.amber.core.settings.DEFAULT_AMBER_SYSTEM_PROMPT
 import app.amber.core.settings.DEFAULT_AGENT_SOUL_MARKDOWN
 import app.amber.core.settings.PREVIOUS_DEFAULT_AMBER_SYSTEM_PROMPT
@@ -153,6 +154,41 @@ class SecretPrefsChainRoundTripTest {
             "Bearer agg-mcp-token",
             rehydrated.mcpServers.first().commonOptions.headers.single().second,
         )
+    }
+
+    @Test
+    fun `SettingsAggregator write round trips removed display controls as canonical values`() = runBlocking {
+        val aggregator = buildAggregator()
+        aggregator.settingsFlow.awaitUntil { !it.init }
+
+        aggregator.update(
+            Settings(
+                displaySetting = DisplaySetting(
+                    showModelIcon = true,
+                    showDateBelowName = true,
+                    autoCloseThinking = false,
+                    enableLatexRendering = false,
+                    sendOnEnter = true,
+                ),
+            )
+        )
+
+        val persisted = JsonInstant.decodeFromString<DisplaySetting>(
+            dataStore.data.first()[PreferencesKeys.DISPLAY_SETTING]!!,
+        )
+        assertFalse(persisted.showModelIcon)
+        assertFalse(persisted.showDateBelowName)
+        assertTrue(persisted.autoCloseThinking)
+        assertTrue(persisted.enableLatexRendering)
+        assertTrue("unrelated display settings must survive normalization", persisted.sendOnEnter)
+
+        val loaded = aggregator.settingsFlow.awaitUntil {
+            !it.init && it.displaySetting.sendOnEnter
+        }
+        assertFalse(loaded.displaySetting.showModelIcon)
+        assertFalse(loaded.displaySetting.showDateBelowName)
+        assertTrue(loaded.displaySetting.autoCloseThinking)
+        assertTrue(loaded.displaySetting.enableLatexRendering)
     }
 
     @Test

@@ -142,6 +142,48 @@ class HomeCompactLayoutTest {
     }
 
     @Test
+    fun additionalContinueEntryOpensTheCandidatePicker() {
+        var opened = 0
+        content {
+            HomeFeatureRail(
+                resumeCandidate = candidate(running = false),
+                additionalResumeCount = 2,
+                onOpenResume = {},
+                onOpenAdditionalResume = { opened++ },
+                onDeepRead = {}, onMiniApps = {}, onNovel = {}, onWebMount = {}, onCouncil = {},
+            )
+        }
+        compose.onNodeWithText(
+            "${context.getString(R.string.session_home_continue)} · 2",
+            useUnmergedTree = true,
+        ).performClick()
+        assertEquals(1, opened)
+    }
+
+    @Test
+    fun continueCandidatesSheetReturnsTheSelectedCandidate() {
+        var opened: ContinueCandidate? = null
+        val first = candidate(running = false, id = "candidate-one", title = "first candidate")
+        val second = candidate(running = false, id = "candidate-two", title = "second candidate")
+        compose.setContent {
+            CompositionLocalProvider(
+                LocalAmberTokens provides buildAmberTokens(AmberBase.LIGHT, Color(0xFFB8623A)),
+            ) {
+                MaterialTheme {
+                    ContinueCandidatesSheet(
+                        candidates = listOf(first, second),
+                        onOpen = { opened = it },
+                        onDismiss = {},
+                    )
+                }
+            }
+        }
+        compose.waitForIdle()
+        compose.onNodeWithText("second candidate", useUnmergedTree = true).performClick()
+        assertEquals(second.route, opened?.route)
+    }
+
+    @Test
     fun homeTopFadeStaysAtClippedEdgeUntilReturningToStart() {
         compose.mainClock.autoAdvance = false
         lateinit var listState: LazyListState
@@ -206,11 +248,15 @@ class HomeCompactLayoutTest {
             .assertDoesNotExist()
     }
 
-    private fun candidate(running: Boolean) = ContinueCandidate(
+    private fun candidate(
+        running: Boolean,
+        id: String = "home-layout-fixture",
+        title: String = article,
+    ) = ContinueCandidate(
         sourceKind = ContinueSourceKind.DEEP_READ,
-        sourceId = "home-layout-fixture",
-        route = ContinueRoute.DeepRead("home-layout-fixture", article, "https://example.com/article"),
-        title = article,
+        sourceId = id,
+        route = ContinueRoute.DeepRead(id, title, "https://example.com/article"),
+        title = title,
         summary = phase,
         lastUpdatedAt = Instant.EPOCH,
         status = ContinueStatus.FAILED_RESUMABLE,

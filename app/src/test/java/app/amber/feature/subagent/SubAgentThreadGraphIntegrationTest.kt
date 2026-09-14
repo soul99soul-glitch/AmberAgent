@@ -490,6 +490,11 @@ class SubAgentThreadGraphIntegrationTest : DurableRuntimeTestBase() {
         val payload = second.cancel(threadId)
         assertEquals("cancelled", payloadStatus(payload))
         assertEquals("cancelled", second.read(threadId)["status"]?.jsonPrimitive?.contentOrNull)
+        val cancelledTask = AgentTaskStore(context, Json).read(threadId)
+        assertEquals(AgentTaskStatus.CANCELLED, cancelledTask?.status)
+        assertEquals(false, cancelledTask?.cancelCapability)
+        assertNull(cancelledTask?.error)
+        assertNull(cancelledTask?.lastErrorCode)
     }
 
     // ── interrupt keeps the thread; followup continues it ─────────────────
@@ -661,6 +666,146 @@ class SubAgentThreadGraphIntegrationTest : DurableRuntimeTestBase() {
     }
 
     @Test
+    fun followupsShareTheGlobalConcurrencyAdmission() = runBlocking {
+        val manager = manager()
+        val first = manager.start(
+            parentConversationId = conversationId,
+            input = startInput("Admission A"),
+            parentTools = parentTools(),
+            parentRunId = "parent_run_1",
+        )["run_id"]!!.jsonPrimitive.content
+        awaitTerminal(manager, first)
+        val second = manager.start(
+            parentConversationId = conversationId,
+            input = startInput("Admission B"),
+            parentTools = parentTools(),
+            parentRunId = "parent_run_1",
+        )["run_id"]!!.jsonPrimitive.content
+        awaitTerminal(manager, second)
+
+        settingsStore.update { settings ->
+            settings.copy(
+                agentRuntime = settings.agentRuntime.copy(
+                    subAgent = settings.agentRuntime.subAgent.copy(maxConcurrentRuns = 1),
+                ),
+            )
+        }
+        fakeRunner.gate = CompletableDeferred()
+
+        fun followupInput(objective: String) = buildJsonObject {
+            put("task", buildJsonObject { put("objective", objective) })
+        }
+
+        val followupA = async {
+            manager.followup(
+                parentConversationId = conversationId,
+                threadId = first,
+                input = followupInput("Admission followup A"),
+                parentTools = parentTools(),
+                parentRunId = "parent_run_1",
+            )
+        }
+        val followupB = async {
+            manager.followup(
+                parentConversationId = conversationId,
+                threadId = second,
+                input = followupInput("Admission followup B"),
+                parentTools = parentTools(),
+                parentRunId = "parent_run_1",
+            )
+        }
+        val payloads = listOf(followupA.await(), followupB.await())
+        assertEquals(1, payloads.count { payloadStatus(it) == "running" })
+        assertEquals(1, payloads.count { it["code"]?.jsonPrimitive?.contentOrNull == "too_many_subagents" })
+
+        fakeRunner.gate!!.complete(
+            SubAgentResult(status = SubAgentRunStatus.COMPLETED, summary = "admission followup done")
+        )
+        val admittedThread = if (payloadStatus(payloads[0]) == "running") first else second
+        val rejectedThread = if (admittedThread == first) second else first
+        val graphStore = RoomThreadGraphStore(database.threadGraphDao())
+        assertTrue(graphStore.listMessages(rejectedThread).isEmpty())
+        awaitTerminal(manager, admittedThread)
+    }
+
+    @Test
+    fun approvalRequiredThreadRejectsFollowupInsteadOfBypassingThePause() = runBlocking {
+        val manager = manager()
+        fakeRunner.gate = CompletableDeferred()
+        val started = manager.start(
+            parentConversationId = conversationId,
+            input = startInput("Approval followup test"),
+            parentTools = parentTools(),
+            parentRunId = "parent_run_1",
+        )
+        val threadId = started["run_id"]!!.jsonPrimitive.content
+        awaitLive(threadId)
+        fakeRunner.calls.single().onTerminal!!(GenerationTerminal.WaitingUser)
+        fakeRunner.gate!!.complete(
+            SubAgentResult(
+                status = SubAgentRunStatus.APPROVAL_REQUIRED,
+                summary = "approval required",
+            )
+        )
+        awaitTerminal(manager, threadId)
+        assertEquals(SubAgentRunStatus.APPROVAL_REQUIRED, manager.snapshot(threadId)?.status)
+
+        val followup = manager.followup(
+            parentConversationId = conversationId,
+            threadId = threadId,
+            input = buildJsonObject {
+                put("task", buildJsonObject { put("objective", "must wait for approval") })
+            },
+            parentTools = parentTools(),
+            parentRunId = "parent_run_1",
+        )
+        assertEquals("thread_approval_required", followup["code"]?.jsonPrimitive?.contentOrNull)
+        assertEquals(1, fakeRunner.calls.size)
+        assertTrue(RoomThreadGraphStore(database.threadGraphDao()).listMessages(threadId).isEmpty())
+    }
+
+    @Test
+    fun structuredOnlyFollowupDoesNotPersistItsPreviousAnswerAsCurrentTranscript() = runBlocking {
+        val manager = manager()
+        val started = manager.start(
+            parentConversationId = conversationId,
+            input = startInput("Seeded transcript"),
+            parentTools = parentTools(),
+            parentRunId = "parent_run_1",
+        )
+        val threadId = started["run_id"]!!.jsonPrimitive.content
+        awaitTerminal(manager, threadId)
+        assertEquals("fake answer: Seeded transcript", manager.snapshot(threadId)?.displayText)
+
+        fakeRunner.emitVisibleText = false
+        fakeRunner.emitToolOnlyPart = true
+        fakeRunner.nextResult = SubAgentResult(
+            status = SubAgentRunStatus.COMPLETED,
+            summary = "structured followup result",
+        )
+        manager.followup(
+            parentConversationId = conversationId,
+            threadId = threadId,
+            input = buildJsonObject {
+                put("task", buildJsonObject { put("objective", "Structured only followup") })
+            },
+            parentTools = parentTools(),
+            parentRunId = "parent_run_1",
+        )
+        awaitTerminal(manager, threadId)
+        assertEquals("fake answer: Seeded transcript", fakeRunner.calls.last().previousAnswer)
+
+        assertEquals("", manager.snapshot(threadId)?.displayText)
+        assertEquals("structured followup result", manager.snapshot(threadId)?.result?.summary)
+        assertEquals("", RoomThreadGraphStore(database.threadGraphDao()).getResult(threadId)?.finalAnswer)
+        assertTrue(
+            File(context.filesDir, "amberagent/subagents/runs/$threadId.jsonl")
+                .readText()
+                .contains("fake answer: Seeded transcript")
+        )
+    }
+
+    @Test
     fun followupAndCancelCompetitionCannotResurrectCancelledThread() = runBlocking {
         val manager = manager()
         fakeRunner.gate = CompletableDeferred()
@@ -801,6 +946,10 @@ class SubAgentThreadGraphIntegrationTest : DurableRuntimeTestBase() {
         val third = manager()
         assertEquals("cancelled", payloadStatus(third.read(childA)))
         assertEquals("cancelled", payloadStatus(third.read(childB)))
+        assertEquals(
+            AgentTaskStatus.CANCELLED,
+            AgentTaskStore(context, Json).read(childA)?.status,
+        )
         // A child of another root run is untouched.
         fakeRunner.gate = null
         val unrelated = second.start(
@@ -1012,6 +1161,8 @@ class FakeSubAgentRunner : SubAgentRunner {
 
     val calls = CopyOnWriteArrayList<CapturedCall>()
     var gate: CompletableDeferred<SubAgentResult>? = null
+    var emitVisibleText: Boolean = true
+    var emitToolOnlyPart: Boolean = false
     var nextResult: SubAgentResult =
         SubAgentResult(status = SubAgentRunStatus.COMPLETED, summary = "fake done")
 
@@ -1036,7 +1187,19 @@ class FakeSubAgentRunner : SubAgentRunner {
             previousAnswer = previousAnswer,
             events = events,
         )
-        liveText.value = "fake answer: ${task.objective}"
+        if (emitToolOnlyPart) {
+            liveParts.value = listOf(
+                UIMessagePart.Tool(
+                    toolCallId = "tool-${task.objective}",
+                    toolName = "file_read",
+                    input = "{}",
+                    output = emptyList(),
+                )
+            )
+            liveText.value = ""
+        } else if (emitVisibleText) {
+            liveText.value = "fake answer: ${task.objective}"
+        }
         val g = gate
         return if (g != null) g.await() else nextResult
     }

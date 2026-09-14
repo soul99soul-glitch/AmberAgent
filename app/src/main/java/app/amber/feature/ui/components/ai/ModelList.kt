@@ -540,7 +540,15 @@ internal fun ColumnScope.ModelList(
     }
 
     // 计算当前选中模型的位置
-    val selectedModelPosition = remember(currentModel, favoriteModels, providers, typeFilteredModelsByProvider) {
+    val selectedModelPosition = remember(
+        currentModel,
+        favoriteModels,
+        providers,
+        searchFilteredModelsByProvider,
+        expandedProviders,
+        searchKeywords,
+        hasSearchResults,
+    ) {
         if (currentModel == null) return@remember 0
 
         var position = 0
@@ -548,6 +556,9 @@ internal fun ColumnScope.ModelList(
         // 跳过无providers提示
         if (providers.isEmpty()) {
             position += 1
+        }
+        if (providers.isNotEmpty() && searchKeywords.isNotBlank() && !hasSearchResults) {
+            position += 1 // search-empty
         }
 
         // 检查是否在收藏列表中
@@ -566,16 +577,31 @@ internal fun ColumnScope.ModelList(
             position += favoriteModels.size
         }
 
-        // 在providers中查找
-        for (provider in providers) {
-            position += 1 // provider header
-            val models = typeFilteredModelsByProvider[provider.id].orEmpty()
-            val modelIndex = models.indexOfFirst { it.id == currentModel }
-            if (modelIndex >= 0) {
-                position += modelIndex
-                return@remember position
+        // 在 providers 中查找。这里必须和下面 LazyColumn 的实际 emission 保持一致：
+        // 非当前 provider 默认折叠，只计 header（以及 group gap），不能把隐藏的模型行
+        // 也计入 initialFirstVisibleItemIndex，否则当前模型在后一个 provider 时会被滚出视口。
+        for (providerIndex in providers.indices) {
+            val provider = providers[providerIndex]
+            val models = searchFilteredModelsByProvider[provider.id].orEmpty()
+            if (models.isEmpty()) continue
+            if (providerIndex > 0 || favoriteModels.isNotEmpty()) {
+                position += 1 // group gap
             }
-            position += models.size
+            position += 1 // provider header
+            val expanded = expandedProviders[provider.id]
+                ?: (
+                    searchKeywords.isNotBlank() ||
+                        models.any { it.id == currentModel } ||
+                        currentModel == null
+                    )
+            if (expanded) {
+                val modelIndex = models.indexOfFirst { it.id == currentModel }
+                if (modelIndex >= 0) {
+                    position += modelIndex
+                    return@remember position
+                }
+                position += models.size
+            }
         }
 
         0

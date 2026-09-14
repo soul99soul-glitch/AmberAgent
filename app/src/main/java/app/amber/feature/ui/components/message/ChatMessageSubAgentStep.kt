@@ -198,18 +198,17 @@ fun SubAgentTaskStepView(
 
 internal const val PHASE_LABEL_INTERVAL_MS = 5_000L
 
-/** P4-02: terminal statuses the UI may take from the persisted thread graph. */
+/** P4-02: persisted statuses the UI may take from the thread graph after a restart. */
 private fun SubAgentRunStatus.isTerminalForDisplay(): Boolean = when (this) {
     SubAgentRunStatus.COMPLETED,
     SubAgentRunStatus.FAILED,
     SubAgentRunStatus.CANCELLED,
     SubAgentRunStatus.TIMED_OUT,
     SubAgentRunStatus.INTERRUPTED,
+    SubAgentRunStatus.APPROVAL_REQUIRED,
     -> true
 
-    SubAgentRunStatus.RUNNING,
-    SubAgentRunStatus.APPROVAL_REQUIRED,
-    -> false
+    SubAgentRunStatus.RUNNING -> false
 }
 
 /** The operation represented by the latest subagent tool call in a task card. */

@@ -59,6 +59,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.dokar.sonner.ToastType
@@ -1388,7 +1389,7 @@ private fun MemoryLibrarySubpage(
     LazyColumn(
         modifier = modifier,
         state = rememberLazyListState(),
-        verticalArrangement = Arrangement.spacedBy(28.dp),
+        verticalArrangement = Arrangement.spacedBy(0.dp),
     ) {
         item("memory_summary") {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -1401,6 +1402,7 @@ private fun MemoryLibrarySubpage(
             }
         }
 
+        item("memory_gap_candidates") { Spacer(Modifier.height(28.dp)) }
         memoryCandidatesSection(
             candidates = pendingCandidates,
             onAccept = onAcceptCandidate,
@@ -1408,6 +1410,7 @@ private fun MemoryLibrarySubpage(
             onIgnoreLowConfidence = onIgnoreLowConfidenceCandidates,
         )
 
+        item("memory_gap_core") { Spacer(Modifier.height(28.dp)) }
         memoryRecordsSection(
             title = coreMemoryTitle,
             emptyText = coreMemoryEmptyText,
@@ -1420,6 +1423,7 @@ private fun MemoryLibrarySubpage(
             onDeleteMemory = onDeleteMemory,
         )
 
+        item("memory_gap_short_term") { Spacer(Modifier.height(28.dp)) }
         memoryRecordsSection(
             title = shortTermMemoryTitle,
             emptyText = shortTermMemoryEmptyText,
@@ -1432,6 +1436,7 @@ private fun MemoryLibrarySubpage(
             onDeleteMemory = onDeleteMemory,
         )
 
+        item("memory_gap_long_term") { Spacer(Modifier.height(28.dp)) }
         memoryRecordsSection(
             title = longTermMemoryTitle,
             emptyText = longTermMemoryEmptyText,
@@ -1444,6 +1449,7 @@ private fun MemoryLibrarySubpage(
             onDeleteMemory = onDeleteMemory,
         )
 
+        item("memory_gap_maintenance") { Spacer(Modifier.height(28.dp)) }
         item("memory_maintenance") {
             MemoryMaintenanceSection(
                 eventCount = recentMemoryEvents.size,
@@ -1681,60 +1687,64 @@ private fun AssistantMemory.isSummarySensitive(): Boolean {
     return isSensitiveMemoryContent(content)
 }
 
-private fun LazyListScope.memoryCandidatesSection(
+private fun memoryGroupShape(index: Int, size: Int): RoundedCornerShape = when {
+    size <= 1 -> RoundedCornerShape(14.dp)
+    index == 0 -> RoundedCornerShape(topStart = 14.dp, topEnd = 14.dp)
+    index == size - 1 -> RoundedCornerShape(bottomStart = 14.dp, bottomEnd = 14.dp)
+    else -> RoundedCornerShape(0.dp)
+}
+
+internal fun LazyListScope.memoryCandidatesSection(
     candidates: List<MemoryCandidate>,
     onAccept: (String) -> Unit,
     onIgnore: (String) -> Unit,
     onIgnoreLowConfidence: () -> Unit,
 ) {
-    item("memory_candidate_section") {
-        val lowConfidenceCount = candidates.count { it.confidence < LOW_CONFIDENCE_CANDIDATE_THRESHOLD }
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            SettingSectionTitle(stringResource(R.string.memory_candidate_review_title))
+    val lowConfidenceCount = candidates.count { it.confidence < LOW_CONFIDENCE_CANDIDATE_THRESHOLD }
+    item("memory_candidate_section_title") {
+        SettingSectionTitle(stringResource(R.string.memory_candidate_review_title))
+    }
+    item("memory_candidate_card_gap") { Spacer(Modifier.height(8.dp)) }
+    if (candidates.isEmpty()) {
+        item("memory_candidate_empty") {
             AmberCard(modifier = Modifier.fillMaxWidth()) {
-                if (candidates.isEmpty()) {
-                    Text(
-                        text = stringResource(R.string.memory_candidate_empty),
-                        style = LocalAmberType.current.secondary,
-                        color = LocalAmberTokens.current.ink3,
-                        modifier = Modifier.padding(16.dp),
-                    )
-                } else {
-                    candidates.forEachIndexed { index, candidate ->
-                        if (index > 0) {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 14.dp)
-                                    .height(1.dp)
-                                    .background(LocalAmberTokens.current.line),
-                            )
-                        }
-                        MemoryCandidateCard(
-                            candidate = candidate,
-                            onAccept = { onAccept(candidate.id) },
-                            onIgnore = { onIgnore(candidate.id) },
-                        )
-                    }
-                    if (lowConfidenceCount > 0) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 14.dp)
-                                .height(1.dp)
-                                .background(LocalAmberTokens.current.line),
-                        )
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 14.dp),
-                            horizontalArrangement = Arrangement.End,
-                        ) {
-                            TextButton(onClick = onIgnoreLowConfidence) {
-                                Text(stringResource(R.string.memory_ignore_low_confidence, lowConfidenceCount))
-                            }
-                        }
-                    }
+                Text(
+                    text = stringResource(R.string.memory_candidate_empty),
+                    style = LocalAmberType.current.secondary,
+                    color = LocalAmberTokens.current.ink3,
+                    modifier = Modifier.padding(16.dp),
+                )
+            }
+        }
+        return
+    }
+
+    val groupSize = candidates.size + if (lowConfidenceCount > 0) 1 else 0
+    itemsIndexed(
+        items = candidates,
+        key = { _, candidate -> "memory_candidate_${candidate.id}" },
+    ) { index, candidate ->
+        MemoryCandidateCard(
+            candidate = candidate,
+            shape = memoryGroupShape(index, groupSize),
+            onAccept = { onAccept(candidate.id) },
+            onIgnore = { onIgnore(candidate.id) },
+        )
+    }
+    if (lowConfidenceCount > 0) {
+        item("memory_candidate_low_confidence") {
+            val tokens = LocalAmberTokens.current
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(memoryGroupShape(groupSize - 1, groupSize))
+                    .background(tokens.surface)
+                    .border(1.dp, tokens.line, memoryGroupShape(groupSize - 1, groupSize))
+                    .padding(horizontal = 14.dp),
+                horizontalAlignment = Alignment.End,
+            ) {
+                TextButton(onClick = onIgnoreLowConfidence) {
+                    Text(stringResource(R.string.memory_ignore_low_confidence, lowConfidenceCount))
                 }
             }
         }
@@ -1744,12 +1754,17 @@ private fun LazyListScope.memoryCandidatesSection(
 @Composable
 private fun MemoryCandidateCard(
     candidate: MemoryCandidate,
+    shape: RoundedCornerShape = RoundedCornerShape(14.dp),
     onAccept: () -> Unit,
     onIgnore: () -> Unit,
 ) {
+    val tokens = LocalAmberTokens.current
     Column(
         modifier = Modifier
             .fillMaxWidth()
+            .clip(shape)
+            .background(tokens.surface)
+            .border(1.dp, tokens.line, shape)
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
@@ -2072,7 +2087,7 @@ private fun MemoryPortabilitySection(
     }
 }
 
-private fun LazyListScope.memoryRecordsSection(
+internal fun LazyListScope.memoryRecordsSection(
     title: String,
     emptyText: String,
     memories: List<AssistantMemory>,
@@ -2083,43 +2098,63 @@ private fun LazyListScope.memoryRecordsSection(
     onEditMemory: (AssistantMemory) -> Unit,
     onDeleteMemory: (AssistantMemory) -> Unit,
 ) {
-    item("memory_records_section_$title") {
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            MemoryRecordsHeader(
-                title = title,
-                infoTitle = infoTitle,
-                infoText = infoText,
-                onInfoClick = onInfoClick,
-                onAddMemory = onAddMemory,
-            )
+    item("memory_records_header_$title") {
+        MemoryRecordsHeader(
+            title = title,
+            infoTitle = infoTitle,
+            infoText = infoText,
+            onInfoClick = onInfoClick,
+            onAddMemory = onAddMemory,
+        )
+    }
+    item("memory_records_card_gap_$title") { Spacer(Modifier.height(8.dp)) }
+    if (memories.isEmpty()) {
+        item("memory_records_empty_$title") {
             AmberCard(modifier = Modifier.fillMaxWidth()) {
-                if (memories.isEmpty()) {
-                    Text(
-                        text = emptyText,
-                        style = LocalAmberType.current.secondary,
-                        color = workspaceColors().muted,
-                        modifier = Modifier.padding(16.dp),
-                    )
-                } else {
-                    memories.forEachIndexed { index, memory ->
-                        if (index > 0) {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 14.dp)
-                                    .height(1.dp)
-                                    .background(LocalAmberTokens.current.line),
-                            )
-                        }
-                        MemoryItem(
-                            memory = memory,
-                            onEditMemory = onEditMemory,
-                            onDeleteMemory = onDeleteMemory,
-                        )
-                    }
-                }
+                Text(
+                    text = emptyText,
+                    style = LocalAmberType.current.secondary,
+                    color = workspaceColors().muted,
+                    modifier = Modifier.padding(16.dp),
+                )
             }
         }
+        return
+    }
+
+    itemsIndexed(
+        items = memories,
+        key = { _, memory -> "memory_record_${title}_${memory.id}" },
+    ) { index, memory ->
+        MemoryRecordRow(
+            memory = memory,
+            shape = memoryGroupShape(index, memories.size),
+            onEditMemory = onEditMemory,
+            onDeleteMemory = onDeleteMemory,
+        )
+    }
+}
+
+@Composable
+private fun MemoryRecordRow(
+    memory: AssistantMemory,
+    shape: RoundedCornerShape,
+    onEditMemory: (AssistantMemory) -> Unit,
+    onDeleteMemory: (AssistantMemory) -> Unit,
+) {
+    val tokens = LocalAmberTokens.current
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .background(tokens.surface)
+            .border(1.dp, tokens.line, shape),
+    ) {
+        MemoryItem(
+            memory = memory,
+            onEditMemory = onEditMemory,
+            onDeleteMemory = onDeleteMemory,
+        )
     }
 }
 

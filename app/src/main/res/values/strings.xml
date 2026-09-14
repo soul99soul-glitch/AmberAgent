@@ -3407,4 +3407,9 @@ My task:</string>
   <string name="subagent_dock_progress_note">Progress update</string>
     <string name="subagent_dock_close">Close</string>
     <string name="subagent_dock_swipe_hint">Swipe up to expand, down to collapse</string>
+  <string name="zcode_agent_access_label">Allow Amber to use this connection through WebMount</string>
+  <string name="zcode_agent_access_description">Enable WebMount in Settings, then allow Amber to use this saved ZCode connection. Amber will not change WebMount settings automatically.</string>
+  <string name="zcode_preparing_session">Preparing the ZCode browser session…</string>
+  <string name="zcode_session_unavailable">The ZCode browser session could not be prepared. Try again.</string>
+  <string name="zcode_connection_changed">The ZCode connection changed while opening. Return and open it again.</string>
 </resources>

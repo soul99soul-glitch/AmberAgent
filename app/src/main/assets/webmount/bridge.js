@@ -78,6 +78,32 @@
     return raw.replace(/\s+/g, ' ').trim().substring(0, maxChars || 4000);
   }
 
+  function isContentEditableElement(el) {
+    if (!el) return false;
+    if (el.isContentEditable === true) return true;
+    var attr = el.getAttribute && el.getAttribute('contenteditable');
+    return attr != null && String(attr).toLowerCase() !== 'false';
+  }
+
+  function editableText(el) {
+    return el && el.textContent ? String(el.textContent) : '';
+  }
+
+  function editableName(el) {
+    if (!el || !el.getAttribute) return '';
+    var aria = el.getAttribute('aria-label');
+    if (aria) return String(aria).trim();
+    var labelled = el.getAttribute('aria-labelledby');
+    if (labelled) {
+      var ref = document.getElementById(labelled);
+      if (ref) return (ref.innerText || ref.textContent || '').trim();
+    }
+    var placeholder = el.getAttribute('placeholder');
+    if (placeholder) return String(placeholder).trim();
+    var testId = el.getAttribute('data-testid');
+    return testId ? String(testId).trim() : '';
+  }
+
   function interactiveState(el) {
     var tag = (el.tagName || '').toLowerCase();
     var state = [];
@@ -90,6 +116,9 @@
       }
       if (tag === 'select') state.push('selected_index=' + (el.selectedIndex | 0));
     }
+    if (isContentEditableElement(el)) {
+      state.push('value_hash=' + hashString(editableText(el)));
+    }
     state.push('disabled=' + isDisabled(el));
     state.push('readonly=' + isReadOnly(el));
     return state.join(',');
@@ -99,7 +128,7 @@
     args = args || {};
     var text = semanticText(args.text_fingerprint_chars || 60000);
     var interactive = Array.prototype.slice.call(document.querySelectorAll(
-      'a[href],button,input,select,textarea,[role=button],[role=link],[role=tab],[role=menuitem],[onclick]'
+      'a[href],button,input,select,textarea,[role=button],[role=link],[role=tab],[role=menuitem],[role=textbox],[contenteditable="true"],[onclick]'
     )).filter(isVisible);
     var main = snapshotState();
     main.snapshot_id = window.__amberWmSnapshot ? window.__amberWmSnapshot.id : null;
@@ -309,8 +338,12 @@
     var r = rectOf(el);
     var href = el && el.tagName === 'A' ? redactedUrl(el.href || '') : '';
     var inputType = el && el.tagName === 'INPUT' ? (el.type || '') : '';
-    var name = accessibleName(el) || '';
-    var text = textPreview(el);
+    // A contenteditable draft is user data, and it changes on every edit.
+    // Keep its ref identity tied to stable author-provided metadata instead
+    // of putting the draft into the returned fingerprint.
+    var editable = isContentEditableElement(el);
+    var name = editable ? editableName(el) : (accessibleName(el) || '');
+    var text = editable ? '' : textPreview(el);
     return {
       key: [
         (el.tagName || '').toLowerCase(),
@@ -397,7 +430,7 @@
 
   function findByFingerprint(fingerprint, visibleOnly) {
     if (!fingerprint || !fingerprint.key) return [];
-    var selector = 'a[href],button,input,select,textarea,[role=button],[role=link],[role=tab],[role=menuitem],[onclick],label,h1,h2,h3,h4,li,p,span,div';
+    var selector = 'a[href],button,input,select,textarea,[role=button],[role=link],[role=tab],[role=menuitem],[role=textbox],[contenteditable="true"],[onclick],label,h1,h2,h3,h4,li,p,span,div';
     var all = Array.prototype.slice.call(document.querySelectorAll(selector));
     return all.filter(function (el) {
       if (visibleOnly && !isVisible(el)) return false;
@@ -493,11 +526,12 @@
   // --------------------------------------------------------------- extract
 
   function describeNode(el, opts) {
+    var editable = isContentEditableElement(el);
     var node = {
       tag: (el.tagName || '').toLowerCase(),
       path: nodePath(el),
       role: roleOf(el),
-      name: accessibleName(el),
+      name: editable ? (editableName(el) || null) : accessibleName(el),
       rect: rectOf(el),
       visible: isVisible(el),
     };
@@ -516,7 +550,11 @@
       }
       if (el.disabled) node.disabled = true;
     }
-    if (opts && opts.text !== false) {
+    if (editable) {
+      node.value_chars = editableText(el).length;
+      if (isDisabled(el)) node.disabled = true;
+      if (isReadOnly(el)) node.readonly = true;
+    } else if (opts && opts.text !== false) {
       var t = (el.innerText || el.textContent || '').trim();
       if (t.length > 0) node.text = t.length > 240 ? (t.substring(0, 240) + '…') : t;
     }
@@ -555,7 +593,7 @@
 
   function extractInteractive(args) {
     var maxNodes = Math.min(((args.max_nodes | 0) || 200), 1000);
-    var selector = 'a[href],button,input,select,textarea,[role=button],[role=link],[role=tab],[role=menuitem],[onclick]';
+    var selector = 'a[href],button,input,select,textarea,[role=button],[role=link],[role=tab],[role=menuitem],[role=textbox],[contenteditable="true"],[onclick]';
     var els = Array.prototype.slice.call(document.querySelectorAll(selector));
     var visible = args.visible_only !== false;
     var nodes = [];
@@ -1122,13 +1160,91 @@
     };
   }
 
+  function editableSelection(el) {
+    var selection = window.getSelection && window.getSelection();
+    if (selection && selection.rangeCount > 0) {
+      var current = selection.getRangeAt(0);
+      if (el.contains(current.startContainer) && el.contains(current.endContainer)) {
+        return current.cloneRange();
+      }
+    }
+    var range = document.createRange();
+    range.selectNodeContents(el);
+    range.collapse(false);
+    return range;
+  }
+
+  function setEditableSelection(range) {
+    var selection = window.getSelection && window.getSelection();
+    if (!selection) return;
+    selection.removeAllRanges();
+    selection.addRange(range);
+    // Lexical listens for the public document selectionchange event to map
+    // the DOM caret back to its editor selection before beforeinput arrives.
+    try { document.dispatchEvent(new Event('selectionchange')); } catch (_) {}
+  }
+
+  function dispatchEditingEvent(el, type, inputType, data) {
+    var init = {
+      bubbles: true,
+      cancelable: type === 'beforeinput',
+      inputType: inputType,
+      data: data == null ? null : String(data),
+    };
+    var InputEventCtor = window.InputEvent;
+    if (typeof InputEventCtor === 'function') {
+      try { return el.dispatchEvent(new InputEventCtor(type, init)); }
+      catch (_) { /* fall through to a regular event for older WebViews */ }
+    }
+    var ev = new Event(type, { bubbles: true, cancelable: init.cancelable });
+    try { Object.defineProperty(ev, 'inputType', { configurable: true, value: inputType }); } catch (_) {}
+    try { Object.defineProperty(ev, 'data', { configurable: true, value: init.data }); } catch (_) {}
+    return el.dispatchEvent(ev);
+  }
+
+  function insertEditableRange(el, text) {
+    var range = editableSelection(el);
+    range.deleteContents();
+    if (text) {
+      var node = document.createTextNode(text);
+      range.insertNode(node);
+      range.setStartAfter(node);
+    }
+    range.collapse(true);
+    setEditableSelection(range);
+  }
+
+  function performEditableType(el, text, clear) {
+    var inputType = text ? 'insertText' : 'deleteContentBackward';
+    // Preserve wm_type's existing append semantics. `clear=true` selects the
+    // editor contents first, allowing the browser/Lexical to replace the
+    // existing paragraphs without flattening their DOM.
+    var range = document.createRange();
+    range.selectNodeContents(el);
+    if (!clear) range.collapse(false);
+    setEditableSelection(range);
+    if (!text && !clear) return { ok: true, handled: false };
+
+    // Use one public beforeinput/input route. Lexical consumes beforeinput and
+    // updates its own state; React contenteditables fall through to a DOM
+    // Range mutation followed by input. Do not combine this with a native
+    // editing command: Android WebView can let both it and Lexical's
+    // beforeinput handler apply the same edit.
+    var beforeInput = dispatchEditingEvent(el, 'beforeinput', inputType, text || null);
+    if (beforeInput) {
+      insertEditableRange(el, text);
+      dispatchEditingEvent(el, 'input', inputType, text || null);
+    }
+    return { ok: true, handled: true };
+  }
+
   function performType(args) {
     var text = args.text;
     if (typeof text !== 'string') throw new Error('type requires text string');
     var resolved = resolveTarget(args, { requireUnique: true, allowFingerprintFallback: false, requireStableRect: true });
     if (!resolved.ok) return resolved;
     var el = resolved.el;
-    if (el.tagName !== 'INPUT' && el.tagName !== 'TEXTAREA' && !el.isContentEditable) {
+    if (el.tagName !== 'INPUT' && el.tagName !== 'TEXTAREA' && !isContentEditableElement(el)) {
       return targetError('target_not_editable', 'element is not editable', 'Use wm_extract(mode="interactive") and choose an input, textarea, or contenteditable node.', [candidateSummary(el, resolved.ref)]);
     }
     if (isDisabled(el)) {
@@ -1139,19 +1255,18 @@
     }
     if (el.focus) try { el.focus(); } catch (_) {}
     var clear = args.clear === true;
-    if (el.isContentEditable) {
-      // Simple insert at end.
-      el.textContent = (clear ? '' : (el.textContent || '')) + text;
+    if (isContentEditableElement(el)) {
+      performEditableType(el, text, clear);
     } else {
       // Frameworks such as React wrap the instance value setter to track
       // programmatic writes. Use the native setter so the input event below
       // observes a changed value and updates the controlled state.
       var prototype = el.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
       Object.getOwnPropertyDescriptor(prototype, 'value').set.call(el, (clear ? '' : (el.value || '')) + text);
+      // Fire input/change so frameworks observe the new native-control value.
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      el.dispatchEvent(new Event('change', { bubbles: true }));
     }
-    // Fire input/change so frameworks observe the new value.
-    el.dispatchEvent(new Event('input', { bubbles: true }));
-    el.dispatchEvent(new Event('change', { bubbles: true }));
     if (args.press_enter === true) {
       var k = new KeyboardEvent('keydown', { bubbles: true, key: 'Enter', code: 'Enter', keyCode: 13, which: 13 });
       el.dispatchEvent(k);
@@ -1161,7 +1276,7 @@
       target: candidateSummaryNoText(el, resolved.ref),
       matches_n: resolved.matches_n,
       match_level: resolved.match_level,
-      value_chars: (el.isContentEditable ? (el.textContent || '') : (el.value || '')).length,
+      value_chars: (isContentEditableElement(el) ? editableText(el) : (el.value || '')).length,
     };
   }
 
@@ -1174,7 +1289,7 @@
     if (kind === 'text') {
       value = el.innerText || el.textContent || '';
     } else if (kind === 'value') {
-      value = el.isContentEditable ? (el.textContent || '') : (el.value || '');
+      value = isContentEditableElement(el) ? editableText(el) : (el.value || '');
     } else if (kind === 'html') {
       value = el.outerHTML || '';
     } else if (kind === 'attr') {
@@ -1615,6 +1730,348 @@
     return { ok: true, matches: matches, total_returned: matches.length };
   }
 
+  // --------------------------------------------------------------- ZCode v4
+
+  // This is deliberately a narrow, page-contract adapter. The generic
+  // WebMount handlers remain available for ordinary pages, while these
+  // methods only operate on the currently rendered v4 composer.
+  var ZCODE_COMPOSER_SELECTOR = '.chat-composer-region[data-testid="v4-composer"][data-input-routing]';
+  var ZCODE_INPUT_SELECTOR = '[data-testid="v4-composer-input"][data-lexical-editor="true"]';
+  var ZCODE_SEND_SELECTOR = 'button[type="submit"][data-testid="v4-composer-send"]';
+  var ZCODE_TASK_SELECTOR = '[data-testid^="v4-session-pane-"][data-session-id]';
+  var zcodeTicket = null;
+  var zcodeTicketSeq = 0;
+
+  function zcodeError(code, message, hint, extra) {
+    var error = { code: code, message: message, hint: hint || null };
+    if (extra) {
+      for (var key in extra) {
+        if (Object.prototype.hasOwnProperty.call(extra, key)) error[key] = extra[key];
+      }
+    }
+    return { ok: false, error: error };
+  }
+
+  function zcodeTargetSummary(el, ref) {
+    return {
+      ref: ref || null,
+      tag: (el.tagName || '').toLowerCase(),
+      role: roleOf(el),
+      rect: rectOf(el),
+      visible: isVisible(el),
+      css: nodePath(el),
+    };
+  }
+
+  function zcodeIsVisible(el) {
+    return isVisible(el) && String(el.getAttribute && el.getAttribute('aria-hidden') || '').toLowerCase() !== 'true';
+  }
+
+  function zcodeSnapshotRefForElement(el) {
+    var entries = window.__amberWmSnapshot && window.__amberWmSnapshot.entries;
+    if (!entries) return null;
+    for (var ref in entries) {
+      if (Object.prototype.hasOwnProperty.call(entries, ref) && entries[ref].el === el) return ref;
+    }
+    return null;
+  }
+
+  function zcodeRememberTarget(el) {
+    var ref = zcodeSnapshotRefForElement(el);
+    if (!ref) ref = rememberSnapshotNode(el, describeNode(el, { text: false })).ref;
+    return zcodeTargetSummary(el, ref);
+  }
+
+  function zcodeAttachmentCount(composer) {
+    var kinds = composer.querySelectorAll('[data-composer-attachment-kind]');
+    if (kinds.length > 0) return kinds.length;
+    var rows = composer.querySelectorAll('[data-composer-file-attachments-row],[data-composer-context-attachments-row]');
+    for (var i = 0; i < rows.length; i++) {
+      // These rows are rendered only when a file, context, or reference is
+      // present. Keep the check structural so hidden chip text is never read.
+      if (rows[i].querySelector('*') || String(rows[i].textContent || '').trim()) return 1;
+    }
+    return 0;
+  }
+
+  function zcodeTaskForComposer(composer) {
+    var task = composer && composer.closest ? composer.closest(ZCODE_TASK_SELECTOR) : null;
+    if (!task || !task.getAttribute('data-session-id')) return null;
+    return { node: task, id: String(task.getAttribute('data-session-id')) };
+  }
+
+  function zcodeFindComposer() {
+    var composers = Array.prototype.slice.call(document.querySelectorAll(ZCODE_COMPOSER_SELECTOR))
+      .filter(zcodeIsVisible);
+    if (composers.length === 0) {
+      return zcodeError(
+        'zcode_unsupported',
+        'visible ZCode v4 composer was not found',
+        'Open the ZCode v4 chat page with one visible composer.',
+        { composer_count: 0 },
+      );
+    }
+    if (composers.length !== 1) {
+      return zcodeError(
+        'zcode_unsupported',
+        'ZCode v4 requires exactly one visible composer',
+        'Close hidden or duplicate chat panes, then read the page again.',
+        { composer_count: composers.length },
+      );
+    }
+    var composer = composers[0];
+    var task = zcodeTaskForComposer(composer);
+    if (!task) {
+      return zcodeError(
+        'zcode_unsupported',
+        'ZCode v4 composer is not attached to a session pane',
+        'Open the intended ZCode task and read the page again.',
+      );
+    }
+    var routing = String(composer.getAttribute('data-input-routing') || '');
+    if (routing !== 'startNow' && routing !== 'enqueue' && routing !== 'reject') {
+      return zcodeError(
+        'zcode_unsupported',
+        'ZCode composer has an unknown input routing mode',
+        'Refresh the ZCode page and use a supported v4 composer.',
+      );
+    }
+    var inputs = Array.prototype.slice.call(composer.querySelectorAll(ZCODE_INPUT_SELECTOR))
+      .filter(zcodeIsVisible)
+      .filter(function (el) { return el.getAttribute('role') === 'textbox' && isContentEditableElement(el); });
+    if (inputs.length !== 1) {
+      return zcodeError(
+        'zcode_unsupported',
+        'ZCode v4 composer must contain exactly one visible Lexical input',
+        'Read the page again after the composer finishes rendering.',
+        { input_count: inputs.length },
+      );
+    }
+    var submits = routing === 'startNow'
+      ? Array.prototype.slice.call(composer.querySelectorAll(ZCODE_SEND_SELECTOR)).filter(zcodeIsVisible)
+      : [];
+    if (submits.length > 1) {
+      return zcodeError(
+        'zcode_unsupported',
+        'ZCode v4 composer has multiple visible submit buttons',
+        'Wait for the composer to settle, then read the page again.',
+        { submit_count: submits.length },
+      );
+    }
+    return {
+      ok: true,
+      composer: composer,
+      task: task,
+      input: inputs[0],
+      send: submits.length === 1 ? submits[0] : null,
+      routing: routing,
+      draft: editableText(inputs[0]),
+      attachment_count: zcodeAttachmentCount(composer),
+    };
+  }
+
+  function zcodeRead(args) {
+    args = args || {};
+    // A read refresh invalidates any prepared side effect. The typed draft is
+    // intentionally left in the page so the user can inspect or clear it.
+    var discardedTicket = zcodeTicket !== null;
+    zcodeTicket = null;
+    var observation;
+    if (args.include_page_text === true) {
+      observation = observePage(args);
+    } else {
+      var compactSnapshotId = startSnapshot();
+      var compactPage = snapshotState();
+      compactPage.snapshot_id = compactSnapshotId;
+      observation = { mode: 'zcode_read', page: compactPage };
+    }
+    var snapshotId = observation.interactive && observation.interactive.snapshot_id != null
+      ? observation.interactive.snapshot_id
+      : observation.snapshot_id != null
+        ? observation.snapshot_id
+        : observation.page && observation.page.snapshot_id;
+    var uiTree = null;
+    if (typeof window.__amberZCodeUiTree === 'function') {
+      try {
+        uiTree = window.__amberZCodeUiTree(args || {}, {
+          describe: function (el) { return describeNode(el, { text: true }); },
+          remember: rememberSnapshotNode,
+          isVisible: isVisible,
+          snapshotId: snapshotId,
+        });
+      } catch (e) {
+        uiTree = { ok: false, error: { code: 'zcode_ui_tree_failed', message: String(e && e.message || e) } };
+      }
+    }
+    var info = zcodeFindComposer();
+    var zcode = {
+      supported: info.ok === true,
+      input_routing: info.ok ? info.routing : null,
+      draft_chars: info.ok ? info.draft.length : 0,
+      remote_task_id: info.ok ? info.task.id : null,
+      composer_target: null,
+      input_target: null,
+      send_target: null,
+      send_available: false,
+      snapshot_id: snapshotId,
+    };
+    if (discardedTicket) {
+      zcode.ticket_discarded = true;
+      zcode.draft_retained = true;
+    }
+    if (!info.ok) {
+      zcode.error = info.error;
+      return { observation: observation, ui_tree: uiTree, zcode: zcode };
+    }
+    // The composer target is the Lexical input itself. Kotlin passes this ref
+    // back as input_target; the outer composer remains an internal guard.
+    zcode.composer_target = zcodeRememberTarget(info.input);
+    zcode.input_target = zcode.composer_target;
+    if (info.send) {
+      zcode.send_target = zcodeRememberTarget(info.send);
+      zcode.send_available = true;
+    }
+    return { observation: observation, ui_tree: uiTree, zcode: zcode };
+  }
+
+  function zcodeTargetRef(value) {
+    if (value && typeof value === 'object' && value.ref != null) return String(value.ref);
+    if (value == null) return null;
+    return String(value);
+  }
+
+  function zcodeResolveRef(value, snapshotId) {
+    var ref = zcodeTargetRef(value);
+    if (!ref) return zcodeError('missing_target', 'ZCode target ref is required', 'Call zcode_read and pass its snapshot target ref.');
+    if (snapshotId == null) return zcodeError('missing_snapshot', 'snapshot_id is required for a ZCode target ref', 'Pass the snapshot_id returned by zcode_read.');
+    return resolveTarget({ target: ref, snapshot_id: snapshotId }, {
+      requireUnique: true,
+      allowFingerprintFallback: false,
+      requireStableRect: true,
+    });
+  }
+
+  function zcodePrepare(args) {
+    args = args || {};
+    if (typeof args.text !== 'string') throw new Error('zcode_prepare requires text string');
+    if (args.text.trim().length === 0) return zcodeError('empty_text', 'ZCode prompt must not be empty', 'Pass a non-empty prompt.');
+    if (zcodeTicket !== null) {
+      return zcodeError('ticket_exists', 'a ZCode prepare ticket is already pending', 'Consume the existing ticket with zcode_send before preparing another prompt.');
+    }
+    var snapshotId = args.snapshot_id;
+    var info = zcodeFindComposer();
+    if (!info.ok) return info;
+    var remoteTaskId = zcodeTargetRef(args.remote_task_id);
+    if (!remoteTaskId) {
+      return zcodeError('missing_remote_task_id', 'remote_task_id is required for ZCode prepare', 'Pass the remote_task_id returned by zcode_read.');
+    }
+    if (remoteTaskId !== info.task.id) {
+      return zcodeError('remote_task_mismatch', 'remote_task_id does not match the current ZCode task', 'Read the current page and prepare again.');
+    }
+    if (info.routing !== 'startNow') {
+      return zcodeError(
+        'input_routing',
+        'ZCode composer is not ready for an immediate prompt',
+        'Wait until data-input-routing is startNow; enqueue and reject are not eligible for automatic ask.',
+        { input_routing: info.routing },
+      );
+    }
+    if (!info.send) {
+      return zcodeError('send_unavailable', 'ZCode send button is not available', 'Wait for the idle composer and call zcode_read again.');
+    }
+    if (info.attachment_count > 0) {
+      return zcodeError('attachments_present', 'ZCode composer contains attachments or references', 'Remove attachments and references before asking an unambiguous prompt.', { attachment_count: info.attachment_count });
+    }
+    if (info.draft.trim().length > 0) {
+      return zcodeError('draft_not_empty', 'ZCode composer already contains draft text', 'Read the current page and resolve the draft before preparing a prompt.', { draft_chars: info.draft.length });
+    }
+    var inputRef = zcodeTargetRef(args.input_target);
+    var sendRef = zcodeTargetRef(args.send_target);
+    var inputResolved = zcodeResolveRef(inputRef, snapshotId);
+    if (!inputResolved.ok) return inputResolved;
+    var sendResolved = zcodeResolveRef(sendRef, snapshotId);
+    if (!sendResolved.ok) return sendResolved;
+    if (inputResolved.el !== info.input) {
+      return zcodeError('target_mismatch', 'input_target is not the current ZCode v4 composer input', 'Call zcode_read again and use its input_target.ref.');
+    }
+    if (sendResolved.el !== info.send) {
+      return zcodeError('target_mismatch', 'send_target is not the current ZCode v4 submit button', 'Call zcode_read again and use its send_target.ref.');
+    }
+    var typed = performType({ target: inputRef, snapshot_id: snapshotId, text: args.text, clear: true });
+    if (!typed.ok) return typed;
+    var ticket = 'zcode_ticket_' + window.__amberWmRealmId + '_' + (++zcodeTicketSeq);
+    zcodeTicket = {
+      id: ticket,
+      composer: info.composer,
+      task: info.task,
+      task_id: info.task.id,
+      input: info.input,
+      send: info.send,
+      url: location.href,
+      text: args.text,
+    };
+    return {
+      ok: true,
+      ticket: ticket,
+      snapshot_id: snapshotId,
+      text_chars: args.text.length,
+      input_target: zcodeTargetSummary(info.input, inputRef),
+      send_target: zcodeTargetSummary(info.send, sendRef),
+    };
+  }
+
+  function zcodeSendFailure(result, draftRetained) {
+    if (result && result.ok === false) result.draft_retained = draftRetained !== false;
+    return result;
+  }
+
+  function zcodeSend(args) {
+    args = args || {};
+    var requested = zcodeTargetRef(args.ticket);
+    if (!requested) return zcodeError('missing_ticket', 'ZCode ticket is required', 'Call zcode_prepare first.');
+    if (zcodeTicket === null) return zcodeError('ticket_used', 'ZCode prepare ticket is no longer available', 'Prepare a new prompt after reading the current page.');
+    if (requested !== zcodeTicket.id) return zcodeError('ticket_mismatch', 'ZCode ticket does not match the pending prepare operation', 'Use the exact ticket returned by zcode_prepare.');
+    // A ticket is single-use even when a later validation fails. This prevents
+    // a caller from blindly retrying a potentially changed composer.
+    var ticket = zcodeTicket;
+    zcodeTicket = null;
+    if (location.href !== ticket.url) return zcodeSendFailure(zcodeError('ticket_stale', 'ZCode page URL changed after prepare', 'Read the current page and prepare again.'), false);
+    var info = zcodeFindComposer();
+    if (!info.ok) return zcodeSendFailure(info, false);
+    var sameComposerDom = info.composer === ticket.composer && info.input === ticket.input && info.send === ticket.send;
+    if (!sameComposerDom || info.task.node !== ticket.task.node || info.task.id !== ticket.task_id) {
+      return zcodeSendFailure(zcodeError('ticket_stale', 'ZCode composer or remote task changed after prepare', 'Read the current page and prepare again.'), sameComposerDom);
+    }
+    if (info.routing !== 'startNow') {
+      return zcodeSendFailure(zcodeError('input_routing', 'ZCode composer is no longer ready for an immediate prompt', 'Read the current page and prepare again.', { input_routing: info.routing }));
+    }
+    if (info.attachment_count > 0) {
+      return zcodeSendFailure(zcodeError('attachments_present', 'ZCode composer contains attachments or references', 'Read the current page and prepare again.'));
+    }
+    if (editableText(info.input) !== ticket.text) {
+      return zcodeSendFailure(zcodeError('draft_changed', 'ZCode draft changed after prepare', 'Read the current page and prepare again.'));
+    }
+    if (isDisabled(info.input) || isReadOnly(info.input)) {
+      return zcodeSendFailure(zcodeError('input_unavailable', 'ZCode input is disabled or read-only', 'Read the current page and prepare again.'));
+    }
+    if (isDisabled(info.send)) {
+      return zcodeSendFailure(zcodeError('send_disabled', 'ZCode send button is disabled', 'Read the current page and prepare again.'));
+    }
+    // The old ref is intentionally not reused for the side effect. Create a
+    // fresh snapshot entry immediately before the one allowed click.
+    var freshSnapshotId = startSnapshot();
+    var freshSend = zcodeRememberTarget(info.send);
+    var clicked = performClick({ target: freshSend.ref, snapshot_id: freshSnapshotId });
+    if (!clicked.ok) return zcodeSendFailure({ ok: false, dispatched: false, error: clicked.error });
+    return {
+      ok: true,
+      dispatched: true,
+      ticket: ticket.id,
+      snapshot_id: freshSnapshotId,
+      target: zcodeTargetSummary(info.send, freshSend.ref),
+    };
+  }
+
   function actionResult(fn) {
     try { return fn(); }
     catch (e) {
@@ -1694,6 +2151,15 @@
         case 'click':    AmberWM.resolve(reqId, safeJson(actionResult(function () { return performClick(args); }))); return;
         case 'tap':      AmberWM.resolve(reqId, safeJson(actionResult(function () { return performTap(args); }))); return;
         case 'type':     AmberWM.resolve(reqId, safeJson(actionResult(function () { return performType(args); }))); return;
+        case 'zcode_read':
+          AmberWM.resolve(reqId, safeJson(actionResult(function () { return zcodeRead(args); })));
+          return;
+        case 'zcode_prepare':
+          AmberWM.resolve(reqId, safeJson(actionResult(function () { return zcodePrepare(args); })));
+          return;
+        case 'zcode_send':
+          AmberWM.resolve(reqId, safeJson(actionResult(function () { return zcodeSend(args); })));
+          return;
         case 'get':      AmberWM.resolve(reqId, safeJson(actionResult(function () { return performGet(args); }))); return;
         case 'feishu_snapshot':
           AmberWM.resolve(reqId, safeJson(actionResult(function () { return feishuSnapshot(args); })));

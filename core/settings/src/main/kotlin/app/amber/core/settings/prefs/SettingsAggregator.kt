@@ -95,7 +95,10 @@ class SettingsAggregator(
             Log.w(TAG, "Cannot update dummy settings")
             return
         }
-        val settingsForWrite = settings.withMigratedMemoryDreamLegacy().withMigratedPromptDefaults()
+        val settingsForWrite = settings
+            .withMigratedMemoryDreamLegacy()
+            .withMigratedPromptDefaults()
+            .normalizeRemovedDisplayFields()
         var legacyMigrationPending = false
         dataStore.edit { p ->
             legacyMigrationPending = hasPendingLegacyAssistantSettings(p)
@@ -115,7 +118,7 @@ class SettingsAggregator(
             p[PreferencesKeys.DYNAMIC_COLOR] = settings.dynamicColor
             p[PreferencesKeys.THEME_ID] = settings.themeId
             p[PreferencesKeys.DEVELOPER_MODE] = settings.developerMode
-            p[PreferencesKeys.DISPLAY_SETTING] = JsonInstant.encodeToString(settings.displaySetting)
+            p[PreferencesKeys.DISPLAY_SETTING] = JsonInstant.encodeToString(settingsForWrite.displaySetting)
 
             p[PreferencesKeys.ENABLE_WEB_SEARCH] = settings.enableWebSearch
             p[PreferencesKeys.FAVORITE_MODELS] = JsonInstant.encodeToString(settings.favoriteModels)
@@ -447,7 +450,10 @@ internal fun applyBackfillAndSeed(it: Settings): Settings {
  * - Normalize display fields whose settings controls were removed
  */
 internal fun applyCrossDomainConsistency(settings: Settings): Settings {
-    val migratedSettings = settings.withMigratedMemoryDreamLegacy().withMigratedPromptDefaults()
+    val migratedSettings = settings
+        .withMigratedMemoryDreamLegacy()
+        .withMigratedPromptDefaults()
+        .normalizeRemovedDisplayFields()
     val validMcpServerIds = migratedSettings.mcpServers.map { it.id }.toSet()
     val validModeInjectionIds = migratedSettings.modeInjections.map { it.id }.toSet()
     val validLorebookIds = migratedSettings.lorebooks.map { it.id }.toSet()
@@ -466,15 +472,6 @@ internal fun applyCrossDomainConsistency(settings: Settings): Settings {
                 .orEmpty()
         }
     return migratedSettings.copy(
-        // These controls are intentionally no longer user-configurable. Keep the
-        // canonical values at the settings boundary so old persisted snapshots and
-        // imported backups cannot re-enable the removed display switches.
-        displaySetting = migratedSettings.displaySetting.copy(
-            showModelIcon = false,
-            showDateBelowName = false,
-            autoCloseThinking = true,
-            enableLatexRendering = true,
-        ),
         searchServiceSelected = cleanedSearchSelected,
         searchEnabledServiceIds = cleanedSearchEnabledIds,
         providers = migratedSettings.providers.distinctBy { it.id }.map { provider ->
@@ -503,6 +500,16 @@ internal fun applyCrossDomainConsistency(settings: Settings): Settings {
         quickMessages = migratedSettings.quickMessages.distinctBy { it.id },
     )
 }
+
+/** Keep the four display switches removed from the settings UI canonical on both read and write. */
+private fun Settings.normalizeRemovedDisplayFields(): Settings = copy(
+    displaySetting = displaySetting.copy(
+        showModelIcon = false,
+        showDateBelowName = false,
+        autoCloseThinking = true,
+        enableLatexRendering = true,
+    ),
+)
 
 private fun Settings.withMigratedMemoryDreamLegacy(): Settings {
     val worker = agentRuntime.memoryWorker

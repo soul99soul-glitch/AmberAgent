@@ -199,4 +199,55 @@ class ModelMenuInteractionTest {
         compose.onNodeWithText("model-visible").assertIsDisplayed().performClick()
         assertEquals(model.id, picked?.id)
     }
+
+    @Test
+    fun modelList_initialScrollTargetsCurrentModelAfterCollapsedProvider() {
+        val firstProvider = ProviderSetting.OpenAI(
+            name = "First provider",
+            models = List(20) { index ->
+                Model(
+                    modelId = "first-$index",
+                    displayName = "first-$index",
+                    type = ModelType.CHAT,
+                )
+            },
+        )
+        val target = Model(
+            modelId = "target-model",
+            displayName = "target-model",
+            type = ModelType.CHAT,
+        )
+        val secondProvider = ProviderSetting.OpenAI(
+            name = "Second provider",
+            models = listOf(target) + List(29) { index ->
+                Model(
+                    modelId = "second-${index + 1}",
+                    displayName = "second-${index + 1}",
+                    type = ModelType.CHAT,
+                )
+            },
+        )
+
+        compose.setContent {
+            CompositionLocalProvider(
+                LocalNavController provides Navigator(mutableListOf(Screen.SessionHome)),
+            ) {
+                Column(Modifier.height(600.dp)) {
+                    ModelList(
+                        currentModel = target.id,
+                        providers = listOf(firstProvider, secondProvider),
+                        modelType = ModelType.CHAT,
+                        onSelect = {},
+                        onDismiss = {},
+                        favoriteModelIds = emptyList(),
+                        onFavoriteModelsChange = {},
+                    )
+                }
+            }
+        }
+
+        // The first provider is collapsed by default; the selected model's provider is open.
+        // Its first row must be visible even though the earlier provider owns many hidden rows.
+        compose.onNodeWithText("target-model").assertIsDisplayed()
+    }
 }

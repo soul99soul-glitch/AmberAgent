@@ -20,6 +20,13 @@ function createHarness() {
       <input id="readonly" readonly value="fixed">
       <button id="submit">Submit</button>
     </form>
+    <section id="zcodeTask" data-testid="v4-session-pane-task-a" data-session-id="remote-task-a">
+      <form id="zcodeComposer" class="chat-composer-region" data-testid="v4-composer" data-input-routing="startNow">
+        <div id="zcodeInput" data-testid="v4-composer-input" data-lexical-editor="true" role="textbox" contenteditable="true" aria-label="ZCode prompt"><p><br></p></div>
+        <button id="zcodeSend" data-testid="v4-composer-send" type="submit">Send</button>
+      </form>
+    </section>
+    <div id="plainEditable" contenteditable="true"><p>seed</p></div>
     <div id="wrapper"><button id="login">Login</button></div>
     <button id="disabled" disabled>Disabled</button>
     <button id="ariaDisabled" aria-disabled="true">Aria disabled</button>
@@ -54,6 +61,10 @@ function createHarness() {
     readonly: 170,
     submit: 200,
     login: 250,
+    zcodeTask: 350,
+    zcodeComposer: 350,
+    zcodeInput: 360,
+    zcodeSend: 390,
     disabled: 290,
     ariaDisabled: 320,
     bottom: 500,
@@ -75,6 +86,33 @@ function createHarness() {
   };
   window.getComputedStyle = () => ({ visibility: 'visible', display: 'block', opacity: '1' });
 
+  // Small browser editing shim for the Lexical fixture. It models the public
+  // contenteditable contract: a native edit emits beforeinput, the editor may
+  // consume it, and an unconsumed edit emits input after the DOM mutation.
+  const zcodeInput = document.getElementById('zcodeInput');
+  const editingEvents = [];
+  const replaceEditableText = (text) => {
+    zcodeInput.replaceChildren(document.createElement('p'));
+    zcodeInput.firstElementChild.textContent = text;
+  };
+  zcodeInput.addEventListener('beforeinput', event => {
+    editingEvents.push({ type: 'beforeinput', inputType: event.inputType, data: event.data });
+    event.preventDefault();
+    if (event.inputType === 'insertText') replaceEditableText(event.data || '');
+    if (event.inputType === 'deleteContentBackward') replaceEditableText('');
+  });
+  zcodeInput.addEventListener('input', event => {
+    editingEvents.push({ type: 'input', inputType: event.inputType, data: event.data });
+  });
+  const plainEditable = document.getElementById('plainEditable');
+  const plainEditingEvents = [];
+  plainEditable.addEventListener('beforeinput', event => {
+    plainEditingEvents.push({ type: 'beforeinput', inputType: event.inputType, data: event.data });
+  });
+  plainEditable.addEventListener('input', event => {
+    plainEditingEvents.push({ type: 'input', inputType: event.inputType, data: event.data });
+  });
+
   const results = Object.create(null);
   window.AmberWM = {
     resolve(id, payload) { results[id] = JSON.parse(payload); },
@@ -83,6 +121,7 @@ function createHarness() {
     onDomMutation() {},
     log() {},
   };
+  window.__amberZCodeUiTree = (_args, hooks) => ({ ok: true, snapshot_id: hooks.snapshotId, nodes: [] });
   window.fetch = function (input) {
     const url = new URL(typeof input === 'string' ? input : input.url, window.location.href).href;
     if (url.endsWith('/api/body-error')) {
@@ -105,7 +144,7 @@ function createHarness() {
     return results[id];
   }
 
-  return { window, document, results, call };
+  return { window, document, results, call, editingEvents, plainEditingEvents };
 }
 
 function waitForResult(results, id, timeoutMs = 1000) {
@@ -127,11 +166,16 @@ function waitForResult(results, id, timeoutMs = 1000) {
 }
 
 async function main() {
-  const { window, document, results, call } = createHarness();
+  const { window, document, results, call, editingEvents, plainEditingEvents } = createHarness();
   let loginClicks = 0;
   let disabledClicks = 0;
+  let zcodeSubmits = 0;
   document.getElementById('login').addEventListener('click', () => { loginClicks++; });
   document.getElementById('disabled').addEventListener('click', () => { disabledClicks++; });
+  document.getElementById('zcodeComposer').addEventListener('submit', event => {
+    event.preventDefault();
+    zcodeSubmits++;
+  });
 
   const selectorClick = call('click', { selector: 'text=Login' }, 'selector_click');
   assert.equal(selectorClick.ok, true);
@@ -144,6 +188,96 @@ async function main() {
   const bottomNode = interactive.nodes.find(node => node.name === 'Bottom');
   const loginNode = interactive.nodes.find(node => node.name === 'Login');
   assert.ok(bottomNode && loginNode);
+
+  const zcodeComposerElement = document.getElementById('zcodeComposer');
+  zcodeComposerElement.setAttribute('data-input-routing', 'enqueue');
+  const enqueueRead = call('zcode_read', { include_page_text: false }, 'zcode_read_enqueue');
+  assert.equal(enqueueRead.zcode.supported, true);
+  assert.equal(enqueueRead.zcode.input_routing, 'enqueue');
+  assert.equal(enqueueRead.zcode.send_target, null);
+  zcodeComposerElement.setAttribute('data-input-routing', 'startNow');
+  const zcodeRead = call('zcode_read', { include_page_text: false }, 'zcode_read');
+  assert.equal(zcodeRead.zcode.supported, true);
+  assert.equal(zcodeRead.zcode.input_routing, 'startNow');
+  assert.equal(zcodeRead.zcode.draft_chars, 0);
+  assert.equal(zcodeRead.zcode.remote_task_id, 'remote-task-a');
+  assert.ok(zcodeRead.zcode.composer_target.ref);
+  assert.ok(zcodeRead.zcode.send_target.ref);
+  assert.equal(zcodeRead.ui_tree.snapshot_id, zcodeRead.zcode.snapshot_id);
+  assert.equal(Object.prototype.hasOwnProperty.call(zcodeRead.observation, 'readable'), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(zcodeRead.zcode.composer_target, 'text'), false);
+  const wrongRemoteTask = call('zcode_prepare', {
+    snapshot_id: zcodeRead.zcode.snapshot_id,
+    remote_task_id: 'remote-task-b',
+    input_target: zcodeRead.zcode.composer_target.ref,
+    send_target: zcodeRead.zcode.send_target.ref,
+    text: 'must not type',
+  }, 'zcode_prepare_wrong_task');
+  assert.equal(wrongRemoteTask.ok, false);
+  assert.equal(wrongRemoteTask.error.code, 'remote_task_mismatch');
+  assert.equal(document.getElementById('zcodeInput').textContent, '');
+  const zcodePrepare = call('zcode_prepare', {
+    snapshot_id: zcodeRead.zcode.snapshot_id,
+    remote_task_id: zcodeRead.zcode.remote_task_id,
+    input_target: zcodeRead.zcode.composer_target.ref,
+    send_target: zcodeRead.zcode.send_target.ref,
+    text: 'Ask ZCode',
+  }, 'zcode_prepare');
+  assert.equal(zcodePrepare.ok, true);
+  assert.equal(zcodePrepare.text_chars, 9);
+  assert.deepEqual(editingEvents, [{ type: 'beforeinput', inputType: 'insertText', data: 'Ask ZCode' }]);
+  assert.equal(document.getElementById('zcodeInput').textContent, 'Ask ZCode');
+  const zcodeSend = call('zcode_send', { ticket: zcodePrepare.ticket }, 'zcode_send');
+  assert.equal(zcodeSend.ok, true);
+  assert.equal(zcodeSend.dispatched, true);
+  assert.equal(zcodeSubmits, 1);
+  const reusedTicket = call('zcode_send', { ticket: zcodePrepare.ticket }, 'zcode_send_reused');
+  assert.equal(reusedTicket.ok, false);
+  assert.equal(reusedTicket.error.code, 'ticket_used');
+
+  // A session pane can reuse its DOM node for another remote task. The
+  // one-shot ticket must catch that identity change and retain the draft for
+  // inspection instead of clicking the new task's submit button.
+  const zcodeInputElement = document.getElementById('zcodeInput');
+  zcodeInputElement.replaceChildren(document.createElement('p'));
+  const zcodeReadAgain = call('zcode_read', {}, 'zcode_read_again');
+  const zcodePrepareAgain = call('zcode_prepare', {
+    snapshot_id: zcodeReadAgain.zcode.snapshot_id,
+    remote_task_id: zcodeReadAgain.zcode.remote_task_id,
+    input_target: zcodeReadAgain.zcode.composer_target.ref,
+    send_target: zcodeReadAgain.zcode.send_target.ref,
+    text: 'Task guarded',
+  }, 'zcode_prepare_again');
+  assert.equal(zcodePrepareAgain.ok, true);
+  document.getElementById('zcodeTask').setAttribute('data-session-id', 'remote-task-b');
+  const changedTaskSend = call('zcode_send', { ticket: zcodePrepareAgain.ticket }, 'zcode_send_changed_task');
+  assert.equal(changedTaskSend.ok, false);
+  assert.equal(changedTaskSend.error.code, 'ticket_stale');
+  assert.equal(changedTaskSend.draft_retained, true);
+  assert.equal(zcodeInputElement.textContent, 'Task guarded');
+  assert.equal(zcodeSubmits, 1);
+
+  // An ordinary contenteditable with no beforeinput consumer exercises the
+  // bridge's real DOM Range fallback. Verify append, replace, and clear each
+  // mutate the current document exactly once.
+  const plainEditable = document.getElementById('plainEditable');
+  const append = call('type', { selector: '#plainEditable', text: ' +', clear: false }, 'plain_append');
+  assert.equal(append.ok, true);
+  assert.equal(plainEditable.textContent, 'seed +');
+  const replace = call('type', { selector: '#plainEditable', text: 'replaced', clear: true }, 'plain_replace');
+  assert.equal(replace.ok, true);
+  assert.equal(plainEditable.textContent, 'replaced');
+  const clear = call('type', { selector: '#plainEditable', text: '', clear: true }, 'plain_clear');
+  assert.equal(clear.ok, true);
+  assert.equal(plainEditable.textContent, '');
+  assert.deepEqual(plainEditingEvents, [
+    { type: 'beforeinput', inputType: 'insertText', data: ' +' },
+    { type: 'input', inputType: 'insertText', data: ' +' },
+    { type: 'beforeinput', inputType: 'insertText', data: 'replaced' },
+    { type: 'input', inputType: 'insertText', data: 'replaced' },
+    { type: 'beforeinput', inputType: 'deleteContentBackward', data: null },
+    { type: 'input', inputType: 'deleteContentBackward', data: null },
+  ]);
 
   const disabledClick = call('click', { selector: '#disabled' }, 'disabled_click');
   assert.equal(disabledClick.ok, false);

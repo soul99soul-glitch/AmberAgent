@@ -3347,4 +3347,9 @@
     <string name="subagent_dock_details_title">Сведения о субагенте</string>
     <string name="subagent_dock_dismiss">Скрыть задачу</string>
     <string name="subagent_dock_status_queued">В очереди</string>
+  <string name="zcode_agent_access_label">Разрешить Amber использовать это подключение через WebMount</string>
+  <string name="zcode_agent_access_description">Включите WebMount в настройках, затем разрешите Amber использовать это сохранённое подключение ZCode. Amber не будет менять настройки WebMount автоматически.</string>
+  <string name="zcode_preparing_session">Подготовка сеанса браузера ZCode…</string>
+  <string name="zcode_session_unavailable">Не удалось подготовить сеанс браузера ZCode. Повторите попытку.</string>
+  <string name="zcode_connection_changed">Подключение ZCode изменилось во время открытия. Вернитесь на страницу подключения и откройте его снова.</string>
 </resources>

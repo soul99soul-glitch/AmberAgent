@@ -456,13 +456,17 @@ class WebViewPool(
 
     private fun loadBridgeBootstrap(): String =
         runCatching {
-            appContext.assets.open(BRIDGE_ASSET).bufferedReader().use { it.readText() }
+            val bridge = appContext.assets.open(BRIDGE_ASSET).bufferedReader().use { it.readText() }
+            val zcodeUiTree = appContext.assets.open(ZCODE_UI_TREE_ASSET).bufferedReader().use { it.readText() }
+            // Keep the two source files separate in the repository while
+            // injecting one bootstrap string into every primary/popup realm.
+            "$bridge\n;\n$zcodeUiTree"
         }.getOrElse { error ->
-            Log.e(TAG, "Failed to load $BRIDGE_ASSET", error)
+            Log.e(TAG, "Failed to load WebMount bootstrap assets", error)
             bridgeBootstrapError = error
             // Force-fail any subsequent bridge call rather than silently
             // letting it time out. The JS we inject just throws.
-            "throw new Error('AmberWM bridge bootstrap asset missing: $BRIDGE_ASSET');"
+            "throw new Error('AmberWM bootstrap asset missing: $BRIDGE_ASSET or $ZCODE_UI_TREE_ASSET');"
         }
 
     /** Throws if [BRIDGE_ASSET] failed to load — tools call this before issuing bridge RPCs. */
@@ -676,6 +680,7 @@ class WebViewPool(
     companion object {
         private const val TAG = "WebMountPool"
         private const val BRIDGE_ASSET = "webmount/bridge.js"
+        private const val ZCODE_UI_TREE_ASSET = "webmount/zcode-ui-tree.js"
         const val DEFAULT_MAX_SESSIONS = 4
         const val VIRTUAL_VIEWPORT_W = 412
         const val VIRTUAL_VIEWPORT_H = 915

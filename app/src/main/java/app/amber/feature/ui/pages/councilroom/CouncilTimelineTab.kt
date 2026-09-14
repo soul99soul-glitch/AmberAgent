@@ -28,6 +28,8 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
@@ -974,15 +976,7 @@ private fun TimelineMessageRow(
                     .weight(1f),
                 verticalArrangement = Arrangement.spacedBy(7.dp),
             ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    CouncilMemberTag(msg = msg, isHost = isHost, modelLabel = modelLabel)
-                    if (msg.role.isNotBlank() && msg.role != msg.authorName) {
-                        CouncilRolePill(text = msg.role, isHost = isHost)
-                    }
-                }
+                CouncilMemberIdentityHeader(msg = msg, isHost = isHost, modelLabel = modelLabel)
                 if (isSynthesis) {
                     Text(
                         text = stringResource(R.string.council_room_host_summary),
@@ -1079,13 +1073,43 @@ private fun CouncilMemberAvatar(msg: CouncilMessage, isHost: Boolean) {
 }
 
 /** Identity tag keeps human names sans and model ids mono, as in the reference room. */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun CouncilMemberTag(msg: CouncilMessage, isHost: Boolean, modelLabel: String) {
+internal fun CouncilMemberIdentityHeader(
+    msg: CouncilMessage,
+    isHost: Boolean,
+    modelLabel: String,
+) {
+    FlowRow(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        CouncilMemberTag(
+            msg = msg,
+            isHost = isHost,
+            modelLabel = modelLabel,
+            modifier = Modifier.widthIn(max = 240.dp),
+        )
+        if (msg.role.isNotBlank() && msg.role != msg.authorName) {
+            CouncilRolePill(text = msg.role, isHost = isHost)
+        }
+    }
+}
+
+@Composable
+private fun CouncilMemberTag(
+    msg: CouncilMessage,
+    isHost: Boolean,
+    modelLabel: String,
+    modifier: Modifier = Modifier,
+) {
     val tokens = LocalAmberTokens.current
     val chatTheme = LocalChatTheme.current
     val type = LocalAmberType.current
     val shape = RoundedCornerShape(999.dp)
     Surface(
+        modifier = modifier,
         shape = shape,
         color = if (isHost) chatTheme.accent.copy(alpha = 0.12f) else tokens.surface2,
         border = BorderStroke(
@@ -1095,13 +1119,14 @@ private fun CouncilMemberTag(msg: CouncilMessage, isHost: Boolean, modelLabel: S
     ) {
         Row(
             modifier = Modifier
-                .height(22.dp)
+                .heightIn(min = 22.dp)
                 .padding(horizontal = 9.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(7.dp),
         ) {
             Text(
                 text = msg.authorName.ifBlank { msg.authorId },
+                modifier = Modifier.weight(1f, fill = false),
                 style = type.tinyTag.copy(
                     fontSize = 12.sp,
                     lineHeight = 14.sp,
@@ -1109,6 +1134,7 @@ private fun CouncilMemberTag(msg: CouncilMessage, isHost: Boolean, modelLabel: S
                 ),
                 color = if (isHost) chatTheme.accent else tokens.ink,
                 maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
             if (modelLabel.isNotBlank()) {
                 Box(

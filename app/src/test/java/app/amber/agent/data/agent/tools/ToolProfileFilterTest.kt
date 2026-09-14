@@ -51,6 +51,8 @@ class ToolProfileFilterTest {
                 tool("webview_search_open"),
                 tool("webview_read"),
                 tool("wm_observe"),
+                tool("wm_zcode_open"),
+                tool("wm_zcode_read"),
                 tool("feishu_docs_read"),
                 tool("feishu_docs_create"),
                 tool("http_request"),
@@ -69,6 +71,8 @@ class ToolProfileFilterTest {
         assertTrue("webview_search_open" in names)
         assertTrue("webview_read" in names)
         assertTrue("wm_observe" in names)
+        assertTrue("wm_zcode_open" in names)
+        assertTrue("wm_zcode_read" in names)
         assertTrue("feishu_docs_read" in names)
         assertFalse("feishu_docs_create" in names)
         assertFalse("http_request" in names)

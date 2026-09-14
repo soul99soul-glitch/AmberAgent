@@ -35,6 +35,7 @@ import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -63,7 +64,7 @@ import app.amber.core.utils.plus
 import org.koin.androidx.compose.koinViewModel
 
 @Composable
-private fun <T> WorkspaceSegmentedChoice(
+internal fun <T> WorkspaceSegmentedChoice(
     options: List<T>,
     selected: T,
     modifier: Modifier = Modifier,
@@ -91,7 +92,7 @@ private fun <T> WorkspaceSegmentedChoice(
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(32.dp)
+                                .heightIn(min = 32.dp)
                                 .clip(capsuleShape)
                                 .background(if (isSelected) accent.copy(alpha = 0.10f) else workspace.row)
                                 .border(1.dp, accent.copy(alpha = if (isSelected) 0.12f else 0.04f), capsuleShape)
@@ -223,6 +224,8 @@ fun SettingDisplayPage(vm: SettingVM = koinViewModel()) {
                                             text = label,
                                             textAlign = TextAlign.Center,
                                             modifier = Modifier.fillMaxWidth(),
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
                                             fontFamily = when (family) {
                                                 ChatFontFamily.DEFAULT -> FontFamily.Default
                                                 ChatFontFamily.SERIF -> NotoSerifSC

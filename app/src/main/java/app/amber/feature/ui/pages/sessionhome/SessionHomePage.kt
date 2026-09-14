@@ -46,6 +46,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.SwipeToDismissBox
 import androidx.compose.material3.SwipeToDismissBoxDefaults
 import androidx.compose.material3.SwipeToDismissBoxState
@@ -118,7 +119,9 @@ import java.time.ZoneId
 import kotlin.uuid.Uuid
 import kotlinx.coroutines.launch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.ripple
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.ui.res.painterResource
 import androidx.paging.LoadState
 import androidx.paging.compose.collectAsLazyPagingItems
@@ -176,9 +179,11 @@ fun SessionHomePage() {
     val appendError = conversations.loadState.append as? LoadState.Error
     val isRefreshLoading = conversations.loadState.refresh is LoadState.Loading
     val continueCandidates = vm.continueCandidates.collectAsStateWithLifecycle().value
+    val hasContinueError = vm.hasContinueError.collectAsStateWithLifecycle().value
     val lastConversationId = rememberSharedPreferenceString(LAST_CONVERSATION_ID_PREF).value
     val listState = rememberLazyListState()
     val hazeState = rememberHazeState()
+    var showAdditionalContinueCandidates by rememberSaveable { mutableStateOf(false) }
     val hasTopOverflow by remember {
         derivedStateOf { listState.canScrollBackward }
     }
@@ -197,6 +202,9 @@ fun SessionHomePage() {
     val fabShape = CircleShape
     val fabInteractionSource = remember { MutableInteractionSource() }
     val operationError = stringResource(R.string.error_title_operation)
+    val additionalContinueCandidates = remember(continueCandidates) {
+        continueCandidates.drop(1)
+    }
 
     LaunchedEffect(homeSearchQuery, untitledConversationLabel) {
         vm.setHomeSearchQuery(homeSearchQuery, untitledConversationLabel)
@@ -374,13 +382,21 @@ fun SessionHomePage() {
                 item(key = "home_features") {
                     HomeFeatureRail(
                         resumeCandidate = continueCandidates.firstOrNull(),
+                        additionalResumeCount = additionalContinueCandidates.size,
                         onOpenResume = openContinueCandidate,
+                        onOpenAdditionalResume = { showAdditionalContinueCandidates = true },
                         onDeepRead = { navController.navigate(Screen.TodayBoard) },
                         onMiniApps = { navController.navigate(Screen.MiniAppList) },
                         onNovel = { navController.navigate(Screen.NovelProjects) },
                         onWebMount = { navController.navigate(Screen.SettingExperimentalWebMount) },
                         onCouncil = openCouncilRoom,
                     )
+                }
+
+                if (hasContinueError) {
+                    item(key = "home_continue_error") {
+                        HomeContinueInlineError(onRetry = vm::retryContinueCandidates)
+                    }
                 }
 
                 item(key = "home_conversations_header") {
@@ -535,6 +551,17 @@ fun SessionHomePage() {
                 }
             }
         }
+    }
+
+    if (showAdditionalContinueCandidates && additionalContinueCandidates.isNotEmpty()) {
+        ContinueCandidatesSheet(
+            candidates = additionalContinueCandidates,
+            onOpen = { candidate ->
+                showAdditionalContinueCandidates = false
+                openContinueCandidate(candidate)
+            },
+            onDismiss = { showAdditionalContinueCandidates = false },
+        )
     }
 }
 
@@ -986,6 +1013,32 @@ private fun HomeConversationInlineError(onRetry: () -> Unit) {
     }
 }
 
+@Composable
+private fun HomeContinueInlineError(onRetry: () -> Unit) {
+    val tokens = LocalAmberTokens.current
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 20.dp, vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Text(
+            text = stringResource(R.string.parity_home_continue_error),
+            modifier = Modifier
+                .weight(1f)
+                .padding(end = 8.dp),
+            fontSize = 12.5.sp,
+            color = tokens.ink3,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
+        TextButton(onClick = onRetry) {
+            Text(stringResource(R.string.parity_home_retry))
+        }
+    }
+}
+
 /* ------------------------------------------------------------ feature rail --- */
 
 private data class FeatureEntry(
@@ -1116,7 +1169,9 @@ private fun HomeConversationHeader() {
 @Composable
 internal fun HomeFeatureRail(
     resumeCandidate: ContinueCandidate?,
+    additionalResumeCount: Int = 0,
     onOpenResume: (ContinueCandidate) -> Unit,
+    onOpenAdditionalResume: () -> Unit = {},
     onDeepRead: () -> Unit,
     onMiniApps: () -> Unit,
     onNovel: () -> Unit,
@@ -1202,6 +1257,23 @@ internal fun HomeFeatureRail(
                         .padding(horizontal = 14.dp, vertical = 6.dp),
                 )
             }
+            if (additionalResumeCount > 0) {
+                TextButton(
+                    onClick = onOpenAdditionalResume,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 40.dp),
+                ) {
+                    Text(
+                        text = "${stringResource(R.string.session_home_continue)} · $additionalResumeCount",
+                        fontSize = 11.5.sp,
+                        lineHeight = 15.sp,
+                        color = tokens.accent,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
             Box(
                 Modifier
                     .fillMaxWidth()
@@ -1242,6 +1314,82 @@ internal fun HomeFeatureRail(
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+internal fun ContinueCandidatesSheet(
+    candidates: List<ContinueCandidate>,
+    onOpen: (ContinueCandidate) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val tokens = LocalAmberTokens.current
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Text(
+                text = stringResource(R.string.session_home_continue),
+                fontFamily = JetBrainsMonoFamily,
+                fontSize = 12.sp,
+                color = tokens.ink2,
+            )
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 420.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                items(
+                    items = candidates,
+                    key = { candidate -> "${candidate.sourceKind.name}:${candidate.sourceId}" },
+                ) { candidate ->
+                    val feature = continueFeatureSpec(candidate.sourceKind)
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 52.dp)
+                            .clickable { onOpen(candidate) }
+                            .padding(horizontal = 8.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        Icon(
+                            imageVector = feature.icon,
+                            contentDescription = null,
+                            modifier = Modifier.size(20.dp),
+                            tint = tokens.accent,
+                        )
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = feature.label,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = tokens.ink,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            Text(
+                                text = candidate.title,
+                                fontSize = 11.sp,
+                                lineHeight = 15.sp,
+                                color = tokens.ink2,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    }
                 }
             }
         }

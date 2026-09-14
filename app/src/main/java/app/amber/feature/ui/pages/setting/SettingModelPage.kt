@@ -427,11 +427,12 @@ private fun ImagePromptInjectionSheet(
 }
 
 @Composable
-private fun DefaultTitleModelSetting(
+internal fun DefaultTitleModelSetting(
     settings: Settings,
     vm: SettingVM,
 ) {
     var showModal by remember { mutableStateOf(false) }
+    var draftPrompt by remember { mutableStateOf(settings.titlePrompt) }
     ModelTaskSetting(
         title = stringResource(R.string.setting_model_page_title_model),
         description = stringResource(R.string.setting_model_page_title_model_desc),
@@ -447,20 +448,23 @@ private fun DefaultTitleModelSetting(
         onClear = {
             vm.updateSettings(settings.copy(titleModelId = DEFAULT_AUTO_MODEL_ID))
         },
-        onOpenParams = { showModal = true },
+        onOpenParams = {
+            draftPrompt = settings.titlePrompt
+            showModal = true
+        },
     )
     if (showModal) {
         ModelPromptSheet(
             title = stringResource(R.string.setting_model_page_title_model),
             variableHint = stringResource(R.string.setting_model_page_suggestion_prompt_vars),
-            prompt = settings.titlePrompt,
-            onPromptChange = {
-                vm.updateSettings(settings.copy(titlePrompt = it))
-            },
-            onReset = {
-                vm.updateSettings(settings.copy(titlePrompt = DEFAULT_TITLE_PROMPT))
-            },
+            prompt = draftPrompt,
+            onPromptChange = { draftPrompt = it },
+            onReset = { draftPrompt = DEFAULT_TITLE_PROMPT },
             onDismissRequest = { showModal = false },
+            onSave = {
+                val savedPrompt = draftPrompt
+                vm.updateSettings { current -> current.copy(titlePrompt = savedPrompt) }
+            },
         )
     }
 }
@@ -471,6 +475,7 @@ private fun DefaultSuggestionModelSetting(
     vm: SettingVM,
 ) {
     var showModal by remember { mutableStateOf(false) }
+    var draftPrompt by remember { mutableStateOf(settings.suggestionPrompt) }
     ModelTaskSetting(
         title = stringResource(R.string.setting_model_page_suggestion_model),
         description = stringResource(R.string.setting_model_page_suggestion_model_desc),
@@ -486,20 +491,23 @@ private fun DefaultSuggestionModelSetting(
         onClear = {
             vm.updateSettings(settings.copy(suggestionModelId = DEFAULT_AUTO_MODEL_ID))
         },
-        onOpenParams = { showModal = true },
+        onOpenParams = {
+            draftPrompt = settings.suggestionPrompt
+            showModal = true
+        },
     )
     if (showModal) {
         ModelPromptSheet(
             title = stringResource(R.string.setting_model_page_suggestion_model),
             variableHint = stringResource(R.string.setting_model_page_suggestion_prompt_vars),
-            prompt = settings.suggestionPrompt,
-            onPromptChange = {
-                vm.updateSettings(settings.copy(suggestionPrompt = it))
-            },
-            onReset = {
-                vm.updateSettings(settings.copy(suggestionPrompt = DEFAULT_SUGGESTION_PROMPT))
-            },
+            prompt = draftPrompt,
+            onPromptChange = { draftPrompt = it },
+            onReset = { draftPrompt = DEFAULT_SUGGESTION_PROMPT },
             onDismissRequest = { showModal = false },
+            onSave = {
+                val savedPrompt = draftPrompt
+                vm.updateSettings { current -> current.copy(suggestionPrompt = savedPrompt) }
+            },
         )
     }
 }
@@ -510,6 +518,7 @@ private fun DefaultOcrModelSetting(
     vm: SettingVM,
 ) {
     var showModal by remember { mutableStateOf(false) }
+    var draftPrompt by remember { mutableStateOf(settings.ocrPrompt) }
     val context = LocalContext.current
     val healthStrings = remember(context) { VisionModelHealthStrings.from(context) }
     val providerCatalog = koinInject<ProviderCatalog>()
@@ -537,20 +546,23 @@ private fun DefaultOcrModelSetting(
         onSelect = {
             vm.updateSettings(settings.copy(ocrModelId = it.id))
         },
-        onOpenParams = { showModal = true },
+        onOpenParams = {
+            draftPrompt = resolveVisionRecognitionPrompt(settings.ocrPrompt)
+            showModal = true
+        },
     )
     if (showModal) {
         ModelPromptSheet(
             title = stringResource(R.string.setting_model_page_ocr_model),
             variableHint = stringResource(R.string.setting_model_page_ocr_prompt_vars),
-            prompt = resolveVisionRecognitionPrompt(settings.ocrPrompt),
-            onPromptChange = {
-                vm.updateSettings(settings.copy(ocrPrompt = it))
-            },
-            onReset = {
-                vm.updateSettings(settings.copy(ocrPrompt = DEFAULT_OCR_PROMPT))
-            },
+            prompt = draftPrompt,
+            onPromptChange = { draftPrompt = it },
+            onReset = { draftPrompt = DEFAULT_OCR_PROMPT },
             onDismissRequest = { showModal = false },
+            onSave = {
+                val savedPrompt = draftPrompt
+                vm.updateSettings { current -> current.copy(ocrPrompt = savedPrompt) }
+            },
         )
     }
 }
@@ -561,6 +573,7 @@ private fun DefaultCompressModelSetting(
     vm: SettingVM,
 ) {
     var showModal by remember { mutableStateOf(false) }
+    var draftPrompt by remember { mutableStateOf(settings.compressPrompt) }
     ModelTaskSetting(
         title = stringResource(R.string.setting_model_page_compress_model),
         description = stringResource(R.string.setting_model_page_compress_model_desc),
@@ -576,20 +589,23 @@ private fun DefaultCompressModelSetting(
         onClear = {
             vm.updateSettings(settings.copy(compressModelId = DEFAULT_AUTO_MODEL_ID))
         },
-        onOpenParams = { showModal = true },
+        onOpenParams = {
+            draftPrompt = settings.compressPrompt
+            showModal = true
+        },
     )
     if (showModal) {
         ModelPromptSheet(
             title = stringResource(R.string.setting_model_page_compress_model),
             variableHint = stringResource(R.string.setting_model_page_compress_prompt_vars),
-            prompt = settings.compressPrompt,
-            onPromptChange = {
-                vm.updateSettings(settings.copy(compressPrompt = it))
-            },
-            onReset = {
-                vm.updateSettings(settings.copy(compressPrompt = DEFAULT_COMPRESS_PROMPT))
-            },
+            prompt = draftPrompt,
+            onPromptChange = { draftPrompt = it },
+            onReset = { draftPrompt = DEFAULT_COMPRESS_PROMPT },
             onDismissRequest = { showModal = false },
+            onSave = {
+                val savedPrompt = draftPrompt
+                vm.updateSettings { current -> current.copy(compressPrompt = savedPrompt) }
+            },
         )
     }
 }
@@ -1043,12 +1059,6 @@ private fun ModelPromptSheet(
                     minHeight = 150.dp,
                 )
             }
-            ProviderGhostButton(
-                text = stringResource(R.string.setting_model_page_reset_to_default),
-                onClick = onReset,
-                accent = false,
-                modifier = Modifier.align(Alignment.End),
-            )
             ModelPromptActionBar(
                 resetText = stringResource(R.string.setting_model_page_reset_to_default),
                 onReset = onReset,

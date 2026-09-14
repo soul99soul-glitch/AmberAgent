@@ -50,6 +50,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.foundation.text.KeyboardOptions
@@ -156,7 +157,7 @@ internal fun WebDavDraft.syncFrom(config: WebDavConfig): WebDavDraft = copy(
 )
 
 @Composable
-private fun BackupCompactField(
+internal fun BackupCompactField(
     label: String,
     value: String,
     onValueChange: (String) -> Unit,
@@ -177,10 +178,12 @@ private fun BackupCompactField(
     ) {
         Text(
             text = label,
+            modifier = Modifier
+                .testTag("backup-compact-field-label")
+                .width(88.dp),
             style = type.secondary.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.Medium),
             color = tokens.ink3,
-            maxLines = 1,
-            modifier = Modifier.width(88.dp),
+            softWrap = true,
         )
         BasicTextField(
             value = value,

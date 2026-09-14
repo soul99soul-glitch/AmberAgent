@@ -3407,4 +3407,9 @@
   <string name="subagent_dock_progress_note">进展记录</string>
     <string name="subagent_dock_close">关闭</string>
     <string name="subagent_dock_swipe_hint">上滑展开，下滑收回</string>
+  <string name="zcode_agent_access_label">允许 Amber 通过 WebMount 使用此连接</string>
+  <string name="zcode_agent_access_description">启用 WebMount 后，再允许 Amber 使用这条已保存的 ZCode 连接。Amber 不会自动修改 WebMount 设置。</string>
+  <string name="zcode_preparing_session">正在准备 ZCode 浏览器会话…</string>
+  <string name="zcode_session_unavailable">无法准备 ZCode 浏览器会话，请重试。</string>
+  <string name="zcode_connection_changed">打开时 ZCode 连接已更改，请返回连接页后重新打开。</string>
 </resources>

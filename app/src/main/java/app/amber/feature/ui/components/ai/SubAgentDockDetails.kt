@@ -4,6 +4,7 @@ import app.amber.ai.ui.UIMessagePart
 import app.amber.feature.subagent.SubAgentManager
 import app.amber.feature.subagent.SubAgentResult
 import app.amber.feature.subagent.SubAgentRun
+import app.amber.feature.subagent.SubAgentRunStatus
 import app.amber.feature.subagent.ThreadGraphManager
 import app.amber.feature.task.AgentTaskSnapshot
 import app.amber.feature.task.AgentTaskStatus
@@ -137,11 +138,12 @@ internal fun subAgentDockDetailsFlow(
                         return@mapLatest SubAgentDockDetails()
                     }
                     val liveRun = input.run?.takeIf { it.matches(snapshot) }
-                    val active = snapshot.status.isActiveTaskStatus()
-                    if (!persistedLoaded && input.run == null && !active) {
+                    val taskActive = snapshot.status.isActiveTaskStatus()
+                    if (!persistedLoaded && input.run == null && !taskActive) {
                         persistedState = subAgentManager.persistedState(key.taskId)
                         persistedLoaded = true
                     }
+                    val active = snapshot.isActiveWithPersistedState(persistedState)
                     val followupSeedNow = active &&
                         liveRun != null &&
                         liveRun.startedAtMs < key.createdAtMs &&
@@ -185,7 +187,7 @@ internal fun buildDockDetails(
     followupSeed: String?,
     transcript: TranscriptDockDetails,
 ): SubAgentDockDetails {
-    val active = snapshot.status.isActiveTaskStatus()
+    val active = snapshot.isActiveWithPersistedState(persistedState)
     val objective = if (active) {
         (liveRun?.task?.objective?.takeIf { it.isNotBlank() }
             ?: snapshot.summary?.takeIf { it.isNotBlank() })?.let(::boundedObjective)
@@ -384,6 +386,14 @@ private fun SubAgentRun.matches(snapshot: AgentTaskSnapshot): Boolean =
 
 private fun AgentTaskStatus.isActiveTaskStatus(): Boolean =
     this == AgentTaskStatus.QUEUED || this == AgentTaskStatus.RUNNING
+
+private fun AgentTaskSnapshot.isActiveWithPersistedState(
+    persistedState: ThreadGraphManager.ThreadGraphState?,
+): Boolean = status.isActiveTaskStatus() || (
+    status == AgentTaskStatus.INTERRUPTED &&
+    persistedState?.status == SubAgentRunStatus.APPROVAL_REQUIRED &&
+        persistedState.updatedAtMs >= createdAtMs
+    )
 
 private val transcriptJson = Json { ignoreUnknownKeys = true }
 

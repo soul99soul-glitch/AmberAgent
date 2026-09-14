@@ -12,6 +12,7 @@ import app.amber.feature.webmount.primitives.WebMountSessionOwner
 import app.amber.feature.webmount.profile.ProfileBridge
 import app.amber.feature.webmount.profile.ProfileRegistry
 import app.amber.feature.webmount.usersites.UserSiteRegistry
+import app.amber.feature.ui.pages.zcode.ZCodeUrlStore
 
 /**
  * Thin coordinator for the 23 WebMount primitive tools. All per-tool logic
@@ -48,6 +49,7 @@ class WebMountPrimitiveTools(
     private val oauthStore: WebMountOAuthTokenStore,
     private val settingsStore: SettingsAggregator,
     private val sessionOwner: WebMountSessionOwner,
+    private val zCodeUrlStore: ZCodeUrlStore,
 ) {
     private val deps = WebMountDeps(pool, activityStore, sessionOwner, context)
 
@@ -101,7 +103,7 @@ class WebMountPrimitiveTools(
         siteAddTool,
         siteRemoveTool,
         profileSynthesizeTool,
-    ).map { tool ->
+    ).plus(zCodeTools.tools()).map { tool ->
         // Tool.execute only receives JSON. Carry the already resolved
         // conversation/run scope through private fields so every factory can
         // acquire the same AGENT lease without introducing global context.
@@ -116,6 +118,7 @@ class WebMountPrimitiveTools(
     }
 
     private val openTool by lazy { createOpenTool(deps, profileRegistry, cookieProvider, manager) }
+    private val zCodeTools by lazy { WebMountZCodeTools(deps, zCodeUrlStore, manager) }
     private val stateTool by lazy { createStateTool(deps, profileRegistry, cookieProvider, manager) }
     private val observeTool by lazy { createObserveTool(deps) }
     private val extractTool by lazy { createExtractTool(deps) }

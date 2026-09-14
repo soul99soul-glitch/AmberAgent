@@ -203,6 +203,65 @@ class SubAgentDockStateTest {
     }
 
     @Test
+    fun persistedApprovalProjectsOnlyOntoTheMatchingRecoveredGeneration() {
+        val tracker = SubAgentDockTracker()
+        val recovered = snapshot(status = AgentTaskStatus.INTERRUPTED, createdAtMs = 100L, updatedAtMs = 140L)
+        val key = SubAgentDockRunKey(recovered.taskId, recovered.createdAtMs)
+        val persistedApproval = mapOf(key to SubAgentRunStatus.APPROVAL_REQUIRED)
+
+        assertEquals(
+            SubAgentDockStatus.APPROVAL_REQUIRED,
+            tracker.reduce(
+                snapshots = listOf(recovered),
+                liveRuns = emptyMap(),
+                persistedStatuses = persistedApproval,
+                processRunKeys = setOf(key),
+            ).tasks.single().status,
+        )
+
+        val replacement = recovered.copy(createdAtMs = 200L, updatedAtMs = 240L)
+        assertEquals(
+            SubAgentDockStatus.INTERRUPTED,
+            tracker.reduce(
+                snapshots = listOf(replacement),
+                liveRuns = emptyMap(),
+                persistedStatuses = persistedApproval,
+                processRunKeys = setOf(replacement.toDockKeyForTest()),
+            ).tasks.single().status,
+        )
+
+        val details = buildDockDetails(
+            snapshot = recovered.copy(summary = "approval objective"),
+            liveRun = null,
+            liveText = "",
+            liveParts = emptyList(),
+            persistedState = ThreadGraphManager.ThreadGraphState(
+                status = SubAgentRunStatus.APPROVAL_REQUIRED,
+                startedAtMs = 100L,
+                updatedAtMs = 140L,
+            ),
+            followupSeed = null,
+            transcript = TranscriptDockDetails(),
+        )
+        assertEquals("approval objective", details.objective)
+
+        val cancelledDetails = buildDockDetails(
+            snapshot = recovered.copy(status = AgentTaskStatus.CANCELLED, summary = "cancelled objective"),
+            liveRun = null,
+            liveText = "",
+            liveParts = emptyList(),
+            persistedState = ThreadGraphManager.ThreadGraphState(
+                status = SubAgentRunStatus.APPROVAL_REQUIRED,
+                startedAtMs = 100L,
+                updatedAtMs = 140L,
+            ),
+            followupSeed = null,
+            transcript = TranscriptDockDetails(),
+        )
+        assertEquals(null, cancelledDetails.objective)
+    }
+
+    @Test
     fun runningSnapshotSummaryIsExposedOnlyAsObjective() {
         val running = snapshot(
             status = AgentTaskStatus.RUNNING,
@@ -326,6 +385,33 @@ class SubAgentDockStateTest {
     }
 
     @Test
+    fun structuredFollowupOutputKeepsPreviousAnswerSeparate() {
+        val terminal = snapshot(status = AgentTaskStatus.COMPLETED, createdAtMs = 900L, updatedAtMs = 950L)
+        val details = buildDockDetails(
+            snapshot = terminal,
+            liveRun = liveRun(
+                taskId = terminal.taskId,
+                status = SubAgentRunStatus.COMPLETED,
+                updatedAtMs = 950L,
+            ).copy(
+                displayText = "",
+                result = SubAgentResult(
+                    status = SubAgentRunStatus.COMPLETED,
+                    summary = "new structured result",
+                ),
+            ),
+            liveText = "",
+            liveParts = emptyList(),
+            persistedState = null,
+            followupSeed = "previous answer",
+            transcript = TranscriptDockDetails(previousOutput = "previous answer"),
+        )
+
+        assertTrue(details.output.contains("new structured result"))
+        assertEquals("previous answer", details.previousOutput)
+    }
+
+    @Test
     fun aRecoveredFollowupDoesNotShowThePreviousPersistedAnswerAsItsOwn() {
         val terminal = snapshot(status = AgentTaskStatus.INTERRUPTED, createdAtMs = 700L, updatedAtMs = 900L)
         val persisted = ThreadGraphManager.ThreadGraphState(
@@ -359,6 +445,8 @@ class SubAgentDockStateTest {
         createdAtMs = createdAtMs,
         updatedAtMs = updatedAtMs,
     )
+
+    private fun AgentTaskSnapshot.toDockKeyForTest() = SubAgentDockRunKey(taskId, createdAtMs)
 
     private fun liveRun(
         taskId: String,

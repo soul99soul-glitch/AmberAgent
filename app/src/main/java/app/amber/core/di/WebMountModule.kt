@@ -37,7 +37,9 @@ import app.amber.feature.webmount.profile.ProfileRegistry
 import app.amber.feature.webmount.tools.WebMountPageSnapshotCache
 import app.amber.feature.webmount.tools.WebMountPrimitiveTools
 import app.amber.feature.webmount.usersites.UserSiteRegistry
+import app.amber.feature.ui.pages.zcode.ZCodeUrlStore
 import app.amber.core.settings.prefs.SettingsAggregator
+import kotlinx.coroutines.flow.first
 import org.koin.dsl.module
 
 /**
@@ -138,7 +140,18 @@ val webMountModule = module {
         )
     }
 
-    single { WebMountSessionOwner(context = get(), pool = get()) }
+    single {
+        WebMountSessionOwner(
+            context = get(),
+            pool = get(),
+            resolveZCodeReopenUrl = { sessionId ->
+                val connection = get<ZCodeUrlStore>().connectionFlow.first()
+                connection.sessionId
+                    ?.takeIf { it == sessionId }
+                    ?.let { connection.url }
+            },
+        )
+    }
 
     single { ProfileRegistry(context = get()) }
 
@@ -161,6 +174,7 @@ val webMountModule = module {
             oauthStore = get(),
             settingsStore = get<SettingsAggregator>(),
             sessionOwner = get(),
+            zCodeUrlStore = get(),
         )
     }
 }

@@ -36,7 +36,8 @@ import kotlinx.serialization.json.contentOrNull
  * - network (args carry the outbound URL): WorkspaceArtifactTools.kt
  *   (http_request, download_file), SearchTools.kt (scrape_web), WebViewTools.kt
  *   (webview_open, webview_open_link), WebMountNavigationTools.kt (wm_open),
- *   WebMountFetchTools.kt (wm_signed_fetch), WebMountSiteTools.kt (wm_site_add),
+ *   WebMountZCodeTools.kt (wm_zcode_open/read/ask), WebMountFetchTools.kt
+ *   (wm_signed_fetch), WebMountSiteTools.kt (wm_site_add),
  *   ScreenAutomationTools.kt (screen_open_url), IntentAccessTools.kt
  *   (intent_open's optional `data_uri`), FeishuOfficeTools.kt (officepro_open's
  *   optional `url`), DeepReadOpenTool.kt (deep_read_open's optional
@@ -223,6 +224,13 @@ internal object ExecutionPolicyGate {
         "wm_open" to UrlArg("url", required = true),
         "wm_signed_fetch" to UrlArg("url", required = true),
         "wm_site_add" to UrlArg("url", required = true),
+        // ZCode tools use a host-owned saved share URL. The model only sends
+        // the selected origin (never the credential-bearing query); open may
+        // omit it for a discovery-only result, while read/ask must identify
+        // the origin the caller inspected and approved.
+        "wm_zcode_open" to UrlArg("url", required = false),
+        "wm_zcode_read" to UrlArg("url", required = true),
+        "wm_zcode_ask" to UrlArg("url", required = true),
         // P1-4: outbound-URL tools that were missing from the domain table.
         // screen_open_url requires an http(s) URL (tool-enforced); the other
         // three accept absent arguments and/or non-web schemes.

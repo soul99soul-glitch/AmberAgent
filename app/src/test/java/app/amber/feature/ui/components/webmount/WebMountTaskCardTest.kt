@@ -12,6 +12,14 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.test.onAllNodesWithText
+import org.junit.Assert.assertFalse
+import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.test.assertHeightIsEqualTo
+import androidx.compose.ui.unit.dp
+import org.junit.Assert.assertTrue
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotDisplayed
 import androidx.compose.ui.test.hasScrollAction
@@ -109,6 +117,10 @@ class WebMountTaskCardTest {
             }
         }
 
+        val layouts = mutableListOf<TextLayoutResult>()
+        val actionLabel = compose.onAllNodesWithText("查看", useUnmergedTree = true)[0].fetchSemanticsNode()
+        assertTrue(actionLabel.config[SemanticsActions.GetTextLayoutResult].action?.invoke(layouts) == true)
+        assertFalse("Action text must not be clipped at large font scale", layouts.single().didOverflowHeight)
         compose.onNodeWithText("会话 0").assertIsDisplayed()
         compose.onNodeWithText("会话 7").assertIsNotDisplayed()
         compose.onNode(hasScrollAction()).performScrollToNode(hasText("会话 7"))
@@ -119,7 +131,8 @@ class WebMountTaskCardTest {
     fun cardCanCollapseExpandAnimateActivityAndDismiss() {
         val session = WebMountSessionMetadata(
             sessionId = "wm_activity",
-            title = "云盘",
+            title = "iCloud 云盘",
+            redactedUrl = "https://www.icloud.com/iclouddrive/",
             status = "ready",
         )
         var activity by mutableStateOf<String?>("打开云盘")
@@ -148,8 +161,22 @@ class WebMountTaskCardTest {
                 bitmap.compress(Bitmap.CompressFormat.PNG, 100, it)
             }
         }
+        val expandedHeight = compose.onRoot().fetchSemanticsNode().boundsInRoot.height
+        compose.mainClock.autoAdvance = false
         compose.onNodeWithContentDescription("折叠").performClick()
+        // Android measurement follows the Compose frame; sample completed frames
+        // rather than assuming that the transition starts on the click's frame.
+        val heights = (1..12).map {
+            compose.mainClock.advanceTimeByFrame()
+            compose.waitForIdle()
+            compose.onRoot().fetchSemanticsNode().boundsInRoot.height
+        }
+        assertTrue("Height transition: $expandedHeight -> $heights", heights.any { it < expandedHeight && it > 36f })
+        compose.mainClock.advanceTimeBy(400)
+        compose.mainClock.autoAdvance = true
         compose.onNodeWithText("打开云盘").assertIsDisplayed()
+        compose.onNodeWithContentDescription("关闭").assertDoesNotExist()
+        compose.onRoot().assertHeightIsEqualTo(36.dp)
 
         compose.runOnIdle {
             val view = requireNotNull(renderedView)
@@ -159,9 +186,9 @@ class WebMountTaskCardTest {
                 bitmap.compress(Bitmap.CompressFormat.PNG, 100, it)
             }
         }
-        compose.onNodeWithContentDescription("展开").performTouchInput { swipeUp() }
-        compose.onNodeWithText("浏览器任务").assertIsDisplayed()
-        compose.onNodeWithContentDescription("折叠").performTouchInput { swipeDown() }
+        compose.onNodeWithContentDescription("展开").performTouchInput { swipeUp(startY = height - 1f, endY = 1f) }
+        compose.onNodeWithText("iCloud 云盘").assertIsDisplayed()
+        compose.onNodeWithContentDescription("折叠").performTouchInput { swipeDown(startY = 1f, endY = height - 1f) }
         compose.onNodeWithContentDescription("展开").assertIsDisplayed()
 
         compose.runOnIdle { activity = "读取文件" }

@@ -153,17 +153,23 @@ class ThemePackageManagerTest {
     }
 
     @Test
-    fun `remove deletes the package from the library`() = runTest {
+    fun `remove active package clears marker and preserves applied display settings`() = runTest {
         val store = FakeThemeSettingsStore(Settings(displaySetting = DisplaySetting()))
         val manager = ThemePackageManager(dao = db.themePackageDao(), settingsStore = store)
         val imported = manager.importPackage(exportJson(customDisplay())) as ThemePackageImportResult.Preview
         assertNull(db.themePackageDao().getById(imported.pkg.id))
         assertEquals(ThemePackageApplyResult.Applied, manager.applyPrepared(imported.pkg.id, imported.candidateDigest))
         assertNotNull(db.themePackageDao().getById(imported.pkg.id))
+        val activeDisplay = store.current.displaySetting
+        assertEquals(imported.pkg.id, activeDisplay.appliedThemePackageId)
 
         assertTrue(manager.remove(imported.pkg.id))
 
         assertNull(db.themePackageDao().getById(imported.pkg.id))
+        assertEquals(
+            activeDisplay.copy(appliedThemePackageId = null),
+            store.current.displaySetting,
+        )
     }
 
     @Test

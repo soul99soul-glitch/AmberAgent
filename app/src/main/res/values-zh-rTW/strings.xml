@@ -3361,4 +3361,9 @@
     <string name="subagent_dock_dismiss">收起此任務</string>
     <string name="subagent_dock_status_queued">已排隊</string>
   <string name="skills_page_github_action_short">GitHub匯入</string>
+  <string name="zcode_agent_access_label">允許 Amber 透過 WebMount 使用此連結</string>
+  <string name="zcode_agent_access_description">請先在設定中開啟 WebMount，再允許 Amber 使用這條已儲存的 ZCode 連線。Amber 不會自動修改 WebMount 設定。</string>
+  <string name="zcode_preparing_session">正在準備 ZCode 瀏覽器工作階段…</string>
+  <string name="zcode_session_unavailable">無法準備 ZCode 瀏覽器工作階段，請重試。</string>
+  <string name="zcode_connection_changed">開啟時 ZCode 連線已變更，請返回連線頁後重新開啟。</string>
 </resources>

@@ -42,6 +42,7 @@ import androidx.compose.runtime.mutableStateOf
 import com.composables.icons.lucide.EllipsisVertical
 import androidx.compose.runtime.remember
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -51,6 +52,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.ImeAction
@@ -280,7 +282,7 @@ fun SkillsPage() {
 }
 
 @Composable
-private fun SkillLibraryStatusCard(
+internal fun SkillLibraryStatusCard(
     installedCount: Int,
     enabledCount: Int,
     disabledCount: Int,
@@ -323,7 +325,12 @@ private fun SkillLibraryStatusCard(
                         style = type.sessionTitle,
                         color = tokens.ink,
                     )
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Row(
+                        modifier = Modifier
+                            .testTag("skills-status-pills")
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
                         // V3 settings-skills.jsx: 三 pill 中只有"已启用"用 accentSoft + accent，
                         // 不要绿色。设计稿原注释 "single accent color, no green"
                         WorkspaceStatusPill(

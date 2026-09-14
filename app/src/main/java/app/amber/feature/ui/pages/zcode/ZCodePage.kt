@@ -3,6 +3,7 @@ package app.amber.feature.ui.pages.zcode
 import androidx.annotation.StringRes
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
@@ -28,6 +29,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
@@ -40,6 +42,7 @@ import app.amber.feature.ui.components.ds.AmberCard
 import app.amber.feature.ui.components.ds.SectionLabel
 import app.amber.feature.ui.components.ds.amberCanvas
 import app.amber.feature.ui.components.ui.WorkspaceTopBar
+import app.amber.feature.ui.components.ui.Switch
 import app.amber.feature.ui.context.LocalNavController
 import app.amber.feature.ui.context.LocalToaster
 import app.amber.feature.ui.theme.LocalAmberTokens
@@ -53,8 +56,8 @@ import com.composables.icons.lucide.ScanQrCode
 import org.koin.compose.koinInject
 
 /**
- * ZCode companion: paste the share URL from 智谱 ZCode and open its mobile web UI.
- * No special bridge — ZCode is already a mobile-ready HTML page.
+ * ZCode companion: paste the share URL from 智谱 ZCode and open the pooled
+ * WebMount page so Amber can optionally consult the same browser session.
  */
 @Composable
 fun ZCodePage(
@@ -68,7 +71,8 @@ fun ZCodePage(
     val scanNotUrlMessage = stringResource(R.string.zcode_scan_not_url)
     val cameraPermissionMessage = stringResource(R.string.zcode_camera_permission_required)
     val scanFailedShortMessage = stringResource(R.string.zcode_scan_failed_short)
-    val saved by store.urlFlow.collectAsStateWithLifecycle(initialValue = "")
+    val connection by store.connectionFlow.collectAsStateWithLifecycle(initialValue = ZCodeConnection())
+    val saved = connection.url
     var draft by remember { mutableStateOf("") }
     var error by remember { mutableStateOf<ZCodeUiMessage?>(null) }
 
@@ -172,6 +176,31 @@ fun ZCodePage(
                             }
                         },
                     )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                stringResource(R.string.zcode_agent_access_label),
+                                style = type.body,
+                                color = t.ink,
+                            )
+                            Text(
+                                stringResource(R.string.zcode_agent_access_description),
+                                style = type.secondary,
+                                color = t.ink3,
+                            )
+                        }
+                        Switch(
+                            checked = connection.agentEnabled,
+                            enabled = normalizeZCodeUrl(draft) == saved && saved.isNotBlank(),
+                            onCheckedChange = { enabled ->
+                                scope.launch { store.setAgentEnabled(enabled) }
+                            },
+                        )
+                    }
                     error?.let {
                         Text(
                             text = stringResource(it.resourceId, *it.formatArgs.toTypedArray()),
@@ -213,6 +242,11 @@ internal fun normalizeZCodeUrl(raw: String): String? {
         val scheme = uri.scheme?.lowercase()
         if (scheme != "http" && scheme != "https") return null
         if (uri.host.isNullOrBlank()) return null
+        // A share URL is later loaded by a pooled WebView. Do not accept
+        // credential-bearing authorities or ports outside the TCP range.
+        if (uri.rawUserInfo != null) return null
+        if (uri.port == 0 || uri.port !in -1..65_535) return null
+        if (uri.rawAuthority?.endsWith(":") == true) return null
         withScheme
     }.getOrNull()
 }

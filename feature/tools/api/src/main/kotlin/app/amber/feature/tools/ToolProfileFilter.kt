@@ -90,6 +90,8 @@ object ToolProfileFilter {
         "wm_forward",
         "wm_network_inspect",
         "wm_recipe_candidates",
+        "wm_zcode_open",
+        "wm_zcode_read",
         "hn_top",
         "hn_item_read",
         "hn_user_read",

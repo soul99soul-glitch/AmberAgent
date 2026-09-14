@@ -80,6 +80,12 @@ sealed interface WebMountLeaseResult {
 class WebMountSessionOwner(
     context: Context,
     private val pool: WebViewPool,
+    /**
+     * Host-owned resolver for credential-bearing ZCode reopen URLs. The
+     * resolver must return a URL only when [sessionId] is still the selected
+     * connection's exact session id; null deliberately means no fallback.
+     */
+    private val resolveZCodeReopenUrl: suspend (sessionId: String) -> String? = { null },
 ) {
     private val prefs = context.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
     private val lock = Any()
@@ -312,7 +318,23 @@ class WebMountSessionOwner(
         conversationId: String? = null,
     ): WebMountLeaseResult {
         val normalizedSessionId = sessionId.trim()
-        val safeUrl = safeReopenUrl(metadata(normalizedSessionId)?.redactedUrl)
+        val safeUrl = if (normalizedSessionId.startsWith("wm_zcode_")) {
+            // ZCode's share credential lives in the user-owned connection
+            // store, while session metadata intentionally stores only a
+            // redacted URL. Never reconstruct a ZCode URL from metadata and
+            // never fall back when the selected connection no longer matches.
+            val resolved = try {
+                resolveZCodeReopenUrl(normalizedSessionId)
+            } catch (cancel: CancellationException) {
+                throw cancel
+            } catch (_: Throwable) {
+                null
+            }
+            resolved
+                ?.let(::safeZCodeReopenUrl)
+        } else {
+            safeReopenUrl(metadata(normalizedSessionId)?.redactedUrl)
+        }
         if (safeUrl == null) {
             return WebMountLeaseResult.Rejected(
                 WebMountLeaseFailure.NEEDS_REOPEN,
@@ -329,7 +351,12 @@ class WebMountSessionOwner(
         val lease = (claimed as? WebMountLeaseResult.Granted)?.lease
             ?: return claimed
         return try {
-            val state = lease.handle.loadUrl(safeUrl)
+            val state = lease.handle.loadUrl(
+                safeUrl,
+                dispatchWithLease = { action ->
+                    dispatchIfHumanActive(lease.leaseId, action)
+                },
+            )
             if (state.status == SessionHandle.LoadStatus.READY) {
                 claimed
             } else {
@@ -395,6 +422,22 @@ class WebMountSessionOwner(
         ) {
             return@synchronized false
         }
+        action()
+        true
+    }
+
+    /**
+     * Dispatch the one synchronous navigation needed while preparing an
+     * explicitly opened ZCode page. HUMAN leases do not carry an agent
+     * conversation/run identity, so they use this narrow lease-only guard.
+     */
+    fun dispatchIfHumanActive(
+        leaseId: String,
+        action: () -> Unit,
+    ): Boolean = synchronized(lock) {
+        expireAgentLeasesLocked(System.currentTimeMillis())
+        val active = activeLeases[leaseId] ?: return@synchronized false
+        if (active.owner != WebMountOwner.HUMAN) return@synchronized false
         action()
         true
     }
@@ -731,6 +774,21 @@ class WebMountSessionOwner(
         if (path.any { it.isISOControl() }) return null
         val port = if (uri.port >= 0) ":${uri.port}" else ""
         return "$scheme://${host.lowercase(Locale.ROOT)}$port$path"
+    }
+
+    /**
+     * Validate a complete host-owned ZCode URL without stripping its share
+     * query/fragment. The value is used only for this in-memory load; normal
+     * owner metadata and page summaries still pass through redaction.
+     */
+    private fun safeZCodeReopenUrl(url: String): String? {
+        val uri = runCatching { URI(url.trim()) }.getOrNull() ?: return null
+        val scheme = uri.scheme?.lowercase(Locale.ROOT)
+        if (scheme != "http" && scheme != "https") return null
+        val host = uri.host?.takeIf { it.isNotBlank() } ?: return null
+        if (uri.userInfo != null) return null
+        if (url.any { it.isISOControl() }) return null
+        return url.trim()
     }
 
     private fun publishLocked() {
