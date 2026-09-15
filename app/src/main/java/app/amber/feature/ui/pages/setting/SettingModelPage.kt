@@ -223,7 +223,7 @@ private fun DefaultChatModelSetting(
             description = null,
             modelId = settings.chatModelId,
             providers = settings.providers,
-            onSelect = { vm.updateSettings(settings.copy(chatModelId = it.id)) },
+            onSelect = { vm.updateSettings { current -> current.copy(chatModelId = it.id) } },
         )
     }
     if (showParams) {
@@ -291,10 +291,10 @@ private fun DefaultImageGenerationModelSetting(
             emptyLabel = stringResource(R.string.setting_model_page_image_gen_model_empty),
             clearContentDescription = stringResource(R.string.setting_model_page_image_gen_model_clear),
             onClear = {
-                vm.updateSettings(settings.copy(imageGenerationModelId = DEFAULT_AUTO_MODEL_ID))
+                vm.updateSettings { current -> current.copy(imageGenerationModelId = DEFAULT_AUTO_MODEL_ID) }
             },
             onSelect = {
-                vm.updateSettings(settings.copy(imageGenerationModelId = it.id))
+                vm.updateSettings { current -> current.copy(imageGenerationModelId = it.id) }
             },
         )
     }
@@ -443,10 +443,10 @@ internal fun DefaultTitleModelSetting(
         followsChatModel = settings.findModelById(settings.titleModelId) == null,
         fallbackModel = settings.resolveTaskChatModel(settings.titleModelId),
         onSelect = {
-            vm.updateSettings(settings.copy(titleModelId = it.id))
+            vm.updateSettings { current -> current.copy(titleModelId = it.id) }
         },
         onClear = {
-            vm.updateSettings(settings.copy(titleModelId = DEFAULT_AUTO_MODEL_ID))
+            vm.updateSettings { current -> current.copy(titleModelId = DEFAULT_AUTO_MODEL_ID) }
         },
         onOpenParams = {
             draftPrompt = settings.titlePrompt
@@ -486,10 +486,10 @@ private fun DefaultSuggestionModelSetting(
         followsChatModel = settings.findModelById(settings.suggestionModelId) == null,
         fallbackModel = settings.resolveTaskChatModel(settings.suggestionModelId),
         onSelect = {
-            vm.updateSettings(settings.copy(suggestionModelId = it.id))
+            vm.updateSettings { current -> current.copy(suggestionModelId = it.id) }
         },
         onClear = {
-            vm.updateSettings(settings.copy(suggestionModelId = DEFAULT_AUTO_MODEL_ID))
+            vm.updateSettings { current -> current.copy(suggestionModelId = DEFAULT_AUTO_MODEL_ID) }
         },
         onOpenParams = {
             draftPrompt = settings.suggestionPrompt
@@ -544,7 +544,7 @@ private fun DefaultOcrModelSetting(
         providers = settings.providers,
         preferredInputModality = Modality.IMAGE,
         onSelect = {
-            vm.updateSettings(settings.copy(ocrModelId = it.id))
+            vm.updateSettings { current -> current.copy(ocrModelId = it.id) }
         },
         onOpenParams = {
             draftPrompt = resolveVisionRecognitionPrompt(settings.ocrPrompt)
@@ -584,10 +584,10 @@ private fun DefaultCompressModelSetting(
         followsChatModel = settings.findModelById(settings.compressModelId) == null,
         fallbackModel = settings.resolveTaskChatModel(settings.compressModelId),
         onSelect = {
-            vm.updateSettings(settings.copy(compressModelId = it.id))
+            vm.updateSettings { current -> current.copy(compressModelId = it.id) }
         },
         onClear = {
-            vm.updateSettings(settings.copy(compressModelId = DEFAULT_AUTO_MODEL_ID))
+            vm.updateSettings { current -> current.copy(compressModelId = DEFAULT_AUTO_MODEL_ID) }
         },
         onOpenParams = {
             draftPrompt = settings.compressPrompt
@@ -642,28 +642,28 @@ private fun DefaultMemoryWorkerModelSetting(
             },
             clearContentDescription = stringResource(R.string.setting_model_page_restore_follow_compress_model),
             onClear = {
-                vm.updateSettings(
-                    settings.copy(
-                        agentRuntime = settings.agentRuntime.copy(
-                            memoryWorker = worker.copy(
+                vm.updateSettings { current ->
+                    current.copy(
+                        agentRuntime = current.agentRuntime.copy(
+                            memoryWorker = current.agentRuntime.memoryWorker.copy(
                                 modelId = DEFAULT_AUTO_MODEL_ID,
                                 followCompressModel = true,
                             )
                         )
                     )
-                )
+                }
             },
             onSelect = {
-                vm.updateSettings(
-                    settings.copy(
-                        agentRuntime = settings.agentRuntime.copy(
-                            memoryWorker = worker.copy(
+                vm.updateSettings { current ->
+                    current.copy(
+                        agentRuntime = current.agentRuntime.copy(
+                            memoryWorker = current.agentRuntime.memoryWorker.copy(
                                 modelId = it.id,
                                 followCompressModel = false,
                             )
                         )
                     )
-                )
+                }
             },
         )
     }
@@ -701,28 +701,28 @@ private fun DefaultDaydreamModelSetting(
             },
             clearContentDescription = stringResource(R.string.setting_model_page_restore_follow_compress_model),
             onClear = {
-                vm.updateSettings(
-                    settings.copy(
-                        agentRuntime = settings.agentRuntime.copy(
-                            memoryWorker = worker.copy(
+                vm.updateSettings { current ->
+                    current.copy(
+                        agentRuntime = current.agentRuntime.copy(
+                            memoryWorker = current.agentRuntime.memoryWorker.copy(
                                 daydreamModelId = DEFAULT_AUTO_MODEL_ID,
                                 daydreamFollowCompressModel = true,
                             )
                         )
                     )
-                )
+                }
             },
             onSelect = {
-                vm.updateSettings(
-                    settings.copy(
-                        agentRuntime = settings.agentRuntime.copy(
-                            memoryWorker = worker.copy(
+                vm.updateSettings { current ->
+                    current.copy(
+                        agentRuntime = current.agentRuntime.copy(
+                            memoryWorker = current.agentRuntime.memoryWorker.copy(
                                 daydreamModelId = it.id,
                                 daydreamFollowCompressModel = false,
                             )
                         )
                     )
-                )
+                }
             },
         )
     }
@@ -1129,15 +1129,15 @@ private fun ModelGroupSessionDefaultsSheet(
     }
 
     fun updateDefault(groupId: String, block: (ModelGroupSessionDefault) -> ModelGroupSessionDefault) {
-        val existing = settings.modelGroupSessionDefaults.firstOrNull { it.groupId == groupId }
-            ?: ModelGroupSessionDefault(groupId = groupId)
-        val updated = block(existing)
-        vm.updateSettings(
-            settings.copy(
-                modelGroupSessionDefaults = settings.modelGroupSessionDefaults
+        vm.updateSettings { current ->
+            val existing = current.modelGroupSessionDefaults.firstOrNull { it.groupId == groupId }
+                ?: ModelGroupSessionDefault(groupId = groupId)
+            val updated = block(existing)
+            current.copy(
+                modelGroupSessionDefaults = current.modelGroupSessionDefaults
                     .filterNot { it.groupId == groupId } + updated
             )
-        )
+        }
     }
 
     ModalBottomSheet(

@@ -67,7 +67,7 @@ internal fun parseProviderImport(text: String): List<ProviderSetting> {
     }.also { require(it.isNotEmpty()) }
 }
 
-private fun ProviderSetting.freshImportIds(): ProviderSetting = copyProvider(
+internal fun ProviderSetting.freshImportIds(): ProviderSetting = copyProvider(
     id = Uuid.random(),
     models = models.map { model ->
         model.copy(

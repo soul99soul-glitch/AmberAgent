@@ -190,9 +190,8 @@ fun GenerativeWidgetCard(
         )
     }
 
-    // V3: 画板风 widget 卡片. 之前用 colorScheme.surface + outlineVariant 1dp 在 Paper/Midnight
-    // 主题下会显示成"硬黑框 + 浅底", 跟设计稿不符. 改为 chatTheme.widgetCanvas (比 bg 略深,
-    // 暗色略浅), 默认无描边; 若主题显式给了 widgetCanvasBorder 才画 1dp 描边.
+    // 画板风 widget 卡片: 底色用 chatTheme.widgetCanvas (比 bg 略深, 暗色略浅), 默认无描边;
+    // 若主题显式给了 widgetCanvasBorder 才画 1dp 描边.
     val chatTheme = app.amber.feature.ui.pages.chat.LocalChatTheme.current
     val widgetSurfaceColor = chatTheme.widgetCanvas.takeIf { it.isSpecified } ?: MaterialTheme.colorScheme.surface
     val widgetBorder = chatTheme.widgetCanvasBorder

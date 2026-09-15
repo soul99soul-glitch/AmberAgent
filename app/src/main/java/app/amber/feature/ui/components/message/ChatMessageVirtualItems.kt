@@ -30,6 +30,7 @@ import app.amber.feature.ui.components.richtext.MarkdownParseResult
 import app.amber.feature.ui.components.richtext.canRenderByTopLevelBlocks
 import app.amber.feature.ui.components.richtext.topLevelBlockCount
 import app.amber.feature.ui.components.richtext.topLevelBlockKey
+import app.amber.feature.ui.context.LocalChatFontScale
 import app.amber.feature.ui.context.LocalSettings
 import app.amber.feature.ui.utils.amberTraceMeasure
 import app.amber.core.utils.copyMessageToClipboard
@@ -294,6 +295,7 @@ internal fun ChatMessageVirtualItemContent(
     var showActionsSheet by remember(message.id) { mutableStateOf(false) }
     var showSelectCopySheet by remember(message.id) { mutableStateOf(false) }
     val context = LocalContext.current
+    val chatFontScale = LocalSettings.current.displaySetting.fontSizeRatio
     Box(
         modifier = modifier
             .fillMaxWidth()
@@ -303,6 +305,7 @@ internal fun ChatMessageVirtualItemContent(
                 } else null,
             ),
     ) {
+        CompositionLocalProvider(LocalChatFontScale provides chatFontScale) {
         when (item) {
             is ChatMessageVirtualItem.Header -> {
                 Column(
@@ -471,6 +474,7 @@ internal fun ChatMessageVirtualItemContent(
                     }
                 }
             }
+        }
         }
     }
 

@@ -19,6 +19,7 @@ import app.amber.ai.ui.UIMessagePart
 import app.amber.core.localization.OAuthDisplayLocalizer
 import app.amber.core.infra.AppScope
 import app.amber.core.model.MainAgentToolProfile
+import app.amber.core.settings.DEFAULT_AUTO_MODEL_ID
 import app.amber.core.settings.prefs.AgentPrefs
 import app.amber.core.settings.prefs.ChatPrefs
 import app.amber.core.settings.prefs.ExtensionPrefs
@@ -76,7 +77,7 @@ import kotlin.uuid.Uuid
  * P0–P2 agent provider-config tools contract tests（对齐 iOS §6 / §10-11）。
  *
  * 覆盖：
- *  - status：has_api_key 只读引用/掩码状态、悬空 chat 模型 issue、result 永不含 key 明文
+ *  - status：has_api_key 只读引用/掩码状态、悬空 chat 模型自愈为 auto 后不再上报悬空 issue、result 永不含 key 明文
  *  - apply：批准后经 SettingsAggregator 落 SecretStore；拒绝不写；非法 scheme 不部分提交；
  *           placeholder 拒绝；空串清除走审批
  *  - refresh_models：merge 保留已有模型；401 明确 key 无效且不清 models（fake fetcher）
@@ -206,12 +207,17 @@ class ProviderConfigToolsTest {
                 imageGenerationModelId = settings.imageGenerationModelId,
             )
         }
-        // 等 DataStore 回读流把写后值刷新到 settingsFlow.value（eager 写 + 回读均一致）
+        // 等 DataStore 回读流把写后值刷新到 settingsFlow.value（eager 写 + 回读均一致）。
+        // 读取管线会把指向不存在模型的选择 id 自愈为 DEFAULT_AUTO_MODEL_ID，
+        // 因此模型 id 项同时接受种子值与自愈哨兵。
         withTimeout(5_000) {
             settingsStore.settingsFlow.first { flow ->
                 flow.providers.map { p -> p.id } == settings.providers.map { p -> p.id } &&
-                    flow.chatModelId == settings.chatModelId &&
-                    flow.imageGenerationModelId == settings.imageGenerationModelId
+                    (flow.chatModelId == settings.chatModelId || flow.chatModelId == DEFAULT_AUTO_MODEL_ID) &&
+                    (
+                        flow.imageGenerationModelId == settings.imageGenerationModelId ||
+                            flow.imageGenerationModelId == DEFAULT_AUTO_MODEL_ID
+                        )
             }
         }
     }
@@ -267,7 +273,7 @@ class ProviderConfigToolsTest {
     }
 
     @Test
-    fun `status reports no key and dangling chat model issues`() = runBlocking {
+    fun `status reports no key and heals dangling chat model to auto`() = runBlocking {
         val danglingChatId = Uuid.random()
         seed(
             app.amber.core.settings.Settings.dummy().copy(
@@ -276,15 +282,18 @@ class ProviderConfigToolsTest {
                 chatModelId = danglingChatId,
             )
         )
+        // 悬空的 chatModelId 指向不存在的模型，读取管线自愈为“自动”哨兵
+        settingsStore.settingsFlow.first { it.chatModelId == DEFAULT_AUTO_MODEL_ID }
         val result = runTool(tool(TOOL_PROVIDER_CONFIG_STATUS), """{"provider_name_contains":"TestOpenAI"}""")
         val providerJson = result["providers"]!!.jsonArray.first().jsonObject
         assertEquals(false, providerJson["has_api_key"]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull())
         val issues = result["issues"]!!.jsonArray.map { it.jsonPrimitive.contentOrNull.orEmpty() }
         assertTrue(issues.any { it.contains("has no API key") })
-        assertTrue(issues.any { it.contains("chat model id does not resolve to any configured CHAT model") })
         val chatSlot = result["slots"]!!.jsonObject["chat"]!!.jsonObject
-        assertEquals(danglingChatId.toString(), chatSlot["model_id"]?.jsonPrimitive?.contentOrNull)
+        assertEquals(DEFAULT_AUTO_MODEL_ID.toString(), chatSlot["model_id"]?.jsonPrimitive?.contentOrNull)
         assertEquals(false, chatSlot["resolved"]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull())
+        // 自愈后悬空 id 不再以 issue 形式上报
+        assertFalse(issues.any { it.contains("chat model id does not resolve") })
     }
 
     @Test

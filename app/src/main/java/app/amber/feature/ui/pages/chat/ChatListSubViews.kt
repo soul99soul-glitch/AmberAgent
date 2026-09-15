@@ -39,6 +39,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -233,8 +234,7 @@ internal fun BoxScope.MessageJumper(
             targetOffsetX = { if (onLeft) -it * 2 else it * 2 },
         )
     ) {
-        // V3: 浮动导航卡。之前 border = outlineVariant@60% 在 Paper/Whisper 上看着是粗黑勾边,
-        // 跟整体轻 hairline 体系冲突. 改 chatTheme.hair (8% ink) 极淡描边 + 抬升 shadow 到 8dp
+        // 浮动导航卡: chatTheme 极淡描边 + 抬升 shadow 到 8dp
         // 让它"浮"在 chat 上, 而不是靠 border 厚重感.
         val chatTheme = LocalChatTheme.current
         val dividerColor = chatTheme.hair
@@ -253,8 +253,8 @@ internal fun BoxScope.MessageJumper(
                     elevation = 8.dp,
                     shape = RoundedCornerShape(12.dp),
                     clip = false,
-                    ambientColor = chatTheme.composerShadow,
-                    spotColor = chatTheme.composerShadow,
+                    ambientColor = Color.Transparent,
+                    spotColor = Color.Transparent,
                 ),
             shape = RoundedCornerShape(12.dp),
             color = chatTheme.surface,

@@ -30,6 +30,11 @@ import app.amber.feature.deepread.api.DeepReadDescriptor
 import app.amber.feature.deepread.impl.DeepReadAgentAdapter
 import app.amber.feature.history.SessionAccessGrantStore
 import app.amber.core.repository.CouncilRoomRepository
+import app.amber.feature.live.LiveEventPayload
+import app.amber.feature.live.LiveTurnAgent
+import app.amber.feature.live.LiveTurnArtifact
+import app.amber.feature.live.LiveTurnDescriptor
+import app.amber.feature.live.LiveTurnInput
 import app.amber.feature.modelcouncil.CouncilRoomManager
 import app.amber.feature.modelcouncil.CouncilRoomStore
 import app.amber.feature.modelcouncil.ExternalCliModelCouncilRunner
@@ -110,6 +115,13 @@ val agentRuntimeModule = module {
                 artifactSerializer = NovelTurnArtifact.serializer(),
                 factory = { NovelTurnAgent(get()) },
             )
+            register(
+                descriptor = LiveTurnDescriptor.value,
+                inputClass = LiveTurnInput::class,
+                inputSerializer = LiveTurnInput.serializer(),
+                artifactSerializer = LiveTurnArtifact.serializer(),
+                factory = { LiveTurnAgent(get(), get(), get()) },
+            )
         }
     }
 
@@ -153,6 +165,8 @@ val agentRuntimeModule = module {
             // rounds stay snapshot-free until their durable path is on.
             ChatEventPayload.RequestSnapshot::class.qualifiedName!! to
                 AgentEventPayloadCodec(ChatEventPayload.RequestSnapshot.TYPE, ChatEventPayload.RequestSnapshot.serializer()),
+            LiveEventPayload.AnalysisCompleted::class.qualifiedName!! to
+                AgentEventPayloadCodec(LiveEventPayload.AnalysisCompleted.TYPE, LiveEventPayload.AnalysisCompleted.serializer()),
         )
     }
 
@@ -228,6 +242,10 @@ val agentRuntimeModule = module {
                     is NovelTurnInput -> LegacyRunScope(
                         runId = runId,
                         events = persistingWriter(NovelTurnDescriptor.ID.value),
+                    )
+                    is LiveTurnInput -> LegacyRunScope(
+                        runId = runId,
+                        events = persistingWriter(LiveTurnDescriptor.ID.value),
                     )
                     else -> LegacyRunScope(runId = runId)
                 }

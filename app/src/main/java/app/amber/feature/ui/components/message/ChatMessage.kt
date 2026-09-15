@@ -33,6 +33,7 @@ import app.amber.core.model.AssistantRegex
 import app.amber.core.model.MessageNode
 import app.amber.feature.ui.components.richtext.buildMarkdownPreviewHtml
 import app.amber.feature.ui.components.ui.ChainOfThought
+import app.amber.feature.ui.context.LocalChatFontScale
 import app.amber.feature.ui.context.LocalNavController
 import app.amber.feature.ui.context.LocalSettings
 import app.amber.feature.ui.theme.JetbrainsMono
@@ -137,6 +138,7 @@ fun ChatMessage(
         CompositionLocalProvider(
             LocalSearchSources provides searchSources,
             LocalSearchImageUrls provides searchImageUrls,
+            LocalChatFontScale provides settings.fontSizeRatio,
         ) {
             if (message.role == MessageRole.ASSISTANT) {
                 SearchImageGallery(

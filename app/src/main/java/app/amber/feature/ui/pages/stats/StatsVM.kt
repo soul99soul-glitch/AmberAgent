@@ -6,6 +6,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import app.amber.agent.data.db.dao.ConversationDAO
@@ -24,12 +25,15 @@ data class AppStats(
     val totalCachedTokens: Long = 0L,
     val conversationsPerDay: Map<LocalDate, Int> = emptyMap(),
     val launchCount: Int = 0,
+    val liveAnalysisCount: Long = 0L,
+    val liveTotalTokens: Long = 0L,
 )
 
 class StatsVM(
     private val conversationDAO: ConversationDAO,
     private val messageStatsDAO: MessageStatsDAO,
     private val settingsStore: SettingsAggregator,
+    private val liveUsageStore: app.amber.feature.live.LiveUsageStore,
 ) : ViewModel() {
 
     private val _stats = MutableStateFlow(AppStats())
@@ -66,6 +70,9 @@ class StatsVM(
 
         val launchCount = settingsStore.settingsFlow.value.launchCount
 
+        // Live 伴随 usage 走独立汇总（蓝图 v3 §7.2 P0-4：不伪造聊天消息统计）。
+        val liveTotals = liveUsageStore.totals.first()
+
         _stats.value = AppStats(
             isLoading = false,
             totalConversations = totalConversations,
@@ -75,6 +82,8 @@ class StatsVM(
             totalCachedTokens = tokenStats.cachedTokens,
             conversationsPerDay = conversationsPerDay,
             launchCount = launchCount,
+            liveAnalysisCount = liveTotals.analysisCount,
+            liveTotalTokens = liveTotals.promptTokens + liveTotals.completionTokens,
         )
     }
 }

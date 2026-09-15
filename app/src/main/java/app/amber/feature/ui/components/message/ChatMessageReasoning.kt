@@ -59,6 +59,7 @@ import app.amber.feature.ui.components.richtext.StreamingPlainText
 import app.amber.feature.ui.components.ui.ChainOfThoughtScope
 import app.amber.feature.ui.components.ui.workspaceColors
 import app.amber.feature.ui.theme.LocalAmberType
+import app.amber.feature.ui.context.LocalChatFontScale
 import app.amber.feature.ui.context.LocalSettings
 import app.amber.feature.ui.modifier.shimmer
 import app.amber.core.utils.extractThinkingTitle
@@ -301,10 +302,11 @@ private fun ReasoningContent(
                     streaming = displayTextStreaming,
                     // Thoughts are human prose → SANS (.secondary), rendered directly on the
                     // thinking surface without a document-style quote rule.
+                    // 字号随聊天字号比例缩放（思考正文原来被硬编码绕过滑杆）。
                     style = LocalAmberType.current.secondary.copy(
                         color = app.amber.feature.ui.pages.chat.LocalChatTheme.current.thinkBodyInk,
-                        fontSize = 12.5.sp,
-                        lineHeight = 23.sp,
+                        fontSize = 12.5.sp * LocalChatFontScale.current,
+                        lineHeight = 23.sp * LocalChatFontScale.current,
                         letterSpacing = 0.2.sp,
                     ),
                     modifier = Modifier
@@ -494,7 +496,6 @@ private fun ReasoningTitle(title: String) {
                 fontSize = 12.5.sp,
                 fontWeight = FontWeight.Normal,
             ),
-            // V3 主题感知 (Paper 砖红 / Plain 黑 / Midnight 靛蓝)
             color = chatTheme.inkSoft,
             modifier = Modifier
                 .padding(horizontal = 4.dp)

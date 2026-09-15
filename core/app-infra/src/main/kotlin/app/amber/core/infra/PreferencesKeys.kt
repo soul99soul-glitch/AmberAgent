@@ -18,8 +18,6 @@ object PreferencesKeys {
     val VERSION = intPreferencesKey("data_version")
 
     // UI设置
-    val DYNAMIC_COLOR = booleanPreferencesKey("dynamic_color")
-    val THEME_ID = stringPreferencesKey("theme_id")
     val DISPLAY_SETTING = stringPreferencesKey("display_setting")
     val DEVELOPER_MODE = booleanPreferencesKey("developer_mode")
 

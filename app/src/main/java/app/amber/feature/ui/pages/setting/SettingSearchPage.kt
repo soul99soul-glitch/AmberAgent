@@ -71,37 +71,37 @@ fun SettingSearchPage(vm: SettingVM = koinViewModel()) {
     ) { contentPadding ->
         fun moveSearchService(fromIndex: Int, toIndex: Int) {
             if (fromIndex !in settings.searchServices.indices || toIndex !in settings.searchServices.indices) return
-            val selectedServiceId = settings.searchServices.getOrNull(settings.searchServiceSelected)?.id
-            val newServices = settings.searchServices.toMutableList().apply {
-                add(toIndex, removeAt(fromIndex))
-            }
-            vm.updateSettings(
-                settings.copy(
+            vm.updateSettings { current ->
+                val selectedServiceId = current.searchServices.getOrNull(current.searchServiceSelected)?.id
+                val newServices = current.searchServices.toMutableList().apply {
+                    add(toIndex, removeAt(fromIndex))
+                }
+                current.copy(
                     searchServices = newServices,
                     searchServiceSelected = resolveSelectedSearchIndex(newServices, selectedServiceId),
                 )
-            )
+            }
         }
 
         fun deleteSearchService(target: SearchServiceEditorTarget) {
             if (target.index == null || settings.searchServices.size <= 1) return
-            val currentIndex = settings.searchServices.indexOfFirst { it.id == target.service.id }
-                .takeIf { it >= 0 }
-                ?: target.index
-            if (currentIndex !in settings.searchServices.indices) return
-            val selectedServiceId = settings.searchServices.getOrNull(settings.searchServiceSelected)?.id
-            val newServices = settings.searchServices.toMutableList()
-            val deleted = newServices.removeAt(currentIndex)
-            vm.updateSettings(
-                settings.copy(
+            vm.updateSettings { current ->
+                val currentIndex = current.searchServices.indexOfFirst { it.id == target.service.id }
+                    .takeIf { it >= 0 }
+                    ?: target.index
+                if (currentIndex !in current.searchServices.indices) return@updateSettings current
+                val selectedServiceId = current.searchServices.getOrNull(current.searchServiceSelected)?.id
+                val newServices = current.searchServices.toMutableList()
+                val deleted = newServices.removeAt(currentIndex)
+                current.copy(
                     searchServices = newServices,
                     searchServiceSelected = resolveSelectedSearchIndex(
                         services = newServices,
                         selectedServiceId = selectedServiceId.takeUnless { it == deleted.id },
                     ),
-                    searchEnabledServiceIds = settings.searchEnabledServiceIds.filterNot { it == deleted.id },
+                    searchEnabledServiceIds = current.searchEnabledServiceIds.filterNot { it == deleted.id },
                 )
-            )
+            }
         }
 
         LazyColumn(
@@ -126,7 +126,7 @@ fun SettingSearchPage(vm: SettingVM = koinViewModel()) {
                         ).count { it },
                     serviceCount = settings.searchServices.size + 6,
                     onCheckedChange = { enabled ->
-                        vm.updateSettings(settings.copy(enableWebSearch = enabled))
+                        vm.updateSettings { current -> current.copy(enableWebSearch = enabled) }
                     },
                 )
             }
@@ -140,33 +140,35 @@ fun SettingSearchPage(vm: SettingVM = koinViewModel()) {
                     hackerNewsEnabled = settings.searchBuiltinHackerNewsEnabled,
                     googleWebViewFallbackEnabled = settings.searchGoogleWebViewFallbackEnabled,
                     onJinaEnabledChange = { enabled ->
-                        vm.updateSettings(settings.copy(searchBuiltinJinaEnabled = enabled))
+                        vm.updateSettings { current -> current.copy(searchBuiltinJinaEnabled = enabled) }
                     },
                     onDuckDuckGoEnabledChange = { enabled ->
-                        vm.updateSettings(settings.copy(searchBuiltinDuckDuckGoEnabled = enabled))
+                        vm.updateSettings { current -> current.copy(searchBuiltinDuckDuckGoEnabled = enabled) }
                     },
                     onBingEnabledChange = { enabled ->
-                        vm.updateSettings(settings.copy(searchBuiltinBingEnabled = enabled))
+                        vm.updateSettings { current -> current.copy(searchBuiltinBingEnabled = enabled) }
                     },
                     onWikipediaEnabledChange = { enabled ->
-                        vm.updateSettings(settings.copy(searchBuiltinWikipediaEnabled = enabled))
+                        vm.updateSettings { current -> current.copy(searchBuiltinWikipediaEnabled = enabled) }
                     },
                     onHackerNewsEnabledChange = { enabled ->
-                        vm.updateSettings(settings.copy(searchBuiltinHackerNewsEnabled = enabled))
+                        vm.updateSettings { current -> current.copy(searchBuiltinHackerNewsEnabled = enabled) }
                     },
                     onGoogleWebViewFallbackEnabledChange = { enabled ->
-                        vm.updateSettings(settings.copy(searchGoogleWebViewFallbackEnabled = enabled))
+                        vm.updateSettings { current -> current.copy(searchGoogleWebViewFallbackEnabled = enabled) }
                     },
                     services = settings.searchServices,
                     enabledServiceIds = settings.searchEnabledServiceIds,
                     onServiceMove = ::moveSearchService,
                     onServiceEnabledChange = { service, enabled ->
-                        val enabledIds = if (enabled) {
-                            (settings.searchEnabledServiceIds + service.id).distinct()
-                        } else {
-                            settings.searchEnabledServiceIds.filterNot { it == service.id }
+                        vm.updateSettings { current ->
+                            val enabledIds = if (enabled) {
+                                (current.searchEnabledServiceIds + service.id).distinct()
+                            } else {
+                                current.searchEnabledServiceIds.filterNot { it == service.id }
+                            }
+                            current.copy(searchEnabledServiceIds = enabledIds)
                         }
-                        vm.updateSettings(settings.copy(searchEnabledServiceIds = enabledIds))
                     },
                     onEditService = { service ->
                         editingService = SearchServiceEditorTarget(
@@ -181,7 +183,7 @@ fun SettingSearchPage(vm: SettingVM = koinViewModel()) {
                 SearchCommonOptionsCard(
                     settings = settings,
                     onUpdate = { options ->
-                        vm.updateSettings(settings.copy(searchCommonOptions = options))
+                        vm.updateSettings { current -> current.copy(searchCommonOptions = options) }
                     },
                 )
             }
@@ -217,35 +219,34 @@ fun SettingSearchPage(vm: SettingVM = koinViewModel()) {
                 },
                 onConfirm = { updatedService ->
                     if (target.index == null) {
-                        vm.updateSettings(
-                            settings.copy(
-                                searchServices = listOf(updatedService) + settings.searchServices,
-                                searchEnabledServiceIds = (listOf(updatedService.id) + settings.searchEnabledServiceIds).distinct(),
+                        vm.updateSettings { current ->
+                            current.copy(
+                                searchServices = listOf(updatedService) + current.searchServices,
+                                searchEnabledServiceIds = (listOf(updatedService.id) + current.searchEnabledServiceIds).distinct(),
                                 searchServiceSelected = 0,
                             )
-                        )
+                        }
                         scope.launch {
                             lazyListState.animateScrollToItem(1)
                         }
                     } else {
-                        val currentIndex = settings.searchServices.indexOfFirst { it.id == target.service.id }
-                            .takeIf { it >= 0 }
-                            ?: target.index
-                        if (currentIndex in settings.searchServices.indices) {
-                            val oldService = settings.searchServices[currentIndex]
-                            val wasEnabled = oldService.id in settings.searchEnabledServiceIds
-                            val newServices = settings.searchServices.toMutableList()
+                        vm.updateSettings { current ->
+                            val currentIndex = current.searchServices.indexOfFirst { it.id == target.service.id }
+                                .takeIf { it >= 0 }
+                                ?: target.index
+                            if (currentIndex !in current.searchServices.indices) return@updateSettings current
+                            val oldService = current.searchServices[currentIndex]
+                            val wasEnabled = oldService.id in current.searchEnabledServiceIds
+                            val newServices = current.searchServices.toMutableList()
                             newServices[currentIndex] = updatedService
                             val enabledIds = if (wasEnabled) {
-                                settings.searchEnabledServiceIds.filterNot { it == oldService.id } + updatedService.id
+                                current.searchEnabledServiceIds.filterNot { it == oldService.id } + updatedService.id
                             } else {
-                                settings.searchEnabledServiceIds
+                                current.searchEnabledServiceIds
                             }
-                            vm.updateSettings(
-                                settings.copy(
-                                    searchServices = newServices,
-                                    searchEnabledServiceIds = enabledIds.distinct(),
-                                )
+                            current.copy(
+                                searchServices = newServices,
+                                searchEnabledServiceIds = enabledIds.distinct(),
                             )
                         }
                     }

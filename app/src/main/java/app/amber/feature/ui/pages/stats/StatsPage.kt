@@ -3,6 +3,7 @@ package app.amber.feature.ui.pages.stats
 import com.composables.icons.lucide.Lucide
 import com.composables.icons.lucide.ChartColumn
 import com.composables.icons.lucide.Cpu
+import com.composables.icons.lucide.Eye
 import com.composables.icons.lucide.MessageCircle
 import com.composables.icons.lucide.Rocket
 import com.composables.icons.lucide.Zap
@@ -419,6 +420,16 @@ private fun StatsGrid(stats: AppStats, modifier: Modifier = Modifier) {
                 label = stringResource(R.string.stats_page_launch_count),
                 value = formatCount(stats.launchCount.toLong(), appLocale),
             )
+            if (stats.liveAnalysisCount > 0) {
+                Hairline()
+                StatCard(
+                    modifier = Modifier.fillMaxWidth(),
+                    icon = Lucide.Eye,
+                    label = stringResource(R.string.stats_page_live_companion),
+                    value = "${formatCount(stats.liveAnalysisCount, appLocale)} · " +
+                        formatTokens(stats.liveTotalTokens, appLocale),
+                )
+            }
         }
     }
 }

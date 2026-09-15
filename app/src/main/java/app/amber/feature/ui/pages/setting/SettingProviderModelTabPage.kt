@@ -178,11 +178,26 @@ private fun ModelList(
     val blankState = useEditState<Model> { onUpdateProvider(providerSetting.addModel(it)) }
     val lazyListState = rememberLazyListState()
     val modelItemOffset = 1
+    // Drag reorders a local overlay only; the store is written once on drag stop
+    // instead of on every onMove frame (each write re-persisted all models).
+    // The overlay is kept until the store write publishes the new models —
+    // clearing it here would flash the stale order for a few frames.
+    var dragOrder by remember(providerSetting.models) { mutableStateOf<List<Model>?>(null) }
+    val displayModels = dragOrder ?: providerSetting.models
+    fun commitDragOrder() {
+        val order = dragOrder
+        if (order != null) {
+            onUpdateProvider(providerSetting.copyProvider(models = order))
+        }
+    }
     val reorderableLazyListState = rememberReorderableLazyListState(lazyListState) { from, to ->
         val fromModelIndex = from.index - modelItemOffset
         val toModelIndex = to.index - modelItemOffset
-        if (fromModelIndex in providerSetting.models.indices && toModelIndex in providerSetting.models.indices) {
-            onUpdateProvider(providerSetting.moveMove(fromModelIndex, toModelIndex))
+        val base = dragOrder ?: providerSetting.models
+        if (fromModelIndex in base.indices && toModelIndex in base.indices) {
+            dragOrder = base.toMutableList().apply {
+                add(toModelIndex, removeAt(fromModelIndex))
+            }
         }
     }
     val t = LocalAmberTokens.current
@@ -233,7 +248,7 @@ private fun ModelList(
                     }
                 }
             } else {
-                items(providerSetting.models, key = { it.id }) { item ->
+                items(displayModels, key = { it.id }) { item ->
                     ReorderableItem(
                         state = reorderableLazyListState,
                         key = item.id
@@ -248,7 +263,9 @@ private fun ModelList(
                                 },
                                 onOpenEditor = { editState.open(item.copy()) },
                                 modifier = Modifier
-                                    .longPressDraggableHandle()
+                                    .longPressDraggableHandle(
+                                        onDragStopped = { commitDragOrder() },
+                                    )
                                     .graphicsLayer {
                                         if (isDragging) {
                                             scaleX = 1.05f

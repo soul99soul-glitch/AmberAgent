@@ -3,7 +3,6 @@ package app.amber.feature.ui.pages.chat
 import app.amber.feature.ui.utils.amberTraceMeasure
 import android.content.Context
 import android.net.Uri
-import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
@@ -54,7 +53,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -650,51 +648,9 @@ private fun ChatPageContent(
 
     val pendingQueueCount = pendingUserMessages.size
 
-    // 用 Box 强制 z-order：chatTheme.bg → bloom → Scaffold（透明）
-    // 之前 Surface(color=paper) 包 bloom 时，Material3 Scaffold 内 Surface 可能再画一层
-    // tonal tint 把 bloom 盖住，导致真机看不到光晕。
-    // 必须用 LocalChatTheme.current.bg 而非 workspaceColors().paper —— 后者在浅色模式
-    // 硬编码 Color.White (WorkspaceStyle.kt:107)，会把 Paper #FDFAF3 / Plain #FFFFFF 都
-    // 强行变白，导致用户切到 Paper 看到的还是白底。
-    val chatThemeForBg = app.amber.feature.ui.pages.chat.LocalChatTheme.current
     // Graphite TopModelMenu: header 下方卷帘下拉的开合状态（顶栏触发器 + 内容区 overlay 共享）
     var modelMenuOpen by remember { mutableStateOf(false) }
     Box(modifier = Modifier.fillMaxSize().amberCanvas()) {
-        // V3 Whisper：空白态满强度 bloom；进入对话按设计稿"蓝光晕去掉 → 干净浅灰白"。
-        // 转场用 700ms tween 缓慢淡出，避免发送瞬间硬切。
-        // Paper/Midnight 设计稿 (themes.jsx haloConvo) 要求对话态保留 faint 底光氛围
-        // → showBloomInConvo=true 时降到 0.25 而非 0；Whisper/Plain 仍然完全淡出
-        //
-        // 切换 conversation 时 init=false 期间 messageNodes 快照可能是空 (异步还没填), bloom
-        // 会误判为"空白态"开始 700ms 渐变到 1f, 内容到了又反向, 用户看到光晕来回闪. 修复:
-        // init=false 时 bloom 锁定在对话态值 (低), 等 initialized=true 真实状态明确再切.
-        // review P3 #4: 之前每次 recomposition 重算 + messageNodes 瞬态空快照会触发 700ms
-        // 反复 fade up/down. 改为只在 (initialized / conversation.id / messageNodes 真实空否
-        // / 主题切换) 四个关键 key 变化时重算, 流式 chunk 引起的 recomp 不再扰动 bloom.
-        val isMessageListEmpty = conversation.messageNodes.isEmpty()
-        val bloomTarget by remember(
-            timelineLoadState.initialized,
-            conversation.id,
-            isMessageListEmpty,
-            chatThemeForBg.showBloomInConvo,
-        ) {
-            derivedStateOf {
-                when {
-                    !timelineLoadState.initialized -> if (chatThemeForBg.showBloomInConvo) 0.25f else 0f
-                    isMessageListEmpty -> 1f
-                    chatThemeForBg.showBloomInConvo -> 0.25f
-                    else -> 0f
-                }
-            }
-        }
-        val bloomIntensity by animateFloatAsState(
-            targetValue = bloomTarget,
-            animationSpec = tween(durationMillis = 700, easing = FastOutSlowInEasing),
-            label = "bloomFade",
-        )
-        // Graphite (D4): bottom ambient bloom removed — flat & hairline, no glow (anti-goals §1).
-        // `bloomTarget` / `bloomIntensity` above are now inert; cleaned up with the bloom machinery
-        // when the chat background is fully de-decorated.
         Scaffold(
             modifier = Modifier.amberTraceMeasure("Amber ChatPage measure"),
             topBar = {
@@ -1904,9 +1860,9 @@ private fun TopBar(
     onToggleModelMenu: () -> Unit,
 ) {
     val newSessionLabel = stringResource(R.string.chat_page_new_session)
-    // V3 phone-screen.jsx header 没有 surface —— 直接坐在 bloom 之上
-    // 之前用 workspace.paper@96% (legacy 硬编码白底) 把 halo 顶层盖住，所以 Paper
-    // 主题下用户反馈"顶栏没变暖纸色"——其实是被白 Surface 罩住了
+    // V3 phone-screen.jsx header 没有 surface —— 直接坐在 chatTheme.bg 之上
+    // 之前用 workspace.paper@96% (legacy 硬编码白底)，用户反馈"顶栏没变暖纸色"
+    // ——其实是被白 Surface 罩住了
     Surface(
         color = Color.Transparent,
         modifier = Modifier
@@ -2094,7 +2050,7 @@ private fun TopBar(
 @Composable
 private fun AmberHeaderBackArrow() {
     // 主题感知 ink 色 —— legacy workspaceColors().ink 在浅色硬编码 #1F1F1F，
-    // Paper 主题下需要 #2A241B 才能跟 bg/halo 协调
+    // Paper 主题下需要 #2A241B 才能跟 bg 协调
     val ink = LocalChatTheme.current.ink
     Canvas(modifier = Modifier.size(22.dp)) {
         val w = size.width

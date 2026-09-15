@@ -127,22 +127,18 @@ fun SettingProviderPage(vm: SettingVM = koinViewModel()) {
                         existingProviders = settings.providers,
                         onImport = vm::importProviders,
                     ) {
-                        vm.updateSettings(
-                            settings.copy(
-                                providers = listOf(it.copyProvider(Uuid.random())) + settings.providers
-                            )
-                        )
+                        vm.updateSettings { current ->
+                            current.copy(providers = listOf(it.freshImportIds()) + current.providers)
+                        }
                     }
                     AddButton(
                         existingProviderIds = remember(settings.providers) {
                             settings.providers.map { it.id }.toSet()
                         },
                     ) {
-                        vm.updateSettings(
-                            settings.copy(
-                                providers = listOf(it) + settings.providers
-                            )
-                        )
+                        vm.updateSettings { current ->
+                            current.copy(providers = listOf(it) + current.providers)
+                        }
                     }
                 },
             )

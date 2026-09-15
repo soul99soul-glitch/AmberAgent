@@ -528,9 +528,17 @@ class SecretRedactor(private val secretStore: SecretStore) {
         fieldName: String,
         persistedValue: String,
     ): String {
-        val ref = refs[SecretDescriptor(scope, ownerId, fieldName).key] ?: return persistedValue
+        val ref = refs[SecretDescriptor(scope, ownerId, fieldName).key]
+        if (ref == null) {
+            // 孤儿掩码（如恢复不带 secretRefs 的备份）：掩码不是真实密钥，按未配置处理，避免把掩码发上 wire
+            if (persistedValue.startsWith(MASK_STRING)) return ""
+            return persistedValue
+        }
         // 密钥失效/密文损坏：SecretStore.read 已 null 安全，不删 reference、不崩
-        return secretStore.read(ref.descriptor()) ?: ""
+        return secretStore.read(ref.descriptor()) ?: run {
+            Log.w(TAG, "SecretStore read failed for ${ref.descriptor().key} (Keystore invalidated or device restored); treating as unset")
+            ""
+        }
     }
 
     fun rehydrateProviders(

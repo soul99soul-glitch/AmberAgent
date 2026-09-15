@@ -2,6 +2,7 @@ package app.amber.feature.live
 
 import android.content.Context
 import app.amber.ai.core.ReasoningLevel
+import app.amber.ai.core.TokenUsage
 import app.amber.ai.provider.Modality
 import app.amber.ai.provider.Model
 import app.amber.ai.provider.ModelType
@@ -31,6 +32,9 @@ class LiveAnalyzer(
         val usedVision: Boolean,
         /** 非空 = 激进模式被降级的原因（提示用） */
         val degradedReason: String?,
+        /** 本次调用的实际 token 用量；provider 未返回时为 null（记账侧按 0 值累加、
+         *  次数 +1——统计上 token 为下限、次数准确，不伪造估算值）。 */
+        val usage: TokenUsage? = null,
     )
 
     /** 解析伴随模型：companionModelId 优先，无效/未设则跟随聊天模型。 */
@@ -106,6 +110,7 @@ class LiveAnalyzer(
             card = LivePrompt.parseCard(text, actionLabel, locale),
             usedVision = useVision,
             degradedReason = degradedReason,
+            usage = result.usage,
         )
     }
 

@@ -82,6 +82,14 @@ fun ShareSheet(
                         .fillMaxWidth()
                         .aspectRatio(1f)
                 )
+
+                // The shared payload rehydrates the stored key in plain text; make
+                // sure the user knows before handing the QR to someone else.
+                Text(
+                    text = stringResource(R.string.share_sheet_plaintext_key_warning),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
         }
     }

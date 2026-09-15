@@ -11,18 +11,25 @@ import androidx.compose.runtime.getValue
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import app.amber.ai.provider.ProviderCatalog
 import app.amber.agent.AppScope
 import app.amber.agent.R
+import app.amber.core.agent.runtime.AgentRunId
+import app.amber.core.agent.runtime.AgentRunner
+import app.amber.core.agent.runtime.RunStatus
+import app.amber.core.agent.store.RoomAgentEventStore
 import app.amber.core.automation.AmberAccessibilityService
 import app.amber.core.settings.prefs.SettingsAggregator
+import app.amber.core.utils.JsonInstant
 import app.amber.core.utils.appLocale
 import app.amber.feature.live.bubble.LiveBubbleContent
 import app.amber.feature.live.bubble.LiveBubbleWindow
@@ -33,6 +40,9 @@ class LiveModeManager(
     private val settingsStore: SettingsAggregator,
     private val providerCatalog: ProviderCatalog,
     private val appScope: AppScope,
+    private val agentRunner: AgentRunner,
+    private val eventStore: RoomAgentEventStore,
+    private val usageStore: LiveUsageStore,
 ) {
     private val _state = MutableStateFlow(
         LiveModeUiState(statusText = context.getString(R.string.live_empty_not_started)),
@@ -50,6 +60,9 @@ class LiveModeManager(
     private var engine: LiveEngine? = null
     private var pendingSnapshot: LiveScreenSnapshot? = null
     private var focusInstruction: String = ""
+
+    @Volatile
+    private var activeRunId: AgentRunId? = null
 
     @Volatile
     private var screenDirty: Boolean = true // 启动先看一眼
@@ -70,6 +83,18 @@ class LiveModeManager(
             active = true,
             statusText = context.getString(R.string.live_master_enabled),
         )
+        appScope.launch(Dispatchers.IO) {
+            restoreLatestCard()
+            // 保留清扫（蓝图 v3 §6）：终态 run 与过期事件同窗口清理，best-effort。
+            val cutoff = System.currentTimeMillis() - LIVE_ARTIFACT_RETENTION_MS
+            runCatching {
+                eventStore.deleteTerminalRunsOfAgentOlderThan(LiveTurnDescriptor.ID.value, cutoff)
+                eventStore.deleteEventsOfTypeOlderThan(LiveEventPayload.AnalysisCompleted.TYPE, cutoff)
+            }
+            // 隐私边界（蓝图 v3 §7.2 P0-6）：默认不留存原始屏幕——清掉旧版本
+            // 可能遗留的截图缓存（P0 不开放截图，此目录不应存在内容）。
+            runCatching { java.io.File(context.cacheDir, "live").deleteRecursively() }
+        }
         eventJob = appScope.launch {
             AmberAccessibilityService.screenEvents.collect { event ->
                 if (event.packageName != context.packageName) screenDirty = true
@@ -78,15 +103,46 @@ class LiveModeManager(
         loopJob = appScope.launch(Dispatchers.Main.immediate) { runLoop() }
     }
 
+    /** 冷读取（蓝图 v3 §7.2 P0-2 验收链）：从事件库恢复最近一次伴随卡片。
+     *  进程内已有卡片时不覆盖；恢复的 cardSignature 与下一帧屏幕签名比对，
+     *  屏幕已不同则经 cardStale 自然呈现"屏幕已变化"。 */
+    private suspend fun restoreLatestCard() {
+        val entity = runCatching {
+            eventStore.latestEventOfType(LiveEventPayload.AnalysisCompleted.TYPE)
+        }.getOrNull() ?: return
+        val payload = runCatching {
+            JsonInstant.decodeFromString<LiveEventPayload.AnalysisCompleted>(entity.payload)
+        }.getOrNull() ?: return
+        _state.update {
+            // 回填前确认会话仍在（总检查 #3）：start 后极短窗口内 stop 时不得复活卡片。
+            if (!it.active || it.card != null) it else it.copy(
+                card = LiveModeCard(
+                    watching = payload.watching,
+                    keyPoints = payload.keyPoints,
+                    suggestions = payload.suggestions,
+                ),
+                cardSignature = payload.screenSignature,
+                // 首帧快照可能已写入当前现场——只在现场为空时回填，不覆盖新鲜元数据。
+                currentPackage = it.currentPackage.ifBlank { payload.packageName },
+                currentAppLabel = it.currentAppLabel.ifBlank { payload.appLabel },
+                currentTitle = it.currentTitle.ifBlank { payload.title },
+                lastUpdatedAtMillis = entity.ts,
+            )
+        }
+    }
+
     fun pause() {
         analysisGeneration.incrementAndGet()
         _state.update {
             it.copy(
                 paused = true,
                 analyzing = false,
+                requestedAction = "",
                 statusText = context.getString(R.string.live_master_paused),
             )
         }
+        activeRunId?.let(agentRunner::cancel)
+        activeRunId = null
         analysisJob?.cancel()
     }
 
@@ -110,6 +166,8 @@ class LiveModeManager(
         loopJob = null
         eventJob?.cancel()
         eventJob = null
+        activeRunId?.let(agentRunner::cancel)
+        activeRunId = null
         analysisJob?.cancel()
         analysisJob = null
         bubble.hide()
@@ -193,11 +251,20 @@ class LiveModeManager(
             val liveSetting = settings.agentRuntime.liveMode
             syncBubble(liveSetting)
             if (!liveSetting.enabled) {
+                // 设置页开关关闭 = 停止一切（与 stop() 的取消语义对齐）：
+                // 在飞 run 取消、晚到结果经 generation 兜底不回写（总检查 #2）。
+                if (_state.value.analyzing || activeRunId != null) {
+                    analysisGeneration.incrementAndGet()
+                    activeRunId?.let(agentRunner::cancel)
+                    activeRunId = null
+                    analysisJob?.cancel()
+                }
                 _state.update {
                     it.copy(
                         active = false,
                         paused = false,
                         analyzing = false,
+                        requestedAction = "",
                         statusText = context.getString(R.string.live_master_not_enabled),
                         nextAnalysisAfterMillis = 0L,
                     )
@@ -272,32 +339,26 @@ class LiveModeManager(
                 if (engine.onScreenSignature(snapshot.stableHash, now)) {
                     pendingSnapshot = snapshot
                     _state.update {
+                        val stale = it.card != null && it.cardSignature != null &&
+                            it.cardSignature != snapshot.stableHash
                         it.copy(
                             active = true, needsAccessibility = false, noModelConfigured = false,
                             currentPackage = snapshot.packageName,
                             currentAppLabel = snapshot.appLabel,
                             currentTitle = snapshot.title,
                             lastSnapshotHash = snapshot.stableHash,
-                            statusText = readingStatus(snapshot.appLabel.ifBlank { snapshot.packageName }),
+                            statusText = if (stale) {
+                                context.getString(R.string.live_result_screen_changed)
+                            } else {
+                                readingStatus(snapshot.appLabel.ifBlank { snapshot.packageName })
+                            },
                         )
                     }
                 }
             }
 
-            // 场景静默：OTHER 且用户没给焦点指令 → 不自动分析
-            val snapshot = pendingSnapshot
-            if (snapshot != null && liveSetting.autoRefresh) {
-                val scene = LiveScenes.classify(snapshot.packageName)
-                val silent = scene == LiveScene.OTHER && focusInstruction.isBlank()
-                if (silent) {
-                    _state.update {
-                        if (it.analyzing || it.card != null) it
-                        else it.copy(statusText = readingStatus(snapshot.appLabel.ifBlank { snapshot.packageName }))
-                    }
-                } else if (engine.decide(System.currentTimeMillis()) == LiveEngine.Decision.Analyze) {
-                    analyzeSnapshot(snapshot, force = false)
-                }
-            }
+            // P0 手动语义（蓝图 v3 §7.2 P0-7）：屏幕事件只驱动快照与状态呈现，
+            // 不自动发起模型调用；分析仅由 refreshNow / submitFocusInstruction 触发。
             delay(tickInterval)
         }
     }
@@ -306,7 +367,6 @@ class LiveModeManager(
         val engine = engine ?: return
         val now = System.currentTimeMillis()
         val settings = settingsStore.settingsFlow.value
-        val liveSetting = settings.agentRuntime.liveMode
         when (val d = engine.decide(now, force)) {
             is LiveEngine.Decision.Wait -> {
                 if (d.reason == "backoff") {
@@ -343,6 +403,8 @@ class LiveModeManager(
 
         val generation = analysisGeneration.incrementAndGet()
         engine.onAnalysisStarted(now)
+        activeRunId?.let(agentRunner::cancel)
+        activeRunId = null
         analysisJob?.cancel()
         analysisJob = appScope.launch(Dispatchers.IO) {
             try {
@@ -357,41 +419,77 @@ class LiveModeManager(
                         nextAnalysisAfterMillis = 0L,
                     )
                 }
-                val screenshotUri = if (liveSetting.analysisMode == LiveAnalysisMode.AGGRESSIVE) {
-                    AmberAccessibilityService.getActiveService()?.let { svc ->
-                        // Amber 自己全屏在前台时截屏只会拍到自己，喂给模型反而污染分析 → 跳过
-                        val activePackage = svc.activePackageName()
-                        if (activePackage == context.packageName) null
-                        else screenshotter.captureToFileUri(svc)
-                    }
-                } else null
-                val outcome = analyzer.analyze(
-                    settings = settings,
-                    model = model,
-                    snapshot = snapshot,
+                // 一次分析 = 一个 run（蓝图 v3 §7.1 执行顺序链）：run 只包推理，
+                // 采集/门控在本域层；P0 不开放截图分析（P1-8 恢复时 input 加 mode）。
+                val input = LiveTurnInput(
+                    packageName = snapshot.packageName,
+                    appLabel = snapshot.appLabel,
+                    title = snapshot.title,
+                    contentText = snapshot.contentText.ifBlank { snapshot.visibleText },
+                    uiTree = snapshot.uiTree,
+                    screenSignature = snapshot.stableHash,
                     focus = focusInstruction,
                     actionLabel = actionLabel,
-                    mode = liveSetting.analysisMode,
-                    screenshotUri = screenshotUri,
-                    locale = context.appLocale(),
+                    localeTag = context.appLocale().toLanguageTag(),
+                    capturedAtMillis = snapshot.capturedAtMillis,
                 )
+                val handle = agentRunner.launch(LiveTurnDescriptor.ID, input).getOrThrow()
+                // 代数兜底：launch 到注册之间取消方（pause/stop/新分析）可能已落空，
+                // generation 不匹配 = 本 run 已被放弃，立即取消，晚到结果不得入库。
+                if (generation != analysisGeneration.get()) {
+                    agentRunner.cancel(handle.runId)
+                    throw CancellationException("live analysis superseded")
+                }
+                activeRunId = handle.runId
+                val terminal = agentRunner.observe(handle.runId).first { it.status.isTerminal }
+                if (activeRunId == handle.runId) activeRunId = null
+                val artifact = terminal.artifact as? LiveTurnArtifact
+                if (terminal.status != RunStatus.COMPLETED || artifact == null) {
+                    throw terminal.error ?: IllegalStateException("Live run ended ${terminal.status}")
+                }
+                // 模型调用已发生即记账（与结果是否回写无关）；usage 缺失按 0 值累加、次数 +1。
+                // 记账失败不得把成功分析误报为失败（总检查 #4），故 runCatching 隔离。
+                runCatching {
+                    withContext(NonCancellable) {
+                        usageStore.accumulate(artifact.promptTokens, artifact.completionTokens, artifact.cachedTokens)
+                    }
+                }
                 withContext(Dispatchers.Main.immediate) {
-                    if (generation == analysisGeneration.get()) {
-                        engine.onAnalysisSucceeded(snapshot.stableHash)
-                        _state.update {
-                            it.copy(
-                                analyzing = false,
-                                card = outcome.card,
-                                currentPackage = snapshot.packageName,
-                                currentAppLabel = snapshot.appLabel,
-                                currentTitle = snapshot.title,
-                                requestedAction = "",
-                                completedAction = actionLabel,
-                                statusText = outcome.degradedReason ?: doneStatus(actionLabel),
-                                error = null,
-                                lastUpdatedAtMillis = System.currentTimeMillis(),
-                                nextAnalysisAfterMillis = 0L,
-                            )
+                    // 结果有效性检查（蓝图 v3 §7.1 执行顺序链末端）：
+                    // generation 未变 + 屏幕上下文自分析启动后未变 + 结果未超期，三者同时成立才回写。
+                    val finishedAt = System.currentTimeMillis()
+                    val contextCurrent = pendingSnapshot?.stableHash == snapshot.stableHash
+                    val withinTtl = finishedAt - now <= ANALYSIS_RESULT_TTL_MS
+                    when {
+                        generation != analysisGeneration.get() -> Unit
+                        !contextCurrent || !withinTtl -> {
+                            _state.update {
+                                it.copy(
+                                    analyzing = false,
+                                    requestedAction = "",
+                                    completedAction = "",
+                                    statusText = context.getString(R.string.live_result_stale_dropped),
+                                )
+                            }
+                        }
+                        else -> {
+                            engine.onAnalysisSucceeded(snapshot.stableHash)
+                            _state.update {
+                                it.copy(
+                                    analyzing = false,
+                                    card = artifact.card,
+                                    cardSignature = snapshot.stableHash,
+                                    currentPackage = snapshot.packageName,
+                                    currentAppLabel = snapshot.appLabel,
+                                    currentTitle = snapshot.title,
+                                    requestedAction = "",
+                                    completedAction = actionLabel,
+                                    statusText = artifact.degradedReason ?: doneStatus(actionLabel),
+                                    error = null,
+                                    lastUpdatedAtMillis = finishedAt,
+                                    nextAnalysisAfterMillis = 0L,
+                                )
+                            }
                         }
                     }
                 }
@@ -410,6 +508,7 @@ class LiveModeManager(
                         _state.update {
                             it.copy(
                                 analyzing = false,
+                                requestedAction = "",
                                 statusText = failure.statusText,
                                 error = failure.message,
                                 completedAction = "",
@@ -502,20 +601,13 @@ class LiveModeManager(
         }
     }
 
-    /** 只填不发：草稿写进对方输入框；失败降级剪贴板。 */
+    /** P0 收敛为纯复制（蓝图 v3 §7.2 P0-5）：写入仲裁契约落地前不触碰目标应用
+     *  输入框；P1 起按白名单逐 App 恢复填入，恢复时需带目标绑定与写入前校验。 */
     fun fillCurrentDraft(): LiveFillResult {
         val card = _state.value.card ?: return LiveFillResult.NO_DRAFT
         val draft = card.suggestions.firstOrNull()?.takeIf { it.isNotBlank() }
             ?: card.watching.takeIf { it.isNotBlank() }
             ?: return LiveFillResult.NO_DRAFT
-        val service = AmberAccessibilityService.getActiveService()
-        if (service != null) {
-            val targetPackage = _state.value.currentPackage
-            if (targetPackage.isNotBlank() && service.setTextInPackage(targetPackage, draft)) {
-                return LiveFillResult.FILLED
-            }
-            if (service.setFocusedText(draft)) return LiveFillResult.FILLED
-        }
         val clipboard = context.getSystemService(ClipboardManager::class.java)
             ?: return LiveFillResult.NO_DRAFT
         clipboard.setPrimaryClip(ClipData.newPlainText("amber-live-draft", draft))
@@ -554,6 +646,12 @@ class LiveModeManager(
         private const val TAG = "LiveModeManager"
         private const val DEFAULT_ACTION_LABEL = "屏幕分析"
         private const val MODEL_BUSY_BACKOFF_MS = 30_000L
+
+        /** 分析结果回写的有效期：超时即认为结果已脱离现场，丢弃而非覆盖。 */
+        private const val ANALYSIS_RESULT_TTL_MS = 60_000L
+
+        /** Live run/事件的保留窗口（蓝图 v3 §6）：30 天，伴随启动时 best-effort 清扫。 */
+        private const val LIVE_ARTIFACT_RETENTION_MS = 30L * 24 * 60 * 60 * 1000
     }
 }
 

@@ -98,6 +98,7 @@ import app.amber.feature.ui.components.message.LocalSearchImageUrls
 import app.amber.feature.ui.components.message.LocalSearchSources
 import app.amber.feature.ui.components.message.SearchSourcesRegistry
 import app.amber.feature.ui.components.table.DataTable
+import app.amber.feature.ui.context.LocalChatFontScale
 import app.amber.feature.ui.context.LocalSettings
 import app.amber.feature.ui.theme.JetbrainsMono
 import app.amber.feature.ui.utils.amberTraceMeasure
@@ -1907,6 +1908,14 @@ private fun MarkdownNode(
                 6 -> HeaderStyle.H6
                 else -> throw IllegalArgumentException("Unknown header type")
             }
+            // 标题是绝对字号，不随 LocalTextStyle 缩放；乘聊天字号比例保持标题/正文
+            // 比例。非聊天面（LocalChatFontScale 默认 1f）维持原值。
+            val fontScale = LocalChatFontScale.current
+            val scaledStyle = style.copy(
+                fontSize = style.fontSize * fontScale,
+                lineHeight = style.lineHeight * fontScale,
+            )
+            // 垂直 padding 同乘 scale，保持标题行盒与呼吸感的比例不随滑杆漂移。
             val headingPadding = when (node.headingLevel) {
                 1 -> 16.dp
                 2 -> 14.dp
@@ -1915,12 +1924,12 @@ private fun MarkdownNode(
                 5 -> 8.dp
                 6 -> 6.dp
                 else -> 8.dp
-            }
+            } * fontScale
             // Capture the body style BEFORE switching to the heading style, so
             // the live-suffix preview of the paragraph that follows the heading
             // renders as body text rather than leaking the heading's large bold.
             val bodyStyle = LocalTextStyle.current
-            ProvideTextStyle(value = style) {
+            ProvideTextStyle(value = scaledStyle) {
                 StreamingBlockReveal(node = node, modifier = modifier.fillWidthIf(LocalMarkdownFillWidth.current)) { revealModifier ->
                     FlowRow(
                         modifier = revealModifier,

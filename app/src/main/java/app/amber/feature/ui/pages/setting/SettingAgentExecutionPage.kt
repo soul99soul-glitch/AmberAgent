@@ -24,6 +24,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.composables.icons.lucide.Lucide
 import com.composables.icons.lucide.ChevronRight
 import com.composables.icons.lucide.CodeXml
+import com.composables.icons.lucide.Eye
 import com.composables.icons.lucide.SearchCheck
 import com.composables.icons.lucide.Megaphone
 import com.composables.icons.lucide.RefreshCw
@@ -107,13 +108,13 @@ fun SettingAgentExecutionPage(vm: SettingVM = koinViewModel()) {
                                     options = operationPreviewModeOptions,
                                     selected = settings.agentRuntime.operationPreviewMode,
                                     onSelected = { mode ->
-                                        vm.updateSettings(
-                                            settings.copy(
-                                                agentRuntime = settings.agentRuntime.copy(
+                                        vm.updateSettings { current ->
+                                            current.copy(
+                                                agentRuntime = current.agentRuntime.copy(
                                                     operationPreviewMode = mode
                                                 )
                                             )
-                                        )
+                                        }
                                     },
                                     modifier = Modifier.fillMaxWidth(),
                                     label = { mode ->
@@ -143,13 +144,13 @@ fun SettingAgentExecutionPage(vm: SettingVM = koinViewModel()) {
                             Switch(
                                 checked = settings.agentRuntime.generativeUi.enabled,
                                 onCheckedChange = { checked ->
-                                    vm.updateSettings(
-                                        settings.copy(
-                                            agentRuntime = settings.agentRuntime.copy(
-                                                generativeUi = settings.agentRuntime.generativeUi.copy(enabled = checked)
+                                    vm.updateSettings { current ->
+                                        current.copy(
+                                            agentRuntime = current.agentRuntime.copy(
+                                                generativeUi = current.agentRuntime.generativeUi.copy(enabled = checked)
                                             )
                                         )
-                                    )
+                                    }
                                 }
                             )
                         },
@@ -166,13 +167,13 @@ fun SettingAgentExecutionPage(vm: SettingVM = koinViewModel()) {
                                     MAX_AGENT_TOOL_LOOP_STEPS,
                                 ),
                                 onOptionSelected = { steps ->
-                                    vm.updateSettings(
-                                        settings.copy(
-                                            agentRuntime = settings.agentRuntime.copy(
+                                    vm.updateSettings { current ->
+                                        current.copy(
+                                            agentRuntime = current.agentRuntime.copy(
                                                 maxToolLoopSteps = steps
                                             )
                                         )
-                                    )
+                                    }
                                 },
                                 optionToString = {
                                     stringResource(R.string.setting_page_agent_tool_loop_steps_value, it)
@@ -196,13 +197,13 @@ fun SettingAgentExecutionPage(vm: SettingVM = koinViewModel()) {
                             Switch(
                                 checked = settings.agentRuntime.enableLiveStatusNotification,
                                 onCheckedChange = { checked ->
-                                    vm.updateSettings(
-                                        settings.copy(
-                                            agentRuntime = settings.agentRuntime.copy(
+                                    vm.updateSettings { current ->
+                                        current.copy(
+                                            agentRuntime = current.agentRuntime.copy(
                                                 enableLiveStatusNotification = checked
                                             )
                                         )
-                                    )
+                                    }
                                 }
                             )
                         },
@@ -215,13 +216,13 @@ fun SettingAgentExecutionPage(vm: SettingVM = koinViewModel()) {
                             Switch(
                                 checked = settings.agentRuntime.hideSensitiveLiveStatus,
                                 onCheckedChange = { checked ->
-                                    vm.updateSettings(
-                                        settings.copy(
-                                            agentRuntime = settings.agentRuntime.copy(
+                                    vm.updateSettings { current ->
+                                        current.copy(
+                                            agentRuntime = current.agentRuntime.copy(
                                                 hideSensitiveLiveStatus = checked
                                             )
                                         )
-                                    )
+                                    }
                                 }
                             )
                         },
@@ -241,32 +242,13 @@ fun SettingAgentExecutionPage(vm: SettingVM = koinViewModel()) {
                             Switch(
                                 checked = settings.agentRuntime.liveMode.enabled,
                                 onCheckedChange = { checked ->
-                                    vm.updateSettings(
-                                        settings.copy(
-                                            agentRuntime = settings.agentRuntime.copy(
-                                                liveMode = settings.agentRuntime.liveMode.copy(enabled = checked)
+                                    vm.updateSettings { current ->
+                                        current.copy(
+                                            agentRuntime = current.agentRuntime.copy(
+                                                liveMode = current.agentRuntime.liveMode.copy(enabled = checked)
                                             )
                                         )
-                                    )
-                                }
-                            )
-                        },
-                    )
-                    item(
-                        leadingContent = { SettingTileIcon(Lucide.RefreshCw) },
-                        supportingContent = { Text(stringResource(R.string.setting_page_agent_live_mode_auto_refresh_desc)) },
-                        headlineContent = { Text(stringResource(R.string.setting_page_agent_live_mode_auto_refresh)) },
-                        trailingContent = {
-                            Switch(
-                                checked = settings.agentRuntime.liveMode.autoRefresh,
-                                onCheckedChange = { checked ->
-                                    vm.updateSettings(
-                                        settings.copy(
-                                            agentRuntime = settings.agentRuntime.copy(
-                                                liveMode = settings.agentRuntime.liveMode.copy(autoRefresh = checked)
-                                            )
-                                        )
-                                    )
+                                    }
                                 }
                             )
                         },
@@ -283,13 +265,13 @@ fun SettingAgentExecutionPage(vm: SettingVM = koinViewModel()) {
                                     liveRefreshOptions.last(),
                                 ),
                                 onOptionSelected = { interval ->
-                                    vm.updateSettings(
-                                        settings.copy(
-                                            agentRuntime = settings.agentRuntime.copy(
-                                                liveMode = settings.agentRuntime.liveMode.copy(refreshIntervalMs = interval)
+                                    vm.updateSettings { current ->
+                                        current.copy(
+                                            agentRuntime = current.agentRuntime.copy(
+                                                liveMode = current.agentRuntime.liveMode.copy(refreshIntervalMs = interval)
                                             )
                                         )
-                                    )
+                                    }
                                 },
                                 optionToString = {
                                     stringResource(R.string.setting_page_agent_live_mode_refresh_interval_value, it / 1_000f)
@@ -310,18 +292,32 @@ fun SettingAgentExecutionPage(vm: SettingVM = koinViewModel()) {
                                     liveMaxNodeOptions.last(),
                                 ),
                                 onOptionSelected = { maxNodes ->
-                                    vm.updateSettings(
-                                        settings.copy(
-                                            agentRuntime = settings.agentRuntime.copy(
-                                                liveMode = settings.agentRuntime.liveMode.copy(maxNodes = maxNodes)
+                                    vm.updateSettings { current ->
+                                        current.copy(
+                                            agentRuntime = current.agentRuntime.copy(
+                                                liveMode = current.agentRuntime.liveMode.copy(maxNodes = maxNodes)
                                             )
                                         )
-                                    )
+                                    }
                                 },
                                 optionToString = {
                                     stringResource(R.string.setting_page_agent_live_mode_max_nodes_value, it)
                                 },
                                 // V3 ValueChip 内容自适应,
+                            )
+                        },
+                    )
+                    item(
+                        onClick = { navController.navigate(Screen.LiveCompanion) },
+                        leadingContent = { SettingTileIcon(Lucide.Eye) },
+                        supportingContent = { Text(stringResource(R.string.setting_page_agent_live_mode_open_desc)) },
+                        headlineContent = { Text(stringResource(R.string.setting_page_agent_live_mode_open)) },
+                        trailingContent = {
+                            Icon(
+                                Lucide.ChevronRight,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp),
+                                tint = workspaceColors().muted,
                             )
                         },
                     )
@@ -340,15 +336,15 @@ fun SettingAgentExecutionPage(vm: SettingVM = koinViewModel()) {
                             Switch(
                                 checked = settings.agentRuntime.generationRetry.enabled,
                                 onCheckedChange = { checked ->
-                                    vm.updateSettings(
-                                        settings.copy(
-                                            agentRuntime = settings.agentRuntime.copy(
-                                                generationRetry = settings.agentRuntime.generationRetry.copy(
+                                    vm.updateSettings { current ->
+                                        current.copy(
+                                            agentRuntime = current.agentRuntime.copy(
+                                                generationRetry = current.agentRuntime.generationRetry.copy(
                                                     enabled = checked
                                                 )
                                             )
                                         )
-                                    )
+                                    }
                                 }
                             )
                         },
@@ -362,15 +358,15 @@ fun SettingAgentExecutionPage(vm: SettingVM = koinViewModel()) {
                                 options = retryCountOptions,
                                 selectedOption = settings.agentRuntime.generationRetry.maxRetries.coerceIn(1, 5),
                                 onOptionSelected = { maxRetries ->
-                                    vm.updateSettings(
-                                        settings.copy(
-                                            agentRuntime = settings.agentRuntime.copy(
-                                                generationRetry = settings.agentRuntime.generationRetry.copy(
+                                    vm.updateSettings { current ->
+                                        current.copy(
+                                            agentRuntime = current.agentRuntime.copy(
+                                                generationRetry = current.agentRuntime.generationRetry.copy(
                                                     maxRetries = maxRetries
                                                 )
                                             )
                                         )
-                                    )
+                                    }
                                 },
                                 optionToString = {
                                     stringResource(R.string.setting_page_agent_generation_retry_count_value, it)
@@ -387,13 +383,13 @@ fun SettingAgentExecutionPage(vm: SettingVM = koinViewModel()) {
                             Switch(
                                 checked = settings.agentRuntime.keepGenerationAliveInBackground,
                                 onCheckedChange = { checked ->
-                                    vm.updateSettings(
-                                        settings.copy(
-                                            agentRuntime = settings.agentRuntime.copy(
+                                    vm.updateSettings { current ->
+                                        current.copy(
+                                            agentRuntime = current.agentRuntime.copy(
                                                 keepGenerationAliveInBackground = checked
                                             )
                                         )
-                                    )
+                                    }
                                 }
                             )
                         },

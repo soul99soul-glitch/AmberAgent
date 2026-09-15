@@ -47,8 +47,7 @@ fun <T> Select(
     trailing: @Composable () -> Unit = {},
 ) {
     var expanded by remember { mutableStateOf(false) }
-    // V3 设计稿：方框 → 胶囊 + 主题色 (不再固定蓝色 workspace.blueContainer)
-    // Paper 是橘棕、Plain 是黑灰、Midnight 是冷靛蓝，跟随 LocalChatTheme.accent
+    // 胶囊造型 + 主题色 (替代固定蓝色 workspace.blueContainer), 颜色跟随 LocalChatTheme.accent
     val chatTheme = LocalChatTheme.current
 
     ExposedDropdownMenuBox(

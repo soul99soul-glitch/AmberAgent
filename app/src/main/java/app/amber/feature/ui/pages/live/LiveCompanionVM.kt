@@ -6,7 +6,6 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import app.amber.feature.live.LiveAnalysisMode
 import app.amber.feature.live.LiveFillResult
 import app.amber.feature.live.LiveModeManager
 import app.amber.feature.live.LiveModeUiState
@@ -57,30 +56,6 @@ class LiveCompanionVM(
 
     fun exportCurrentCard(): String? = liveModeManager.exportCurrentCard()
 
-    fun setAutoRefresh(enabled: Boolean) {
-        viewModelScope.launch {
-            settingsStore.update { settings ->
-                settings.copy(
-                    agentRuntime = settings.agentRuntime.copy(
-                        liveMode = settings.agentRuntime.liveMode.copy(autoRefresh = enabled)
-                    )
-                )
-            }
-        }
-    }
-
-    fun setAnalysisMode(mode: LiveAnalysisMode) {
-        viewModelScope.launch {
-            settingsStore.update { settings ->
-                settings.copy(
-                    agentRuntime = settings.agentRuntime.copy(
-                        liveMode = settings.agentRuntime.liveMode.copy(analysisMode = mode)
-                    )
-                )
-            }
-        }
-    }
-
     fun setCompanionModel(modelId: String?) {
         viewModelScope.launch {
             settingsStore.update { settings ->
@@ -107,20 +82,6 @@ class LiveCompanionVM(
         }
     }
 
-    fun setVoiceInputEnabled(enabled: Boolean) {
-        viewModelScope.launch {
-            settingsStore.update { settings ->
-                settings.copy(
-                    agentRuntime = settings.agentRuntime.copy(
-                        liveMode = settings.agentRuntime.liveMode.copy(voiceInputEnabled = enabled)
-                    )
-                )
-            }
-        }
-    }
-
-    override fun onCleared() {
-        liveModeManager.stop()
-        super.onCleared()
-    }
+    // 伴随会话不随页面 VM 销毁而停止（蓝图 v3 §7.2 P0-3）：
+    // Manager 是进程级 single（AgentInfraModule.kt:67），停止语义=页面主开关 off / 气泡长按。
 }

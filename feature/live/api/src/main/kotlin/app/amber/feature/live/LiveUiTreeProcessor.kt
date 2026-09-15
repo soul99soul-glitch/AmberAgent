@@ -163,10 +163,11 @@ object LiveUiTreeProcessor {
         return true
     }
 
+    /** 归一化只忽略明确识别的时钟噪声；金额、数量与正文变化必须产生新签名
+     *  （蓝图 v3 §7.2 P0-8 / D10：旧实现把全数字替换为 [num]，会吞掉 Price 99→199 这类变化）。 */
     private fun String.normalizeForHash(): String =
         lowercase(Locale.ROOT)
             .replace(Regex("\\d{1,2}:\\d{2}"), "[time]")
-            .replace(Regex("\\b\\d+(\\.\\d+)?\\b"), "[num]")
             .replace(Regex("\\s+"), " ")
             .trim()
 

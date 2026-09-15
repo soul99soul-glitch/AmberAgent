@@ -450,7 +450,7 @@ internal fun ChatListNormal(
         )
     }
 
-    // ChatPage owns the canvas and bloom; leave the timeline transparent so its texture
+    // ChatPage owns the canvas; leave the timeline transparent so its texture
     // stays visible between opaque message/tool cards without changing their theme tokens.
     val tailIndicatorReserveVisible = showBottomFollowAnimation &&
         (
@@ -462,14 +462,13 @@ internal fun ChatListNormal(
     // P8-06: 流式内容继续到达且用户不在底部时显示「回到底部」按钮。
     // reverseLayout 下"在底部" = firstVisibleItemIndex == 0 且偏移在缓冲内；
     // 用户上滑离开后自动跟随天然停止，点击按钮滚回 index 0 即恢复。
+    // 不受 enableAutoScroll 门控：关闭自动跟随后，这是唯一的手动回底入口。
     val backToBottomVisible by remember(
         state,
         activeGeneration,
-        settings.displaySetting.enableAutoScroll,
     ) {
         derivedStateOf {
-            settings.displaySetting.enableAutoScroll &&
-                activeGeneration &&
+            activeGeneration &&
                 (
                     state.firstVisibleItemIndex != 0 ||
                         state.firstVisibleItemScrollOffset > bottomPinBufferPx

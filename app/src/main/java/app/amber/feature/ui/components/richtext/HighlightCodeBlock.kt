@@ -69,6 +69,7 @@ import com.composables.icons.lucide.CloudDownload
 import com.composables.icons.lucide.Eye
 import app.amber.agent.R
 import app.amber.agent.Screen
+import app.amber.feature.ui.context.LocalChatFontScale
 import app.amber.feature.ui.context.LocalNavController
 import app.amber.feature.ui.context.LocalSettings
 import app.amber.feature.ui.context.Navigator
@@ -99,10 +100,7 @@ fun HighlightCodeBlock(
     language: String,
     modifier: Modifier = Modifier,
     completeCodeBlock: Boolean = true,
-    style: TextStyle? = TextStyle(
-        fontSize = 12.sp,
-        lineHeight = 16.sp,
-    ),
+    style: TextStyle? = null,
     forceAutoWrap: Boolean = false,
 ) {
     val darkMode = LocalDarkMode.current
@@ -158,7 +156,13 @@ fun HighlightCodeBlock(
                 completeCodeBlock = completeCodeBlock,
             )
         }
-        val codeTextStyle = LocalTextStyle.current.merge(style)
+        // 默认 12sp 代码字号随聊天字号比例缩放；显式传入 style 的调用方
+        // （工具预览等 chrome 小字）不缩放。
+        val effectiveStyle = style ?: TextStyle(
+            fontSize = 12.sp * LocalChatFontScale.current,
+            lineHeight = 16.sp * LocalChatFontScale.current,
+        )
+        val codeTextStyle = LocalTextStyle.current.merge(effectiveStyle)
         val activeStreamingBlock = LocalStreamingTailActive.current != null
         Column(
             modifier = Modifier.padding(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 8.dp)

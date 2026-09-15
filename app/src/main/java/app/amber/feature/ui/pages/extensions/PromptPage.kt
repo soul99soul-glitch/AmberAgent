@@ -139,12 +139,12 @@ fun PromptPage(vm: PromptVM = koinViewModel()) {
                 when (page) {
                     0 -> ModeInjectionTab(
                         modeInjections = settings.modeInjections,
-                        onUpdate = { vm.updateSettings(settings.copy(modeInjections = it)) }
+                        onUpdate = { vm.updateSettings { current -> current.copy(modeInjections = it) } }
                     )
 
                     1 -> LorebookTab(
                         lorebooks = settings.lorebooks,
-                        onUpdate = { vm.updateSettings(settings.copy(lorebooks = it)) }
+                        onUpdate = { vm.updateSettings { current -> current.copy(lorebooks = it) } }
                     )
                 }
             }

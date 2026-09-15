@@ -85,6 +85,14 @@ class RoomAgentEventStore(
     override suspend fun deleteEventsOfTypeOlderThan(type: String, cutoffMs: Long): Int =
         dao.deleteEventsOfTypeOlderThan(type, cutoffMs)
 
+    /** Live 伴随保留清扫：终态 run 清理（事件侧走 deleteEventsOfTypeOlderThan）。 */
+    suspend fun deleteTerminalRunsOfAgentOlderThan(descriptorId: String, cutoffMs: Long): Int =
+        dao.deleteTerminalRunsOfAgentOlderThan(descriptorId, cutoffMs)
+
+    /** 冷读取：某类事件的最新一条（Live 伴随恢复最近卡片用）。 */
+    suspend fun latestEventOfType(type: String): AgentEventEntity? =
+        dao.latestEventOfType(type)
+
     override suspend fun listUnfinishedRuns(): List<AgentRunRecord> =
         dao.listUnfinished().map { it.toRecord() }
 

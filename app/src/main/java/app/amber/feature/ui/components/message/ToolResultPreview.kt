@@ -75,7 +75,7 @@ fun ToolResultPreview(
 @Composable
 private fun PreviewThumb() {
     val theme = LocalChatTheme.current
-    // 设计稿: previewBg 主题 surface (Whisper/Plain 白 / Paper 纸黄 / Midnight 半透白)
+    // previewBg 用聊天主题 surface
     // border 8% ink (比 composer 5% 略明显) + 单层柔影 0.06 (比 composer 0.08 轻一档)
     Box(
         modifier = Modifier

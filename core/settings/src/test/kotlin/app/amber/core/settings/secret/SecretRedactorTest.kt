@@ -224,4 +224,27 @@ class SecretRedactorTest {
         assertTrue(store.listOrphans(emptySet()).isEmpty())
         assertEquals(SecretRedactor.MASK_STRING + "1234", (redacted.single() as ProviderSetting.OpenAI).apiKey)
     }
+
+    @Test
+    fun `rehydrate treats orphan masked apiKey as missing secret`() {
+        val store = fakeSecretStore()
+        val redactor = SecretRedactor(store)
+        // 恢复不带 secretRefs 的备份：持久化值是掩码且无 reference
+        val provider = ProviderSetting.OpenAI(apiKey = SecretRedactor.MASK_STRING + "abcd")
+
+        val rehydrated = redactor.rehydrateProviders(listOf(provider), emptyMap())
+
+        assertEquals("", (rehydrated.single() as ProviderSetting.OpenAI).apiKey)
+    }
+
+    @Test
+    fun `rehydrate keeps plain value without ref untouched`() {
+        val store = fakeSecretStore()
+        val redactor = SecretRedactor(store)
+        val provider = ProviderSetting.OpenAI(apiKey = "sk-plain-no-ref-9")
+
+        val rehydrated = redactor.rehydrateProviders(listOf(provider), emptyMap())
+
+        assertEquals("sk-plain-no-ref-9", (rehydrated.single() as ProviderSetting.OpenAI).apiKey)
+    }
 }

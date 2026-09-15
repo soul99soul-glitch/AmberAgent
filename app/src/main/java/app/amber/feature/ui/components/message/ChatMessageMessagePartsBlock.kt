@@ -455,7 +455,7 @@ internal fun MessagePartsBlock(
                             },
                             modifier = Modifier,
                             shape = RoundedCornerShape(50),
-                            // V3 review P3 #8: 切 chatTheme.accent 系列, 适配 Paper/Midnight
+                            // 配色用 chatTheme.accent 系列, 跟随当前聊天主题
                             color = app.amber.feature.ui.pages.chat.LocalChatTheme.current.accentSoft,
                             contentColor = app.amber.feature.ui.pages.chat.LocalChatTheme.current.accent,
                             border = BorderStroke(1.dp, app.amber.feature.ui.pages.chat.LocalChatTheme.current.accent.copy(alpha = 0.12f)),

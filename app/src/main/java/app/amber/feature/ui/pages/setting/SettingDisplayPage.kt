@@ -23,6 +23,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -116,7 +117,7 @@ fun SettingDisplayPage(vm: SettingVM = koinViewModel()) {
 
     fun updateDisplaySetting(setting: DisplaySetting) {
         displaySetting = setting
-        vm.updateSettings(settings.copy(displaySetting = setting))
+        vm.updateSettings { current -> current.copy(displaySetting = setting) }
     }
 
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
@@ -126,6 +127,16 @@ fun SettingDisplayPage(vm: SettingVM = koinViewModel()) {
         ) else emptySet(),
     )
     PermissionManager(permissionState = permissionState)
+
+    // 通知开关：系统授权确认后才写 ON，避免「开关已开但通知权限被拒」的静默失效。
+    // 拒绝时开关保持 OFF；rationale 弹窗与「去设置」引导由 PermissionManager 处理。
+    var pendingNotificationEnable by remember { mutableStateOf(false) }
+    LaunchedEffect(permissionState.allPermissionsGranted) {
+        if (permissionState.allPermissionsGranted && pendingNotificationEnable) {
+            pendingNotificationEnable = false
+            updateDisplaySetting(displaySetting.copy(enableNotificationOnMessageGeneration = true))
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -298,9 +309,12 @@ fun SettingDisplayPage(vm: SettingVM = koinViewModel()) {
                                 checked = displaySetting.enableNotificationOnMessageGeneration,
                                 onCheckedChange = { enabled ->
                                     if (enabled && !permissionState.allPermissionsGranted) {
+                                        pendingNotificationEnable = true
                                         permissionState.requestPermissions()
+                                    } else {
+                                        if (!enabled) pendingNotificationEnable = false
+                                        updateDisplaySetting(displaySetting.copy(enableNotificationOnMessageGeneration = enabled))
                                     }
-                                    updateDisplaySetting(displaySetting.copy(enableNotificationOnMessageGeneration = enabled))
                                 },
                             )
                         },

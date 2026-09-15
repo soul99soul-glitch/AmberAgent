@@ -22,6 +22,7 @@ import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
+import app.amber.feature.ui.context.LocalChatFontScale
 import app.amber.feature.ui.theme.AtomOneDarkPalette
 import app.amber.feature.ui.theme.AtomOneLightPalette
 import app.amber.feature.ui.theme.JetbrainsMono
@@ -104,16 +105,17 @@ internal fun rememberMarkdownSingleTextStyle(): MarkdownSingleTextStyle {
     val density = LocalDensity.current
     val baseFontSize = LocalTextStyle.current.fontSize
     val darkMode = LocalDarkMode.current
-    return remember(colorScheme, density, baseFontSize, darkMode) {
+    val fontScale = LocalChatFontScale.current
+    return remember(colorScheme, density, baseFontSize, darkMode, fontScale) {
         MarkdownSingleTextStyle(
             paragraphSpaceAfter = baseFontSize,
-            headingSpacing = HEADING_PADDING_DP.map { with(density) { it.dp.toSp() } },
+            headingSpacing = HEADING_PADDING_DP.map { with(density) { it.dp.toSp() * fontScale } },
             linkColor = colorScheme.primary,
             bulletColor = colorScheme.primary,
             inlineCodeBackground = colorScheme.secondaryContainer.copy(alpha = 0.2f),
             codeBackground = colorScheme.surfaceContainer,
             codePalette = if (darkMode) AtomOneDarkPalette else AtomOneLightPalette,
-            codeFontSize = 12.sp,
+            codeFontSize = 12.sp * fontScale,
             quoteBackground = colorScheme.surfaceVariant.copy(alpha = 0.12f),
             ruleColor = colorScheme.primary.copy(alpha = 0.5f),
         )
@@ -135,6 +137,8 @@ private data class MdBlockCtx(
     val enableLatexRendering: Boolean,
     /** Localized label used for image placeholders in the streaming text. */
     val imageFallbackLabel: String,
+    /** 聊天字号比例，标题绝对字号（HeaderStyle）随之缩放；非聊天面默认 1f。 */
+    val headingFontScale: Float,
 )
 
 private class JoinedBlock(
@@ -172,6 +176,7 @@ internal fun mdNodeToAnnotatedString(
     onClickUrl: (String) -> Unit = {},
     codeHighlights: Map<String, List<HighlightToken>> = emptyMap(),
     enableLatexRendering: Boolean = true,
+    headingFontScale: Float = 1f,
     imageFallbackLabel: String,
 ): AnnotatedString {
     val ctx = MdBlockCtx(
@@ -179,6 +184,7 @@ internal fun mdNodeToAnnotatedString(
         listLevel = 0,
         enableLatexRendering = enableLatexRendering,
         imageFallbackLabel = imageFallbackLabel,
+        headingFontScale = headingFontScale,
     )
     val children = if (root.type == MdNodeType.Root) root.children else listOf(root)
     return joinBlocks(buildBlocks(children, source, ctx, onClickUrl, codeHighlights), style)
@@ -481,7 +487,7 @@ private fun buildHeading(
         it.type == MdNodeType.Unknown && it.textIn(source).isBlank()
     }
     if (inlineChildren.isEmpty()) return null
-    val fontSize = when (level) {
+    val headingFontSize = when (level) {
         1 -> HeaderStyle.H1.fontSize
         2 -> HeaderStyle.H2.fontSize
         3 -> HeaderStyle.H3.fontSize
@@ -489,6 +495,7 @@ private fun buildHeading(
         5 -> HeaderStyle.H5.fontSize
         else -> HeaderStyle.H6.fontSize
     }
+    val fontSize = headingFontSize * ctx.headingFontScale
     val text = buildAnnotatedString {
         withStyle(SpanStyle(fontSize = fontSize, fontWeight = FontWeight.Bold)) {
             appendInlineRun(inlineChildren, source, ctx, onClickUrl)

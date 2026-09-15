@@ -100,13 +100,13 @@ fun SettingExperimentalModelCouncilPage(
 
     fun update(block: (ModelCouncilRuntimeSetting) -> ModelCouncilRuntimeSetting) {
         val nextCouncil = block(council)
-        vm.updateSettings(
-            settings.copy(
-                agentRuntime = settings.agentRuntime.copy(
+        vm.updateSettings { current ->
+            current.copy(
+                agentRuntime = current.agentRuntime.copy(
                     modelCouncil = nextCouncil
                 )
             )
-        )
+        }
         scope.launch {
             promptConfigRepository.writeModelCouncilMarkdown(nextCouncil)
         }

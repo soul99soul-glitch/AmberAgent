@@ -29,6 +29,7 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -132,11 +133,13 @@ internal fun ModelEditorSheet(
     val t = LocalAmberTokens.current
     val type = LocalAmberType.current
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    val canConfirm = if (isEdit) {
+    var contextWindowInvalid by remember { mutableStateOf(false) }
+    val baseCanConfirm = if (isEdit) {
         model.displayName.isNotBlank()
     } else {
         model.modelId.isNotBlank() && model.displayName.isNotBlank()
     }
+    val canConfirm = baseCanConfirm && !contextWindowInvalid
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -194,6 +197,7 @@ internal fun ModelEditorSheet(
                     onModelChange = onModelChange,
                     isEdit = isEdit,
                     parentProvider = parentProvider,
+                    onContextWindowInvalidChange = { contextWindowInvalid = it },
                 )
             }
 
@@ -215,12 +219,19 @@ internal fun ModelSettingsForm(
     model: Model,
     onModelChange: (Model) -> Unit,
     isEdit: Boolean,
-    parentProvider: ProviderSetting? = null
+    parentProvider: ProviderSetting? = null,
+    onContextWindowInvalidChange: (Boolean) -> Unit = {},
 ) {
     val pagerState = rememberPagerState { 3 }
     val scope = rememberCoroutineScope()
     var contextWindowInput by remember(model.id, model.modelId) {
         mutableStateOf(model.contextWindowTokens?.formatContextWindowInput().orEmpty())
+    }
+    // Invalid input keeps the previous value instead of silently dropping the
+    // field; surface the problem and block confirm until it is fixed or cleared.
+    val contextWindowInvalid = contextWindowInput.isNotBlank() && parseContextWindowInput(contextWindowInput) == null
+    LaunchedEffect(contextWindowInvalid) {
+        onContextWindowInvalidChange(contextWindowInvalid)
     }
 
     fun setModelId(id: String) {
@@ -231,7 +242,9 @@ internal fun ModelSettingsForm(
         onModelChange(
             model.copy(
                 modelId = id,
-                displayName = id,
+                // A display name the user already typed (or renamed) must survive
+                // typing the rest of the model id.
+                displayName = if (model.displayName.isBlank() || model.displayName == model.modelId) id else model.displayName,
                 inputModalities = inputModality,
                 outputModalities = outputModality,
                 abilities = abilities,
@@ -366,12 +379,23 @@ internal fun ModelSettingsForm(
                                                 value = contextWindowInput,
                                                 onValueChange = {
                                                     contextWindowInput = it
-                                                    onModelChange(model.copy(contextWindowTokens = parseContextWindowInput(it)))
+                                                    val parsed = parseContextWindowInput(it)
+                                                    if (it.isBlank() || parsed != null) {
+                                                        onModelChange(model.copy(contextWindowTokens = parsed))
+                                                    }
                                                 },
                                                 placeholder = stringResource(R.string.setting_provider_page_model_context_window_placeholder),
                                                 mono = true,
                                             )
                                         }
+                                    }
+                                    if (contextWindowInvalid) {
+                                        Text(
+                                            text = stringResource(R.string.setting_provider_page_model_context_window_invalid),
+                                            style = LocalAmberType.current.meta.copy(fontSize = 11.sp),
+                                            color = LocalAmberTokens.current.accent,
+                                            modifier = Modifier.padding(start = 14.dp, end = 14.dp, bottom = 8.dp),
+                                        )
                                     }
                                 }
                             }

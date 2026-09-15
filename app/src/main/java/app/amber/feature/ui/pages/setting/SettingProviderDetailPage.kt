@@ -20,6 +20,7 @@ import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -69,6 +70,16 @@ fun SettingProviderDetailPage(id: Uuid, vm: SettingVM = koinViewModel()) {
     val shareSheetState = rememberShareSheetState()
     var fetchedCandidates by remember(provider.id) { mutableStateOf<ProviderModelCandidates?>(null) }
     var modelListRefreshKey by remember(provider.id) { mutableIntStateOf(0) }
+    // Config-tab draft, hoisted here so switching pager tabs (which disposes the
+    // config page) keeps unsaved key/baseUrl/name edits. Keyed on provider.id, not
+    // the provider instance, so models-tab writes don't reset the draft.
+    var internalProvider by remember(provider.id) { mutableStateOf(provider) }
+    // The config tab never edits models, but the OAuth consoles commit through it.
+    // Pin the draft's models to the store so an OAuth commit can neither revert
+    // newer models-tab edits nor have its own model writes merged away.
+    LaunchedEffect(provider) {
+        internalProvider = internalProvider.copyProvider(models = provider.models)
+    }
     val t = LocalAmberTokens.current
     val type = LocalAmberType.current
 
@@ -201,7 +212,8 @@ fun SettingProviderDetailPage(id: Uuid, vm: SettingVM = koinViewModel()) {
             when (page) {
                 0 -> {
                     SettingProviderConfigPage(
-                        provider = provider,
+                        internalProvider = internalProvider,
+                        onInternalChange = { internalProvider = it },
                         onEdit = {
                             onEdit(it)
                             toaster.show(

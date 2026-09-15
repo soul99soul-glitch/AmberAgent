@@ -165,13 +165,13 @@ fun SettingAgentRuntimeTasksPage(
                             Switch(
                                 checked = debug.showPermissionReasons,
                                 onCheckedChange = { checked ->
-                                    vm.updateSettings(
-                                        settings.copy(
-                                            agentRuntime = settings.agentRuntime.copy(
-                                                harnessDebug = debug.copy(showPermissionReasons = checked)
+                                    vm.updateSettings { current ->
+                                        current.copy(
+                                            agentRuntime = current.agentRuntime.copy(
+                                                harnessDebug = current.agentRuntime.harnessDebug.copy(showPermissionReasons = checked)
                                             )
                                         )
-                                    )
+                                    }
                                 },
                             )
                         },
@@ -183,13 +183,13 @@ fun SettingAgentRuntimeTasksPage(
                             Switch(
                                 checked = debug.showParallelBatches,
                                 onCheckedChange = { checked ->
-                                    vm.updateSettings(
-                                        settings.copy(
-                                            agentRuntime = settings.agentRuntime.copy(
-                                                harnessDebug = debug.copy(showParallelBatches = checked)
+                                    vm.updateSettings { current ->
+                                        current.copy(
+                                            agentRuntime = current.agentRuntime.copy(
+                                                harnessDebug = current.agentRuntime.harnessDebug.copy(showParallelBatches = checked)
                                             )
                                         )
-                                    )
+                                    }
                                 },
                             )
                         },
@@ -201,13 +201,13 @@ fun SettingAgentRuntimeTasksPage(
                             Switch(
                                 checked = debug.showCapabilitySnapshotSummary,
                                 onCheckedChange = { checked ->
-                                    vm.updateSettings(
-                                        settings.copy(
-                                            agentRuntime = settings.agentRuntime.copy(
-                                                harnessDebug = debug.copy(showCapabilitySnapshotSummary = checked)
+                                    vm.updateSettings { current ->
+                                        current.copy(
+                                            agentRuntime = current.agentRuntime.copy(
+                                                harnessDebug = current.agentRuntime.harnessDebug.copy(showCapabilitySnapshotSummary = checked)
                                             )
                                         )
-                                    )
+                                    }
                                 },
                             )
                         },
@@ -219,13 +219,13 @@ fun SettingAgentRuntimeTasksPage(
                             Switch(
                                 checked = speculative.enabled,
                                 onCheckedChange = { checked ->
-                                    vm.updateSettings(
-                                        settings.copy(
-                                            agentRuntime = settings.agentRuntime.copy(
-                                                speculativeToolExecution = speculative.copy(enabled = checked)
+                                    vm.updateSettings { current ->
+                                        current.copy(
+                                            agentRuntime = current.agentRuntime.copy(
+                                                speculativeToolExecution = current.agentRuntime.speculativeToolExecution.copy(enabled = checked)
                                             )
                                         )
-                                    )
+                                    }
                                 },
                             )
                         },

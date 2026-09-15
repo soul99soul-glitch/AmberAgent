@@ -149,11 +149,11 @@ fun SettingTodayBoardPage(
     }
 
     fun update(block: (TodayBoardSetting) -> TodayBoardSetting) {
-        vm.updateSettings(
-            settings.copy(
-                agentRuntime = settings.agentRuntime.copy(todayBoard = block(board))
+        vm.updateSettings { current ->
+            current.copy(
+                agentRuntime = current.agentRuntime.copy(todayBoard = block(board))
             )
-        )
+        }
     }
 
     fun addFocusRule(content: String) {

@@ -16,10 +16,10 @@ class BackToBottomButtonTest {
     fun `button visible only while streaming and user is not at bottom`() {
         val source = repoFile("src/main/java/app/amber/feature/ui/pages/chat/ChatListNormalSection.kt").readText()
 
-        // 可见性 = 自动滚动开启 && 生成中 && 不在底部（reverseLayout 下即
-        // firstVisibleItemIndex != 0 或偏移超出钉底缓冲）
+        // 可见性 = 生成中 && 不在底部（reverseLayout 下即 firstVisibleItemIndex != 0
+        // 或偏移超出钉底缓冲）。不受 enableAutoScroll 门控：关闭自动跟随后，
+        // 该按钮是唯一的手动回底入口；门控只保留在自动跟随副作用上。
         assertTrue(source.contains("backToBottomVisible"))
-        assertTrue(source.contains("settings.displaySetting.enableAutoScroll"))
         assertTrue(source.contains("activeGeneration"))
         assertTrue(source.contains("state.firstVisibleItemIndex != 0"))
         assertTrue(source.contains("state.firstVisibleItemScrollOffset > bottomPinBufferPx"))

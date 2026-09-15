@@ -17,12 +17,10 @@ enum class LiveAnalysisMode {
 @Serializable
 data class LiveModeSetting(
     val enabled: Boolean = false,
-    val autoRefresh: Boolean = true,
     val refreshIntervalMs: Long = 1_500L,
     val stableDelayMs: Long = 1_500L,
     val minAnalysisIntervalMs: Long = 10_000L,
     val maxNodes: Int = 180,
-    val voiceInputEnabled: Boolean = true,
     val analysisMode: LiveAnalysisMode = LiveAnalysisMode.CONSERVATIVE,
     /** 伴随模型 Uuid 字符串；null = 跟随当前聊天模型 */
     val companionModelId: String? = null,
@@ -100,6 +98,7 @@ data class LiveWindowCandidate(
     }
 }
 
+@Serializable
 data class LiveModeCard(
     val watching: String = "",
     val keyPoints: List<String> = emptyList(),
@@ -127,4 +126,11 @@ data class LiveModeUiState(
     val lastUpdatedAtMillis: Long = 0L,
     val nextAnalysisAfterMillis: Long = 0L,
     val lastSnapshotHash: String? = null,
-)
+    /** 当前卡片生成时对应的屏幕签名；与 lastSnapshotHash 不一致即卡片已脱离现场。 */
+    val cardSignature: String? = null,
+) {
+    /** 卡片生成后屏幕又发生了变化（蓝图 v3 D2：仅失效呈现，不产生自动触发）。 */
+    val cardStale: Boolean
+        get() = card != null && cardSignature != null &&
+            lastSnapshotHash != null && lastSnapshotHash != cardSignature
+}

@@ -287,8 +287,6 @@
   <string name="setting_display_page_chat_font_family_monospace">等幅</string>
   <string name="setting_display_page_chat_font_family_serif">明朝体</string>
   <string name="setting_display_page_chat_font_family_title">チャットフォント</string>
-  <string name="setting_display_page_chat_list_model_icon_desc">チャットリストのメッセージにモデルアイコンを表示するかどうか</string>
-  <string name="setting_display_page_chat_list_model_icon_title">チャットリストのモデルアイコン</string>
   <string name="setting_display_page_code_block_auto_collapse_desc">デフォルトでコードブロックを自動的に折りたたむ</string>
   <string name="setting_display_page_code_block_auto_collapse_title">コードブロックの自動折りたたみ</string>
   <string name="setting_display_page_code_block_auto_wrap_desc">コードブロック内の長い行を自動的に折り返す</string>
@@ -312,8 +310,6 @@
   <string name="setting_display_page_send_on_enter_title">Enterキーで送信</string>
   <string name="setting_display_page_show_assistant_bubble_desc">アシスタントメッセージのバブル背景を表示するかどうか</string>
   <string name="setting_display_page_show_assistant_bubble_title">アシスタントメッセージバブルを表示</string>
-  <string name="setting_display_page_show_date_below_name_desc">ニックネームまたはモデル名の下にメッセージの日付を表示するかどうか</string>
-  <string name="setting_display_page_show_date_below_name_title">名前の下に日付を表示</string>
   <string name="setting_display_page_show_line_numbers_desc">コードブロックに行番号を表示</string>
   <string name="setting_display_page_show_line_numbers_title">行番号を表示</string>
   <string name="setting_display_page_show_message_jumper_desc">チャットリストをスクロールすると、右側にクイックジャンプボタンが表示されます。</string>
@@ -478,8 +474,6 @@
   <string name="setting_provider_page_scan_qr_code">QRコードをスキャン</string>
   <string name="setting_provider_page_select_all">すべて選択 (%1$d)</string>
   <string name="setting_provider_page_select_from_gallery">ギャラリーから選択</string>
-  <string name="setting_provider_page_test">テスト</string>
-  <string name="setting_provider_page_test_connection">接続テスト</string>
   <string name="setting_provider_page_text">テキスト</string>
   <string name="setting_provider_page_tool">ツール</string>
   <string name="setting_provider_page_vertex_ai">Vertex AI</string>
@@ -526,6 +520,7 @@
   <string name="stats_page_heatmap_title">チャットヒートマップ</string>
   <string name="stats_page_input_tokens">入力トークン</string>
   <string name="stats_page_launch_count">アプリ起動回数</string>
+  <string name="stats_page_live_companion">コンパニオン分析（回数 · トークン）</string>
   <string name="stats_page_output_tokens">出力トークン</string>
   <string name="stats_page_title">統計</string>
   <string name="stats_page_total_conversations">総会話数</string>
@@ -709,6 +704,7 @@
   <string name="setting_provider_page_selected_count">選択済み %1$d / %2$d</string>
   <string name="setting_provider_page_model_context_window">コンテキスト長</string>
   <string name="setting_provider_page_model_context_window_placeholder">自動判定する場合は空欄（例：128K / 1M / 1000000）</string>
+  <string name="setting_provider_page_model_context_window_invalid">コンテキストウィンドウの形式が無効です。数値または K/M 接尾辞（例: 128K / 1M / 1000000）で入力してください</string>
   <string name="amberagent_accessibility_service_desc">ユーザーが承認した画面自動化操作を AmberAgent に許可します。</string>
   <string name="amberagent_accessibility_service_label">AmberAgent アクセシビリティ</string>
   <string name="amberagent_notification_listener_label">AmberAgent 通知アクセス</string>
@@ -985,17 +981,15 @@
   <string name="setting_page_agent_high_risk_auto_approve_confirm_title">高リスク自動承認を有効にしますか？</string>
   <string name="setting_page_agent_high_risk_auto_approve_desc">通常および高リスクのツールを自動承認します。ターミナル/SSH、画面操作、SubAgent ツールなどが対象で、グローバル自動承認を同時に有効にする必要はありません。</string>
   <string name="setting_page_agent_live_mode">Live コンパニオンを有効にする</string>
-  <string name="setting_page_agent_live_mode_auto_refresh">自動更新</string>
-  <string name="setting_page_agent_live_mode_auto_refresh_desc">監視中の UI が変化して安定してからのみ分析します。</string>
-  <string name="setting_page_agent_live_mode_desc">ユーザー補助機能で別のアプリを監視し、コンパクトな読み取り専用コンパニオンカードを更新します。</string>
+  <string name="setting_page_agent_live_mode_desc">ユーザー補助で他アプリの画面を読み取ります。画面のテキストは手動で分析した時だけ選択中のモデル提供元に送信され、いつでも停止できます</string>
+  <string name="setting_page_agent_live_mode_open">コンパニオンを開く</string>
+  <string name="setting_page_agent_live_mode_open_desc">コンパニオンセッションと最新の分析を表示</string>
   <string name="setting_page_agent_live_mode_max_nodes">UI ノードの上限</string>
   <string name="setting_page_agent_live_mode_max_nodes_desc">分析前に取得する1回の UI ツリーのスナップショットの上限。</string>
   <string name="setting_page_agent_live_mode_max_nodes_value">%1$d ノード</string>
   <string name="setting_page_agent_live_mode_refresh_interval">監視間隔</string>
   <string name="setting_page_agent_live_mode_refresh_interval_desc">重複除去とスロットリングの前に Amber が UI ツリーを取得する頻度。</string>
   <string name="setting_page_agent_live_mode_refresh_interval_value">%1$.1f 秒</string>
-  <string name="setting_page_agent_live_mode_voice">音声フォーカス入力</string>
-  <string name="setting_page_agent_live_mode_voice_desc">Android の音声認識を使って、一時的なフォーカス指示を追加します。</string>
   <string name="setting_page_agent_live_status">Fluid Cloud / ライブステータス</string>
   <string name="setting_page_agent_live_status_desc">タスク実行中にシステムのライブステータスを表示します。</string>
   <string name="setting_page_agent_live_status_privacy">機密なライブステータスを非表示</string>
@@ -2128,11 +2122,6 @@
   <string name="setting_officepro_doc_url">Feishu ドキュメント URL</string>
   <string name="setting_officepro_file_read_failed">選択したファイルを読み取れません</string>
   <string name="setting_officepro_file_too_large">ファイルが 50 MB を超えています。まず workspace に置き、そのパスをソース参照として追加してください。</string>
-  <string name="setting_provider_connection_tester_non_streaming">非ストリーミング</string>
-  <string name="setting_provider_connection_tester_streaming">ストリーミング</string>
-  <string name="setting_provider_connection_tester_tool_call">ツール呼び出し</string>
-  <string name="setting_provider_connection_tester_tool_call_result">呼び出し: %1$s  入力: %2$s</string>
-  <string name="setting_provider_connection_tester_tool_not_called">ツールは呼び出されませんでした。応答: %1$s</string>
   <string name="setting_provider_page_account">アカウント</string>
   <string name="setting_provider_page_authentication">認証</string>
   <string name="setting_provider_page_connection_summary_connected">接続済み · %1$s · %2$d モデル</string>
@@ -2307,13 +2296,8 @@
   <string name="live_action_screen_analysis">画面分析</string>
   <string name="live_action_summarize">要約</string>
   <string name="live_action_write_reply">返信を作成</string>
-  <string name="live_analysis_mode">分析モード</string>
-  <string name="live_analysis_mode_screenshot">スクリーンショット</string>
-  <string name="live_analysis_mode_text_only">テキストのみ</string>
   <string name="live_analysis_model">分析モデル</string>
   <string name="live_analyze_now">今すぐ分析</string>
-  <string name="live_auto_analysis">自動分析</string>
-  <string name="live_auto_analysis_hint">ページが安定したら実行</string>
   <string name="live_bubble">フローティングバブル</string>
   <string name="live_bubble_collapse">折りたたむ</string>
   <string name="live_bubble_hint">他のアプリの上に表示</string>
@@ -2350,7 +2334,6 @@
   <string name="live_master_result_hint">結果は「%1$s」に表示されます</string>
   <string name="live_master_status_mode">%1$s · %2$s</string>
   <string name="live_master_target_mode">%1$s · %2$s</string>
-  <string name="live_mode_aggressive">積極 · スクリーンショット</string>
   <string name="live_mode_conservative">控えめ · テキスト</string>
   <string name="live_model_required_body">コンパニオンはチャットモデルで短い分析を行います。利用可能なモデルを選び、戻って起動してください。</string>
   <string name="live_model_required_title">モデルの設定が必要です</string>
@@ -2372,7 +2355,9 @@
   <string name="live_result_no_risk_points">明確なリスクはまだ見つかっていません。</string>
   <string name="live_result_reply_draft">返信の下書き</string>
   <string name="live_result_risks">リスク</string>
+  <string name="live_result_screen_changed">画面が変わりました。下のアクションで再分析してください</string>
   <string name="live_result_screen_unclear">画面の情報はまだ十分に明確ではありません。</string>
+  <string name="live_result_stale_dropped">この結果は期限切れのため破棄されました</string>
   <string name="live_result_summary">要約</string>
   <string name="live_result_title_companion">コンパニオンの結果</string>
   <string name="live_result_title_custom">%1$s の結果</string>
@@ -2397,6 +2382,7 @@
   <string name="profile_stats_tokens">トークン数</string>
   <string name="profile_title">プロフィール</string>
   <string name="share_sheet_title">LLMモデルを共有</string>
+  <string name="share_sheet_plaintext_key_warning">QRコードと共有テキストにはAPIキーが平文で含まれます。信頼できる相手とだけ共有してください。</string>
   <string name="synara_auth_token_hint">SYNARA_AUTH_TOKEN</string>
   <string name="synara_auth_token_label">Auth Token</string>
   <string name="synara_auth_token_supporting">Mac デスクトッププロセスの環境変数 SYNARA_AUTH_TOKEN から取得します。パスワードと同様に扱ってください</string>

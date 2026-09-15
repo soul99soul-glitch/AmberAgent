@@ -464,7 +464,7 @@ private fun CouncilRoundDivider(label: String) {
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        // V3 review P3 #8: Council marker 切 chatTheme.accent 适配 Paper/Midnight
+        // Council marker 用 chatTheme.accent, 跟随当前聊天主题
         val chatAccent = app.amber.feature.ui.pages.chat.LocalChatTheme.current.accent
         Surface(
             shape = RoundedCornerShape(50),

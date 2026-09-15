@@ -136,7 +136,7 @@ private fun AgentWaitingDot(
     modifier: Modifier = Modifier,
 ) {
     val workspace = workspaceColors()
-    // V3: 用 chatTheme.accent 替代硬编码 workspace.blue, 跟 4 主题 (Whisper蓝/Plain黑/Paper砖红/Midnight冷靛) 联动.
+    // accent 取自聊天主题 token (随 amberBase + accent 色解析), 替代硬编码 workspace.blue.
     val accent = app.amber.feature.ui.pages.chat.LocalChatTheme.current.accent
     val transition = rememberInfiniteTransition(label = "agent_waiting_dot")
     val dotScale by transition.animateFloat(

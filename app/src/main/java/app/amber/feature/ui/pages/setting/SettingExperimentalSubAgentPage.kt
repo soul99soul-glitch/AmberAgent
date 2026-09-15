@@ -101,13 +101,13 @@ fun SettingExperimentalSubAgentPage(
 
     fun update(block: (SubAgentRuntimeSetting) -> SubAgentRuntimeSetting) {
         val nextSubAgent = block(subAgent)
-        vm.updateSettings(
-            settings.copy(
-                agentRuntime = settings.agentRuntime.copy(
+        vm.updateSettings { current ->
+            current.copy(
+                agentRuntime = current.agentRuntime.copy(
                     subAgent = nextSubAgent
                 )
             )
-        )
+        }
         scope.launch {
             promptConfigRepository.writeSubAgentMarkdown(nextSubAgent)
         }
@@ -404,13 +404,13 @@ fun SettingExperimentalSubAgentPage(
                         Switch(
                             checked = council.enabled,
                             onCheckedChange = { checked ->
-                                vm.updateSettings(
-                                    settings.copy(
-                                        agentRuntime = settings.agentRuntime.copy(
-                                            modelCouncil = council.copy(enabled = checked),
+                                vm.updateSettings { current ->
+                                    current.copy(
+                                        agentRuntime = current.agentRuntime.copy(
+                                            modelCouncil = current.agentRuntime.modelCouncil.copy(enabled = checked),
                                         )
                                     )
-                                )
+                                }
                             },
                         )
                     }

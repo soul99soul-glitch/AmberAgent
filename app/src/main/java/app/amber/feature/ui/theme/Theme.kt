@@ -213,8 +213,8 @@ fun AmberAgentTheme(
     val settings by rememberUserSettingsState()
 
     // Graphite redesign (D2/D3): base family × system dark-mode → one of 4 bases; the accent is
-    // an independent user setting. Legacy chatThemeChoice is no longer consulted. chatTheme is
-    // derived from the new tokens via the compat adapter so existing LocalChatTheme consumers work.
+    // an independent user setting. chatTheme is derived from the new tokens via the compat adapter
+    // so existing LocalChatTheme consumers work.
     val amberBase = when {
         settings.displaySetting.amberBaseFamily == "SAGE" && darkTheme -> AmberBase.SAGE_DARK
         settings.displaySetting.amberBaseFamily == "SAGE" -> AmberBase.SAGE

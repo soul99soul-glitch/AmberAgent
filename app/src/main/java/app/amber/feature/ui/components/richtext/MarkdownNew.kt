@@ -89,6 +89,7 @@ import app.amber.feature.ui.components.message.LocalSearchSources
 import app.amber.feature.ui.components.message.LocalStripUnverifiedLinks
 import app.amber.feature.ui.components.message.SearchSourcesRegistry
 import app.amber.feature.ui.components.table.DataTable
+import app.amber.feature.ui.context.LocalChatFontScale
 import app.amber.feature.ui.context.LocalSettings
 import app.amber.feature.ui.context.LocalToaster
 import app.amber.feature.ui.theme.JetbrainsMono
@@ -455,10 +456,17 @@ private fun HtmlHeading(element: Element, onClickCitation: (String) -> Unit) {
         5 -> HeaderStyle.H5
         else -> HeaderStyle.H6
     }
+    // 与 Markdown.kt 标题分支一致：绝对字号乘聊天字号比例（非聊天面默认 1f 不变）。
+    val fontScale = LocalChatFontScale.current
+    val scaledHeading = headingStyle.copy(
+        fontSize = headingStyle.fontSize * fontScale,
+        lineHeight = headingStyle.lineHeight * fontScale,
+    )
+    // 垂直 padding 同乘 scale，与块级路径保持同一呼吸感比例。
     val verticalPadding = when (level) {
         1 -> 16.dp; 2 -> 14.dp; 3 -> 12.dp; 4 -> 10.dp; 5 -> 8.dp; else -> 6.dp
-    }
-    ProvideTextStyle(LocalTextStyle.current.merge(headingStyle)) {
+    } * fontScale
+    ProvideTextStyle(LocalTextStyle.current.merge(scaledHeading)) {
         Box(modifier = Modifier.padding(vertical = verticalPadding)) {
             HtmlParagraph(element = element, onClickCitation = onClickCitation)
         }

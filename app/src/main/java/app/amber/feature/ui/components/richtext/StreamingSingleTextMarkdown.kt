@@ -30,6 +30,7 @@ import app.amber.core.model.AssistantRegex
 import app.amber.core.utils.openUrl
 import app.amber.agent.R
 import app.amber.feature.ui.components.message.MessageRenderCache
+import app.amber.feature.ui.context.LocalChatFontScale
 import app.amber.feature.ui.context.LocalSettings
 import app.amber.highlight.HighlightToken
 import app.amber.highlight.LocalHighlighter
@@ -154,6 +155,7 @@ fun StreamingSingleTextMarkdown(
 
     val singleTextStyle = rememberMarkdownSingleTextStyle()
     val enableLatexRendering = LocalSettings.current.displaySetting.enableLatexRendering
+    val headingFontScale = LocalChatFontScale.current
     val context = LocalContext.current
     val imageFallbackLabel = stringResource(R.string.html_asset_slides_fallback_image)
     val onClickUrl = remember(context) {
@@ -167,6 +169,7 @@ fun StreamingSingleTextMarkdown(
         onClickUrl,
         enableLatexRendering,
         imageFallbackLabel,
+        headingFontScale,
     ) {
         mdNodeToAnnotatedString(
             source = data.preprocessed,
@@ -175,6 +178,7 @@ fun StreamingSingleTextMarkdown(
             onClickUrl = onClickUrl,
             codeHighlights = codeHighlights.toMap(),
             enableLatexRendering = enableLatexRendering,
+            headingFontScale = headingFontScale,
             imageFallbackLabel = imageFallbackLabel,
         )
     }

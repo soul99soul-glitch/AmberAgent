@@ -287,8 +287,6 @@
   <string name="setting_display_page_chat_font_family_monospace">Моноширинный</string>
   <string name="setting_display_page_chat_font_family_serif">С засечками</string>
   <string name="setting_display_page_chat_font_family_title">Шрифт чата</string>
-  <string name="setting_display_page_chat_list_model_icon_desc">Отображать значки моделей в списке сообщений чата</string>
-  <string name="setting_display_page_chat_list_model_icon_title">Значок модели в списке чатов</string>
   <string name="setting_display_page_code_block_auto_collapse_desc">Автоматически сворачивать блоки кода по умолчанию</string>
   <string name="setting_display_page_code_block_auto_collapse_title">Автосворачивание блоков кода</string>
   <string name="setting_display_page_code_block_auto_wrap_desc">Автоматически переносить длинные строки в блоках кода</string>
@@ -312,8 +310,6 @@
   <string name="setting_display_page_send_on_enter_title">Отправлять по Enter</string>
   <string name="setting_display_page_show_assistant_bubble_desc">Показывать фоновый пузырь для сообщений ассистента</string>
   <string name="setting_display_page_show_assistant_bubble_title">Показывать всплывающее сообщение ассистента</string>
-  <string name="setting_display_page_show_date_below_name_desc">Показывать дату сообщения под ником или названием модели</string>
-  <string name="setting_display_page_show_date_below_name_title">Показывать дату под именем</string>
   <string name="setting_display_page_show_line_numbers_desc">Отображать номера строк в блоках кода</string>
   <string name="setting_display_page_show_line_numbers_title">Показывать номера строк</string>
   <string name="setting_display_page_show_message_jumper_desc">Отображать кнопки быстрого перехода справа при прокрутке списка чатов</string>
@@ -478,8 +474,6 @@
   <string name="setting_provider_page_scan_qr_code">Сканировать QR-код</string>
   <string name="setting_provider_page_select_all">Выбрать все (%1$d)</string>
   <string name="setting_provider_page_select_from_gallery">Выбрать из галереи</string>
-  <string name="setting_provider_page_test">Тест</string>
-  <string name="setting_provider_page_test_connection">Проверить подключение</string>
   <string name="setting_provider_page_text">Текст</string>
   <string name="setting_provider_page_tool">Инструмент</string>
   <string name="setting_provider_page_vertex_ai">Vertex AI</string>
@@ -526,6 +520,7 @@
   <string name="stats_page_heatmap_title">Тепловая карта чата</string>
   <string name="stats_page_input_tokens">Входные токены</string>
   <string name="stats_page_launch_count">Количество запусков приложения</string>
+  <string name="stats_page_live_companion">Анализы компаньона (кол-во · токены)</string>
   <string name="stats_page_output_tokens">Выходные токены</string>
   <string name="stats_page_title">Статистика</string>
   <string name="stats_page_total_conversations">Всего бесед</string>
@@ -709,6 +704,7 @@
   <string name="setting_provider_page_selected_count">Выбрано: %1$d / %2$d</string>
   <string name="setting_provider_page_model_context_window">Размер контекста</string>
   <string name="setting_provider_page_model_context_window_placeholder">Оставьте пустым для автоопределения, например 128K / 1M / 1000000</string>
+  <string name="setting_provider_page_model_context_window_invalid">Недопустимый формат окна контекста. Введите число или суффикс K/M, например 128K / 1M / 1000000</string>
   <string name="amberagent_accessibility_service_desc">Позволяет AmberAgent выполнять одобренные пользователем действия автоматизации экрана.</string>
   <string name="amberagent_accessibility_service_label">AmberAgent Специальные возможности</string>
   <string name="amberagent_notification_listener_label">AmberAgent: доступ к уведомлениям</string>
@@ -985,17 +981,15 @@
   <string name="setting_page_agent_high_risk_auto_approve_confirm_title">Включить автоматическое подтверждение высокого риска?</string>
   <string name="setting_page_agent_high_risk_auto_approve_desc">Автоматически подтверждает обычные и высокорисковые инструменты, включая терминал/SSH, действия на экране и инструменты SubAgent, без необходимости включать глобальное автоподтверждение.</string>
   <string name="setting_page_agent_live_mode">Включить компаньона Live</string>
-  <string name="setting_page_agent_live_mode_auto_refresh">Автообновление</string>
-  <string name="setting_page_agent_live_mode_auto_refresh_desc">Анализировать только после изменения наблюдаемого интерфейса и его стабилизации.</string>
-  <string name="setting_page_agent_live_mode_desc">Наблюдать за другим приложением через специальные возможности и обновлять компактную карточку компаньона только для чтения.</string>
+  <string name="setting_page_agent_live_mode_desc">Читает интерфейс других приложений через специальные возможности; текст экрана отправляется выбранному провайдеру модели только при ручном запуске анализа; остановить можно в любой момент</string>
+  <string name="setting_page_agent_live_mode_open">Открыть компаньона</string>
+  <string name="setting_page_agent_live_mode_open_desc">Просмотр сеанса компаньона и последнего анализа</string>
   <string name="setting_page_agent_live_mode_max_nodes">Максимум узлов UI</string>
   <string name="setting_page_agent_live_mode_max_nodes_desc">Верхний предел для одного снимка дерева UI перед анализом.</string>
   <string name="setting_page_agent_live_mode_max_nodes_value">%1$d узлов</string>
   <string name="setting_page_agent_live_mode_refresh_interval">Интервал наблюдения</string>
   <string name="setting_page_agent_live_mode_refresh_interval_desc">Как часто Amber считывает дерево UI до удаления дубликатов и ограничения частоты.</string>
   <string name="setting_page_agent_live_mode_refresh_interval_value">%1$.1f с</string>
-  <string name="setting_page_agent_live_mode_voice">Голосовой ввод фокуса</string>
-  <string name="setting_page_agent_live_mode_voice_desc">Использовать распознавание речи Android для добавления временной инструкции о фокусе.</string>
   <string name="setting_page_agent_live_status">Fluid Cloud / состояние в реальном времени</string>
   <string name="setting_page_agent_live_status_desc">Показывать состояние системы в реальном времени во время выполнения задач.</string>
   <string name="setting_page_agent_live_status_privacy">Скрывать конфиденциальное состояние в реальном времени</string>
@@ -2128,11 +2122,6 @@
   <string name="setting_officepro_doc_url">URL документа Feishu</string>
   <string name="setting_officepro_file_read_failed">Не удалось прочитать выбранный файл</string>
   <string name="setting_officepro_file_too_large">Файл превышает 50 МБ. Сначала поместите его в workspace, затем добавьте путь как ссылку на источник.</string>
-  <string name="setting_provider_connection_tester_non_streaming">Без потоковой передачи</string>
-  <string name="setting_provider_connection_tester_streaming">Потоковая передача</string>
-  <string name="setting_provider_connection_tester_tool_call">Вызов инструмента</string>
-  <string name="setting_provider_connection_tester_tool_call_result">Вызов: %1$s  Входные данные: %2$s</string>
-  <string name="setting_provider_connection_tester_tool_not_called">Инструмент не вызван, ответ: %1$s</string>
   <string name="setting_provider_page_account">Учётная запись</string>
   <string name="setting_provider_page_authentication">Аутентификация</string>
   <string name="setting_provider_page_connection_summary_connected">Подключено · %1$s · моделей: %2$d</string>
@@ -2307,13 +2296,8 @@
   <string name="live_action_screen_analysis">Анализ экрана</string>
   <string name="live_action_summarize">Сделать сводку</string>
   <string name="live_action_write_reply">Составить ответ</string>
-  <string name="live_analysis_mode">Режим анализа</string>
-  <string name="live_analysis_mode_screenshot">снимок экрана</string>
-  <string name="live_analysis_mode_text_only">только текст</string>
   <string name="live_analysis_model">Модель анализа</string>
   <string name="live_analyze_now">Анализировать сейчас</string>
-  <string name="live_auto_analysis">Автоматический анализ</string>
-  <string name="live_auto_analysis_hint">Анализ после стабилизации страницы</string>
   <string name="live_bubble">Плавающая подсказка</string>
   <string name="live_bubble_collapse">Свернуть</string>
   <string name="live_bubble_hint">Показывать поверх других приложений</string>
@@ -2350,7 +2334,6 @@
   <string name="live_master_result_hint">Результат появится в разделе «%1$s»</string>
   <string name="live_master_status_mode">%1$s · %2$s</string>
   <string name="live_master_target_mode">%1$s · %2$s</string>
-  <string name="live_mode_aggressive">Агрессивный · снимок экрана</string>
   <string name="live_mode_conservative">Консервативный · текст</string>
   <string name="live_model_required_body">Компаньон использует вашу модель чата для краткого анализа. Выберите доступную модель и вернитесь, чтобы начать.</string>
   <string name="live_model_required_title">Требуется модель</string>
@@ -2372,7 +2355,9 @@
   <string name="live_result_no_risk_points">Явных рисков пока не найдено.</string>
   <string name="live_result_reply_draft">Черновик ответа</string>
   <string name="live_result_risks">Риски</string>
+  <string name="live_result_screen_changed">Экран изменился; повторите анализ действием ниже</string>
   <string name="live_result_screen_unclear">Информация на экране пока недостаточно ясна.</string>
+  <string name="live_result_stale_dropped">Результат устарел и был отброшен</string>
   <string name="live_result_summary">Сводка</string>
   <string name="live_result_title_companion">Результат компаньона</string>
   <string name="live_result_title_custom">Результат: %1$s</string>
@@ -2397,6 +2382,7 @@
   <string name="profile_stats_tokens">Токены</string>
   <string name="profile_title">Профиль</string>
   <string name="share_sheet_title">Поделиться моделью LLM</string>
+  <string name="share_sheet_plaintext_key_warning">QR-код и текст публикации содержат API-ключ в открытом виде. Делитесь только с теми, кому доверяете.</string>
   <string name="synara_auth_token_hint">SYNARA_AUTH_TOKEN</string>
   <string name="synara_auth_token_label">Auth Token</string>
   <string name="synara_auth_token_supporting">Из переменной окружения SYNARA_AUTH_TOKEN процесса Mac; обращайтесь с ним как с паролем</string>

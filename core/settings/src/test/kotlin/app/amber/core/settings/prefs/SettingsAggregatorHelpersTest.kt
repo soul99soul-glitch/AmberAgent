@@ -4,6 +4,7 @@ import app.amber.ai.provider.Model
 import app.amber.ai.provider.ProviderSetting
 import app.amber.core.model.AMBER_AGENT_ID
 import app.amber.core.settings.LegacyAssistantProfile
+import app.amber.core.settings.DEFAULT_AUTO_MODEL_ID
 import app.amber.core.settings.DEFAULT_PROVIDERS
 import app.amber.core.settings.DisplaySetting
 import app.amber.core.settings.GeminiProviderIdRef
@@ -40,7 +41,7 @@ class SettingsAggregatorHelpersTest {
     @Test
     fun `compose maps direct Amber runtime fields from ChatPrefs and ExtensionPrefs`() {
         val out = composeRawSettings(
-            ui = UIPrefsData(themeId = "theme_test"),
+            ui = UIPrefsData(),
             search = SearchPrefsData(),
             agent = AgentPrefsData(),
             provider = ProviderPrefsData(),
@@ -136,8 +137,6 @@ class SettingsAggregatorHelpersTest {
         val input = composeRawSettings(
             ui = UIPrefsData(
                 displaySetting = DisplaySetting(
-                    showModelIcon = true,
-                    showDateBelowName = true,
                     autoCloseThinking = false,
                     enableLatexRendering = false,
                     sendOnEnter = true,
@@ -154,8 +153,6 @@ class SettingsAggregatorHelpersTest {
 
         val out = applyCrossDomainConsistency(input)
 
-        assertFalse(out.displaySetting.showModelIcon)
-        assertFalse(out.displaySetting.showDateBelowName)
         assertTrue(out.displaySetting.autoCloseThinking)
         assertTrue(out.displaySetting.enableLatexRendering)
         assertTrue(out.displaySetting.sendOnEnter)
@@ -176,5 +173,107 @@ class SettingsAggregatorHelpersTest {
         val pass1 = applyCrossDomainConsistency(applyBackfillAndSeed(raw))
         val pass2 = applyCrossDomainConsistency(applyBackfillAndSeed(pass1))
         assertEquals(pass1, pass2)
+    }
+
+    @Test
+    fun `consistency resets dangling model selections to auto`() {
+        val dangling = Uuid.random()
+        val input = composeRawSettings(
+            ui = UIPrefsData(),
+            search = SearchPrefsData(),
+            agent = AgentPrefsData(),
+            provider = ProviderPrefsData(),
+            chat = ChatPrefsData(
+                chatModelId = dangling,
+                titleModelId = dangling,
+                suggestionModelId = dangling,
+                imageGenerationModelId = dangling,
+                ocrModelId = dangling,
+                compressModelId = dangling,
+            ),
+            ext = ExtensionPrefsData(),
+        )
+
+        val out = applyCrossDomainConsistency(input)
+
+        assertEquals(DEFAULT_AUTO_MODEL_ID, out.chatModelId)
+        // 其余五个字段同一规则，抽两个代表断言
+        assertEquals(DEFAULT_AUTO_MODEL_ID, out.imageGenerationModelId)
+        assertEquals(DEFAULT_AUTO_MODEL_ID, out.compressModelId)
+    }
+
+    @Test
+    fun `consistency keeps model selections that still exist`() {
+        val kept = Uuid.random()
+        val input = composeRawSettings(
+            ui = UIPrefsData(),
+            search = SearchPrefsData(),
+            agent = AgentPrefsData(),
+            provider = ProviderPrefsData(
+                providers = listOf(
+                    ProviderSetting.OpenAI(models = listOf(Model(id = kept))),
+                ),
+            ),
+            chat = ChatPrefsData(chatModelId = kept),
+            ext = ExtensionPrefsData(),
+        )
+
+        val out = applyCrossDomainConsistency(input)
+
+        assertEquals(kept, out.chatModelId)
+    }
+
+    @Test
+    fun `consistency keeps auto sentinel model selections untouched`() {
+        val input = composeRawSettings(
+            ui = UIPrefsData(),
+            search = SearchPrefsData(),
+            agent = AgentPrefsData(),
+            provider = ProviderPrefsData(),
+            chat = ChatPrefsData(chatModelId = DEFAULT_AUTO_MODEL_ID),
+            ext = ExtensionPrefsData(),
+        )
+
+        val out = applyCrossDomainConsistency(input)
+
+        assertEquals(DEFAULT_AUTO_MODEL_ID, out.chatModelId)
+    }
+
+    @Test
+    fun `consistency normalizes provider base url trailing slashes`() {
+        val openai = ProviderSetting.OpenAI(
+            baseUrl = "https://x.com/v1/",
+            models = listOf(
+                Model(
+                    modelId = "m1",
+                    providerOverwrite = ProviderSetting.OpenAI(baseUrl = "https://y.com/v1/"),
+                ),
+            ),
+        )
+        val google = ProviderSetting.Google(baseUrl = "https://g.com/v1/")
+        val claude = ProviderSetting.Claude(baseUrl = "https://c.com/v1/")
+        val plain = ProviderSetting.OpenAI(baseUrl = "https://api.openai.com/v1")
+        val input = composeRawSettings(
+            ui = UIPrefsData(),
+            search = SearchPrefsData(),
+            agent = AgentPrefsData(),
+            provider = ProviderPrefsData(providers = listOf(openai, google, claude, plain)),
+            chat = ChatPrefsData(),
+            ext = ExtensionPrefsData(),
+        )
+
+        val out = applyCrossDomainConsistency(input)
+
+        val outOpenai = out.providers.first { it.id == openai.id } as ProviderSetting.OpenAI
+        assertEquals("https://x.com/v1", outOpenai.baseUrl)
+        val overwrite = outOpenai.models.single().providerOverwrite as ProviderSetting.OpenAI
+        assertEquals("https://y.com/v1", overwrite.baseUrl)
+        assertEquals("https://g.com/v1", (out.providers.first { it.id == google.id } as ProviderSetting.Google).baseUrl)
+        assertEquals("https://c.com/v1", (out.providers.first { it.id == claude.id } as ProviderSetting.Claude).baseUrl)
+        // 无尾斜杠保持不变
+        assertEquals(
+            "https://api.openai.com/v1",
+            (out.providers.first { it.id == plain.id } as ProviderSetting.OpenAI).baseUrl,
+        )
     }
 }

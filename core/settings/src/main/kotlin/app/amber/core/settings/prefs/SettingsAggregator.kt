@@ -15,9 +15,11 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
+import app.amber.ai.provider.Model
 import app.amber.ai.provider.OpenAIBrand
 import app.amber.ai.provider.ProviderSetting
 import app.amber.core.infra.AppScope
+import app.amber.core.settings.DEFAULT_AUTO_MODEL_ID
 import app.amber.core.settings.DEFAULT_PROVIDERS
 import app.amber.core.settings.GeminiProviderIdRef
 import app.amber.core.settings.OpenAIProviderIdRef
@@ -36,6 +38,7 @@ import app.amber.core.settings.secret.SecretReference
 import app.amber.core.agent.utils.JsonInstant
 import app.amber.core.settings.toMutableStateFlow
 import app.amber.core.settings.withMigratedPromptDefaults
+import kotlin.uuid.Uuid
 
 private const val TAG = "SettingsAggregator"
 
@@ -115,8 +118,6 @@ class SettingsAggregator(
                 s3Config = settingsForWrite.s3Config,
                 existingRefs = existingRefs,
             )
-            p[PreferencesKeys.DYNAMIC_COLOR] = settings.dynamicColor
-            p[PreferencesKeys.THEME_ID] = settings.themeId
             p[PreferencesKeys.DEVELOPER_MODE] = settings.developerMode
             p[PreferencesKeys.DISPLAY_SETTING] = JsonInstant.encodeToString(settingsForWrite.displaySetting)
 
@@ -306,8 +307,6 @@ internal fun composeRawSettings(
     ext: ExtensionPrefsData,
 ): Settings = Settings(
     init = false,
-    dynamicColor = ui.dynamicColor,
-    themeId = ui.themeId,
     developerMode = ui.developerMode,
     displaySetting = ui.displaySetting,
     launchCount = ui.launchCount,
@@ -445,6 +444,11 @@ internal fun applyBackfillAndSeed(it: Settings): Settings {
  * - Dedup providers (by id) and dedup their models (by id)
  * - Filter stale enabled MCP/mode-injection/lorebook references
  * - Filter favoriteModels — only models that still exist in providers survive
+ * - Reset dangling chat/title/suggestion/imageGeneration/ocr/compress model ids
+ *   to DEFAULT_AUTO_MODEL_ID (same reason as favoriteModels: the provider or
+ *   model was deleted and the runtime would fail with "Provider not found")
+ * - Trim trailing slashes from provider baseUrls (OpenAI-style callers
+ *   concatenate baseUrl + path; also inside model providerOverwrite)
  * - Filter searchEnabledServiceIds — only services that still exist survive
  * - Dedup modeInjections / lorebooks / quickMessages (by id)
  * - Normalize display fields whose settings controls were removed
@@ -457,6 +461,11 @@ internal fun applyCrossDomainConsistency(settings: Settings): Settings {
     val validMcpServerIds = migratedSettings.mcpServers.map { it.id }.toSet()
     val validModeInjectionIds = migratedSettings.modeInjections.map { it.id }.toSet()
     val validLorebookIds = migratedSettings.lorebooks.map { it.id }.toSet()
+    // 悬空模型选择自愈为“自动”：删 provider 后 chatModelId 等仍指向不存在的模型，
+    // 运行时会 Provider not found（与 favoriteModels 的过滤同因）。
+    val modelIds = migratedSettings.providers.flatMap { it.models }.map { m -> m.id }.toSet()
+    fun Uuid.orAutoModelId(): Uuid =
+        if (this != DEFAULT_AUTO_MODEL_ID && this !in modelIds) DEFAULT_AUTO_MODEL_ID else this
     // Normalize search references on every read, including fresh installs and
     // migration gaps where no settings write has occurred yet.
     val cleanedSearchSelected = if (migratedSettings.searchServices.isEmpty()) {
@@ -477,21 +486,36 @@ internal fun applyCrossDomainConsistency(settings: Settings): Settings {
         providers = migratedSettings.providers.distinctBy { it.id }.map { provider ->
             when (provider) {
                 is ProviderSetting.OpenAI -> provider.copy(
-                    models = provider.models.distinctBy { model -> model.id }
+                    baseUrl = provider.baseUrl.normalizedBaseUrl(),
+                    models = provider.models
+                        .distinctBy { model -> model.id }
+                        .map { model -> model.withNormalizedOverwriteBaseUrl() },
                 )
 
                 is ProviderSetting.Google -> provider.copy(
-                    models = provider.models.distinctBy { model -> model.id }
+                    baseUrl = provider.baseUrl.normalizedBaseUrl(),
+                    models = provider.models
+                        .distinctBy { model -> model.id }
+                        .map { model -> model.withNormalizedOverwriteBaseUrl() },
                 )
 
                 is ProviderSetting.Claude -> provider.copy(
-                    models = provider.models.distinctBy { model -> model.id }
+                    baseUrl = provider.baseUrl.normalizedBaseUrl(),
+                    models = provider.models
+                        .distinctBy { model -> model.id }
+                        .map { model -> model.withNormalizedOverwriteBaseUrl() },
                 )
             }
         },
         enabledMcpServerIds = migratedSettings.enabledMcpServerIds.filter { it in validMcpServerIds }.toSet(),
         enabledModeInjectionIds = migratedSettings.enabledModeInjectionIds.filter { it in validModeInjectionIds }.toSet(),
         enabledLorebookIds = migratedSettings.enabledLorebookIds.filter { it in validLorebookIds }.toSet(),
+        chatModelId = migratedSettings.chatModelId.orAutoModelId(),
+        titleModelId = migratedSettings.titleModelId.orAutoModelId(),
+        suggestionModelId = migratedSettings.suggestionModelId.orAutoModelId(),
+        imageGenerationModelId = migratedSettings.imageGenerationModelId.orAutoModelId(),
+        ocrModelId = migratedSettings.ocrModelId.orAutoModelId(),
+        compressModelId = migratedSettings.compressModelId.orAutoModelId(),
         favoriteModels = migratedSettings.favoriteModels.filter { uuid ->
             migratedSettings.providers.flatMap { it.models }.any { m -> m.id == uuid }
         },
@@ -501,11 +525,24 @@ internal fun applyCrossDomainConsistency(settings: Settings): Settings {
     )
 }
 
-/** Keep the four display switches removed from the settings UI canonical on both read and write. */
+/**
+ * OpenAI 系裸拼接 baseUrl + path（OpenAIProvider.kt:109 `"$baseUrl/models"`），尾斜杠会产生 `//models`；
+ * 只归一尾部斜杠，不碰 chatCompletionsPath。模型内嵌 providerOverwrite 同样生效。
+ */
+private fun String.normalizedBaseUrl(): String = trim().trimEnd('/')
+
+private fun Model.withNormalizedOverwriteBaseUrl(): Model =
+    copy(providerOverwrite = providerOverwrite?.withNormalizedBaseUrl())
+
+private fun ProviderSetting.withNormalizedBaseUrl(): ProviderSetting = when (this) {
+    is ProviderSetting.OpenAI -> copy(baseUrl = baseUrl.normalizedBaseUrl())
+    is ProviderSetting.Google -> copy(baseUrl = baseUrl.normalizedBaseUrl())
+    is ProviderSetting.Claude -> copy(baseUrl = baseUrl.normalizedBaseUrl())
+}
+
+/** Keep the two display switches removed from the settings UI canonical on both read and write. */
 private fun Settings.normalizeRemovedDisplayFields(): Settings = copy(
     displaySetting = displaySetting.copy(
-        showModelIcon = false,
-        showDateBelowName = false,
         autoCloseThinking = true,
         enableLatexRendering = true,
     ),

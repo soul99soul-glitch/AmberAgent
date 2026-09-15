@@ -64,7 +64,8 @@ val agentInfraModule = module {
     // actions (bound to runId + toolCallId + args digest).
     single { NotificationApprovalTokenRegistry() }
 
-    single { LiveModeManager(get(), get(), get(), get()) }
+    single { app.amber.feature.live.LiveUsageStore(get()) }
+    single { LiveModeManager(get(), get(), get(), get(), get(), get(), get()) }
 
     single { AlpineRuntimeInstaller(get()) }
 

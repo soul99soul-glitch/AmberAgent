@@ -31,25 +31,31 @@ class LiveUiTreeProcessorTest {
     }
 
     @Test
-    fun stableHashIgnoresVolatileNumbersAndTime() {
+    fun stableHashIgnoresClockButKeepsAmounts() {
         val first = LiveUiTreeProcessor.stableHash(
             packageName = "com.example",
             title = "订单",
             uiTree = "- class=TextView | text=14:20 价格 128 | bounds=[0,0][10,10]",
         )
-        val second = LiveUiTreeProcessor.stableHash(
+        val clockOnly = LiveUiTreeProcessor.stableHash(
             packageName = "com.example",
             title = "订单",
-            uiTree = "- class=TextView | text=14:21 价格 256 | bounds=[0,0][10,10]",
+            uiTree = "- class=TextView | text=14:21 价格 128 | bounds=[0,0][10,10]",
         )
-        val third = LiveUiTreeProcessor.stableHash(
+        val priceChanged = LiveUiTreeProcessor.stableHash(
+            packageName = "com.example",
+            title = "订单",
+            uiTree = "- class=TextView | text=14:20 价格 256 | bounds=[0,0][10,10]",
+        )
+        val textChanged = LiveUiTreeProcessor.stableHash(
             packageName = "com.example",
             title = "订单",
             uiTree = "- class=TextView | text=确认付款 | bounds=[0,0][10,10]",
         )
 
-        assertEquals(first, second)
-        assertNotEquals(first, third)
+        assertEquals(first, clockOnly)
+        assertNotEquals(first, priceChanged)
+        assertNotEquals(first, textChanged)
     }
 
     @Test

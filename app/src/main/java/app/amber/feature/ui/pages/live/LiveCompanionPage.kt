@@ -28,7 +28,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -52,7 +51,6 @@ import app.amber.ai.provider.ModelType
 import app.amber.core.settings.findModelById
 import app.amber.core.settings.getCurrentChatModel
 import app.amber.core.utils.appLocale
-import app.amber.feature.live.LiveAnalysisMode
 import app.amber.feature.live.LiveFillResult
 import app.amber.feature.live.LiveModeCard
 import app.amber.feature.live.LiveModeUiState
@@ -74,9 +72,9 @@ import kotlin.uuid.Uuid
 
 /**
  * AI 伴随 — Terminal × Modern graphite reskin. Layout follows the design handoff:
- * eyebrow header (// COMPANION ● + 标题), a master toggle card (主开关 + 自动分析 + 暂停),
- * the last-analysis result section, and a CONFIG card (模式 / 气泡 / 模型). Every functional
- * control from the source screen is preserved — reskin, not restructure (design §7.1).
+ * eyebrow header (// COMPANION ● + 标题), a master toggle card (主开关 + 暂停),
+ * the last-analysis result section, and a CONFIG card (气泡 / 模型).
+ * P0 语义（蓝图 v3 §7.2）：仅手动触发分析；截图分析不开放；草稿仅复制。
  */
 @Composable
 fun LiveCompanionPage(vm: LiveCompanionVM = koinViewModel()) {
@@ -96,9 +94,8 @@ fun LiveCompanionPage(vm: LiveCompanionVM = koinViewModel()) {
         (id?.let { settings.findModelById(it) } ?: settings.getCurrentChatModel())?.modelId
     }
 
-    DisposableEffect(Unit) {
-        onDispose { vm.stop() }
-    }
+    // 伴随会话由页面主开关/气泡长按显式启停（蓝图 v3 §7.2 P0-1/P0-3）；
+    // 离开页面不停止——气泡仍在屏上，Manager 归进程级域 owner。
 
     Scaffold(
         topBar = {
@@ -122,9 +119,7 @@ fun LiveCompanionPage(vm: LiveCompanionVM = koinViewModel()) {
             // ── 主开关卡 ──
             MasterCard(
                 state = state,
-                autoRefresh = liveSetting.autoRefresh,
                 onMaster = { on -> if (on) vm.start() else vm.stop() },
-                onToggleAutoRefresh = vm::setAutoRefresh,
                 onPauseResume = vm::pauseOrResume,
             )
 
@@ -168,7 +163,7 @@ fun LiveCompanionPage(vm: LiveCompanionVM = koinViewModel()) {
                         state = state,
                         modelId = companionModelId,
                         actionKey = actionKey,
-                        stale = state.requestedAction.isNotBlank(),
+                        stale = state.requestedAction.isNotBlank() || state.cardStale,
                         pendingAction = state.requestedAction,
                         enabled = state.active && !state.paused && !state.analyzing,
                         onInstruction = vm::submitFocusInstruction,
@@ -190,10 +185,6 @@ fun LiveCompanionPage(vm: LiveCompanionVM = koinViewModel()) {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 SectionLabel(stringResource(R.string.live_config))
                 ConfigCard(
-                    aggressive = liveSetting.analysisMode == LiveAnalysisMode.AGGRESSIVE,
-                    onSelectMode = { aggressive ->
-                        vm.setAnalysisMode(if (aggressive) LiveAnalysisMode.AGGRESSIVE else LiveAnalysisMode.CONSERVATIVE)
-                    },
                     bubbleEnabled = liveSetting.bubbleEnabled,
                     onToggleBubble = vm::setBubbleEnabled,
                     modelId = liveSetting.companionModelId?.let { runCatching { Uuid.parse(it) }.getOrNull() },
@@ -240,7 +231,7 @@ private fun LiveHeader(live: Boolean, onBack: () -> Unit, onSettings: () -> Unit
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text("//", style = type.eyebrow, color = t.accent)
-                        Text(" COMPANION", style = type.eyebrow, color = t.ink3)
+                        Text(" COMPANION", style = type.eyebrow, color = t.ink2)
                     }
                     LiveDot(idle = !live, dotSize = 4.dp)
                 }
@@ -267,9 +258,7 @@ private fun LiveHeader(live: Boolean, onBack: () -> Unit, onSettings: () -> Unit
 @Composable
 private fun MasterCard(
     state: LiveModeUiState,
-    autoRefresh: Boolean,
     onMaster: (Boolean) -> Unit,
-    onToggleAutoRefresh: (Boolean) -> Unit,
     onPauseResume: () -> Unit,
 ) {
     val t = LocalAmberTokens.current
@@ -315,7 +304,7 @@ private fun MasterCard(
                     }
                 }
                 Text(
-                    text = state.masterSubtitle(autoRefresh),
+                    text = state.masterSubtitle(),
                     style = type.secondary,
                     color = t.ink3,
                     maxLines = 2,
@@ -324,14 +313,6 @@ private fun MasterCard(
             }
             AmberToggle(checked = state.active, onCheckedChange = onMaster)
         }
-
-        Hairline()
-        ToggleRow(
-            label = stringResource(R.string.live_auto_analysis),
-            hint = stringResource(R.string.live_auto_analysis_hint),
-            checked = autoRefresh,
-            onCheckedChange = onToggleAutoRefresh,
-        )
 
         if (state.active) {
             Hairline()
@@ -353,8 +334,6 @@ private fun MasterCard(
 
 @Composable
 private fun ConfigCard(
-    aggressive: Boolean,
-    onSelectMode: (Boolean) -> Unit,
     bubbleEnabled: Boolean,
     onToggleBubble: (Boolean) -> Unit,
     modelId: Uuid?,
@@ -365,38 +344,6 @@ private fun ConfigCard(
     val t = LocalAmberTokens.current
     val type = LocalAmberType.current
     AmberCard {
-        Column(
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 13.dp),
-            verticalArrangement = Arrangement.spacedBy(11.dp),
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    stringResource(R.string.live_analysis_mode),
-                    style = type.body.copy(fontWeight = FontWeight.Medium),
-                    color = t.ink,
-                    modifier = Modifier.weight(1f),
-                )
-                Text(
-                    if (aggressive) {
-                        stringResource(R.string.live_analysis_mode_screenshot)
-                    } else {
-                        stringResource(R.string.live_analysis_mode_text_only)
-                    },
-                    style = type.meta,
-                    color = t.ink3,
-                )
-            }
-            AmberSeg(
-                options = listOf(
-                    stringResource(R.string.live_mode_conservative),
-                    stringResource(R.string.live_mode_aggressive),
-                ),
-                selectedIndex = if (aggressive) 1 else 0,
-                onSelect = { onSelectMode(it == 1) },
-            )
-        }
-
-        Hairline()
         ToggleRow(
             label = stringResource(R.string.live_bubble),
             hint = stringResource(R.string.live_bubble_hint),
@@ -423,6 +370,7 @@ private fun ConfigCard(
                 modelId = modelId,
                 providers = providers,
                 type = ModelType.CHAT,
+                minimalText = true,
                 allowClear = true,
                 emptyLabel = stringResource(R.string.live_follow_chat_model),
                 onClear = onClearModel,
@@ -456,7 +404,6 @@ private fun LiveResultCard(
     val uncertainResultText = stringResource(R.string.live_result_uncertain)
     val screenUnclearText = stringResource(R.string.live_result_screen_unclear)
     val noClearRiskText = stringResource(R.string.live_result_no_clear_risk)
-    val actionLabel = actionKey.localizedActionLabel()
     AmberCard {
         Column(
             modifier = Modifier.padding(14.dp),
@@ -466,6 +413,7 @@ private fun LiveResultCard(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Row(
                     modifier = Modifier
+                        .weight(1f, fill = false)
                         .clip(RoundedCornerShape(999.dp))
                         .background(t.surface2)
                         .padding(horizontal = 10.dp, vertical = 5.dp),
@@ -491,12 +439,16 @@ private fun LiveResultCard(
                 }
             }
 
-            if (stale && pendingAction.isNotBlank()) {
+            if (stale) {
                 Text(
-                    text = stringResource(
-                        R.string.live_new_action_pending,
-                        pendingAction.localizedActionLabel(),
-                    ),
+                    text = if (pendingAction.isNotBlank()) {
+                        stringResource(
+                            R.string.live_new_action_pending,
+                            pendingAction.localizedActionLabel(),
+                        )
+                    } else {
+                        stringResource(R.string.live_result_screen_changed)
+                    },
                     style = type.secondary,
                     color = t.ink3,
                 )
@@ -572,7 +524,9 @@ private fun LiveResultCard(
             }
 
             DynamicActionChips(
-                currentAction = if (stale && pendingAction.isNotBlank()) pendingAction else actionKey,
+                // stale 且无 pending 时传空串：不匹配任何 chip 命令，同名动作保持可见
+                // （UI 总检查 #1：stale 文案提示"点下方动作重新分析"，不得藏起同名 chip）。
+                currentAction = if (stale) pendingAction else actionKey,
                 enabled = enabled,
                 onInstruction = onInstruction,
             )
@@ -591,7 +545,7 @@ private fun EmptyResultCard(state: LiveModeUiState) {
     val type = LocalAmberType.current
     AmberCard {
         Column(
-            modifier = Modifier.padding(16.dp),
+            modifier = Modifier.padding(14.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Text(
@@ -751,7 +705,7 @@ private fun GuidanceCard(title: String, body: String, action: String, onAction: 
     val type = LocalAmberType.current
     AmberCard {
         Column(
-            modifier = Modifier.padding(16.dp),
+            modifier = Modifier.padding(14.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -841,41 +795,6 @@ private fun AmberToggle(checked: Boolean, onCheckedChange: (Boolean) -> Unit, en
     }
 }
 
-/** Segmented control: surface-2 track, raised active thumb (design §6.2). */
-@Composable
-private fun AmberSeg(options: List<String>, selectedIndex: Int, onSelect: (Int) -> Unit) {
-    val t = LocalAmberTokens.current
-    val type = LocalAmberType.current
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(999.dp))
-            .background(t.surface2)
-            .padding(3.dp),
-        horizontalArrangement = Arrangement.spacedBy(3.dp),
-    ) {
-        options.forEachIndexed { index, label ->
-            val active = index == selectedIndex
-            Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .clip(RoundedCornerShape(999.dp))
-                    .background(if (active) t.raised else Color.Transparent)
-                    .pressable(onClick = { onSelect(index) })
-                    .padding(vertical = 8.dp),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    text = label,
-                    style = type.secondary.copy(fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal),
-                    color = if (active) t.ink else t.ink3,
-                    maxLines = 1,
-                )
-            }
-        }
-    }
-}
-
 /** Rounded pill action — accent fill or surface-2 (design §6.1 buttons, compact). */
 @Composable
 private fun PillButton(text: String, accent: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
@@ -913,13 +832,9 @@ private fun LiveModeUiState.masterTitle(): String = when {
 }
 
 @Composable
-private fun LiveModeUiState.masterSubtitle(autoRefresh: Boolean): String {
+private fun LiveModeUiState.masterSubtitle(): String {
     val target = listOf(currentAppLabel, currentTitle).filter { it.isNotBlank() }.joinToString(" · ")
-    val mode = if (autoRefresh) {
-        stringResource(R.string.live_auto_analysis)
-    } else {
-        stringResource(R.string.live_manual_analysis)
-    }
+    val mode = stringResource(R.string.live_manual_analysis)
     val analyzingHint = stringResource(R.string.live_master_analyzing_hint)
     return when {
         !active -> stringResource(R.string.live_master_disabled_hint)

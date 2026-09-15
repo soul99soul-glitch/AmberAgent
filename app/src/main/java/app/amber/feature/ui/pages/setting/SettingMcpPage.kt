@@ -139,29 +139,25 @@ fun SettingMcpPage(vm: SettingVM = koinViewModel()) {
                 vm.settings.value.mcpServers.map { it.commonOptions.name }.toSet()
             },
             publish = { configs ->
-                val current = vm.settings.value
-                vm.updateSettings(current.copy(mcpServers = current.mcpServers + configs))
+                vm.updateSettings { current -> current.copy(mcpServers = current.mcpServers + configs) }
             },
         )
     }
     val creationState = useEditState<McpServerConfig> {
-        vm.updateSettings(
-            settings.copy(
-                mcpServers = mcpConfigs + it
-            )
-        )
+        vm.updateSettings { current -> current.copy(mcpServers = current.mcpServers + it) }
     }
     val editState = useEditState<McpServerConfig> { newConfig ->
-        vm.updateSettings(
-            settings.copy(
-                mcpServers = mcpConfigs.map {
+        vm.updateSettings { current ->
+            current.copy(
+                mcpServers = current.mcpServers.map {
                     if (it.id == newConfig.id) {
                         newConfig
                     } else {
                         it
                     }
                 }
-            ))
+            )
+        }
     }
     var showImportDialog by remember { mutableStateOf(false) }
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
@@ -224,11 +220,9 @@ fun SettingMcpPage(vm: SettingVM = koinViewModel()) {
                             editState.open(mcpConfig)
                         },
                         onDelete = {
-                            vm.updateSettings(
-                                settings.copy(
-                                    mcpServers = mcpConfigs.filter { it.id != mcpConfig.id }
-                                )
-                            )
+                            vm.updateSettings { current ->
+                                current.copy(mcpServers = current.mcpServers.filter { it.id != mcpConfig.id })
+                            }
                         },
                         onStartAuthorization = {
                             mcpManager.startAuthorization(mcpConfig, context)

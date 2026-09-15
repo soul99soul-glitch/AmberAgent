@@ -95,7 +95,7 @@ import app.amber.feature.ui.pages.setting.components.ProviderSectionLabel
 import app.amber.feature.ui.pages.setting.components.ProviderSegOption
 import app.amber.feature.ui.pages.setting.components.ProviderTextField
 import app.amber.feature.ui.pages.setting.components.ProviderToggle
-import app.amber.feature.ui.pages.setting.components.ProviderConnectionTester
+
 import app.amber.feature.ui.pages.setting.components.convertTo
 import app.amber.feature.ui.pages.setting.components.isUsingDefaultBaseUrl
 import app.amber.feature.ui.pages.setting.components.providerAuthLabel
@@ -120,20 +120,23 @@ import kotlin.reflect.KClass
 
 @Composable
 internal fun SettingProviderConfigPage(
-    provider: ProviderSetting,
+    internalProvider: ProviderSetting,
+    onInternalChange: (ProviderSetting) -> Unit,
     onEdit: (ProviderSetting) -> Unit,
     onDelete: () -> Unit,
     onModelsFetched: (ProviderModelCandidates) -> Unit = {},
     onModelCandidatesInvalidated: () -> Unit = {},
 ) {
-    var internalProvider by remember(provider) { mutableStateOf(provider) }
     var showDeleteDialog by remember { mutableStateOf(false) }
 
     ProviderConsole(
         provider = internalProvider,
-        onEdit = { internalProvider = it },
+        onEdit = onInternalChange,
+        // OAuth consoles commit whole-provider snapshots whose model writes are
+        // intentional (login selection, fetched defaults); the draft's models are
+        // pinned to the store upstream, so commit as-is.
         onCommit = {
-            internalProvider = it
+            onInternalChange(it)
             onEdit(it)
         },
         onModelsFetched = onModelsFetched,
@@ -142,7 +145,7 @@ internal fun SettingProviderConfigPage(
         ProviderConsoleActions(
             provider = currentProvider,
             onDelete = { showDeleteDialog = true },
-            onReset = { internalProvider = internalProvider.resetBaseUrlToDefault() },
+            onReset = { onInternalChange(internalProvider.resetBaseUrlToDefault()) },
             onSave = { onEdit(internalProvider) },
         )
     }
@@ -980,19 +983,6 @@ private fun ProviderConsoleActions(
             .padding(top = 8.dp),
         verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
-            horizontalArrangement = Arrangement.Start,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            ProviderConnectionTester(internalProvider = provider)
-            Text(
-                text = stringResource(R.string.setting_provider_page_test_connection),
-                style = LocalAmberType.current.secondary.copy(fontWeight = FontWeight.SemiBold),
-                color = t.ink2,
-                modifier = Modifier.padding(start = 2.dp),
-            )
-        }
         ProviderConfigQuietAction(
             text = stringResource(R.string.setting_model_page_reset_to_default),
             enabled = !provider.isUsingDefaultBaseUrl(),

@@ -300,8 +300,7 @@ internal fun ExperimentActionButton(
     val workspace = workspaceColors()
     val type = LocalAmberType.current
     val scheme = MaterialTheme.colorScheme
-    // V3: primary 按钮跟主题 (Paper 砖红 / Whisper 天蓝 / Plain 黑 / Midnight 靛蓝),
-    // 不再硬编码 workspace.blue.
+    // primary 按钮用 colorScheme.primary (随应用主题色解析), 不硬编码 workspace.blue.
     val container = when {
         !enabled -> workspace.row
         primary -> scheme.primary
@@ -372,7 +371,7 @@ internal fun ExperimentBooleanPill(
     val workspace = workspaceColors()
     val scheme = MaterialTheme.colorScheme
     val type = LocalAmberType.current
-    // V3: ready 跟主题 (Paper 砖红 / Whisper 天蓝 等), 不硬编码 workspace.blue
+    // ready 态用 colorScheme.primary 系配色 (随应用主题色), 不硬编码 workspace.blue
     Surface(
         shape = RoundedCornerShape(999.dp),
         color = if (ready) scheme.primaryContainer else workspace.row,

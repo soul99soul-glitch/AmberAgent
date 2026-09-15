@@ -263,9 +263,6 @@ class ExecutionPolicyCoveragePinTest {
             // tool_policy_explain are agent-loop introspection.
             "ask_user", "get_time_info", "run_plan_update", "permissions_status",
             "tools_list", "tool_policy_explain",
-            // Provider-connection probe Tool inside settings UI; never
-            // registered in the agent catalog (ProviderConnectionTester.kt).
-            "get_current_time",
             // In-app JS engine (sandboxed runtime, no tool-call surface).
             "eval_javascript",
             // Fixed conversation-scoped output dir; no user-supplied path arg.

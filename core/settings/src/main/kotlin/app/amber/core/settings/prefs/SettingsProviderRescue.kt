@@ -28,6 +28,10 @@ private const val TAG = "SettingsProviderRescue"
  * The race could persist default Settings over a user's real settings. When a
  * richer local sync payload is still cached, recover the user-visible settings
  * layer from it. This never touches conversations, DB tables, or files.
+ *
+ * Rescue only fires when the current providers still look like wiped factory
+ * defaults ([Settings.looksLikeWipedProviderDefaults]); a healthy configuration
+ * (the user's real custom providers) is never rolled back to the backup.
  */
 class SettingsProviderRescue(
     private val context: Context,
@@ -39,7 +43,7 @@ class SettingsProviderRescue(
         runCatching {
             val current = settingsStore.settingsFlow.filterNot { it.init }.first()
             val backup = findBestCachedSettingsBackup() ?: return@runCatching
-            if (!current.needsSettingsRescueFrom(backup.settings)) {
+            if (!current.needsSettingsRescueFrom(json, backup.settings)) {
                 return@runCatching
             }
 
@@ -67,7 +71,7 @@ class SettingsProviderRescue(
             .mapNotNull { file -> readSettingsFromPayload(file)?.let { file to it } }
             .filter { (_, backup) -> backup.settings.providers.isNotEmpty() }
             .maxWithOrNull(
-                compareBy<Pair<File, CachedSettingsBackup>> { (_, backup) -> backup.settings.configRecoveryScore() }
+                compareBy<Pair<File, CachedSettingsBackup>> { (_, backup) -> backup.settings.configRecoveryScore(json) }
                     .thenBy { (file, _) -> file.lastModified() }
             )
             ?.second
@@ -93,152 +97,156 @@ class SettingsProviderRescue(
         null
     }
 
-    private fun Settings.needsSettingsRescueFrom(backup: Settings): Boolean {
-        if (looksLikeWipedProviderDefaults() && backup.providerRecoveryScore() > providerRecoveryScore()) {
-            return true
-        }
-        if (searchRecoveryScore() < backup.searchRecoveryScore()) {
-            return true
-        }
-        if (displaySetting.looksLikeDefaultIdentity() && !backup.displaySetting.looksLikeDefaultIdentity()) {
-            return true
-        }
-        if (quickMessages.size < backup.quickMessages.size) {
-            return true
-        }
-        if (mcpServers.size < backup.mcpServers.size || modeInjections.size < backup.modeInjections.size) {
-            return true
-        }
-        return false
-    }
-
-    private fun Settings.recoverSettingsFrom(backup: Settings): Settings {
-        val validModelIds = backup.providers.flatMap { it.models }.map { it.id }.toSet()
-        return copy(
-            dynamicColor = backup.dynamicColor,
-            themeId = backup.themeId,
-            developerMode = backup.developerMode,
-            displaySetting = backup.displaySetting,
-            enableWebSearch = backup.enableWebSearch,
-            favoriteModels = backup.favoriteModels.filter { it in validModelIds },
-            chatModelId = backup.chatModelId.takeIfValidModel(validModelIds, chatModelId),
-            titleModelId = backup.titleModelId.takeIfValidModel(validModelIds, titleModelId),
-            suggestionModelId = backup.suggestionModelId.takeIfValidModel(validModelIds, suggestionModelId),
-            imageGenerationModelId = backup.imageGenerationModelId.takeIfValidModel(
-                validModelIds,
-                imageGenerationModelId
-            ),
-            titlePrompt = backup.titlePrompt,
-            suggestionPrompt = backup.suggestionPrompt,
-            ocrModelId = backup.ocrModelId.takeIfValidModel(validModelIds, ocrModelId),
-            ocrPrompt = backup.ocrPrompt,
-            compressModelId = backup.compressModelId.takeIfValidModel(validModelIds, compressModelId),
-            compressPrompt = backup.compressPrompt,
-            modelGroupSessionDefaults = backup.modelGroupSessionDefaults.filter { it.groupId.isNotBlank() },
-            providers = backup.providers,
-            imageModelsSeededVersion = backup.imageModelsSeededVersion,
-            systemPrompt = backup.systemPrompt,
-            temperature = backup.temperature,
-            topP = backup.topP,
-            contextMessageSize = backup.contextMessageSize,
-            streamOutput = backup.streamOutput,
-            messageTemplate = backup.messageTemplate,
-            presetMessages = backup.presetMessages,
-            regexes = backup.regexes,
-            reasoningLevel = backup.reasoningLevel,
-            maxTokens = backup.maxTokens,
-            customHeaders = backup.customHeaders,
-            customBodies = backup.customBodies,
-            rememberedReasoningLevelsByModelId = backup.rememberedReasoningLevelsByModelId,
-            enabledSkills = backup.enabledSkills,
-            enabledMcpServerIds = backup.enabledMcpServerIds,
-            enabledModeInjectionIds = backup.enabledModeInjectionIds,
-            enabledLorebookIds = backup.enabledLorebookIds,
-            searchServices = backup.searchServices,
-            searchCommonOptions = backup.searchCommonOptions,
-            searchServiceSelected = backup.searchServiceSelected,
-            searchEnabledServiceIds = backup.searchEnabledServiceIds,
-            searchBuiltinDuckDuckGoEnabled = backup.searchBuiltinDuckDuckGoEnabled,
-            searchBuiltinBingEnabled = backup.searchBuiltinBingEnabled,
-            searchBuiltinJinaEnabled = backup.searchBuiltinJinaEnabled,
-            searchBuiltinWikipediaEnabled = backup.searchBuiltinWikipediaEnabled,
-            searchBuiltinHackerNewsEnabled = backup.searchBuiltinHackerNewsEnabled,
-            searchGoogleWebViewFallbackEnabled = backup.searchGoogleWebViewFallbackEnabled,
-            agentRuntime = backup.agentRuntime,
-            mcpServers = backup.mcpServers,
-            webDavConfig = backup.webDavConfig,
-            s3Config = backup.s3Config,
-            modeInjections = backup.modeInjections,
-            lorebooks = backup.lorebooks,
-            quickMessages = backup.quickMessages,
-            backupReminderConfig = backup.backupReminderConfig,
-            sponsorAlertDismissedAt = backup.sponsorAlertDismissedAt,
-            routingQuickMessagesSeededVersion = backup.routingQuickMessagesSeededVersion,
-            // Keep current-device sync identity/revision and launch count.
-            syncSettings = syncSettings,
-            launchCount = launchCount,
-        )
-    }
-
-    private fun Settings.looksLikeWipedProviderDefaults(): Boolean {
-        val defaultIds = DEFAULT_PROVIDERS.map { it.id }.toSet()
-        val providerIds = providers.map { it.id }.toSet()
-        if (providerIds != defaultIds) return false
-        if (providers.any { it.hasCredentialOrManagedAuth() }) return false
-        val currentModels = providers.sumOf { it.models.size }
-        val defaultModels = DEFAULT_PROVIDERS.sumOf { it.models.size }
-        return currentModels <= defaultModels + 2
-    }
-
-    private fun Settings.configRecoveryScore(): Int =
-        providerRecoveryScore() +
-            searchRecoveryScore() +
-            (if (!displaySetting.looksLikeDefaultIdentity()) 80 else 0) +
-            quickMessages.size * 3 +
-            mcpServers.size * 5 +
-            modeInjections.size * 3 +
-            lorebooks.size * 3
-
-    private fun Settings.providerRecoveryScore(): Int {
-        val defaultIds = DEFAULT_PROVIDERS.map { it.id }.toSet()
-        return providers.sumOf { provider ->
-            val userProviderBonus = if (provider.id !in defaultIds) 50 else 0
-            val credentialBonus = if (provider.hasCredentialOrManagedAuth()) 100 else 0
-            val enabledBonus = if (provider.enabled) 5 else 0
-            userProviderBonus + credentialBonus + enabledBonus + provider.models.size
-        }
-    }
-
-    private fun Settings.searchRecoveryScore(): Int {
-        val serviceCount = searchServices.size * 10
-        val enabledCount = searchEnabledServiceIds.size * 3
-        val configuredServices = searchServices.count { service ->
-            val encoded = json.encodeToString(service)
-            encoded.contains("\"apiKey\":\"") && !encoded.contains("\"apiKey\":\"\"")
-        } * 20
-        return serviceCount + enabledCount + configuredServices
-    }
-
-    private fun ProviderSetting.hasCredentialOrManagedAuth(): Boolean = when (this) {
-        is ProviderSetting.OpenAI ->
-            apiKey.isNotBlank() || authMode != OpenAIAuthMode.API_KEY
-
-        is ProviderSetting.Google ->
-            apiKey.isNotBlank() ||
-                privateKey.isNotBlank() ||
-                serviceAccountEmail.isNotBlank() ||
-                authMode != GoogleAuthMode.API_KEY
-
-        is ProviderSetting.Claude ->
-            apiKey.isNotBlank()
-    }
-
-    private fun DisplaySetting.looksLikeDefaultIdentity(): Boolean =
-        userNickname.isBlank() && userAvatar == DisplaySetting().userAvatar
-
-    private fun Uuid.takeIfValidModel(validModelIds: Set<Uuid>, fallback: Uuid): Uuid =
-        if (this in validModelIds) this else fallback
 }
+
+/**
+ * 触发前提：当前 providers 形如被抹成出厂默认（looksLikeWipedProviderDefaults）。
+ * 配置健康（用户已有真实自定义 providers/凭据）时一律不整份恢复备份，避免回滚用户改动。
+ */
+internal fun Settings.needsSettingsRescueFrom(json: Json, backup: Settings): Boolean {
+    if (!looksLikeWipedProviderDefaults()) return false
+    if (backup.providerRecoveryScore() > providerRecoveryScore()) {
+        return true
+    }
+    if (searchRecoveryScore(json) < backup.searchRecoveryScore(json)) {
+        return true
+    }
+    if (displaySetting.looksLikeDefaultIdentity() && !backup.displaySetting.looksLikeDefaultIdentity()) {
+        return true
+    }
+    if (quickMessages.size < backup.quickMessages.size) {
+        return true
+    }
+    if (mcpServers.size < backup.mcpServers.size || modeInjections.size < backup.modeInjections.size) {
+        return true
+    }
+    return false
+}
+
+internal fun Settings.recoverSettingsFrom(backup: Settings): Settings {
+    val validModelIds = backup.providers.flatMap { it.models }.map { it.id }.toSet()
+        return copy(
+            developerMode = backup.developerMode,
+        displaySetting = backup.displaySetting,
+        enableWebSearch = backup.enableWebSearch,
+        favoriteModels = backup.favoriteModels.filter { it in validModelIds },
+        chatModelId = backup.chatModelId.takeIfValidModel(validModelIds, chatModelId),
+        titleModelId = backup.titleModelId.takeIfValidModel(validModelIds, titleModelId),
+        suggestionModelId = backup.suggestionModelId.takeIfValidModel(validModelIds, suggestionModelId),
+        imageGenerationModelId = backup.imageGenerationModelId.takeIfValidModel(
+            validModelIds,
+            imageGenerationModelId
+        ),
+        titlePrompt = backup.titlePrompt,
+        suggestionPrompt = backup.suggestionPrompt,
+        ocrModelId = backup.ocrModelId.takeIfValidModel(validModelIds, ocrModelId),
+        ocrPrompt = backup.ocrPrompt,
+        compressModelId = backup.compressModelId.takeIfValidModel(validModelIds, compressModelId),
+        compressPrompt = backup.compressPrompt,
+        modelGroupSessionDefaults = backup.modelGroupSessionDefaults.filter { it.groupId.isNotBlank() },
+        providers = backup.providers,
+        imageModelsSeededVersion = backup.imageModelsSeededVersion,
+        systemPrompt = backup.systemPrompt,
+        temperature = backup.temperature,
+        topP = backup.topP,
+        contextMessageSize = backup.contextMessageSize,
+        streamOutput = backup.streamOutput,
+        messageTemplate = backup.messageTemplate,
+        presetMessages = backup.presetMessages,
+        regexes = backup.regexes,
+        reasoningLevel = backup.reasoningLevel,
+        maxTokens = backup.maxTokens,
+        customHeaders = backup.customHeaders,
+        customBodies = backup.customBodies,
+        rememberedReasoningLevelsByModelId = backup.rememberedReasoningLevelsByModelId,
+        enabledSkills = backup.enabledSkills,
+        enabledMcpServerIds = backup.enabledMcpServerIds,
+        enabledModeInjectionIds = backup.enabledModeInjectionIds,
+        enabledLorebookIds = backup.enabledLorebookIds,
+        searchServices = backup.searchServices,
+        searchCommonOptions = backup.searchCommonOptions,
+        searchServiceSelected = backup.searchServiceSelected,
+        searchEnabledServiceIds = backup.searchEnabledServiceIds,
+        searchBuiltinDuckDuckGoEnabled = backup.searchBuiltinDuckDuckGoEnabled,
+        searchBuiltinBingEnabled = backup.searchBuiltinBingEnabled,
+        searchBuiltinJinaEnabled = backup.searchBuiltinJinaEnabled,
+        searchBuiltinWikipediaEnabled = backup.searchBuiltinWikipediaEnabled,
+        searchBuiltinHackerNewsEnabled = backup.searchBuiltinHackerNewsEnabled,
+        searchGoogleWebViewFallbackEnabled = backup.searchGoogleWebViewFallbackEnabled,
+        agentRuntime = backup.agentRuntime,
+        mcpServers = backup.mcpServers,
+        webDavConfig = backup.webDavConfig,
+        s3Config = backup.s3Config,
+        modeInjections = backup.modeInjections,
+        lorebooks = backup.lorebooks,
+        quickMessages = backup.quickMessages,
+        backupReminderConfig = backup.backupReminderConfig,
+        sponsorAlertDismissedAt = backup.sponsorAlertDismissedAt,
+        routingQuickMessagesSeededVersion = backup.routingQuickMessagesSeededVersion,
+        // Keep current-device sync identity/revision and launch count.
+        syncSettings = syncSettings,
+        launchCount = launchCount,
+    )
+}
+
+internal fun Settings.looksLikeWipedProviderDefaults(): Boolean {
+    val defaultIds = DEFAULT_PROVIDERS.map { it.id }.toSet()
+    val providerIds = providers.map { it.id }.toSet()
+    if (providerIds != defaultIds) return false
+    if (providers.any { it.hasCredentialOrManagedAuth() }) return false
+    val currentModels = providers.sumOf { it.models.size }
+    val defaultModels = DEFAULT_PROVIDERS.sumOf { it.models.size }
+    return currentModels <= defaultModels + 2
+}
+
+private fun Settings.configRecoveryScore(json: Json): Int =
+    providerRecoveryScore() +
+        searchRecoveryScore(json) +
+        (if (!displaySetting.looksLikeDefaultIdentity()) 80 else 0) +
+        quickMessages.size * 3 +
+        mcpServers.size * 5 +
+        modeInjections.size * 3 +
+        lorebooks.size * 3
+
+private fun Settings.providerRecoveryScore(): Int {
+    val defaultIds = DEFAULT_PROVIDERS.map { it.id }.toSet()
+    return providers.sumOf { provider ->
+        val userProviderBonus = if (provider.id !in defaultIds) 50 else 0
+        val credentialBonus = if (provider.hasCredentialOrManagedAuth()) 100 else 0
+        val enabledBonus = if (provider.enabled) 5 else 0
+        userProviderBonus + credentialBonus + enabledBonus + provider.models.size
+    }
+}
+
+private fun Settings.searchRecoveryScore(json: Json): Int {
+    val serviceCount = searchServices.size * 10
+    val enabledCount = searchEnabledServiceIds.size * 3
+    val configuredServices = searchServices.count { service ->
+        val encoded = json.encodeToString(service)
+        encoded.contains("\"apiKey\":\"") && !encoded.contains("\"apiKey\":\"\"")
+    } * 20
+    return serviceCount + enabledCount + configuredServices
+}
+
+private fun ProviderSetting.hasCredentialOrManagedAuth(): Boolean = when (this) {
+    is ProviderSetting.OpenAI ->
+        apiKey.isNotBlank() || authMode != OpenAIAuthMode.API_KEY
+
+    is ProviderSetting.Google ->
+        apiKey.isNotBlank() ||
+            privateKey.isNotBlank() ||
+            serviceAccountEmail.isNotBlank() ||
+            authMode != GoogleAuthMode.API_KEY
+
+    is ProviderSetting.Claude ->
+        apiKey.isNotBlank()
+}
+
+private fun DisplaySetting.looksLikeDefaultIdentity(): Boolean =
+    userNickname.isBlank() && userAvatar == DisplaySetting().userAvatar
+
+private fun Uuid.takeIfValidModel(validModelIds: Set<Uuid>, fallback: Uuid): Uuid =
+    if (this in validModelIds) this else fallback
 
 /** 缓存同步 payload 中解析出的 settings + 备份携带的 secret reference（P1-01）。 */
 private data class CachedSettingsBackup(

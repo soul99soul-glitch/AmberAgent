@@ -53,6 +53,18 @@ abstract class AgentRuntimeDao {
     @Query("DELETE FROM agent_event WHERE type = :type AND ts < :cutoffMs")
     abstract suspend fun deleteEventsOfTypeOlderThan(type: String, cutoffMs: Long): Int
 
+    // Live 伴随保留策略（蓝图 v3 §6）：终态 run 与关联事件同窗口清理，
+    // 限定 descriptor 不影响其他 agent；进行中的 run 不在清理范围。
+    @Query(
+        "DELETE FROM agent_run WHERE agent_descriptor_id = :descriptorId " +
+            "AND status IN ('completed', 'failed', 'cancelled', 'interrupted') " +
+            "AND finished_at < :cutoffMs",
+    )
+    abstract suspend fun deleteTerminalRunsOfAgentOlderThan(descriptorId: String, cutoffMs: Long): Int
+
+    @Query("SELECT * FROM agent_event WHERE type = :type ORDER BY ts DESC LIMIT 1")
+    abstract suspend fun latestEventOfType(type: String): AgentEventEntity?
+
     @Query(
         "SELECT * FROM agent_run WHERE status IN (" +
             "'created', 'running', 'waiting_user', 'waiting_external', " +

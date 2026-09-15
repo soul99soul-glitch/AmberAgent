@@ -288,8 +288,6 @@
   <string name="setting_display_page_chat_font_family_monospace">等寬字體</string>
   <string name="setting_display_page_chat_font_family_serif">Serif</string>
   <string name="setting_display_page_chat_font_family_title">聊天字型</string>
-  <string name="setting_display_page_chat_list_model_icon_desc">是否在聊天列表消息中顯示模型圖標</string>
-  <string name="setting_display_page_chat_list_model_icon_title">聊天列表模型圖標</string>
   <string name="setting_display_page_code_block_auto_collapse_desc">預設自動摺疊程式碼區塊</string>
   <string name="setting_display_page_code_block_auto_collapse_title">程式碼區塊自動摺疊</string>
   <string name="setting_display_page_code_block_auto_wrap_desc">自動換行程式碼區塊中的長行</string>
@@ -313,8 +311,6 @@
   <string name="setting_display_page_send_on_enter_title">按 Enter 鍵傳送</string>
   <string name="setting_display_page_show_assistant_bubble_desc">是否顯示助理訊息的泡泡背景</string>
   <string name="setting_display_page_show_assistant_bubble_title">顯示助理訊息氣泡</string>
-  <string name="setting_display_page_show_date_below_name_desc">是否在暱稱或模型名稱下方顯示訊息日期</string>
-  <string name="setting_display_page_show_date_below_name_title">在名稱下方顯示日期</string>
   <string name="setting_display_page_show_line_numbers_desc">在程式碼區塊中顯示行號</string>
   <string name="setting_display_page_show_line_numbers_title">顯示行號</string>
   <string name="setting_display_page_show_message_jumper_desc">在捲動聊天列表時，在右側顯示快速跳轉按鈕</string>
@@ -505,8 +501,6 @@
   <string name="setting_provider_page_scan_qr_code">掃描二維碼</string>
   <string name="setting_provider_page_select_all">全選 (%1$d)</string>
   <string name="setting_provider_page_select_from_gallery">從相簿選擇</string>
-  <string name="setting_provider_page_test">測試</string>
-  <string name="setting_provider_page_test_connection">測試連接</string>
   <string name="setting_provider_page_text">文字</string>
   <string name="setting_provider_page_tool">工具</string>
   <string name="setting_provider_page_vertex_ai">Vertex AI</string>
@@ -553,6 +547,7 @@
   <string name="stats_page_heatmap_title">聊天熱力圖</string>
   <string name="stats_page_input_tokens">輸入詞元</string>
   <string name="stats_page_launch_count">應用程式啟動次數</string>
+  <string name="stats_page_live_companion">伴隨分析（次數 · 詞元）</string>
   <string name="stats_page_output_tokens">輸出詞元</string>
   <string name="stats_page_title">統計資料</string>
   <string name="stats_page_total_conversations">總對話數</string>
@@ -710,6 +705,7 @@
   <string name="setting_provider_page_selected_count">已選 %1$d / %2$d</string>
   <string name="setting_provider_page_model_context_window">上下文長度</string>
   <string name="setting_provider_page_model_context_window_placeholder">留空以自動識別，例如：128K / 1M / 1000000</string>
+  <string name="setting_provider_page_model_context_window_invalid">上下文視窗格式無效。請輸入數字或 K/M 後綴，如 128K / 1M / 1000000</string>
   <string name="amberagent_accessibility_service_desc">允許 AmberAgent 執行使用者核准的螢幕自動化操作。</string>
   <string name="amberagent_accessibility_service_label">AmberAgent 無障礙服務</string>
   <string name="amberagent_notification_listener_label">AmberAgent 通知存取</string>
@@ -985,17 +981,15 @@
   <string name="setting_page_agent_high_risk_auto_approve_confirm_title">確定要啟用高風險自動核准嗎？</string>
   <string name="setting_page_agent_high_risk_auto_approve_desc">自動核准一般與高風險工具，包括終端機/SSH、螢幕操作和 SubAgent 工具，無需同時啟用全域自動核准。</string>
   <string name="setting_page_agent_live_mode">啟用 Live 伴隨功能</string>
-  <string name="setting_page_agent_live_mode_auto_refresh">自動重新整理</string>
-  <string name="setting_page_agent_live_mode_auto_refresh_desc">僅在觀察到的 UI 變更並穩定後分析。</string>
-  <string name="setting_page_agent_live_mode_desc">透過無障礙功能觀察其他應用程式，並更新精簡的唯讀伴隨卡片。</string>
+  <string name="setting_page_agent_live_mode_desc">透過無障礙讀取其他應用程式介面；螢幕文字僅在你手動觸發分析時傳送給所選模型服務商，隨時可停止</string>
+  <string name="setting_page_agent_live_mode_open">開啟伴隨</string>
+  <string name="setting_page_agent_live_mode_open_desc">檢視伴隨工作階段與最近一次分析</string>
   <string name="setting_page_agent_live_mode_max_nodes">UI 節點上限</string>
   <string name="setting_page_agent_live_mode_max_nodes_desc">分析前單次 UI 樹快照的上限。</string>
   <string name="setting_page_agent_live_mode_max_nodes_value">%1$d 個節點</string>
   <string name="setting_page_agent_live_mode_refresh_interval">觀察間隔</string>
   <string name="setting_page_agent_live_mode_refresh_interval_desc">Amber 在去重與節流前讀取 UI 樹的頻率。</string>
   <string name="setting_page_agent_live_mode_refresh_interval_value">%1$.1f 秒</string>
-  <string name="setting_page_agent_live_mode_voice">語音關注點輸入</string>
-  <string name="setting_page_agent_live_mode_voice_desc">使用 Android 語音辨識暫時新增關注指示。</string>
   <string name="setting_page_agent_live_status">流體雲 / 即時狀態</string>
   <string name="setting_page_agent_live_status_desc">工作執行時顯示系統即時狀態。</string>
   <string name="setting_page_agent_live_status_privacy">隱藏敏感的即時狀態</string>
@@ -2141,11 +2135,6 @@
   <string name="setting_officepro_doc_url">飛書文件 URL</string>
   <string name="setting_officepro_file_read_failed">無法讀取所選檔案</string>
   <string name="setting_officepro_file_too_large">檔案超過 50 MB，請先放入 workspace，再將路徑寫入來源引用。</string>
-  <string name="setting_provider_connection_tester_non_streaming">非串流</string>
-  <string name="setting_provider_connection_tester_streaming">串流</string>
-  <string name="setting_provider_connection_tester_tool_call">工具呼叫</string>
-  <string name="setting_provider_connection_tester_tool_call_result">呼叫：%1$s  參數：%2$s</string>
-  <string name="setting_provider_connection_tester_tool_not_called">未呼叫工具，回應：%1$s</string>
   <string name="setting_provider_page_account">帳戶</string>
   <string name="setting_provider_page_authentication">驗證</string>
   <string name="setting_provider_page_connection_summary_connected">已連線 · %1$s · %2$d 個模型</string>
@@ -2320,13 +2309,8 @@
   <string name="live_action_screen_analysis">螢幕分析</string>
   <string name="live_action_summarize">總結</string>
   <string name="live_action_write_reply">幫我寫回覆</string>
-  <string name="live_analysis_mode">分析模式</string>
-  <string name="live_analysis_mode_screenshot">截圖</string>
-  <string name="live_analysis_mode_text_only">文字</string>
   <string name="live_analysis_model">分析模型</string>
   <string name="live_analyze_now">立即分析</string>
-  <string name="live_auto_analysis">自動分析</string>
-  <string name="live_auto_analysis_hint">頁面穩定後觸發</string>
   <string name="live_bubble">懸浮氣泡</string>
   <string name="live_bubble_collapse">收起</string>
   <string name="live_bubble_hint">其它應用上顯示</string>
@@ -2363,7 +2347,6 @@
   <string name="live_master_result_hint">結果會顯示在「%1$s」裡</string>
   <string name="live_master_status_mode">%1$s · %2$s</string>
   <string name="live_master_target_mode">%1$s · %2$s</string>
-  <string name="live_mode_aggressive">激進 · 截圖</string>
   <string name="live_mode_conservative">保守 · 文字</string>
   <string name="live_model_required_body">伴隨會複用聊天模型做短分析。先選一個可用模型，再回來啟動。</string>
   <string name="live_model_required_title">需要設定模型</string>
@@ -2385,7 +2368,9 @@
   <string name="live_result_no_risk_points">暫時沒有發現明確風險。</string>
   <string name="live_result_reply_draft">回覆草稿</string>
   <string name="live_result_risks">風險點</string>
+  <string name="live_result_screen_changed">畫面已變更，點下方動作重新分析</string>
   <string name="live_result_screen_unclear">這塊螢幕資訊還不夠明確。</string>
+  <string name="live_result_stale_dropped">本次結果已過期，未寫入</string>
   <string name="live_result_summary">總結</string>
   <string name="live_result_title_companion">伴隨結果</string>
   <string name="live_result_title_custom">%1$s結果</string>
@@ -2410,6 +2395,7 @@
   <string name="profile_stats_tokens">Token 數</string>
   <string name="profile_title">個人資料</string>
   <string name="share_sheet_title">分享你的 LLM 模型</string>
+  <string name="share_sheet_plaintext_key_warning">二維碼與分享文字包含明文 API Key，請僅分享給可信的人。</string>
   <string name="synara_auth_token_hint">SYNARA_AUTH_TOKEN</string>
   <string name="synara_auth_token_label">Auth Token</string>
   <string name="synara_auth_token_supporting">來自 Mac 桌面程序環境變數 SYNARA_AUTH_TOKEN，等同密碼</string>

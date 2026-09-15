@@ -164,8 +164,6 @@ class SecretPrefsChainRoundTripTest {
         aggregator.update(
             Settings(
                 displaySetting = DisplaySetting(
-                    showModelIcon = true,
-                    showDateBelowName = true,
                     autoCloseThinking = false,
                     enableLatexRendering = false,
                     sendOnEnter = true,
@@ -176,8 +174,6 @@ class SecretPrefsChainRoundTripTest {
         val persisted = JsonInstant.decodeFromString<DisplaySetting>(
             dataStore.data.first()[PreferencesKeys.DISPLAY_SETTING]!!,
         )
-        assertFalse(persisted.showModelIcon)
-        assertFalse(persisted.showDateBelowName)
         assertTrue(persisted.autoCloseThinking)
         assertTrue(persisted.enableLatexRendering)
         assertTrue("unrelated display settings must survive normalization", persisted.sendOnEnter)
@@ -185,8 +181,6 @@ class SecretPrefsChainRoundTripTest {
         val loaded = aggregator.settingsFlow.awaitUntil {
             !it.init && it.displaySetting.sendOnEnter
         }
-        assertFalse(loaded.displaySetting.showModelIcon)
-        assertFalse(loaded.displaySetting.showDateBelowName)
         assertTrue(loaded.displaySetting.autoCloseThinking)
         assertTrue(loaded.displaySetting.enableLatexRendering)
     }

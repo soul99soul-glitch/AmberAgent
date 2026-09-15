@@ -185,8 +185,7 @@ fun <T> ChainOfThought(
                     }
                 }
 
-                // V3: 左竖线用 chatTheme.thinkRule 替代 outlineVariant (faint 灰)
-                // 这样多步骤链条跟主题 accent 走（Whisper 蓝 / Paper 砖红 / Plain 黑 / Midnight 靛蓝）
+                // 左竖线用 chatTheme.thinkRule 替代 outlineVariant (faint 灰), 跟随聊天主题色
                 // drawTimeline=false 时跳过竖线。
                 val lineColor = app.amber.feature.ui.pages.chat.LocalChatTheme.current.thinkRule
                 val scope = remember { ChainOfThoughtScopeImpl() }

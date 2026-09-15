@@ -198,7 +198,7 @@ private fun MainPage(vm: DebugVM) {
                 }
                 Hairline()
                 DebugButtonRow(stringResource(R.string.debug_reset_chat_model)) {
-                    vm.updateSettings(settings.copy(chatModelId = Uuid.random()))
+                    vm.updateSettings { current -> current.copy(chatModelId = Uuid.random()) }
                 }
                 Hairline()
                 DebugButtonRow(stringResource(R.string.debug_crash_button), danger = true) {
@@ -310,7 +310,9 @@ private fun MainPage(vm: DebugVM) {
                         singleLine = true,
                     )
                     Button(onClick = {
-                        launchCountInput.toIntOrNull()?.let { vm.updateSettings(settings.copy(launchCount = it)) }
+                        launchCountInput.toIntOrNull()?.let { value ->
+                            vm.updateSettings { current -> current.copy(launchCount = value) }
+                        }
                     }) { Text("Set") }
                 }
             }

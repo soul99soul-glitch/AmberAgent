@@ -209,7 +209,7 @@ fun LiveBubbleContent(
                 )
                 card.keyPoints.take(3).forEach { point ->
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Text(text = "·", color = tokens.ink3, fontSize = 13.sp)
+                        Text(text = "·", color = tokens.accent, fontSize = 13.sp)
                         Text(text = point, fontSize = 13.sp, color = tokens.ink2)
                     }
                 }
@@ -242,10 +242,15 @@ fun LiveBubbleContent(
                     }) {
                         Text(stringResource(R.string.live_fill_action), fontSize = 13.sp, color = tokens.accent)
                     }
+                    Spacer(modifier = Modifier.width(4.dp))
                 }
-                Spacer(modifier = Modifier.width(4.dp))
-                TextButton(onClick = onRefresh) {
-                    Text(stringResource(R.string.live_analyze_now), fontSize = 13.sp, color = tokens.accent)
+                val refreshEnabled = state.active && !state.paused && !state.analyzing
+                TextButton(onClick = onRefresh, enabled = refreshEnabled) {
+                    Text(
+                        stringResource(R.string.live_analyze_now),
+                        fontSize = 13.sp,
+                        color = if (refreshEnabled) tokens.accent else tokens.ink4,
+                    )
                 }
             }
         }

@@ -42,21 +42,11 @@ import app.amber.core.model.PromptInjection
 import app.amber.core.model.QuickMessage
 import app.amber.core.sync.core.SyncSettings
 import app.amber.core.sync.s3.S3Config
-// PresetThemes lives in :app feature/ui/theme; we use only its first
-// id as default — hardcoded to "amberagent_clash" to keep PreferencesStore
-// free of UI/Compose-flavored dependencies. The themeId field stores a
-// String anyway, so no behavior change.
 import app.amber.core.agent.utils.JsonInstant
 import app.amber.search.SearchCommonOptions
 import app.amber.search.SearchServiceOptions
 import kotlin.uuid.Uuid
 
-
-// Default theme id seeded into freshly-initialized Settings. Must match
-// AmberAgentClashThemePreset.id in :app feature/ui/theme/presets — pinned
-// as a string here so PreferencesStore stays free of the Compose-flavored
-// PresetThemes registry.
-const val DEFAULT_PRESET_THEME_ID = "amberagent_clash"
 
 // Exact previous factory text, retained only to upgrade saved defaults.
 internal val PREVIOUS_DEFAULT_AMBER_SYSTEM_PROMPT = """
@@ -101,8 +91,6 @@ val Context.settingsStore by preferencesDataStore(
 data class Settings(
     @Transient
     val init: Boolean = false,
-    val dynamicColor: Boolean = false,
-    val themeId: String = DEFAULT_PRESET_THEME_ID,
     val developerMode: Boolean = false,
     val displaySetting: DisplaySetting = DisplaySetting(),
     val enableWebSearch: Boolean = false,
@@ -377,22 +365,17 @@ enum class ChatFontFamily {
 data class DisplaySetting(
     val userAvatar: Avatar = Avatar.Dummy,
     val userNickname: String = "",
-    val useAppIconStyleLoadingIndicator: Boolean = true,
     val showUserAvatar: Boolean = true,
     val showAssistantBubble: Boolean = false,
-    val showModelIcon: Boolean = true,
     val showModelName: Boolean = true,
-    val showDateBelowName: Boolean = false,
     val showThinkingContent: Boolean = true,
     val autoCloseThinking: Boolean = true,
-    val showUpdates: Boolean = true,
     val showMessageJumper: Boolean = true,
     val messageJumperOnLeft: Boolean = false,
     val fontSizeRatio: Float = 1.0f,
     val enableMessageGenerationHapticEffect: Boolean = false,
     val skipCropImage: Boolean = false,
     val enableNotificationOnMessageGeneration: Boolean = false,
-    val enableLiveUpdateNotification: Boolean = false,
     val codeBlockAutoWrap: Boolean = false,
     val codeBlockAutoCollapse: Boolean = false,
     val showLineNumbers: Boolean = false,
@@ -402,12 +385,9 @@ data class DisplaySetting(
     val enableAutoScroll: Boolean = true,
     val showBottomFollowAnimation: Boolean = true,
     val enableLatexRendering: Boolean = true,
-    val enableBlurEffect: Boolean = false,
     val chatFontFamily: ChatFontFamily = ChatFontFamily.DEFAULT,
     val enableVolumeKeyScroll: Boolean = false,
     val volumeKeyScrollRatio: Float = 1.0f,
-    // V3：用户在设置里手选的聊天主题 key。浅色/深色模式各自只应用匹配模式的主题。
-    val chatThemeChoice: String = "WHISPER",
     // Graphite redesign: base family (WARM | SAGE); light/dark resolved by system mode.
     val amberBaseFamily: String = "WARM",
     // Graphite redesign: accent color (independent of base), one of the curated 5. Hex string.
