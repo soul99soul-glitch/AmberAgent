@@ -9,6 +9,7 @@ import app.amber.ai.provider.ModelType
 import app.amber.ai.provider.ProviderCatalog
 import app.amber.ai.provider.TextGenerationParams
 import app.amber.ai.core.MessageRole
+import app.amber.ai.ui.MessageStreamAccumulator
 import app.amber.ai.ui.UIMessage
 import app.amber.ai.ui.UIMessagePart
 import app.amber.agent.R
@@ -46,11 +47,13 @@ class LiveAnalyzer(
     }
 
     /**
+     * 流式分析（蓝图 §7.3 P1-1）：gateway.stream 逐 chunk 聚合（MessageStreamAccumulator），
+     * onDelta 回调累积文本供气泡/页面即时预览；结束后按完整文本解析卡片。
      * @param screenshotUri 激进模式下由调用方先截好（file:// URI）；
      *        null 表示不可用（低版本/截屏失败/保守模式），自动走纯文字。
      * @throws Throwable 网络/模型错误原样抛出，由 Manager 统一映射 LiveFailure。
      */
-    suspend fun analyze(
+    suspend fun analyzeStream(
         settings: Settings,
         model: Model,
         snapshot: LiveScreenSnapshot,
@@ -59,6 +62,8 @@ class LiveAnalyzer(
         mode: LiveAnalysisMode,
         screenshotUri: String?,
         locale: Locale,
+        recallLines: List<String> = emptyList(),
+        onDelta: (String) -> Unit,
     ): Outcome {
         val provider = model.findProvider(settings.providers)
             ?: throw IllegalStateException(context.getString(R.string.model_list_no_providers))
@@ -67,8 +72,7 @@ class LiveAnalyzer(
         val useVision = wantVision && modelSupportsVision && screenshotUri != null
         val degradedReason = when {
             !wantVision -> null
-            !modelSupportsVision -> context.getString(R.string.live_mode_conservative)
-            screenshotUri == null -> context.getString(R.string.live_mode_conservative)
+            !useVision -> context.getString(R.string.live_mode_conservative)
             else -> null
         }
 
@@ -78,7 +82,7 @@ class LiveAnalyzer(
                 UIMessage(
                     role = MessageRole.USER,
                     parts = listOf(
-                        UIMessagePart.Text(LivePrompt.user(snapshot, focus, actionLabel, locale)),
+                        UIMessagePart.Text(LivePrompt.user(snapshot, focus, actionLabel, locale, recallLines)),
                         UIMessagePart.Image(url = screenshotUri),
                     ),
                 ),
@@ -86,12 +90,14 @@ class LiveAnalyzer(
         } else {
             listOf(
                 UIMessage.system(LivePrompt.system(locale)),
-                UIMessage.user(LivePrompt.user(snapshot, focus, actionLabel, locale)),
+                UIMessage.user(LivePrompt.user(snapshot, focus, actionLabel, locale, recallLines)),
             )
         }
 
         val providerImpl = providerCatalog.text(provider)
-        val result = providerImpl.complete(
+        val accumulator = MessageStreamAccumulator(listOf(UIMessage.user("")), model)
+        var lastEmitted = ""
+        providerImpl.stream(
             providerSetting = provider,
             messages = messages,
             params = TextGenerationParams(
@@ -104,13 +110,21 @@ class LiveAnalyzer(
                 customHeaders = model.customHeaders,
                 customBody = model.customBodies,
             ),
-        )
-        val text = result.choices.firstOrNull()?.message?.toText()?.trim().orEmpty()
+        ).collect { chunk ->
+            accumulator.append(chunk)
+            val text = accumulator.snapshot().lastOrNull()?.toText()?.trim().orEmpty()
+            if (text != lastEmitted) {
+                lastEmitted = text
+                onDelta(text)
+            }
+        }
+        val final = accumulator.snapshot().lastOrNull()
+        val text = lastEmitted
         return Outcome(
             card = LivePrompt.parseCard(text, actionLabel, locale),
             usedVision = useVision,
             degradedReason = degradedReason,
-            usage = result.usage,
+            usage = final?.usage,
         )
     }
 
@@ -147,6 +161,7 @@ Rules:
             focus: String,
             actionLabel: String,
             locale: Locale,
+            recallLines: List<String> = emptyList(),
         ): String = buildString {
             val chinese = locale.isChineseLocale()
             appendLine("${if (chinese) "当前应用" else "Current app"}: ${snapshot.appLabel.ifBlank { snapshot.packageName }}")
@@ -174,6 +189,17 @@ Rules:
                 },
             )
             appendLine(snapshot.uiTree.take(4_000))
+            if (recallLines.isNotEmpty()) {
+                appendLine()
+                appendLine(
+                    if (chinese) {
+                        "相关记忆（仅供背景参考，可能与当前屏幕无关；不要把记忆当成屏幕上看到的事实）："
+                    } else {
+                        "Related memories (background only, may be unrelated; do not present them as on-screen facts):"
+                    },
+                )
+                recallLines.forEach { appendLine(it) }
+            }
         }
 
         fun parseCard(text: String, actionLabel: String, locale: Locale): LiveModeCard {

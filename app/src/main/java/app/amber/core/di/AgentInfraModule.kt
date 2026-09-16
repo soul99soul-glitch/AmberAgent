@@ -65,7 +65,9 @@ val agentInfraModule = module {
     single { NotificationApprovalTokenRegistry() }
 
     single { app.amber.feature.live.LiveUsageStore(get()) }
-    single { LiveModeManager(get(), get(), get(), get(), get(), get(), get()) }
+    single { app.amber.feature.bubble.AgentTaskBubbleController(get(), get(), get(), get(), get()) }
+    single { app.amber.feature.live.LiveCardStore(get()) }
+    single { LiveModeManager(get(), get(), get(), get(), get(), get(), get(), get(), get()) }
 
     single { AlpineRuntimeInstaller(get()) }
 

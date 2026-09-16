@@ -25,6 +25,7 @@ import com.composables.icons.lucide.Lucide
 import com.composables.icons.lucide.ChevronRight
 import com.composables.icons.lucide.CodeXml
 import com.composables.icons.lucide.Eye
+import com.composables.icons.lucide.MessageCircle
 import com.composables.icons.lucide.SearchCheck
 import com.composables.icons.lucide.Megaphone
 import com.composables.icons.lucide.RefreshCw
@@ -220,6 +221,25 @@ fun SettingAgentExecutionPage(vm: SettingVM = koinViewModel()) {
                                         current.copy(
                                             agentRuntime = current.agentRuntime.copy(
                                                 hideSensitiveLiveStatus = checked
+                                            )
+                                        )
+                                    }
+                                }
+                            )
+                        },
+                    )
+                    item(
+                        leadingContent = { SettingTileIcon(Lucide.MessageCircle) },
+                        supportingContent = { Text(stringResource(R.string.setting_page_agent_task_bubble_desc)) },
+                        headlineContent = { Text(stringResource(R.string.setting_page_agent_task_bubble)) },
+                        trailingContent = {
+                            Switch(
+                                checked = settings.agentRuntime.agentTaskBubbleEnabled,
+                                onCheckedChange = { checked ->
+                                    vm.updateSettings { current ->
+                                        current.copy(
+                                            agentRuntime = current.agentRuntime.copy(
+                                                agentTaskBubbleEnabled = checked
                                             )
                                         )
                                     }

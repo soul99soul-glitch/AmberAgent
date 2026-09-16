@@ -96,6 +96,10 @@ class AmberAgentApp : Application() {
         recoverInterruptedAgentRuns()
         recoverInterruptedNovelJobs()
 
+        // 任务气泡驱动循环：agent 任务（含 GUI 操控）运行中悬浮展示输出
+        runCatching { get<app.amber.feature.bubble.AgentTaskBubbleController>().start() }
+            .onFailure { Log.w(TAG, "start task bubble controller failed", it) }
+
         // install bundled agent skills
         installBuiltinSkills()
 

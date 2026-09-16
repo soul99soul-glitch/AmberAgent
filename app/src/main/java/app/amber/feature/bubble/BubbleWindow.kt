@@ -1,4 +1,4 @@
-package app.amber.feature.live.bubble
+package app.amber.feature.bubble
 
 import android.content.Context
 import android.graphics.PixelFormat
@@ -22,16 +22,18 @@ import app.amber.core.automation.AmberAccessibilityService
 import kotlin.math.roundToInt
 
 /**
- * 伴随气泡的悬浮窗宿主：TYPE_ACCESSIBILITY_OVERLAY 挂在无障碍服务上，
+ * 悬浮气泡的窗口宿主：TYPE_ACCESSIBILITY_OVERLAY 挂在无障碍服务上，
  * 不需要 SYSTEM_ALERT_WINDOW 权限；服务断开时系统自动移除窗口。
+ * Live 伴随气泡与任务气泡共用这一个宿主。
  * 自持 Lifecycle/SavedState owner——不能借 Activity 的（后台 STOPPED 会冻结重组）。
- * 所有方法仅主线程调用（LiveModeManager.runLoop 在 Main.immediate）。
+ * 所有方法仅主线程调用（驱动方各自在 Main.immediate 上 tick）。
  */
-class LiveBubbleWindow {
+class BubbleWindow {
     private var host: ComposeView? = null
     private var hostService: AmberAccessibilityService? = null
     private var owner: BubbleLifecycleOwner? = null
     private var params: WindowManager.LayoutParams? = null
+    private var touchPassthrough: Boolean = false
 
     val isShowing: Boolean get() = host != null
 
@@ -58,6 +60,7 @@ class LiveBubbleWindow {
             gravity = Gravity.TOP or Gravity.START
             x = dm.widthPixels - (64 * dm.density).roundToInt() // 初始贴右
             y = dm.heightPixels / 3
+            if (touchPassthrough) flags = passthroughFlags(flags, true)
         }
         val added = runCatching { windowManager(service).addView(view, lp) }.isSuccess
         if (!added) {
@@ -79,6 +82,30 @@ class LiveBubbleWindow {
         owner = null
         params = null
     }
+
+    /**
+     * GUI 操控期间注入的手势走正常输入管线，会打在气泡上被吞；
+     * 屏幕工具执行期间切 FLAG_NOT_TOUCHABLE 让触摸全部穿透到底层应用。
+     * 未显示时仅记录意图，show() 时按状态补 flag；应用失败回滚状态，
+     * 让下一次调用能重试（不破坏状态去重）。
+     */
+    fun setTouchPassthrough(enabled: Boolean) {
+        if (enabled == touchPassthrough) return
+        touchPassthrough = enabled
+        val lp = params ?: return
+        val view = host ?: return
+        val service = hostService ?: return
+        lp.flags = passthroughFlags(lp.flags, enabled)
+        val updated = runCatching { windowManager(service).updateViewLayout(view, lp) }.isSuccess
+        if (!updated) touchPassthrough = !enabled
+    }
+
+    private fun passthroughFlags(flags: Int, enabled: Boolean): Int =
+        if (enabled) {
+            flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+        } else {
+            flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv()
+        }
 
     /** 拖动中：位移叠加、夹回屏内、立即应用。 */
     fun moveBy(dx: Float, dy: Float) {

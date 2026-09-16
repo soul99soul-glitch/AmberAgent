@@ -168,6 +168,27 @@ class AppDatabaseMigrationTest {
         db.close()
     }
 
+    @Test
+    fun migration_18_19_creates_live_card_table() {
+        helper.createDatabase(TEST_DB, 18).close()
+
+        val db = helper.runMigrationsAndValidate(
+            TEST_DB,
+            19,
+            true,
+            AppDatabase.MIGRATION_18_19,
+        )
+
+        db.execSQL(
+            "INSERT INTO live_card (package_name, app_label, title, action_label, watching, " +
+                "key_points_json, suggestions_json, screen_signature, created_at) " +
+                "VALUES ('com.tencent.mm', '微信', '群聊', '写回复', '结论', '[]', '[]', 'sig', 1000)"
+        )
+        assertEquals(1, db.countRows("live_card", "package_name = 'com.tencent.mm'"))
+        assertEquals("结论", db.stringValue("live_card", "watching", "package_name = 'com.tencent.mm'"))
+        db.close()
+    }
+
     private fun SupportSQLiteDatabase.countRows(table: String, where: String): Int {
         query("SELECT COUNT(*) FROM $table WHERE $where").use { cursor ->
             assertTrue(cursor.moveToFirst())

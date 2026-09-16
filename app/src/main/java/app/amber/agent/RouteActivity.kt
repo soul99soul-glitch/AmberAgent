@@ -211,6 +211,7 @@ class RouteActivity : ComponentActivity() {
 
     companion object {
         const val EXTRA_OPEN_CHAT_PROMPT = "openChatPrompt"
+        const val EXTRA_OPEN_LIVE_COMPANION = "openLiveCompanion"
         private const val STATE_SHARE_INTENT_CONSUMED = "shareIntentConsumed"
     }
 
@@ -371,6 +372,9 @@ class RouteActivity : ComponentActivity() {
         if (intent.getBooleanExtra(BoardNotifier.EXTRA_OPEN_TODAY_BOARD, false)) {
             navStack?.add(Screen.TodayBoard)
         }
+        if (intent.getBooleanExtra(EXTRA_OPEN_LIVE_COMPANION, false)) {
+            navStack?.add(Screen.LiveCompanion)
+        }
         deepReadScreenFromIntent(intent)?.let { screen ->
             navStack?.add(screen)
         }
@@ -509,6 +513,9 @@ class RouteActivity : ComponentActivity() {
             }
             if (intent.getBooleanExtra(BoardNotifier.EXTRA_OPEN_TODAY_BOARD, false)) {
                 return@remember Screen.TodayBoard
+            }
+            if (intent.getBooleanExtra(EXTRA_OPEN_LIVE_COMPANION, false)) {
+                return@remember Screen.LiveCompanion
             }
             taskSessionScreenFromIntent(intent)?.let { screen ->
                 return@remember screen

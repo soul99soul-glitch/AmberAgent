@@ -27,6 +27,8 @@ data class AppStats(
     val launchCount: Int = 0,
     val liveAnalysisCount: Long = 0L,
     val liveTotalTokens: Long = 0L,
+    val liveAutoSuggestCount: Long = 0L,
+    val liveAutoSuggestViewed: Long = 0L,
 )
 
 class StatsVM(
@@ -84,6 +86,8 @@ class StatsVM(
             launchCount = launchCount,
             liveAnalysisCount = liveTotals.analysisCount,
             liveTotalTokens = liveTotals.promptTokens + liveTotals.completionTokens,
+            liveAutoSuggestCount = liveTotals.autoSuggestCount,
+            liveAutoSuggestViewed = liveTotals.autoSuggestViewedCount,
         )
     }
 }

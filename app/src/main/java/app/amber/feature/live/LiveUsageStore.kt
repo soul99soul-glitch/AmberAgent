@@ -22,6 +22,9 @@ class LiveUsageStore(private val context: Context) {
         val cachedTokens: Long = 0L,
         val analysisCount: Long = 0L,
         val firstAtMillis: Long = 0L,
+        /** 自动建议触发次数与查看次数（蓝图 §7.4 P2 对照指标：误打扰 vs 有效帮助）。 */
+        val autoSuggestCount: Long = 0L,
+        val autoSuggestViewedCount: Long = 0L,
     )
 
     val totals: Flow<Totals> = context.liveUsageDataStore.data.map { p ->
@@ -31,6 +34,8 @@ class LiveUsageStore(private val context: Context) {
             cachedTokens = p[KEY_CACHED] ?: 0L,
             analysisCount = p[KEY_COUNT] ?: 0L,
             firstAtMillis = p[KEY_FIRST_AT] ?: 0L,
+            autoSuggestCount = p[KEY_SUGGEST_COUNT] ?: 0L,
+            autoSuggestViewedCount = p[KEY_SUGGEST_VIEWED] ?: 0L,
         )
     }
 
@@ -44,11 +49,27 @@ class LiveUsageStore(private val context: Context) {
         }
     }
 
+    /** 自动建议触发 +1。 */
+    suspend fun accumulateSuggest() {
+        context.liveUsageDataStore.edit { p ->
+            p[KEY_SUGGEST_COUNT] = (p[KEY_SUGGEST_COUNT] ?: 0L) + 1
+        }
+    }
+
+    /** 自动建议结果被查看（气泡展开）+1。 */
+    suspend fun markSuggestViewed() {
+        context.liveUsageDataStore.edit { p ->
+            p[KEY_SUGGEST_VIEWED] = (p[KEY_SUGGEST_VIEWED] ?: 0L) + 1
+        }
+    }
+
     private companion object {
         val KEY_PROMPT = longPreferencesKey("prompt_tokens")
         val KEY_COMPLETION = longPreferencesKey("completion_tokens")
         val KEY_CACHED = longPreferencesKey("cached_tokens")
         val KEY_COUNT = longPreferencesKey("analysis_count")
         val KEY_FIRST_AT = longPreferencesKey("first_at_millis")
+        val KEY_SUGGEST_COUNT = longPreferencesKey("auto_suggest_count")
+        val KEY_SUGGEST_VIEWED = longPreferencesKey("auto_suggest_viewed")
     }
 }

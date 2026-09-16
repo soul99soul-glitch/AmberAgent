@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -28,8 +29,11 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -45,15 +49,20 @@ import com.composables.icons.lucide.ArrowLeft
 import com.composables.icons.lucide.Eye
 import com.composables.icons.lucide.Settings
 import com.composables.icons.lucide.Sparkles
+import com.composables.icons.lucide.X
 import app.amber.agent.Screen
 import app.amber.agent.R
+import app.amber.agent.data.db.entity.LiveCardEntity
 import app.amber.ai.provider.ModelType
 import app.amber.core.settings.findModelById
 import app.amber.core.settings.getCurrentChatModel
 import app.amber.core.utils.appLocale
+import app.amber.core.utils.base64Encode
+import app.amber.feature.live.LiveAnalysisMode
 import app.amber.feature.live.LiveFillResult
 import app.amber.feature.live.LiveModeCard
 import app.amber.feature.live.LiveModeUiState
+import app.amber.feature.live.LiveScene
 import app.amber.feature.ui.components.ai.ModelSelector
 import app.amber.feature.ui.components.ds.AmberCard
 import app.amber.feature.ui.components.ds.Hairline
@@ -74,7 +83,8 @@ import kotlin.uuid.Uuid
  * AI 伴随 — Terminal × Modern graphite reskin. Layout follows the design handoff:
  * eyebrow header (// COMPANION ● + 标题), a master toggle card (主开关 + 暂停),
  * the last-analysis result section, and a CONFIG card (气泡 / 模型).
- * P0 语义（蓝图 v3 §7.2）：仅手动触发分析；截图分析不开放；草稿仅复制。
+ * P1 语义（蓝图 v3 §7.3）：仅手动触发分析；截图分析可选（文字/截屏双模式，
+ * 图树同次观察校验，截图即用即删）；草稿仅复制（填入白名单见 P1-C）。
  */
 @Composable
 fun LiveCompanionPage(vm: LiveCompanionVM = koinViewModel()) {
@@ -82,13 +92,10 @@ fun LiveCompanionPage(vm: LiveCompanionVM = koinViewModel()) {
     val context = LocalContext.current
     val state by vm.state.collectAsStateWithLifecycle()
     val settings by vm.settings.collectAsStateWithLifecycle()
+    val savedCards by vm.savedCards.collectAsStateWithLifecycle()
     val liveSetting = settings.agentRuntime.liveMode
     val tokens = LocalAmberTokens.current
     val scrollState = rememberScrollState()
-    val fillDraftFilledMessage = stringResource(R.string.live_fill_result_filled)
-    val fillDraftCopiedMessage = stringResource(R.string.live_fill_result_copied)
-    val fillDraftMissingMessage = stringResource(R.string.live_fill_result_missing)
-
     val companionModelId = remember(settings, liveSetting.companionModelId) {
         val id = liveSetting.companionModelId?.let { runCatching { Uuid.parse(it) }.getOrNull() }
         (id?.let { settings.findModelById(it) } ?: settings.getCurrentChatModel())?.modelId
@@ -150,6 +157,9 @@ fun LiveCompanionPage(vm: LiveCompanionVM = koinViewModel()) {
 
             if (state.requestedAction.isNotBlank()) {
                 ActionProgressCard(state)
+            } else if (state.analyzing && !state.streamingText.isNullOrBlank()) {
+                // 无显式动作的"屏幕分析"路径（OTHER 场景）也要有流式预览（Phase 6 检查 #2）。
+                StreamingPreviewCard(state.streamingText.orEmpty())
             }
 
             // ── 上次分析 ──
@@ -167,13 +177,31 @@ fun LiveCompanionPage(vm: LiveCompanionVM = koinViewModel()) {
                         pendingAction = state.requestedAction,
                         enabled = state.active && !state.paused && !state.analyzing,
                         onInstruction = vm::submitFocusInstruction,
-                        onFillDraft = {
-                            val msg = when (vm.fillDraft()) {
-                                LiveFillResult.FILLED -> fillDraftFilledMessage
-                                LiveFillResult.COPIED -> fillDraftCopiedMessage
-                                LiveFillResult.NO_DRAFT -> fillDraftMissingMessage
+                        onFillDraft = vm::fillDraft,
+                        onSaveCard = {
+                            vm.saveCard { saved ->
+                                Toast.makeText(
+                                    context,
+                                    if (saved) R.string.live_saved_toast_saved else R.string.live_saved_toast_nothing,
+                                    Toast.LENGTH_SHORT,
+                                ).show()
                             }
-                            Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                        },
+                        onSendToChat = {
+                            // Screen.Chat.text 的仓内契约是 base64 编码（ChatPage 无条件
+                            // base64Decode；shortcuts/通知路径均先编码），原文会直接抛异常。
+                            vm.exportCurrentCard()?.let { text ->
+                                navController.navigate(
+                                    Screen.Chat(
+                                        kotlin.uuid.Uuid.random().toString(),
+                                        text = text.base64Encode(),
+                                    )
+                                )
+                            }
+                        },
+                        onRemember = {
+                            vm.rememberCurrentCard()
+                            Toast.makeText(context, R.string.live_remember_toast, Toast.LENGTH_SHORT).show()
                         },
                     )
                 } else {
@@ -181,16 +209,40 @@ fun LiveCompanionPage(vm: LiveCompanionVM = koinViewModel()) {
                 }
             }
 
+            // ── 已保存（历史区，蓝图 §7.3 P1-3）──
+            if (savedCards.isNotEmpty()) {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    SectionLabel(stringResource(R.string.live_saved_section))
+                    AmberCard {
+                        savedCards.take(5).forEachIndexed { index, saved ->
+                            if (index > 0) Hairline()
+                            SavedCardRow(card = saved, onDelete = { vm.deleteSavedCard(saved.id) })
+                        }
+                    }
+                }
+            }
+
             // ── CONFIG ──
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 SectionLabel(stringResource(R.string.live_config))
                 ConfigCard(
+                    aggressive = liveSetting.analysisMode == LiveAnalysisMode.AGGRESSIVE,
+                    onSelectMode = { aggressive ->
+                        vm.setAnalysisMode(if (aggressive) LiveAnalysisMode.AGGRESSIVE else LiveAnalysisMode.CONSERVATIVE)
+                    },
                     bubbleEnabled = liveSetting.bubbleEnabled,
                     onToggleBubble = vm::setBubbleEnabled,
                     modelId = liveSetting.companionModelId?.let { runCatching { Uuid.parse(it) }.getOrNull() },
                     providers = settings.providers,
                     onClearModel = { vm.setCompanionModel(null) },
                     onSelectModel = { vm.setCompanionModel(it) },
+                    currentAppLabel = state.currentAppLabel.ifBlank { state.currentPackage },
+                    sceneOverride = liveSetting.sceneOverrides[state.currentPackage],
+                    onSelectScene = { scene ->
+                        vm.setSceneOverride(state.currentPackage, scene)
+                    },
+                    autoSuggestEnabled = liveSetting.autoSuggestPackages.contains(state.currentPackage),
+                    onToggleAutoSuggest = { vm.setAutoSuggestForCurrentApp(it) },
                 )
             }
 
@@ -334,16 +386,55 @@ private fun MasterCard(
 
 @Composable
 private fun ConfigCard(
+    aggressive: Boolean,
+    onSelectMode: (Boolean) -> Unit,
     bubbleEnabled: Boolean,
     onToggleBubble: (Boolean) -> Unit,
     modelId: Uuid?,
     providers: List<app.amber.ai.provider.ProviderSetting>,
     onClearModel: () -> Unit,
     onSelectModel: (String) -> Unit,
+    currentAppLabel: String,
+    sceneOverride: String?,
+    onSelectScene: (LiveScene?) -> Unit,
+    autoSuggestEnabled: Boolean,
+    onToggleAutoSuggest: (Boolean) -> Unit,
 ) {
     val t = LocalAmberTokens.current
     val type = LocalAmberType.current
     AmberCard {
+        Column(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 13.dp),
+            verticalArrangement = Arrangement.spacedBy(11.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    stringResource(R.string.live_analysis_mode),
+                    style = type.body.copy(fontWeight = FontWeight.Medium),
+                    color = t.ink,
+                    modifier = Modifier.weight(1f),
+                )
+                Text(
+                    if (aggressive) {
+                        stringResource(R.string.live_analysis_mode_screenshot)
+                    } else {
+                        stringResource(R.string.live_analysis_mode_text_only)
+                    },
+                    style = type.meta,
+                    color = t.ink3,
+                )
+            }
+            AmberSeg(
+                options = listOf(
+                    stringResource(R.string.live_mode_conservative),
+                    stringResource(R.string.live_mode_aggressive),
+                ),
+                selectedIndex = if (aggressive) 1 else 0,
+                onSelect = { onSelectMode(it == 1) },
+            )
+        }
+
+        Hairline()
         ToggleRow(
             label = stringResource(R.string.live_bubble),
             hint = stringResource(R.string.live_bubble_hint),
@@ -377,6 +468,47 @@ private fun ConfigCard(
                 onSelect = { model -> onSelectModel(model.id.toString()) },
             )
         }
+
+        // 当前应用场景覆盖（蓝图 §7.3 P1-9）：仅在有观察现场时可配。
+        if (currentAppLabel.isNotBlank()) {
+            Hairline()
+            Column(
+                modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        stringResource(R.string.live_scene_override_label),
+                        style = type.body.copy(fontWeight = FontWeight.Medium),
+                        color = t.ink,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Text(currentAppLabel, style = type.meta, color = t.ink3, maxLines = 1)
+                }
+                val sceneOptions = listOf(
+                    null to stringResource(R.string.live_scene_default),
+                    LiveScene.CHAT to stringResource(R.string.live_scene_chat),
+                    LiveScene.READING to stringResource(R.string.live_scene_reading),
+                    LiveScene.OTHER to stringResource(R.string.live_scene_other),
+                )
+                val selectedIndex = sceneOptions.indexOfFirst {
+                    it.first?.name?.lowercase() == sceneOverride || (it.first == null && sceneOverride == null)
+                }.coerceAtLeast(0)
+                AmberSeg(
+                    options = sceneOptions.map { it.second },
+                    selectedIndex = selectedIndex,
+                    onSelect = { index -> onSelectScene(sceneOptions[index].first) },
+                )
+            }
+
+            // 有限自动建议（蓝图 §7.4 P2）：逐 App 开启，默认关。
+            ToggleRow(
+                label = stringResource(R.string.live_auto_suggest_label),
+                hint = stringResource(R.string.live_auto_suggest_hint),
+                checked = autoSuggestEnabled,
+                onCheckedChange = onToggleAutoSuggest,
+            )
+        }
     }
 }
 
@@ -395,7 +527,10 @@ private fun LiveResultCard(
     pendingAction: String,
     enabled: Boolean,
     onInstruction: (String) -> Unit,
-    onFillDraft: () -> Unit,
+    onFillDraft: () -> LiveFillResult,
+    onSaveCard: () -> Unit,
+    onSendToChat: () -> Unit,
+    onRemember: () -> Unit,
 ) {
     val appLocale = LocalContext.current.appLocale()
     val t = LocalAmberTokens.current
@@ -506,11 +641,7 @@ private fun LiveResultCard(
                         prominent = true,
                     )
                     LiveSection(title = stringResource(R.string.live_result_tone), items = card.keyPoints)
-                    PillButton(
-                        text = stringResource(R.string.live_fill_other_input),
-                        accent = true,
-                        onClick = onFillDraft,
-                    )
+                    FillDraftButton(state = state, onFillDraft = onFillDraft)
                 }
                 else -> {
                     LiveSection(
@@ -530,6 +661,16 @@ private fun LiveResultCard(
                 enabled = enabled,
                 onInstruction = onInstruction,
             )
+
+            // 卡片资产化动作（蓝图 §7.3 P1-3/4/5）：保存 / 发到聊天 / 记住。
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                CardActionChip(text = stringResource(R.string.live_action_save), onClick = onSaveCard)
+                CardActionChip(text = stringResource(R.string.live_action_send_to_chat), onClick = onSendToChat)
+                CardActionChip(text = stringResource(R.string.live_action_remember), onClick = onRemember)
+            }
 
             if (!modelId.isNullOrBlank()) {
                 Hairline()
@@ -695,8 +836,110 @@ private fun ActionProgressCard(state: LiveModeUiState) {
                 style = type.secondary,
                 color = t.ink3,
             )
+            // 流式预览（蓝图 §7.3 P1-1）：分析中显示生成中的文本（截断两行）。
+            state.streamingText?.takeIf { it.isNotBlank() && state.analyzing }?.let { streaming ->
+                Text(
+                    text = streaming,
+                    style = type.meta,
+                    color = t.ink3,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
+            }
         }
     }
+}
+
+@Composable
+private fun StreamingPreviewCard(text: String) {
+    val t = LocalAmberTokens.current
+    val type = LocalAmberType.current
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .background(t.surface2)
+            .padding(14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = t.accent)
+        Text(
+            text = text,
+            style = type.meta,
+            color = t.ink3,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+/** 卡片资产化动作 chip（与 DynamicActionChips 的 chip 同风格，surface2 pill）。 */
+@Composable
+private fun CardActionChip(text: String, onClick: () -> Unit) {
+    val t = LocalAmberTokens.current
+    val type = LocalAmberType.current
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(999.dp))
+            .background(t.surface2)
+            .pressable(onClick = onClick)
+            .padding(horizontal = 13.dp, vertical = 7.dp),
+    ) {
+        Text(text = text, style = type.secondary, color = t.ink2, maxLines = 1)
+    }
+}
+
+/** 已保存卡片行（历史区）：时间 · 应用 · 结论一行截断 + 删除；跨天显示日期。 */
+@Composable
+private fun SavedCardRow(card: LiveCardEntity, onDelete: () -> Unit) {
+    val t = LocalAmberTokens.current
+    val type = LocalAmberType.current
+    val appLocale = LocalContext.current.appLocale()
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 14.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Text(
+            text = formatSavedTime(card.createdAt, appLocale),
+            style = type.meta,
+            color = t.ink4,
+        )
+        Text(
+            text = card.appLabel.ifBlank { card.packageName },
+            style = type.meta,
+            color = t.ink3,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.widthIn(max = 72.dp),
+        )
+        Text(
+            text = card.watching,
+            style = type.secondary,
+            color = t.ink,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
+        Box(
+            modifier = Modifier.size(28.dp).pressable(onClick = onDelete),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(Lucide.X, contentDescription = stringResource(R.string.delete), tint = t.ink4, modifier = Modifier.size(15.dp))
+        }
+    }
+}
+
+private fun formatSavedTime(timestampMs: Long, locale: Locale): String {
+    val zone = java.time.ZoneId.systemDefault()
+    val sameDay = java.time.Instant.ofEpochMilli(timestampMs).atZone(zone).toLocalDate() ==
+        java.time.Instant.now().atZone(zone).toLocalDate()
+    val pattern = if (sameDay) "HH:mm" else "MM-dd HH:mm"
+    return SimpleDateFormat(pattern, locale).format(Date(timestampMs))
 }
 
 @Composable
@@ -793,6 +1036,92 @@ private fun AmberToggle(checked: Boolean, onCheckedChange: (Boolean) -> Unit, en
                 .background(Color(0xFFFFFFFF)),
         )
     }
+}
+
+/** Segmented control: surface-2 track, raised active thumb (design §6.2). */
+@Composable
+private fun AmberSeg(options: List<String>, selectedIndex: Int, onSelect: (Int) -> Unit) {
+    val t = LocalAmberTokens.current
+    val type = LocalAmberType.current
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(999.dp))
+            .background(t.surface2)
+            .padding(3.dp),
+        horizontalArrangement = Arrangement.spacedBy(3.dp),
+    ) {
+        options.forEachIndexed { index, label ->
+            val active = index == selectedIndex
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(999.dp))
+                    .background(if (active) t.raised else Color.Transparent)
+                    .pressable(onClick = { onSelect(index) })
+                    .padding(vertical = 8.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = label,
+                    style = type.secondary.copy(fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal),
+                    color = if (active) t.ink else t.ink3,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+    }
+}
+
+/** 填入/复制按钮（蓝图 §7.2 P0-5 仲裁 + §7.3 P1-2 白名单）：CHAT 白名单内显示
+ *  "填入"，其余显示"复制草稿"；Manager 仲裁返回 NEEDS_CONFIRM 时切"覆盖"确认态
+ *  （5s 无操作自动复位）。Toast 反馈集中在这里。 */
+@Composable
+private fun FillDraftButton(
+    state: LiveModeUiState,
+    onFillDraft: () -> LiveFillResult,
+) {
+    val context = LocalContext.current
+    val fillAllowed = state.fillAllowed
+    var confirmOverwrite by remember { mutableStateOf(false) }
+    if (confirmOverwrite) {
+        LaunchedEffect(Unit) {
+            kotlinx.coroutines.delay(5_000L)
+            confirmOverwrite = false
+        }
+    }
+    val label = when {
+        confirmOverwrite -> stringResource(R.string.live_fill_confirm_overwrite)
+        fillAllowed -> stringResource(R.string.live_fill_action_fill)
+        else -> stringResource(R.string.live_fill_other_input)
+    }
+    PillButton(
+        text = label,
+        accent = true,
+        onClick = {
+            val message = when (onFillDraft()) {
+                LiveFillResult.FILLED -> {
+                    confirmOverwrite = false
+                    R.string.live_fill_result_filled
+                }
+                LiveFillResult.NEEDS_CONFIRM -> {
+                    confirmOverwrite = true
+                    R.string.live_fill_toast_need_confirm
+                }
+                LiveFillResult.REJECTED_STALE -> {
+                    confirmOverwrite = false
+                    R.string.live_fill_toast_stale_copied
+                }
+                LiveFillResult.COPIED -> {
+                    confirmOverwrite = false
+                    R.string.live_fill_result_copied
+                }
+                LiveFillResult.NO_DRAFT -> R.string.live_fill_result_missing
+            }
+            Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+        },
+    )
 }
 
 /** Rounded pill action — accent fill or surface-2 (design §6.1 buttons, compact). */

@@ -35,10 +35,15 @@ object LiveScenes {
         "com.coolapk.market",
     )
 
-    fun classify(packageName: String): LiveScene = when {
-        packageName in chatPackages -> LiveScene.CHAT
-        readingPrefixes.any { packageName == it || packageName.startsWith("$it.") } -> LiveScene.READING
-        else -> LiveScene.OTHER
+    fun classify(packageName: String, overrides: Map<String, String> = emptyMap()): LiveScene {
+        overrides[packageName]?.let { wire ->
+            LiveScene.entries.firstOrNull { it.name.lowercase() == wire }?.let { return it }
+        }
+        return when {
+            packageName in chatPackages -> LiveScene.CHAT
+            readingPrefixes.any { packageName == it || packageName.startsWith("$it.") } -> LiveScene.READING
+            else -> LiveScene.OTHER
+        }
     }
 
     /** 场景默认动作标签；null = 静默，等用户主动召唤。 */

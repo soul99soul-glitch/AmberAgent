@@ -195,6 +195,7 @@ data class AgentRuntimeSetting(
     val generativeUi: GenerativeUiSetting = GenerativeUiSetting(),
     val enableLiveStatusNotification: Boolean = true,
     val hideSensitiveLiveStatus: Boolean = true,
+    val agentTaskBubbleEnabled: Boolean = true,
     val liveMode: LiveModeSetting = LiveModeSetting(),
     val maxToolLoopSteps: Int = DEFAULT_AGENT_MAX_TOOL_LOOP_STEPS,
     val autoApproveAllToolCalls: Boolean = false,

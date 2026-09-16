@@ -979,6 +979,23 @@ class ChatService(
     private val activeKernelRuns =
         MutableStateFlow<Map<Uuid, app.amber.core.agent.runtime.AgentRunId>>(emptyMap())
 
+    /** Conversations whose run paused for the user (approval / ask_user). The
+     *  kernel dispatch wait ends on pause — these are invisible to
+     *  activeKernelRuns but app-external surfaces (task bubble) must keep
+     *  showing them until a resume dispatch or a stop clears the entry. */
+    private val pausedForUserConversations = MutableStateFlow<Set<Uuid>>(emptySet())
+
+    /** Latest terminal RunStatus per conversation, recorded when a dispatch
+     *  wait ends in a terminal state or the dispatch job is cancelled. */
+    private val _lastRunOutcomes = MutableStateFlow<Map<Uuid, app.amber.core.agent.runtime.RunStatus>>(emptyMap())
+    val lastRunOutcomes: StateFlow<Map<Uuid, app.amber.core.agent.runtime.RunStatus>> =
+        _lastRunOutcomes.asStateFlow()
+
+    /** Conversation ids with an active or user-paused run; drives app-external surfaces (task bubble). */
+    val activeConversationIds: StateFlow<Set<Uuid>> =
+        combine(activeKernelRuns, pausedForUserConversations) { runs, paused -> runs.keys + paused }
+            .stateIn(appScope, kotlinx.coroutines.flow.SharingStarted.Eagerly, emptySet())
+
     /** Latest active kernel-path run for a conversation, or null if none. */
     fun getActiveKernelRunFlow(conversationId: Uuid): StateFlow<app.amber.core.agent.runtime.AgentRunId?> =
         activeKernelRuns
@@ -1233,6 +1250,7 @@ class ChatService(
             if (activeKernelRuns.value[conversationId] != expectedPausedRunId) return
             activeRunId = expectedPausedRunId
         }
+        var pauseRecorded = false
         try {
             // Stop can win while policy/model preflight is running. Recheck
             // the durable owner immediately before launch; fixed requested
@@ -1278,6 +1296,9 @@ class ChatService(
             if (activeRunId == null) {
                 activeKernelRuns.update { it + (conversationId to handle.runId) }
                 activeRunId = handle.runId
+                // A resume dispatch takes the conversation back from the
+                // user-paused set in the same breath it re-registers as active.
+                pausedForUserConversations.update { it - conversationId }
             }
             val snapshots = runner.observe(handle.runId)
             if (expectedPausedRunId != null && preLaunchSnapshot != null) {
@@ -1288,17 +1309,29 @@ class ChatService(
                     snapshot !== preLaunchSnapshot || snapshot.status.isTerminal
                 }
             }
-            snapshots.first { snapshot ->
+            val endedSnapshot = snapshots.first { snapshot ->
                 // Keep waiting through live states; a terminal outcome OR a
                 // persisted pause (approval / server-cancel pending) ends
                 // this turn's wait — the paused run resumes via its own
                 // entry points under the same runId.
                 snapshot.status.isTerminal || snapshot.status.isPause
             }
+            if (endedSnapshot.status.isPause) {
+                pauseRecorded = true
+                pausedForUserConversations.update { it + conversationId }
+            } else {
+                _lastRunOutcomes.update { it + (conversationId to endedSnapshot.status) }
+            }
         } catch (cancelled: CancellationException) {
             activeRunId?.let(runner::cancel)
+            _lastRunOutcomes.update { it + (conversationId to app.amber.core.agent.runtime.RunStatus.CANCELLED) }
             throw cancelled
         } finally {
+            // 本 dispatch 未以 pause 退出 = 会话已不在等待用户态：无论从终态、
+            // 取消还是任何 bail 路径离开，都回收 paused 条目，避免僵尸气泡。
+            if (!pauseRecorded) {
+                pausedForUserConversations.update { it - conversationId }
+            }
             activeRunId?.let { runId ->
                 activeKernelRuns.update { current ->
                     if (current[conversationId] == runId) current - conversationId else current
@@ -4058,6 +4091,7 @@ class ChatService(
         if (cancelledPersistedWaitingRun) {
             // There is no flow completion left to stop the foreground
             // keep-alive after a persisted WAITING_USER pause is cancelled.
+            pausedForUserConversations.update { it - conversationId }
             stopGenerationKeepAlive(conversationId)
             // No flow completion will settle the event-store row either —
             // move it to CANCELLED here or it stays a live WAITING_USER row

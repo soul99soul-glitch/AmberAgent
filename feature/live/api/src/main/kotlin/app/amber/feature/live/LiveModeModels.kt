@@ -26,6 +26,10 @@ data class LiveModeSetting(
     val companionModelId: String? = null,
     /** 伴随期间显示悬浮气泡（无障碍 overlay，零额外权限） */
     val bubbleEnabled: Boolean = true,
+    /** 用户自定义场景映射：包名 → 场景 wire 名（chat/reading/other）；覆盖内置表。 */
+    val sceneOverrides: Map<String, String> = emptyMap(),
+    /** 有限自动建议（蓝图 §7.4 P2）：逐 App 开启，默认空=默认关；仅这些包名允许自动分析。 */
+    val autoSuggestPackages: Set<String> = emptySet(),
 )
 
 data class LiveScreenSnapshot(
@@ -37,6 +41,8 @@ data class LiveScreenSnapshot(
     val contentText: String = visibleText,
     val windowDebugLabel: String = "",
     val nodeCount: Int,
+    /** 候选窗口的 AccessibilityWindowInfo.id；-1 = fallback 路径（无窗口对象）。 */
+    val windowId: Int = -1,
     val capturedAtMillis: Long = System.currentTimeMillis(),
 ) {
     val stableHash: String = LiveUiTreeProcessor.stableHash(
@@ -128,6 +134,12 @@ data class LiveModeUiState(
     val lastSnapshotHash: String? = null,
     /** 当前卡片生成时对应的屏幕签名；与 lastSnapshotHash 不一致即卡片已脱离现场。 */
     val cardSignature: String? = null,
+    /** 分析进行中的流式累积文本（即时预览用；分析结束即清）。 */
+    val streamingText: String? = null,
+    /** 当前卡片场景是否允许填入（CHAT 白名单+未熔断；Manager 在快照更新时计算，UI 只读）。 */
+    val fillAllowed: Boolean = false,
+    /** 当前卡片是否来自自动建议（P2 指标口径：viewed 只在自动结果上记）。 */
+    val lastResultAuto: Boolean = false,
 ) {
     /** 卡片生成后屏幕又发生了变化（蓝图 v3 D2：仅失效呈现，不产生自动触发）。 */
     val cardStale: Boolean

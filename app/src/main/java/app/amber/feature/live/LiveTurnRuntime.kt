@@ -18,7 +18,7 @@ import kotlinx.serialization.Serializable
 /**
  * Live 伴随的 run 契约（蓝图 v3 §7.2 P0-2）：一次"通过门控、绑定确定屏幕上下文"
  * 的分析请求 = 一个 run；run 只包推理，采集与门控在 LiveModeManager 域层完成。
- * P0 不开放截图分析（P1-8 恢复时 input 再加 mode/screenshot 字段）。
+ * P1-A 起支持截图分析：analysisMode 由域层读取设置传入，截图在域层采集并校验。
  */
 @Serializable
 data class LiveTurnInput(
@@ -32,6 +32,10 @@ data class LiveTurnInput(
     val actionLabel: String,
     val localeTag: String,
     val capturedAtMillis: Long,
+    /** "conservative"（仅文字）/ "aggressive"（截图+文字）；与 LiveAnalysisMode 的 wire 名一致。 */
+    val analysisMode: String = "conservative",
+    /** 截图 file:// URI（域层采集；仅 aggressive 且校验通过时非空）。 */
+    val screenshotUri: String? = null,
 ) : AgentInput
 
 @Serializable
@@ -83,6 +87,8 @@ class LiveTurnAgent(
     private val context: Context,
     private val settingsStore: SettingsAggregator,
     private val providerCatalog: ProviderCatalog,
+    private val streamSink: LiveModeManager,
+    private val recallStore: app.amber.core.memory.recall.MemoryRecallStore,
 ) : Agent<LiveTurnInput, LiveTurnArtifact> {
     override val descriptor: AgentDescriptor = LiveTurnDescriptor.value
 
@@ -101,15 +107,27 @@ class LiveTurnAgent(
             nodeCount = 0,
             capturedAtMillis = input.capturedAtMillis,
         )
-        val outcome = analyzer.analyze(
+        // 记忆融合（蓝图 §7.4 P2 三选一）：纯 DB 召回前 3 条作背景段喂入；
+        // 召回失败不阻断分析。有意用 recall() 而非 buildPrompt()——后者会 touchMemories
+        // 更新 lastUsedAt，伴随的高频分析不应污染记忆新鲜度排序。
+        val recallLines = runCatching {
+            recallStore.recall(
+                settings = settings,
+                messages = listOf(app.amber.ai.ui.UIMessage.user(input.contentText.take(500))),
+            ).take(3).map { "- ${it.content.take(120)}" }
+        }.getOrDefault(emptyList())
+        val outcome = analyzer.analyzeStream(
             settings = settings,
             model = model,
             snapshot = snapshot,
             focus = input.focus,
             actionLabel = input.actionLabel,
-            mode = LiveAnalysisMode.CONSERVATIVE,
-            screenshotUri = null,
+            mode = runCatching { LiveAnalysisMode.valueOf(input.analysisMode.uppercase()) }
+                .getOrDefault(LiveAnalysisMode.CONSERVATIVE),
+            screenshotUri = input.screenshotUri,
             locale = Locale.forLanguageTag(input.localeTag),
+            recallLines = recallLines,
+            onDelta = streamSink::onLiveStreamDelta,
         )
         val usage = outcome.usage
         scope.events.commit(

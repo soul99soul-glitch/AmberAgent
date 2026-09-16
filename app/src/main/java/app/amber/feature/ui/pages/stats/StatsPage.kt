@@ -6,6 +6,7 @@ import com.composables.icons.lucide.Cpu
 import com.composables.icons.lucide.Eye
 import com.composables.icons.lucide.MessageCircle
 import com.composables.icons.lucide.Rocket
+import com.composables.icons.lucide.Sparkles
 import com.composables.icons.lucide.Zap
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -428,6 +429,16 @@ private fun StatsGrid(stats: AppStats, modifier: Modifier = Modifier) {
                     label = stringResource(R.string.stats_page_live_companion),
                     value = "${formatCount(stats.liveAnalysisCount, appLocale)} · " +
                         formatTokens(stats.liveTotalTokens, appLocale),
+                )
+            }
+            if (stats.liveAutoSuggestCount > 0) {
+                Hairline()
+                StatCard(
+                    modifier = Modifier.fillMaxWidth(),
+                    icon = Lucide.Sparkles,
+                    label = stringResource(R.string.stats_page_live_auto_suggest),
+                    value = "${formatCount(stats.liveAutoSuggestCount, appLocale)} · " +
+                        formatCount(stats.liveAutoSuggestViewed, appLocale),
                 )
             }
         }

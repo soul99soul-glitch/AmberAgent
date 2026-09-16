@@ -120,7 +120,7 @@ val agentRuntimeModule = module {
                 inputClass = LiveTurnInput::class,
                 inputSerializer = LiveTurnInput.serializer(),
                 artifactSerializer = LiveTurnArtifact.serializer(),
-                factory = { LiveTurnAgent(get(), get(), get()) },
+                factory = { LiveTurnAgent(get(), get(), get(), get(), get()) },
             )
         }
     }

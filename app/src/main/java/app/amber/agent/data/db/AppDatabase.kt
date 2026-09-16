@@ -13,6 +13,7 @@ import app.amber.agent.data.db.dao.ConversationCompactDAO
 import app.amber.agent.data.db.dao.ConversationContextEventDAO
 import app.amber.agent.data.db.dao.ConversationDraftDAO
 import app.amber.agent.data.db.dao.ContinueCandidateDismissDAO
+import app.amber.agent.data.db.dao.LiveCardDAO
 import app.amber.agent.data.db.dao.BoardFocusRuleDAO
 import app.amber.agent.data.db.dao.BoardItemDAO
 import app.amber.agent.data.db.dao.BoardSignalDAO
@@ -47,6 +48,7 @@ import app.amber.agent.data.db.entity.ConversationContextEventEntity
 import app.amber.agent.data.db.entity.ConversationDraftEntity
 import app.amber.agent.data.db.entity.ContinueCandidateDismissEntity
 import app.amber.agent.data.db.entity.ArtifactEntity
+import app.amber.agent.data.db.entity.LiveCardEntity
 import app.amber.agent.data.db.entity.ArtifactReferenceEntity
 import app.amber.agent.data.db.entity.BoardFocusRuleEntity
 import app.amber.agent.data.db.entity.BoardItemEntity
@@ -138,8 +140,9 @@ import kotlinx.serialization.json.JsonPrimitive
         ThreadResultEntity::class,
         ContinueCandidateDismissEntity::class,
         ThemePackageEntity::class,
+        LiveCardEntity::class,
     ],
-    version = 18
+    version = 19
 )
 @TypeConverters(TokenUsageConverter::class)
 abstract class AppDatabase : RoomDatabase() {
@@ -216,6 +219,8 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun continueCandidateDismissDao(): ContinueCandidateDismissDAO
 
     abstract fun themePackageDao(): ThemePackageDAO
+
+    abstract fun liveCardDao(): LiveCardDAO
 
 
 
@@ -580,6 +585,29 @@ abstract class AppDatabase : RoomDatabase() {
                 db.execSQL(
                     "ALTER TABLE `memoryentity` ADD COLUMN `member_ids_json` " +
                         "TEXT NOT NULL DEFAULT '[]'"
+                )
+            }
+        }
+
+        /** Live companion cards explicitly saved by the user (blueprint §7.3 P1-3). */
+        val MIGRATION_18_19 = object : Migration(18, 19) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `live_card` (" +
+                        "`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                        "`package_name` TEXT NOT NULL, " +
+                        "`app_label` TEXT NOT NULL, " +
+                        "`title` TEXT NOT NULL, " +
+                        "`action_label` TEXT NOT NULL, " +
+                        "`watching` TEXT NOT NULL, " +
+                        "`key_points_json` TEXT NOT NULL, " +
+                        "`suggestions_json` TEXT NOT NULL, " +
+                        "`screen_signature` TEXT NOT NULL, " +
+                        "`created_at` INTEGER NOT NULL)"
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_live_card_created_at` " +
+                        "ON `live_card` (`created_at`)"
                 )
             }
         }

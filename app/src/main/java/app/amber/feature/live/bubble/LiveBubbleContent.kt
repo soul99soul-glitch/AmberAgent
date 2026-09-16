@@ -64,12 +64,15 @@ fun LiveBubbleContent(
     onDrag: (Float, Float) -> Unit,
     onDragEnd: () -> Unit,
     onSizeChanged: () -> Unit,
+    onFreshViewed: (Long) -> Unit = {},
 ) {
     val tokens = LocalAmberTokens.current
     val context = LocalContext.current
     val fillDraftFilledMessage = stringResource(R.string.live_fill_result_filled)
     val fillDraftCopiedMessage = stringResource(R.string.live_fill_result_copied_short)
     val fillDraftMissingMessage = stringResource(R.string.live_fill_result_missing)
+    val fillNeedConfirmMessage = stringResource(R.string.live_fill_toast_need_confirm)
+    val fillStaleCopiedMessage = stringResource(R.string.live_fill_toast_stale_copied)
     val defaultStatusText = stringResource(R.string.live_bubble_status_default)
     val uncertainResultText = stringResource(R.string.live_result_uncertain)
     var expanded by remember { mutableStateOf(false) }
@@ -102,8 +105,13 @@ fun LiveBubbleContent(
                 }
                 .combinedClickable(
                     onClick = {
+                        // 指标口径（P2 终审 #3）：只把"自动建议的新鲜结果"的展开记为查看；
+                        // 手动结果的展开不计。去重由 Manager 侧按结果时间戳完成。
+                        val fresh = hasFreshResult && state.lastResultAuto
+                        val resultAt = state.lastUpdatedAtMillis
                         expanded = true
                         lastSeenMillis = state.lastUpdatedAtMillis
+                        if (fresh) onFreshViewed(resultAt)
                         onSizeChanged()
                     },
                     onLongClick = onStop,
@@ -194,6 +202,22 @@ fun LiveBubbleContent(
                 )
             }
 
+            // 流式预览（蓝图 §7.3 P1-1）：分析中展示生成中的文本（有无卡片都显示）。
+            if (state.analyzing && !state.streamingText.isNullOrBlank()) {
+                Text(
+                    text = state.streamingText.orEmpty(),
+                    fontSize = 12.sp,
+                    color = tokens.ink3,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(tokens.surface2)
+                        .padding(8.dp),
+                )
+            }
+
             if (card == null) {
                 Text(
                     text = stringResource(R.string.live_bubble_no_result),
@@ -232,15 +256,47 @@ fun LiveBubbleContent(
                 val draftAvailable = card != null &&
                     (card.suggestions.firstOrNull()?.isNotBlank() == true || card.watching.isNotBlank())
                 if (draftAvailable) {
+                    // 填入/复制（蓝图 §7.3 P1-2）：CHAT 白名单内显示"填入"，其余"复制"；
+                    // NEEDS_CONFIRM 切"覆盖"确认态（5s 复位）。降级复制由 Manager 仲裁。
+                    val fillAllowed = state.fillAllowed
+                    var confirmOverwrite by remember { mutableStateOf(false) }
+                    if (confirmOverwrite) {
+                        LaunchedEffect(Unit) {
+                            kotlinx.coroutines.delay(5_000L)
+                            confirmOverwrite = false
+                        }
+                    }
                     TextButton(onClick = {
                         val message = when (onFillDraft()) {
-                            LiveFillResult.FILLED -> fillDraftFilledMessage
-                            LiveFillResult.COPIED -> fillDraftCopiedMessage
+                            LiveFillResult.FILLED -> {
+                                confirmOverwrite = false
+                                fillDraftFilledMessage
+                            }
+                            LiveFillResult.NEEDS_CONFIRM -> {
+                                confirmOverwrite = true
+                                fillNeedConfirmMessage
+                            }
+                            LiveFillResult.REJECTED_STALE -> {
+                                confirmOverwrite = false
+                                fillStaleCopiedMessage
+                            }
+                            LiveFillResult.COPIED -> {
+                                confirmOverwrite = false
+                                fillDraftCopiedMessage
+                            }
                             LiveFillResult.NO_DRAFT -> fillDraftMissingMessage
                         }
                         Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
                     }) {
-                        Text(stringResource(R.string.live_fill_action), fontSize = 13.sp, color = tokens.accent)
+                        Text(
+                            text = when {
+                                confirmOverwrite -> stringResource(R.string.live_fill_confirm_overwrite)
+                                fillAllowed -> stringResource(R.string.live_fill_action_fill)
+                                else -> stringResource(R.string.live_fill_action)
+                            },
+                            fontSize = 13.sp,
+                            color = tokens.accent,
+                        )
                     }
                     Spacer(modifier = Modifier.width(4.dp))
                 }

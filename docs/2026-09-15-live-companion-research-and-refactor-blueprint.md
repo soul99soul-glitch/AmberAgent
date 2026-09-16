@@ -383,3 +383,62 @@ R2 结论「需修订后再实施」，主代理逐条裁决：**全部接受（
 另采纳 7 项精准修复：设置页 enabled 关闭时对齐 stop() 取消语义（取消在飞 run+requestedAction 清空）；restoreLatestCard 回填前 active 校验（防 start 后极短窗口 stop 复活卡片）；accumulate 包 runCatching（记账失败不误报分析失败）；结果卡 pill 加 `weight(1f, fill=false)` 防长 app 名挤压时间戳；ConfigCard 的 ModelSelector 改 `minimalText=true`（对齐仓内样式惯例）；EmptyResultCard/GuidanceCard padding 16→14 统一；眉题" COMPANION" ink3→ink2 对齐 SectionLabel 惯例；气泡要点 bullet ink3→accent 与页面统一、Spacer 条件化；删死变量 actionLabel。修复后 `:app:compileDebugKotlin` + `:feature:live:api:test` 全绿。
 
 总检查确认无误要点：八条端到端链路（入口/分析/失效/停止/持久化/usage/设置/干扰面）全部走通；动态验证 54 个测试全绿（live api 14 + store-room 11 + runtime-impl 20 + app 侧 LiveUiTreeProcessorTest 9）；147 个代码引用字符串键在 default locale 全部存在。
+
+---
+
+## 附录 C：P1 + P2 实施记录（2026-09-15，同日完成）
+
+**实施方式**：与 P0 同一节奏——6 个 phase（5-10）顺序实施，每个 phase 独立 checker 审查（逻辑闭环/调用链路/UI 细节），发现的问题当轮修复并复验证。工作区同期存在并行会话的气泡通用化重构（feature/bubble/）与记忆系统工作，全程隔离；P0 成果已被用户提交（1a70967），P1/P2 在当日工作区待统一提交。
+
+### Phase 5（P1-A 图树同次观察 + 截图分析恢复）
+
+- `LiveScreenSnapshot` 加 `windowId`（候选窗口 id 透出链：Service→CapturedWindow→Snapshot）；`AmberAccessibilityService` 新增 `takeScreenshotOfWindowBitmap`（API 34+ 按窗口截，气泡不混入，失败回退整屏）。
+- Manager `captureVerifiedScreenshot`：Amber 前台不拍、活动包名≠快照包名拒拍（同次观察校验）。
+- 截图即用即删：run 结束 finally 清理；checker 修复整目录删除竞态——改按次唯一文件名+只删本次文件；desc 隐私口径 6 locale 扩为含截图；模式选择 UI 恢复（AmberSeg+4 键 6 locale，ko 误植俄语顺手修正）。
+- checker：1 一般（cleanup 竞态）+3 建议，全部修复。
+
+### Phase 6（P1-B 流式卡片）
+
+- `LiveAnalyzer.analyze` → `analyzeStream`（MessageStreamAccumulator 聚合+usage merge 与 complete 等价）；LiveTurnAgent 注入 Manager 作 streamSink（惰性 factory 无环）；`LiveModeUiState.streamingText` + 80ms 节流；气泡/页面双出口预览（页面无指令路径由 StreamingPreviewCard 承接）。
+- checker：2 必修——degradedReason 三分支被误并导致成功视觉分析被标降级（恢复 `!useVision` 分支）、OTHER 场景页面预览被 requestedAction 门挡住（预览挂 analyzing 门）；3 建议全修（节流器重置、pause/enabled 清 streamingText）。
+
+### Phase 7（P1-C 填入白名单 + 仲裁契约落地）
+
+- 决策核抽纯函数 `LiveFillPolicy`（feature/live/api，7 用例 JVM 锁定决策表）；Service 新增 `readTextInPackage`/`setTextInPackageVerified`（写入后 refresh+回读比对）/`locateEditableInPackage` 共用定位/`findFirstEditable` 加 visited 上限 400。
+- 仲裁链：stale 拒绝→白名单（场景覆盖感知）→熔断→**写入前现抓窗口身份比对**（封死 runLoop tick 的同包切会话盲窗，checker 必修）→NEEDS_CONFIRM 5s 二次确认→verified 写入→MISMATCH 熔断降级复制。
+- UI：页面 FillDraftButton + 气泡按钮（白名单内"填入"/NEEDS_CONFIRM 切"覆盖"5s 复位/Toast 集中）；LiveFillResult 扩 5 值；4 locale 旧"填入"文案改"复制"语义（checker 必修 2）。
+- checker：2 必修+6 建议，必修全修。
+
+### Phase 8（P1-D 资产化 + 结果通知）
+
+- 保存卡片：`live_card` 表（AppDatabase 18→19，MIGRATION_18_19 + androidTest 迁移用例）+ `LiveCardStore` owner（同签名+同结论去重）+ 页面 SAVED 历史区（最近 5 条、跨天日期、删除）。
+- 发到聊天：`Screen.Chat(newId, text=base64Encode(exportCurrentCard()))`——checker 必修：text 仓内契约是 base64（ChatPage 无条件 decode），原文会崩；通知冷启动路由补齐（startScreen remember 块加 EXTRA_OPEN_LIVE_COMPANION 分支）。
+- 记住此事：`MemoryRepository.addCandidate`（NOTE/LONG_TERM/0.6/reason 标来源/content 前缀"伴随观察·模型推断"）入审核链，runCatching 兜底。
+- 结果通知：气泡显示中才发（伴随页前台不打扰）、chatLiveUpdate 通道、VISIBILITY_PRIVATE 锁屏不暴露摘要、固定 id 覆盖、点击打开伴随页。
+- checker：2 必修+5 建议，必修全修（另修：记住包 runCatching、保存去重、SavedCardRow 限宽+跨天日期、迁移 SQL 与 entity 默认值对齐、ko 引号 aapt 转义）。
+
+### Phase 9（P1-E 场景配置化）
+
+- `LiveModeSetting.sceneOverrides`（包名→场景 wire）；`LiveScenes.classify(pkg, overrides)` 覆盖优先、非法 wire 回退；`LiveScenesTest` +3 用例。
+- 伴随页 CONFIG 加"当前应用场景"4 态 seg（默认/聊天/阅读/其他，仅观察现场存在时可配）；`LiveModeUiState.fillAllowed` 由 Manager 每 tick 重算（checker 必修：签名去重导致设置变更/熔断后不自愈）——页面/气泡按钮统一读它。
+- checker：1 必修+2 建议，全修（AmberSeg 加 Ellipsis、测试补齐）。
+
+### Phase 10（P2 有限自动建议 + 记忆融合）
+
+- 三分门控：采集门 `autoSuggestPackages`（逐 App 开启、默认空集关）；推理门 引擎 decide（非 force）+ 每包名每小时 4 次滑动窗口预算；打扰门 场景有默认动作（OTHER 静默）+ **自动不得顶掉在飞手动分析**（checker 必修 1）。
+- 主动建议通知：同一通道/形态，标题区分"伴随建议 · 动作"（auto=!force）。
+- 指标口径（checker 必修 3）：建议数=成功产出结果次数（失败不计，触发成本归预算）；viewed 只在 `lastResultAuto` 结果上记 + Manager 侧按结果时间戳去重（气泡重组不重复计）；Stats 页"自动建议（建议 · 查看）"行。
+- 记忆融合（三选一选定）：`LiveTurnAgent` 注入 MemoryRecallStore，纯 DB 召回前 3 条作背景段（标注"仅供背景参考、不要当成屏幕事实"，防注入意识）；有意用 recall() 不 touchMemories（高频分析不污染记忆新鲜度，已注释）；失败不阻断。
+- 隐私披露修复（checker 必修 2）：desc 与自动建议 hint 6 locale 明示"自动读取+分析+外发+计费"。
+- 采纳建议：冷读取恢复时种子化引擎去重签名（重启后同屏不重复自动分析）；start() 清扫统一走 `cleanupOrphans()`。
+- checker 终审：P0+P1 全部契约在 P2 加入后完好；24 个 live api 用例全绿；编译含 androidTest 全过。
+
+### 验证证据汇总
+
+- 编译：`:app:compileDebugKotlin`、`:app:compileDebugAndroidTestKotlin` 全绿。
+- 测试：`:feature:live:api:test` 24/24（LiveEngine 8、LiveFillPolicy 7、LiveScenes 7、Stale 2、Normalize 1）。
+- 代码审查证据：隐私三链路、仲裁链、门控、通知路由（冷/热启动）——设备侧真机验证仍是唯一未覆盖环节。
+
+### P2 运营前提（蓝图 §8 效果准入不变）
+
+代码已就绪，但自动建议的**默认关**口径不变：逐 App 由用户开启；第 4 月对照评估以 Stats 页的"自动建议（建议 · 查看）"与 token 成本为输入，无清晰增益则按熔断条款收缩。

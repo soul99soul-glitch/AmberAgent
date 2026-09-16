@@ -29,4 +29,24 @@ class LiveScenesTest {
         assertEquals("找重点", LiveScenes.defaultActionLabel(LiveScene.READING))
         assertNull(LiveScenes.defaultActionLabel(LiveScene.OTHER))
     }
+
+    @Test
+    fun `用户覆盖优先于内置表`() {
+        val overrides = mapOf("com.tencent.mm" to "other")
+        assertEquals(LiveScene.OTHER, LiveScenes.classify("com.tencent.mm", overrides))
+        assertEquals(LiveScene.CHAT, LiveScenes.classify("org.telegram.messenger", overrides))
+    }
+
+    @Test
+    fun `未知包名可被覆盖为 CHAT`() {
+        val overrides = mapOf("com.example.myapp" to "chat")
+        assertEquals(LiveScene.CHAT, LiveScenes.classify("com.example.myapp", overrides))
+        assertEquals(LiveScene.OTHER, LiveScenes.classify("com.example.myapp"))
+    }
+
+    @Test
+    fun `非法 wire 名回退内置表`() {
+        val overrides = mapOf("com.tencent.mm" to "bogus")
+        assertEquals(LiveScene.CHAT, LiveScenes.classify("com.tencent.mm", overrides))
+    }
 }

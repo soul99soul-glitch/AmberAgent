@@ -103,12 +103,54 @@ class AmberAccessibilityService : AccessibilityService(), AccessibilityControlle
         return false
     }
 
-    private fun findFirstEditable(node: AccessibilityNodeInfo, depth: Int): AccessibilityNodeInfo? {
-        if (depth > 80) return null
+    /** 仲裁契约（蓝图 §7.2 P0-5）：读取目标包名输入框的当前文本；找不到返回 null。 */
+    fun readTextInPackage(packageName: String): String? {
+        val target = locateEditableInPackage(packageName) ?: return null
+        return target.text?.toString()
+    }
+
+    /** 写入后回读验证：定位→写入→refresh→重读比对。MISMATCH = 写入未被目标接受
+     *  （或被其它写入者并发覆盖），调用方据此熔断，不重试不排队。 */
+    fun setTextInPackageVerified(packageName: String, text: String): LiveFillOutcome {
+        val target = locateEditableInPackage(packageName) ?: return LiveFillOutcome.NOT_FOUND
+        val arguments = Bundle().apply {
+            putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text)
+        }
+        if (!target.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, arguments)) {
+            return LiveFillOutcome.NOT_FOUND
+        }
+        val readback = runCatching {
+            target.refresh()
+            locateEditableInPackage(packageName)?.text?.toString()
+        }.getOrNull() ?: return LiveFillOutcome.UNKNOWN
+        return if (readback == text) LiveFillOutcome.SUCCESS else LiveFillOutcome.MISMATCH
+    }
+
+    private fun locateEditableInPackage(packageName: String): AccessibilityNodeInfo? {
+        if (packageName.isBlank()) return null
+        for (window in windows.orEmpty()) {
+            val root = window.root ?: continue
+            if (root.packageName?.toString() != packageName) continue
+            val target = root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)?.takeIf { it.isEditable }
+                ?: findFirstEditable(root, depth = 0)
+            if (target != null) return target
+        }
+        return null
+    }
+
+    private fun findFirstEditable(
+        node: AccessibilityNodeInfo,
+        depth: Int,
+        visited: IntArray = intArrayOf(0),
+    ): AccessibilityNodeInfo? {
+        // 节点数上限（Phase 7 检查建议 1）：目标进程主线程繁忙时每次 getChild 都是
+        // binder 调用，无界遍历会阻塞 Amber 主线程。
+        if (depth > 80 || visited[0] >= 400) return null
+        visited[0]++
         if (node.isEditable && node.isVisibleToUser) return node
         for (i in 0 until node.childCount) {
             val child = node.getChild(i) ?: continue
-            findFirstEditable(child, depth + 1)?.let { return it }
+            findFirstEditable(child, depth + 1, visited)?.let { return it }
         }
         return null
     }
@@ -125,6 +167,35 @@ class AmberAccessibilityService : AccessibilityService(), AccessibilityControlle
             val launched = runCatching {
                 takeScreenshot(
                     Display.DEFAULT_DISPLAY,
+                    mainExecutor,
+                    object : TakeScreenshotCallback {
+                        override fun onSuccess(result: ScreenshotResult) {
+                            val bitmap = Bitmap.wrapHardwareBuffer(result.hardwareBuffer, result.colorSpace)
+                                ?.copy(Bitmap.Config.ARGB_8888, false)
+                            result.hardwareBuffer.close()
+                            if (cont.isActive) cont.resume(bitmap)
+                        }
+
+                        override fun onFailure(errorCode: Int) {
+                            if (cont.isActive) cont.resume(null)
+                        }
+                    },
+                )
+            }.isSuccess
+            if (!launched && cont.isActive) cont.resume(null)
+        }
+    }
+
+    /**
+     * API 34+ 按窗口截图（takeScreenshotOfWindow）：只拍候选窗口，气泡等 overlay 不混入。
+     * 窗口已失效（id 过期）或低版本返回 null，调用方回退整屏 [takeScreenshotBitmap]。
+     */
+    suspend fun takeScreenshotOfWindowBitmap(windowId: Int): Bitmap? {
+        if (windowId < 0 || Build.VERSION.SDK_INT < 34) return null
+        return suspendCancellableCoroutine { cont ->
+            val launched = runCatching {
+                takeScreenshotOfWindow(
+                    windowId,
                     mainExecutor,
                     object : TakeScreenshotCallback {
                         override fun onSuccess(result: ScreenshotResult) {
@@ -171,7 +242,7 @@ class AmberAccessibilityService : AccessibilityService(), AccessibilityControlle
                 focused = window.isFocused,
                 splitDivider = false,
             )
-            snapshot.copy(candidate = candidate).takeIf { candidate.isEligible() }
+            snapshot.copy(candidate = candidate, windowId = window.id).takeIf { candidate.isEligible() }
         }
 
         val bestWindow = windowSnapshots.maxByOrNull { it.candidate.selectionScore() }
@@ -362,6 +433,7 @@ class AmberAccessibilityService : AccessibilityService(), AccessibilityControlle
             contentText = contentText,
             windowDebugLabel = candidate.debugLabel(),
             nodeCount = nodeCount,
+            windowId = windowId,
         )
 
     private fun CapturedWindow.toCandidate(
@@ -443,6 +515,8 @@ private data class CapturedWindow(
     val contentText: String,
     val nodeCount: Int,
     val bounds: Rect,
+    /** 候选窗口 id（takeScreenshotOfWindow 用）；fallback 路径为 -1。 */
+    val windowId: Int = -1,
     val candidate: LiveWindowCandidate = LiveWindowCandidate(
         type = 0,
         packageName = packageName,
@@ -457,3 +531,6 @@ private data class CapturedWindow(
 
 // AccessibilityTextMatch moved to :core:automation:api so feature tools can
 // consume the wire type without pulling the :app-only AmberAccessibilityService.
+
+/** Live 填入的写入后回读结果（蓝图 §7.2 P0-5 仲裁契约）。 */
+enum class LiveFillOutcome { SUCCESS, NOT_FOUND, MISMATCH, UNKNOWN }
