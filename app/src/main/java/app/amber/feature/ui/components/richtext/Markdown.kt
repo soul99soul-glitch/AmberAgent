@@ -634,9 +634,15 @@ internal fun streamingLiveSuffixFor(
     activeBaseOffset: Int,
     parsedPreprocessed: String,
     syntheticSuffixStart: Int,
-    streaming: Boolean,
 ): StreamingLiveSuffix {
-    if (!streaming) return EMPTY_STREAMING_LIVE_SUFFIX
+    // No `streaming` gate: the suffix is whatever the display text has that
+    // the last parse has NOT covered yet, so staleness alone decides when it
+    // is empty. An eager `!streaming -> empty` return dropped the tail one
+    // frame early at stream end — the final chars were still un-parsed
+    // (finalParse lands on a background dispatcher), so they vanished for a
+    // beat and popped back in ("最后一个字顿住"). A fresh parse covers the
+    // whole active region and this yields EMPTY on its own — including in
+    // fully settled state.
     if (activeBaseOffset < 0 || activeBaseOffset > renderContent.length) {
         return EMPTY_STREAMING_LIVE_SUFFIX
     }
@@ -1495,7 +1501,6 @@ internal fun MarkdownBlockLegacy(
         activeBaseOffset = data.activeBaseOffset,
         parsedPreprocessed = data.preprocessed,
         syntheticSuffixStart = data.syntheticSuffixStart,
-        streaming = parseAsStreamingState,
     )
     SideEffect {
         StreamingRenderProbe.liveSuffixLength = streamingLiveSuffix.text.length

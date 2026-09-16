@@ -85,7 +85,6 @@ class StreamingMarkdownRepairTest {
             activeBaseOffset = 0,
             parsedPreprocessed = "hello",
             syntheticSuffixStart = "hello".length,
-            streaming = true,
         )
 
         assertEquals(" amber", result.text)
@@ -100,7 +99,6 @@ class StreamingMarkdownRepairTest {
             activeBaseOffset = 0,
             parsedPreprocessed = parsed.text,
             syntheticSuffixStart = parsed.syntheticSuffixStart,
-            streaming = true,
         )
 
         assertEquals("er", result.text)
@@ -114,7 +112,6 @@ class StreamingMarkdownRepairTest {
             activeBaseOffset = 0,
             parsedPreprocessed = "<https://example.com>",
             syntheticSuffixStart = "<https://example.com>".length,
-            streaming = true,
         )
 
         assertEquals("", result.text)
@@ -127,14 +124,12 @@ class StreamingMarkdownRepairTest {
             activeBaseOffset = -1,
             parsedPreprocessed = "hello",
             syntheticSuffixStart = "hello".length,
-            streaming = true,
         )
         val beyondEndOffset = streamingLiveSuffixFor(
             renderContent = "hello",
             activeBaseOffset = "hello".length + 1,
             parsedPreprocessed = "hello",
             syntheticSuffixStart = "hello".length,
-            streaming = true,
         )
 
         assertEquals("", negativeOffset.text)
