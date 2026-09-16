@@ -21,6 +21,10 @@ class MemoryFrontmatterCodec {
         record.sourceConversationId?.let { appendLine("source_conversation_id: ${quote(it)}") }
         appendLine("source_message_ids: [${record.sourceMessageIds.joinToString(", ") { quote(it) }}]")
         appendLine("supersedes_ids: [${record.supersedesIds.joinToString(", ")}]")
+        record.topicTitle?.let { appendLine("topic_title: ${quote(it)}") }
+        if (record.memberIds.isNotEmpty()) {
+            appendLine("member_ids: [${record.memberIds.joinToString(", ")}]")
+        }
         appendLine("pinned: ${record.pinned}")
         appendLine("archived: ${record.archived}")
         appendLine("---")
@@ -29,15 +33,26 @@ class MemoryFrontmatterCodec {
     }
 
     fun decode(text: String): MemoryRecord {
-        val parts = text.split("---", limit = 3)
-        require(parts.size >= 3) { "Invalid memory frontmatter" }
-        val frontmatter = parts[1].lineSequence()
+        // Delimiters are whole lines — a "---" inside a value must not split.
+        val lines = text.lines()
+        require(lines.firstOrNull()?.trim() == "---") { "Invalid memory frontmatter" }
+        val closingIndex = lines.drop(1).indexOfFirst { it.trim() == "---" }
+            .takeIf { it >= 0 }
+            ?.plus(1)
+            ?: throw IllegalArgumentException("Invalid memory frontmatter")
+        val frontmatter = lines.subList(1, closingIndex)
             .mapNotNull { line ->
                 val index = line.indexOf(':')
-                if (index < 0) null else line.take(index).trim() to line.drop(index + 1).trim().trim('"')
+                if (index < 0) {
+                    null
+                } else {
+                    line.take(index).trim() to line.drop(index + 1).trim()
+                        .trim('"').unescapeScalar()
+                }
             }
             .toMap()
-        val content = parts[2].trim()
+        require(frontmatter.containsKey("kind")) { "Invalid memory frontmatter" }
+        val content = lines.drop(closingIndex + 1).joinToString("\n").trim()
         val scope = MemoryScope.fromWireName(frontmatter["scope"])
         val kind = MemoryKind.fromWireName(frontmatter["kind"])
         return MemoryRecord(
@@ -49,6 +64,8 @@ class MemoryFrontmatterCodec {
             sourceConversationId = frontmatter["source_conversation_id"],
             sourceMessageIds = parseInlineList(frontmatter["source_message_ids"].orEmpty()),
             supersedesIds = parseIntList(frontmatter["supersedes_ids"].orEmpty()),
+            topicTitle = frontmatter["topic_title"],
+            memberIds = parseIntList(frontmatter["member_ids"].orEmpty()),
             confidence = frontmatter["confidence"]?.toFloatOrNull() ?: 1f,
             pinned = frontmatter["pinned"] == "true",
             archived = frontmatter["archived"] == "true",
@@ -70,6 +87,9 @@ class MemoryFrontmatterCodec {
         Regex("\"((?:\\\\.|[^\"])*)\"").findAll(value)
             .map { match -> match.groupValues[1].replace("\\\"", "\"").replace("\\\\", "\\") }
             .toList()
+
+    private fun String.unescapeScalar(): String =
+        replace("\\\"", "\"").replace("\\\\", "\\")
 
     private fun parseIntList(value: String): List<Int> =
         Regex("""-?\d+""").findAll(value)

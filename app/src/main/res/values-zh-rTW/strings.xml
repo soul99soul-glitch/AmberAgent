@@ -2032,7 +2032,8 @@
   <string name="memory_dream_source">來源：%1$s</string>
   <string name="memory_dream_source_auto">自動 Daydream</string>
   <string name="memory_dream_source_manual">手動產生</string>
-  <string name="memory_dream_summary">合併 %1$d 組 · 提升 %2$d 條 · 封存 %3$d 條 · 取代 %4$d 條 · 忽略候選 %5$d 條</string>
+  <string name="memory_dream_summary">合併 %1$d 組 · 提升 %2$d 條 · 封存 %3$d 條 · 取代 %4$d 條 · 忽略候選 %5$d 條 · 主題 %6$d 個</string>
+  <string name="memory_dream_topic">主題「%1$s」聚合 %2$s%3$s</string>
   <string name="memory_event_log_desc">檢視最近 %1$d 條記憶背景事件。</string>
   <string name="memory_event_log_empty">目前沒有記憶事件。</string>
   <string name="memory_event_log_title">事件記錄</string>
@@ -2043,8 +2044,6 @@
   <string name="memory_frontmatter_import_desc">從 AmberAgentMemory 目錄讀取 .mem.md 檔案並寫回 Room 主要儲存體。</string>
   <string name="memory_frontmatter_import_title">Frontmatter 匯入</string>
   <string name="memory_generate_suggestion">產生建議</string>
-  <string name="memory_idle_only_desc">關閉後，自動整理不再要求 Android device idle；仍需要網路與足夠電量。</string>
-  <string name="memory_idle_only_title">僅在裝置閒置時自動執行</string>
   <string name="memory_ignore">忽略</string>
   <string name="memory_ignore_low_confidence">忽略低信心候選項目（%1$d）</string>
   <string name="memory_import">匯入</string>
@@ -2054,19 +2053,19 @@
   <string name="memory_library_title">記憶庫</string>
   <string name="memory_llm_maintenance_desc">開啟後，Daydream 可以讓模型提出衝突取代等進階建議；仍需人工確認後才會套用。</string>
   <string name="memory_llm_maintenance_title">LLM 整理建議</string>
-  <string name="memory_local_maintenance_desc">每 24 小時在背景產生待審核整理建議；套用前需要確認。核心記憶不會自動修改。自動執行需要網路與足夠電量，也可能依設定要求裝置閒置。
+  <string name="memory_local_maintenance_desc">每夜在背景自動整理：逐字重複合併、過期封存、低價值候選忽略等確定性清理會自動套用並記入事件紀錄；模型建議仍需確認。核心記憶不會自動修改。自動執行需要網路與足夠電量，也可能依設定要求裝置充電中。
 目前候選 %1$d 條，最近事件 %2$d 條。</string>
   <string name="memory_local_maintenance_title">本機整理建議</string>
   <string name="memory_long_title">長期記憶</string>
   <string name="memory_maintenance_tools_title">維護工具</string>
-  <string name="memory_manual_review_desc">手動或背景產生的 diff 都需要確認；背景 Daydream 不會自動套用整理結果。</string>
+  <string name="memory_manual_review_desc">在這裡審核模型產生的建議。確定性清理會自動套用，只有模型建議需要確認。</string>
   <string name="memory_manual_review_title">手動整理審核</string>
   <string name="memory_no_manual_plan">目前還沒有手動整理建議。</string>
   <string name="memory_notification_failed_title">Daydream 整理失敗</string>
   <string name="memory_notification_pending_title">已產生記憶整理建議</string>
   <string name="memory_notification_running_text">正在檢查短期與長期記憶</string>
   <string name="memory_notification_running_title">AmberAgent 正在產生整理建議</string>
-  <string name="memory_notification_summary">合併 %1$d · 提升 %2$d · 封存 %3$d · 取代 %4$d · 忽略候選 %5$d</string>
+  <string name="memory_notification_summary">合併 %1$d · 提升 %2$d · 封存 %3$d · 取代 %4$d · 忽略候選 %5$d · 主題 %6$d</string>
   <string name="memory_recall_desc">核心、短期、長期、最近對話、時間提醒與選擇性召回。</string>
   <string name="memory_recall_title">記憶開關</string>
   <string name="memory_recommend_manual_review">· 建議人工審核</string>
@@ -3216,6 +3215,10 @@
   <string name="memory_dream_apply_failed">套用 Dream 建議失敗：%1$s</string>
   <string name="memory_dream_plan_applied">已套用 Dream 整理建議</string>
   <string name="memory_dream_plan_failed">Dream 整理失敗：%1$s</string>
+  <string name="memory_dream_auto_applied">已自動套用 %1$d 項安全整理。</string>
+  <string name="memory_dream_auto_applied_pending">已自動套用 %1$d 項安全整理，並產生新的待審建議。</string>
+  <string name="memory_auto_apply_title">自動套用安全整理</string>
+  <string name="memory_auto_apply_desc">確定性清理（逐字重複、過期項目、低價值候選）自動套用不再等待確認；模型建議仍需審核。</string>
   <string name="memory_dream_plan_generated">已產生 Dream 整理建議</string>
   <string name="memory_dream_plan_replaced">已產生 Dream 整理建議，上一份待審核建議已作廢</string>
   <string name="memory_export_failed">匯出失敗：%1$s</string>

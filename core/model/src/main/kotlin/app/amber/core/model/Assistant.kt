@@ -31,6 +31,10 @@ data class AssistantMemory(
     val sourceRunId: String? = null,
     /** P2-06: write path ("tool" | "auto_extraction" | ...). */
     val sourceTrigger: String? = null,
+    /** Topic display title; set only when kind == TOPIC. */
+    val topicTitle: String? = null,
+    /** Member memory ids grouped by this topic; set only when kind == TOPIC. */
+    val memberIds: List<Int> = emptyList(),
     /** Existing memory record metadata retained for the settings editor. */
     val sourceConversationId: String? = null,
     val sourceMessageIds: List<String> = emptyList(),

@@ -27,5 +27,6 @@ class MemoryRepository(
         /** P2-06 provenance trigger labels (delegated to the base repository). */
         const val TRIGGER_TOOL = app.amber.core.memory.store.MemoryRepository.TRIGGER_TOOL
         const val TRIGGER_AUTO_EXTRACTION = app.amber.core.memory.store.MemoryRepository.TRIGGER_AUTO_EXTRACTION
+        const val TRIGGER_DREAM = app.amber.core.memory.store.MemoryRepository.TRIGGER_DREAM
     }
 }

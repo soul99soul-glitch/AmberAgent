@@ -141,6 +141,33 @@ class AppDatabaseMigrationTest {
         db.close()
     }
 
+    @Test
+    fun migration_17_18_adds_topic_columns_and_preserves_rows() {
+        val createdAt = 3_000L
+        val version17 = helper.createDatabase(TEST_DB, 17)
+        version17.execSQL(
+            "INSERT INTO memoryentity " +
+                "(id, assistant_id, content, scope, kind, source_conversation_id, " +
+                "source_message_ids_json, supersedes_ids_json, expires_at, confidence, pinned, archived, " +
+                "created_at, updated_at, last_used_at, revision, source_run_id, source_trigger) " +
+                "VALUES (1, '__long_term__', '用户偏好中文简洁回复。', 'long_term', 'user', NULL, " +
+                "'[]', '[]', NULL, 0.9, 0, 0, $createdAt, $createdAt, NULL, 1, NULL, NULL)"
+        )
+        version17.close()
+
+        val db = helper.runMigrationsAndValidate(
+            TEST_DB,
+            18,
+            true,
+            AppDatabase.MIGRATION_17_18,
+        )
+
+        assertEquals(1, db.countRows("memoryentity", "id = 1"))
+        assertTrue(db.isNullValue("memoryentity", "topic_title", "id = 1"))
+        assertEquals("[]", db.stringValue("memoryentity", "member_ids_json", "id = 1"))
+        db.close()
+    }
+
     private fun SupportSQLiteDatabase.countRows(table: String, where: String): Int {
         query("SELECT COUNT(*) FROM $table WHERE $where").use { cursor ->
             assertTrue(cursor.moveToFirst())

@@ -6,6 +6,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.floatOrNull
+import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -20,10 +21,13 @@ import app.amber.core.settings.resolveTaskChatModel
 import app.amber.core.memory.model.MemoryCandidate
 import app.amber.core.memory.model.MemoryEventType
 import app.amber.core.memory.model.MemoryKind
+import app.amber.core.memory.model.MemoryRecord
 import app.amber.core.memory.model.MemoryScope
 import app.amber.core.memory.prompt.MemoryExtractionPrompt
+import app.amber.core.memory.recall.MemoryRecallStore
 import app.amber.core.memory.safety.isSensitiveMemoryContent
 import app.amber.core.memory.store.MemoryRepository
+import app.amber.core.memory.store.MemoryStaleException
 import app.amber.core.memory.telemetry.MemoryEventLogger
 import app.amber.core.memory.time.MemoryTimeAnchorParser
 import app.amber.core.model.Conversation
@@ -124,10 +128,16 @@ class MemoryExtractor(
             runCatching {
                 val sourceMessages = conversation.currentMessages.takeLast(16)
                 val sourceIds = sourceMessages.map { it.id.toString() }
+                val activeRecords = memoryRepository.getAllActiveRecords()
+                val shownRecords = selectRelevantRecords(activeRecords, sourceMessages)
+                // Update targets must come from the shown list — an id the model
+                // never saw is model error, not consent to rewrite that record.
+                val recordsById = shownRecords.associateBy { it.id }
                 val prompt = MemoryExtractionPrompt.build(
                     messages = sourceMessages,
                     sourceMessageIds = sourceIds,
                     locale = context.appLocaleDisplayName(),
+                    existingMemories = shownRecords,
                 )
                 val response = providerCatalog.text(provider).complete(
                     providerSetting = provider,
@@ -139,13 +149,14 @@ class MemoryExtractor(
                 )
                 val text = response.choices.firstOrNull()?.message?.toText().orEmpty()
                 val parsedCandidates = parseCandidates(
+                    json = json,
                     raw = text,
                     conversationId = conversationId,
                     sourceMessageIds = sourceIds,
                 )
                 val parseMetaById = parsedCandidates.associateBy { it.candidate.id }
                 val candidates = parsedCandidates.map { it.candidate }
-                val filtered = candidateFilter.filter(candidates, memoryRepository.getAllActiveRecords())
+                val filtered = candidateFilter.filter(candidates, activeRecords)
                 memoryRepository.addCandidates(filtered.rejected)
                 filtered.accepted.forEach { candidate ->
                     val meta = parseMetaById[candidate.id]
@@ -154,7 +165,41 @@ class MemoryExtractor(
                         explicitScope = meta?.explicitScope == true,
                         explicitKind = meta?.explicitKind == true,
                     )
-                    if (autoWrite) {
+                    // Reconcile: a model "update" rewrites the target in place via
+                    // CAS bound to the snapshot revision. Core and pinned records
+                    // are never touched; a stale snapshot goes to review instead
+                    // of adding. The gate still requires the candidate's own
+                    // explicit scope/kind even though an update keeps the
+                    // target's classification — conservative on purpose.
+                    val updateTarget = meta?.updateMemoryId?.let(recordsById::get)
+                    // Topics are dream-synthesized; extraction updates must
+                    // never rewrite them — they fall back to pending review.
+                    val updateAttempted = autoWrite &&
+                        updateTarget != null &&
+                        updateTarget.scope != MemoryScope.CORE &&
+                        updateTarget.kind != MemoryKind.TOPIC &&
+                        !updateTarget.pinned
+                    val updateApplied = updateAttempted && applyExtractionUpdate(
+                        target = updateTarget!!,
+                        newContent = candidate.content,
+                    ) { id, content, revision ->
+                        memoryRepository.updateContentCas(
+                            id = id,
+                            content = content,
+                            expectedRevision = revision,
+                            sourceRunId = conversationId,
+                            sourceTrigger = MemoryRepository.TRIGGER_AUTO_EXTRACTION,
+                        )
+                    }
+                    if (updateApplied) {
+                        eventLogger.log(
+                            type = MemoryEventType.MEMORY_UPDATED,
+                            conversationId = conversationId,
+                            memoryId = updateTarget!!.id,
+                            modelId = model.id.toString(),
+                            message = "Auto-updated by extraction reconcile.",
+                        )
+                    } else if (autoWrite && !updateAttempted) {
                         val memory = memoryRepository.addMemory(
                             scope = candidate.scope,
                             kind = candidate.kind,
@@ -179,13 +224,21 @@ class MemoryExtractor(
                             message = candidate.autoWriteEventMessage(),
                         )
                     } else {
-                        memoryRepository.addCandidate(candidate)
+                        // A pending candidate that the model meant as an update
+                        // keeps the target link in its reason so review doesn't
+                        // create a duplicate of the still-live record.
+                        val pendingCandidate = meta?.updateMemoryId?.let { targetId ->
+                            candidate.copy(
+                                reason = "updates memory #$targetId: ${candidate.reason}".trim(),
+                            )
+                        } ?: candidate
+                        memoryRepository.addCandidate(pendingCandidate)
                         eventLogger.log(
                             type = MemoryEventType.CANDIDATE_CREATED,
                             conversationId = conversationId,
-                            candidateId = candidate.id,
+                            candidateId = pendingCandidate.id,
                             modelId = model.id.toString(),
-                            message = candidate.reason,
+                            message = pendingCandidate.reason,
                         )
                     }
                 }
@@ -224,53 +277,24 @@ class MemoryExtractor(
             else -> settings.resolveTaskChatModel(settings.chatModelId)
         } ?: settings.resolveTaskChatModel(settings.chatModelId)
 
-    private fun parseCandidates(
-        raw: String,
-        conversationId: String,
-        sourceMessageIds: List<String>,
-    ): List<ParsedMemoryCandidate> {
-        val cleaned = raw.trim()
-            .removePrefix("```json")
-            .removePrefix("```")
-            .removeSuffix("```")
-            .trim()
-            .let { text ->
-                val start = text.indexOf('{')
-                val end = text.lastIndexOf('}')
-                if (start >= 0 && end > start) text.substring(start, end + 1) else text
+    private fun selectRelevantRecords(
+        records: List<MemoryRecord>,
+        messages: List<UIMessage>,
+    ): List<MemoryRecord> {
+        val conversationTokens = MemoryRecallStore.tokenize(
+            messages.joinToString("\n") { it.toText() }
+        )
+        return records
+            .map { record ->
+                record to MemoryRecallStore.tokenize(record.content).count(conversationTokens::contains)
             }
-        val root = json.parseToJsonElement(cleaned).jsonObject
-        return root["candidates"]?.jsonArray.orEmpty().take(5).mapNotNull { item ->
-            val obj = item.jsonObject
-            val content = obj["content"]?.jsonPrimitive?.contentOrNull?.trim().orEmpty()
-            if (content.isBlank()) return@mapNotNull null
-            val expiresInDays = obj["expires_in_days"]?.jsonPrimitive?.contentOrNull?.toLongOrNull()
-            val scopeValue = obj["scope"]?.jsonPrimitive?.contentOrNull
-            val kindValue = obj["kind"]?.jsonPrimitive?.contentOrNull
-            val scope = MemoryScope.fromWireName(scopeValue)
-            val expiresAt = resolveCandidateExpiresAt(content, scope, expiresInDays)
-            ParsedMemoryCandidate(
-                explicitScope = scopeValue.isValidMemoryScope(),
-                explicitKind = kindValue.isValidMemoryKind(),
-                candidate = MemoryCandidate(
-                    content = content,
-                    scope = scope,
-                    kind = MemoryKind.fromWireName(kindValue),
-                    confidence = obj["confidence"]?.jsonPrimitive?.floatOrNull ?: 0.55f,
-                    reason = obj["reason"]?.jsonPrimitive?.contentOrNull.orEmpty(),
-                    sourceConversationId = conversationId,
-                    sourceMessageIds = sourceMessageIds,
-                    expiresAt = expiresAt,
-                ),
+            .sortedWith(
+                compareByDescending<Pair<MemoryRecord, Int>> { it.second }
+                    .thenByDescending { it.first.updatedAt }
             )
-        }
+            .map { it.first }
+            .take(RECONCILE_MEMORY_LIMIT)
     }
-
-    private fun String?.isValidMemoryScope(): Boolean =
-        MemoryScope.entries.any { it.wireName == this }
-
-    private fun String?.isValidMemoryKind(): Boolean =
-        MemoryKind.entries.any { it.wireName == this }
 
     private fun MemoryCandidate.isDurableAutoWrite(): Boolean =
         scope == MemoryScope.LONG_TERM &&
@@ -284,15 +308,95 @@ class MemoryExtractor(
             else -> "Auto-created short-term project memory."
         }
 
-    private data class ParsedMemoryCandidate(
+    internal data class ParsedMemoryCandidate(
         val candidate: MemoryCandidate,
         val explicitScope: Boolean,
         val explicitKind: Boolean,
+        val updateMemoryId: Int?,
     )
 
     companion object {
         internal const val SHORT_TERM_PROJECT_AUTO_WRITE_CONFIDENCE = 0.72f
         internal const val DURABLE_AUTO_WRITE_CONFIDENCE = 0.85f
+
+        /** Existing memories injected into the extraction prompt for reconcile. */
+        internal const val RECONCILE_MEMORY_LIMIT = 24
+
+        private fun String?.isValidMemoryScope(): Boolean =
+            MemoryScope.entries.any { it.wireName == this }
+
+        private fun String?.isValidMemoryKind(): Boolean =
+            MemoryKind.entries.any { it.wireName == this }
+
+        internal fun parseCandidates(
+            json: Json,
+            raw: String,
+            conversationId: String,
+            sourceMessageIds: List<String>,
+        ): List<ParsedMemoryCandidate> {
+            val cleaned = raw.trim()
+                .removePrefix("```json")
+                .removePrefix("```")
+                .removeSuffix("```")
+                .trim()
+                .let { text ->
+                    val start = text.indexOf('{')
+                    val end = text.lastIndexOf('}')
+                    if (start >= 0 && end > start) text.substring(start, end + 1) else text
+                }
+            val root = json.parseToJsonElement(cleaned).jsonObject
+            return root["candidates"]?.jsonArray.orEmpty().take(5).mapNotNull { item ->
+                val obj = item.jsonObject
+                val content = obj["content"]?.jsonPrimitive?.contentOrNull?.trim().orEmpty()
+                if (content.isBlank()) return@mapNotNull null
+                val expiresInDays = obj["expires_in_days"]?.jsonPrimitive?.contentOrNull?.toLongOrNull()
+                val scopeValue = obj["scope"]?.jsonPrimitive?.contentOrNull
+                val kindValue = obj["kind"]?.jsonPrimitive?.contentOrNull
+                val scope = MemoryScope.fromWireName(scopeValue)
+                val expiresAt = resolveCandidateExpiresAt(content, scope, expiresInDays)
+                val isUpdate = obj["action"]?.jsonPrimitive?.contentOrNull == "update"
+                ParsedMemoryCandidate(
+                    explicitScope = scopeValue.isValidMemoryScope(),
+                    explicitKind = kindValue.isValidMemoryKind(),
+                    updateMemoryId = if (isUpdate) {
+                        obj["update_memory_id"]?.jsonPrimitive?.intOrNull
+                    } else {
+                        null
+                    },
+                    candidate = MemoryCandidate(
+                        content = content,
+                        scope = scope,
+                        // Extraction never produces topic records — those are
+                        // synthesized by dream review only.
+                        kind = MemoryKind.fromWireName(kindValue)
+                            .takeIf { it != MemoryKind.TOPIC } ?: MemoryKind.NOTE,
+                        confidence = obj["confidence"]?.jsonPrimitive?.floatOrNull ?: 0.55f,
+                        reason = obj["reason"]?.jsonPrimitive?.contentOrNull.orEmpty(),
+                        sourceConversationId = conversationId,
+                        sourceMessageIds = sourceMessageIds,
+                        expiresAt = expiresAt,
+                    ),
+                )
+            }
+        }
+
+        /**
+         * Auto-apply a model "update" action: the CAS binds the revision the
+         * model saw at prompt time. Returns false when the record moved in
+         * between — the caller then hands the update intent to review instead
+         * of overwriting or adding a stale duplicate.
+         */
+        internal suspend fun applyExtractionUpdate(
+            target: MemoryRecord,
+            newContent: String,
+            write: suspend (id: Int, content: String, expectedRevision: Long) -> Unit,
+        ): Boolean = try {
+            write(target.id, newContent, target.revision)
+            true
+        } catch (stale: MemoryStaleException) {
+            false
+        }
+
 
         internal fun shouldAutoWriteCandidate(
             candidate: MemoryCandidate,

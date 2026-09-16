@@ -1,6 +1,7 @@
 package app.amber.core.memory.prompt
 
 import app.amber.core.memory.model.MemoryRecord
+import app.amber.core.model.MemoryKind
 import java.util.Locale
 
 object MemoryPromptBuilder {
@@ -23,6 +24,12 @@ object MemoryPromptBuilder {
                 append(record.kind.wireName)
                 if (record.pinned) append("/pinned")
                 append("] ")
+                if (record.kind == MemoryKind.TOPIC &&
+                    !record.topicTitle.isNullOrBlank()
+                ) {
+                    append(record.topicTitle)
+                    append(": ")
+                }
                 append(record.content.trim().replace("\n", " "))
                 if (debug) {
                     append(" (id=")

@@ -92,6 +92,10 @@ data class MemoryRecord(
     val createdAt: Long = 0L,
     val updatedAt: Long = 0L,
     val lastUsedAt: Long? = null,
+    /** Topic display title; set only when kind == TOPIC. */
+    val topicTitle: String? = null,
+    /** Member memory ids grouped by this topic; set only when kind == TOPIC. */
+    val memberIds: List<Int> = emptyList(),
     /** P2-06: compare-and-set revision; edit/delete bind to the approved revision. */
     val revision: Long = 1,
     /** P2-06: run that triggered this write (pollution auditing). */
@@ -149,6 +153,10 @@ data class MemoryWorkerSetting(
     val extractionEnabled: Boolean = true,
     val dreamMaintenanceEnabled: Boolean = true,
     val dreamModelEnabled: Boolean = false,
+    // Deterministic maintenance output (exact-duplicate merges, expired
+    // archives, low-value candidate ignores, conservative promotes) applies
+    // without review; model-produced plans still require confirmation.
+    val autoApplyMaintenance: Boolean = true,
     // Legacy alias from the old Daydream switch. Settings decode migrates this
     // into dreamModelEnabled and keeps this false on newly written settings.
     val dreamEnabled: Boolean = false,

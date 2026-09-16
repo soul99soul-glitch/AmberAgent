@@ -33,6 +33,8 @@
     <string name="setting_agent_memory_kind_reference">资料</string>
     <string name="setting_agent_memory_kind_routine">习惯</string>
     <string name="setting_agent_memory_kind_note">笔记</string>
+    <string name="setting_agent_memory_kind_topic">主题</string>
+    <string name="setting_agent_memory_metadata_members">成员记忆</string>
     <string name="setting_agent_memory_source_chat">来自聊天</string>
     <string name="setting_agent_memory_source_messages">关联消息：%1$d 条</string>
     <string name="setting_agent_memory_source_supersedes">替代旧记忆：%1$d 条</string>
@@ -40,6 +42,7 @@
     <string name="setting_agent_memory_source_tool">工具写入</string>
     <string name="setting_agent_memory_source_run">任务运行写入</string>
     <string name="setting_agent_memory_source_manual">手动或未标记写入</string>
+    <string name="setting_agent_memory_source_dream">Daydream 整理</string>
     <string name="setting_agent_memory_info_content_description">说明记忆分区</string>
     <string name="setting_agent_memory_add_content_description">新增记忆</string>
 </resources>

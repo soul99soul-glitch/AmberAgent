@@ -31,7 +31,7 @@ data class PersistedMemoryDreamPlan(
     val summary: String
         get() = "合并 ${plan.mergeSuggestions.size} · 提升 ${plan.promoteMemoryIds.size} · " +
             "归档 ${plan.archiveMemoryIds.size} · 替换 ${plan.supersedeSuggestions.size} · " +
-            "忽略候选 ${plan.ignoreCandidateIds.size}"
+            "忽略候选 ${plan.ignoreCandidateIds.size} · 主题 ${plan.topicSuggestions.size}"
 }
 
 class MemoryDreamPlanStore(
@@ -89,6 +89,34 @@ class MemoryDreamPlanStore(
                 createdAt = now,
                 appliedAt = null,
                 dismissedAt = now,
+            )
+        )
+    }
+
+    /**
+     * Audit-trail row for a maintenance plan that was applied without review.
+     * Plain insert: it must not disturb (dismiss/replace) a plan still waiting
+     * for review the way [savePending]/[saveApplied] do via replacePending.
+     */
+    suspend fun recordAppliedRun(
+        plan: MemoryDreamPlan,
+        source: MemoryDreamPlanSource,
+        now: Long = System.currentTimeMillis(),
+    ) = withPlanWriter {
+        dao.insert(
+            MemoryDreamPlanEntity(
+                id = Uuid.random().toString(),
+                planJson = json.encodeToString(MemoryDreamPlan.serializer(), plan),
+                status = MemoryDreamPlanStatus.APPLIED.wireName,
+                source = source.wireName,
+                mergeCount = plan.mergeSuggestions.size,
+                promoteCount = plan.promoteMemoryIds.size,
+                archiveCount = plan.archiveMemoryIds.size,
+                supersedeCount = plan.supersedeSuggestions.size,
+                ignoreCandidateCount = plan.ignoreCandidateIds.size,
+                createdAt = now,
+                appliedAt = now,
+                dismissedAt = null,
             )
         )
     }

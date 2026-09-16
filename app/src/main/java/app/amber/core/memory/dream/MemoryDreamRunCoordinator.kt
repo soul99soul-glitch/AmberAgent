@@ -15,6 +15,7 @@ class MemoryDreamRunCoordinator(
     private val planner: MemoryDreamPlanProvider,
     private val planStore: MemoryDreamPlanStore,
     private val notifier: MemoryDreamReviewNotifier,
+    private val applier: MemoryDreamPlanApplier,
     private val restoreWriteGate: SyncRestoreWriteGate? = null,
 ) {
     suspend fun run(
@@ -50,19 +51,40 @@ class MemoryDreamRunCoordinator(
         }
 
         notifier.notifyRunning()
-        val plan = planner.plan()
-        if (!plan.hasChanges) {
-            if (!isManualRun) {
-                planStore.recordAutoRun(plan, now)
-            }
-            notifier.cancel()
-            return MemoryDreamRunOutcome.EMPTY
+        val split = planner.plan()
+        val source = if (isManualRun) MemoryDreamPlanSource.MANUAL else MemoryDreamPlanSource.AUTO
+
+        // Deterministic maintenance applies without review when enabled. The
+        // model plan was computed against the pre-maintenance snapshot; the
+        // applier re-filters stale ids at apply time, so that is safe.
+        val appliedMaintenance = if (worker.autoApplyMaintenance && split.maintenance.hasChanges) {
+            applier.apply(split.maintenance).takeIf { it.hasChanges }
+        } else {
+            null
+        }
+        if (appliedMaintenance != null) {
+            planStore.recordAppliedRun(appliedMaintenance, source, now)
         }
 
-        val source = if (isManualRun) MemoryDreamPlanSource.MANUAL else MemoryDreamPlanSource.AUTO
-        planStore.savePending(plan, source, now)
-        notifier.notifyPendingReview(plan)
-        return MemoryDreamRunOutcome.PENDING_REVIEW
+        // With auto-apply on, only the model part still needs review; with it
+        // off, merge both sources into one pending plan (legacy behavior).
+        val reviewPlan = if (worker.autoApplyMaintenance) split.model else split.merged()
+        if (reviewPlan?.hasChanges == true) {
+            planStore.savePending(reviewPlan, source, now)
+            notifier.notifyPendingReview(reviewPlan)
+            return MemoryDreamRunOutcome.PENDING_REVIEW
+        }
+
+        if (appliedMaintenance != null) {
+            notifier.cancel()
+            return MemoryDreamRunOutcome.AUTO_APPLIED
+        }
+
+        if (!isManualRun) {
+            planStore.recordAutoRun(MemoryDreamPlan(), now)
+        }
+        notifier.cancel()
+        return MemoryDreamRunOutcome.EMPTY
     }
 
     private suspend fun captureWriteContext(): CoroutineContext {
@@ -77,5 +99,6 @@ enum class MemoryDreamRunOutcome {
     DISABLED,
     AUTO_DAILY_LIMIT,
     EMPTY,
+    AUTO_APPLIED,
     PENDING_REVIEW,
 }

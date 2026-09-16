@@ -40,6 +40,7 @@ open class MemoryRepository(
 
         /** Trigger label for automatic extraction writes (P2-06 provenance). */
         const val TRIGGER_AUTO_EXTRACTION = "auto_extraction"
+        const val TRIGGER_DREAM = "dream"
     }
 
     fun getMemoriesOfAssistantFlow(assistantId: String): Flow<List<AssistantMemory>> =
@@ -151,6 +152,8 @@ open class MemoryRepository(
         pinned: Boolean = false,
         sourceRunId: String? = null,
         sourceTrigger: String? = null,
+        topicTitle: String? = null,
+        memberIds: List<Int> = emptyList(),
     ): MemoryRecord = withMemoryWriter {
         addMemoryInternal(
             scope = scope,
@@ -165,6 +168,8 @@ open class MemoryRepository(
             pinned = pinned,
             sourceRunId = sourceRunId,
             sourceTrigger = sourceTrigger,
+            topicTitle = topicTitle,
+            memberIds = memberIds,
         )
     }
 
@@ -181,6 +186,8 @@ open class MemoryRepository(
         pinned: Boolean = false,
         sourceRunId: String? = null,
         sourceTrigger: String? = null,
+        topicTitle: String? = null,
+        memberIds: List<Int> = emptyList(),
     ): MemoryRecord {
         val now = System.currentTimeMillis()
         val id = memoryDAO.insertMemory(
@@ -201,6 +208,8 @@ open class MemoryRepository(
                 revision = 1,
                 sourceRunId = sourceRunId,
                 sourceTrigger = sourceTrigger,
+                topicTitle = topicTitle,
+                memberIdsJson = JsonInstant.encodeToString(memberIds.distinct()),
             )
         ).toInt()
         return memoryDAO.getMemoryById(id)?.toRecord() ?: error("Created memory #$id not found")
@@ -235,6 +244,8 @@ open class MemoryRepository(
             lastUsedAt = entity.lastUsedAt,
             sourceRunId = entity.sourceRunId,
             sourceTrigger = entity.sourceTrigger,
+            topicTitle = entity.topicTitle,
+            memberIdsJson = entity.memberIdsJson,
             expectedRevision = entity.revision,
         )
         if (affected == 0) {
@@ -280,7 +291,11 @@ open class MemoryRepository(
         sourceRunId: String?,
         sourceTrigger: String?,
     ): MemoryCasUpdateResult {
-        val old = memoryDAO.getMemoryById(id) ?: error("Memory record #$id not found")
+        // A record that vanished since the caller's snapshot is "stale" in the
+        // same sense as a revision mismatch — surface it uniformly so callers
+        // can fall back to review instead of aborting a batch.
+        val old = memoryDAO.getMemoryById(id)
+            ?: throw MemoryStaleException(id, expectedRevision, actualRevision = 0)
         val updatedAt = System.currentTimeMillis()
         val affected = memoryDAO.updateContentCas(
             id = id,
@@ -333,6 +348,8 @@ open class MemoryRepository(
             lastUsedAt = old.lastUsedAt,
             sourceRunId = old.sourceRunId,
             sourceTrigger = old.sourceTrigger,
+            topicTitle = old.topicTitle,
+            memberIdsJson = old.memberIdsJson,
             expectedRevision = memory.revision,
         )
         if (affected == 0) {
@@ -467,6 +484,8 @@ open class MemoryRepository(
         revision = revision,
         sourceRunId = sourceRunId,
         sourceTrigger = sourceTrigger,
+        topicTitle = topicTitle,
+        memberIds = decodeIntList(memberIdsJson),
         sourceConversationId = sourceConversationId,
         sourceMessageIds = decodeStringList(sourceMessageIdsJson),
         supersedesIds = decodeIntList(supersedesIdsJson),
@@ -487,6 +506,8 @@ open class MemoryRepository(
         revision = revision,
         sourceRunId = sourceRunId,
         sourceTrigger = sourceTrigger,
+        topicTitle = topicTitle,
+        memberIds = memberIds,
         sourceConversationId = sourceConversationId,
         sourceMessageIds = sourceMessageIds,
         supersedesIds = supersedesIds,
@@ -511,6 +532,8 @@ open class MemoryRepository(
         createdAt = createdAt,
         updatedAt = updatedAt,
         lastUsedAt = lastUsedAt,
+        topicTitle = topicTitle,
+        memberIds = decodeIntList(memberIdsJson),
         revision = revision,
         sourceRunId = sourceRunId,
         sourceTrigger = sourceTrigger,
@@ -530,8 +553,12 @@ open class MemoryRepository(
         pinned = pinned,
         archived = archived,
         createdAt = createdAt.takeIf { it > 0 } ?: System.currentTimeMillis(),
-        updatedAt = System.currentTimeMillis(),
+        // Inserts keep the record's timestamp (imports preserve file state);
+        // the update path overrides updatedAt via its own DAO parameter.
+        updatedAt = updatedAt.takeIf { it > 0 } ?: System.currentTimeMillis(),
         lastUsedAt = lastUsedAt,
+        topicTitle = topicTitle,
+        memberIdsJson = JsonInstant.encodeToString(memberIds.distinct()),
         revision = revision.takeIf { it > 0 } ?: 1,
         sourceRunId = sourceRunId,
         sourceTrigger = sourceTrigger,

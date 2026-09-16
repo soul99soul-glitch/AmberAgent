@@ -33,6 +33,8 @@
     <string name="setting_agent_memory_kind_reference">Reference</string>
     <string name="setting_agent_memory_kind_routine">Routine</string>
     <string name="setting_agent_memory_kind_note">Note</string>
+    <string name="setting_agent_memory_kind_topic">Topic</string>
+    <string name="setting_agent_memory_metadata_members">Members</string>
     <string name="setting_agent_memory_source_chat">From chat</string>
     <string name="setting_agent_memory_source_messages">Linked messages: %1$d</string>
     <string name="setting_agent_memory_source_supersedes">Replaces older memories: %1$d</string>
@@ -40,6 +42,7 @@
     <string name="setting_agent_memory_source_tool">Tool write</string>
     <string name="setting_agent_memory_source_run">Task run</string>
     <string name="setting_agent_memory_source_manual">Manual or unlabelled write</string>
+    <string name="setting_agent_memory_source_dream">Daydream review</string>
     <string name="setting_agent_memory_info_content_description">Explain memory section</string>
     <string name="setting_agent_memory_add_content_description">Add memory</string>
 </resources>

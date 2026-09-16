@@ -2019,7 +2019,8 @@
   <string name="memory_dream_source">출처: %1$s</string>
   <string name="memory_dream_source_auto">자동 Daydream</string>
   <string name="memory_dream_source_manual">수동 생성</string>
-  <string name="memory_dream_summary">병합 %1$d개 · 승격 %2$d개 · 보관 %3$d개 · 교체 %4$d개 · 후보 무시 %5$d개</string>
+  <string name="memory_dream_summary">병합 %1$d개 · 승격 %2$d개 · 보관 %3$d개 · 교체 %4$d개 · 후보 무시 %5$d개 · 주제 %6$d개</string>
+  <string name="memory_dream_topic">주제 "%1$s"이(가) %2$s을(를) 그룹화%3$s</string>
   <string name="memory_event_log_desc">최근 메모리 백그라운드 이벤트 %1$d개를 봅니다.</string>
   <string name="memory_event_log_empty">메모리 이벤트가 없습니다.</string>
   <string name="memory_event_log_title">이벤트 로그</string>
@@ -2030,8 +2031,6 @@
   <string name="memory_frontmatter_import_desc">AmberAgentMemory 디렉터리에서 .mem.md 파일을 읽어 Room 주 저장소에 다시 씁니다.</string>
   <string name="memory_frontmatter_import_title">Frontmatter 가져오기</string>
   <string name="memory_generate_suggestion">제안 생성</string>
-  <string name="memory_idle_only_desc">끄면 자동 정리에 Android device idle이 필요하지 않지만 네트워크와 충분한 배터리는 필요합니다.</string>
-  <string name="memory_idle_only_title">기기가 유휴 상태일 때만 자동 실행</string>
   <string name="memory_ignore">무시</string>
   <string name="memory_ignore_low_confidence">낮은 신뢰도 후보 무시(%1$d)</string>
   <string name="memory_import">가져오기</string>
@@ -2041,19 +2040,19 @@
   <string name="memory_library_title">메모리 라이브러리</string>
   <string name="memory_llm_maintenance_desc">켜면 Daydream이 모델에 충돌 교체와 같은 고급 제안을 요청할 수 있지만 적용 전에 사람의 확인이 필요합니다.</string>
   <string name="memory_llm_maintenance_title">LLM 정리 제안</string>
-  <string name="memory_local_maintenance_desc">24시간마다 백그라운드에서 검토할 정리 제안을 생성하며 적용 전에 확인이 필요합니다. 핵심 메모리는 자동으로 변경되지 않습니다. 자동 실행에는 네트워크와 충분한 배터리가 필요하며 설정에 따라 기기 유휴 상태가 필요할 수 있습니다.
+  <string name="memory_local_maintenance_desc">매일 밤 백그라운드에서 자동으로 정리합니다. 완전히 동일한 중복 병합, 만료 항목 보관, 저가치 후보 무시 같은 결정적 정리는 자동으로 적용되고 이벤트 로그에 기록됩니다. 모델 제안은 계속 확인이 필요합니다. 핵심 메모리는 자동으로 변경되지 않습니다. 자동 실행에는 네트워크와 충분한 배터리가 필요하며 설정에 따라 충전 중이어야 할 수 있습니다.
 현재 후보 %1$d개 · 최근 이벤트 %2$d개.</string>
   <string name="memory_local_maintenance_title">로컬 정리 제안</string>
   <string name="memory_long_title">장기 메모리</string>
   <string name="memory_maintenance_tools_title">유지 관리 도구</string>
-  <string name="memory_manual_review_desc">수동 또는 백그라운드에서 생성된 diff는 확인이 필요하며 백그라운드 Daydream은 정리 결과를 자동으로 적용하지 않습니다.</string>
+  <string name="memory_manual_review_desc">모델이 생성한 제안을 여기서 검토합니다. 결정적 정리는 자동으로 적용되며 모델 제안만 확인을 기다립니다.</string>
   <string name="memory_manual_review_title">수동 정리 검토</string>
   <string name="memory_no_manual_plan">수동 정리 제안이 아직 없습니다.</string>
   <string name="memory_notification_failed_title">Daydream 정리 실패</string>
   <string name="memory_notification_pending_title">메모리 정리 제안이 생성되었습니다</string>
   <string name="memory_notification_running_text">단기 및 장기 메모리 확인 중</string>
   <string name="memory_notification_running_title">AmberAgent가 정리 제안을 생성하는 중</string>
-  <string name="memory_notification_summary">병합 %1$d · 승격 %2$d · 보관 %3$d · 교체 %4$d · 후보 무시 %5$d</string>
+  <string name="memory_notification_summary">병합 %1$d · 승격 %2$d · 보관 %3$d · 교체 %4$d · 후보 무시 %5$d · 주제 %6$d</string>
   <string name="memory_recall_desc">핵심, 단기, 장기, 최근 대화, 시간 알림 및 선택적 회상입니다.</string>
   <string name="memory_recall_title">메모리 스위치</string>
   <string name="memory_recommend_manual_review">· 수동 검토 권장</string>
@@ -3203,6 +3202,10 @@
   <string name="memory_dream_apply_failed">Dream 제안 적용 실패: %1$s</string>
   <string name="memory_dream_plan_applied">Dream 정리 제안을 적용했습니다</string>
   <string name="memory_dream_plan_failed">Dream 정리 실패: %1$s</string>
+  <string name="memory_dream_auto_applied">안전한 정리 %1$d개를 자동으로 적용했습니다.</string>
+  <string name="memory_dream_auto_applied_pending">안전한 정리 %1$d개를 자동으로 적용하고 새 검토 대기 제안을 생성했습니다.</string>
+  <string name="memory_auto_apply_title">안전한 정리 자동 적용</string>
+  <string name="memory_auto_apply_desc">결정적 정리(완전 동일 중복, 만료 항목, 저가치 후보)는 확인 없이 적용됩니다. 모델 제안은 계속 확인이 필요합니다.</string>
   <string name="memory_dream_plan_generated">Dream 정리 제안을 생성했습니다</string>
   <string name="memory_dream_plan_replaced">Dream 정리 제안을 생성했으며 이전 검토 대기 제안은 폐기되었습니다</string>
   <string name="memory_export_failed">내보내기 실패: %1$s</string>

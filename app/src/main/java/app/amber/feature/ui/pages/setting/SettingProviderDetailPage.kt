@@ -20,12 +20,14 @@ import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -99,6 +101,26 @@ fun SettingProviderDetailPage(id: Uuid, vm: SettingVM = koinViewModel()) {
             )
         }
         navController.popBackStack()
+    }
+
+    // Auto-commit the config draft when leaving the Configuration tab — the
+    // Models tab and the chat path both read the persisted provider, so an
+    // API key that was typed but never saved would fetch/chat with an empty
+    // credential. Dirty check keeps the write a no-op when nothing changed;
+    // deleting the provider makes the map a no-op for the stale draft id.
+    val latestDraftProvider by rememberUpdatedState(internalProvider)
+    val latestSavedProvider by rememberUpdatedState(provider)
+    val persistDirtyDraft = {
+        val draft = latestDraftProvider
+        if (draft != latestSavedProvider) {
+            onEdit(draft)
+        }
+    }
+    LaunchedEffect(pager.targetPage) {
+        if (pager.targetPage != 0) persistDirtyDraft()
+    }
+    DisposableEffect(Unit) {
+        onDispose { persistDirtyDraft() }
     }
 
     ShareSheet(shareSheetState)

@@ -26,6 +26,7 @@ import app.amber.core.memory.export.MemoryImportExportManager
 import app.amber.core.memory.model.MemoryCandidateStatus
 import app.amber.core.memory.model.MemoryEvent
 import app.amber.core.memory.model.MemoryEventType
+import app.amber.core.memory.model.MemoryWorkerDreamGate
 import app.amber.core.memory.store.bucketForScope
 import app.amber.core.memory.store.MemoryStaleException
 import app.amber.core.model.AssistantMemory
@@ -315,22 +316,53 @@ class SettingAgentMemoryVM(
             _memoryTaskRunning.value = true
             runCatching {
                 withContext(Dispatchers.IO) {
-                    val plan = memoryDreamPlanner.plan()
-                    val replacedPending = plan.hasChanges && memoryDreamPlanStore.getPendingPlan() != null
-                    if (plan.hasChanges) {
-                        memoryDreamPlanStore.savePending(plan, MemoryDreamPlanSource.MANUAL)
+                    val worker = settings.value.agentRuntime.memoryWorker
+                    if (!worker.enabled || !MemoryWorkerDreamGate.isAnyDreamEnabled(worker)) {
+                        return@withContext null
                     }
-                    plan to replacedPending
-                }
-            }.onSuccess { (plan, replacedPending) ->
-                _operationMessage.value = if (plan.hasChanges) {
-                    if (replacedPending) {
-                        context.getString(R.string.memory_dream_plan_replaced)
+                    val split = memoryDreamPlanner.plan()
+                    val appliedMaintenance = if (worker.autoApplyMaintenance && split.maintenance.hasChanges) {
+                        memoryDreamApplier.apply(split.maintenance).takeIf { it.hasChanges }
                     } else {
-                        context.getString(R.string.memory_dream_plan_generated)
+                        null
                     }
-                } else {
-                    context.getString(R.string.memory_no_maintenance_needed)
+                    if (appliedMaintenance != null) {
+                        memoryDreamPlanStore.recordAppliedRun(
+                            appliedMaintenance,
+                            MemoryDreamPlanSource.MANUAL,
+                        )
+                    }
+                    val reviewPlan = if (worker.autoApplyMaintenance) split.model else split.merged()
+                    val replacedPending = reviewPlan?.hasChanges == true &&
+                        memoryDreamPlanStore.getPendingPlan() != null
+                    if (reviewPlan?.hasChanges == true) {
+                        memoryDreamPlanStore.savePending(reviewPlan, MemoryDreamPlanSource.MANUAL)
+                    }
+                    Triple(appliedMaintenance, reviewPlan?.hasChanges == true, replacedPending)
+                }
+            }.onSuccess { result ->
+                if (result == null) {
+                    _operationMessage.value = context.getString(R.string.memory_run_unavailable_desc)
+                    return@onSuccess
+                }
+                val (appliedMaintenance, hasPending, replacedPending) = result
+                val appliedCount = appliedMaintenance?.let { plan ->
+                    plan.mergeSuggestions.size + plan.promoteMemoryIds.size +
+                        plan.archiveMemoryIds.size + plan.supersedeSuggestions.size +
+                        plan.ignoreCandidateIds.size
+                } ?: 0
+                _operationMessage.value = when {
+                    appliedCount > 0 && hasPending -> context.getString(
+                        R.string.memory_dream_auto_applied_pending,
+                        appliedCount,
+                    )
+                    appliedCount > 0 -> context.getString(
+                        R.string.memory_dream_auto_applied,
+                        appliedCount,
+                    )
+                    hasPending && replacedPending -> context.getString(R.string.memory_dream_plan_replaced)
+                    hasPending -> context.getString(R.string.memory_dream_plan_generated)
+                    else -> context.getString(R.string.memory_no_maintenance_needed)
                 }
             }.onFailure { error ->
                 _operationMessage.value = context.getString(

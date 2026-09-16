@@ -2019,7 +2019,8 @@
   <string name="memory_dream_source">ソース：%1$s</string>
   <string name="memory_dream_source_auto">自動 Daydream</string>
   <string name="memory_dream_source_manual">手動生成</string>
-  <string name="memory_dream_summary">マージ %1$d · 昇格 %2$d · アーカイブ %3$d · 置換 %4$d · 候補を無視 %5$d</string>
+  <string name="memory_dream_summary">マージ %1$d · 昇格 %2$d · アーカイブ %3$d · 置換 %4$d · 候補を無視 %5$d · トピック %6$d</string>
+  <string name="memory_dream_topic">トピック「%1$s」が %2$s を集約%3$s</string>
   <string name="memory_event_log_desc">直近 %1$d 件のメモリバックグラウンドイベントを表示します。</string>
   <string name="memory_event_log_empty">メモリイベントはありません。</string>
   <string name="memory_event_log_title">イベントログ</string>
@@ -2030,8 +2031,6 @@
   <string name="memory_frontmatter_import_desc">AmberAgentMemory ディレクトリから .mem.md ファイルを読み込み、Room の主ストレージに書き戻します。</string>
   <string name="memory_frontmatter_import_title">Frontmatter のインポート</string>
   <string name="memory_generate_suggestion">提案を生成</string>
-  <string name="memory_idle_only_desc">オフにすると自動整理に Android のアイドル状態は不要になりますが、ネットワーク接続と十分なバッテリーは必要です。</string>
-  <string name="memory_idle_only_title">端末がアイドル時のみ自動実行</string>
   <string name="memory_ignore">無視</string>
   <string name="memory_ignore_low_confidence">低信頼度の候補を無視（%1$d）</string>
   <string name="memory_import">インポート</string>
@@ -2041,19 +2040,19 @@
   <string name="memory_library_title">メモリライブラリ</string>
   <string name="memory_llm_maintenance_desc">オンにすると Daydream がモデルに競合の置換など高度な提案を求められます。適用には引き続き人の確認が必要です。</string>
   <string name="memory_llm_maintenance_title">LLM による整理提案</string>
-  <string name="memory_local_maintenance_desc">24 時間ごとにバックグラウンドで確認待ちの整理提案を生成します。適用前に確認が必要で、コアメモリは自動変更されません。自動実行にはネットワークと十分なバッテリーが必要で、設定によって端末のアイドル状態も必要です。
+  <string name="memory_local_maintenance_desc">夜間にバックグラウンドで自動整理します。完全一致の重複マージ・期限切れのアーカイブ・低価値候補の無視などの確定的な整理は自動適用され、イベントログで確認できます。モデルの提案は引き続き確認が必要です。コアメモリは自動変更されません。自動実行にはネットワークと十分なバッテリーが必要で、設定によって充電中も必要です。
 候補 %1$d 件、最近のイベント %2$d 件。</string>
   <string name="memory_local_maintenance_title">ローカル整理の提案</string>
   <string name="memory_long_title">長期メモリ</string>
   <string name="memory_maintenance_tools_title">メンテナンスツール</string>
-  <string name="memory_manual_review_desc">手動またはバックグラウンドで生成された diff は確認が必要です。バックグラウンドの Daydream が整理結果を自動適用することはありません。</string>
+  <string name="memory_manual_review_desc">モデルが生成した提案をここで確認します。確定的な整理は自動適用され、モデルの提案のみ確認待ちになります。</string>
   <string name="memory_manual_review_title">手動整理の確認</string>
   <string name="memory_no_manual_plan">手動整理の提案はまだありません。</string>
   <string name="memory_notification_failed_title">Daydream の整理に失敗</string>
   <string name="memory_notification_pending_title">メモリ整理の提案が生成されました</string>
   <string name="memory_notification_running_text">短期メモリと長期メモリを確認中</string>
   <string name="memory_notification_running_title">AmberAgent が整理の提案を生成中</string>
-  <string name="memory_notification_summary">マージ %1$d · 昇格 %2$d · アーカイブ %3$d · 置換 %4$d · 候補を無視 %5$d</string>
+  <string name="memory_notification_summary">マージ %1$d · 昇格 %2$d · アーカイブ %3$d · 置換 %4$d · 候補を無視 %5$d · トピック %6$d</string>
   <string name="memory_recall_desc">コア、短期、長期、最近の会話、時間リマインダー、選択的想起。</string>
   <string name="memory_recall_title">メモリのスイッチ</string>
   <string name="memory_recommend_manual_review">· 手動確認を推奨</string>
@@ -3203,6 +3202,10 @@
   <string name="memory_dream_apply_failed">Dream の提案を適用できませんでした：%1$s</string>
   <string name="memory_dream_plan_applied">Dream の整理提案を適用しました</string>
   <string name="memory_dream_plan_failed">Dream の整理に失敗しました：%1$s</string>
+  <string name="memory_dream_auto_applied">安全な整理を %1$d 件自動適用しました。</string>
+  <string name="memory_dream_auto_applied_pending">安全な整理を %1$d 件自動適用し、新しい確認待ちの提案を生成しました。</string>
+  <string name="memory_auto_apply_title">安全な整理を自動適用</string>
+  <string name="memory_auto_apply_desc">確定的な整理（完全一致の重複、期限切れ項目、低価値候補）は確認なしで適用されます。モデルの提案は引き続き確認が必要です。</string>
   <string name="memory_dream_plan_generated">Dream の整理提案を生成しました</string>
   <string name="memory_dream_plan_replaced">Dream の整理提案を生成しました。前の審査待ち提案は破棄されました</string>
   <string name="memory_export_failed">エクスポートに失敗しました：%1$s</string>

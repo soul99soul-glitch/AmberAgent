@@ -2,6 +2,7 @@ package app.amber.core.di
 
 import app.amber.core.memory.dream.MemoryDreamApplier
 import app.amber.core.memory.dream.MemoryDreamNotifier
+import app.amber.core.memory.dream.MemoryDreamPlanApplier
 import app.amber.core.memory.dream.MemoryDreamPlanStore
 import app.amber.core.memory.dream.MemoryDreamPlanProvider
 import app.amber.core.memory.dream.MemoryDreamPlanner
@@ -34,13 +35,14 @@ val memoryModule = module {
     single<MemoryDreamPlanProvider> { get<MemoryDreamPlanner>() }
 
     single { MemoryDreamApplier(get(), get(), get()) }
+    single<MemoryDreamPlanApplier> { get<MemoryDreamApplier>() }
 
     single { MemoryDreamPlanStore(get(), get(), get()) }
 
     single { MemoryDreamNotifier(get()) }
     single<MemoryDreamReviewNotifier> { get<MemoryDreamNotifier>() }
 
-    single { MemoryDreamRunCoordinator(get(), get(), get(), get()) }
+    single { MemoryDreamRunCoordinator(get(), get(), get(), get(), get()) }
 
     single { MemoryDreamScheduler(get(), get()) }
 

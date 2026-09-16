@@ -2046,7 +2046,8 @@ What would you like to talk about today?</string>
   <string name="memory_dream_source">Source: %1$s</string>
   <string name="memory_dream_source_auto">automatic Daydream</string>
   <string name="memory_dream_source_manual">manual generation</string>
-  <string name="memory_dream_summary">Merge %1$d · promote %2$d · archive %3$d · replace %4$d · ignore candidates %5$d</string>
+  <string name="memory_dream_summary">Merge %1$d · promote %2$d · archive %3$d · replace %4$d · ignore candidates %5$d · topics %6$d</string>
+  <string name="memory_dream_topic">Topic "%1$s" groups %2$s%3$s</string>
   <string name="memory_event_log_desc">View the last %1$d background memory events.</string>
   <string name="memory_event_log_empty">No memory events.</string>
   <string name="memory_event_log_title">Event log</string>
@@ -2057,8 +2058,6 @@ What would you like to talk about today?</string>
   <string name="memory_frontmatter_import_desc">Read .mem.md files from the AmberAgentMemory directory and write them back to Room storage.</string>
   <string name="memory_frontmatter_import_title">Frontmatter import</string>
   <string name="memory_generate_suggestion">Generate suggestion</string>
-  <string name="memory_idle_only_desc">When off, automatic maintenance no longer requires Android device idle; network and sufficient battery are still required.</string>
-  <string name="memory_idle_only_title">Run automatically only when device is idle</string>
   <string name="memory_ignore">Ignore</string>
   <string name="memory_ignore_low_confidence">Ignore low-confidence candidates (%1$d)</string>
   <string name="memory_import">Import</string>
@@ -2068,19 +2067,19 @@ What would you like to talk about today?</string>
   <string name="memory_library_title">Memory library</string>
   <string name="memory_llm_maintenance_desc">When enabled, Daydream can ask the model for advanced suggestions such as conflict replacement; human confirmation is still required before applying them.</string>
   <string name="memory_llm_maintenance_title">LLM maintenance suggestions</string>
-  <string name="memory_local_maintenance_desc">Every 24 hours, generate suggestions for review in the background; confirmation is required before applying them. Core memory is never changed automatically. Automatic runs need network and sufficient battery, and may require device idle according to settings.
+  <string name="memory_local_maintenance_desc">Runs in the background at night: deterministic cleanups (exact duplicates, expired items, low-value candidates) apply automatically and are recorded in the event log. Core memory is never changed automatically. Automatic runs need network and sufficient battery, and may require the device to be charging according to settings.
 Pending candidates: %1$d · recent events: %2$d.</string>
   <string name="memory_local_maintenance_title">Local maintenance suggestions</string>
   <string name="memory_long_title">Long-term memory</string>
   <string name="memory_maintenance_tools_title">Maintenance tools</string>
-  <string name="memory_manual_review_desc">Diffs generated manually or in the background require confirmation; background Daydream never applies maintenance results automatically.</string>
+  <string name="memory_manual_review_desc">Review model-generated suggestions here. Deterministic cleanups apply automatically; only model suggestions wait for confirmation.</string>
   <string name="memory_manual_review_title">Manual maintenance review</string>
   <string name="memory_no_manual_plan">No manual maintenance suggestions yet.</string>
   <string name="memory_notification_failed_title">Daydream maintenance failed</string>
   <string name="memory_notification_pending_title">Memory maintenance suggestions ready</string>
   <string name="memory_notification_running_text">Checking short-term and long-term memory</string>
   <string name="memory_notification_running_title">AmberAgent is generating maintenance suggestions</string>
-  <string name="memory_notification_summary">Merge %1$d · promote %2$d · archive %3$d · replace %4$d · ignore candidates %5$d</string>
+  <string name="memory_notification_summary">Merge %1$d · promote %2$d · archive %3$d · replace %4$d · ignore candidates %5$d · topics %6$d</string>
   <string name="memory_recall_desc">Core, short-term, long-term, recent chat, time reminders, and selective recall.</string>
   <string name="memory_recall_title">Memory switches</string>
   <string name="memory_recommend_manual_review">· manual review recommended</string>
@@ -3230,6 +3229,10 @@ Keep AmberAgent in the foreground while authorizing; the one-shot local callback
   <string name="memory_dream_apply_failed">Failed to apply Dream suggestion: %1$s</string>
   <string name="memory_dream_plan_applied">Applied Dream maintenance suggestion</string>
   <string name="memory_dream_plan_failed">Dream maintenance failed: %1$s</string>
+  <string name="memory_dream_auto_applied">Auto-applied %1$d safe maintenance changes.</string>
+  <string name="memory_dream_auto_applied_pending">Auto-applied %1$d safe maintenance changes; a new suggestion is pending review.</string>
+  <string name="memory_auto_apply_title">Auto-apply safe maintenance</string>
+  <string name="memory_auto_apply_desc">Deterministic cleanups (exact duplicates, expired items, low-value candidates) apply without review. Model suggestions still need confirmation.</string>
   <string name="memory_dream_plan_generated">Generated a Dream maintenance suggestion</string>
   <string name="memory_dream_plan_replaced">Generated a Dream maintenance suggestion; the previous pending suggestion was discarded</string>
   <string name="memory_export_failed">Export failed: %1$s</string>

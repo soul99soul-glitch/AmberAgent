@@ -41,4 +41,26 @@ class MemoryFrontmatterCodecTest {
         assertTrue(decoded.pinned)
         assertTrue(decoded.archived)
     }
+
+    @Test
+    fun roundTripsTopicFields() {
+        val codec = MemoryFrontmatterCodec()
+        val record = MemoryRecord(
+            id = 9,
+            content = "用户偏好中文简洁回复的主题摘要。",
+            scope = MemoryScope.LONG_TERM,
+            kind = MemoryKind.TOPIC,
+            assistantId = "__long_term__",
+            topicTitle = "回复风格偏好",
+            memberIds = listOf(1, 2, 5),
+            createdAt = 1_700_000_000_000,
+            updatedAt = 1_700_000_100_000,
+        )
+
+        val decoded = codec.decode(codec.encode(record))
+
+        assertEquals(MemoryKind.TOPIC, decoded.kind)
+        assertEquals("回复风格偏好", decoded.topicTitle)
+        assertEquals(listOf(1, 2, 5), decoded.memberIds)
+    }
 }

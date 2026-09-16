@@ -2019,7 +2019,8 @@
   <string name="memory_dream_source">Источник: %1$s</string>
   <string name="memory_dream_source_auto">автоматический Daydream</string>
   <string name="memory_dream_source_manual">создано вручную</string>
-  <string name="memory_dream_summary">объединить: %1$d · повысить: %2$d · архивировать: %3$d · заменить: %4$d · игнорировать кандидатов: %5$d</string>
+  <string name="memory_dream_summary">объединить: %1$d · повысить: %2$d · архивировать: %3$d · заменить: %4$d · игнорировать кандидатов: %5$d · темы: %6$d</string>
+  <string name="memory_dream_topic">Тема «%1$s» объединяет %2$s%3$s</string>
   <string name="memory_event_log_desc">Просмотреть последние фоновые события памяти: %1$d.</string>
   <string name="memory_event_log_empty">Событий памяти нет.</string>
   <string name="memory_event_log_title">Журнал событий</string>
@@ -2030,8 +2031,6 @@
   <string name="memory_frontmatter_import_desc">Прочитать файлы .mem.md из каталога AmberAgentMemory и записать их обратно в основное хранилище Room.</string>
   <string name="memory_frontmatter_import_title">Импорт Frontmatter</string>
   <string name="memory_generate_suggestion">Создать предложение</string>
-  <string name="memory_idle_only_desc">После отключения автоматическая обработка не требует простоя Android, но сеть и достаточный заряд по-прежнему нужны.</string>
-  <string name="memory_idle_only_title">Запускать автоматически только при простое устройства</string>
   <string name="memory_ignore">Игнорировать</string>
   <string name="memory_ignore_low_confidence">Игнорировать кандидатов с низкой уверенностью (%1$d)</string>
   <string name="memory_import">Импорт</string>
@@ -2041,19 +2040,19 @@
   <string name="memory_library_title">Библиотека памяти</string>
   <string name="memory_llm_maintenance_desc">Если включено, Daydream может попросить модель предложить расширенные действия, например замену конфликтов; перед применением всё равно нужно подтверждение человека.</string>
   <string name="memory_llm_maintenance_title">Предложения LLM по обработке</string>
-  <string name="memory_local_maintenance_desc">Каждые 24 часа в фоне создаются предложения для проверки; перед применением требуется подтверждение. Основная память не изменяется автоматически. Для запуска нужны сеть и достаточный заряд, а по настройкам может потребоваться простой устройства.
+  <string name="memory_local_maintenance_desc">Каждую ночь в фоне выполняется автообработка: детерминированная очистка (точные дубликаты, истёкшие записи, малоценные кандидаты) применяется автоматически и записывается в журнал событий; предложения модели по-прежнему требуют подтверждения. Основная память автоматически не изменяется. Для запуска нужны сеть и достаточный заряд, а по настройкам может потребоваться зарядка устройства.
 Кандидатов: %1$d, последних событий: %2$d.</string>
   <string name="memory_local_maintenance_title">Локальные предложения по обработке</string>
   <string name="memory_long_title">Долгосрочная память</string>
   <string name="memory_maintenance_tools_title">Инструменты обслуживания</string>
-  <string name="memory_manual_review_desc">Для diff, созданных вручную или в фоне, требуется подтверждение; фоновый Daydream никогда не применяет результаты автоматически.</string>
+  <string name="memory_manual_review_desc">Здесь проверяются предложения, созданные моделью. Детерминированная очистка применяется автоматически; подтверждения ждут только предложения модели.</string>
   <string name="memory_manual_review_title">Проверка ручной обработки</string>
   <string name="memory_no_manual_plan">Ручных предложений по обработке пока нет.</string>
   <string name="memory_notification_failed_title">Ошибка обработки Daydream</string>
   <string name="memory_notification_pending_title">Предложения по обработке памяти готовы</string>
   <string name="memory_notification_running_text">Проверка краткосрочной и долгосрочной памяти</string>
   <string name="memory_notification_running_title">AmberAgent создаёт предложения по обработке</string>
-  <string name="memory_notification_summary">объединить: %1$d · повысить: %2$d · архивировать: %3$d · заменить: %4$d · игнорировать кандидатов: %5$d</string>
+  <string name="memory_notification_summary">объединить: %1$d · повысить: %2$d · архивировать: %3$d · заменить: %4$d · игнорировать кандидатов: %5$d · темы: %6$d</string>
   <string name="memory_recall_desc">Основная, краткосрочная, долгосрочная память, недавние чаты, напоминания о времени и выборочное извлечение.</string>
   <string name="memory_recall_title">Переключатели памяти</string>
   <string name="memory_recommend_manual_review">· рекомендуется ручная проверка</string>
@@ -3203,6 +3202,10 @@
   <string name="memory_dream_apply_failed">Не удалось применить предложение Dream: %1$s</string>
   <string name="memory_dream_plan_applied">Предложение по обработке Dream применено</string>
   <string name="memory_dream_plan_failed">Ошибка обработки Dream: %1$s</string>
+  <string name="memory_dream_auto_applied">Автоматически применено безопасных изменений: %1$d.</string>
+  <string name="memory_dream_auto_applied_pending">Автоматически применено безопасных изменений: %1$d; создано новое предложение на проверку.</string>
+  <string name="memory_auto_apply_title">Автоприменение безопасной обработки</string>
+  <string name="memory_auto_apply_desc">Детерминированная очистка (точные дубликаты, истёкшие записи, малоценные кандидаты) применяется без подтверждения. Предложения модели по-прежнему требуют проверки.</string>
   <string name="memory_dream_plan_generated">Предложение по обработке Dream создано</string>
   <string name="memory_dream_plan_replaced">Предложение по обработке Dream создано; предыдущее предложение на проверке отменено</string>
   <string name="memory_export_failed">Ошибка экспорта: %1$s</string>

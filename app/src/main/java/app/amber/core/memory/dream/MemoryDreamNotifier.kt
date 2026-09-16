@@ -112,4 +112,5 @@ private fun MemoryDreamPlan.summaryText(context: Context): String = context.getS
     archiveMemoryIds.size,
     supersedeSuggestions.size,
     ignoreCandidateIds.size,
+    topicSuggestions.size,
 )

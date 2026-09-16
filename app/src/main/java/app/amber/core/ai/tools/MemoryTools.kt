@@ -167,7 +167,10 @@ fun buildMemoryTools(
                         put(
                             "enum",
                             buildJsonArray {
-                                MemoryKind.entries.forEach { add(it.wireName) }
+                                // Topics are dream-synthesized; not tool-writable.
+                                MemoryKind.entries
+                                    .filter { it != MemoryKind.TOPIC }
+                                    .forEach { add(it.wireName) }
                             }
                         )
                         put("description", "Structured memory kind. Defaults to note.")
@@ -189,7 +192,10 @@ fun buildMemoryTools(
             }
             val content = input.jsonObject["content"]?.jsonPrimitive?.contentOrNull ?: error("content is required")
             val source = input.jsonObject["source"]?.jsonPrimitive?.contentOrNull
-            val kind = input.jsonObject["kind"]?.jsonPrimitive?.contentOrNull?.let(MemoryKind::fromWireName)
+            // Topics are dream-synthesized only; tool writes can't author them.
+            val kind = input.jsonObject["kind"]?.jsonPrimitive?.contentOrNull
+                ?.let(MemoryKind::fromWireName)
+                ?.takeIf { it != MemoryKind.TOPIC }
                 ?: MemoryKind.NOTE
             val expiresAt = input.jsonObject["expiresAt"]?.jsonPrimitive?.contentOrNull?.toLongOrNull()
             val created = onCreation(
@@ -319,7 +325,10 @@ fun buildMemoryTools(
                         put(
                             "enum",
                             buildJsonArray {
-                                MemoryKind.entries.forEach { add(it.wireName) }
+                                // Topics are dream-synthesized; not tool-writable.
+                                MemoryKind.entries
+                                    .filter { it != MemoryKind.TOPIC }
+                                    .forEach { add(it.wireName) }
                             }
                         )
                         put("description", "The memory kind for create. Defaults to note.")
@@ -361,7 +370,10 @@ fun buildMemoryTools(
                     require(scope in setOf("core", "short_term", "long_term")) {
                         "scope must be one of [core, short_term, long_term]"
                     }
-                    val kind = params["kind"]?.jsonPrimitive?.contentOrNull?.let(MemoryKind::fromWireName)
+                    // Topics are dream-synthesized only; tool writes can't author them.
+                    val kind = params["kind"]?.jsonPrimitive?.contentOrNull
+                        ?.let(MemoryKind::fromWireName)
+                        ?.takeIf { it != MemoryKind.TOPIC }
                         ?: MemoryKind.NOTE
                     val sourceConversationId = params["sourceConversationId"]?.jsonPrimitive?.contentOrNull
                     val sourceMessageIds = params["sourceMessageIds"]?.jsonArray
@@ -513,6 +525,8 @@ private fun AssistantMemory.toJson(scope: String) = buildJsonObject {
     put("pinned", pinned)
     put("archived", archived)
     put("revision", revision)
+    topicTitle?.let { put("topic_title", it) }
+    if (memberIds.isNotEmpty()) put("member_ids", buildJsonArray { memberIds.forEach { add(it) } })
     sourceRunId?.let { put("source_run_id", it) }
     sourceTrigger?.let { put("source_trigger", it) }
 }

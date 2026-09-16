@@ -33,7 +33,24 @@ import kotlin.coroutines.EmptyCoroutineContext
 import kotlin.coroutines.coroutineContext
 
 interface MemoryDreamPlanProvider {
-    suspend fun plan(): MemoryDreamPlan
+    suspend fun plan(): MemoryDreamPlanSplit
+}
+
+/**
+ * The two plan sources kept separate so callers can auto-apply the
+ * deterministic [maintenance] part while still sending the model-produced
+ * [model] part through review. [merged] reproduces the legacy single-plan
+ * view for paths that review everything together.
+ */
+@Serializable
+data class MemoryDreamPlanSplit(
+    val maintenance: MemoryDreamPlan = MemoryDreamPlan(),
+    val model: MemoryDreamPlan? = null,
+) {
+    val hasChanges: Boolean
+        get() = maintenance.hasChanges || model?.hasChanges == true
+
+    fun merged(): MemoryDreamPlan = maintenance.mergeWith(model)
 }
 
 class MemoryDreamPlanner(
@@ -44,10 +61,10 @@ class MemoryDreamPlanner(
     private val eventLogger: MemoryEventLogger,
     private val restoreWriteGate: SyncRestoreWriteGate? = null,
 ) : MemoryDreamPlanProvider {
-    override suspend fun plan(): MemoryDreamPlan =
+    override suspend fun plan(): MemoryDreamPlanSplit =
         withContext(captureWriteContext()) { planInternal() }
 
-    private suspend fun planInternal(): MemoryDreamPlan {
+    private suspend fun planInternal(): MemoryDreamPlanSplit {
         val now = System.currentTimeMillis()
         val settings = settingsStore.settingsFlow.value
         val records = memoryRepository.getAllRecords()
@@ -65,25 +82,13 @@ class MemoryDreamPlanner(
             null
         }
 
-        val plan = localPlan.mergeWith(modelPlan)
         eventLogger.log(
             type = MemoryEventType.DREAM_PLANNED,
-            message = buildString {
-                append("merge=${plan.mergeSuggestions.size}, promote=${plan.promoteMemoryIds.size}, ")
-                append("archive=${plan.archiveMemoryIds.size}, supersede=${plan.supersedeSuggestions.size}, ")
-                append("ignore=${plan.ignoreCandidateIds.size}")
-                append(", source=")
-                append(
-                    when {
-                        localPlan.hasChanges && modelPlan?.hasChanges == true -> "merged"
-                        modelPlan?.hasChanges == true -> "model"
-                        localPlan.hasChanges -> "maintenance"
-                        else -> "none"
-                    }
-                )
-            },
+            // Count each source separately: the merged view caps ignore ids at 48
+            // and would under-report what an auto-applied maintenance run did.
+            message = "maintenance(${localPlan.countsText()}) model(${modelPlan?.countsText() ?: "none"})",
         )
-        return plan
+        return MemoryDreamPlanSplit(maintenance = localPlan, model = modelPlan)
     }
 
     private suspend fun captureWriteContext(): CoroutineContext {
@@ -196,19 +201,50 @@ class MemoryDreamPlanner(
                         normalize(candidate.content) in activeRecords.map { normalize(it.content) }.toSet()
                 }
                 .map { it.id }
+            // Pending candidates that expired or sat unreviewed past the TTL
+            // are auto-ignored — the queue must drain itself, not grow forever.
+            val staleCandidateIds = candidates
+                .filter { candidate ->
+                    candidate.expiresAt?.let { it <= now } == true ||
+                        candidate.createdAt <= now - PENDING_CANDIDATE_TTL_MS
+                }
+                .map { it.id }
+            val flaggedCandidateIds = (noisyCandidateIds + staleCandidateIds).toSet()
+            // Soft cap on the pending queue: once exceeded, drop the
+            // lowest-confidence (then oldest) overflow after other flags.
+            val overflowCount = (candidates.size - MAX_PENDING_CANDIDATES) - flaggedCandidateIds.size
+            val overflowCandidateIds = if (overflowCount > 0) {
+                candidates
+                    .filter { it.id !in flaggedCandidateIds }
+                    .sortedWith(
+                        compareBy<MemoryCandidate> { it.confidence }.thenBy { it.createdAt }
+                    )
+                    .take(overflowCount)
+                    .map { it.id }
+            } else {
+                emptyList()
+            }
             return MemoryDreamPlan(
                 mergeSuggestions = duplicateGroups,
                 promoteMemoryIds = promoteIds.distinct(),
                 archiveMemoryIds = expiredProjects.map { it.id }.distinct(),
-                ignoreCandidateIds = noisyCandidateIds.distinct(),
+                ignoreCandidateIds = (noisyCandidateIds + staleCandidateIds + overflowCandidateIds).distinct(),
                 notes = buildList {
                     if (duplicateGroups.isNotEmpty()) add("发现 ${duplicateGroups.size} 组可能重复的记忆，可合并后归档副本。")
                     if (promoteIds.isNotEmpty()) add("发现 ${promoteIds.size} 条反复使用的短期项目记忆，可提升为长期记忆。")
                     if (expiredProjects.isNotEmpty()) add("发现 ${expiredProjects.size} 条过期短期项目记忆，可归档。")
                     if (noisyCandidateIds.isNotEmpty()) add("发现 ${noisyCandidateIds.size} 条低价值或重复候选，可忽略。")
+                    if (staleCandidateIds.isNotEmpty()) add("发现 ${staleCandidateIds.size} 条已过期或长期未审批的候选，可忽略。")
+                    if (overflowCandidateIds.isNotEmpty()) add("待审批候选超出上限，可忽略置信度最低的 ${overflowCandidateIds.size} 条。")
                 },
             )
         }
+
+        /** Pending candidates older than this are auto-ignored during maintenance. */
+        internal const val PENDING_CANDIDATE_TTL_MS: Long = 14L * 24 * 60 * 60 * 1000
+
+        /** Soft cap on the pending-candidate queue; overflow drops lowest confidence first. */
+        internal const val MAX_PENDING_CANDIDATES: Int = 100
 
         private fun normalize(text: String): String =
             text.lowercase().filter { it.isLetterOrDigit() }.take(200)
@@ -221,6 +257,11 @@ class MemoryDreamPlanner(
         ): MemoryDreamPlan {
             val memoryIds = records.map { it.id }.toSet()
             val candidateIds = candidates.map { it.id }.toSet()
+            val managedIds = records.filter { record ->
+                !record.archived &&
+                    record.scope != MemoryScope.CORE &&
+                    record.kind != MemoryKind.TOPIC
+            }.map { it.id }.toSet()
             val cleaned = raw.trim()
                 .removePrefix("```json")
                 .removePrefix("```")
@@ -283,6 +324,26 @@ class MemoryDreamPlanner(
                     .filter { it in candidateIds }
                     .distinct(),
                 supersedeSuggestions = supersedes,
+                // Topic members must be dream-managed records: active, non-core,
+                // and never another topic (no nesting).
+                topicSuggestions = root["topics"]?.jsonArray.orEmpty().mapNotNull { item ->
+                    val obj = item.jsonObject
+                    val title = obj["title"]?.jsonPrimitive?.contentOrNull?.trim()
+                        ?.takeIf { it.isNotEmpty() } ?: return@mapNotNull null
+                    val content = obj["content"]?.jsonPrimitive?.contentOrNull?.trim()
+                        ?.takeIf { it.length >= 8 } ?: return@mapNotNull null
+                    val memberIds = obj["member_memory_ids"]?.jsonArray.orEmpty()
+                        .mapNotNull { it.jsonPrimitive.contentOrNull?.toIntOrNull() }
+                        .filter { it in managedIds }
+                        .distinct()
+                    if (memberIds.size < 2) return@mapNotNull null
+                    MemoryTopicSuggestion(
+                        title = title.take(80),
+                        memberMemoryIds = memberIds,
+                        content = content.take(2_000),
+                        reason = obj["reason"]?.jsonPrimitive?.contentOrNull.orEmpty(),
+                    )
+                }.take(4),
                 notes = root["notes"]?.jsonArray.orEmpty()
                     .mapNotNull { it.jsonPrimitive.contentOrNull?.take(240) }
                     .take(6),
@@ -290,6 +351,11 @@ class MemoryDreamPlanner(
         }
     }
 }
+
+private fun MemoryDreamPlan.countsText(): String =
+    "merge=${mergeSuggestions.size},promote=${promoteMemoryIds.size}," +
+        "archive=${archiveMemoryIds.size},supersede=${supersedeSuggestions.size}," +
+        "ignore=${ignoreCandidateIds.size},topics=${topicSuggestions.size}"
 
 internal fun MemoryDreamPlan.mergeWith(other: MemoryDreamPlan?): MemoryDreamPlan {
     if (other == null) return this
@@ -305,6 +371,9 @@ internal fun MemoryDreamPlan.mergeWith(other: MemoryDreamPlan?): MemoryDreamPlan
         supersedeSuggestions = (supersedeSuggestions + other.supersedeSuggestions)
             .distinctBy { it.oldMemoryIds.toSet() to it.newContent }
             .take(12),
+        topicSuggestions = (topicSuggestions + other.topicSuggestions)
+            .distinctBy { it.title.lowercase().filter(Char::isLetterOrDigit) }
+            .take(8),
         notes = (notes + other.notes).distinct().take(12),
     )
 }
@@ -316,6 +385,7 @@ data class MemoryDreamPlan(
     val archiveMemoryIds: List<Int> = emptyList(),
     val ignoreCandidateIds: List<String> = emptyList(),
     val supersedeSuggestions: List<MemorySupersedeSuggestion> = emptyList(),
+    val topicSuggestions: List<MemoryTopicSuggestion> = emptyList(),
     val notes: List<String> = emptyList(),
 ) {
     val hasChanges: Boolean
@@ -323,8 +393,22 @@ data class MemoryDreamPlan(
             promoteMemoryIds.isNotEmpty() ||
             archiveMemoryIds.isNotEmpty() ||
             ignoreCandidateIds.isNotEmpty() ||
-            supersedeSuggestions.isNotEmpty()
+            supersedeSuggestions.isNotEmpty() ||
+            topicSuggestions.isNotEmpty()
 }
+
+/**
+ * Model-produced topic synthesis: group related memories under a named topic
+ * document. Semantic output — always goes through pending review, never the
+ * auto-applied maintenance path.
+ */
+@Serializable
+data class MemoryTopicSuggestion(
+    val title: String,
+    val memberMemoryIds: List<Int>,
+    val content: String,
+    val reason: String = "",
+)
 
 @Serializable
 data class MemoryMergeSuggestion(

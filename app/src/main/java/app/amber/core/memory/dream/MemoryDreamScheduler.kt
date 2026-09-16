@@ -8,6 +8,7 @@ import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import app.amber.core.memory.model.MemoryWorkerDreamGate
+import app.amber.core.memory.model.MemoryWorkerSetting
 import app.amber.core.settings.Settings
 import app.amber.core.settings.prefs.SettingsAggregator
 import java.time.Duration
@@ -36,16 +37,20 @@ class MemoryDreamScheduler(
      * the end of doWork() so the loop continues night after night without losing the slot to
      * a periodic worker's flex window.
      *
-     * If the user is currently inside the night window we run immediately (subject to idle
-     * constraint); otherwise we wait until tonight 00:00 (or tomorrow 00:00 if 06:00 has
+     * If the user is currently inside the night window we run immediately (subject to the
+     * charging/idle gates); otherwise we wait until tonight 00:00 (or tomorrow 00:00 if 06:00 has
      * already passed today).
      */
     fun scheduleNextNightRun(skipCurrentWindow: Boolean = false) {
         val worker = settingsStore.settingsFlow.value.agentRuntime.memoryWorker
+        val gates = memoryDreamWorkConstraints(worker)
         val constraintsBuilder = Constraints.Builder()
             .setRequiredNetworkType(NetworkType.CONNECTED)
             .setRequiresBatteryNotLow(true)
-        if (worker.runOnlyOnIdle && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+        if (gates.requiresCharging) {
+            constraintsBuilder.setRequiresCharging(true)
+        }
+        if (gates.requiresDeviceIdle && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             // User explicitly asked: "when the device is sitting around". Idle is the cleanest
             // proxy — Android only flags it when screen is off + non-interactive for a while.
             constraintsBuilder.setRequiresDeviceIdle(true)
@@ -121,3 +126,27 @@ class MemoryDreamScheduler(
         private val NIGHT_END: LocalTime = LocalTime.of(6, 0)
     }
 }
+
+internal data class MemoryDreamWorkConstraints(
+    val requiresCharging: Boolean,
+    val requiresDeviceIdle: Boolean,
+)
+
+/**
+ * Nightly-run gates derived from worker settings. When the user asks for
+ * charging-only runs the charging constraint *replaces* the idle gate rather
+ * than stacking on it: plugged-in-overnight is reachable every night, while
+ * Doze idle (screen-off + still + a settling delay) routinely is not — ANDing
+ * them would make the run almost never fire.
+ */
+internal fun memoryDreamWorkConstraints(
+    worker: MemoryWorkerSetting,
+): MemoryDreamWorkConstraints =
+    if (worker.runOnlyOnCharging) {
+        MemoryDreamWorkConstraints(requiresCharging = true, requiresDeviceIdle = false)
+    } else {
+        MemoryDreamWorkConstraints(
+            requiresCharging = false,
+            requiresDeviceIdle = worker.runOnlyOnIdle,
+        )
+    }

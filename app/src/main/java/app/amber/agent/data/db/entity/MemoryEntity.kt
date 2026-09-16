@@ -47,4 +47,9 @@ data class MemoryEntity(
     val sourceRunId: String? = null,
     @ColumnInfo("source_trigger")
     val sourceTrigger: String? = null,
+    // Topic records (kind == "topic"): display title and grouped member ids.
+    @ColumnInfo("topic_title")
+    val topicTitle: String? = null,
+    @ColumnInfo(name = "member_ids_json", defaultValue = "'[]'")
+    val memberIdsJson: String = "[]",
 )

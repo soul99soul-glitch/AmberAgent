@@ -46,7 +46,12 @@ enum class MemoryKind(val wireName: String) {
     ROUTINE("routine"),
 
     @SerialName("note")
-    NOTE("note");
+    NOTE("note"),
+
+    // A synthesized topic document grouping member memories (dream output).
+    // Older builds read the wire name as NOTE via fromWireName fallback.
+    @SerialName("topic")
+    TOPIC("topic");
 
     companion object {
         fun fromWireName(value: String?): MemoryKind =

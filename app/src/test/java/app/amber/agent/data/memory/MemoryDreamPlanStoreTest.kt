@@ -91,6 +91,30 @@ class MemoryDreamPlanStoreTest {
         )
         assertEquals(1, dao.find(supersede.id)?.supersedeCount)
     }
+
+    @Test
+    fun appliedRunIsAuditedWithoutDisturbingPendingPlan() = runBlocking {
+        val dao = FakeMemoryDreamPlanDao()
+        val store = MemoryDreamPlanStore(dao, Json)
+        val pending = store.savePending(
+            plan = MemoryDreamPlan(archiveMemoryIds = listOf(1)),
+            source = MemoryDreamPlanSource.AUTO,
+            now = 100L,
+        )
+
+        store.recordAppliedRun(
+            plan = MemoryDreamPlan(promoteMemoryIds = listOf(2)),
+            source = MemoryDreamPlanSource.AUTO,
+            now = 200L,
+        )
+
+        assertEquals(pending.id, store.getPendingPlan()?.id)
+        val appliedRow = dao.findAll().single {
+            it.status == MemoryDreamPlanStatus.APPLIED.wireName && it.promoteCount == 1
+        }
+        assertEquals(200L, appliedRow.appliedAt)
+        assertEquals(2, store.countAutoPlansSince(0L))
+    }
 }
 
 internal class FakeMemoryDreamPlanDao : MemoryDreamPlanDAO {
@@ -144,6 +168,8 @@ internal class FakeMemoryDreamPlanDao : MemoryDreamPlanDAO {
     }
 
     fun find(id: String): MemoryDreamPlanEntity? = plans.firstOrNull { it.id == id }
+
+    fun findAll(): List<MemoryDreamPlanEntity> = plans.toList()
 
     private fun refreshPending() {
         pendingFlow.value = plans

@@ -68,7 +68,9 @@ interface MemoryDAO {
             "expires_at = :expiresAt, confidence = :confidence, pinned = :pinned, " +
             "archived = :archived, created_at = :createdAt, updated_at = :updatedAt, " +
             "last_used_at = :lastUsedAt, revision = revision + 1, source_run_id = :sourceRunId, " +
-            "source_trigger = :sourceTrigger WHERE id = :id AND revision = :expectedRevision"
+            "source_trigger = :sourceTrigger, topic_title = :topicTitle, " +
+            "member_ids_json = :memberIdsJson " +
+            "WHERE id = :id AND revision = :expectedRevision"
     )
     suspend fun updateRecordCas(
         id: Int,
@@ -88,6 +90,8 @@ interface MemoryDAO {
         lastUsedAt: Long?,
         sourceRunId: String?,
         sourceTrigger: String?,
+        topicTitle: String?,
+        memberIdsJson: String,
         expectedRevision: Long,
     ): Int
 

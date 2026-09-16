@@ -111,6 +111,8 @@ class MemoryCasTest {
             lastUsedAt: Long?,
             sourceRunId: String?,
             sourceTrigger: String?,
+            topicTitle: String?,
+            memberIdsJson: String,
             expectedRevision: Long,
         ): Int {
             val current = rows[id] ?: return 0
@@ -133,6 +135,8 @@ class MemoryCasTest {
                 revision = current.revision + 1,
                 sourceRunId = sourceRunId,
                 sourceTrigger = sourceTrigger,
+                topicTitle = topicTitle,
+                memberIdsJson = memberIdsJson,
             )
             return 1
         }

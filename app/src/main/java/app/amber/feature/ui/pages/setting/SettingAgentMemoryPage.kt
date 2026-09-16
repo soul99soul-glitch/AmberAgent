@@ -66,6 +66,7 @@ import com.dokar.sonner.ToastType
 import com.composables.icons.lucide.Lucide
 import com.composables.icons.lucide.ChevronRight
 import com.composables.icons.lucide.FileText
+import com.composables.icons.lucide.Folder
 import com.composables.icons.lucide.Maximize
 import com.composables.icons.lucide.Plus
 import com.composables.icons.lucide.Smartphone
@@ -658,6 +659,12 @@ private fun MemoryEditMetadata(memory: AssistantMemory) {
                 value = formatMemoryDate(memory.updatedAt),
             )
         }
+        if (memory.kind == MemoryKind.TOPIC && memory.memberIds.isNotEmpty()) {
+            MemoryMetadataLine(
+                label = stringResource(R.string.setting_agent_memory_metadata_members),
+                value = memory.memberIds.joinToString(", ") { "#$it" },
+            )
+        }
         memory.lastUsedAt?.takeIf { it > 0L }?.let { lastUsedAt ->
             MemoryMetadataLine(
                 label = stringResource(R.string.setting_agent_memory_metadata_last_used),
@@ -825,6 +832,7 @@ private fun memorySourceLabel(memory: AssistantMemory): String {
         MemoryRepository.TRIGGER_AUTO_EXTRACTION ->
             stringResource(R.string.setting_agent_memory_source_auto_extraction)
         MemoryRepository.TRIGGER_TOOL -> stringResource(R.string.setting_agent_memory_source_tool)
+        MemoryRepository.TRIGGER_DREAM -> stringResource(R.string.setting_agent_memory_source_dream)
         null -> if (memory.sourceRunId == null) {
             stringResource(R.string.setting_agent_memory_source_manual)
         } else {
@@ -849,6 +857,7 @@ private fun memoryKindLabel(kind: MemoryKind): String = when (kind) {
     MemoryKind.REFERENCE -> stringResource(R.string.setting_agent_memory_kind_reference)
     MemoryKind.ROUTINE -> stringResource(R.string.setting_agent_memory_kind_routine)
     MemoryKind.NOTE -> stringResource(R.string.setting_agent_memory_kind_note)
+    MemoryKind.TOPIC -> stringResource(R.string.setting_agent_memory_kind_topic)
 }
 
 private fun formatMemoryDate(value: Long): String =
@@ -1005,7 +1014,13 @@ private fun MemoryOverviewPreview(
                 item(
                     headlineContent = {
                         Text(
-                            text = memory.content,
+                            text = if (memory.kind == MemoryKind.TOPIC &&
+                                !memory.topicTitle.isNullOrBlank()
+                            ) {
+                                "${memory.topicTitle} · ${memory.content}"
+                            } else {
+                                memory.content
+                            },
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
@@ -1015,6 +1030,7 @@ private fun MemoryOverviewPreview(
                             when (memory.kind) {
                                 MemoryKind.USER, MemoryKind.FEEDBACK -> Lucide.Sparkles
                                 MemoryKind.PROJECT, MemoryKind.REFERENCE -> Lucide.Smartphone
+                                MemoryKind.TOPIC -> Lucide.Folder
                                 else -> Lucide.Maximize
                             },
                         )
@@ -1171,6 +1187,29 @@ private fun MemoryWorkerSubpage(
             },
         )
         item(
+            headlineContent = { Text(stringResource(R.string.memory_auto_apply_title)) },
+            supportingContent = {
+                MemoryRowSubtitle(
+                    stringResource(R.string.memory_auto_apply_desc),
+                    mono = false,
+                )
+            },
+            trailingContent = {
+                Switch(
+                    checked = worker.autoApplyMaintenance,
+                    size = SwitchSize.Small,
+                    enabled = worker.dreamMaintenanceEnabled,
+                    onCheckedChange = { enabled ->
+                        onUpdate {
+                            it.copy(
+                                memoryWorker = it.memoryWorker.copy(autoApplyMaintenance = enabled)
+                            )
+                        }
+                    },
+                )
+            },
+        )
+        item(
             headlineContent = { Text(stringResource(R.string.memory_llm_maintenance_title)) },
             supportingContent = {
                 MemoryRowSubtitle(
@@ -1195,24 +1234,6 @@ private fun MemoryWorkerSubpage(
                 )
             },
         )
-        item(
-            headlineContent = { Text(stringResource(R.string.memory_idle_only_title)) },
-            supportingContent = {
-                MemoryRowSubtitle(
-                    stringResource(R.string.memory_idle_only_desc),
-                    mono = false,
-                )
-            },
-            trailingContent = {
-                Switch(
-                    checked = worker.runOnlyOnIdle,
-                    size = SwitchSize.Small,
-                    onCheckedChange = { enabled ->
-                        onUpdate { it.copy(memoryWorker = it.memoryWorker.copy(runOnlyOnIdle = enabled)) }
-                    },
-                )
-            },
-        )
         if (!canRunDream) {
             item(
                 headlineContent = { Text(stringResource(R.string.memory_run_unavailable_title)) },
@@ -1223,7 +1244,10 @@ private fun MemoryWorkerSubpage(
         //   - 记忆后台任务 (worker.enabled)            → field kept ON
         //   - 对话结束后提取 (worker.extractionEnabled) → field kept ON
         //   - 跟随压缩模型 (worker.followCompressModel)  → moved to model settings page
-        //   - 只在充电时运行 (worker.runOnlyOnCharging)  → scheduler ignores; runs whenever
+        //   - 只在充电时运行 (worker.runOnlyOnCharging)  → kept ON; wired to the nightly
+        //     WorkManager constraint, where it replaces the idle gate when enabled
+        //   - 仅设备空闲时 (worker.runOnlyOnIdle)         → inert while charging-only is on
+        //     (no UI for that pref), so the row was removed; the pref is still honored
         // Manual "立即运行一次" → moved to toolbar play icon.
     }
 
@@ -1231,6 +1255,7 @@ private fun MemoryWorkerSubpage(
     DreamReviewSection(
         plan = dreamPlan,
         running = running,
+        canRun = canRunDream,
         onPlan = onPlan,
         onApply = onApply,
         onDismiss = onDismiss,
@@ -1815,6 +1840,7 @@ private fun MemoryCandidateCard(
 private fun DreamReviewSection(
     plan: PersistedMemoryDreamPlan?,
     running: Boolean,
+    canRun: Boolean,
     onPlan: () -> Unit,
     onApply: () -> Unit,
     onDismiss: () -> Unit,
@@ -1859,7 +1885,7 @@ private fun DreamReviewSection(
                         textAlign = TextAlign.Center,
                     )
                     TextButton(
-                        enabled = !running,
+                        enabled = !running && canRun,
                         onClick = onPlan,
                         modifier = Modifier
                             .fillMaxWidth()
@@ -1911,6 +1937,7 @@ private fun DreamReviewSection(
                         current.archiveMemoryIds.size,
                         current.supersedeSuggestions.size,
                         current.ignoreCandidateIds.size,
+                        current.topicSuggestions.size,
                     )
                     // Graphite §3: dream-plan summary is a count-dense machine-fact → MONO.
                     Text(
@@ -1930,7 +1957,7 @@ private fun DreamReviewSection(
                         style = LocalAmberType.current.secondary,
                         color = tokens.ink2,
                     )
-                    current.notes.take(4).forEach { note ->
+                    current.notes.take(6).forEach { note ->
                         Text(
                             text = "• $note",
                             style = LocalAmberType.current.secondary,
@@ -1960,6 +1987,24 @@ private fun DreamReviewSection(
                                 R.string.memory_dream_replace,
                                 suggestion.oldMemoryIds.joinToString(","),
                                 suggestion.newContent,
+                                reasonSuffix,
+                            ),
+                            style = LocalAmberType.current.secondary,
+                            maxLines = 3,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    current.topicSuggestions.take(4).forEach { suggestion ->
+                        val reasonSuffix = if (suggestion.reason.isNotBlank()) {
+                            stringResource(R.string.memory_dream_reason_suffix, suggestion.reason)
+                        } else {
+                            ""
+                        }
+                        Text(
+                            text = stringResource(
+                                R.string.memory_dream_topic,
+                                suggestion.title,
+                                suggestion.memberMemoryIds.joinToString(","),
                                 reasonSuffix,
                             ),
                             style = LocalAmberType.current.secondary,
@@ -2254,7 +2299,11 @@ private fun MemoryItem(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
-            text = memory.content,
+            text = if (memory.kind == MemoryKind.TOPIC && !memory.topicTitle.isNullOrBlank()) {
+                "${memory.topicTitle} · ${memory.content}"
+            } else {
+                memory.content
+            },
             modifier = Modifier.weight(1f),
             style = LocalAmberType.current.body,
             color = tokens.ink,

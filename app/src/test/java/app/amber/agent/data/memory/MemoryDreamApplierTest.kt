@@ -14,6 +14,7 @@ import app.amber.core.memory.dream.MemoryDreamApplier
 import app.amber.core.memory.dream.MemoryMergeSuggestion
 import app.amber.core.memory.dream.MemoryDreamPlan
 import app.amber.core.memory.dream.MemorySupersedeSuggestion
+import app.amber.core.memory.dream.MemoryTopicSuggestion
 import app.amber.core.memory.model.MemoryEventType
 import app.amber.core.memory.model.MemoryKind
 import app.amber.core.memory.model.MemoryScope
@@ -157,6 +158,82 @@ class MemoryDreamApplierTest {
         assertTrue(eventDao.events.isEmpty())
     }
 
+    @Test
+    fun topicSuggestionCreatesTopicRecordAndUpdatesExistingByTitle() = runBlocking {
+        val memoryDao = FakeMemoryDao(
+            listOf(
+                entity(1, "__long_term__", "用户偏好中文回复。", MemoryScope.LONG_TERM, MemoryKind.USER),
+                entity(2, "__long_term__", "用户偏好简洁分点。", MemoryScope.LONG_TERM, MemoryKind.FEEDBACK),
+            )
+        )
+        val repository = MemoryRepository(memoryDao, FakeMemoryCandidateDao(), FakeMemoryEventDao())
+        val applier = MemoryDreamApplier(repository, MemoryEventLogger(repository))
+        val suggestion = MemoryTopicSuggestion(
+            title = "回复风格",
+            memberMemoryIds = listOf(1, 2),
+            content = "用户偏好中文简洁分点回复。",
+        )
+
+        applier.apply(MemoryDreamPlan(topicSuggestions = listOf(suggestion)))
+
+        var records = repository.getAllRecords()
+        val topic = records.single { it.kind == MemoryKind.TOPIC }
+        assertEquals(MemoryScope.LONG_TERM, topic.scope)
+        assertEquals("回复风格", topic.topicTitle)
+        assertEquals(listOf(1, 2), topic.memberIds)
+
+        // Re-applying the same suggestion updates in place — no duplicate topic.
+        applier.apply(
+            MemoryDreamPlan(
+                topicSuggestions = listOf(suggestion.copy(content = "更新后的主题摘要。"))
+            )
+        )
+        records = repository.getAllRecords()
+        val topics = records.filter { it.kind == MemoryKind.TOPIC }
+        assertEquals(1, topics.size)
+        assertEquals("更新后的主题摘要。", topics.single().content)
+        assertEquals(2L, topics.single().revision)
+        // Members are never archived by a topic write.
+        assertFalse(records.first { it.id == 1 }.archived)
+        assertFalse(records.first { it.id == 2 }.archived)
+    }
+
+    @Test
+    fun topicMembersArchivedInSamePassAreDroppedFromMembership() = runBlocking {
+        val memoryDao = FakeMemoryDao(
+            listOf(
+                entity(1, "__long_term__", "同一条事实", MemoryScope.LONG_TERM, MemoryKind.USER),
+                entity(2, "__long_term__", "同一条事实", MemoryScope.LONG_TERM, MemoryKind.USER),
+                entity(3, "__long_term__", "另一条事实。", MemoryScope.LONG_TERM, MemoryKind.USER),
+            )
+        )
+        val repository = MemoryRepository(memoryDao, FakeMemoryCandidateDao(), FakeMemoryEventDao())
+        val applier = MemoryDreamApplier(repository, MemoryEventLogger(repository))
+
+        val applied = applier.apply(
+            MemoryDreamPlan(
+                mergeSuggestions = listOf(
+                    MemoryMergeSuggestion(targetMemoryId = 1, duplicateMemoryIds = listOf(2))
+                ),
+                topicSuggestions = listOf(
+                    MemoryTopicSuggestion(
+                        title = "聚合主题",
+                        memberMemoryIds = listOf(1, 2, 3),
+                        content = "聚合这两条事实的主题。",
+                    )
+                ),
+            )
+        )
+
+        // #2 wins the merge (newer updatedAt) -> #1 is archived this pass and
+        // the topic keeps only the live members.
+        val records = repository.getAllRecords()
+        val topic = records.single { it.kind == MemoryKind.TOPIC }
+        assertEquals(listOf(2, 3), applied.topicSuggestions.single().memberMemoryIds)
+        assertEquals(listOf(2, 3), topic.memberIds)
+        assertTrue(records.first { it.id == 1 }.archived)
+    }
+
     private fun supersede(
         oldId: Int,
         newContent: String = "用户现在偏好英文详细解释。",
@@ -263,6 +340,8 @@ private class FakeMemoryDao(
         lastUsedAt: Long?,
         sourceRunId: String?,
         sourceTrigger: String?,
+        topicTitle: String?,
+        memberIdsJson: String,
         expectedRevision: Long,
     ): Int {
         val index = memories.indexOfFirst { it.id == id }
@@ -287,6 +366,8 @@ private class FakeMemoryDao(
             revision = current.revision + 1,
             sourceRunId = sourceRunId,
             sourceTrigger = sourceTrigger,
+            topicTitle = topicTitle,
+            memberIdsJson = memberIdsJson,
         )
         return 1
     }

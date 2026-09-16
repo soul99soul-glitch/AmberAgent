@@ -139,7 +139,7 @@ import kotlinx.serialization.json.JsonPrimitive
         ContinueCandidateDismissEntity::class,
         ThemePackageEntity::class,
     ],
-    version = 17
+    version = 18
 )
 @TypeConverters(TokenUsageConverter::class)
 abstract class AppDatabase : RoomDatabase() {
@@ -569,6 +569,17 @@ abstract class AppDatabase : RoomDatabase() {
                 db.execSQL(
                     "CREATE INDEX IF NOT EXISTS `index_tool_effect_tool_name_status_finished_at_ms` " +
                         "ON `tool_effect` (`tool_name`, `status`, `finished_at_ms`)"
+                )
+            }
+        }
+
+        /** Topic memory records: synthesized groupings produced by Dream review. */
+        val MIGRATION_17_18 = object : Migration(17, 18) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `memoryentity` ADD COLUMN `topic_title` TEXT")
+                db.execSQL(
+                    "ALTER TABLE `memoryentity` ADD COLUMN `member_ids_json` " +
+                        "TEXT NOT NULL DEFAULT '[]'"
                 )
             }
         }

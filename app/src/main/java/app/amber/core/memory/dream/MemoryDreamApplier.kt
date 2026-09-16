@@ -17,14 +17,19 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
+/** Applies a dream plan; abstraction lets run coordination fake it in tests. */
+fun interface MemoryDreamPlanApplier {
+    suspend fun apply(plan: MemoryDreamPlan): MemoryDreamPlan
+}
+
 class MemoryDreamApplier(
     private val memoryRepository: MemoryRepository,
     private val eventLogger: MemoryEventLogger,
     private val restoreWriteGate: SyncRestoreWriteGate? = null,
-) {
+) : MemoryDreamPlanApplier {
     private val applyMutex = Mutex()
 
-    suspend fun apply(plan: MemoryDreamPlan): MemoryDreamPlan =
+    override suspend fun apply(plan: MemoryDreamPlan): MemoryDreamPlan =
         withContext(captureWriteContext()) { applyInternal(plan) }
 
     private suspend fun applyInternal(plan: MemoryDreamPlan): MemoryDreamPlan = applyMutex.withLock {
@@ -118,9 +123,50 @@ class MemoryDreamApplier(
             }
         }
 
+        applicablePlan.topicSuggestions.forEach { suggestion ->
+            val titleKey = normalizeTopicTitle(suggestion.title)
+            val existing = records.values.firstOrNull { record ->
+                record.kind == MemoryKind.TOPIC && !record.archived &&
+                    record.topicTitle?.let(::normalizeTopicTitle) == titleKey
+            }
+            if (existing != null) {
+                records[existing.id] = memoryRepository.upsertRecord(
+                    existing.copy(
+                        content = suggestion.content,
+                        topicTitle = suggestion.title,
+                        memberIds = suggestion.memberMemoryIds,
+                    )
+                )
+                eventLogger.log(
+                    type = MemoryEventType.MEMORY_UPDATED,
+                    memoryId = existing.id,
+                    message = "Topic updated by dream review.",
+                )
+            } else {
+                val created = memoryRepository.addMemory(
+                    scope = MemoryScope.LONG_TERM,
+                    kind = MemoryKind.TOPIC,
+                    content = suggestion.content,
+                    topicTitle = suggestion.title,
+                    memberIds = suggestion.memberMemoryIds,
+                    confidence = 0.8f,
+                    sourceTrigger = MemoryRepository.TRIGGER_DREAM,
+                )
+                records[created.id] = created
+                eventLogger.log(
+                    type = MemoryEventType.MEMORY_CREATED,
+                    memoryId = created.id,
+                    message = "Topic created by dream review: ${suggestion.title}.",
+                )
+            }
+        }
+
         val candidates = memoryRepository.getAllCandidates().associateBy { it.id }
         applicablePlan.ignoreCandidateIds.forEach { id ->
             val candidate = candidates[id] ?: return@forEach
+            // A candidate accepted between planning and applying must not be
+            // flipped back to ignored — its memory was already written.
+            if (candidate.status != MemoryCandidateStatus.PENDING) return@forEach
             memoryRepository.updateCandidate(candidate.copy(status = MemoryCandidateStatus.IGNORED))
         }
 
@@ -146,6 +192,7 @@ class MemoryDreamApplier(
         val supersedeSuggestions = supersedeSuggestions.mapNotNull { suggestion ->
             if (suggestion.scope == MemoryScope.CORE) return@mapNotNull null
             if (suggestion.kind == MemoryKind.NOTE) return@mapNotNull null
+            if (suggestion.kind == MemoryKind.TOPIC) return@mapNotNull null
             if (suggestion.confidence < 0.70f) return@mapNotNull null
             if (suggestion.newContent.trim().length < 8) return@mapNotNull null
             if (isSensitiveMemoryContent(suggestion.newContent)) return@mapNotNull null
@@ -179,6 +226,29 @@ class MemoryDreamApplier(
             )
         }
         val mergeIds = mergeSuggestions.flatMap { listOf(it.targetMemoryId) + it.duplicateMemoryIds }.toSet()
+        val archiveMemoryIds = archiveMemoryIds
+            .mapNotNull { records[it] }
+            .filter {
+                it.scope == MemoryScope.SHORT_TERM &&
+                    !it.archived &&
+                    !it.pinned &&
+                    it.id !in mergeIds &&
+                    it.id !in supersededIds
+            }
+            .map { it.id }
+            .distinct()
+        val archivedThisPass =
+            mergeSuggestions.flatMap { it.duplicateMemoryIds }.toSet() +
+                supersededIds + archiveMemoryIds
+        val topicSuggestions = topicSuggestions.mapNotNull { suggestion ->
+            val memberIds = suggestion.memberMemoryIds
+                .mapNotNull { records[it] }
+                .filter { it.isManagedByDream() && it.id !in archivedThisPass }
+                .map { it.id }
+                .distinct()
+            if (memberIds.size < 2) return@mapNotNull null
+            suggestion.copy(memberMemoryIds = memberIds)
+        }
         return copy(
             mergeSuggestions = mergeSuggestions,
             promoteMemoryIds = promoteMemoryIds
@@ -186,24 +256,20 @@ class MemoryDreamApplier(
                 .filter { it.scope == MemoryScope.SHORT_TERM && !it.archived && it.id !in supersededIds }
                 .map { it.id }
                 .distinct(),
-            archiveMemoryIds = archiveMemoryIds
-                .mapNotNull { records[it] }
-                .filter {
-                    it.scope == MemoryScope.SHORT_TERM &&
-                        !it.archived &&
-                        !it.pinned &&
-                        it.id !in mergeIds &&
-                        it.id !in supersededIds
-                }
-                .map { it.id }
-                .distinct(),
+            archiveMemoryIds = archiveMemoryIds,
             ignoreCandidateIds = ignoreCandidateIds.distinct(),
             supersedeSuggestions = supersedeSuggestions,
+            topicSuggestions = topicSuggestions,
         )
     }
 
     private fun MemoryRecord.isManagedByDream(): Boolean =
-        !archived && scope != MemoryScope.CORE
+        !archived && scope != MemoryScope.CORE && kind != MemoryKind.TOPIC
+
+    // Fuzzy upsert key on purpose: "A B" and "AB" collapse to one topic —
+    // near-duplicate titles should update, not fork.
+    private fun normalizeTopicTitle(title: String): String =
+        title.lowercase().filter { it.isLetterOrDigit() }
 
     private fun MemoryRecord.canBeSuperseded(): Boolean =
         isManagedByDream() && !pinned && !isSensitiveMemoryContent(content)
@@ -211,7 +277,7 @@ class MemoryDreamApplier(
     private fun MemoryDreamPlan.summaryText(prefix: String): String =
         "$prefix: merge=${mergeSuggestions.size}, promote=${promoteMemoryIds.size}, " +
             "archive=${archiveMemoryIds.size}, supersede=${supersedeSuggestions.size}, " +
-            "ignore=${ignoreCandidateIds.size}"
+            "ignore=${ignoreCandidateIds.size}, topics=${topicSuggestions.size}"
 
     private val managedMemoryComparator = compareByDescending<MemoryRecord> { it.scope == MemoryScope.LONG_TERM }
         .thenByDescending { it.pinned }

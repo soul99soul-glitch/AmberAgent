@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
@@ -43,6 +44,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -405,13 +409,18 @@ internal fun ProviderSecretField(
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         BasicTextField(
-            value = if (visible) value else value.toMaskedSecret(),
-            onValueChange = { if (visible) onValueChange(it) },
+            value = value,
+            onValueChange = onValueChange,
             modifier = Modifier
                 .weight(1f)
                 .padding(top = 5.dp),
-            readOnly = !visible,
             singleLine = false,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+            visualTransformation = if (visible) {
+                VisualTransformation.None
+            } else {
+                PasswordVisualTransformation()
+            },
             textStyle = LocalAmberType.current.meta.copy(color = t.ink, lineHeight = 19.sp),
             decorationBox = { inner ->
                 Box {
@@ -957,9 +966,6 @@ internal fun Int?.toContextLabel(): String = when (val v = this) {
     in 1_000..999_999 -> "${v / 1_000}K"
     else -> v.toString()
 }
-
-private fun String.toMaskedSecret(): String =
-    if (isBlank()) "" else "•".repeat(40)
 
 private fun String.convertToTargetBaseUrl(targetDefaultBaseUrl: String): String {
     val sourceUrl = toHttpUrlOrNull() ?: return this

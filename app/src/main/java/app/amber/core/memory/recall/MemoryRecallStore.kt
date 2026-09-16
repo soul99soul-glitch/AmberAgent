@@ -125,6 +125,9 @@ class MemoryRecallStore(
                 MemoryKind.ROUTINE -> 18.0
                 MemoryKind.REFERENCE -> 12.0
                 MemoryKind.NOTE -> 6.0
+                // Synthesized topic docs score near raw facts but are never
+                // always-eligible — they surface only on genuine term match.
+                MemoryKind.TOPIC -> 30.0
             }
             score += when (record.scope) {
                 MemoryScope.CORE -> 26.0
