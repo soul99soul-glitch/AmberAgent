@@ -1,5 +1,6 @@
 package app.amber.core.memory.export
 
+import app.amber.core.memory.dream.normalizeTopicTitle
 import app.amber.core.memory.model.MemoryKind
 import app.amber.core.memory.model.MemoryRecord
 import app.amber.core.memory.store.MemoryRepository
@@ -124,12 +125,7 @@ class MemoryImportExportManager(
                 }
                 .minByOrNull { it.id }
             val written = try {
-                memoryRepository.upsertRecord(
-                    record.copy(
-                        id = existing?.id ?: 0,
-                        revision = existing?.revision ?: record.revision,
-                    )
-                )
+                memoryRepository.upsertRecord(record.mergingOnto(existing))
             } catch (stale: MemoryStaleException) {
                 // A concurrent writer owns the row now — skip, don't abort.
                 skipped++
@@ -141,22 +137,23 @@ class MemoryImportExportManager(
             imported++
         }
         decoded.filter { it.kind == MemoryKind.TOPIC }.forEach { record ->
-            val titleKey = record.topicTitle?.lowercase()
+            // Same normalization the dream applier uses for topic upserts, so
+            // an imported title matches what review would have produced.
+            val titleKey = record.topicTitle
+                ?.let(::normalizeTopicTitle)
+                ?.takeIf { it.isNotEmpty() }
             val existing = currentRecords
                 .filter { candidate ->
                     candidate.kind == MemoryKind.TOPIC &&
                         candidate.archived == record.archived &&
                         titleKey != null &&
-                        candidate.topicTitle?.lowercase() == titleKey
+                        candidate.topicTitle?.let(::normalizeTopicTitle) == titleKey
                 }
                 .minByOrNull { it.id }
             val written = try {
                 memoryRepository.upsertRecord(
-                    record.copy(
-                        id = existing?.id ?: 0,
-                        revision = existing?.revision ?: record.revision,
-                        memberIds = record.memberIds.mapNotNull(remappedIds::get),
-                    )
+                    record.mergingOnto(existing)
+                        .copy(memberIds = record.memberIds.mapNotNull(remappedIds::get))
                 )
             } catch (stale: MemoryStaleException) {
                 skipped++
@@ -172,6 +169,25 @@ class MemoryImportExportManager(
             skippedCount = skipped,
         )
     }
+
+    /**
+     * Rebase a decoded file record onto the matched existing row. Fields the
+     * codec never exports (lastUsedAt, provenance) would otherwise be blanked
+     * by the update; createdAt keeps the earliest timestamp of the two.
+     */
+    private fun MemoryRecord.mergingOnto(existing: MemoryRecord?): MemoryRecord =
+        if (existing == null) {
+            copy(id = 0)
+        } else {
+            copy(
+                id = existing.id,
+                revision = existing.revision,
+                createdAt = minOf(existing.createdAt, createdAt),
+                lastUsedAt = existing.lastUsedAt ?: lastUsedAt,
+                sourceRunId = existing.sourceRunId ?: sourceRunId,
+                sourceTrigger = existing.sourceTrigger ?: sourceTrigger,
+            )
+        }
 
     private suspend fun captureWriteContext(): CoroutineContext {
         coroutineContext[SyncRestoreWriteEpoch]?.let { return it }

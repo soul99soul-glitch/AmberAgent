@@ -47,7 +47,7 @@ class MemoryFrontmatterCodec {
                     null
                 } else {
                     line.take(index).trim() to line.drop(index + 1).trim()
-                        .trim('"').unescapeScalar()
+                        .removeSurrounding("\"").unescapeScalar()
                 }
             }
             .toMap()

@@ -195,11 +195,11 @@ class MemoryExtractor(
                         eventLogger.log(
                             type = MemoryEventType.MEMORY_UPDATED,
                             conversationId = conversationId,
-                            memoryId = updateTarget!!.id,
+                            memoryId = updateTarget.id,
                             modelId = model.id.toString(),
                             message = "Auto-updated by extraction reconcile.",
                         )
-                    } else if (autoWrite && !updateAttempted) {
+                    } else if (autoWrite && meta?.updateMemoryId == null) {
                         val memory = memoryRepository.addMemory(
                             scope = candidate.scope,
                             kind = candidate.kind,

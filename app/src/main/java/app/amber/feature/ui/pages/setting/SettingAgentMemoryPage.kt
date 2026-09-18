@@ -636,11 +636,6 @@ private fun MemoryEditMetadata(memory: AssistantMemory) {
             .padding(horizontal = 4.dp),
         verticalArrangement = Arrangement.spacedBy(5.dp),
     ) {
-        Text(
-            text = stringResource(R.string.setting_agent_memory_metadata_source),
-            style = LocalAmberType.current.secondary.copy(fontWeight = FontWeight.SemiBold),
-            color = LocalAmberTokens.current.accent,
-        )
         MemoryMetadataLine(
             label = stringResource(R.string.setting_agent_memory_metadata_source),
             value = memorySourceLabel(memory),
@@ -696,6 +691,8 @@ private fun MemoryMetadataLine(
             style = LocalAmberType.current.secondary,
             color = workspaceColors().ink,
             textAlign = TextAlign.End,
+            maxLines = 3,
+            overflow = TextOverflow.Ellipsis,
         )
     }
 }
@@ -706,6 +703,9 @@ private fun MemoryClassificationEditor(
     enabled: Boolean,
     onChange: (AssistantMemory) -> Unit,
 ) {
+    // Topics stay in their dream-managed classification: pinning or re-scoping
+    // one would defeat the recall rule that keeps topics out of always-eligible.
+    val classificationEditable = enabled && memory.kind != MemoryKind.TOPIC
     var scopeMenuExpanded by remember(memory.id) { mutableStateOf(false) }
     Column(
         modifier = Modifier
@@ -720,7 +720,7 @@ private fun MemoryClassificationEditor(
         )
         Box(modifier = Modifier.fillMaxWidth()) {
             TextButton(
-                enabled = enabled,
+                enabled = classificationEditable,
                 onClick = { scopeMenuExpanded = true },
                 modifier = Modifier.fillMaxWidth(),
                 shape = MaterialTheme.shapes.small,
@@ -773,7 +773,7 @@ private fun MemoryClassificationEditor(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .clickable(enabled = enabled) {
+                .clickable(enabled = classificationEditable) {
                     onChange(memory.copy(pinned = !memory.pinned))
                 }
                 .padding(horizontal = 12.dp, vertical = 5.dp),
@@ -798,7 +798,7 @@ private fun MemoryClassificationEditor(
             Switch(
                 checked = memory.pinned,
                 onCheckedChange = { onChange(memory.copy(pinned = it)) },
-                enabled = enabled,
+                enabled = classificationEditable,
             )
         }
     }
@@ -1196,7 +1196,7 @@ private fun MemoryWorkerSubpage(
             },
             trailingContent = {
                 Switch(
-                    checked = worker.autoApplyMaintenance,
+                    checked = worker.autoApplyMaintenance && worker.dreamMaintenanceEnabled,
                     size = SwitchSize.Small,
                     enabled = worker.dreamMaintenanceEnabled,
                     onCheckedChange = { enabled ->
@@ -1237,7 +1237,12 @@ private fun MemoryWorkerSubpage(
         if (!canRunDream) {
             item(
                 headlineContent = { Text(stringResource(R.string.memory_run_unavailable_title)) },
-                supportingContent = { Text(stringResource(R.string.memory_run_unavailable_desc)) },
+                supportingContent = {
+                    MemoryRowSubtitle(
+                        stringResource(R.string.memory_run_unavailable_desc),
+                        mono = false,
+                    )
+                },
             )
         }
         // The following toggles were removed in favor of defaults:
@@ -1251,7 +1256,7 @@ private fun MemoryWorkerSubpage(
         // Manual "立即运行一次" → moved to toolbar play icon.
     }
 
-    Spacer(Modifier.height(26.dp))
+    Spacer(Modifier.height(12.dp))
     DreamReviewSection(
         plan = dreamPlan,
         running = running,
@@ -2004,7 +2009,7 @@ private fun DreamReviewSection(
                             text = stringResource(
                                 R.string.memory_dream_topic,
                                 suggestion.title,
-                                suggestion.memberMemoryIds.joinToString(","),
+                                suggestion.memberMemoryIds.joinToString(", ") { "#$it" },
                                 reasonSuffix,
                             ),
                             style = LocalAmberType.current.secondary,
@@ -2015,7 +2020,7 @@ private fun DreamReviewSection(
 
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         TextButton(
-                            enabled = !running,
+                            enabled = !running && canRun,
                             onClick = onPlan,
                         ) {
                             Text(stringResource(R.string.memory_generate_suggestion))

@@ -41,6 +41,13 @@ open class MemoryRepository(
         /** Trigger label for automatic extraction writes (P2-06 provenance). */
         const val TRIGGER_AUTO_EXTRACTION = "auto_extraction"
         const val TRIGGER_DREAM = "dream"
+
+        /**
+         * Prefix MemoryExtractor puts on a pending candidate's reason when the
+         * model's intent was to update an existing record. acceptCandidate
+         * parses it back to apply the update in place.
+         */
+        private val UPDATE_TARGET_REASON = Regex("^updates memory #(\\d+)")
     }
 
     fun getMemoriesOfAssistantFlow(assistantId: String): Flow<List<AssistantMemory>> =
@@ -88,7 +95,7 @@ open class MemoryRepository(
     suspend fun getLongTermMemories(): List<AssistantMemory> =
         memoryDAO.getMemoriesOfAssistant(LONG_TERM_MEMORY_ID).map { it.toAssistantMemory() }
 
-    suspend fun getActiveRecords(scopes: Set<MemoryScope>, now: Long = System.currentTimeMillis()): List<MemoryRecord> {
+    open suspend fun getActiveRecords(scopes: Set<MemoryScope>, now: Long = System.currentTimeMillis()): List<MemoryRecord> {
         if (scopes.isEmpty()) return emptyList()
         return memoryDAO.getActiveMemoriesByScopes(scopes.map { it.wireName }, now).map { it.toRecord() }
     }
@@ -296,6 +303,11 @@ open class MemoryRepository(
         // can fall back to review instead of aborting a batch.
         val old = memoryDAO.getMemoryById(id)
             ?: throw MemoryStaleException(id, expectedRevision, actualRevision = 0)
+        // Topic content is dream-synthesized; a by-id content rewrite would let
+        // it drift from the member set. Topics change only via the dream applier.
+        require(old.kind != MemoryKind.TOPIC.wireName) {
+            "Memory record #$id is a dream-managed topic; content edits are rejected."
+        }
         val updatedAt = System.currentTimeMillis()
         val affected = memoryDAO.updateContentCas(
             id = id,
@@ -393,7 +405,7 @@ open class MemoryRepository(
     /** Current revision of a memory record, or null when it does not exist. */
     suspend fun memoryRevision(id: Int): Long? = memoryDAO.revisionOf(id)
 
-    suspend fun touchMemories(ids: List<Int>, usedAt: Long = System.currentTimeMillis()) = withMemoryWriter {
+    open suspend fun touchMemories(ids: List<Int>, usedAt: Long = System.currentTimeMillis()) = withMemoryWriter {
         if (ids.isNotEmpty()) {
             memoryDAO.touchMemories(ids, usedAt)
         }
@@ -439,16 +451,42 @@ open class MemoryRepository(
             check(candidate.status == MemoryCandidateStatus.PENDING) {
                 "Memory candidate #$id is already ${candidate.status.wireName}"
             }
-            val record = addMemoryInternal(
-                scope = candidate.scope,
-                kind = candidate.kind,
-                content = candidate.content,
-                assistantId = bucketForScope(candidate.scope),
-                sourceConversationId = candidate.sourceConversationId,
-                sourceMessageIds = candidate.sourceMessageIds,
-                expiresAt = candidate.expiresAt,
-                confidence = candidate.confidence,
-            )
+            // A candidate carrying an update intent ("updates memory #N: ...",
+            // emitted by MemoryExtractor) is applied to the target in place so
+            // accepting it cannot duplicate the still-live record. The target's
+            // current revision is used because the reviewer's approval applies
+            // to the record as it stands now; a stale write aborts and keeps
+            // the candidate pending instead of inserting a duplicate.
+            val updateTarget = UPDATE_TARGET_REASON
+                .find(candidate.reason)
+                ?.groupValues?.get(1)?.toIntOrNull()
+                ?.let { memoryDAO.getMemoryById(it) }
+            val record = if (
+                updateTarget != null &&
+                !updateTarget.archived &&
+                updateTarget.scope != MemoryScope.CORE.wireName &&
+                updateTarget.kind != MemoryKind.TOPIC.wireName
+            ) {
+                updateContentCasInternal(
+                    id = updateTarget.id,
+                    content = candidate.content,
+                    expectedRevision = updateTarget.revision,
+                    sourceRunId = candidate.sourceConversationId,
+                    sourceTrigger = TRIGGER_AUTO_EXTRACTION,
+                )
+                memoryDAO.getMemoryById(updateTarget.id)!!.toRecord()
+            } else {
+                addMemoryInternal(
+                    scope = candidate.scope,
+                    kind = candidate.kind,
+                    content = candidate.content,
+                    assistantId = bucketForScope(candidate.scope),
+                    sourceConversationId = candidate.sourceConversationId,
+                    sourceMessageIds = candidate.sourceMessageIds,
+                    expiresAt = candidate.expiresAt,
+                    confidence = candidate.confidence,
+                )
+            }
             updateCandidateInternal(candidate.copy(status = MemoryCandidateStatus.ACCEPTED))
             record
         }

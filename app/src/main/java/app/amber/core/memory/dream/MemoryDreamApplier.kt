@@ -230,6 +230,7 @@ class MemoryDreamApplier(
             .mapNotNull { records[it] }
             .filter {
                 it.scope == MemoryScope.SHORT_TERM &&
+                    it.kind != MemoryKind.TOPIC &&
                     !it.archived &&
                     !it.pinned &&
                     it.id !in mergeIds &&
@@ -253,7 +254,12 @@ class MemoryDreamApplier(
             mergeSuggestions = mergeSuggestions,
             promoteMemoryIds = promoteMemoryIds
                 .mapNotNull { records[it] }
-                .filter { it.scope == MemoryScope.SHORT_TERM && !it.archived && it.id !in supersededIds }
+                .filter {
+                    it.scope == MemoryScope.SHORT_TERM &&
+                        it.kind != MemoryKind.TOPIC &&
+                        !it.archived &&
+                        it.id !in supersededIds
+                }
                 .map { it.id }
                 .distinct(),
             archiveMemoryIds = archiveMemoryIds,
@@ -265,11 +271,6 @@ class MemoryDreamApplier(
 
     private fun MemoryRecord.isManagedByDream(): Boolean =
         !archived && scope != MemoryScope.CORE && kind != MemoryKind.TOPIC
-
-    // Fuzzy upsert key on purpose: "A B" and "AB" collapse to one topic —
-    // near-duplicate titles should update, not fork.
-    private fun normalizeTopicTitle(title: String): String =
-        title.lowercase().filter { it.isLetterOrDigit() }
 
     private fun MemoryRecord.canBeSuperseded(): Boolean =
         isManagedByDream() && !pinned && !isSensitiveMemoryContent(content)
@@ -284,3 +285,9 @@ class MemoryDreamApplier(
         .thenByDescending { it.confidence }
         .thenByDescending { it.updatedAt }
 }
+
+// Fuzzy upsert key on purpose: "A B" and "AB" collapse to one topic —
+// near-duplicate titles should update, not fork. Shared with the importer so
+// file matching uses the same normalization as dream review.
+internal fun normalizeTopicTitle(title: String): String =
+    title.lowercase().filter { it.isLetterOrDigit() }

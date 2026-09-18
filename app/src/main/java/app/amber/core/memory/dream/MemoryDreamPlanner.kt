@@ -165,9 +165,13 @@ class MemoryDreamPlanner(
             val expiredProjects = records.filter { record ->
                 !record.archived &&
                     record.scope == MemoryScope.SHORT_TERM &&
+                    record.kind != MemoryKind.TOPIC &&
                     record.expiresAt?.let { it <= now } == true
             }
+            // Topics are dream-synthesized views keyed by title; verbatim
+            // content duplication is not a merge signal for them.
             val duplicateGroups = activeRecords
+                .filter { it.kind != MemoryKind.TOPIC }
                 .groupBy { normalize(it.content) }
                 .values
                 .filter { group -> group.size > 1 && group.first().content.length >= 8 }
