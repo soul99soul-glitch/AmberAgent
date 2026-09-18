@@ -100,7 +100,7 @@ class AgentTaskBubbleController(
         val next = AgentBubbleReducer.reduce(
             previous = prev,
             pickedConversationId = picked,
-            activity = activity?.takeIf { it.conversationId == picked },
+            activity = activity,
             messages = messages,
             finalText = finalText,
             failed = failed,

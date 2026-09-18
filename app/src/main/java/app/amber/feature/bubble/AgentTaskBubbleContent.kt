@@ -17,11 +17,14 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -37,7 +40,10 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -64,9 +70,11 @@ fun AgentTaskBubbleContent(
 ) {
     val tokens = LocalAmberTokens.current
     val errorColor = MaterialTheme.colorScheme.error
+    val dotDescription = stringResource(R.string.task_bubble_a11y_label)
     var expanded by remember { mutableStateOf(false) }
+    LaunchedEffect(state.stepRunning) { onSizeChanged() }
 
-    if (!expanded) {
+    if (!expanded || state.stepRunning) {
         // ── 收起态：状态点 ──
         val waiting = state.phase == AgentBubblePhase.RUNNING && state.waitingApproval
         val pulse = rememberInfiniteTransition(label = "taskBubblePulse")
@@ -101,6 +109,7 @@ fun AgentTaskBubbleContent(
                         onDragEnd = { onDragEnd() },
                     )
                 }
+                .semantics { contentDescription = dotDescription }
                 .combinedClickable(
                     onClick = {
                         expanded = true
@@ -121,6 +130,7 @@ fun AgentTaskBubbleContent(
         }
     } else {
         // ── 展开态：任务卡片 ──
+        // 穿透期间窗口 FLAG_NOT_TOUCHABLE，卡片不可点，收成点态避免误导（手势结束自动恢复展开）。
         var appeared by remember { mutableStateOf(false) }
         LaunchedEffect(Unit) {
             appeared = true
@@ -145,6 +155,8 @@ fun AgentTaskBubbleContent(
                     transformOrigin = TransformOrigin(1f, 0f)
                 }
                 .width(280.dp)
+                .heightIn(max = (LocalConfiguration.current.screenHeightDp - 48).dp)
+                .verticalScroll(rememberScrollState())
                 .clip(RoundedCornerShape(16.dp))
                 .background(tokens.surface)
                 .border(1.dp, tokens.line2, RoundedCornerShape(16.dp))
@@ -228,14 +240,20 @@ fun AgentTaskBubbleContent(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
-                    TextButton(onClick = onApprove) {
+                    TextButton(
+                        modifier = Modifier.weight(1f),
+                        onClick = onApprove,
+                    ) {
                         Text(
                             stringResource(R.string.task_bubble_approve),
                             fontSize = 13.sp,
                             color = tokens.accent,
                         )
                     }
-                    TextButton(onClick = onDeny) {
+                    TextButton(
+                        modifier = Modifier.weight(1f),
+                        onClick = onDeny,
+                    ) {
                         Text(
                             stringResource(R.string.task_bubble_deny),
                             fontSize = 13.sp,

@@ -21,7 +21,9 @@ data class AgentBubbleUiState(
     val approvalToolTitle: String = "",
     /** 当前正在执行的步骤标题（仅运行中的工具），空串 = 无步骤信息。 */
     val stepTitle: String = "",
-    /** screen_* 工具正在执行：气泡窗口需触摸穿透，避免吞掉注入手势。 */
+    /** screen_* 工具正在执行：气泡窗口需触摸穿透，避免吞掉注入手势。
+     *  展示会话与执行手势的会话可能不同，穿透必须全局判定（任一活跃会话的 screen_* 在执行即穿透）。
+     */
     val stepRunning: Boolean = false,
     /** agent 最新文本回复的尾部预览。 */
     val replyPreview: String = "",
@@ -56,6 +58,11 @@ object AgentBubbleReducer {
         return activeIds.first()
     }
 
+    /**
+     * 归约气泡状态。[activity] 是全局沙箱活动快照（可能属于任一活跃会话）：
+     * stepRunning（触摸穿透）按全局判定，stepTitle 只取被展示会话（[pickedConversationId]）——
+     * 展示会话与执行手势的会话可能不同，穿透必须全局判定。
+     */
     fun reduce(
         previous: AgentBubbleUiState,
         pickedConversationId: String?,
@@ -115,7 +122,7 @@ object AgentBubbleReducer {
             waitingAskUser = pendingTool?.toolName == ASK_USER_TOOL,
             approvalToolCallId = pendingTool?.toolCallId,
             approvalToolTitle = pendingTool?.toolName.orEmpty(),
-            stepTitle = runningStepTitle(activity),
+            stepTitle = runningStepTitle(activity?.takeIf { it.conversationId == pickedConversationId }),
             stepRunning = activity?.status == ToolActivityStatus.RUNNING &&
                 activity.toolName.startsWith(SCREEN_TOOL_PREFIX),
             replyPreview = lastText?.takeLast(PREVIEW_TAIL_CHARS).orEmpty(),

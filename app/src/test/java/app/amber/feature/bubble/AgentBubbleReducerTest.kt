@@ -169,6 +169,32 @@ class AgentBubbleReducerTest {
         assertEquals("", doneTool.stepTitle)
     }
 
+    @Test
+    fun `cross conversation running screen tool requests passthrough with empty step title`() {
+        val state = AgentBubbleReducer.reduce(
+            previous = AgentBubbleUiState(),
+            pickedConversationId = conversationA,
+            activity = runningScreenTool(conversationId = conversationB),
+            messages = null,
+            nowMillis = 1_000L,
+        )
+        assertTrue(state.stepRunning)
+        assertEquals("", state.stepTitle)
+    }
+
+    @Test
+    fun `picked conversation running non screen tool shows title without passthrough`() {
+        val state = AgentBubbleReducer.reduce(
+            previous = AgentBubbleUiState(),
+            pickedConversationId = conversationA,
+            activity = runningScreenTool(toolName = "terminal_execute"),
+            messages = null,
+            nowMillis = 1_000L,
+        )
+        assertFalse(state.stepRunning)
+        assertEquals("点击屏幕", state.stepTitle)
+    }
+
     // ── reduce：结束过渡与停留 ──
 
     @Test
