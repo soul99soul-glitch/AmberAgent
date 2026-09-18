@@ -82,27 +82,6 @@ class AmberAccessibilityService : AccessibilityService(), AccessibilityControlle
         return node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
     }
 
-    /**
-     * 在指定包名的窗口里填入文本：优先该窗口的输入焦点节点，否则深度优先找第一个
-     * 可编辑节点。供 Live 伴随"只填不发"使用 —— 点击 Amber 自己的按钮时活动窗口
-     * 是 Amber，rootInActiveWindow 拿不到对方输入框，必须按包名扫 windows。
-     */
-    fun setTextInPackage(packageName: String, text: String): Boolean {
-        if (packageName.isBlank()) return false
-        for (window in windows.orEmpty()) {
-            val root = window.root ?: continue
-            if (root.packageName?.toString() != packageName) continue
-            val target = root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)?.takeIf { it.isEditable }
-                ?: findFirstEditable(root, depth = 0)
-                ?: continue
-            val arguments = Bundle().apply {
-                putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text)
-            }
-            if (target.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, arguments)) return true
-        }
-        return false
-    }
-
     /** 仲裁契约（蓝图 §7.2 P0-5）：读取目标包名输入框的当前文本；找不到返回 null。 */
     fun readTextInPackage(packageName: String): String? {
         val target = locateEditableInPackage(packageName) ?: return null
