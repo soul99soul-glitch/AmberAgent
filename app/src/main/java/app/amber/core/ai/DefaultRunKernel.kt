@@ -56,6 +56,15 @@ private const val PERF_TAG = "AmberChatPerf"
 /** Wire reason carried by [GenerationTerminal.GuardStopped]. */
 private const val DUPLICATE_TOOL_CALL_GUARD_REASON = "duplicate_tool_call"
 
+/**
+ * GUI 操控（无障碍/adb 自动化）工具族前缀。这类工具的执行结果取决于外部屏幕状态：
+ * 同参数跨步重复是长任务的正常形态（连续滑动、逐屏读取、滚动直到目标出现），
+ * 不计入重复守卫的跨步签名计数，失控上界交给 maxSteps 步数预算（用户可配）。
+ * 同批双胞胎与已计数 callId 的重发仍照常守卫。
+ * （iOS ToolLoopGuard 对齐在 Android 侧放宽，双端契约以本注释为准。）
+ */
+private const val SCREEN_AUTOMATION_TOOL_PREFIX = "screen_"
+
 // These observations may change between model steps. Keep this explicit:
 // the ledger's READ_ONLY class also covers execution tools, not just reads.
 private val REPEATABLE_OBSERVATION_TOOLS = setOf(
@@ -845,7 +854,11 @@ class DefaultRunKernel(
      * skipped, third stops the run.
      *
      * Fresh observation callIds may ignore earlier steps' signature counts;
-     * already-counted callIds still go through the guard. Approval/crash
+     * screen_* automation calls (fresh callIds) enjoy the same exemption —
+     * their outcome depends on the changing screen state, so an identical
+     * cross-step repeat is normal for long automation tasks; the runaway
+     * bound is the maxSteps budget. Same-batch twins and counted-callId
+     * re-emissions stay guarded either way. Approval/crash
      * resume never needs this exception — those
      * flows re-enter run() with PREPARED/RECONCILED effects, which are never
      * counted (only FINISHED, non-failure executions count), so a resumed
@@ -872,7 +885,8 @@ class DefaultRunKernel(
         for (tool in tools) {
             val signature = tool.toolName to argsDigest(tool.input)
             val batchSeen = batchSeenCounts[signature] ?: 0
-            val freshObservation = tool.toolName in REPEATABLE_OBSERVATION_TOOLS &&
+            val freshObservation = (tool.toolName in REPEATABLE_OBSERVATION_TOOLS ||
+                tool.toolName.startsWith(SCREEN_AUTOMATION_TOOL_PREFIX)) &&
                 tool.toolCallId !in countedToolCallIds
             val priorOccurrences = if (freshObservation) 0 else executedSignatures[signature] ?: 0
             val occurrence = priorOccurrences + batchSeen + 1

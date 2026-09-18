@@ -701,6 +701,81 @@ class DefaultRunKernelTest : DurableRuntimeTestBase() {
     }
 
     @Test
+    fun `cross-step identical screen automation calls all execute without tripping the guard`() = runTest {
+        val executions = AtomicInteger(0)
+        val swipe = Tool(
+            name = "screen_swipe",
+            description = "swipe the screen",
+            execute = {
+                executions.incrementAndGet()
+                listOf(UIMessagePart.Text("swiped"))
+            },
+        )
+        // 长任务常态：连续多步以相同参数滑动，每次调用后屏幕状态已变化。
+        val engine = FakeRoundEngine(
+            listOf(
+                { toolCallAssistant("call_1", "screen_swipe") },
+                { toolCallAssistant("call_2", "screen_swipe") },
+                { toolCallAssistant("call_3", "screen_swipe") },
+                { toolCallAssistant("call_4", "screen_swipe") },
+                { textAssistant("完成") },
+            ),
+        )
+        val terminals = mutableListOf<GenerationTerminal>()
+
+        kernel(engine).run(
+            session(
+                messages = listOf(UIMessage.user("一直滑到底")),
+                tools = listOf(swipe),
+                terminals = terminals,
+            ),
+        ).toList()
+
+        assertEquals("every cross-step emission executed", 4, executions.get())
+        assertEquals("no guard stop, the loop ran into the final answer round", 5, engine.requests.size)
+        assertTrue("natural completion, no terminal signal", terminals.isEmpty())
+    }
+
+    @Test
+    fun `same-batch twins of a screen automation tool still dedupe`() = runTest {
+        val executions = AtomicInteger(0)
+        val click = Tool(
+            name = "screen_click",
+            description = "click the screen",
+            execute = {
+                executions.incrementAndGet()
+                listOf(UIMessagePart.Text("clicked"))
+            },
+        )
+        val engine = FakeRoundEngine(
+            listOf(
+                { _: List<UIMessage> ->
+                    UIMessage(
+                        role = MessageRole.ASSISTANT,
+                        parts = listOf(
+                            UIMessagePart.Tool(toolCallId = "call_1", toolName = "screen_click", input = "{}"),
+                            UIMessagePart.Tool(toolCallId = "call_2", toolName = "screen_click", input = "{}"),
+                        ),
+                    )
+                },
+                { textAssistant("完成") },
+            ),
+        )
+        val terminals = mutableListOf<GenerationTerminal>()
+
+        kernel(engine).run(
+            session(
+                messages = listOf(UIMessage.user("点两下")),
+                tools = listOf(click),
+                terminals = terminals,
+            ),
+        ).toList()
+
+        assertEquals("only the first in-batch emission executed", 1, executions.get())
+        assertTrue("a skipped twin is not a stop and not a park", terminals.isEmpty())
+    }
+
+    @Test
     fun `two same-signature calls in one message execute once and the twin is skipped in-batch`() = runTest {
         val executions = AtomicInteger(0)
         val readOnly = Tool(
