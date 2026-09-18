@@ -226,7 +226,7 @@ class ExecutionPolicyCoveragePinTest {
                 "wm_tab_close", "wm_back", "wm_forward", "wm_scroll", "wm_find", "wm_network_inspect",
                 "wm_stations", "wm_recipe_candidates", "wm_signed_fetch", "wm_extract", "wm_site_add",
                 "wm_site_remove", "wm_profile_synthesize", "wm_click", "wm_tap", "wm_type", "wm_keys",
-                "wm_select", "wm_eval", "wm_zcode_open", "wm_zcode_read", "wm_zcode_ask",
+                "wm_select", "wm_eval", "wm_zcode_open", "wm_zcode_read", "wm_zcode_ask", "wm_run_goal",
             ),
             Capability.MCP_IMPORT to setOf("mcp_import_from_skill", "mcp_test"),
             Capability.MCP_TOOL to setOf("mcp_call_tool"),

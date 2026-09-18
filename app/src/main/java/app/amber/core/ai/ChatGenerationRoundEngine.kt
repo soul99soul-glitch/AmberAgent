@@ -158,6 +158,7 @@ class ChatGenerationRoundEngine(
             settings = settings,
             messages = messages,
             locale = context.appLocale(),
+            runKey = request.runId,
         )
         val systemParts = buildSystemPromptParts(
             settings = settings,
@@ -176,6 +177,7 @@ class ChatGenerationRoundEngine(
             tools = tools,
             contextMessageSize = sessionDefaults.contextMessageSize,
             promptOverheadTokens = ConversationContextPlanner.estimateTokens(listOf(UIMessage.system(system))),
+            jevRunKey = request.runId,
         )
         suspend fun prepareInternalMessages(forceImageToText: Boolean = false): List<UIMessage> =
             buildList {

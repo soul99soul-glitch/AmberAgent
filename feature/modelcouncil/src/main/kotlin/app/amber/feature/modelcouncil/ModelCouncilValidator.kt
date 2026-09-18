@@ -22,6 +22,7 @@ object ModelCouncilValidator {
         input: JsonObject,
         settings: Settings,
         councilSetting: ModelCouncilRuntimeSetting,
+        rankedPool: List<Uuid>? = null,
     ): ModelCouncilTaskSpec {
         require(councilSetting.enabled) { "Model Council experimental mode is disabled." }
         val task = input["task"]?.jsonObject ?: input
@@ -30,7 +31,7 @@ object ModelCouncilValidator {
             "debate" -> ModelCouncilMode.DEBATE
             else -> error("mode must be compare or debate")
         }
-        val seats = parseSeats(task, settings, councilSetting)
+        val seats = parseSeats(task, settings, councilSetting, rankedPool)
         validateSeats(settings, councilSetting, seats)
         val maxRounds = councilSetting.maxRounds.coerceAtLeast(DEFAULT_MODEL_COUNCIL_MAX_ROUNDS)
         val rounds = (task["rounds"]?.jsonPrimitive?.intOrNull ?: councilSetting.defaultRounds)
@@ -108,6 +109,7 @@ object ModelCouncilValidator {
         task: JsonObject,
         settings: Settings,
         setting: ModelCouncilRuntimeSetting,
+        rankedPool: List<Uuid>? = null,
     ): List<ModelCouncilSeat> {
         val seatStrategy = task.stringOrBlank("seat_strategy").lowercase(Locale.ROOT)
         val allowExternalCli = task.booleanFlag("allow_external_cli")
@@ -155,6 +157,12 @@ object ModelCouncilValidator {
         require(modelPool.isNotEmpty()) {
             "Model Council default mode needs at least one enabled CHAT model for auto-injected seats."
         }
+        // Jev 模型调度只重排/筛减"合法池"内的候选；过滤后为空则回退原轮转。
+        val effectivePool = rankedPool
+            ?.filter { it in modelPool }
+            ?.filter { settings.findModelById(it)?.type == ModelType.CHAT }
+            ?.takeIf { it.isNotEmpty() }
+            ?: modelPool
         val usedModelIds = setting.defaultSeats.mapNotNull { seat ->
             if (seat.runnerType != ModelCouncilSeatRunner.PROVIDER_MODEL) return@mapNotNull null
             settings.findModelById(seat.modelId)
@@ -163,11 +171,11 @@ object ModelCouncilValidator {
         }.toCollection(LinkedHashSet())
         var autoModelIndex = 0
         fun nextAutoModelId(): Uuid {
-            modelPool.firstOrNull { it !in usedModelIds }?.let { modelId ->
+            effectivePool.firstOrNull { it !in usedModelIds }?.let { modelId ->
                 usedModelIds += modelId
                 return modelId
             }
-            val modelId = modelPool[(autoModelIndex++ % modelPool.size)]
+            val modelId = effectivePool[(autoModelIndex++ % effectivePool.size)]
             usedModelIds += modelId
             return modelId
         }
@@ -342,6 +350,10 @@ object ModelCouncilValidator {
         val alias = stringOrBlank("runner_type").lowercase(Locale.ROOT)
         return alias.takeIf(ExternalCliToolRegistry::isSupported).orEmpty()
     }
+
+    /** 合法池（已启用 CHAT 模型、provider 轮转序），供池排序器与默认路径共用。 */
+    fun defaultPoolModelIds(settings: Settings, setting: ModelCouncilRuntimeSetting): List<Uuid> =
+        settings.defaultCouncilModelPool(setting)
 
     private fun Settings.defaultCouncilModelPool(setting: ModelCouncilRuntimeSetting): List<Uuid> {
         val allChatCandidates = modelCandidates()

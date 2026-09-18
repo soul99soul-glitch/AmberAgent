@@ -175,6 +175,7 @@ val webMountModule = module {
             settingsStore = get<SettingsAggregator>(),
             sessionOwner = get(),
             zCodeUrlStore = get(),
+            goalRunner = get(),
         )
     }
 }

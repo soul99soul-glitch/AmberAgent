@@ -52,6 +52,7 @@ import com.composables.icons.lucide.ImageUp
 import com.composables.icons.lucide.MessageCircle
 import com.composables.icons.lucide.Pen
 import com.composables.icons.lucide.ScanSearch
+import com.composables.icons.lucide.Sparkles
 import com.composables.icons.lucide.Server
 import com.composables.icons.lucide.Settings
 import com.composables.icons.lucide.SquareCode
@@ -221,6 +222,13 @@ fun SettingPage(vm: SettingVM = koinViewModel()) {
                         onClick = { navController.navigate(Screen.SettingSearch) },
                         leadingContent = { SettingLeadingIcon(Lucide.ScanSearch) },
                         headlineContent = { Text(stringResource(R.string.setting_page_search_service)) },
+                        trailingContent = { SettingChevron() },
+                    )
+                    item(
+                        modifier = Modifier.settingSingleLine(),
+                        onClick = { navController.navigate(Screen.SettingJev) },
+                        leadingContent = { SettingLeadingIcon(Lucide.Sparkles) },
+                        headlineContent = { Text(stringResource(R.string.setting_page_jev)) },
                         trailingContent = { SettingChevron() },
                     )
                 }

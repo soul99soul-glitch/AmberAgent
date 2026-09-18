@@ -27,4 +27,5 @@ dependencies {
     api(project(":feature:subagent:api"))
     api(libs.kotlinx.serialization.json)
     testImplementation(libs.junit)
+    testImplementation(libs.kotlinx.coroutines.test)
 }

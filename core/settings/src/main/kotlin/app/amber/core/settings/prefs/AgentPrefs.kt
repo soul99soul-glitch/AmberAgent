@@ -12,6 +12,7 @@ import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import app.amber.core.infra.AppScope
+import app.amber.core.jev.JevSetting
 import app.amber.core.settings.AgentRuntimeSetting
 import app.amber.core.settings.PreferencesKeys
 import app.amber.core.agent.utils.JsonInstant
@@ -20,6 +21,7 @@ import app.amber.core.settings.toMutableStateFlow
 
 data class AgentPrefsData(
     val agentRuntime: AgentRuntimeSetting = AgentRuntimeSetting(),
+    val jev: JevSetting = JevSetting(),
 )
 
 class AgentPrefs(
@@ -50,9 +52,13 @@ class AgentPrefs(
         agentRuntime = p[PreferencesKeys.AGENT_RUNTIME]?.let {
             it.decodeJsonOrNull<AgentRuntimeSetting>()
         } ?: AgentRuntimeSetting(),
+        jev = p[PreferencesKeys.JEV]?.let {
+            it.decodeJsonOrNull<JevSetting>()
+        } ?: JevSetting(),
     )
 
     private fun writeTo(p: MutablePreferences, data: AgentPrefsData) {
         p[PreferencesKeys.AGENT_RUNTIME] = JsonInstant.encodeToString(data.agentRuntime)
+        p[PreferencesKeys.JEV] = JsonInstant.encodeToString(data.jev)
     }
 }

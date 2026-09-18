@@ -198,6 +198,7 @@ class SettingsAggregator(
             p[PreferencesKeys.AMBER_ENABLED_LOREBOOK_IDS] =
                 JsonInstant.encodeToString(settingsForWrite.enabledLorebookIds)
             p[PreferencesKeys.AGENT_RUNTIME] = JsonInstant.encodeToString(settingsForWrite.agentRuntime)
+            p[PreferencesKeys.JEV] = JsonInstant.encodeToString(settingsForWrite.jev)
             p[PreferencesKeys.BACKUP_REMINDER_CONFIG] =
                 JsonInstant.encodeToString(settings.backupReminderConfig)
             p[PreferencesKeys.SYNC_SETTINGS] = JsonInstant.encodeToString(settings.syncSettings)
@@ -354,6 +355,7 @@ internal fun composeRawSettings(
     searchGoogleWebViewFallbackEnabled = search.searchGoogleWebViewFallbackEnabled,
 
     agentRuntime = agent.agentRuntime,
+    jev = agent.jev,
 
     mcpServers = ext.mcpServers,
     webDavConfig = ext.webDavConfig,

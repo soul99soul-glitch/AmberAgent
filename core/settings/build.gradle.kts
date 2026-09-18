@@ -34,6 +34,7 @@ kotlin {
 dependencies {
     api(project(":ai"))
     api(project(":core:model"))
+    api(project(":core:jev"))
     api(project(":core:app-infra"))
     api(project(":core:agent-utils"))
     api(project(":feature:terminal:api"))

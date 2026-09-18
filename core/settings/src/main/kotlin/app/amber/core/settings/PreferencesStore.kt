@@ -43,6 +43,7 @@ import app.amber.core.model.QuickMessage
 import app.amber.core.sync.core.SyncSettings
 import app.amber.core.sync.s3.S3Config
 import app.amber.core.agent.utils.JsonInstant
+import app.amber.core.jev.JevSetting
 import app.amber.search.SearchCommonOptions
 import app.amber.search.SearchServiceOptions
 import kotlin.uuid.Uuid
@@ -143,6 +144,8 @@ data class Settings(
     val lorebooks: List<Lorebook> = emptyList(),
     val quickMessages: List<QuickMessage> = emptyList(),
     val agentRuntime: AgentRuntimeSetting = AgentRuntimeSetting(),
+    /** Jev 判断服务（独立于聊天 provider；真实 Key 只存 SecretStore）。 */
+    val jev: JevSetting = JevSetting(),
     val backupReminderConfig: BackupReminderConfig = BackupReminderConfig(),
     val syncSettings: SyncSettings = SyncSettings(),
     val launchCount: Int = 0,

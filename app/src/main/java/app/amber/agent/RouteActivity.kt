@@ -156,6 +156,7 @@ import app.amber.feature.ui.pages.setting.SettingProviderDetailPage
 import app.amber.feature.ui.pages.setting.SettingProviderPage
 import app.amber.feature.ui.pages.setting.SettingSandboxPage
 import app.amber.feature.ui.pages.setting.SettingSearchPage
+import app.amber.feature.ui.pages.setting.SettingJevPage
 import app.amber.feature.ui.pages.setting.SettingSlidesFontPage
 import app.amber.feature.ui.pages.setting.SettingSystemAccessPage
 import app.amber.feature.ui.pages.share.handler.ShareHandlerPage
@@ -813,6 +814,10 @@ class RouteActivity : ComponentActivity() {
                                 SettingSearchPage()
                             }
 
+                            entry<Screen.SettingJev> {
+                                SettingJevPage()
+                            }
+
                             entry<Screen.SettingMcp> {
                                 SettingMcpPage()
                             }
@@ -1161,6 +1166,8 @@ sealed interface Screen : NavKey {
     @Serializable
     data object SettingSearch : Screen
 
+    @Serializable
+    data object SettingJev : Screen
 
     @Serializable
     data object SettingMcp : Screen

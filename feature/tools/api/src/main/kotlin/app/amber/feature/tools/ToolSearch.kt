@@ -22,13 +22,39 @@ import java.util.Locale
 const val TOOL_SEARCH_TOOL_NAME = "tool_search"
 const val TOOL_SEARCH_AUTO_THRESHOLD = 40
 const val TOOL_SEARCH_DEFAULT_LIMIT = 5
+/** 语义重排的候选上限；与判断服务的候选上限一致，超限按词面+类别优先截断。 */
+const val TOOL_SEARCH_SEMANTIC_CANDIDATE_CAP = 64
 
 private val toolSearchJson = Json { ignoreUnknownKeys = true }
+
+/** 语义重排的候选工具元数据（已过 profile/scope 硬过滤的合法集合）。 */
+data class SemanticToolCandidate(
+    val name: String,
+    val category: String,
+    val description: String,
+)
+
+/** applied=false 时调用方保持词面结果（off/shadow/失败回退）；rankedNames 为语义排序后的工具名。 */
+data class SemanticToolRankResult(
+    val rankedNames: List<String>,
+    val applied: Boolean,
+)
+
+/** 由宿主注入的语义搜索能力；实现负责模式/范围/预算判断，返回 null 视为回退。 */
+fun interface ToolSemanticSearch {
+    suspend fun rerank(
+        query: String,
+        category: String?,
+        limit: Int,
+        candidates: List<SemanticToolCandidate>,
+    ): SemanticToolRankResult?
+}
 
 fun createToolSearchTool(
     registry: ToolRegistry,
     profile: MainAgentToolProfile? = null,
     registryProvider: () -> ToolRegistry = { registry },
+    semanticSearch: ToolSemanticSearch? = null,
 ) = Tool(
     name = TOOL_SEARCH_TOOL_NAME,
     description = "Search AmberAgent's full tool catalog by intent/category and expose the best matching tool schemas for the next step.",
@@ -73,7 +99,7 @@ fun createToolSearchTool(
         val category = input.jsonObject["category"]?.jsonPrimitive?.contentOrNull?.ifBlank { null }
         val limit = input.jsonObject["limit"]?.jsonPrimitive?.intOrNull ?: TOOL_SEARCH_DEFAULT_LIMIT
         val index = ToolSearchIndex(currentRegistry, profile)
-        listOf(UIMessagePart.Text(index.searchPayload(query, category, limit).toString()))
+        listOf(UIMessagePart.Text(index.searchPayloadWithSemantic(query, category, limit, semanticSearch).toString()))
     },
 )
 
@@ -90,10 +116,58 @@ class ToolSearchIndex(
         query: String,
         category: String?,
         limit: Int,
+    ): JsonObject = buildPayload(query, category, limit, search(query, normalized(category), limit.coerceIn(1, 20)), semanticTrace = null)
+
+    /** 语义入口：active 时以 Jev 排序替换词面匹配；off/shadow/回退保持词面结果。 */
+    suspend fun searchPayloadWithSemantic(
+        query: String,
+        category: String?,
+        limit: Int,
+        semanticSearch: ToolSemanticSearch?,
     ): JsonObject {
-        val normalizedCategory = category?.trim()?.lowercase(Locale.ROOT)?.ifBlank { null }
+        val normalizedCategory = normalized(category)
         val boundedLimit = limit.coerceIn(1, 20)
-        val matches = search(query, normalizedCategory, boundedLimit)
+        var matches = search(query, normalizedCategory, boundedLimit)
+        var semanticTrace: JsonObject? = null
+        // 语义重排仅在 lazy 目录（>阈值）且非精确名查询时尝试；词面精确命中零额外网络。
+        if (semanticSearch != null && registry.metadata.size > TOOL_SEARCH_AUTO_THRESHOLD &&
+            toolsByName.keys.none { it.equals(query.trim(), ignoreCase = true) }
+        ) {
+            val candidates = semanticCandidates(query, normalizedCategory)
+            if (candidates.isNotEmpty()) {
+                val semantic = semanticSearch.rerank(query, normalizedCategory, boundedLimit, candidates)
+                if (semantic != null && semantic.applied && semantic.rankedNames.isNotEmpty()) {
+                    matches = semantic.rankedNames.mapNotNull { name -> scoredToolFor(name) }
+                    semanticTrace = buildJsonObject {
+                        put("mode", "applied")
+                        put("candidates", candidates.size)
+                        put("catalog", registry.metadata.size)
+                        put("coverage", candidates.size.toDouble() / registry.metadata.size)
+                    }
+                } else if (semantic != null) {
+                    semanticTrace = buildJsonObject {
+                        put("mode", "shadow")
+                        put("candidates", candidates.size)
+                        put("catalog", registry.metadata.size)
+                    }
+                }
+            }
+        }
+        return buildPayload(query, category, limit, matches, semanticTrace)
+    }
+
+    private fun normalized(category: String?): String? =
+        category?.trim()?.lowercase(Locale.ROOT)?.ifBlank { null }
+
+    private fun buildPayload(
+        query: String,
+        category: String?,
+        limit: Int,
+        matches: List<ScoredTool>,
+        semanticTrace: JsonObject?,
+    ): JsonObject {
+        val normalizedCategory = normalized(category)
+        val boundedLimit = limit.coerceIn(1, 20)
         val expandedTools = matches.map { it.metadata.name }
         val fullSchemaChars = registry.tools().sumOf { it.schemaFootprintChars() }
         val residentSchemaChars = registry.tools()
@@ -126,6 +200,7 @@ class ToolSearchIndex(
                 put("estimated_expanded_schema_chars", expandedSchemaChars)
                 put("estimated_schema_savings_chars", (fullSchemaChars - residentSchemaChars - expandedSchemaChars).coerceAtLeast(0))
             })
+            semanticTrace?.let { put("semantic", it) }
             put("tools", buildJsonArray { matches.forEach { add(it.toJson()) } })
             if (matches.isEmpty()) {
                 put("category_candidates", buildJsonArray {
@@ -168,6 +243,38 @@ class ToolSearchIndex(
             .sortedWith(compareByDescending<ScoredTool> { it.score }.thenBy { it.metadata.name })
             .take(limit)
             .toList()
+    }
+
+    /** 语义候选：词面前 20 ∪ 类别匹配 ∪（不足 16 时）目录补充，上限 [TOOL_SEARCH_SEMANTIC_CANDIDATE_CAP]。 */
+    private fun semanticCandidates(query: String, category: String?): List<SemanticToolCandidate> {
+        val names = LinkedHashSet<String>()
+        search(query, category, 20).forEach { names += it.metadata.name }
+        if (category != null) {
+            registry.metadata
+                .filter { it.name != TOOL_SEARCH_TOOL_NAME && it.category.lowercase(Locale.ROOT) == category }
+                .take(20)
+                .forEach { names += it.name }
+        }
+        if (names.size < 16) {
+            registry.metadata
+                .asSequence()
+                .filter { it.name != TOOL_SEARCH_TOOL_NAME }
+                .forEach { names += it.name }
+        }
+        return names.take(TOOL_SEARCH_SEMANTIC_CANDIDATE_CAP).mapNotNull { semanticCandidateFor(it) }
+    }
+
+    private fun semanticCandidateFor(name: String): SemanticToolCandidate? {
+        val metadata = registry.metadataFor(name) ?: return null
+        val tool = toolsByName[name] ?: return null
+        return SemanticToolCandidate(name = name, category = metadata.category, description = tool.description.take(200))
+    }
+
+    /** 语义排序结果的按名还原（词面分不再参与排序；payload 的 trace 标注 semantic）。 */
+    private fun scoredToolFor(name: String): ScoredTool? {
+        val metadata = registry.metadataFor(name) ?: return null
+        val tool = toolsByName[name] ?: return null
+        return ScoredTool(metadata, tool, 0)
     }
 
     private fun scoreTool(

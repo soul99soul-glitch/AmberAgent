@@ -30,6 +30,7 @@ import app.amber.core.di.boardModule
 import app.amber.core.di.chatModule
 import app.amber.core.di.dataSourceModule
 import app.amber.core.di.iCloudModule
+import app.amber.core.di.jevModule
 import app.amber.core.di.memoryModule
 import app.amber.core.di.novelModule
 import app.amber.core.di.repositoryModule
@@ -77,7 +78,7 @@ class AmberAgentApp : Application() {
             androidLogger()
             androidContext(this@AmberAgentApp)
             workManagerFactory()
-            modules(appModule, chatModule, memoryModule, iCloudModule, webMountModule, agentRuntimeModule, agentInfraModule, boardModule, workspaceModule, novelModule, viewModelModule, dataSourceModule, repositoryModule)
+            modules(appModule, chatModule, memoryModule, iCloudModule, webMountModule, agentRuntimeModule, agentInfraModule, boardModule, workspaceModule, novelModule, viewModelModule, dataSourceModule, repositoryModule, jevModule)
         }
         this.createNotificationChannel()
 

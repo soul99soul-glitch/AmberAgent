@@ -745,6 +745,7 @@ dependencies {
     implementation(project(":core:agent-utils"))
     implementation(project(":core:model"))
     implementation(project(":core:settings"))
+    implementation(project(":core:jev"))
     implementation(project(":core:event"))
     implementation(project(":core:usage"))
     implementation(project(":core:agent-runtime-impl"))

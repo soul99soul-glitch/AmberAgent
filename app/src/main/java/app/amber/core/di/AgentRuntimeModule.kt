@@ -299,6 +299,7 @@ val agentRuntimeModule = module {
             get<ProviderModelCouncilTextRunner>(),
             get(),
             get(),
+            get(),
         )
     }
 

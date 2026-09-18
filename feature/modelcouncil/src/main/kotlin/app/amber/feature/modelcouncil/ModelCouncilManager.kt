@@ -22,6 +22,9 @@ import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonObject
+import java.util.Locale
 import kotlinx.serialization.json.add
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.encodeToJsonElement
@@ -82,6 +85,8 @@ class ModelCouncilManager(
     private val modelRunner: ModelCouncilTextRunner,
     private val externalCliRunner: ExternalCliModelCouncilRunner,
     private val agentTaskStore: AgentTaskStore,
+    // 宿主注入的模型池排序器（Jev MODEL_ROUTING）；null 保持纯轮转。
+    private val poolRanker: CouncilPoolRanker? = null,
 ) {
     private val runDir = File(context.filesDir, "amberagent/model-council/runs").also { it.mkdirs() }
     private val runs = java.util.concurrent.ConcurrentHashMap<String, RuntimeRun>()
@@ -98,11 +103,33 @@ class ModelCouncilManager(
      */
     private val seatLiveTextFlows = java.util.concurrent.ConcurrentHashMap<String, java.util.concurrent.ConcurrentHashMap<String, MutableStateFlow<String>>>()
 
+    private fun usesDefaultSeatStrategy(input: JsonObject): Boolean {
+        val task = input["task"]?.jsonObject ?: input
+        if (task["seats"] != null) return false
+        val strategy = (task["seat_strategy"] as? kotlinx.serialization.json.JsonPrimitive)
+            ?.contentOrNull?.trim()?.lowercase(Locale.ROOT).orEmpty()
+        return strategy.isEmpty() || strategy == "default"
+    }
+
     suspend fun start(input: JsonObject): JsonObject = withContext(Dispatchers.IO) {
         val settings = settingsStore.settingsFlow.value
         val councilSetting = settings.agentRuntime.modelCouncil
+        // MODEL_ROUTING 只作用于默认席次路径；显式 seats / agent_planned 是模型自己的
+        // 明确选择，不经排序器覆盖。
+        val rankedPool = poolRanker
+            ?.takeIf { ranker -> runCatching { usesDefaultSeatStrategy(input) }.getOrDefault(false) }
+            ?.let { ranker ->
+                // rank 是 start() 的挂起点：取消必须传播，否则中断后留下 RUNNING 僵尸 run。
+                try {
+                    ranker.rank(input, settings, councilSetting)
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    null
+                }
+            }
         val task = runCatching {
-            ModelCouncilValidator.parseTask(input, settings, councilSetting)
+            ModelCouncilValidator.parseTask(input, settings, councilSetting, rankedPool)
         }.getOrElse {
             return@withContext errorPayload("invalid_model_council_task", it.message ?: it.toString())
         }

@@ -98,6 +98,8 @@ object PreferencesKeys {
     val QUICK_MESSAGES = stringPreferencesKey("quick_messages")
     val AGENT_RUNTIME = stringPreferencesKey("agent_runtime")
 
+    // Jev 判断服务（独立于聊天 provider）
+    val JEV = stringPreferencesKey("jev")
     // 备份提醒
     val BACKUP_REMINDER_CONFIG = stringPreferencesKey("backup_reminder_config")
 

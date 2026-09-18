@@ -50,6 +50,8 @@ class WebMountPrimitiveTools(
     private val settingsStore: SettingsAggregator,
     private val sessionOwner: WebMountSessionOwner,
     private val zCodeUrlStore: ZCodeUrlStore,
+    // Jev 有界目标循环；null 时 wm_run_goal 返回 goal_runner_unavailable。
+    private val goalRunner: app.amber.core.jev.JevWebGoalRunner? = null,
 ) {
     private val deps = WebMountDeps(pool, activityStore, sessionOwner, context)
 
@@ -74,6 +76,13 @@ class WebMountPrimitiveTools(
         runId: String? = null,
     ): List<Tool> = listOfNotNull(
         openTool,
+        // WEB_AUTOMATION 关闭时不注册：避免模型调用一个注定 disabled 的工具、
+        // 用户却被强制审批一次（与 modelCouncil 工具的设置门控同款惯例）。
+        if (settingsStore.settingsFlow.value.jev.modeFor(app.amber.core.jev.JevPurpose.WEB_AUTOMATION) != app.amber.core.jev.JevMode.OFF) {
+            goalTool
+        } else {
+            null
+        },
         stateTool,
         observeTool,
         extractTool,
@@ -118,6 +127,7 @@ class WebMountPrimitiveTools(
     }
 
     private val openTool by lazy { createOpenTool(deps, profileRegistry, cookieProvider, manager) }
+    private val goalTool by lazy { createGoalTool(deps, goalRunner) }
     private val zCodeTools by lazy { WebMountZCodeTools(deps, zCodeUrlStore, manager) }
     private val stateTool by lazy { createStateTool(deps, profileRegistry, cookieProvider, manager) }
     private val observeTool by lazy { createObserveTool(deps) }

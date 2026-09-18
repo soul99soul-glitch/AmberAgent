@@ -50,7 +50,7 @@ val repositoryModule = module {
     }
 
     single {
-        MemoryRecallStore(get())
+        MemoryRecallStore(get(), get())
     }
 
     single {

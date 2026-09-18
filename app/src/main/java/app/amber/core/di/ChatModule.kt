@@ -73,6 +73,7 @@ val chatModule = module {
             secretStore = get(),
             themePackageManager = get(),
             restoreWriteGate = get(),
+            jevToolSemanticSearch = get(),
         )
     }
     single<ConversationAccess> { get<ChatService>() }

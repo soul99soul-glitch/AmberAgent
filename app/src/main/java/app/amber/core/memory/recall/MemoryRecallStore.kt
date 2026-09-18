@@ -1,7 +1,9 @@
 package app.amber.core.memory.recall
 
+import app.amber.ai.core.MessageRole
 import app.amber.ai.ui.UIMessage
 import app.amber.core.settings.Settings
+import app.amber.core.jev.MemorySemanticReranker
 import app.amber.core.memory.model.MemoryKind
 import app.amber.core.memory.model.MemoryRecord
 import app.amber.core.memory.model.MemoryScope
@@ -14,13 +16,15 @@ import java.util.Locale
 
 class MemoryRecallStore(
     private val memoryRepository: MemoryRepository,
+    private val semanticReranker: MemorySemanticReranker? = null,
 ) {
     suspend fun buildPrompt(
         settings: Settings,
         messages: List<UIMessage>,
         locale: Locale = Locale.ENGLISH,
+        runKey: String? = null,
     ): String {
-        val selections = recallSelections(settings, messages)
+        val selections = recallSelections(settings, messages, runKey)
         val records = selections.map { it.record }
         memoryRepository.touchMemories(selections.map { it.record.id })
         return MemoryPromptBuilder.buildMemoryContext(
@@ -37,11 +41,15 @@ class MemoryRecallStore(
         )
     }
 
-    suspend fun recall(settings: Settings, messages: List<UIMessage>): List<MemoryRecord> {
-        return recallSelections(settings, messages).map { it.record }
+    suspend fun recall(settings: Settings, messages: List<UIMessage>, runKey: String? = null): List<MemoryRecord> {
+        return recallSelections(settings, messages, runKey).map { it.record }
     }
 
-    private suspend fun recallSelections(settings: Settings, messages: List<UIMessage>): List<MemoryRecallSelection> {
+    private suspend fun recallSelections(
+        settings: Settings,
+        messages: List<UIMessage>,
+        runKey: String? = null,
+    ): List<MemoryRecallSelection> {
         val scopes = buildSet {
             if (settings.agentRuntime.enableCoreMemory) add(MemoryScope.CORE)
             if (settings.agentRuntime.enableShortTermMemory) add(MemoryScope.SHORT_TERM)
@@ -50,17 +58,39 @@ class MemoryRecallStore(
         if (scopes.isEmpty()) return emptyList()
 
         val now = System.currentTimeMillis()
-        return rankRecords(
-            settings = settings,
-            messages = messages,
-            records = memoryRepository.getActiveRecords(scopes, now),
-            now = now,
-        )
+        val records = memoryRepository.getActiveRecords(scopes, now)
+        if (records.isEmpty()) return emptyList()
+        val reranker = semanticReranker ?: return rankRecords(settings, messages, records, now)
+
+        val scored = scoreAll(settings, messages, records, now)
+        val baseline = budgeted(scored.baselineEligible(), settings)
+
+        // 候选独立于词面 >0 过滤：词面/强保留池 + 新近补充——语义召回的价值
+        // 恰恰在零词面命中的候选上，不能先过滤再指望重排。
+        val lexicalPool = scored.selections.take(SEMANTIC_CANDIDATE_LEXICAL_POOL)
+        val recentPool = scored.selections
+            .sortedByDescending { it.record.updatedAt }
+            .take(SEMANTIC_CANDIDATE_RECENT_POOL)
+            .filterNot { candidate -> lexicalPool.any { it.record.id == candidate.record.id } }
+        val candidates = (lexicalPool + recentPool).distinctBy { it.record.id }
+        if (candidates.isEmpty()) return baseline
+
+        val taskText = messages.lastOrNull { it.role == MessageRole.USER }?.toText().orEmpty()
+        val semantic = reranker.rerank(candidates.map { it.record }, taskText, runKey)
+        val rankedIds = semantic.rankedIds?.takeIf { semantic.applied } ?: return baseline
+
+        // 置顶等强保留语义继续满足：Jev 未选中的置顶记忆仍然保留在前部。
+        val selectionById = scored.selections.associateBy { it.record.id }
+        val pinnedFirst = candidates.filter { it.record.pinned }.mapNotNull { selectionById[it.record.id] }
+        val ordered = rankedIds.mapNotNull { selectionById[it] }
+        return budgeted(pinnedFirst.distinctBy { it.record.id } + ordered, settings)
     }
 
     companion object {
         internal const val USER_ALWAYS_ELIGIBLE_CONFIDENCE = 0.70f
         private const val TIME_DECAY_MULTIPLIER = 0.35
+        internal const val SEMANTIC_CANDIDATE_LEXICAL_POOL = 24
+        internal const val SEMANTIC_CANDIDATE_RECENT_POOL = 16
 
         internal fun rankRecords(
             settings: Settings,
@@ -68,22 +98,40 @@ class MemoryRecallStore(
             records: List<MemoryRecord>,
             now: Long = System.currentTimeMillis(),
         ): List<MemoryRecallSelection> {
+            val scored = scoreAll(settings, messages, records, now)
+            return budgeted(scored.baselineEligible(), settings)
+        }
+
+        /**
+         * 全量打分排序（不做 >0 过滤与预算截断），一次计算供基线与语义候选共用。
+         * [baselineEligible] 恢复原 rankRecords 的词面过滤语义。
+         */
+        internal fun scoreAll(
+            settings: Settings,
+            messages: List<UIMessage>,
+            records: List<MemoryRecord>,
+            now: Long = System.currentTimeMillis(),
+        ): ScoredMemories {
             val queryText = messages.takeLast(16).joinToString("\n") { it.toText() }
             val currentText = messages.lastOrNull()?.toText().orEmpty()
             val terms = tokenize("$currentText\n$queryText")
-            val maxItems = settings.agentRuntime.memoryRecall.maxItems.coerceIn(1, 40)
-            val maxChars = settings.agentRuntime.memoryRecall.maxPromptChars.coerceIn(256, 12_000)
-
-            return records
-                .asSequence()
+            val selections = records
                 .map { record -> MemoryRecallSelection(record, score(record, terms, currentText, now)) }
-                .filter { (_, score) -> score.value > 0 || terms.isEmpty() }
                 .sortedWith(
                     compareByDescending<MemoryRecallSelection> { it.record.pinned }
                         .thenByDescending { it.score.value }
                         .thenByDescending { it.record.updatedAt }
                 )
-                .takeBudget(maxItems, maxChars)
+            return ScoredMemories(selections = selections, hasQueryTerms = terms.isNotEmpty())
+        }
+
+        internal fun budgeted(
+            selections: List<MemoryRecallSelection>,
+            settings: Settings,
+        ): List<MemoryRecallSelection> {
+            val maxItems = settings.agentRuntime.memoryRecall.maxItems.coerceIn(1, 40)
+            val maxChars = settings.agentRuntime.memoryRecall.maxPromptChars.coerceIn(256, 12_000)
+            return selections.asSequence().takeBudget(maxItems, maxChars).toList()
         }
 
         internal fun score(
@@ -211,6 +259,16 @@ internal data class MemoryRecallSelection(
     val record: MemoryRecord,
     val score: MemoryRecallScore,
 )
+
+/** scoreAll 的产物：全量排序 + 是否存在查询词，供基线过滤与语义候选共用一次计算。 */
+internal class ScoredMemories(
+    val selections: List<MemoryRecallSelection>,
+    val hasQueryTerms: Boolean,
+) {
+    /** 原词面过滤语义：有查询词时丢弃零相关且非 always-eligible 的记录。 */
+    fun baselineEligible(): List<MemoryRecallSelection> =
+        if (!hasQueryTerms) selections else selections.filter { it.score.value > 0.0 }
+}
 
 internal data class MemoryRecallScore(
     val value: Double,

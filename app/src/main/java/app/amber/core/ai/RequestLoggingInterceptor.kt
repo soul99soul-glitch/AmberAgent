@@ -73,7 +73,9 @@ class RequestLoggingInterceptor(
         // auth endpoints in any build, and keep bodies out of release builds.
         val isAuthEndpoint = request.url.encodedPath.contains("/oauth", ignoreCase = true) ||
             request.url.encodedPath.contains("/token", ignoreCase = true)
-        val requestBody = if (BuildConfig.DEBUG && !isAuthEndpoint) {
+        // Jev 判断请求携带记忆/任务文本外发内容，即便 DEBUG 构建也不落日志。
+        val isJevEndpoint = request.url.host == "api.typesafe.ai"
+        val requestBody = if (BuildConfig.DEBUG && !isAuthEndpoint && !isJevEndpoint) {
             request.body?.let { body ->
                 val buffer = Buffer()
                 body.writeTo(buffer)

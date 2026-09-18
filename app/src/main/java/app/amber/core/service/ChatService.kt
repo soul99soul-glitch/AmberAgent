@@ -337,6 +337,8 @@ class ChatService(
     // Full restore raises an epoch and serializes durable conversation writes;
     // nullable keeps legacy construction sites and isolated tests unchanged.
     private val restoreWriteGate: SyncRestoreWriteGate? = null,
+    // Jev 语义工具发现（tool_search 的语义重排）；nullable 兼容旧构造点与测试。
+    private val jevToolSemanticSearch: app.amber.core.jev.JevToolSemanticSearch? = null,
 ) : ConversationAccess {
     // ProviderConfigTools needs the same durable Codex OAuth store as the settings and
     // provider layers. This instance is lightweight and reads the shared encrypted store.
@@ -1296,6 +1298,8 @@ class ChatService(
             if (activeRunId == null) {
                 activeKernelRuns.update { it + (conversationId to handle.runId) }
                 activeRunId = handle.runId
+                // 新 run 开始即清本会话旧终态，过渡 tick 才不会把上一轮成败错标到本轮。
+                _lastRunOutcomes.update { it - conversationId }
                 // A resume dispatch takes the conversation back from the
                 // user-paused set in the same breath it re-registers as active.
                 pausedForUserConversations.update { it - conversationId }
@@ -3693,6 +3697,7 @@ class ChatService(
                         profiledMcpManagementTools
                 )
             },
+            semanticSearch = jevToolSemanticSearch?.forRun(runId),
         ).copy(dynamicToolsProvider = recipeContext?.let { recipeToolsProvider })
         val tools = foregroundRegistry.tools() +
             toolSearch +
@@ -4092,6 +4097,8 @@ class ChatService(
             // There is no flow completion left to stop the foreground
             // keep-alive after a persisted WAITING_USER pause is cancelled.
             pausedForUserConversations.update { it - conversationId }
+            // 暂停态停止没有 dispatch 终态可等：直接写终态，任务气泡据此立即收起而非误报完成。
+            _lastRunOutcomes.update { it + (conversationId to app.amber.core.agent.runtime.RunStatus.CANCELLED) }
             stopGenerationKeepAlive(conversationId)
             // No flow completion will settle the event-store row either —
             // move it to CANCELLED here or it stays a live WAITING_USER row

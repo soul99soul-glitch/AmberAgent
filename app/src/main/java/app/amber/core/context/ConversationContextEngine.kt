@@ -78,6 +78,8 @@ class ConversationContextEngine(
     private val capabilitySnapshotBuilder: AgentCapabilitySnapshotBuilder,
     private val promptConfigRepository: AgentPromptConfigRepository,
     private val context: Context,
+    // Jev 长工具结果语义投影；null 保持纯确定性准备路径。
+    private val toolOutputProjector: app.amber.core.jev.JevToolOutputProjector? = null,
 ) {
     private val compactMutex = Mutex()
 
@@ -119,6 +121,7 @@ class ConversationContextEngine(
         tools: List<Tool>,
         contextMessageSize: Int,
         promptOverheadTokens: Int = 0,
+        jevRunKey: String? = null,
     ): PreparedContext {
         val policy = settings.agentRuntime.contextCompaction.toCompactPolicy()
         val editResult = if (policy.enabled) {
@@ -143,7 +146,7 @@ class ConversationContextEngine(
             val limited = effectiveMessages.limitContext(contextMessageSize)
             val estimate = ConversationContextPlanner.estimateTokens(limited)
             return PreparedContext(
-                messages = limited,
+                messages = projectLongToolOutputs(limited, jevRunKey),
                 tokenEstimate = estimate,
                 compressionApplied = false,
                 summaryIds = emptyList(),
@@ -275,7 +278,9 @@ class ConversationContextEngine(
             )
         }
         return PreparedContext(
-            messages = preparedMessages,
+            // 语义投影在压缩与 fit 之后：持久化会话与压缩摘要源始终是原文，
+            // 投影只影响发往模型的请求副本。
+            messages = projectLongToolOutputs(preparedMessages, jevRunKey),
             tokenEstimate = estimate,
             compressionApplied = latestCompacts.any { it.status == "completed" },
             summaryIds = latestCompacts.filter { it.status == "completed" }.map { it.id },
@@ -286,6 +291,12 @@ class ConversationContextEngine(
             ),
         )
     }
+
+    /** CONTEXT_SELECTION active 时对最终请求副本做长工具结果块级投影；其余形态原样返回。 */
+    private suspend fun projectLongToolOutputs(
+        messages: List<UIMessage>,
+        runKey: String?,
+    ): List<UIMessage> = toolOutputProjector?.projectMessages(messages, runKey) ?: messages
 
     private fun prepareMessagesWithCompacts(
         messages: List<UIMessage>,
