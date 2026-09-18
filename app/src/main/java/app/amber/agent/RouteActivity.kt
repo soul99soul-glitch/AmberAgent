@@ -88,6 +88,7 @@ import app.amber.feature.ui.context.Navigator
 import app.amber.feature.ui.hooks.containsPreference
 import app.amber.feature.ui.hooks.readBooleanPreference
 import app.amber.feature.ui.hooks.readStringPreference
+import app.amber.feature.ui.pages.live.LiveCompanionDeepLink
 import app.amber.core.utils.openUrl
 import app.amber.feature.ui.pages.backup.BackupPage
 import app.amber.feature.ui.pages.chat.ChatPage
@@ -258,6 +259,12 @@ class RouteActivity : ComponentActivity() {
         intent?.data?.takeIf { it.scheme == "amberagent" && it.host == "oauth" }?.let { uri ->
             oauthCallbackDispatcher.dispatch(uri)
         }
+        // 冷路径 Live 深链只在"真首次创建"request 一次：startScreen 的 remember 计算块
+        // 会在 Activity 重建（深色切换等未入 configChanges 的变更）时重跑，在那里发
+        // request 会把同一次通知重放成多余的滚动+脉冲（Phase 3 复审 P2）。
+        if (savedInstanceState == null && intent?.getBooleanExtra(EXTRA_OPEN_LIVE_COMPANION, false) == true) {
+            LiveCompanionDeepLink.request()
+        }
         // Cold-start theme flash: the first composed frame reads
         // settingsFlow's initialValue (Settings.dummy(), default terracotta
         // accent) until the DataStore flow emits the user's saved theme — the
@@ -373,7 +380,8 @@ class RouteActivity : ComponentActivity() {
             navStack?.add(Screen.TodayBoard)
         }
         if (intent.getBooleanExtra(EXTRA_OPEN_LIVE_COMPANION, false)) {
-            navStack?.add(Screen.LiveCompanion)
+            LiveCompanionDeepLink.request()
+            if (navStack?.lastOrNull() != Screen.LiveCompanion) navStack?.add(Screen.LiveCompanion)
         }
         deepReadScreenFromIntent(intent)?.let { screen ->
             navStack?.add(screen)
@@ -1152,6 +1160,7 @@ sealed interface Screen : NavKey {
 
     @Serializable
     data object SettingSearch : Screen
+
 
     @Serializable
     data object SettingMcp : Screen

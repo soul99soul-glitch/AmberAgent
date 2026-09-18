@@ -2300,6 +2300,7 @@
   <string name="live_analysis_model">分析モデル</string>
   <string name="live_analyze_now">今すぐ分析</string>
   <string name="live_bubble">フローティングバブル</string>
+  <string name="live_bubble_a11y_label">Amberコンパニオンバブル</string>
   <string name="live_bubble_collapse">折りたたむ</string>
   <string name="live_bubble_hint">他のアプリの上に表示</string>
   <string name="live_bubble_no_result">分析結果はまだありません</string>
@@ -2338,6 +2339,11 @@
   <string name="live_saved_toast_saved">履歴に保存しました</string>
   <string name="live_saved_toast_nothing">保存できるカードがありません</string>
   <string name="live_remember_toast">覚えました。整理のレビュー待ちです</string>
+  <string name="live_bubble_exit_hint">上部のステータス行を長押しで終了</string>
+  <string name="live_saved_deleted">カードを削除しました</string>
+  <string name="live_saved_undo">元に戻す</string>
+  <string name="live_action_copy">コピー</string>
+  <string name="live_card_copied">カードをコピーしました</string>
   <string name="live_notification_result_title">コンパニオン「%s」完了</string>
   <string name="live_scene_override_label">このアプリのシーン</string>
   <string name="live_scene_default">デフォルト</string>

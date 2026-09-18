@@ -17,11 +17,13 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
@@ -37,7 +39,9 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import app.amber.feature.ui.theme.LocalAmberTokens
@@ -188,6 +192,31 @@ fun BlinkingCursor(
             .graphicsLayer { alpha = on }
             .background(c, RoundedCornerShape(1.dp))
     )
+}
+
+/** 流式生成中的文本 + 闪烁光标（DS `.cursor` 的流式搭档）。
+ *  光标画在文本块右下角而非行内占位——行内占位在 maxLines 截断时会被省略号
+ *  吞掉（长流式反而无光标）；块角光标恒可见，且贴合 terminal 设计语言。 */
+@Composable
+fun StreamingTextWithCursor(
+    text: String,
+    style: TextStyle,
+    color: Color,
+    modifier: Modifier = Modifier,
+    maxLines: Int = 2,
+) {
+    Row(modifier = modifier, verticalAlignment = Alignment.Bottom) {
+        Text(
+            text = text,
+            style = style,
+            color = color,
+            maxLines = maxLines,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
+        Spacer(modifier = Modifier.width(6.dp))
+        BlinkingCursor(width = 6.dp, height = 14.dp)
+    }
 }
 
 /** Mono uppercase eyebrow prefixed with an accent `//` (oc-amber section label). */

@@ -2313,6 +2313,7 @@
   <string name="live_analysis_model">分析模型</string>
   <string name="live_analyze_now">立即分析</string>
   <string name="live_bubble">懸浮氣泡</string>
+  <string name="live_bubble_a11y_label">Amber 伴隨氣泡</string>
   <string name="live_bubble_collapse">收起</string>
   <string name="live_bubble_hint">其它應用上顯示</string>
   <string name="live_bubble_no_result">還沒有分析結果</string>
@@ -2351,6 +2352,11 @@
   <string name="live_saved_toast_saved">已保存到歷史</string>
   <string name="live_saved_toast_nothing">沒有可保存的卡片</string>
   <string name="live_remember_toast">已記住，等待整理審核</string>
+  <string name="live_bubble_exit_hint">長按頂部狀態列退出伴隨</string>
+  <string name="live_saved_deleted">已刪除卡片</string>
+  <string name="live_saved_undo">撤銷</string>
+  <string name="live_action_copy">複製</string>
+  <string name="live_card_copied">已複製整張卡片</string>
   <string name="live_notification_result_title">伴隨「%s」完成</string>
   <string name="live_scene_override_label">當前應用場景</string>
   <string name="live_scene_default">跟隨預設</string>

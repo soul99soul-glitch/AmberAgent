@@ -3,6 +3,9 @@ package app.amber.feature.live
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
+/** 填入"覆盖现有输入"二次确认的有效窗口（域仲裁与 UI 倒计时下划线共用，两侧保持镜像）。 */
+const val FILL_CONFIRM_WINDOW_MS: Long = 5_000L
+
 @Serializable
 enum class LiveAnalysisMode {
     /** 保守：只读无障碍 UI 树文字 */

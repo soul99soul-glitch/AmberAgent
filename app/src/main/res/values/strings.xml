@@ -2327,6 +2327,7 @@ Pending candidates: %1$d · recent events: %2$d.</string>
   <string name="live_analysis_model">Analysis model</string>
   <string name="live_analyze_now">Analyze now</string>
   <string name="live_bubble">Floating bubble</string>
+  <string name="live_bubble_a11y_label">Amber companion bubble</string>
   <string name="live_bubble_collapse">Collapse</string>
   <string name="live_bubble_hint">Show over other apps</string>
   <string name="live_bubble_no_result">No analysis result yet</string>
@@ -2365,6 +2366,11 @@ Pending candidates: %1$d · recent events: %2$d.</string>
   <string name="live_saved_toast_saved">Saved to history</string>
   <string name="live_saved_toast_nothing">No card to save</string>
   <string name="live_remember_toast">Remembered; pending review</string>
+  <string name="live_bubble_exit_hint">Long-press the header to exit</string>
+  <string name="live_saved_deleted">Card deleted</string>
+  <string name="live_saved_undo">Undo</string>
+  <string name="live_action_copy">Copy</string>
+  <string name="live_card_copied">Card copied to the clipboard</string>
   <string name="live_notification_result_title">Companion finished: %s</string>
   <string name="live_scene_override_label">Scene for this app</string>
   <string name="live_scene_default">Default</string>

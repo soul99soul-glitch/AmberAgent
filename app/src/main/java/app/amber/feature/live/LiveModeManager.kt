@@ -26,6 +26,7 @@ import kotlinx.coroutines.withContext
 import app.amber.ai.provider.ProviderCatalog
 import app.amber.agent.AppScope
 import app.amber.agent.R
+import app.amber.agent.data.db.entity.LiveCardEntity
 import app.amber.core.agent.runtime.AgentRunId
 import app.amber.core.agent.runtime.AgentRunner
 import app.amber.core.agent.runtime.RunStatus
@@ -55,6 +56,14 @@ class LiveModeManager(
         LiveModeUiState(statusText = context.getString(R.string.live_empty_not_started)),
     )
     val state: StateFlow<LiveModeUiState> = _state.asStateFlow()
+
+    /** 气泡展开态由 Manager 持有（原 UI 侧 remember 在窗口重挂/任务气泡让位往返后会丢失）。
+     *  lastSeenMillis 同理上提：跨重挂的"新鲜结果"判定与查看指标不再重置。 */
+    private val _bubbleExpanded = MutableStateFlow(false)
+    val bubbleExpanded: StateFlow<Boolean> = _bubbleExpanded.asStateFlow()
+
+    @Volatile
+    private var bubbleLastSeenMillis: Long = 0L
 
     private val analyzer = LiveAnalyzer(providerCatalog, context)
     private val screenshotter = LiveScreenshotter(context)
@@ -231,6 +240,16 @@ class LiveModeManager(
         }
     }
 
+    /** 展开即视为"查看"：新鲜自动结果记指标（P2 终审 #3 口径移到这里，跨重挂仍按结果时间戳去重）。 */
+    fun setBubbleExpanded(expanded: Boolean) {
+        val s = _state.value
+        if (expanded && s.card != null && s.lastUpdatedAtMillis > bubbleLastSeenMillis) {
+            if (s.lastResultAuto) markSuggestViewed(s.lastUpdatedAtMillis)
+            bubbleLastSeenMillis = s.lastUpdatedAtMillis
+        }
+        _bubbleExpanded.value = expanded
+    }
+
     fun stop() {
         analysisGeneration.incrementAndGet()
         loopJob?.cancel()
@@ -248,9 +267,22 @@ class LiveModeManager(
         pendingSnapshot = null
         screenDirty = true
         focusInstruction = ""
+        _bubbleExpanded.value = false
+        bubbleLastSeenMillis = 0L
         _state.value = LiveModeUiState(
             statusText = context.getString(R.string.live_empty_not_started),
         )
+        // 闭环（Phase 3 复审 P1）：stop 即功能关闭——回写设置源，设置页主开关与
+        // 伴随页状态不再漂移；气泡长按退出也走这里，两条停止路径都同步。
+        appScope.launch(Dispatchers.IO) {
+            settingsStore.update { settings ->
+                settings.copy(
+                    agentRuntime = settings.agentRuntime.copy(
+                        liveMode = settings.agentRuntime.liveMode.copy(enabled = false),
+                    ),
+                )
+            }
+        }
     }
 
     fun refreshNow() {
@@ -633,6 +665,7 @@ class LiveModeManager(
                         )
                         if (failure.retryable) engine.onRetryableFailure(System.currentTimeMillis())
                         _state.update {
+                            // 失败/超时保留半截流式文本（蓝图 Phase 6），下次分析开始时才清空。
                             it.copy(
                                 analyzing = false,
                                 requestedAction = "",
@@ -640,7 +673,6 @@ class LiveModeManager(
                                 error = failure.message,
                                 completedAction = "",
                                 nextAnalysisAfterMillis = if (failure.retryable) engine.backoffUntilMillis() else 0L,
-                                streamingText = null,
                             )
                         }
                     }
@@ -822,6 +854,13 @@ class LiveModeManager(
             ?.setPrimaryClip(ClipData.newPlainText("amber-live-draft", draft))
     }
 
+    /** 整卡复制（页面"复制"chip）：文案与"发到聊天"同格式，走剪贴板。 */
+    fun copyCurrentCardToClipboard(): Boolean {
+        val text = exportCurrentCard() ?: return false
+        copyDraftToClipboard(text)
+        return true
+    }
+
     /** 保存当前卡片到历史（蓝图 §7.3 P1-3）；无可保存内容返回 false。 */
     suspend fun saveCurrentCard(): Boolean = cardStore.save(_state.value)
 
@@ -829,6 +868,9 @@ class LiveModeManager(
     val savedCards = cardStore.savedCards
 
     suspend fun deleteSavedCard(id: Long) = cardStore.delete(id)
+
+    /** 撤销删除（toast Undo）：原 id 仍在（延迟删除未落库）则跳过，否则按原 createdAt 重插。 */
+    suspend fun restoreSavedCard(card: LiveCardEntity) = cardStore.restore(card)
 
     /**
      * 结果通知（蓝图 §7.3 P1-6 / §7.4 P2-2）：仅在气泡显示中（用户在外 App）时通知；
@@ -882,15 +924,19 @@ class LiveModeManager(
         bubble.show(service) {
             AmberAgentTheme {
                 val uiState by state.collectAsState()
+                val isExpanded by bubbleExpanded.collectAsState()
                 LiveBubbleContent(
                     state = uiState,
+                    expanded = isExpanded,
+                    lastSeenMillis = bubbleLastSeenMillis,
+                    onExpandedChange = ::setBubbleExpanded,
                     onFillDraft = ::fillCurrentDraft,
                     onRefresh = ::refreshNow,
                     onStop = ::stop,
                     onDrag = bubble::moveBy,
                     onDragEnd = bubble::snapToEdge,
                     onSizeChanged = bubble::requestReclamp,
-                    onFreshViewed = ::markSuggestViewed,
+                    anchorEndProvider = bubble::isAnchoredEnd,
                 )
             }
         }
@@ -910,9 +956,6 @@ class LiveModeManager(
         /** 流式预览节流与长度上限。 */
         private const val STREAM_EMIT_INTERVAL_MS = 80L
         private const val STREAM_TEXT_LIMIT = 500
-
-        /** 填入"覆盖现有输入"二次确认的有效窗口。 */
-        private const val FILL_CONFIRM_WINDOW_MS = 5_000L
 
         /** 伴随结果通知的固定 id（新结果覆盖旧通知）。 */
         private const val LIVE_RESULT_NOTIFICATION_ID = 4207

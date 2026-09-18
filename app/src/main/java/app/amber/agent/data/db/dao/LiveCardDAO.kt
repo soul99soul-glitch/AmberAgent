@@ -22,6 +22,10 @@ interface LiveCardDAO {
     @Query("DELETE FROM live_card WHERE id = :id")
     suspend fun deleteById(id: Long): Int
 
+    /** 撤销删除的存在性判断（原 id 还在 = 延迟删除未落库，跳过重插防重复）。 */
+    @Query("SELECT COUNT(*) FROM live_card WHERE id = :id")
+    suspend fun countById(id: Long): Int
+
     @Query("SELECT COUNT(*) FROM live_card")
     suspend fun count(): Int
 }

@@ -42,6 +42,13 @@ class LiveCardStore(private val db: AppDatabase) {
         runCatching { dao.deleteById(id) }
     }
 
+    /** 撤销删除：原 id 仍在（延迟删除未落库）则跳过，否则按原 createdAt 重插（新 id，位置不变）。 */
+    suspend fun restore(card: LiveCardEntity) {
+        runCatching {
+            if (dao.countById(card.id) == 0) dao.insert(card.copy(id = 0))
+        }
+    }
+
     private companion object {
         const val SAVED_CARDS_LIMIT = 50
     }

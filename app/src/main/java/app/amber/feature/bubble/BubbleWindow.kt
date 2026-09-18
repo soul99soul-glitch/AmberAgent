@@ -1,5 +1,6 @@
 package app.amber.feature.bubble
 
+import android.animation.ValueAnimator
 import android.content.Context
 import android.graphics.PixelFormat
 import android.view.Gravity
@@ -18,6 +19,7 @@ import androidx.savedstate.SavedStateRegistry
 import androidx.savedstate.SavedStateRegistryController
 import androidx.savedstate.SavedStateRegistryOwner
 import androidx.savedstate.setViewTreeSavedStateRegistryOwner
+import android.view.animation.PathInterpolator
 import app.amber.core.automation.AmberAccessibilityService
 import kotlin.math.roundToInt
 
@@ -34,6 +36,7 @@ class BubbleWindow {
     private var owner: BubbleLifecycleOwner? = null
     private var params: WindowManager.LayoutParams? = null
     private var touchPassthrough: Boolean = false
+    private var snapAnimator: ValueAnimator? = null
 
     val isShowing: Boolean get() = host != null
 
@@ -75,6 +78,7 @@ class BubbleWindow {
 
     fun hide() {
         val view = host ?: return
+        snapAnimator?.cancel()
         runCatching { hostService?.let { windowManager(it).removeViewImmediate(view) } }
         owner?.destroy()
         host = null
@@ -107,36 +111,65 @@ class BubbleWindow {
             flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv()
         }
 
-    /** 拖动中：位移叠加、夹回屏内、立即应用。 */
+    /** 拖动中：位移叠加、夹回屏内、立即应用。用户接手即终止吸附动画。 */
     fun moveBy(dx: Float, dy: Float) {
         val view = host ?: return
         val lp = params ?: return
         val service = hostService ?: return
+        snapAnimator?.cancel()
         lp.x += dx.roundToInt()
         lp.y += dy.roundToInt()
         clamp(service, lp, view.width, view.height)
         runCatching { windowManager(service).updateViewLayout(view, lp) }
     }
 
-    /** 松手贴边（左右取近）。 */
+    /** 松手贴边（左右取近）：ValueAnimator 逐帧滑向近侧边缘，不再瞬跳。
+     *  刻意不用 Compose Animatable——本类协程上下文没有 MonotonicFrameClock，
+     *  animateTo 会直接抛 IllegalStateException（checker P0）。 */
     fun snapToEdge() {
         val view = host ?: return
         val lp = params ?: return
         val service = hostService ?: return
         val screenW = service.resources.displayMetrics.widthPixels
-        lp.x = if (lp.x + view.width / 2 < screenW / 2) 0 else (screenW - view.width).coerceAtLeast(0)
-        runCatching { windowManager(service).updateViewLayout(view, lp) }
+        val targetX = if (lp.x + view.width / 2 < screenW / 2) 0 else (screenW - view.width).coerceAtLeast(0)
+        if (targetX == lp.x) return
+        snapAnimator?.cancel()
+        val animator = ValueAnimator.ofFloat(lp.x.toFloat(), targetX.toFloat()).apply {
+            duration = SNAP_DURATION_MS
+            // easeOutQuint：临界阻尼弹簧的视觉等价（WebMountTaskCard 同款曲线）
+            interpolator = PathInterpolator(0.22f, 1f, 0.36f, 1f)
+            addUpdateListener { animation ->
+                if (host !== view) {
+                    cancel()
+                    return@addUpdateListener
+                }
+                lp.x = (animation.animatedValue as Float).roundToInt()
+                runCatching { windowManager(service).updateViewLayout(view, lp) }
+            }
+        }
+        snapAnimator = animator
+        animator.start()
     }
 
-    /** 内容尺寸变化（展开/收起卡片）后调用：等重新布局完把窗口夹回屏内。 */
+    /** 内容尺寸变化（展开/收起卡片、卡内文本增高）后调用：等重新布局完把窗口夹回屏内。
+     *  必须先取消吸附动画——否则逐帧覆写 lp.x 会把刚夹回来的位置再推画出去。 */
     fun requestReclamp() {
         val view = host ?: return
+        snapAnimator?.cancel()
         view.doOnNextLayout {
             val lp = params ?: return@doOnNextLayout
             val service = hostService ?: return@doOnNextLayout
             clamp(service, lp, view.width, view.height)
             runCatching { windowManager(service).updateViewLayout(view, lp) }
         }
+    }
+
+    /** 当前是否贴右半屏（内容层据此选 pop 长出方向；未显示时按右侧处理）。 */
+    fun isAnchoredEnd(): Boolean {
+        val lp = params ?: return true
+        val service = hostService ?: return true
+        val screenW = service.resources.displayMetrics.widthPixels
+        return lp.x + (host?.width ?: 0) / 2 >= screenW / 2
     }
 
     private fun clamp(context: Context, lp: WindowManager.LayoutParams, w: Int, h: Int) {
@@ -147,6 +180,11 @@ class BubbleWindow {
 
     private fun windowManager(context: Context): WindowManager =
         context.getSystemService(WindowManager::class.java)
+
+    private companion object {
+        /** 贴边吸附时长（ms）。 */
+        const val SNAP_DURATION_MS = 240L
+    }
 
     /** 常驻 RESUMED 的窗口生命周期——Compose 重组不受宿主 Activity 后台影响。 */
     private class BubbleLifecycleOwner : LifecycleOwner, SavedStateRegistryOwner, ViewModelStoreOwner {

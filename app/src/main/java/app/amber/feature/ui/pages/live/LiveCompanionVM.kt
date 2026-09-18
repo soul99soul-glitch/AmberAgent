@@ -37,8 +37,17 @@ class LiveCompanionVM(
         viewModelScope.launch { onResult(liveModeManager.saveCurrentCard()) }
     }
 
-    fun deleteSavedCard(id: Long) {
-        viewModelScope.launch { liveModeManager.deleteSavedCard(id) }
+    /** 挂起版删除：调用方（页面的延迟删除协程）需在落库完成后继续清账，必须等真实完成。 */
+    suspend fun deleteSavedCard(id: Long) = liveModeManager.deleteSavedCard(id)
+
+    /** 撤销删除（toast Undo）：落库前取消由页面负责；这里兜底重插（原 createdAt，位置不变）。 */
+    fun undoDeleteSavedCard(card: LiveCardEntity) {
+        viewModelScope.launch { liveModeManager.restoreSavedCard(card) }
+    }
+
+    /** 整卡复制（"复制"chip）。 */
+    fun copyCurrentCard(onResult: (Boolean) -> Unit) {
+        viewModelScope.launch { onResult(liveModeManager.copyCurrentCardToClipboard()) }
     }
 
     /** 记住此事（蓝图 §7.3 P1-5）：用户明确选择才入 candidate 审核链；

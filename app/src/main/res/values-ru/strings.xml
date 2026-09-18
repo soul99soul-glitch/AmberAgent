@@ -2300,6 +2300,7 @@
   <string name="live_analysis_model">Модель анализа</string>
   <string name="live_analyze_now">Анализировать сейчас</string>
   <string name="live_bubble">Плавающая подсказка</string>
+  <string name="live_bubble_a11y_label">Пузырь компаньона Amber</string>
   <string name="live_bubble_collapse">Свернуть</string>
   <string name="live_bubble_hint">Показывать поверх других приложений</string>
   <string name="live_bubble_no_result">Результатов анализа пока нет</string>
@@ -2338,6 +2339,11 @@
   <string name="live_saved_toast_saved">Сохранено в историю</string>
   <string name="live_saved_toast_nothing">Нет карточки для сохранения</string>
   <string name="live_remember_toast">Запомнено; ожидает проверки</string>
+  <string name="live_bubble_exit_hint">Долгое нажатие на строку состояния — выход</string>
+  <string name="live_saved_deleted">Карточка удалена</string>
+  <string name="live_saved_undo">Отменить</string>
+  <string name="live_action_copy">Копировать</string>
+  <string name="live_card_copied">Карточка скопирована в буфер обмена</string>
   <string name="live_notification_result_title">Компаньон завершил: %s</string>
   <string name="live_scene_override_label">Сцена приложения</string>
   <string name="live_scene_default">По умолчанию</string>

@@ -2300,6 +2300,7 @@
   <string name="live_analysis_model">분석 모델</string>
   <string name="live_analyze_now">지금 분석</string>
   <string name="live_bubble">플로팅 버블</string>
+  <string name="live_bubble_a11y_label">Amber 컴패니언 버블</string>
   <string name="live_bubble_collapse">접기</string>
   <string name="live_bubble_hint">다른 앱 위에 표시</string>
   <string name="live_bubble_no_result">분석 결과가 아직 없습니다</string>
@@ -2338,6 +2339,11 @@
   <string name="live_saved_toast_saved">기록에 저장했습니다</string>
   <string name="live_saved_toast_nothing">저장할 카드가 없습니다</string>
   <string name="live_remember_toast">기억했습니다. 정리 검토 대기 중입니다</string>
+  <string name="live_bubble_exit_hint">상단 상태 행을 길게 눌러 종료</string>
+  <string name="live_saved_deleted">카드를 삭제했습니다</string>
+  <string name="live_saved_undo">실행 취소</string>
+  <string name="live_action_copy">복사</string>
+  <string name="live_card_copied">카드를 복사했습니다</string>
   <string name="live_notification_result_title">컴패니언「%s」완료</string>
   <string name="live_scene_override_label">이 앱 장면</string>
   <string name="live_scene_default">기본값</string>
