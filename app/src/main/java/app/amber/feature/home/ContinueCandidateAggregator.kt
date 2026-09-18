@@ -4,9 +4,9 @@ import app.amber.agent.data.db.entity.ContinueCandidateDismissEntity
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.flatMapLatest
-import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onStart
 import java.time.Instant
 
 /**
@@ -35,13 +35,12 @@ class ContinueCandidateAggregator(
             values.dropLast(1)
                 .flatMap { @Suppress("UNCHECKED_CAST") it as List<ContinueCandidate> }
                 .filterNot { (it.sourceKind.name to it.sourceId) in activeDismiss }
-        }.flatMapLatest { candidates ->
-            flow {
-                // Minor-2: 每次聚合顺带清理过期的 dismiss 记录（不建独立调度），
-                // 避免 deleteExpired 成为永不调用的死代码。
-                dismissStore.deleteExpired(now().toEpochMilli())
-                emit(sortContinueCandidates(candidates))
-            }
-        }.flowOn(Dispatchers.Default)
+        }.map { candidates -> sortContinueCandidates(candidates) }
+            // Minor-2: 每次收集开始时顺带清理过期的 dismiss 记录（不建独立调度）。
+            // 不能放在 map/flatMapLatest 里：清理回写 dismiss 流会再入 combine，第二次
+            // 变换在 flowOn 缓冲上游就被执行（与下游是否还要元素无关）→ deleteExpired
+            // 双调用竞态；onStart 恰好一次且发生在订阅前，无回环。
+            .onStart { dismissStore.deleteExpired(now().toEpochMilli()) }
+            .flowOn(Dispatchers.Default)
     }
 }
