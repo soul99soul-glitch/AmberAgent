@@ -47,6 +47,16 @@ class AgentCapabilitySnapshotBuilder(
         } else {
             ""
         }
+        val webAutomationGuidance = if (metadata.any { it.name == "wm_run_goal" }) {
+            """
+
+            Web automation:
+            - When Jev web automation is enabled, prefer wm_run_goal for bounded user-requested web goals on an existing WebMount session. It observes the live page and chooses among low-risk actions in a finite loop.
+            - Jev is a judgment service, not a JavaScript engine. If it is disabled or unavailable, use the individual wm_* tools and their normal permission gates.
+            """.trimIndent()
+        } else {
+            ""
+        }
         val raw = """
             [AmberAgent capability snapshot after context compaction]
             This snapshot refreshes current runtime abilities after compact summaries. It is not a user message.
@@ -59,7 +69,7 @@ class AgentCapabilitySnapshotBuilder(
 
             Skills and workflows:
             Use tool_search to expose callable schemas for hidden tools. tools_list is catalog/debug only and does not make hidden tools callable. Skills, MCP, Sub Agent, Model Council and Cron are visible only when their tools appear above.
-$screenAutomationGuidance
+$screenAutomationGuidance$webAutomationGuidance
 
             Background tasks:
             $taskSummary

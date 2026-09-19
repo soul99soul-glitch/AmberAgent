@@ -200,8 +200,9 @@ class JevScreenGoalRunnerTest {
         assertEquals(3, transport.calls)
         assertEquals(2, result["actions_dispatched"]!!.jsonPrimitive.content.toInt())
         assertEquals(2, result["steps"]!!.jsonArray.size)
-        // The final done decision must be followed by a same-id fresh snapshot read.
-        assertTrue(controller.captures >= 6)
+        // Post-action snapshots are reused as the next observation: initial + 2
+        // post-action + 1 done-verification fresh read (same-id required) = 4.
+        assertEquals(4, controller.captures)
     }
 
     @Test

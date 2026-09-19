@@ -60,13 +60,17 @@ class JevScreenGoalRunner(
             }
             return withTimeoutOrNull(maxDurationMs.coerceIn(1_000, 30_000)) {
                 var noProgress = 0
+                // 上一步动作后的快照即本步观察：复用可省一次主线程树 dump。
+                var pending: ScreenSnapshot? = null
                 repeat(maxSteps.coerceIn(1, 8)) {
                     currentCoroutineContext().ensureActive()
                     if (runtime.configFor(JevPurpose.SCREEN_AUTOMATION) != config) {
                         return@withTimeoutOrNull finish("handback", "configuration_changed")
                     }
-                    val snapshot = withContext(mainDispatcher) { controller.captureScreenSnapshot() }
+                    val snapshot = pending
+                        ?: withContext(mainDispatcher) { controller.captureScreenSnapshot() }
                         ?: return@withTimeoutOrNull finish("handback", "screen_unavailable")
+                    pending = null
                     // Do not transmit content of a different app, including permission dialogs.
                     if (snapshot.packageName != packageName) {
                         return@withTimeoutOrNull finish("needs_user_action", "foreground_package_changed")
@@ -166,6 +170,7 @@ class JevScreenGoalRunner(
                         ?: return@withTimeoutOrNull finish("outcome_unknown", "post_action_screen_unavailable")
                     if (after.packageName != packageName) return@withTimeoutOrNull finish("needs_user_action", "foreground_package_changed")
                     last = after
+                    pending = after
                     noProgress = if (after.id == snapshot.id) noProgress + 1 else 0
                     if (noProgress >= 2) return@withTimeoutOrNull finish("handback", "no_progress")
                 }
