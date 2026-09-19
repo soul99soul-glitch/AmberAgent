@@ -37,7 +37,69 @@ interface AccessibilityController {
     fun back(): Boolean
 
     fun home(): Boolean
+
+    /**
+     * Captures the current active accessibility window. Implementations may
+     * return null when the service cannot safely read the active window.
+     * Callers invoke this from [kotlinx.coroutines.Dispatchers.Main].
+     */
+    fun captureScreenSnapshot(): ScreenSnapshot? = null
+
+    /**
+     * Performs one action against a snapshot previously returned by
+     * [captureScreenSnapshot]. Implementations must reject stale snapshots;
+     * the default keeps older controller implementations safe and explicit.
+     */
+    fun performScreenAction(
+        snapshot: ScreenSnapshot,
+        action: ScreenAction,
+    ): ScreenActionReceipt = ScreenActionReceipt(
+        status = "rejected",
+        dispatched = false,
+        reason = "unsupported",
+    )
 }
+
+data class ScreenNode(
+    val ref: String,
+    val label: String,
+    val viewId: String,
+    val className: String,
+    val left: Int,
+    val top: Int,
+    val right: Int,
+    val bottom: Int,
+    val clickable: Boolean,
+    val editable: Boolean,
+    val scrollable: Boolean,
+    val enabled: Boolean,
+)
+
+data class ScreenSnapshot(
+    val id: String,
+    val packageName: String,
+    val windowId: Int,
+    val nodes: List<ScreenNode>,
+)
+
+enum class ScreenActionKind {
+    CLICK,
+    TYPE,
+    SCROLL_FORWARD,
+    SCROLL_BACKWARD,
+}
+
+data class ScreenAction(
+    val kind: ScreenActionKind,
+    val ref: String,
+    val text: String? = null,
+)
+
+data class ScreenActionReceipt(
+    val status: String,
+    val dispatched: Boolean,
+    val reason: String? = null,
+)
 
 data class AccessibilityTextMatch(
     val text: String,

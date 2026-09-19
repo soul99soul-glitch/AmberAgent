@@ -106,6 +106,9 @@ enum class Capability(
      */
     SCREEN_CONTROL("screen.control", ToolRisk.Sensitive, "屏幕操控"),
 
+    /** Accessibility-backed multi-step phone automation; always a high-risk write. */
+    SCREEN_AUTOMATION("screen.automation", ToolRisk.High, "屏幕自动化"),
+
     /** Device clipboard read/write: clipboard_tool（自身 Normal）. */
     CLIPBOARD_ACCESS("clipboard.access", ToolRisk.Normal, "剪贴板读写"),
     ;
@@ -223,6 +226,7 @@ fun capabilityForTool(name: String): Capability? = when (name) {
     "screen_back", "screen_home", "screen_read_ui", "screen_find_text",
     "screen_tap_text", "screen_wait_for_text", "screen_scroll_until",
     -> Capability.SCREEN_CONTROL
+    "screen_run_goal" -> Capability.SCREEN_AUTOMATION
     "clipboard_tool" -> Capability.CLIPBOARD_ACCESS
 
     // Expanded MCP entries keep the `mcp__server__tool` namespace at the

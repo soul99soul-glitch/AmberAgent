@@ -254,6 +254,7 @@ class ExecutionPolicyCoveragePinTest {
                 "screen_back", "screen_home", "screen_read_ui", "screen_find_text",
                 "screen_tap_text", "screen_wait_for_text", "screen_scroll_until",
             ),
+            Capability.SCREEN_AUTOMATION to setOf("screen_run_goal"),
             Capability.CLIPBOARD_ACCESS to setOf("clipboard_tool"),
         )
 

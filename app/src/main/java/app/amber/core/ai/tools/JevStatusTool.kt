@@ -139,4 +139,5 @@ private fun JevPurpose.description(): String = when (this) {
     JevPurpose.CONTEXT_SELECTION -> "Relevance screening of long tool outputs in the prepared context."
     JevPurpose.MODEL_ROUTING -> "Task-fit ranking of council model-pool seats."
     JevPurpose.WEB_AUTOMATION -> "Bounded action decisions inside the wm_run_goal web loop."
+    JevPurpose.SCREEN_AUTOMATION -> "Bounded action decisions inside the screen_run_goal accessibility loop (sends screen content + task text)."
 }

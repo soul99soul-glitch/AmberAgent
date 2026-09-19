@@ -79,7 +79,7 @@ val agentInfraModule = module {
 
     single { ScreenCaptureManager(get()) }
 
-    single { ScreenAutomationTools(get(), get(), get()) }
+    single { ScreenAutomationTools(get(), get(), get(), get()) }
 
     single { AgentPermissionBroker(get(), BuildConfig.DEBUG) }
 

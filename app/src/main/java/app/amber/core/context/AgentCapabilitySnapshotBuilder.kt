@@ -37,6 +37,16 @@ class AgentCapabilitySnapshotBuilder(
         }.ifBlank {
             "- No known background tasks."
         }
+        val screenAutomationGuidance = if (metadata.any { it.name == "screen_run_goal" }) {
+            """
+
+            Screen automation:
+            - When Jev screen automation is enabled, prefer screen_run_goal for bounded user-requested screen goals. It reads a limited accessibility-node snapshot and chooses among safe candidates in a finite loop.
+            - Jev is a judgment service, not a JavaScript engine. If it is disabled or unavailable, use the individual screen tools and their normal permission gates.
+            """.trimIndent()
+        } else {
+            ""
+        }
         val raw = """
             [AmberAgent capability snapshot after context compaction]
             This snapshot refreshes current runtime abilities after compact summaries. It is not a user message.
@@ -49,6 +59,7 @@ class AgentCapabilitySnapshotBuilder(
 
             Skills and workflows:
             Use tool_search to expose callable schemas for hidden tools. tools_list is catalog/debug only and does not make hidden tools callable. Skills, MCP, Sub Agent, Model Council and Cron are visible only when their tools appear above.
+$screenAutomationGuidance
 
             Background tasks:
             $taskSummary

@@ -325,6 +325,12 @@ class ToolSearchIndex(
         when {
             name == "screen_screenshot" -> addAll(listOf("截图", "截屏", "屏幕截图", "看屏幕", "screenshot"))
             name == "screen_read_ui" -> addAll(listOf("读屏幕", "读取屏幕", "ui 树", "UI 树", "当前页面", "看页面"))
+            name == "screen_run_goal" -> addAll(
+                listOf(
+                    "jev", "Jev", "无障碍", "accessibility", "批量", "batch",
+                    "目标", "goal", "屏幕", "screen", "屏幕自动化", "screen automation",
+                ),
+            )
             name.startsWith("screen_click") || name.startsWith("screen_tap") -> addAll(listOf("点击", "点一下", "点击屏幕", "tap"))
             name.startsWith("screen_") -> addAll(listOf("屏幕", "手机屏幕", "滑动", "输入"))
         }

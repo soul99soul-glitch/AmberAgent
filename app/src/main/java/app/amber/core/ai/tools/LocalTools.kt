@@ -168,7 +168,7 @@ class LocalTools(
             tools.addAll(terminalTools.getTools())
         }
         if (options.contains(LocalToolOption.ScreenAutomation)) {
-            tools.addAll(screenAutomationTools.getTools())
+            tools.addAll(screenAutomationTools.getTools(runId = runId))
         }
         if (options.contains(LocalToolOption.SystemAccess)) {
             tools.addAll(systemAccessTools.getTools())

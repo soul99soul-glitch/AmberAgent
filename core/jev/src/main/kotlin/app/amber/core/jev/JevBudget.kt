@@ -35,7 +35,49 @@ class JevBudget(
     private val usageStore: JevUsageStore,
     private val clock: () -> Long = System::currentTimeMillis,
 ) {
-    data class RunUsage(var requests: Int = 0, var stateBytes: Long = 0)
+    companion object {
+        /** Screen automation needs more turns than ordinary Jev purposes. */
+        const val SCREEN_AUTOMATION_MAX_REQUESTS = 24
+        const val SCREEN_AUTOMATION_MAX_STATE_BYTES = 512 * 1024
+    }
+
+    private data class PurposeUsage(var requests: Int = 0, var stateBytes: Long = 0)
+
+    /**
+     * [requests] and [stateBytes] remain the aggregate run totals for callers
+     * and diagnostics. The private buckets enforce purpose-specific ceilings
+     * without inventing a second run key for screen automation.
+     */
+    data class RunUsage(var requests: Int = 0, var stateBytes: Long = 0) {
+        private val purposeUsages = HashMap<JevPurpose?, PurposeUsage>()
+
+        private fun bucket(purpose: JevPurpose?): JevPurpose? =
+            purpose.takeIf { it == JevPurpose.SCREEN_AUTOMATION }
+
+        fun canConsume(purpose: JevPurpose?, requestCount: Int, bodyBytes: Long): Boolean {
+            val usage = purposeUsages[bucket(purpose)] ?: PurposeUsage()
+            val requestLimit = if (bucket(purpose) == JevPurpose.SCREEN_AUTOMATION) {
+                SCREEN_AUTOMATION_MAX_REQUESTS
+            } else {
+                JevLimits.PER_RUN_MAX_REQUESTS
+            }
+            val stateLimit = if (bucket(purpose) == JevPurpose.SCREEN_AUTOMATION) {
+                SCREEN_AUTOMATION_MAX_STATE_BYTES.toLong()
+            } else {
+                JevLimits.PER_RUN_MAX_STATE_BYTES.toLong()
+            }
+            return usage.requests + requestCount <= requestLimit &&
+                usage.stateBytes + bodyBytes <= stateLimit
+        }
+
+        fun record(purpose: JevPurpose?, requestCount: Int, bodyBytes: Long) {
+            val usage = purposeUsages.getOrPut(bucket(purpose)) { PurposeUsage() }
+            usage.requests += requestCount
+            usage.stateBytes += bodyBytes
+            requests += requestCount
+            stateBytes += bodyBytes
+        }
+    }
 
     private val runUsages = object : LinkedHashMap<String, RunUsage>(16, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, RunUsage>): Boolean =
@@ -43,17 +85,20 @@ class JevBudget(
     }
 
     @Synchronized
-    fun consume(runKey: String?, requestCount: Int = 1, bodyBytes: Long): Boolean {
+    fun consume(
+        runKey: String?,
+        requestCount: Int = 1,
+        bodyBytes: Long,
+        purpose: JevPurpose? = null,
+    ): Boolean {
         val dayKey = dayKey(clock())
         val daily = usageStore.load(dayKey)
         if (daily.requests + requestCount > JevLimits.DAILY_MAX_REQUESTS) return false
         if (daily.bodyBytes + bodyBytes > JevLimits.DAILY_MAX_BODY_BYTES) return false
         if (runKey != null) {
             val run = runUsages[runKey] ?: RunUsage().also { runUsages[runKey] = it }
-            if (run.requests + requestCount > JevLimits.PER_RUN_MAX_REQUESTS) return false
-            if (run.stateBytes + bodyBytes > JevLimits.PER_RUN_MAX_STATE_BYTES) return false
-            run.requests += requestCount
-            run.stateBytes += bodyBytes
+            if (!run.canConsume(purpose, requestCount, bodyBytes)) return false
+            run.record(purpose, requestCount, bodyBytes)
         }
         usageStore.store(dayKey, daily.copy(requests = daily.requests + requestCount, bodyBytes = daily.bodyBytes + bodyBytes))
         return true

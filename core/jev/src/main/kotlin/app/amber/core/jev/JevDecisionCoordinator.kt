@@ -154,7 +154,7 @@ class JevDecisionCoordinator(
                     lastFailure = JevDecision.Failed(JevFailureReason.TIMEOUT)
                     break
                 }
-                if (!budget.consume(runKey, 1, bodyBytes)) {
+                if (!budget.consume(runKey, 1, bodyBytes, purpose)) {
                     metrics.record(metric(purpose, config, "fallback:budget_exhausted", clock() - startedAt, bodyBytes, null, null))
                     return JevDecision.Skipped(JevSkipReason.BUDGET_EXHAUSTED)
                 }
