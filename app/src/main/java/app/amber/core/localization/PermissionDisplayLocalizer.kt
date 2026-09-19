@@ -118,6 +118,10 @@ object PermissionDisplayLocalizer {
             titleRes = R.string.permission_display_installed_apps_full_access_title,
             descriptionRes = R.string.permission_display_installed_apps_full_access_description,
         ),
+        "accessibility_service" to PermissionCopy(
+            titleRes = R.string.permission_display_accessibility_service_title,
+            descriptionRes = R.string.permission_display_accessibility_service_description,
+        ),
     )
 
     private val capabilityLabels = mapOf(
@@ -141,6 +145,7 @@ object PermissionDisplayLocalizer {
         Capability.LOCATION_CURRENT to R.string.capability_display_location_current_label,
         Capability.AUDIO_RECORD to R.string.capability_display_audio_record_label,
         Capability.SCREEN_CAPTURE to R.string.capability_display_screen_capture_label,
+        Capability.SCREEN_CONTROL to R.string.capability_display_screen_control_label,
         Capability.CLIPBOARD_ACCESS to R.string.capability_display_clipboard_access_label,
     )
 }

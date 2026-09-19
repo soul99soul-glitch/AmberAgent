@@ -32,6 +32,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -365,6 +366,16 @@ fun LiveCompanionPage(vm: LiveCompanionVM = koinViewModel()) {
                                 }
                             }
                         }
+                        val hiddenCount = savedCards.size - 5
+                        if (hiddenCount > 0) {
+                            Hairline()
+                            Text(
+                                text = stringResource(R.string.live_saved_more, hiddenCount),
+                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                                style = LocalAmberType.current.secondary,
+                                color = LocalAmberTokens.current.ink3,
+                            )
+                        }
                     }
                 }
             }
@@ -419,7 +430,7 @@ private fun LiveHeader(live: Boolean, onBack: () -> Unit, onSettings: () -> Unit
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Box(
-                modifier = Modifier.size(40.dp).pressable(onClick = onBack),
+                modifier = Modifier.size(48.dp).pressable(onClick = onBack),
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(
@@ -437,7 +448,7 @@ private fun LiveHeader(live: Boolean, onBack: () -> Unit, onSettings: () -> Unit
                 Text(stringResource(R.string.live_companion_title), style = type.screenTitle, color = t.ink)
             }
             Box(
-                modifier = Modifier.size(40.dp).pressable(onClick = onSettings),
+                modifier = Modifier.size(48.dp).pressable(onClick = onSettings),
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(
@@ -1154,7 +1165,7 @@ private fun SavedCardRow(card: LiveCardEntity, onDelete: () -> Unit) {
             modifier = Modifier.weight(1f),
         )
         Box(
-            modifier = Modifier.size(40.dp).pressable(onClick = onDelete),
+            modifier = Modifier.size(48.dp).pressable(onClick = onDelete),
             contentAlignment = Alignment.Center,
         ) {
             Icon(Lucide.X, contentDescription = stringResource(R.string.delete), tint = t.ink4, modifier = Modifier.size(15.dp))
@@ -1249,22 +1260,30 @@ private fun AmberToggle(checked: Boolean, onCheckedChange: (Boolean) -> Unit, en
     val knob = 20.dp
     val track by animateColorAsState(if (checked) t.accent else t.line2, label = "toggleTrack")
     val knobOffset by animateDpAsState(if (checked) trackW - knob - 3.dp else 3.dp, label = "toggleKnob")
+    // 48dp touch box wraps the visual track; visuals stay per spec.
     Box(
         modifier = Modifier
-            .size(trackW, trackH)
-            .clip(RoundedCornerShape(999.dp))
-            .background(track)
+            .heightIn(min = 48.dp)
+            .widthIn(min = 48.dp)
             .pressable(onClick = { if (enabled) onCheckedChange(!checked) }, enabled = enabled),
-        contentAlignment = Alignment.CenterStart,
+        contentAlignment = Alignment.Center,
     ) {
         Box(
             modifier = Modifier
-                .offset(x = knobOffset)
-                .size(knob)
-                .clip(CircleShape)
-                // white knob is a design-system constant (§6.2 "white knob"), not a theme token.
-                .background(Color(0xFFFFFFFF)),
-        )
+                .size(trackW, trackH)
+                .clip(RoundedCornerShape(999.dp))
+                .background(track),
+            contentAlignment = Alignment.CenterStart,
+        ) {
+            Box(
+                modifier = Modifier
+                    .offset(x = knobOffset)
+                    .size(knob)
+                    .clip(CircleShape)
+                    // white knob is a design-system constant (§6.2 "white knob"), not a theme token.
+                    .background(Color(0xFFFFFFFF)),
+            )
+        }
     }
 }
 

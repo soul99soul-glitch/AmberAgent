@@ -46,8 +46,20 @@ class ScreenAutomationTools(
 
     private val screenClickTool = Tool(
         name = "screen_click",
-        description = "Tap screen coordinates using AmberAgent Accessibility after user approval.",
-        parameters = { coordinateSchema("x", "y") },
+        description = "Tap screen coordinates using AmberAgent Accessibility after user approval. " +
+            "Optional verify_text polls the UI tree post-action so the tap effect is confirmed, " +
+            "not just injected.",
+        parameters = {
+            InputSchema.Obj(
+                properties = buildJsonObject {
+                    put("x", numberProp("X coordinate."))
+                    put("y", numberProp("Y coordinate."))
+                    put("verify_text", stringProp("Optional text expected to appear after the tap; result reports verify_text_found."))
+                    put("verify_timeout_ms", integerProp("Post-action verify poll timeout. Defaults to 2000."))
+                },
+                required = listOf("x", "y")
+            )
+        },
         needsApproval = true,
         allowsAutoApproval = false,
         execute = { input ->
@@ -59,7 +71,7 @@ class ScreenAutomationTools(
                     label = "screen_click"
                 )
                 val ok = service.tap(point.x, point.y)
-                result(ok)
+                verifiedResult(service, input, ok)
             }
         }
     )
@@ -108,6 +120,8 @@ class ScreenAutomationTools(
                     put("to_x", numberProp("End X coordinate."))
                     put("to_y", numberProp("End Y coordinate."))
                     put("duration_ms", integerProp("Swipe duration in milliseconds. Defaults to 350."))
+                    put("verify_text", stringProp("Optional text expected to appear after the swipe; result reports verify_text_found."))
+                    put("verify_timeout_ms", integerProp("Post-action verify poll timeout. Defaults to 2000."))
                 },
                 required = listOf("from_x", "from_y", "to_x", "to_y")
             )
@@ -134,7 +148,7 @@ class ScreenAutomationTools(
                     toY = to.y,
                     durationMillis = input.long("duration_ms") ?: 350L
                 )
-                result(ok)
+                verifiedResult(service, input, ok)
             }
         }
     )
@@ -365,17 +379,28 @@ class ScreenAutomationTools(
                 val service = requireService()
                 val maxSwipes = (input.int("max_swipes") ?: 8).coerceIn(1, 20)
                 val direction = input.string("direction") ?: "down"
-                var matches = service.findTextNodes(input.requiredString("text"), maxNodes = 200)
+                val query = input.requiredString("text")
+                var matches = service.findTextNodes(query, maxNodes = 200)
                 var swipes = 0
+                var stalled = false
+                var lastTree = service.dumpUiTree(maxNodes = 200)
                 while (matches.isEmpty() && swipes < maxSwipes) {
                     swipeByDirection(service, direction)
                     swipes++
                     delay(450)
-                    matches = service.findTextNodes(input.requiredString("text"), maxNodes = 200)
+                    val tree = service.dumpUiTree(maxNodes = 200)
+                    matches = service.findTextNodes(query, maxNodes = 200)
+                    if (tree == lastTree && matches.isEmpty()) {
+                        // 滑到底/无位移：树完全没变，不再空滑到上限。
+                        stalled = true
+                        break
+                    }
+                    lastTree = tree
                 }
                 textJson {
                     put("found", matches.isNotEmpty())
                     put("swipes", swipes)
+                    if (stalled) put("stalled", true)
                     put("matches", buildJsonArray { matches.take(5).forEachIndexed { index, match -> add(match.toJson(index)) } })
                 }
             }
@@ -404,7 +429,8 @@ class ScreenAutomationTools(
 
     private val vlmTaskTool = Tool(
         name = "vlm_task",
-        description = "Plan a phone automation task with VLM-style trace semantics. Stage 0 records intent and requires low-level tools for execution.",
+        description = "Plan a phone automation task with VLM-style trace semantics. Stage 0 records the " +
+            "intent only — it performs no actions; execute via screen_read_ui plus low-level screen tools.",
         parameters = {
             InputSchema.Obj(
                 properties = buildJsonObject {
@@ -473,6 +499,33 @@ class ScreenAutomationTools(
 
     private fun result(success: Boolean) = textJson {
         put("success", success)
+    }
+
+    /**
+     * 动作后验证：verify_text 提供时轮询 UI 树确认效果（手势注入 ≠ 目标生效）。
+     * 未提供则退化为仅上报注入结果。
+     */
+    private suspend fun verifiedResult(
+        service: AccessibilityController,
+        input: JsonElement,
+        success: Boolean,
+    ): List<UIMessagePart> {
+        val verifyText = input.string("verify_text")
+        if (verifyText == null || !success) return result(success)
+        val deadline = System.currentTimeMillis() +
+            (input.long("verify_timeout_ms") ?: 2_000L).coerceIn(200L, 15_000L)
+        var found = false
+        while (System.currentTimeMillis() < deadline) {
+            if (service.findTextNodes(verifyText, maxNodes = 200).isNotEmpty()) {
+                found = true
+                break
+            }
+            delay(250)
+        }
+        return textJson {
+            put("success", success)
+            put("verify_text_found", found)
+        }
     }
 
     private suspend fun swipeByDirection(service: AccessibilityController, direction: String): Boolean {

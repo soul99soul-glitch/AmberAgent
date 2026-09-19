@@ -3,14 +3,15 @@ package app.amber.feature.ui.pages.setting
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
-import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -26,12 +27,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import app.amber.agent.R
+import app.amber.core.jev.JevApiMode
 import app.amber.core.jev.JevConnectionTestResult
 import app.amber.core.jev.JevDataScope
 import app.amber.core.jev.JevDecisionCoordinator
@@ -48,6 +51,8 @@ import app.amber.feature.ui.components.nav.BackButton
 import app.amber.feature.ui.components.ui.Switch
 import app.amber.feature.ui.components.ui.WorkspaceTopBar
 import app.amber.feature.ui.components.ui.workspaceColors
+import com.composables.icons.lucide.ChevronRight
+import com.composables.icons.lucide.Lucide
 import org.koin.androidx.compose.koinViewModel
 import org.koin.compose.koinInject
 
@@ -72,6 +77,10 @@ fun SettingJevPage(vm: SettingVM = koinViewModel()) {
     val coordinator = koinInject<JevDecisionCoordinator>()
     var editingKey by remember { mutableStateOf(false) }
     var keyInput by remember { mutableStateOf("") }
+    var editingBaseUrl by remember { mutableStateOf(false) }
+    var baseUrlInput by remember { mutableStateOf("") }
+    var editingModel by remember { mutableStateOf(false) }
+    var modelInput by remember { mutableStateOf("") }
     var connection by remember { mutableStateOf<ConnectionUi?>(null) }
     val jev = settings.jev
 
@@ -111,7 +120,11 @@ fun SettingJevPage(vm: SettingVM = koinViewModel()) {
                         trailingContent = {
                             Switch(
                                 checked = jev.enabled,
-                                onCheckedChange = { enabled -> updateJev { it.copy(enabled = enabled) } },
+                                onCheckedChange = { enabled ->
+                                    updateJev { it.copy(enabled = enabled) }
+                                    // 主开关变化同样失效缓存并解除认证暂停（off→on 是显式恢复信号）。
+                                    coordinator.onCredentialOrScopeChanged()
+                                },
                             )
                         },
                     )
@@ -122,6 +135,96 @@ fun SettingJevPage(vm: SettingVM = koinViewModel()) {
                         supportingContent = {
                             Text(jev.apiKeyMask ?: stringResource(R.string.setting_jev_key_unset))
                         },
+                        trailingContent = { SettingChevron() },
+                    )
+                    item(
+                        headlineContent = { Text(stringResource(R.string.setting_jev_api_mode_title)) },
+                        supportingContent = {
+                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Text(
+                                    stringResource(R.string.setting_jev_api_mode_desc),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = workspaceColors().muted,
+                                )
+                                SettingSegmentedChoice(
+                                    options = JevApiMode.entries,
+                                    selected = jev.apiMode,
+                                    onSelected = { mode ->
+                                        if (mode != jev.apiMode) {
+                                            updateJev { current -> current.copy(apiMode = mode) }
+                                            // 方言/端点变化与凭据收紧同语义：失效缓存并解除认证暂停；
+                                            // 旧端点上测出的连接结果对新方言无意义，一并清掉。
+                                            coordinator.onCredentialOrScopeChanged()
+                                            connection = null
+                                        }
+                                    },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    label = { mode ->
+                                        Text(
+                                            mode.label(),
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                    },
+                                )
+                            }
+                        },
+                    )
+                    if (jev.apiMode == JevApiMode.VERCEL) {
+                        item(
+                            modifier = Modifier.settingTwoLine(),
+                            onClick = {
+                                baseUrlInput = jev.baseUrl ?: JevLimits.VERCEL_DEFAULT_BASE_URL
+                                editingBaseUrl = true
+                            },
+                            headlineContent = { Text(stringResource(R.string.setting_jev_base_url_title)) },
+                            supportingContent = {
+                                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    Text(
+                                        jev.baseUrl ?: JevLimits.VERCEL_DEFAULT_BASE_URL,
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                    Text(
+                                        stringResource(R.string.setting_jev_base_url_desc),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = workspaceColors().muted,
+                                    )
+                                }
+                            },
+                            trailingContent = { SettingChevron() },
+                        )
+                    }
+                    item(
+                        modifier = Modifier.settingTwoLine(),
+                        onClick = {
+                            modelInput = when (jev.apiMode) {
+                                JevApiMode.TYPESAFE -> jev.model.orEmpty()
+                                JevApiMode.VERCEL -> jev.vercelModel.orEmpty()
+                            }
+                            editingModel = true
+                        },
+                        headlineContent = { Text(stringResource(R.string.setting_jev_model_title)) },
+                        supportingContent = {
+                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Text(
+                                    when (jev.apiMode) {
+                                        JevApiMode.TYPESAFE -> jev.model ?: JevLimits.DEFAULT_MODEL
+                                        JevApiMode.VERCEL -> jev.vercelModel?.takeIf { it.isNotBlank() }
+                                            ?: JevLimits.VERCEL_DEFAULT_MODEL
+                                    },
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                                Text(
+                                    stringResource(R.string.setting_jev_model_desc),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = workspaceColors().muted,
+                                )
+                            }
+                        },
+                        trailingContent = { SettingChevron() },
                     )
                     item(
                         modifier = Modifier.settingTwoLine(),
@@ -139,6 +242,7 @@ fun SettingJevPage(vm: SettingVM = koinViewModel()) {
                                             )
                                             keyMissing -> stringResource(R.string.setting_jev_connection_key_missing)
                                             budgetExhausted -> stringResource(R.string.setting_jev_connection_budget)
+                                            error == JevConnectionTestResult.ERROR_MODEL_REQUIRED -> stringResource(R.string.setting_jev_connection_model_required)
                                             else -> stringResource(
                                                 R.string.setting_jev_connection_failed,
                                                 error ?: "",
@@ -151,11 +255,21 @@ fun SettingJevPage(vm: SettingVM = koinViewModel()) {
                         },
                         trailingContent = {
                             TextButton(
+                                modifier = Modifier.heightIn(min = 48.dp),
                                 onClick = {
                                     if (connection != ConnectionUi.Running) {
                                         connection = ConnectionUi.Running
                                         scope.launch(Dispatchers.IO) {
-                                            connection = ConnectionUi.Done(coordinator.connectionTest())
+                                            connection = ConnectionUi.Done(
+                                                coordinator.connectionTest(
+                                                    apiMode = jev.apiMode,
+                                                    baseUrl = jev.baseUrl,
+                                                    model = when (jev.apiMode) {
+                                                        JevApiMode.TYPESAFE -> jev.model
+                                                        JevApiMode.VERCEL -> jev.vercelModel
+                                                    },
+                                                ),
+                                            )
                                         }
                                     }
                                 },
@@ -192,7 +306,9 @@ fun SettingJevPage(vm: SettingVM = koinViewModel()) {
                                     )
                                     SettingSegmentedChoice(
                                         options = JevMode.entries,
-                                        selected = jev.modeFor(purpose),
+                                        // 显示/编辑存储值而非 modeFor 有效值：主开关关闭时
+                                        // 控件仍可预配置，不是看着无响应的死控件。
+                                        selected = jev.purposes[purpose] ?: JevMode.OFF,
                                         onSelected = { mode ->
                                             updateJev { current ->
                                                 current.copy(
@@ -294,6 +410,25 @@ fun SettingJevPage(vm: SettingVM = koinViewModel()) {
                             )
                         },
                     )
+                    item(
+                        headlineContent = {
+                            val runtime = coordinator.statusSnapshot()
+                            val lastError = coordinator.metrics.lastErrorReason()
+                            Text(
+                                when {
+                                    runtime.authPaused ->
+                                        stringResource(R.string.setting_jev_status_auth_paused)
+                                    runtime.cooldownRemainingMs > 0 ->
+                                        stringResource(R.string.setting_jev_status_cooldown, runtime.cooldownRemainingMs)
+                                    lastError != null ->
+                                        stringResource(R.string.setting_jev_status_last_error, lastError)
+                                    else -> stringResource(R.string.setting_jev_status_normal)
+                                },
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = if (runtime.authPaused) MaterialTheme.colorScheme.error else workspaceColors().muted,
+                            )
+                        },
+                    )
                 }
             }
         }
@@ -308,6 +443,7 @@ fun SettingJevPage(vm: SettingVM = koinViewModel()) {
                             value = keyInput,
                             onValueChange = { keyInput = it },
                             singleLine = true,
+                            visualTransformation = PasswordVisualTransformation(),
                             label = { Text(stringResource(R.string.setting_jev_key_title)) },
                             supportingText = {
                                 Text(stringResource(R.string.setting_jev_key_hint))
@@ -324,6 +460,7 @@ fun SettingJevPage(vm: SettingVM = koinViewModel()) {
                                     secretStore.delete(JevApiKeyDescriptor)
                                     updateJev { it.copy(apiKeyMask = null) }
                                     coordinator.onCredentialOrScopeChanged()
+                                    connection = null
                                     keyInput = ""
                                     editingKey = false
                                 },
@@ -342,6 +479,7 @@ fun SettingJevPage(vm: SettingVM = koinViewModel()) {
                                 val mask = maskKey(trimmed)
                                 updateJev { it.copy(apiKeyMask = mask) }
                                 coordinator.onCredentialOrScopeChanged()
+                                connection = null
                             }
                             keyInput = ""
                             editingKey = false
@@ -357,7 +495,140 @@ fun SettingJevPage(vm: SettingVM = koinViewModel()) {
                 },
             )
         }
+
+        if (editingBaseUrl) {
+            AlertDialog(
+                onDismissRequest = { editingBaseUrl = false },
+                title = { Text(stringResource(R.string.setting_jev_base_url_dialog_title)) },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedTextField(
+                            value = baseUrlInput,
+                            onValueChange = { baseUrlInput = it },
+                            singleLine = true,
+                            label = { Text(stringResource(R.string.setting_jev_base_url_title)) },
+                            supportingText = {
+                                Text(stringResource(R.string.setting_jev_base_url_desc))
+                            },
+                        )
+                        if (jev.baseUrl != null) {
+                            TextButton(
+                                onClick = {
+                                    updateJev { it.copy(baseUrl = null) }
+                                    coordinator.onCredentialOrScopeChanged()
+                                    connection = null
+                                    baseUrlInput = ""
+                                    editingBaseUrl = false
+                                },
+                            ) {
+                                Text(stringResource(R.string.setting_jev_value_clear))
+                            }
+                        }
+                    }
+                },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            val trimmed = baseUrlInput.trim()
+                            // 显式填缺省值与留空同义：存 null 保持"跟随缺省"语义
+                            val newValue = trimmed
+                                .takeIf { it.isNotEmpty() && it != JevLimits.VERCEL_DEFAULT_BASE_URL }
+                            if (newValue != jev.baseUrl) {
+                                updateJev { it.copy(baseUrl = newValue) }
+                                coordinator.onCredentialOrScopeChanged()
+                                connection = null
+                            }
+                            baseUrlInput = ""
+                            editingBaseUrl = false
+                        },
+                    ) {
+                        Text(stringResource(R.string.setting_jev_key_save))
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { editingBaseUrl = false }) {
+                        Text(stringResource(R.string.cancel))
+                    }
+                },
+            )
+        }
+
+        if (editingModel) {
+            AlertDialog(
+                onDismissRequest = { editingModel = false },
+                title = { Text(stringResource(R.string.setting_jev_model_dialog_title)) },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedTextField(
+                            value = modelInput,
+                            onValueChange = { modelInput = it },
+                            singleLine = true,
+                            label = { Text(stringResource(R.string.setting_jev_model_title)) },
+                            supportingText = {
+                                Text(stringResource(R.string.setting_jev_model_desc))
+                            },
+                        )
+                        val storedModel = when (jev.apiMode) {
+                            JevApiMode.TYPESAFE -> jev.model
+                            JevApiMode.VERCEL -> jev.vercelModel
+                        }
+                        if (storedModel != null) {
+                            TextButton(
+                                onClick = {
+                                    updateJev { current ->
+                                        when (jev.apiMode) {
+                                            JevApiMode.TYPESAFE -> current.copy(model = null)
+                                            JevApiMode.VERCEL -> current.copy(vercelModel = null)
+                                        }
+                                    }
+                                    coordinator.onCredentialOrScopeChanged()
+                                    connection = null
+                                    modelInput = ""
+                                    editingModel = false
+                                },
+                            ) {
+                                Text(stringResource(R.string.setting_jev_value_clear))
+                            }
+                        }
+                    }
+                },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            val newValue = modelInput.trim().ifEmpty { null }
+                            updateJev { current ->
+                                when (jev.apiMode) {
+                                    JevApiMode.TYPESAFE -> current.copy(model = newValue)
+                                    JevApiMode.VERCEL -> current.copy(vercelModel = newValue)
+                                }
+                            }
+                            coordinator.onCredentialOrScopeChanged()
+                            connection = null
+                            modelInput = ""
+                            editingModel = false
+                        },
+                    ) {
+                        Text(stringResource(R.string.setting_jev_key_save))
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { editingModel = false }) {
+                        Text(stringResource(R.string.cancel))
+                    }
+                },
+            )
+        }
     }
+}
+
+@Composable
+private fun SettingChevron() {
+    Icon(
+        imageVector = Lucide.ChevronRight,
+        contentDescription = null,
+        modifier = Modifier.size(18.dp),
+        tint = workspaceColors().muted,
+    )
 }
 
 @Composable
@@ -420,5 +691,13 @@ private fun JevMode.label(): String = stringResource(
         JevMode.OFF -> R.string.setting_jev_mode_off
         JevMode.SHADOW -> R.string.setting_jev_mode_shadow
         JevMode.ACTIVE -> R.string.setting_jev_mode_active
+    },
+)
+
+@Composable
+private fun JevApiMode.label(): String = stringResource(
+    when (this) {
+        JevApiMode.TYPESAFE -> R.string.setting_jev_api_mode_typesafe
+        JevApiMode.VERCEL -> R.string.setting_jev_api_mode_vercel
     },
 )

@@ -99,6 +99,13 @@ enum class Capability(
     /** Device screen capture (MediaProjection): screen_screenshot（自身 Sensitive）. */
     SCREEN_CAPTURE("screen.capture", ToolRisk.Sensitive, "屏幕截图"),
 
+    /**
+     * AccessibilityService 驱动的屏幕观察与操控（UI 树读取 + 手势注入）：
+     * screen_click/swipe/input_text/read_ui/find_text/tap_text/wait_for_text/
+     * scroll_until/back/home（ToolRegistry 均已是 Sensitive）。
+     */
+    SCREEN_CONTROL("screen.control", ToolRisk.Sensitive, "屏幕操控"),
+
     /** Device clipboard read/write: clipboard_tool（自身 Normal）. */
     CLIPBOARD_ACCESS("clipboard.access", ToolRisk.Normal, "剪贴板读写"),
     ;
@@ -210,6 +217,12 @@ fun capabilityForTool(name: String): Capability? = when (name) {
     "location_current" -> Capability.LOCATION_CURRENT
     "audio_record_once" -> Capability.AUDIO_RECORD
     "screen_screenshot" -> Capability.SCREEN_CAPTURE
+    // 依赖 AccessibilityService 的观察/操控面；open_app/open_url 走 Intent
+    // 不需要该服务，不纳入本域（与 system-access 未映射面同一策略）。
+    "screen_click", "screen_long_click", "screen_swipe", "screen_input_text",
+    "screen_back", "screen_home", "screen_read_ui", "screen_find_text",
+    "screen_tap_text", "screen_wait_for_text", "screen_scroll_until",
+    -> Capability.SCREEN_CONTROL
     "clipboard_tool" -> Capability.CLIPBOARD_ACCESS
 
     // Expanded MCP entries keep the `mcp__server__tool` namespace at the

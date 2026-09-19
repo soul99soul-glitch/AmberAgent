@@ -194,6 +194,7 @@ object PreparedContextEditor {
         "agent_runtime_status",
         "agent_task_list",
         "agent_task_read",
+        "jev_status",
         "mcp_list",
     )
 

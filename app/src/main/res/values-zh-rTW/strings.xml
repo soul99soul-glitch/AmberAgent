@@ -2359,6 +2359,7 @@
   <string name="live_action_send_to_chat">發到聊天</string>
   <string name="live_action_remember">記住</string>
   <string name="live_saved_section">已保存</string>
+  <string name="live_saved_more">+ %1$d 則較早記錄</string>
   <string name="live_saved_toast_saved">已保存到歷史</string>
   <string name="live_saved_toast_nothing">沒有可保存的卡片</string>
   <string name="live_remember_toast">已記住，等待整理審核</string>
@@ -2860,6 +2861,7 @@
   <string name="capability_display_call_phone_label">電話撥打</string>
   <string name="capability_display_calllog_read_label">通話記錄讀取</string>
   <string name="capability_display_clipboard_access_label">剪貼簿讀寫</string>
+  <string name="capability_display_screen_control_label">螢幕操控</string>
   <string name="capability_display_contacts_read_label">通訊錄讀取</string>
   <string name="capability_display_contacts_write_label">通訊錄寫入</string>
   <string name="capability_display_filesystem_read_label">檔案系統讀取</string>
@@ -3022,6 +3024,8 @@
   <string name="permission_display_grant_guidance">開啟 AmberAgent 設定 &gt; Agent 權限 &gt; 系統存取權，然後授予「%1$s」。特殊權限項目會開啟 Android 系統設定。</string>
   <string name="permission_display_installed_apps_full_access_description">進階實驗能力。讀取裝置上更完整的已安裝套件清單；Google Play 可能會限制此權限。</string>
   <string name="permission_display_installed_apps_full_access_title">完整應用程式清單</string>
+  <string name="permission_display_accessibility_service_title">無障礙服務</string>
+  <string name="permission_display_accessibility_service_description">讀取螢幕 UI 樹並執行點擊、滑動、輸入等螢幕操控；在系統無障礙設定中開啟 AmberAgent Accessibility。</string>
   <string name="permission_display_location_current_description">讀取最近一次的系統定位結果。</string>
   <string name="permission_display_location_current_title">目前位置</string>
   <string name="permission_display_manage_all_files_description">進階實驗權限。必須由使用者手動授權，且 Agent 只能存取設定中加入的外部路徑。</string>
@@ -3415,7 +3419,19 @@
   <string name="setting_jev_title">Jev 判斷服務</string>
   <string name="setting_jev_service_section">服務</string>
   <string name="setting_jev_master_title">啟用 Jev</string>
-  <string name="setting_jev_master_desc">使用 TypeSafe 判斷服務輔助工具發現、記憶召回等。需要 API Key；不會出現在聊天模型列表中。</string>
+  <string name="setting_jev_master_desc">使用外部判斷服務（TypeSafe systemone 或 Vercel AI Gateway）輔助工具發現、記憶召回等。需要 API Key；不會出現在聊天模型列表中。</string>
+  <string name="setting_jev_api_mode_title">呼叫模式</string>
+  <string name="setting_jev_api_mode_desc">Typesafe 直連 api.typesafe.ai 原生介面；Vercel 走 AI Gateway 的 evaluation-model 評估端點（模型 id 經請求頭傳遞）。</string>
+  <string name="setting_jev_api_mode_typesafe">Typesafe</string>
+  <string name="setting_jev_api_mode_vercel">Vercel</string>
+  <string name="setting_jev_base_url_title">閘道 Base URL</string>
+  <string name="setting_jev_base_url_desc">Vercel 模式的閘道基礎位址，自動附加 /evaluation-model。</string>
+  <string name="setting_jev_base_url_dialog_title">設定閘道 Base URL</string>
+  <string name="setting_jev_model_title">模型</string>
+  <string name="setting_jev_model_desc">Typesafe：可選固定版本（留空跟隨 jev-latest）；Vercel：閘道評估模型 id，預設 typesafe-ai/jev。</string>
+  <string name="setting_jev_model_dialog_title">設定 Jev 模型</string>
+  <string name="setting_jev_value_unset">未設定</string>
+  <string name="setting_jev_value_clear">清除</string>
   <string name="setting_jev_key_title">API Key</string>
   <string name="setting_jev_key_unset">未設定</string>
   <string name="setting_jev_key_dialog_title">設定 Jev API Key</string>
@@ -3429,6 +3445,7 @@
   <string name="setting_jev_connection_desc">傳送一次合成請求，驗證 Key 與服務可用性</string>
   <string name="setting_jev_connection_ok">連線成功（%1$s，%2$d 毫秒）</string>
   <string name="setting_jev_connection_key_missing">請先設定 API Key</string>
+  <string name="setting_jev_connection_model_required">請先設定模型——Vercel 模式需要閘道模型 id</string>
   <string name="setting_jev_connection_failed">失敗：%1$s</string>
   <string name="setting_jev_shadow_notice">Shadow 模式同樣會把資料傳送到外部服務，不是本地模式；僅在下方允許的範圍內外傳。</string>
   <string name="setting_jev_purposes_section">用途模式</string>
@@ -3461,6 +3478,10 @@
   <string name="setting_jev_status_metrics">近期判斷：共 %1$d 次，套用 %2$d、影子 %3$d、快取 %4$d、回退 %5$d、失敗 %6$d</string>
   <string name="setting_jev_status_last">最近結果：%1$s</string>
   <string name="setting_jev_status_none">暫無判斷記錄</string>
+  <string name="setting_jev_status_normal">執行態：正常</string>
+  <string name="setting_jev_status_auth_paused">執行態：認證暫停——更新 Key 或執行連線測試後恢復</string>
+  <string name="setting_jev_status_cooldown">執行態：冷卻中，剩餘 %1$d 毫秒</string>
+  <string name="setting_jev_status_last_error">執行態：最近錯誤 %1$s</string>
   <string name="setting_jev_connection_budget">今日請求預算已耗盡</string>
   <string name="setting_jev_outcome_applied">已套用</string>
   <string name="setting_jev_outcome_shadow">影子</string>

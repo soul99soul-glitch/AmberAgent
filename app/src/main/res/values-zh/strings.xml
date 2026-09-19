@@ -2371,6 +2371,7 @@
   <string name="live_action_send_to_chat">发到聊天</string>
   <string name="live_action_remember">记住</string>
   <string name="live_saved_section">已保存</string>
+  <string name="live_saved_more">+ %1$d 条更早记录</string>
   <string name="live_saved_toast_saved">已保存到历史</string>
   <string name="live_saved_toast_nothing">没有可保存的卡片</string>
   <string name="live_remember_toast">已记住，等待整理审核</string>
@@ -2872,6 +2873,7 @@
   <string name="capability_display_call_phone_label">电话拨打</string>
   <string name="capability_display_calllog_read_label">通话记录读取</string>
   <string name="capability_display_clipboard_access_label">剪贴板读写</string>
+  <string name="capability_display_screen_control_label">屏幕操控</string>
   <string name="capability_display_contacts_read_label">通讯录读取</string>
   <string name="capability_display_contacts_write_label">通讯录写入</string>
   <string name="capability_display_filesystem_read_label">文件系统读取</string>
@@ -3034,6 +3036,8 @@
   <string name="permission_display_grant_guidance">打开 AmberAgent 设置 &gt; Agent 权限 &gt; 系统权限，然后授予“%1$s”。特殊权限项目会打开 Android 系统设置。</string>
   <string name="permission_display_installed_apps_full_access_description">高级实验能力。读取设备上更完整的已安装包列表；Google Play 可能会限制此权限。</string>
   <string name="permission_display_installed_apps_full_access_title">全量应用列表</string>
+  <string name="permission_display_accessibility_service_title">无障碍服务</string>
+  <string name="permission_display_accessibility_service_description">读取屏幕 UI 树并执行点击、滑动、输入等屏幕操控；在系统无障碍设置中开启 AmberAgent Accessibility。</string>
   <string name="permission_display_location_current_description">读取最近一次系统定位结果。</string>
   <string name="permission_display_location_current_title">当前位置</string>
   <string name="permission_display_manage_all_files_description">高级实验权限。必须用户手动授权，且 Agent 只可访问设置中加入的外部路径。</string>
@@ -3461,7 +3465,19 @@
   <string name="setting_jev_title">Jev 判断服务</string>
   <string name="setting_jev_service_section">服务</string>
   <string name="setting_jev_master_title">启用 Jev</string>
-  <string name="setting_jev_master_desc">使用 TypeSafe 判断服务辅助工具发现、记忆召回等。需要 API Key；不会出现在聊天模型列表中。</string>
+  <string name="setting_jev_master_desc">使用外部判断服务（TypeSafe systemone 或 Vercel AI Gateway）辅助工具发现、记忆召回等。需要 API Key；不会出现在聊天模型列表中。</string>
+  <string name="setting_jev_api_mode_title">调用模式</string>
+  <string name="setting_jev_api_mode_desc">Typesafe 直连 api.typesafe.ai 原生接口；Vercel 走 AI Gateway 的 evaluation-model 评估端点（模型 id 经请求头传递）。</string>
+  <string name="setting_jev_api_mode_typesafe">Typesafe</string>
+  <string name="setting_jev_api_mode_vercel">Vercel</string>
+  <string name="setting_jev_base_url_title">网关 Base URL</string>
+  <string name="setting_jev_base_url_desc">Vercel 模式的网关基础地址，自动追加 /evaluation-model。</string>
+  <string name="setting_jev_base_url_dialog_title">设置网关 Base URL</string>
+  <string name="setting_jev_model_title">模型</string>
+  <string name="setting_jev_model_desc">Typesafe：可选固定版本（留空跟随 jev-latest）；Vercel：网关评估模型 id，默认 typesafe-ai/jev。</string>
+  <string name="setting_jev_model_dialog_title">设置 Jev 模型</string>
+  <string name="setting_jev_value_unset">未设置</string>
+  <string name="setting_jev_value_clear">清除</string>
   <string name="setting_jev_key_title">API Key</string>
   <string name="setting_jev_key_unset">未设置</string>
   <string name="setting_jev_key_dialog_title">设置 Jev API Key</string>
@@ -3475,6 +3491,7 @@
   <string name="setting_jev_connection_desc">发送一次合成请求，验证 Key 与服务可用性</string>
   <string name="setting_jev_connection_ok">连接成功（%1$s，%2$d 毫秒）</string>
   <string name="setting_jev_connection_key_missing">请先设置 API Key</string>
+  <string name="setting_jev_connection_model_required">请先设置模型——Vercel 模式需要网关模型 id</string>
   <string name="setting_jev_connection_failed">失败：%1$s</string>
   <string name="setting_jev_shadow_notice">Shadow 模式同样会把数据发送到外部服务，不是本地模式；仅在下方允许的范围内外发。</string>
   <string name="setting_jev_purposes_section">用途模式</string>
@@ -3507,6 +3524,10 @@
   <string name="setting_jev_status_metrics">近期判断：共 %1$d 次，应用 %2$d、影子 %3$d、缓存 %4$d、回退 %5$d、失败 %6$d</string>
   <string name="setting_jev_status_last">最近结果：%1$s</string>
   <string name="setting_jev_status_none">暂无判断记录</string>
+  <string name="setting_jev_status_normal">运行态：正常</string>
+  <string name="setting_jev_status_auth_paused">运行态：认证暂停——更新 Key 或运行连接测试后恢复</string>
+  <string name="setting_jev_status_cooldown">运行态：冷却中，剩余 %1$d 毫秒</string>
+  <string name="setting_jev_status_last_error">运行态：最近错误 %1$s</string>
   <string name="setting_jev_connection_budget">今日请求预算已耗尽</string>
   <string name="setting_jev_outcome_applied">已应用</string>
   <string name="setting_jev_outcome_shadow">影子</string>

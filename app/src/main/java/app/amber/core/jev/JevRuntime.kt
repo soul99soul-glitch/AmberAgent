@@ -18,8 +18,16 @@ class JevRuntime(
         return JevRuntimeConfig(
             mode = mode,
             allowedScopes = setting.dataScopes,
-            model = setting.model ?: JevLimits.DEFAULT_MODEL,
+            // 两模式模型字段独立（model=typesafe 固定版本，vercelModel=网关评估模型 id）
+            // 互不串味；VERCEL 空值回落 canonical 默认 typesafe-ai/jev。
+            model = when (setting.apiMode) {
+                JevApiMode.TYPESAFE -> setting.model ?: JevLimits.DEFAULT_MODEL
+                JevApiMode.VERCEL -> setting.vercelModel?.takeIf { it.isNotBlank() }
+                    ?: JevLimits.VERCEL_DEFAULT_MODEL
+            },
             policyVersion = POLICY_VERSION,
+            apiMode = setting.apiMode,
+            endpoint = jevEndpointFor(setting.apiMode, setting.baseUrl),
         )
     }
 
@@ -42,7 +50,8 @@ class JevRuntime(
     }
 
     companion object {
-        const val POLICY_VERSION = 1
+        /** 判断语义版本：VERCEL 换评估模型契约、预算档位变化时递增（参与缓存键）。 */
+        const val POLICY_VERSION = 2
     }
 }
 

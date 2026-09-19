@@ -34,4 +34,7 @@
     <string name="parity_webmount_dialog_ok">OK</string>
     <string name="parity_webmount_dialog_cancel">Cancel</string>
     <string name="parity_webmount_close_popup">Close popup</string>
+    <string name="parity_webmount_close_agent_title">Close active session?</string>
+    <string name="parity_webmount_close_agent_message">Amber is using this browser session. Closing it destroys the page the agent is working on.</string>
+    <string name="parity_webmount_close_agent_confirm">Close anyway</string>
 </resources>

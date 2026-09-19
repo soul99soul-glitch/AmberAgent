@@ -2352,6 +2352,7 @@
   <string name="live_action_send_to_chat">В чат</string>
   <string name="live_action_remember">Запомнить</string>
   <string name="live_saved_section">Сохранённые</string>
+  <string name="live_saved_more">Ещё %1$d</string>
   <string name="live_saved_toast_saved">Сохранено в историю</string>
   <string name="live_saved_toast_nothing">Нет карточки для сохранения</string>
   <string name="live_remember_toast">Запомнено; ожидает проверки</string>
@@ -2853,6 +2854,7 @@
   <string name="capability_display_call_phone_label">Телефонные вызовы</string>
   <string name="capability_display_calllog_read_label">Чтение журнала вызовов</string>
   <string name="capability_display_clipboard_access_label">Доступ к буферу обмена</string>
+  <string name="capability_display_screen_control_label">Управление экраном</string>
   <string name="capability_display_contacts_read_label">Чтение контактов</string>
   <string name="capability_display_contacts_write_label">Изменение контактов</string>
   <string name="capability_display_filesystem_read_label">Чтение файловой системы</string>
@@ -3015,6 +3017,8 @@
   <string name="permission_display_grant_guidance">Откройте Настройки AmberAgent &gt; Разрешения Agent &gt; Системный доступ и разрешите «%1$s». Для специальных разрешений откроются системные настройки Android.</string>
   <string name="permission_display_installed_apps_full_access_description">Расширенная экспериментальная возможность читать более полный список установленных пакетов; Google Play может ограничивать это разрешение.</string>
   <string name="permission_display_installed_apps_full_access_title">Полный список приложений</string>
+  <string name="permission_display_accessibility_service_title">Специальные возможности</string>
+  <string name="permission_display_accessibility_service_description">Чтение дерева UI экрана и выполнение нажатий, свайпов и ввода текста; включите AmberAgent Accessibility в настройках Android.</string>
   <string name="permission_display_location_current_description">Чтение последнего результата системного определения местоположения.</string>
   <string name="permission_display_location_current_title">Текущее местоположение</string>
   <string name="permission_display_manage_all_files_description">Расширенный экспериментальный доступ. Его нужно разрешить вручную; Agent сможет обращаться только к внешним путям, добавленным в настройках.</string>
@@ -3407,7 +3411,19 @@
   <string name="setting_jev_title">Служба оценки Jev</string>
   <string name="setting_jev_service_section">Служба</string>
   <string name="setting_jev_master_title">Включить Jev</string>
-  <string name="setting_jev_master_desc">Служба оценок TypeSafe помогает искать инструменты и вспоминать память. Требуется API-ключ; в списке моделей чата не появляется.</string>
+  <string name="setting_jev_master_desc">Внешняя служба оценок (TypeSafe systemone или Vercel AI Gateway) помогает искать инструменты и вспоминать память. Требуется API-ключ; в списке моделей чата не появляется.</string>
+  <string name="setting_jev_api_mode_title">Режим API</string>
+  <string name="setting_jev_api_mode_desc">Typesafe напрямую вызывает api.typesafe.ai; Vercel использует эндпоинт evaluation-model в AI Gateway (id модели передаётся заголовком).</string>
+  <string name="setting_jev_api_mode_typesafe">Typesafe</string>
+  <string name="setting_jev_api_mode_vercel">Vercel</string>
+  <string name="setting_jev_base_url_title">Base URL шлюза</string>
+  <string name="setting_jev_base_url_desc">Базовый адрес шлюза для режима Vercel; /evaluation-model добавляется автоматически.</string>
+  <string name="setting_jev_base_url_dialog_title">Указать Base URL шлюза</string>
+  <string name="setting_jev_model_title">Модель</string>
+  <string name="setting_jev_model_desc">Typesafe: закреплённая версия (необязательно, пусто = jev-latest). Vercel: id оценочной модели шлюза (по умолчанию typesafe-ai/jev).</string>
+  <string name="setting_jev_model_dialog_title">Задать модель Jev</string>
+  <string name="setting_jev_value_unset">Не задано</string>
+  <string name="setting_jev_value_clear">Очистить</string>
   <string name="setting_jev_key_title">API-ключ</string>
   <string name="setting_jev_key_unset">Не задан</string>
   <string name="setting_jev_key_dialog_title">Задать API-ключ Jev</string>
@@ -3421,6 +3437,7 @@
   <string name="setting_jev_connection_desc">Отправляет один синтетический запрос для проверки ключа и сервиса</string>
   <string name="setting_jev_connection_ok">Соединение успешно (%1$s, %2$d мс)</string>
   <string name="setting_jev_connection_key_missing">Сначала задайте API-ключ</string>
+  <string name="setting_jev_connection_model_required">Сначала задайте модель — для режима Vercel нужен id модели шлюза</string>
   <string name="setting_jev_connection_failed">Ошибка: %1$s</string>
   <string name="setting_jev_shadow_notice">Режим «Тень» также отправляет данные внешнему сервису — это не локальный режим. Данные уходят только в разрешённых ниже пределах.</string>
   <string name="setting_jev_purposes_section">Режимы по назначению</string>
@@ -3453,6 +3470,10 @@
   <string name="setting_jev_status_metrics">Недавние оценки: всего %1$d, применено %2$d, тень %3$d, кэш %4$d, откатов %5$d, ошибок %6$d</string>
   <string name="setting_jev_status_last">Последний результат: %1$s</string>
   <string name="setting_jev_status_none">Оценок пока нет</string>
+  <string name="setting_jev_status_normal">Состояние: норма</string>
+  <string name="setting_jev_status_auth_paused">Состояние: пауза по авторизации — обновите ключ или запустите тест подключения</string>
+  <string name="setting_jev_status_cooldown">Состояние: пауза после сбоев, осталось %1$d мс</string>
+  <string name="setting_jev_status_last_error">Состояние: последняя ошибка %1$s</string>
   <string name="setting_jev_connection_budget">Дневной лимит запросов исчерпан</string>
   <string name="setting_jev_outcome_applied">Применено</string>
   <string name="setting_jev_outcome_shadow">Тень</string>

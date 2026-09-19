@@ -471,6 +471,7 @@ class ToolExposureState private constructor(
             "ask_user",
             "permissions_status",
             "agent_runtime_status",
+            "jev_status",
             "file_list",
             "file_read",
             "file_write",

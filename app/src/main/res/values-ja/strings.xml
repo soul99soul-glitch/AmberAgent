@@ -2346,6 +2346,7 @@
   <string name="live_action_send_to_chat">チャットへ送る</string>
   <string name="live_action_remember">覚える</string>
   <string name="live_saved_section">保存済み</string>
+  <string name="live_saved_more">他 %1$d 件</string>
   <string name="live_saved_toast_saved">履歴に保存しました</string>
   <string name="live_saved_toast_nothing">保存できるカードがありません</string>
   <string name="live_remember_toast">覚えました。整理のレビュー待ちです</string>
@@ -2847,6 +2848,7 @@
   <string name="capability_display_call_phone_label">電話の発信</string>
   <string name="capability_display_calllog_read_label">通話履歴の読み取り</string>
   <string name="capability_display_clipboard_access_label">クリップボードへのアクセス</string>
+  <string name="capability_display_screen_control_label">画面操作</string>
   <string name="capability_display_contacts_read_label">連絡先の読み取り</string>
   <string name="capability_display_contacts_write_label">連絡先の書き込み</string>
   <string name="capability_display_filesystem_read_label">ファイルシステムの読み取り</string>
@@ -3009,6 +3011,8 @@
   <string name="permission_display_grant_guidance">AmberAgent の設定 &gt; Agent の権限 &gt; システムアクセスを開き、「%1$s」を許可してください。特殊アクセス項目では Android のシステム設定が開きます。</string>
   <string name="permission_display_installed_apps_full_access_description">インストール済みパッケージのより完全な一覧を読み取る高度な実験機能です。Google Play により制限される場合があります。</string>
   <string name="permission_display_installed_apps_full_access_title">すべてのアプリ一覧</string>
+  <string name="permission_display_accessibility_service_title">ユーザー補助サービス</string>
+  <string name="permission_display_accessibility_service_description">画面の UI ツリーを読み取り、タップ・スワイプ・テキスト入力を実行します。Android のユーザー補助設定で AmberAgent Accessibility を有効にしてください。</string>
   <string name="permission_display_location_current_description">システムの最新の位置情報を読み取ります。</string>
   <string name="permission_display_location_current_title">現在地</string>
   <string name="permission_display_manage_all_files_description">高度な実験的アクセスです。手動で許可する必要があり、Agent は設定に追加した外部パスだけにアクセスできます。</string>
@@ -3401,7 +3405,19 @@
   <string name="setting_jev_title">Jev 判定サービス</string>
   <string name="setting_jev_service_section">サービス</string>
   <string name="setting_jev_master_title">Jev を有効化</string>
-  <string name="setting_jev_master_desc">TypeSafe 判定サービスをツール検出やメモリ想起などに利用します。API キーが必要です。チャットのモデル一覧には表示されません。</string>
+  <string name="setting_jev_master_desc">外部判定サービス（TypeSafe systemone または Vercel AI Gateway）をツール検出やメモリ想起などに利用します。API キーが必要です。チャットのモデル一覧には表示されません。</string>
+  <string name="setting_jev_api_mode_title">API モード</string>
+  <string name="setting_jev_api_mode_desc">Typesafe は api.typesafe.ai を直接呼び出します。Vercel は AI Gateway の evaluation-model エンドポイントを使います（モデル id はヘッダーで送信）。</string>
+  <string name="setting_jev_api_mode_typesafe">Typesafe</string>
+  <string name="setting_jev_api_mode_vercel">Vercel</string>
+  <string name="setting_jev_base_url_title">ゲートウェイ Base URL</string>
+  <string name="setting_jev_base_url_desc">Vercel モードのゲートウェイ ベース URL です。/evaluation-model が自動で付加されます。</string>
+  <string name="setting_jev_base_url_dialog_title">ゲートウェイ Base URL を設定</string>
+  <string name="setting_jev_model_title">モデル</string>
+  <string name="setting_jev_model_desc">Typesafe：固定バージョン（任意、空欄は jev-latest に追随）。Vercel：ゲートウェイの評価モデル id（デフォルト typesafe-ai/jev）。</string>
+  <string name="setting_jev_model_dialog_title">Jev モデルを設定</string>
+  <string name="setting_jev_value_unset">未設定</string>
+  <string name="setting_jev_value_clear">クリア</string>
   <string name="setting_jev_key_title">API キー</string>
   <string name="setting_jev_key_unset">未設定</string>
   <string name="setting_jev_key_dialog_title">Jev API キーを設定</string>
@@ -3415,6 +3431,7 @@
   <string name="setting_jev_connection_desc">合成リクエストを 1 件送信してキーとサービスを検証します</string>
   <string name="setting_jev_connection_ok">接続成功（%1$s、%2$d ms）</string>
   <string name="setting_jev_connection_key_missing">先に API キーを設定してください</string>
+  <string name="setting_jev_connection_model_required">先にモデルを設定してください。Vercel モードにはゲートウェイのモデル id が必要です</string>
   <string name="setting_jev_connection_failed">失敗：%1$s</string>
   <string name="setting_jev_shadow_notice">シャドウモードも外部サービスへデータを送信します。ローカルモードではありません。下で許可した範囲内のみ送信されます。</string>
   <string name="setting_jev_purposes_section">用途モード</string>
@@ -3447,6 +3464,10 @@
   <string name="setting_jev_status_metrics">直近の判定：計 %1$d、適用 %2$d、シャドウ %3$d、キャッシュ %4$d、フォールバック %5$d、失敗 %6$d</string>
   <string name="setting_jev_status_last">直近の結果：%1$s</string>
   <string name="setting_jev_status_none">判定記録はまだありません</string>
+  <string name="setting_jev_status_normal">実行状態：正常</string>
+  <string name="setting_jev_status_auth_paused">実行状態：認証一時停止——キーを更新するか接続テストで再開できます</string>
+  <string name="setting_jev_status_cooldown">実行状態：クールダウン中（残り %1$d ミリ秒）</string>
+  <string name="setting_jev_status_last_error">実行状態：直近のエラー %1$s</string>
   <string name="setting_jev_connection_budget">本日のリクエスト予算を使い切りました</string>
   <string name="setting_jev_outcome_applied">適用</string>
   <string name="setting_jev_outcome_shadow">シャドウ</string>

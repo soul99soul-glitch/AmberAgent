@@ -61,7 +61,7 @@ data class WebGoalOutcome(
  * 有界网页目标快循环（WEB_AUTOMATION 用途）。
  *
  * 每轮从真实快照观察，Jev Choice 选动作、逐元素 Noul 选目标、DONE 经独立
- * noul 核验；默认 6 次动作决策 / 15s / 3 次无进展，且只执行读取/滚动/导航/
+ * noul 核验；默认 100 次动作决策 / 600s / 10 次无进展，且只执行读取/滚动/导航/
  * 点击/受控输入等低风险动作（提交/支付等一律 handback 回主模型）。网页动作
  * 不缓存；shadow/dry-run 只产决策轨迹不执行。任何 Jev 失败形态 handback。
  */
@@ -107,10 +107,12 @@ class JevWebGoalRunner(private val runtime: JevRuntime) {
             } catch (e: Exception) {
                 emptyList()
             }
-            val decision = decideStep(goal, steps, state, elements, texts, runKey)
-            if (decision == null) {
-                return WebGoalOutcome("handback", "jev decision unavailable", steps, state)
+            val stepOutcome = decideStep(goal, steps, state, elements, texts, runKey)
+            if (stepOutcome.decision == null) {
+                val reason = stepOutcome.unavailableReason?.let { ": $it" } ?: ""
+                return WebGoalOutcome("handback", "jev decision unavailable$reason", steps, state)
             }
+            val decision = stepOutcome.decision
 
             when (decision.action) {
                 "done" -> {
@@ -192,6 +194,12 @@ class JevWebGoalRunner(private val runtime: JevRuntime) {
         val doneVerified: Boolean?,
     )
 
+    /** decision 为 null 时带具体不可用原因（skip/fail 码），供 handback 透传。 */
+    private class StepOutcome(
+        val decision: StepDecision?,
+        val unavailableReason: String?,
+    )
+
     private suspend fun decideStep(
         goal: String,
         steps: List<WebGoalStep>,
@@ -199,7 +207,7 @@ class JevWebGoalRunner(private val runtime: JevRuntime) {
         elements: List<WebGoalElement>,
         texts: List<String>,
         runKey: String?,
-    ): StepDecision? {
+    ): StepOutcome {
         val actionOptions = buildMap {
             put("observe", "look more; the page state alone is not enough to decide")
             put("scroll_down", "scroll down to reveal more content")
@@ -279,13 +287,20 @@ class JevWebGoalRunner(private val runtime: JevRuntime) {
             questions = questions,
             requiredScopes = setOf(JevDataScope.WEB_CONTENT, JevDataScope.TASK_TEXT),
             cacheAnchor = null, // 网页动作不缓存
-        ) ?: return null
-        val evaluated = outcome.evaluated ?: return null
+        ) ?: return StepOutcome(null, "off")
+        val evaluated = outcome.evaluated ?: return StepOutcome(null, outcome.decision.unavailableReason())
         // shadow 也要产出决策轨迹（run() 层已保证不执行）；只有过期才回退。
-        if (outcome.stale) return null
+        if (outcome.stale) return StepOutcome(null, "stale_config")
 
-        val actionAnswer = evaluated.answers["action"] as? JevAnswer.Choice ?: return null
-        val action = actionAnswer.selected.takeIf { it in actionOptions } ?: return null
+        val actionAnswer = evaluated.answers["action"] as? JevAnswer.Choice
+            ?: return StepOutcome(null, "missing_action_answer")
+        // 低置信门：Jev 自报信心不足时交还主模型，不替它下注。
+        val confidence = actionAnswer.confidence
+        if (confidence != null && confidence < LOW_CONFIDENCE_THRESHOLD) {
+            return StepOutcome(null, "low_confidence:$confidence")
+        }
+        val action = actionAnswer.selected.takeIf { it in actionOptions }
+            ?: return StepOutcome(null, "unknown_action:${actionAnswer.selected}")
 
         var element: WebGoalElement? = null
         if (action == "click" || action == "type") {
@@ -296,12 +311,15 @@ class JevWebGoalRunner(private val runtime: JevRuntime) {
                     best = index to answer.probability
                 }
             }
-            element = best?.let { elements[it.first] } ?: return StepDecision(
-                action = "handback",
-                element = null,
-                text = null,
-                detail = "no_element_target",
-                doneVerified = null,
+            element = best?.let { elements[it.first] } ?: return StepOutcome(
+                StepDecision(
+                    action = "handback",
+                    element = null,
+                    text = null,
+                    detail = "no_element_target",
+                    doneVerified = null,
+                ),
+                null,
             )
         }
         var text: String? = null
@@ -310,11 +328,17 @@ class JevWebGoalRunner(private val runtime: JevRuntime) {
             val textIndex = textAnswer?.selected?.removePrefix("t")?.toIntOrNull()
             text = textIndex?.let { texts.getOrNull(it) }
             if (text == null) {
-                return StepDecision("handback", null, null, "no_text_value", null)
+                return StepOutcome(StepDecision("handback", null, null, "no_text_value", null), null)
             }
         }
         val doneVerified = (evaluated.answers["done_check"] as? JevAnswer.Noul)?.let { it.probability >= DONE_VERIFIED_THRESHOLD }
-        return StepDecision(action, element, text, element?.label, doneVerified)
+        return StepOutcome(StepDecision(action, element, text, element?.label, doneVerified), null)
+    }
+
+    private fun JevDecision.unavailableReason(): String = when (this) {
+        is JevDecision.Skipped -> reason.name.lowercase()
+        is JevDecision.Failed -> reason.name.lowercase()
+        is JevDecision.Evaluated -> "evaluated"
     }
 
     private fun JsonObject.stringField(key: String): String? =
@@ -326,11 +350,13 @@ class JevWebGoalRunner(private val runtime: JevRuntime) {
         }
 
     companion object {
-        const val DEFAULT_MAX_STEPS = 6
-        const val DEFAULT_MAX_DURATION_MS = 15_000L
-        const val MAX_NO_PROGRESS = 3
+        const val DEFAULT_MAX_STEPS = 100
+        const val DEFAULT_MAX_DURATION_MS = 600_000L
+        const val MAX_NO_PROGRESS = 10
         const val MAX_ELEMENTS = 24
         const val TARGET_THRESHOLD = 0.5
         const val DONE_VERIFIED_THRESHOLD = 0.6
+        /** Choice 答案自报信心低于此值时交还主模型（0.5 与 iOS 一致）。 */
+        const val LOW_CONFIDENCE_THRESHOLD = 0.5
     }
 }

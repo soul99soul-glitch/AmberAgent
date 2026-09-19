@@ -36,6 +36,7 @@ enum class AgentSpecialAccess {
     IgnoreBatteryOptimizations,
     ExactAlarm,
     ManageAllFiles,
+    Accessibility,
 }
 
 enum class RuntimeGrantMode {
@@ -171,6 +172,8 @@ class AgentPermissionBroker(
             AgentSpecialAccess.ManageAllFiles -> {
                 Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && Environment.isExternalStorageManager()
             }
+
+            AgentSpecialAccess.Accessibility -> accessibilityServiceEnabled()
         }
 
     private fun createSpecialAccessIntent(access: AgentSpecialAccess): Intent =
@@ -207,7 +210,18 @@ class AgentPermissionBroker(
                     data = Uri.parse("package:${context.packageName}")
                 }
             }
+
+            // AccessibilityService 开关没有包级深链，只能进系统无障碍列表。
+            AgentSpecialAccess.Accessibility -> Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
         }
+
+    private fun accessibilityServiceEnabled(): Boolean {
+        val manager = context.getSystemService(android.view.accessibility.AccessibilityManager::class.java)
+            ?: return false
+        return manager.getEnabledAccessibilityServiceList(
+            android.accessibilityservice.AccessibilityServiceInfo.FEEDBACK_ALL_MASK,
+        ).any { info -> info.resolveInfo.serviceInfo.packageName == context.packageName }
+    }
 
     private fun notificationListenerEnabled(): Boolean {
         val enabled = Settings.Secure.getString(
@@ -454,6 +468,20 @@ object AgentPermissionRegistry {
             risk = AgentPermissionRisk.High,
             minSdk = Build.VERSION_CODES.R,
             toolNames = listOf("external_file_list", "external_file_read", "external_file_write", "external_file_delete"),
+        ),
+        AgentPermissionCapability(
+            id = "accessibility_service",
+            title = "无障碍服务",
+            description = "读取屏幕 UI 树并执行点击、滑动、输入等屏幕操控；在系统无障碍设置中开启 AmberAgent Accessibility。",
+            specialAccess = AgentSpecialAccess.Accessibility,
+            risk = AgentPermissionRisk.Sensitive,
+            // 只列真正依赖该服务的工具；open_app/open_url 走 Intent、
+            // screenshot 走 MediaProjection，均不受此能力门控。
+            toolNames = listOf(
+                "screen_click", "screen_long_click", "screen_swipe", "screen_input_text",
+                "screen_back", "screen_home", "screen_read_ui", "screen_find_text",
+                "screen_tap_text", "screen_wait_for_text", "screen_scroll_until",
+            ),
         ),
         AgentPermissionCapability(
             id = "apps",

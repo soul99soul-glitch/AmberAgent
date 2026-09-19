@@ -7,10 +7,10 @@ import android.webkit.WebView
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.shape.RoundedCornerShape
 import app.amber.feature.ui.components.ds.AmberCard
+import app.amber.feature.ui.components.ds.Hairline
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.size
-import androidx.compose.material3.HorizontalDivider
 import com.composables.icons.lucide.Globe
 import com.composables.icons.lucide.Bot
 import com.composables.icons.lucide.Hand
@@ -116,6 +116,7 @@ fun WebMountSessionPage(
     var popupMenuOpen by remember(sessionId) { mutableStateOf(false) }
     var reopenConsumed by remember(sessionId) { mutableStateOf(false) }
     var initialHumanControlConsumed by remember(sessionId) { mutableStateOf(false) }
+    var confirmCloseAgent by remember(sessionId) { mutableStateOf(false) }
     var isForeground by remember(lifecycleOwner, sessionId) {
         mutableStateOf(lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED))
     }
@@ -292,7 +293,7 @@ fun WebMountSessionPage(
     Scaffold(
         topBar = {
             TopAppBar(
-                expandedHeight = 48.dp,
+                expandedHeight = 52.dp,
                 title = {
                     Text(
                         text = metadata?.title?.takeIf { it.isNotBlank() }
@@ -337,7 +338,13 @@ fun WebMountSessionPage(
                         }
                     }
                     IconButton(
-                        onClick = ::closeSession,
+                        onClick = {
+                            if (metadata?.owner == WebMountOwner.AGENT) {
+                                confirmCloseAgent = true
+                            } else {
+                                closeSession()
+                            }
+                        },
                         enabled = !closing,
                     ) {
                         Icon(
@@ -388,12 +395,15 @@ fun WebMountSessionPage(
             )
 
             if (handle != null && visibleWebView != null) {
-                if (loadState.status == SessionHandle.LoadStatus.LOADING) {
-                    LinearProgressIndicator(
-                        progress = { (loadState.progress / 100f).coerceIn(0f, 1f) },
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                }
+                // Keep the progress slot reserved so the WebView does not jump
+                // when loading starts or finishes.
+                val loading = loadState.status == SessionHandle.LoadStatus.LOADING
+                LinearProgressIndicator(
+                    progress = { if (loading) (loadState.progress / 100f).coerceIn(0f, 1f) else 0f },
+                    modifier = Modifier.fillMaxWidth(),
+                    color = if (loading) MaterialTheme.colorScheme.primary else androidx.compose.ui.graphics.Color.Transparent,
+                    trackColor = if (loading) MaterialTheme.colorScheme.secondaryContainer else androidx.compose.ui.graphics.Color.Transparent,
+                )
                 PooledWebView(
                     webView = visibleWebView,
                     readOnly = !interactive,
@@ -410,6 +420,29 @@ fun WebMountSessionPage(
                 Box(modifier = Modifier.weight(1f).fillMaxWidth())
             }
         }
+    }
+
+    if (confirmCloseAgent) {
+        AlertDialog(
+            onDismissRequest = { confirmCloseAgent = false },
+            title = { Text(stringResource(R.string.parity_webmount_close_agent_title)) },
+            text = { Text(stringResource(R.string.parity_webmount_close_agent_message)) },
+            dismissButton = {
+                TextButton(onClick = { confirmCloseAgent = false }) {
+                    Text(stringResource(R.string.parity_webmount_dialog_cancel))
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        confirmCloseAgent = false
+                        closeSession()
+                    },
+                ) {
+                    Text(stringResource(R.string.parity_webmount_close_agent_confirm))
+                }
+            },
+        )
     }
 
     if (interactive) {
@@ -492,7 +525,7 @@ internal fun SessionHeader(
             Icon(
                 imageVector = statusIcon,
                 contentDescription = ownerText,
-                tint = if (needsReopen || pageFailed) MaterialTheme.colorScheme.error else t.ink2,
+                tint = if (pageFailed) MaterialTheme.colorScheme.error else t.ink2,
                 modifier = Modifier.size(18.dp),
             )
             Box(modifier = Modifier.weight(1f)) {
@@ -532,6 +565,8 @@ internal fun SessionHeader(
         val notice = detail ?: when {
             needsReopen -> stringResource(R.string.parity_webmount_session_needs_reopen)
             pageFailed -> stringResource(R.string.parity_webmount_session_failed)
+            metadata?.owner == WebMountOwner.AGENT ->
+                stringResource(R.string.parity_webmount_session_agent_owned)
             else -> null
         }
         notice?.let { message ->
@@ -539,10 +574,14 @@ internal fun SessionHeader(
                 text = message,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
                 style = type.secondary,
-                color = MaterialTheme.colorScheme.error,
+                color = if (detail != null || pageFailed) {
+                    MaterialTheme.colorScheme.error
+                } else {
+                    t.ink3
+                },
             )
         }
-        HorizontalDivider(color = t.ink3.copy(alpha = 0.15f))
+        Hairline()
     }
 }
 

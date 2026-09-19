@@ -10,6 +10,8 @@ data class JevMetricEntry(
     val requestBytes: Int,
     val usage: JevUsage?,
     val model: String?,
+    /** failed 条目的具体失败原因（如 auth/timeout/invalid_response）；其余为 null。 */
+    val reason: String? = null,
 ) {
     companion object {
         const val OUTCOME_APPLIED = "applied"
@@ -59,5 +61,13 @@ class JevMetrics(private val capacity: Int = 128) {
             failures = list.count { it.outcome == JevMetricEntry.OUTCOME_FAILED },
             lastOutcome = list.lastOrNull()?.outcome,
         )
+    }
+
+    /** 最近一次失败/回退的具体原因（failed 取 reason，回退取 fallback:xxx）；无则 null。 */
+    @Synchronized
+    fun lastErrorReason(): String? {
+        val last = entries.lastOrNull { it.outcome == JevMetricEntry.OUTCOME_FAILED || it.outcome.startsWith("fallback") }
+            ?: return null
+        return last.reason ?: last.outcome
     }
 }

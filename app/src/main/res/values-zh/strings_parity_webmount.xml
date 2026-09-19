@@ -34,4 +34,7 @@
     <string name="parity_webmount_dialog_ok">确定</string>
     <string name="parity_webmount_dialog_cancel">取消</string>
     <string name="parity_webmount_close_popup">关闭弹出页面</string>
+    <string name="parity_webmount_close_agent_title">关闭使用中的会话？</string>
+    <string name="parity_webmount_close_agent_message">Amber 正在使用此浏览器会话，关闭将销毁代理正在操作的页面。</string>
+    <string name="parity_webmount_close_agent_confirm">仍然关闭</string>
 </resources>

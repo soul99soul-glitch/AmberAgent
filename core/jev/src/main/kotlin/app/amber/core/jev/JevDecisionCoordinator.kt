@@ -60,6 +60,12 @@ class JevDecisionCoordinator(
 
     fun dailyUsage(): JevDailyUsage = budget.dailyUsage()
 
+    /** 只读运行态快照（供设置页/诊断工具）；不含凭据与业务原文。 */
+    fun statusSnapshot(): JevCoordinatorStatus = JevCoordinatorStatus(
+        authPaused = authPaused,
+        cooldownRemainingMs = (cooldownUntil - clock()).coerceAtLeast(0),
+    )
+
     suspend fun decide(
         purpose: JevPurpose,
         config: JevRuntimeConfig,
@@ -77,19 +83,23 @@ class JevDecisionCoordinator(
         if (questions.size > JevLimits.MAX_QUESTIONS_PER_REQUEST) {
             return skipped(purpose, config, JevSkipReason.TOO_MANY_QUESTIONS)
         }
+        if (state.toString().toByteArray(Charsets.UTF_8).size > JevLimits.MAX_STATE_BYTES) {
+            return skipped(purpose, config, JevSkipReason.STATE_TOO_LARGE)
+        }
         val apiKey = apiKeyProvider()
         if (apiKey.isNullOrBlank()) return skipped(purpose, config, JevSkipReason.NO_KEY)
+        if (config.model.isBlank()) return skipped(purpose, config, JevSkipReason.NO_MODEL)
         if (authPaused) return skipped(purpose, config, JevSkipReason.AUTH_PAUSED)
         if (clock() < cooldownUntil) return skipped(purpose, config, JevSkipReason.COOLDOWN)
 
-        val body = client.encodeRequestBody(config.model, state, questions)
+        val body = client.encodeRequestBody(config.model, state, questions, config.apiMode)
         val bodyBytes = body.toByteArray(Charsets.UTF_8).size.toLong()
         if (bodyBytes > JevLimits.MAX_REQUEST_BODY_BYTES) {
             return skipped(purpose, config, JevSkipReason.REQUEST_TOO_LARGE)
         }
 
         val cacheKey = cacheAnchor?.let { anchor ->
-            "${purpose.name}|${config.model}|v${config.policyVersion}|${config.allowedScopes.joinToString(",")}|$anchor"
+            "${config.apiMode.name}|${config.endpoint}|${purpose.name}|${config.model}|v${config.policyVersion}|${config.allowedScopes.joinToString(",")}|$anchor"
         }
         if (cacheKey != null) {
             val cached = synchronized(cache) {
@@ -112,7 +122,7 @@ class JevDecisionCoordinator(
         }
 
         val startedAt = clock()
-        val deadline = startedAt + JevLimits.DECISION_DEADLINE_MS
+        val deadline = startedAt + jevDeadlineMs(config.apiMode)
         val runMutex = runKey?.let { key -> runLocks.computeIfAbsent(key) { Mutex() } }
         var attempts = 0
         var lastFailure: JevDecision.Failed = JevDecision.Failed(JevFailureReason.TIMEOUT)
@@ -152,7 +162,7 @@ class JevDecisionCoordinator(
                 val remaining = deadline - clock()
                 val result = try {
                     withTimeout(remaining.coerceAtLeast(1)) {
-                        client.call(config.model, apiKey, state, questions)
+                        client.call(config.apiMode, config.endpoint, config.model, apiKey, state, questions)
                     }
                 } catch (e: TimeoutCancellationException) {
                     JevCallResult.Transport("deadline")
@@ -253,10 +263,18 @@ class JevDecisionCoordinator(
         return true
     }
 
-    /** 连接测试：独立请求身份，固定 jev-latest，只用合成公开数据；成功解除认证暂停。 */
-    suspend fun connectionTest(): JevConnectionTestResult {
+    /** 连接测试：独立请求身份，只用合成公开数据；成功解除认证暂停。 */
+    suspend fun connectionTest(
+        apiMode: JevApiMode = JevApiMode.TYPESAFE,
+        baseUrl: String? = null,
+        model: String? = null,
+    ): JevConnectionTestResult {
         val apiKey = apiKeyProvider()
         if (apiKey.isNullOrBlank()) return JevConnectionTestResult(keyMissing = true)
+        val testModel = model?.takeIf { it.isNotBlank() } ?: when (apiMode) {
+            JevApiMode.TYPESAFE -> JevLimits.CONNECTION_TEST_MODEL
+            JevApiMode.VERCEL -> JevLimits.VERCEL_DEFAULT_MODEL
+        }
         val question = JevQuestion.Noul(
             instructions = "Is 7 a prime number? Answer strictly from arithmetic.",
         )
@@ -264,15 +282,15 @@ class JevDecisionCoordinator(
             put("task", "connection test with synthetic public data")
             put("data", "A prime number is a natural number greater than 1 whose only positive divisors are 1 and itself.")
         }
-        val body = client.encodeRequestBody(JevLimits.CONNECTION_TEST_MODEL, state, mapOf("prime" to question))
+        val body = client.encodeRequestBody(testModel, state, mapOf("prime" to question), apiMode)
         val bodyBytes = body.toByteArray(Charsets.UTF_8).size.toLong()
         if (!budget.consume(null, 1, bodyBytes)) {
             return JevConnectionTestResult(budgetExhausted = true)
         }
         val startedAt = clock()
         val result = try {
-            withTimeout(JevLimits.DECISION_DEADLINE_MS * 2) {
-                client.call(JevLimits.CONNECTION_TEST_MODEL, apiKey, state, mapOf("prime" to question))
+            withTimeout(jevDeadlineMs(apiMode) * 2) {
+                client.call(apiMode, jevEndpointFor(apiMode, baseUrl), testModel, apiKey, state, mapOf("prime" to question))
             }
         } catch (e: TimeoutCancellationException) {
             return JevConnectionTestResult(error = "timeout")
@@ -291,7 +309,7 @@ class JevDecisionCoordinator(
                     resetTransientFailures()
                     JevConnectionTestResult(
                         ok = true,
-                        model = result.model ?: JevLimits.CONNECTION_TEST_MODEL,
+                        model = result.model ?: testModel,
                         latencyMs = clock() - startedAt,
                     )
                 }
@@ -316,7 +334,12 @@ class JevDecisionCoordinator(
         startedAt: Long,
         bodyBytes: Long,
     ): JevDecision.Failed {
-        metrics.record(metric(purpose, config, JevMetricEntry.OUTCOME_FAILED, clock() - startedAt, bodyBytes, null, null))
+        metrics.record(
+            metric(
+                purpose, config, JevMetricEntry.OUTCOME_FAILED, clock() - startedAt, bodyBytes, null, null,
+                reason = failure.reason.name.lowercase(),
+            ),
+        )
         return failure
     }
 
@@ -328,6 +351,7 @@ class JevDecisionCoordinator(
         requestBytes: Long,
         usage: JevUsage?,
         model: String?,
+        reason: String? = null,
     ) = JevMetricEntry(
         timestamp = clock(),
         purpose = purpose,
@@ -337,8 +361,17 @@ class JevDecisionCoordinator(
         requestBytes = requestBytes.coerceAtMost(Int.MAX_VALUE.toLong()).toInt(),
         usage = usage,
         model = model,
+        reason = reason,
     )
 }
+
+/** 协调器运行态的只读快照；字段刻意保持元数据级别。 */
+data class JevCoordinatorStatus(
+    /** 最近一次 401 后进入认证暂停，直到凭据/范围变化或连接测试成功。 */
+    val authPaused: Boolean,
+    /** 连续暂时性失败后的冷却剩余毫秒；0 表示未在冷却。 */
+    val cooldownRemainingMs: Long,
+)
 
 data class JevConnectionTestResult(
     val ok: Boolean = false,
@@ -347,4 +380,9 @@ data class JevConnectionTestResult(
     val model: String? = null,
     val latencyMs: Long = 0,
     val error: String? = null,
-)
+) {
+    companion object {
+        /** VERCEL 模式未配置网关模型 id 时的错误码（UI 据此显示专用文案）。 */
+        const val ERROR_MODEL_REQUIRED = "model_required"
+    }
+}

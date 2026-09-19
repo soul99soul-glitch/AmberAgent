@@ -247,6 +247,13 @@ class ExecutionPolicyCoveragePinTest {
             Capability.LOCATION_CURRENT to setOf("location_current"),
             Capability.AUDIO_RECORD to setOf("audio_record_once"),
             Capability.SCREEN_CAPTURE to setOf("screen_screenshot"),
+            // AccessibilityService 驱动面：手势/树读取/查找——open_app/open_url
+            // 走 Intent、screenshot 走 MediaProjection，不在此能力内。
+            Capability.SCREEN_CONTROL to setOf(
+                "screen_click", "screen_long_click", "screen_swipe", "screen_input_text",
+                "screen_back", "screen_home", "screen_read_ui", "screen_find_text",
+                "screen_tap_text", "screen_wait_for_text", "screen_scroll_until",
+            ),
             Capability.CLIPBOARD_ACCESS to setOf("clipboard_tool"),
         )
 
@@ -263,6 +270,9 @@ class ExecutionPolicyCoveragePinTest {
             // tool_policy_explain are agent-loop introspection.
             "ask_user", "get_time_info", "run_plan_update", "permissions_status",
             "tools_list", "tool_policy_explain",
+            // Read-only Jev settings/metrics introspection; no path, domain,
+            // shell, or capability surface (same class as permissions_status).
+            "jev_status",
             // In-app JS engine (sandboxed runtime, no tool-call surface).
             "eval_javascript",
             // Fixed conversation-scoped output dir; no user-supplied path arg.
@@ -314,13 +324,9 @@ class ExecutionPolicyCoveragePinTest {
             // iCloud status probe; the path-bearing icloud_* tools are in
             // UNMODELED_ROOT_PATH_TOOLS (fail-closed) instead.
             "icloud_status",
-            // Screen automation / device surfaces: Android runtime permissions
-            // and the approval side are the enforcement; only screen_open_url
-            // (domain), screen_screenshot / clipboard_tool and the sms / call /
-            // contacts / location / audio device tools are capability-mapped.
-            "screen_back", "screen_click", "screen_find_text", "screen_home", "screen_input_text",
-            "screen_long_click", "screen_open_app", "screen_read_ui", "screen_scroll_until",
-            "screen_swipe", "screen_tap_text", "screen_wait_for_text", "vlm_task",
+            // screen_open_app 走 Intent launch、vlm_task 只登记意图不动作——
+            // 其余 screen_* 操控面已映射 Capability.SCREEN_CONTROL。
+            "screen_open_app", "vlm_task",
             // Device / system info + settings surfaces (feature/tools/access):
             // read-mostly inventory and Android-setting launches; intent_open
             // (domain) and share_file (path) are mapped instead.

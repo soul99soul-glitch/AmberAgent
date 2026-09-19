@@ -11,6 +11,15 @@ import kotlinx.serialization.Serializable
 @Serializable
 enum class JevMode { OFF, SHADOW, ACTIVE }
 
+/**
+ * 出站调用方言。TYPESAFE = typesafe 原生 `/v1/systemone`；
+ * VERCEL = Vercel AI Gateway 评估模型端点 `POST {baseUrl}/evaluation-model`——
+ * `typesafe-ai/jev` 是 evaluation 模型（不产聊天文本），OpenAI 兼容端点打不通，
+ * 契约以 @ai-sdk/gateway 源码为准：模型走 `ai-model-id` header，body `{state, questions}`。
+ */
+@Serializable
+enum class JevApiMode { TYPESAFE, VERCEL }
+
 @Serializable
 enum class JevPurpose { TOOL_DISCOVERY, MEMORY_RECALL, CONTEXT_SELECTION, MODEL_ROUTING, WEB_AUTOMATION }
 
@@ -22,11 +31,16 @@ enum class JevDataScope { TOOL_METADATA, TASK_TEXT, PERSONAL_MEMORY, TOOL_OUTPUT
 @Serializable
 data class JevSetting(
     val enabled: Boolean = false,
-    /** active/shadow 使用的固定模型版本；null 回落 [JevLimits.DEFAULT_MODEL]。 */
+    /** TYPESAFE 模式的固定模型版本；null 回落 [JevLimits.DEFAULT_MODEL]。 */
     val model: String? = null,
+    /** VERCEL 模式的网关评估模型 id（默认 typesafe-ai/jev）；必填，缺省由协调器 NO_MODEL 跳过。 */
+    val vercelModel: String? = null,
     val purposes: Map<JevPurpose, JevMode> = emptyMap(),
     val dataScopes: Set<JevDataScope> = emptySet(),
     val apiKeyMask: String? = null,
+    val apiMode: JevApiMode = JevApiMode.TYPESAFE,
+    /** VERCEL 模式的 OpenAI 兼容 base URL；null 用 [JevLimits.VERCEL_DEFAULT_BASE_URL]。 */
+    val baseUrl: String? = null,
 ) {
     fun modeFor(purpose: JevPurpose): JevMode = if (!enabled) JevMode.OFF else purposes[purpose] ?: JevMode.OFF
 }
@@ -37,6 +51,9 @@ data class JevRuntimeConfig(
     val allowedScopes: Set<JevDataScope>,
     val model: String,
     val policyVersion: Int,
+    val apiMode: JevApiMode = JevApiMode.TYPESAFE,
+    /** 完整 URL，须由 [jevEndpointFor] 解析；不给默认值——VERCEL 误用 typesafe 域名会静默发错信封。 */
+    val endpoint: String,
 )
 
 sealed interface JevQuestion {
@@ -74,7 +91,7 @@ sealed interface JevAnswer {
 data class JevUsage(val inputTokens: Int, val outputTokens: Int)
 
 enum class JevSkipReason {
-    OFF, NO_KEY, SCOPE_NOT_ALLOWED, BUDGET_EXHAUSTED, COOLDOWN, AUTH_PAUSED,
+    OFF, NO_KEY, NO_MODEL, SCOPE_NOT_ALLOWED, BUDGET_EXHAUSTED, COOLDOWN, AUTH_PAUSED,
     EMPTY_QUESTIONS, TOO_MANY_QUESTIONS, STATE_TOO_LARGE, REQUEST_TOO_LARGE,
 }
 
@@ -99,12 +116,19 @@ sealed interface JevDecision {
  */
 object JevLimits {
     const val ENDPOINT = "https://api.typesafe.ai/v1/systemone"
+    /** VERCEL 模式缺省网关；`{base}/evaluation-model` 追加路径。 */
+    const val VERCEL_DEFAULT_BASE_URL = "https://ai-gateway.vercel.sh/v4/ai"
+    /** VERCEL 模式缺省评估模型（Vercel AI Gateway 上的 canonical Model ID）。 */
+    const val VERCEL_DEFAULT_MODEL = "typesafe-ai/jev"
     /** 连接测试与实验用；active 用途应使用经验收固定的 [JevSetting.model]。 */
     const val CONNECTION_TEST_MODEL = "jev-latest"
     const val DEFAULT_MODEL = "jev-latest"
 
     /** 单次出站请求（含排队/重试/解析）的总 deadline；超时不再阻塞原路径。 */
     const val DECISION_DEADLINE_MS = 1_200L
+
+    /** VERCEL 走通用 chat 模型过网关，结构化输出常态 1~3s；沿用 1.2s 会把模式打成事实不可用。 */
+    const val VERCEL_DECISION_DEADLINE_MS = 4_000L
 
     const val MAX_QUESTIONS_PER_REQUEST = 32
     const val MAX_CANDIDATES = 64
@@ -116,12 +140,12 @@ object JevLimits {
     const val MAX_INFLIGHT_GLOBAL = 3
 
     /** 单用户轮（run）共享预算；重试计数，缓存命中不重复计费。 */
-    const val PER_RUN_MAX_REQUESTS = 6
-    const val PER_RUN_MAX_STATE_BYTES = 256 * 1024
+    const val PER_RUN_MAX_REQUESTS = 2_000
+    const val PER_RUN_MAX_STATE_BYTES = 64L * 1024 * 1024
 
     /** App 日预算（本地软上限，非供应商账单）。 */
-    const val DAILY_MAX_REQUESTS = 1_000
-    const val DAILY_MAX_BODY_BYTES = 16L * 1024 * 1024
+    const val DAILY_MAX_REQUESTS = 100_000
+    const val DAILY_MAX_BODY_BYTES = 2L * 1024 * 1024 * 1024
 
     const val CACHE_MAX_ENTRIES = 128
     const val CACHE_TTL_MS = 5 * 60_000L
@@ -130,4 +154,18 @@ object JevLimits {
     const val RETRY_BACKOFF_MS = 150L
     const val COOLDOWN_AFTER_CONSECUTIVE_FAILURES = 3
     const val COOLDOWN_MS = 60_000L
+}
+
+/** 解析本次调用的完整 URL；VERCEL 模式对 base 去尾斜杠后追加 /evaluation-model。 */
+fun jevEndpointFor(apiMode: JevApiMode, baseUrl: String?): String = when (apiMode) {
+    JevApiMode.TYPESAFE -> JevLimits.ENDPOINT
+    JevApiMode.VERCEL ->
+        (baseUrl?.trim()?.trimEnd('/')?.takeIf { it.isNotEmpty() }
+            ?: JevLimits.VERCEL_DEFAULT_BASE_URL) + "/evaluation-model"
+}
+
+/** 单次 decide 总 deadline，按方言分档（VERCEL 经网关+通用模型，显著更慢）。 */
+fun jevDeadlineMs(apiMode: JevApiMode): Long = when (apiMode) {
+    JevApiMode.TYPESAFE -> JevLimits.DECISION_DEADLINE_MS
+    JevApiMode.VERCEL -> JevLimits.VERCEL_DECISION_DEADLINE_MS
 }

@@ -2375,6 +2375,7 @@ Pending candidates: %1$d · recent events: %2$d.</string>
   <string name="live_action_send_to_chat">Send to chat</string>
   <string name="live_action_remember">Remember</string>
   <string name="live_saved_section">Saved</string>
+  <string name="live_saved_more">+ %1$d earlier</string>
   <string name="live_saved_toast_saved">Saved to history</string>
   <string name="live_saved_toast_nothing">No card to save</string>
   <string name="live_remember_toast">Remembered; pending review</string>
@@ -2876,6 +2877,7 @@ Enable it in Settings.</string>
   <string name="capability_display_call_phone_label">Phone calls</string>
   <string name="capability_display_calllog_read_label">Call-log read</string>
   <string name="capability_display_clipboard_access_label">Clipboard access</string>
+  <string name="capability_display_screen_control_label">Screen control</string>
   <string name="capability_display_contacts_read_label">Contacts read</string>
   <string name="capability_display_contacts_write_label">Contacts write</string>
   <string name="capability_display_filesystem_read_label">File-system read</string>
@@ -3038,6 +3040,8 @@ Enable it in Settings.</string>
   <string name="permission_display_grant_guidance">Open AmberAgent Settings &gt; Agent permissions &gt; System access, then grant “%1$s”. Special access items open Android system settings.</string>
   <string name="permission_display_installed_apps_full_access_description">Advanced experimental access to a more complete list of installed packages; Google Play may restrict this permission.</string>
   <string name="permission_display_installed_apps_full_access_title">Full app list</string>
+  <string name="permission_display_accessibility_service_title">Accessibility service</string>
+  <string name="permission_display_accessibility_service_description">Read the screen UI tree and perform taps, swipes and text input; enable AmberAgent Accessibility in Android settings.</string>
   <string name="permission_display_location_current_description">Read the most recent system location result.</string>
   <string name="permission_display_location_current_title">Current location</string>
   <string name="permission_display_manage_all_files_description">Advanced experimental access. You must grant it manually; Agent can access only external paths added in Settings.</string>
@@ -3463,7 +3467,19 @@ My task:</string>
   <string name="setting_jev_title">Jev Judgment Service</string>
   <string name="setting_jev_service_section">Service</string>
   <string name="setting_jev_master_title">Enable Jev</string>
-  <string name="setting_jev_master_desc">Uses the TypeSafe judgment service for tool discovery, memory recall and more. Needs an API key. Never appears in the chat model list.</string>
+  <string name="setting_jev_master_desc">Uses an external judgment service (TypeSafe systemone or Vercel AI Gateway) for tool discovery, memory recall and more. Needs an API key. Never appears in the chat model list.</string>
+  <string name="setting_jev_api_mode_title">API mode</string>
+  <string name="setting_jev_api_mode_desc">Typesafe calls api.typesafe.ai natively; Vercel calls the AI Gateway evaluation-model endpoint (model id goes in a request header).</string>
+  <string name="setting_jev_api_mode_typesafe">Typesafe</string>
+  <string name="setting_jev_api_mode_vercel">Vercel</string>
+  <string name="setting_jev_base_url_title">Gateway base URL</string>
+  <string name="setting_jev_base_url_desc">Gateway base URL for Vercel mode; /evaluation-model is appended.</string>
+  <string name="setting_jev_base_url_dialog_title">Set gateway base URL</string>
+  <string name="setting_jev_model_title">Model</string>
+  <string name="setting_jev_model_desc">Typesafe: optional pinned version (blank follows jev-latest). Vercel: gateway evaluation model id, default typesafe-ai/jev.</string>
+  <string name="setting_jev_model_dialog_title">Set Jev model</string>
+  <string name="setting_jev_value_unset">Not set</string>
+  <string name="setting_jev_value_clear">Clear</string>
   <string name="setting_jev_key_title">API Key</string>
   <string name="setting_jev_key_unset">Not set</string>
   <string name="setting_jev_key_dialog_title">Set Jev API key</string>
@@ -3477,6 +3493,7 @@ My task:</string>
   <string name="setting_jev_connection_desc">Sends one synthetic request to verify the key and the service</string>
   <string name="setting_jev_connection_ok">Connected (%1$s, %2$d ms)</string>
   <string name="setting_jev_connection_key_missing">Set an API key first</string>
+  <string name="setting_jev_connection_model_required">Set a model first — Vercel mode needs a gateway model id</string>
   <string name="setting_jev_connection_failed">Failed: %1$s</string>
   <string name="setting_jev_shadow_notice">Shadow mode also sends data to the external service; it is not a local mode. Data only leaves the device within the scopes allowed below.</string>
   <string name="setting_jev_purposes_section">Purposes</string>
@@ -3509,6 +3526,10 @@ My task:</string>
   <string name="setting_jev_status_metrics">Recent judgments: %1$d total, applied %2$d, shadow %3$d, cached %4$d, fallbacks %5$d, failed %6$d</string>
   <string name="setting_jev_status_last">Last outcome: %1$s</string>
   <string name="setting_jev_status_none">No judgments recorded yet</string>
+  <string name="setting_jev_status_normal">Runtime: normal</string>
+  <string name="setting_jev_status_auth_paused">Runtime: auth paused — update the key or run a connection test to resume</string>
+  <string name="setting_jev_status_cooldown">Runtime: cooling down, %1$d ms left</string>
+  <string name="setting_jev_status_last_error">Runtime: last error %1$s</string>
   <string name="setting_jev_connection_budget">Daily request budget exhausted</string>
   <string name="setting_jev_outcome_applied">Applied</string>
   <string name="setting_jev_outcome_shadow">Shadow</string>

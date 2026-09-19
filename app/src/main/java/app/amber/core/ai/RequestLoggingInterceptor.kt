@@ -4,6 +4,7 @@ import android.content.Context
 import app.amber.agent.BuildConfig
 import app.amber.common.android.LogEntry
 import app.amber.common.android.Logging
+import app.amber.core.jev.JevHttpRequest
 import app.amber.core.settings.PreferencesKeys
 import app.amber.core.settings.settingsStore
 import kotlinx.coroutines.CoroutineScope
@@ -74,8 +75,9 @@ class RequestLoggingInterceptor(
         val isAuthEndpoint = request.url.encodedPath.contains("/oauth", ignoreCase = true) ||
             request.url.encodedPath.contains("/token", ignoreCase = true)
         // Jev 判断请求携带记忆/任务文本外发内容，即便 DEBUG 构建也不落日志。
-        val isJevEndpoint = request.url.host == "api.typesafe.ai"
-        val requestBody = if (BuildConfig.DEBUG && !isAuthEndpoint && !isJevEndpoint) {
+        // 认 transport 打的 tag 而非域名——VERCEL/自定义网关 host 各异，域名判断会漏。
+        val isJevRequest = request.tag(JevHttpRequest::class.java) != null
+        val requestBody = if (BuildConfig.DEBUG && !isAuthEndpoint && !isJevRequest) {
             request.body?.let { body ->
                 val buffer = Buffer()
                 body.writeTo(buffer)

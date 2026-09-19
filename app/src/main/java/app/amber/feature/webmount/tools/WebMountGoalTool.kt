@@ -23,7 +23,7 @@ import kotlinx.serialization.json.put
 /**
  * `wm_run_goal`：有界网页目标快循环（Jev WEB_AUTOMATION）。
  *
- * 主模型显式调用才进入；默认 6 次动作决策 / 15s / 3 次无进展。只执行
+ * 主模型显式调用才进入；默认 100 次动作决策 / 600s / 10 次无进展。只执行
  * 观察/滚动/后退/点击/受控输入（文本值只来自调用方提供的候选）；提交、
  * 支付、发布等高风险动作不在快循环内，交回主模型走原审批流程。整个工具
  * 强制逐次审批；每步动作仍经 runVerifiedAction 的快照校验与回执记录，
@@ -49,8 +49,8 @@ internal fun createGoalTool(deps: WebMountDeps, runner: JevWebGoalRunner?): Tool
                     put("items", stringProp("Candidate text values the loop may type, supplied by you."))
                     put("description", "Optional. Type actions can only use these strings; without them typing hands back.")
                 })
-                put("max_steps", integerProp("Action decision budget. Default 6, max 6."))
-                put("max_duration_ms", integerProp("Wall clock budget. Default 15000, max 15000."))
+                put("max_steps", integerProp("Action decision budget. Default 100, max 100."))
+                put("max_duration_ms", integerProp("Wall clock budget. Default 600000, max 600000."))
                 put("dry_run", booleanProp("Produce the decision trace without executing actions (default false)."))
             },
             required = listOf("session_id", "goal"),
@@ -92,8 +92,10 @@ internal fun createGoalTool(deps: WebMountDeps, runner: JevWebGoalRunner?): Tool
                     driver = driver,
                     goal = goal,
                     texts = input.stringArray("texts"),
-                    maxSteps = (input.long("max_steps") ?: 6L).toInt().coerceIn(1, 6),
-                    maxDurationMs = (input.long("max_duration_ms") ?: 15_000L).coerceIn(1_000L, 15_000L),
+                    maxSteps = (input.long("max_steps") ?: JevWebGoalRunner.DEFAULT_MAX_STEPS.toLong())
+                        .toInt().coerceIn(1, JevWebGoalRunner.DEFAULT_MAX_STEPS),
+                    maxDurationMs = (input.long("max_duration_ms") ?: JevWebGoalRunner.DEFAULT_MAX_DURATION_MS)
+                        .coerceIn(1_000L, JevWebGoalRunner.DEFAULT_MAX_DURATION_MS),
                     dryRun = input.boolean("dry_run") ?: false,
                     runKey = input.webMountRunId(),
                 )

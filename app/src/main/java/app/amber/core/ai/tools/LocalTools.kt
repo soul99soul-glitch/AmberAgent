@@ -54,6 +54,7 @@ class LocalTools(
     private val conversationRepository: ConversationRepository,
     private val healthSummaryReader: app.amber.feature.health.HealthSummaryReader,
     private val reminderTools: ReminderTools,
+    private val jevDecisionCoordinator: app.amber.core.jev.JevDecisionCoordinator,
 ) {
     val javascriptTool by lazy { createJavascriptTool() }
 
@@ -96,6 +97,14 @@ class LocalTools(
     )
 
     private val permissionsStatusTool by lazy { createPermissionsStatusTool(permissionBroker, context) }
+
+    private val jevStatusTool by lazy {
+        createJevStatusTool(
+            settingsProvider = { settingsStore.settingsFlow.value },
+            coordinator = jevDecisionCoordinator,
+            displayContext = context,
+        )
+    }
 
     private val healthSummaryTool by lazy { createHealthSummaryTool(healthSummaryReader) }
 
@@ -216,6 +225,7 @@ class LocalTools(
             tools.addAll(gatedAdapterTools)
         }
         tools.add(permissionsStatusTool)
+        tools.add(jevStatusTool)
         tools.add(healthSummaryTool)
         tools.addAll(reminderTools.getTools())
         tools.addAll(agentCronTools.getTools())

@@ -307,7 +307,7 @@ fun Tool.invocationPolicy(input: JsonElement?): ToolInvocationPolicy {
             concurrencySafe = readOnly
         }
 
-        "cron_task_list", "agent_task_list", "agent_task_read", "agent_runtime_status", "tool_policy_explain", "tool_search", "tools_list", "provider_config_status" -> {
+        "cron_task_list", "agent_task_list", "agent_task_read", "agent_runtime_status", "tool_policy_explain", "tool_search", "tools_list", "provider_config_status", "jev_status" -> {
             mutates = false
             risk = ToolRisk.Normal
             riskExplicit = true
@@ -575,7 +575,7 @@ internal fun Tool.category(): String = when {
     name.startsWith("deep_read_") -> "deep_read"
     name.startsWith("cron_task_") -> "cron"
     name.startsWith("agent_task_") || name == "agent_runtime_status" -> "task"
-    name in setOf("tool_policy_explain", "tool_search", "tools_list") -> "utility"
+    name in setOf("tool_policy_explain", "tool_search", "tools_list", "jev_status") -> "utility"
     name.startsWith("subagent_") -> "subagent"
     name.startsWith("model_council_") -> "model_council"
     name.startsWith("skill") || name == "use_skill" -> "skill"

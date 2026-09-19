@@ -14,6 +14,8 @@ import android.graphics.Rect
  */
 interface AccessibilityController {
 
+    // 手势方法返回 true 只表示注入完成（dispatchGesture onCompleted），
+    // 不代表目标 UI 产生了效果；效果需经 findTextNodes/dumpUiTree 复核。
     suspend fun tap(x: Float, y: Float, durationMillis: Long = 80): Boolean
 
     suspend fun longPress(x: Float, y: Float, durationMillis: Long = 600): Boolean
