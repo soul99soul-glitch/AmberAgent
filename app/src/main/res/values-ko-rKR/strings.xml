@@ -2015,6 +2015,15 @@
   <string name="memory_core_info_body">핵심, 단기 및 장기 메모리는 서로 나란한 세 가지 메모리 유형입니다. 핵심 메모리는 우선순위가 가장 높으며 안정적인 선호, 정체성 설정 및 장기 규칙을 직접 관리하는 데 적합합니다.</string>
   <string name="memory_core_info_title">핵심 메모리란 무엇인가요?</string>
   <string name="memory_core_title">핵심 메모리</string>
+  <plurals name="memory_doc_entries">
+    <item quantity="other">메모리 %1$d개</item>
+  </plurals>
+  <plurals name="memory_doc_members">
+    <item quantity="other">멤버 %1$d명</item>
+  </plurals>
+  <string name="memory_docs_empty">메모리 문서가 아직 없습니다.</string>
+  <string name="memory_docs_info_body">토픽 문서는 야간 정리에서 관련 메모리를 묶어 생성하고, 분류되지 않은 메모리는 종류별 문서로 합쳐집니다. 탭하면 전체 내용을 볼 수 있습니다.</string>
+  <string name="memory_docs_title">메모리 문서</string>
   <string name="memory_dream_merge">병합 #%1$d &lt;- %2$s</string>
   <string name="memory_dream_reason_suffix">· %1$s</string>
   <string name="memory_dream_replace">%1$s을(를) %2$s로 교체%3$s</string>

@@ -2015,6 +2015,15 @@
   <string name="memory_core_info_body">コア、短期、長期メモリは並列する3種類のメモリです。コアメモリは最も優先度が高く、安定した好み、アイデンティティ設定、長期的なルールを手動で管理するのに適しています。</string>
   <string name="memory_core_info_title">コアメモリとは？</string>
   <string name="memory_core_title">コアメモリ</string>
+  <plurals name="memory_doc_entries">
+    <item quantity="other">%1$d 件のメモリ</item>
+  </plurals>
+  <plurals name="memory_doc_members">
+    <item quantity="other">%1$d 件のメンバー</item>
+  </plurals>
+  <string name="memory_docs_empty">メモリドキュメントはまだありません。</string>
+  <string name="memory_docs_info_body">トピックドキュメントは夜間メンテナンスが関連メモリをまとめて生成します。未分類のメモリは種類ごとのドキュメントにまとめられます。タップして全文を読めます。</string>
+  <string name="memory_docs_title">メモリドキュメント</string>
   <string name="memory_dream_merge">マージ #%1$d &lt;- %2$s</string>
   <string name="memory_dream_reason_suffix">· %1$s</string>
   <string name="memory_dream_replace">%1$s を %2$s に置換%3$s</string>

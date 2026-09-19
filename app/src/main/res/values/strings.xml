@@ -2042,6 +2042,17 @@ What would you like to talk about today?</string>
   <string name="memory_core_info_body">Core, short-term, and long-term memories are three parallel categories. Core memory has the highest priority and is best for stable preferences, identity settings, and long-term rules that you maintain manually.</string>
   <string name="memory_core_info_title">What is core memory?</string>
   <string name="memory_core_title">Core memory</string>
+  <plurals name="memory_doc_entries">
+    <item quantity="one">%1$d entry</item>
+    <item quantity="other">%1$d entries</item>
+  </plurals>
+  <plurals name="memory_doc_members">
+    <item quantity="one">%1$d member</item>
+    <item quantity="other">%1$d members</item>
+  </plurals>
+  <string name="memory_docs_empty">No memory documents yet.</string>
+  <string name="memory_docs_info_body">Topic documents group related memories and are synthesized by nightly Daydream maintenance. Memories not yet grouped merge into per-kind documents. Tap a document to read it.</string>
+  <string name="memory_docs_title">Memory documents</string>
   <string name="memory_dream_merge">Merge #%1$d &lt;- %2$s</string>
   <string name="memory_dream_reason_suffix">· %1$s</string>
   <string name="memory_dream_replace">Replace %1$s → %2$s%3$s</string>

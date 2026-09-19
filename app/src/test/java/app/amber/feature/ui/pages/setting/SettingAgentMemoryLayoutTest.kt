@@ -15,7 +15,6 @@ import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.onAllNodesWithText
 import app.amber.core.memory.model.MemoryCandidate
-import app.amber.core.model.AssistantMemory
 import app.amber.core.model.MemoryKind
 import app.amber.core.model.MemoryScope
 import app.amber.feature.ui.theme.AmberBase
@@ -37,19 +36,11 @@ class SettingAgentMemoryLayoutTest {
     val compose = createComposeRule()
 
     @Test
-    fun memoryRecordsAndCandidatesStayLazyAndScrollToOffscreenRows() {
+    fun memoryCandidatesStayLazyAndScrollToOffscreenRows() {
         val candidates = (0 until 120).map { index ->
             MemoryCandidate(
                 id = "candidate-$index",
                 content = "candidate-row-$index",
-                scope = MemoryScope.LONG_TERM,
-                kind = MemoryKind.NOTE,
-            )
-        }
-        val memories = (0 until 120).map { index ->
-            AssistantMemory(
-                id = index + 1,
-                content = "memory-row-$index",
                 scope = MemoryScope.LONG_TERM,
                 kind = MemoryKind.NOTE,
             )
@@ -67,14 +58,6 @@ class SettingAgentMemoryLayoutTest {
                             onIgnore = {},
                             onIgnoreLowConfidence = {},
                         )
-                        memoryRecordsSection(
-                            title = "Core",
-                            emptyText = "empty",
-                            memories = memories,
-                            onAddMemory = null,
-                            onEditMemory = {},
-                            onDeleteMemory = {},
-                        )
                     }
                 }
             }
@@ -85,16 +68,9 @@ class SettingAgentMemoryLayoutTest {
                 .fetchSemanticsNodes()
                 .isEmpty(),
         )
-        assertTrue(
-            compose.onAllNodesWithText("memory-row-119", useUnmergedTree = true)
-                .fetchSemanticsNodes()
-                .isEmpty(),
-        )
 
         val scrollable = compose.onNode(hasScrollAction(), useUnmergedTree = true)
         scrollable.performScrollToNode(hasText("candidate-row-119"))
         compose.onNodeWithText("candidate-row-119", useUnmergedTree = true).assertIsDisplayed()
-        scrollable.performScrollToNode(hasText("memory-row-119"))
-        compose.onNodeWithText("memory-row-119", useUnmergedTree = true).assertIsDisplayed()
     }
 }

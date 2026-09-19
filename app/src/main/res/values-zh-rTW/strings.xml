@@ -2028,6 +2028,15 @@
   <string name="memory_core_info_body">核心記憶、短期記憶與長期記憶是並列的三類記憶。核心記憶優先順序最高，適合手動維護穩定偏好、身分設定與長期規則。</string>
   <string name="memory_core_info_title">什麼是核心記憶？</string>
   <string name="memory_core_title">核心記憶</string>
+  <plurals name="memory_doc_entries">
+    <item quantity="other">%1$d 條記憶</item>
+  </plurals>
+  <plurals name="memory_doc_members">
+    <item quantity="other">%1$d 位成員</item>
+  </plurals>
+  <string name="memory_docs_empty">尚無記憶文件。</string>
+  <string name="memory_docs_info_body">主題文件由夜間整理聚合相關記憶產生，未歸類的記憶按類型合併為文件。點開即可閱讀全文。</string>
+  <string name="memory_docs_title">記憶文件</string>
   <string name="memory_dream_merge">合併 #%1$d &lt;- %2$s</string>
   <string name="memory_dream_reason_suffix">· %1$s</string>
   <string name="memory_dream_replace">取代 %1$s → %2$s%3$s</string>

@@ -61,9 +61,12 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.ui.res.pluralStringResource
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.dokar.sonner.ToastType
+import androidx.activity.compose.BackHandler
 import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.ArrowLeft
 import com.composables.icons.lucide.ChevronRight
 import com.composables.icons.lucide.FileText
 import com.composables.icons.lucide.Folder
@@ -1403,22 +1406,35 @@ private fun MemoryLibrarySubpage(
 ) {
     var showPortabilityDialog by remember { mutableStateOf(false) }
     var showEventsDialog by remember { mutableStateOf(false) }
-    val coreMemoryTitle = stringResource(R.string.memory_core_title)
-    val coreMemoryEmptyText = stringResource(R.string.setting_agent_memory_empty)
-    val coreMemoryInfoTitle = stringResource(R.string.memory_core_info_title)
-    val coreMemoryInfoText = stringResource(R.string.memory_core_info_body)
-    val shortTermMemoryTitle = stringResource(R.string.memory_short_title)
-    val shortTermMemoryEmptyText = stringResource(R.string.setting_agent_memory_short_empty)
-    val shortTermMemoryInfoTitle = stringResource(R.string.setting_agent_memory_short_info_title)
-    val shortTermMemoryInfoText = stringResource(R.string.setting_agent_memory_short_info_body)
-    val longTermMemoryTitle = stringResource(R.string.memory_long_title)
-    val longTermMemoryEmptyText = stringResource(R.string.setting_agent_memory_long_empty)
-    val longTermMemoryInfoTitle = stringResource(R.string.setting_agent_memory_long_info_title)
-    val longTermMemoryInfoText = stringResource(R.string.setting_agent_memory_long_info_body)
+    val docsTitle = stringResource(R.string.memory_docs_title)
+    val docsEmptyText = stringResource(R.string.memory_docs_empty)
+    val docsInfoText = stringResource(R.string.memory_docs_info_body)
+
+    // The library renders memories as documents: the core bucket is one file,
+    // each dream-synthesized topic is one file, and every record not yet
+    // grouped into a topic merges into its per-kind document.
+    val docs = remember(memories, shortTermMemories, longTermMemories) {
+        buildMemoryDocs(memories, shortTermMemories, longTermMemories)
+    }
+    var openDocId by remember { mutableStateOf<String?>(null) }
+    val openDoc = docs.firstOrNull { it.id == openDocId }
+    BackHandler(enabled = openDoc != null) { openDocId = null }
+    val listState = rememberLazyListState()
+
+    if (openDoc != null) {
+        MemoryDocDetail(
+            doc = openDoc,
+            modifier = modifier,
+            onBack = { openDocId = null },
+            onEditMemory = onEditMemory,
+            onDeleteMemory = onDeleteMemory,
+        )
+        return
+    }
 
     LazyColumn(
         modifier = modifier,
-        state = rememberLazyListState(),
+        state = listState,
         verticalArrangement = Arrangement.spacedBy(0.dp),
     ) {
         item("memory_summary") {
@@ -1440,43 +1456,15 @@ private fun MemoryLibrarySubpage(
             onIgnoreLowConfidence = onIgnoreLowConfidenceCandidates,
         )
 
-        item("memory_gap_core") { Spacer(Modifier.height(28.dp)) }
-        memoryRecordsSection(
-            title = coreMemoryTitle,
-            emptyText = coreMemoryEmptyText,
-            memories = memories,
-            infoTitle = coreMemoryInfoTitle,
-            infoText = coreMemoryInfoText,
+        item("memory_gap_docs") { Spacer(Modifier.height(28.dp)) }
+        memoryDocumentsSection(
+            title = docsTitle,
+            emptyText = docsEmptyText,
+            docs = docs,
+            infoText = docsInfoText,
             onInfoClick = onInfoClick,
             onAddMemory = onAddMemory,
-            onEditMemory = onEditMemory,
-            onDeleteMemory = onDeleteMemory,
-        )
-
-        item("memory_gap_short_term") { Spacer(Modifier.height(28.dp)) }
-        memoryRecordsSection(
-            title = shortTermMemoryTitle,
-            emptyText = shortTermMemoryEmptyText,
-            memories = shortTermMemories,
-            infoTitle = shortTermMemoryInfoTitle,
-            infoText = shortTermMemoryInfoText,
-            onInfoClick = onInfoClick,
-            onAddMemory = null,
-            onEditMemory = onEditMemory,
-            onDeleteMemory = onDeleteMemory,
-        )
-
-        item("memory_gap_long_term") { Spacer(Modifier.height(28.dp)) }
-        memoryRecordsSection(
-            title = longTermMemoryTitle,
-            emptyText = longTermMemoryEmptyText,
-            memories = longTermMemories,
-            infoTitle = longTermMemoryInfoTitle,
-            infoText = longTermMemoryInfoText,
-            onInfoClick = onInfoClick,
-            onAddMemory = null,
-            onEditMemory = onEditMemory,
-            onDeleteMemory = onDeleteMemory,
+            onOpenDoc = { openDocId = it },
         )
 
         item("memory_gap_maintenance") { Spacer(Modifier.height(28.dp)) }
@@ -2137,29 +2125,125 @@ private fun MemoryPortabilitySection(
     }
 }
 
-internal fun LazyListScope.memoryRecordsSection(
+private data class MemoryDoc(
+    val id: String,
+    val fileName: String,
+    /** Non-null when the document is a dream-synthesized topic file. */
+    val topic: AssistantMemory?,
+    /** Aggregate: the doc's records. Topic: resolved live member records. */
+    val records: List<AssistantMemory>,
+    val updatedAt: Long,
+    val sizeBytes: Int,
+    val preview: String,
+)
+
+private fun buildMemoryDocs(
+    coreMemories: List<AssistantMemory>,
+    shortTermMemories: List<AssistantMemory>,
+    longTermMemories: List<AssistantMemory>,
+): List<MemoryDoc> {
+    val byId = (coreMemories + shortTermMemories + longTermMemories).associateBy { it.id }
+    val topics = (shortTermMemories + longTermMemories)
+        .filter { it.kind == MemoryKind.TOPIC && !it.archived }
+    // Members already filed under a topic must not reappear in the loose
+    // per-kind documents — the doc list stays close to a partition.
+    val topicMemberIds = topics.flatMap { it.memberIds }.toSet()
+    val loose = (shortTermMemories + longTermMemories)
+        .filter { it.kind != MemoryKind.TOPIC && !it.archived && it.id !in topicMemberIds }
+    return buildList {
+        val liveCore = coreMemories.filter { !it.archived }
+        if (liveCore.isNotEmpty()) {
+            add(memoryDoc("core", "core.md", null, liveCore))
+        }
+        // Two titles can normalize to the same slug — disambiguate with the id
+        // so the rows stay distinguishable.
+        val slugCounts = topics
+            .groupingBy { memoryDocSlug(it.topicTitle ?: it.content).ifBlank { "topic" } }
+            .eachCount()
+        topics.sortedByDescending { it.updatedAt }.forEach { topic ->
+            val members = topic.memberIds
+                .distinct()
+                .mapNotNull { byId[it] }
+                .filter {
+                    !it.archived &&
+                        it.scope != MemoryScope.CORE &&
+                        it.kind != MemoryKind.TOPIC
+                }
+            val slug = memoryDocSlug(topic.topicTitle ?: topic.content).ifBlank { "topic" }
+            val fileName = if (slugCounts.getValue(slug) > 1) {
+                "$slug-${topic.id}.md"
+            } else {
+                "$slug.md"
+            }
+            add(memoryDoc("topic-${topic.id}", fileName, topic, members))
+        }
+        MemoryKind.entries
+            .filter { it != MemoryKind.TOPIC }
+            .forEach { kind ->
+                loose.filter { it.kind == kind }
+                    .takeIf { it.isNotEmpty() }
+                    ?.let { add(memoryDoc("kind-${kind.wireName}", "${kind.wireName}.md", null, it)) }
+            }
+    }
+}
+
+private fun memoryDoc(
+    id: String,
+    fileName: String,
+    topic: AssistantMemory?,
+    records: List<AssistantMemory>,
+): MemoryDoc {
+    val sorted = records.sortedByDescending { it.updatedAt }
+    val previewSource = topic?.content ?: sorted.firstOrNull()?.content.orEmpty()
+    return MemoryDoc(
+        id = id,
+        fileName = fileName,
+        topic = topic,
+        records = sorted,
+        updatedAt = listOfNotNull(topic?.updatedAt, sorted.firstOrNull()?.updatedAt).max(),
+        sizeBytes = sorted.sumOf { it.content.toByteArray().size } +
+            (topic?.content?.toByteArray()?.size ?: 0),
+        preview = firstLineOf(previewSource),
+    )
+}
+
+private fun memoryDocSlug(text: String): String =
+    text.lowercase()
+        .replace(Regex("[^\\p{L}\\p{N}]+"), "-")
+        .trim('-')
+        .take(48)
+
+private fun firstLineOf(text: String): String =
+    text.lineSequence().firstOrNull { it.isNotBlank() }?.trim().orEmpty()
+
+private fun formatMemorySize(bytes: Int): String =
+    if (bytes >= 1024) {
+        String.format(Locale.getDefault(), "%.1f KB", bytes / 1024f)
+    } else {
+        "$bytes B"
+    }
+
+private fun LazyListScope.memoryDocumentsSection(
     title: String,
     emptyText: String,
-    memories: List<AssistantMemory>,
-    infoTitle: String? = null,
-    infoText: String? = null,
-    onInfoClick: ((String, String) -> Unit)? = null,
-    onAddMemory: (() -> Unit)?,
-    onEditMemory: (AssistantMemory) -> Unit,
-    onDeleteMemory: (AssistantMemory) -> Unit,
+    docs: List<MemoryDoc>,
+    infoText: String,
+    onInfoClick: (String, String) -> Unit,
+    onAddMemory: () -> Unit,
+    onOpenDoc: (String) -> Unit,
 ) {
-    item("memory_records_header_$title") {
+    item("memory_docs_header") {
         MemoryRecordsHeader(
             title = title,
-            infoTitle = infoTitle,
+            infoTitle = title,
             infoText = infoText,
             onInfoClick = onInfoClick,
             onAddMemory = onAddMemory,
         )
     }
-    item("memory_records_card_gap_$title") { Spacer(Modifier.height(8.dp)) }
-    if (memories.isEmpty()) {
-        item("memory_records_empty_$title") {
+    item("memory_docs_gap") { Spacer(Modifier.height(8.dp)) }
+    if (docs.isEmpty()) {
+        item("memory_docs_empty") {
             AmberCard(modifier = Modifier.fillMaxWidth()) {
                 Text(
                     text = emptyText,
@@ -2171,24 +2255,216 @@ internal fun LazyListScope.memoryRecordsSection(
         }
         return
     }
-
     itemsIndexed(
-        items = memories,
-        key = { _, memory -> "memory_record_${title}_${memory.id}" },
-    ) { index, memory ->
-        MemoryRecordRow(
-            memory = memory,
-            shape = memoryGroupShape(index, memories.size),
-            onEditMemory = onEditMemory,
-            onDeleteMemory = onDeleteMemory,
+        items = docs,
+        key = { _, doc -> "memory_doc_${doc.id}" },
+    ) { index, doc ->
+        MemoryDocRow(
+            doc = doc,
+            shape = memoryGroupShape(index, docs.size),
+            onClick = { onOpenDoc(doc.id) },
         )
     }
 }
 
 @Composable
-private fun MemoryRecordRow(
-    memory: AssistantMemory,
+private fun MemoryDocRow(
+    doc: MemoryDoc,
     shape: RoundedCornerShape,
+    onClick: () -> Unit,
+) {
+    val tokens = LocalAmberTokens.current
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .background(tokens.surface)
+            .border(1.dp, tokens.line, shape)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 14.dp, vertical = 10.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = doc.fileName,
+                    style = LocalAmberType.current.meta.copy(fontWeight = FontWeight.SemiBold),
+                    color = tokens.ink,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false),
+                )
+                Text(
+                    text = formatMemorySize(doc.sizeBytes),
+                    style = LocalAmberType.current.meta,
+                    color = workspaceColors().muted,
+                    modifier = Modifier.padding(start = 8.dp),
+                )
+                Spacer(Modifier.weight(1f))
+                Text(
+                    text = formatMemoryDate(doc.updatedAt),
+                    style = LocalAmberType.current.meta,
+                    color = workspaceColors().muted,
+                    maxLines = 1,
+                )
+            }
+            Text(
+                text = doc.preview.ifBlank { "—" },
+                style = LocalAmberType.current.secondary,
+                color = workspaceColors().muted,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        Icon(
+            Lucide.ChevronRight,
+            contentDescription = null,
+            tint = workspaceColors().muted,
+            modifier = Modifier.size(16.dp),
+        )
+    }
+}
+
+@Composable
+private fun MemoryDocDetail(
+    doc: MemoryDoc,
+    modifier: Modifier,
+    onBack: () -> Unit,
+    onEditMemory: (AssistantMemory) -> Unit,
+    onDeleteMemory: (AssistantMemory) -> Unit,
+) {
+    val tokens = LocalAmberTokens.current
+    val countLabel = if (doc.topic != null) {
+        pluralStringResource(R.plurals.memory_doc_members, doc.records.size, doc.records.size)
+    } else {
+        pluralStringResource(R.plurals.memory_doc_entries, doc.records.size, doc.records.size)
+    }
+    Column(modifier = modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            IconButton(onClick = onBack, modifier = Modifier.size(48.dp)) {
+                Icon(
+                    Lucide.ArrowLeft,
+                    contentDescription = stringResource(R.string.back),
+                    tint = tokens.ink,
+                )
+            }
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = doc.fileName,
+                    style = LocalAmberType.current.sessionTitle,
+                    color = tokens.ink,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = "$countLabel · ${formatMemorySize(doc.sizeBytes)} · ${formatMemoryDate(doc.updatedAt)}",
+                    style = LocalAmberType.current.meta,
+                    color = workspaceColors().muted,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            // The topic record itself is the document — its edit/delete lives
+            // on the header, not in the member entries below.
+            doc.topic?.let { topic ->
+                IconButton(
+                    onClick = { onEditMemory(topic) },
+                    modifier = Modifier.size(48.dp),
+                ) {
+                    Icon(
+                        Lucide.Pencil,
+                        contentDescription = stringResource(R.string.edit),
+                        tint = workspaceColors().muted,
+                        modifier = Modifier.size(18.dp),
+                    )
+                }
+                IconButton(
+                    onClick = { onDeleteMemory(topic) },
+                    modifier = Modifier.size(48.dp),
+                ) {
+                    Icon(
+                        Lucide.Trash2,
+                        contentDescription = stringResource(R.string.delete),
+                        tint = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.size(18.dp),
+                    )
+                }
+            }
+        }
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 10.dp)
+                .height(1.dp)
+                .background(tokens.line),
+        )
+        SelectionContainer {
+            LazyColumn(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(0.dp),
+            ) {
+                doc.topic?.let { topic ->
+                    item("doc_topic_body") {
+                        Column(modifier = Modifier.padding(vertical = 8.dp)) {
+                            topic.topicTitle?.takeIf { it.isNotBlank() }?.let { title ->
+                                Text(
+                                    text = title,
+                                    style = LocalAmberType.current.sessionTitle,
+                                    color = tokens.ink,
+                                )
+                                Spacer(Modifier.height(8.dp))
+                            }
+                            Text(
+                                text = topic.content.trim(),
+                                style = LocalAmberType.current.body,
+                                color = tokens.ink,
+                            )
+                        }
+                    }
+                    if (doc.records.isNotEmpty()) {
+                        item("doc_members_label") {
+                            SectionLabel(
+                                text = pluralStringResource(
+                                    R.plurals.memory_doc_members,
+                                    doc.records.size,
+                                    doc.records.size,
+                                ),
+                                modifier = Modifier.padding(top = 12.dp, bottom = 4.dp),
+                            )
+                        }
+                    }
+                }
+                itemsIndexed(
+                    items = doc.records,
+                    key = { _, memory -> "doc_entry_${memory.id}" },
+                ) { index, memory ->
+                    MemoryDocEntry(
+                        memory = memory,
+                        onEditMemory = onEditMemory,
+                        onDeleteMemory = onDeleteMemory,
+                    )
+                    if (index < doc.records.lastIndex) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(1.dp)
+                                .background(tokens.line),
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun MemoryDocEntry(
+    memory: AssistantMemory,
     onEditMemory: (AssistantMemory) -> Unit,
     onDeleteMemory: (AssistantMemory) -> Unit,
 ) {
@@ -2196,15 +2472,54 @@ private fun MemoryRecordRow(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(shape)
-            .background(tokens.surface)
-            .border(1.dp, tokens.line, shape),
+            .padding(vertical = 10.dp),
     ) {
-        MemoryItem(
-            memory = memory,
-            onEditMemory = onEditMemory,
-            onDeleteMemory = onDeleteMemory,
+        Text(
+            text = memory.content.trim(),
+            style = LocalAmberType.current.body,
+            color = tokens.ink,
         )
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = listOf(
+                    memoryKindLabel(memory.kind),
+                    memoryScopeLabel(memory.scope),
+                    formatMemoryDate(memory.updatedAt),
+                ).joinToString(" · "),
+                style = LocalAmberType.current.meta,
+                color = workspaceColors().muted,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+            IconButton(
+                onClick = { onEditMemory(memory) },
+                modifier = Modifier.size(48.dp),
+            ) {
+                Icon(
+                    Lucide.Pencil,
+                    contentDescription = stringResource(R.string.edit),
+                    tint = workspaceColors().muted,
+                    modifier = Modifier.size(18.dp),
+                )
+            }
+            IconButton(
+                onClick = { onDeleteMemory(memory) },
+                modifier = Modifier.size(48.dp),
+            ) {
+                Icon(
+                    Lucide.Trash2,
+                    contentDescription = stringResource(R.string.delete),
+                    tint = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.size(18.dp),
+                )
+            }
+        }
     }
 }
 
@@ -2220,7 +2535,7 @@ private fun MemoryRecordsHeader(
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 8.dp),
+            .padding(horizontal = 2.dp),
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -2288,41 +2603,3 @@ private fun MemoryRecordsHeader(
 }
 
 
-@Composable
-private fun MemoryItem(
-    memory: AssistantMemory,
-    onEditMemory: (AssistantMemory) -> Unit,
-    onDeleteMemory: (AssistantMemory) -> Unit,
-) {
-    val tokens = LocalAmberTokens.current
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .heightIn(min = 52.dp)
-            .padding(horizontal = 14.dp, vertical = 8.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(
-            text = if (memory.kind == MemoryKind.TOPIC && !memory.topicTitle.isNullOrBlank()) {
-                "${memory.topicTitle} · ${memory.content}"
-            } else {
-                memory.content
-            },
-            modifier = Modifier.weight(1f),
-            style = LocalAmberType.current.body,
-            color = tokens.ink,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
-        )
-        TextButton(onClick = { onEditMemory(memory) }) {
-            Text(stringResource(R.string.edit))
-        }
-        TextButton(onClick = { onDeleteMemory(memory) }) {
-            Text(
-                text = stringResource(R.string.delete),
-                color = MaterialTheme.colorScheme.error,
-            )
-        }
-    }
-}

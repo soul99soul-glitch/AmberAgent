@@ -2040,6 +2040,15 @@
   <string name="memory_core_info_body">核心记忆、短期记忆和长期记忆是并列的三类记忆。核心记忆优先级最高，适合手动维护稳定偏好、身份设定和长期规则。</string>
   <string name="memory_core_info_title">核心记忆是什么？</string>
   <string name="memory_core_title">核心记忆</string>
+  <plurals name="memory_doc_entries">
+    <item quantity="other">%1$d 条记忆</item>
+  </plurals>
+  <plurals name="memory_doc_members">
+    <item quantity="other">%1$d 位成员</item>
+  </plurals>
+  <string name="memory_docs_empty">暂无记忆文档。</string>
+  <string name="memory_docs_info_body">主题文档由夜间整理聚合相关记忆生成，未归组的记忆按类型合并为文档。点开即可阅读全文。</string>
+  <string name="memory_docs_title">记忆文档</string>
   <string name="memory_dream_merge">合并 #%1$d &lt;- %2$s</string>
   <string name="memory_dream_reason_suffix">· %1$s</string>
   <string name="memory_dream_replace">替换 %1$s → %2$s%3$s</string>

@@ -2015,6 +2015,21 @@
   <string name="memory_core_info_body">Память бывает трёх параллельных типов: основная, краткосрочная и долгосрочная. Основная имеет наивысший приоритет и подходит для ручного хранения стабильных предпочтений, настроек личности и долгосрочных правил.</string>
   <string name="memory_core_info_title">Что такое основная память?</string>
   <string name="memory_core_title">Основная память</string>
+  <plurals name="memory_doc_entries">
+    <item quantity="one">%1$d запись</item>
+    <item quantity="few">%1$d записи</item>
+    <item quantity="many">%1$d записей</item>
+    <item quantity="other">%1$d записи</item>
+  </plurals>
+  <plurals name="memory_doc_members">
+    <item quantity="one">%1$d участник</item>
+    <item quantity="few">%1$d участника</item>
+    <item quantity="many">%1$d участников</item>
+    <item quantity="other">%1$d участника</item>
+  </plurals>
+  <string name="memory_docs_empty">Документов памяти пока нет.</string>
+  <string name="memory_docs_info_body">Тематические документы создаются ночной обработкой Daydream из связанных записей; нераспределённые записи объединяются в документы по типам. Нажмите, чтобы прочитать.</string>
+  <string name="memory_docs_title">Документы памяти</string>
   <string name="memory_dream_merge">Объединить #%1$d &lt;- %2$s</string>
   <string name="memory_dream_reason_suffix">· %1$s</string>
   <string name="memory_dream_replace">Заменить %1$s → %2$s%3$s</string>
