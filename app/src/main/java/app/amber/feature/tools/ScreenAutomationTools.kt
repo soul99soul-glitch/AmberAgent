@@ -20,13 +20,21 @@ import app.amber.feature.runtime.AgentToolActivityStore
 import app.amber.core.automation.AccessibilityController
 import app.amber.core.automation.getActiveAccessibilityController
 import app.amber.core.automation.ScreenCaptureManager
+import app.amber.core.jev.JevScreenGoalRunner
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.sync.Mutex
 
 class ScreenAutomationTools(
     private val context: Context,
     private val screenCaptureManager: ScreenCaptureManager,
     private val activityStore: AgentToolActivityStore,
+    private val jevScreenGoalRunner: JevScreenGoalRunner? = null,
 ) {
-    fun getTools(): List<Tool> = listOf(
+    private val screenOwner = Mutex()
+
+    fun getTools(runId: String? = null): List<Tool> = listOf(
+        screenGoalTool(runId),
         screenClickTool,
         screenLongClickTool,
         screenSwipeTool,
@@ -42,6 +50,59 @@ class ScreenAutomationTools(
         screenScrollUntilTool,
         screenScreenshotTool,
         vlmTaskTool,
+    )
+
+    private fun screenGoalTool(runId: String?) = Tool(
+        name = "screen_run_goal",
+        description = "Use Jev to accelerate Android Accessibility: open the specified app, then execute a bounded goal internally with fresh UI-node validation. Prefer this over repeated screen_read_ui/click/swipe for read-only navigation, locating content, scrolling, or filling supplied search text. Jev is a decision service, not JavaScript. Requires Jev screen automation and screen-content consent. Returns engine, jev_decisions, actions_dispatched, steps and visible_text; report those facts, never infer Jev usage from tool names. No sending, purchases, account changes or permission grants. On handback use the returned screen evidence and low-level tools. Each call requires approval.",
+        parameters = {
+            InputSchema.Obj(properties = buildJsonObject {
+                put("package_name", stringProp("Android package to open and stay within, e.g. tv.danmaku.bili."))
+                put("goal", stringProp("One concrete screen goal with a visible completion condition; at most 1000 characters."))
+                put("texts", buildJsonObject {
+                    put("type", "array")
+                    put("items", stringProp("Exact permitted search/draft text, at most 300 characters."))
+                    put("description", "Up to 8 text candidates. Without these, typing is unavailable.")
+                })
+                put("max_steps", integerProp("Jev decision limit, default 6, hard maximum 8."))
+                put("max_duration_ms", integerProp("Deadline, default 15000ms, hard maximum 30000ms."))
+                put("dry_run", buildJsonObject { put("type", "boolean"); put("description", "Only inspect the currently open target app and judge; do not launch or execute actions.") })
+            }, required = listOf("package_name", "goal"))
+        },
+        needsApproval = true,
+        allowsAutoApproval = false,
+        mandatoryApproval = true,
+        execute = { input ->
+            trackScreenTool("screen_run_goal", "Jev 无障碍目标执行", input, runtime = "Jev + Android Accessibility") {
+                val runner = jevScreenGoalRunner ?: error("Jev screen runner unavailable")
+                val ownerRun = runId?.takeIf { it.isNotBlank() } ?: error("screen_run_goal requires a host-owned run")
+                val packageName = input.requiredString("package_name")
+                val goal = input.requiredString("goal")
+                val texts = (input.jsonObject["texts"] as? kotlinx.serialization.json.JsonArray)
+                    ?.map { it.jsonPrimitive.content } ?: emptyList()
+                require(goal.isNotBlank() && goal.length <= 1000 && texts.size <= 8 && texts.all { it.length <= 300 })
+                val dryRun = input.string("dry_run") == "true"
+                val service = requireService()
+                // The approval UI can have brought Amber to the front. Restore only the explicitly named app.
+                val alreadyOpen = if (!dryRun && runner.canExecute()) withContext(Dispatchers.Main.immediate) {
+                    service.captureScreenSnapshot()?.packageName == packageName
+                } else false
+                if (!dryRun && runner.canExecute() && !alreadyOpen) {
+                    val intent = context.packageManager.getLaunchIntentForPackage(packageName)
+                        ?: error("No launch intent for package: $packageName")
+                    withContext(Dispatchers.Main.immediate) {
+                        context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                    }
+                    delay(600)
+                }
+                val outcome = runner.run(
+                    controller = service, packageName = packageName, goal = goal, texts = texts,
+                    runKey = ownerRun, maxSteps = input.int("max_steps") ?: 6,
+                    maxDurationMs = input.long("max_duration_ms") ?: 15_000, dryRun = dryRun,
+                )
+                listOf(UIMessagePart.Text(outcome.toString()))
+            }
+        },
     )
 
     private val screenClickTool = Tool(
@@ -236,7 +297,7 @@ class ScreenAutomationTools(
 
     private val screenReadUiTool = Tool(
         name = "screen_read_ui",
-        description = "Read the current Accessibility UI tree for screen reasoning.",
+        description = "Read the current Accessibility UI tree for screen reasoning. For a multi-step phone goal, first discover screen_run_goal: when enabled it uses Jev inside Accessibility to select and execute validated actions, reducing model round trips. Use this raw tree tool for inspection or when that tool hands back.",
         parameters = {
             InputSchema.Obj(
                 properties = buildJsonObject {
@@ -432,19 +493,24 @@ class ScreenAutomationTools(
         runtime: String = "Android Accessibility",
         block: suspend () -> List<UIMessagePart>,
     ): List<UIMessagePart> {
-        val toolCallId = activityStore.startTool(
-            toolName = toolName,
-            title = title,
-            inputPreview = input.activityInputPreview(toolName),
-            runtime = runtime,
-        )
-        return try {
-            val result = block()
-            activityStore.complete(toolCallId, result.previewText())
-            result
-        } catch (error: Throwable) {
-            activityStore.fail(toolCallId, error)
-            throw error
+        check(screenOwner.tryLock()) { "Another screen operation is active; wait for it to finish before observing again." }
+        try {
+            val toolCallId = activityStore.startTool(
+                toolName = toolName,
+                title = title,
+                inputPreview = input.activityInputPreview(toolName),
+                runtime = runtime,
+            )
+            return try {
+                val result = block()
+                activityStore.complete(toolCallId, result.previewText())
+                result
+            } catch (error: Throwable) {
+                activityStore.fail(toolCallId, error)
+                throw error
+            }
+        } finally {
+            screenOwner.unlock()
         }
     }
 
@@ -529,6 +595,10 @@ class ScreenAutomationTools(
 
     private fun JsonElement.activityInputPreview(toolName: String): String =
         when (toolName) {
+            "screen_run_goal" -> buildJsonObject {
+                put("package_name", string("package_name").orEmpty())
+                put("goal_chars", string("goal")?.length ?: 0)
+            }.toString()
             "screen_input_text" -> buildJsonObject {
                 put("text_chars", string("text")?.length ?: 0)
             }.toString()

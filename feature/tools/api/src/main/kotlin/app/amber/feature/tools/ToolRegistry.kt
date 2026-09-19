@@ -128,8 +128,9 @@ class ToolRegistry private constructor(
             val category = category()
             val riskProfile = riskProfile()
             val risk = riskProfile.risk
-            val effectiveNeedsApproval = mandatoryApproval || needsApproval || mutates || risk == ToolRisk.High
-            val effectiveAutoApproval = !mandatoryApproval &&
+            val mandatoryApprovalEffective = mandatoryApproval || name == "screen_run_goal"
+            val effectiveNeedsApproval = mandatoryApprovalEffective || needsApproval || mutates || risk == ToolRisk.High
+            val effectiveAutoApproval = !mandatoryApprovalEffective &&
                 allowsAutoApproval &&
                 risk != ToolRisk.High &&
                 !requiresFailClosedAutoApproval(
@@ -146,7 +147,7 @@ class ToolRegistry private constructor(
                 autoApprovable = effectiveAutoApproval,
                 outputBudgetChars = outputBudgetChars(),
                 risk = risk,
-                mandatoryApproval = mandatoryApproval,
+                mandatoryApproval = mandatoryApprovalEffective,
                 effectClass = effectClass(),
                 supportsReconcile = supportsReconcile(),
                 idempotencyKeySupported = idempotencyKeySupported(),
@@ -263,7 +264,7 @@ fun Tool.invocationPolicy(input: JsonElement?): ToolInvocationPolicy {
     var mutates = baseMutates
     var risk = baseRisk
     var riskExplicit = baseRiskProfile.explicit
-    var mandatoryApprovalEffective = mandatoryApproval
+    var mandatoryApprovalEffective = mandatoryApproval || name == "screen_run_goal"
     var needsApproval = mandatoryApprovalEffective || needsApproval || baseMutates || baseRisk == ToolRisk.High
     var autoApprovable = !mandatoryApprovalEffective && allowsAutoApproval && baseRisk != ToolRisk.High
     var concurrencySafe = concurrencySafe()
@@ -372,6 +373,19 @@ fun Tool.invocationPolicy(input: JsonElement?): ToolInvocationPolicy {
             needsApproval = true
             autoApprovable = false
             concurrencySafe = false
+        }
+
+        "screen_run_goal" -> {
+            // A goal can chain reads and Accessibility writes on the user's
+            // foreground phone. Keep it on the durable non-idempotent ledger
+            // path and out of speculative/background execution.
+            mutates = true
+            risk = ToolRisk.High
+            riskExplicit = true
+            needsApproval = true
+            autoApprovable = false
+            concurrencySafe = false
+            mandatoryApprovalEffective = true
         }
 
         "wm_zcode_open" -> {
@@ -619,6 +633,7 @@ private fun Tool.mutatesState(): Boolean {
         name == "deep_read_finish" ||
         name in setOf("subagent_start", "subagent_cancel") ||
         name in setOf("wm_click", "wm_tap", "wm_type", "wm_keys", "wm_select", "wm_eval", "wm_site_remove", "wm_zcode_ask") ||
+        name == "screen_run_goal" ||
         name.startsWith("skill_enable") ||
         name.startsWith("skill_disable")
 }
@@ -645,7 +660,8 @@ private fun Tool.riskProfile(): RiskProfile = when {
     name == "http_request" -> RiskProfile(ToolRisk.High, explicit = true)
     name == "memory_tool" -> RiskProfile(ToolRisk.High, explicit = true)
     name == "mcp_call_tool" -> RiskProfile(ToolRisk.Sensitive, explicit = true)
-    name == "wm_eval" || name == "wm_zcode_ask" -> RiskProfile(ToolRisk.High, explicit = true)
+    name == "wm_eval" || name == "wm_zcode_ask" || name == "screen_run_goal" ->
+        RiskProfile(ToolRisk.High, explicit = true)
     // Provider config writers rewrite persisted credentials / endpoints /
     // model slots — High risk so plain auto-approval can never silently run
     // them (provider.config capability floor keeps this true flag-off too).

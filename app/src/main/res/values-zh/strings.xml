@@ -3479,6 +3479,8 @@
   <string name="setting_jev_purpose_model_routing_desc">在自动选池生效的场景为议会席位挑选模型</string>
   <string name="setting_jev_purpose_web_automation">网页自动化</string>
   <string name="setting_jev_purpose_web_automation_desc">为明确的网页目标执行有界快速操作（wm_run_goal）</string>
+  <string name="setting_jev_purpose_screen_automation">屏幕自动化</string>
+  <string name="setting_jev_purpose_screen_automation_desc">为明确的无障碍屏幕目标执行有限快速操作（screen_run_goal）。Jev 是判断服务，不是 JS 引擎。</string>
   <string name="setting_jev_mode_off">关闭</string>
   <string name="setting_jev_mode_shadow">影子</string>
   <string name="setting_jev_mode_active">启用</string>
@@ -3493,6 +3495,8 @@
   <string name="setting_jev_scope_tool_output_desc">长工具结果的分块</string>
   <string name="setting_jev_scope_web_content">网页内容</string>
   <string name="setting_jev_scope_web_content_desc">网页快照状态</string>
+  <string name="setting_jev_scope_screen_content">屏幕内容</string>
+  <string name="setting_jev_scope_screen_content_desc">可能发送给 Jev、用于屏幕目标判断的无障碍节点文本与摘要</string>
   <string name="setting_jev_status_section">状态与开销</string>
   <string name="setting_jev_status_daily">今日请求：%1$d / %2$d</string>
   <string name="setting_jev_status_metrics">近期判断：共 %1$d 次，应用 %2$d、影子 %3$d、缓存 %4$d、回退 %5$d、失败 %6$d</string>

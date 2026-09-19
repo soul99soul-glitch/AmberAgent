@@ -99,6 +99,9 @@ enum class Capability(
     /** Device screen capture (MediaProjection): screen_screenshot（自身 Sensitive）. */
     SCREEN_CAPTURE("screen.capture", ToolRisk.Sensitive, "屏幕截图"),
 
+    /** Accessibility-backed multi-step phone automation; always a high-risk write. */
+    SCREEN_AUTOMATION("screen.automation", ToolRisk.High, "屏幕自动化"),
+
     /** Device clipboard read/write: clipboard_tool（自身 Normal）. */
     CLIPBOARD_ACCESS("clipboard.access", ToolRisk.Normal, "剪贴板读写"),
     ;
@@ -210,6 +213,7 @@ fun capabilityForTool(name: String): Capability? = when (name) {
     "location_current" -> Capability.LOCATION_CURRENT
     "audio_record_once" -> Capability.AUDIO_RECORD
     "screen_screenshot" -> Capability.SCREEN_CAPTURE
+    "screen_run_goal" -> Capability.SCREEN_AUTOMATION
     "clipboard_tool" -> Capability.CLIPBOARD_ACCESS
 
     // Expanded MCP entries keep the `mcp__server__tool` namespace at the

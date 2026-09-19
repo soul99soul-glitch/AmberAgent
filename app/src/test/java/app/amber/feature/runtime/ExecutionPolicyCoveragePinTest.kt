@@ -247,6 +247,7 @@ class ExecutionPolicyCoveragePinTest {
             Capability.LOCATION_CURRENT to setOf("location_current"),
             Capability.AUDIO_RECORD to setOf("audio_record_once"),
             Capability.SCREEN_CAPTURE to setOf("screen_screenshot"),
+            Capability.SCREEN_AUTOMATION to setOf("screen_run_goal"),
             Capability.CLIPBOARD_ACCESS to setOf("clipboard_tool"),
         )
 

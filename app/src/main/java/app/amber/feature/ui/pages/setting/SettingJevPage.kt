@@ -368,6 +368,7 @@ private fun JevPurpose.title(): String = stringResource(
         JevPurpose.CONTEXT_SELECTION -> R.string.setting_jev_purpose_context_selection
         JevPurpose.MODEL_ROUTING -> R.string.setting_jev_purpose_model_routing
         JevPurpose.WEB_AUTOMATION -> R.string.setting_jev_purpose_web_automation
+        JevPurpose.SCREEN_AUTOMATION -> R.string.setting_jev_purpose_screen_automation
     },
 )
 
@@ -379,6 +380,7 @@ private fun JevPurpose.description(): String = stringResource(
         JevPurpose.CONTEXT_SELECTION -> R.string.setting_jev_purpose_context_selection_desc
         JevPurpose.MODEL_ROUTING -> R.string.setting_jev_purpose_model_routing_desc
         JevPurpose.WEB_AUTOMATION -> R.string.setting_jev_purpose_web_automation_desc
+        JevPurpose.SCREEN_AUTOMATION -> R.string.setting_jev_purpose_screen_automation_desc
     },
 )
 
@@ -390,6 +392,7 @@ private fun JevDataScope.title(): String = stringResource(
         JevDataScope.PERSONAL_MEMORY -> R.string.setting_jev_scope_personal_memory
         JevDataScope.TOOL_OUTPUT -> R.string.setting_jev_scope_tool_output
         JevDataScope.WEB_CONTENT -> R.string.setting_jev_scope_web_content
+        JevDataScope.SCREEN_CONTENT -> R.string.setting_jev_scope_screen_content
     },
 )
 
@@ -401,6 +404,7 @@ private fun JevDataScope.description(): String = stringResource(
         JevDataScope.PERSONAL_MEMORY -> R.string.setting_jev_scope_personal_memory_desc
         JevDataScope.TOOL_OUTPUT -> R.string.setting_jev_scope_tool_output_desc
         JevDataScope.WEB_CONTENT -> R.string.setting_jev_scope_web_content_desc
+        JevDataScope.SCREEN_CONTENT -> R.string.setting_jev_scope_screen_content_desc
     },
 )
 

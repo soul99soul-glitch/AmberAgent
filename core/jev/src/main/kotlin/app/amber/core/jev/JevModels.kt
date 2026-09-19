@@ -12,11 +12,25 @@ import kotlinx.serialization.Serializable
 enum class JevMode { OFF, SHADOW, ACTIVE }
 
 @Serializable
-enum class JevPurpose { TOOL_DISCOVERY, MEMORY_RECALL, CONTEXT_SELECTION, MODEL_ROUTING, WEB_AUTOMATION }
+enum class JevPurpose {
+    TOOL_DISCOVERY,
+    MEMORY_RECALL,
+    CONTEXT_SELECTION,
+    MODEL_ROUTING,
+    WEB_AUTOMATION,
+    SCREEN_AUTOMATION,
+}
 
 /** 数据外发范围。请求所需范围全部被允许才发送；shadow 同样外发，不是本地模式。 */
 @Serializable
-enum class JevDataScope { TOOL_METADATA, TASK_TEXT, PERSONAL_MEMORY, TOOL_OUTPUT, WEB_CONTENT }
+enum class JevDataScope {
+    TOOL_METADATA,
+    TASK_TEXT,
+    PERSONAL_MEMORY,
+    TOOL_OUTPUT,
+    WEB_CONTENT,
+    SCREEN_CONTENT,
+}
 
 /** 独立于聊天 provider 的 Jev 设置；真实 API Key 只存 SecretStore，这里仅留掩码。 */
 @Serializable

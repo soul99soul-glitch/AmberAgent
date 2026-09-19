@@ -3479,6 +3479,8 @@ My task:</string>
   <string name="setting_jev_purpose_model_routing_desc">Picks council seat models by task where auto-selection applies</string>
   <string name="setting_jev_purpose_web_automation">Web automation</string>
   <string name="setting_jev_purpose_web_automation_desc">Bounded quick actions for explicit web goals (wm_run_goal)</string>
+  <string name="setting_jev_purpose_screen_automation">Screen automation</string>
+  <string name="setting_jev_purpose_screen_automation_desc">Bounded quick actions for explicit accessibility screen goals (screen_run_goal). Jev is a judgment service, not a JavaScript engine.</string>
   <string name="setting_jev_mode_off">Off</string>
   <string name="setting_jev_mode_shadow">Shadow</string>
   <string name="setting_jev_mode_active">Active</string>
@@ -3493,6 +3495,8 @@ My task:</string>
   <string name="setting_jev_scope_tool_output_desc">Blocks of long tool results</string>
   <string name="setting_jev_scope_web_content">Web content</string>
   <string name="setting_jev_scope_web_content_desc">Web page snapshot state</string>
+  <string name="setting_jev_scope_screen_content">Screen content</string>
+  <string name="setting_jev_scope_screen_content_desc">Accessibility node text and summaries that may be sent to Jev for screen goal decisions</string>
   <string name="setting_jev_status_section">Status and usage</string>
   <string name="setting_jev_status_daily">Requests today: %1$d / %2$d</string>
   <string name="setting_jev_status_metrics">Recent judgments: %1$d total, applied %2$d, shadow %3$d, cached %4$d, fallbacks %5$d, failed %6$d</string>

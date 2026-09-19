@@ -102,6 +102,8 @@ plugins {
 android {
     namespace = "app.amber.agent"
     compileSdk = 37
+    // Opt-in device verification against the same package/signature as the installed build.
+    testBuildType = providers.gradleProperty("deviceTestBuildType").getOrElse("debug")
 
     defaultConfig {
         applicationId = baseApplicationId
