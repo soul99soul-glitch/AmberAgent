@@ -71,6 +71,7 @@ import com.dokar.sonner.ToasterState
 import com.yalantis.ucrop.UCrop
 import com.yalantis.ucrop.UCropActivity
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.withContext
 import app.amber.ai.provider.ProviderSetting
 import app.amber.ai.ui.UIMessagePart
@@ -640,7 +641,7 @@ internal fun FullScreenEditor(
 
 @Composable
 internal fun useCropLauncher(
-    onCroppedImageReady: (Uri) -> Unit, onCleanup: (() -> Unit)? = null
+    onCroppedImageReady: (Uri) -> Job, onCleanup: (() -> Unit)? = null
 ): Pair<ActivityResultLauncher<Intent>, (Uri) -> Unit> {
     val context = LocalContext.current
     var cropOutputUri by remember { mutableStateOf<Uri?>(null) }
@@ -648,14 +649,13 @@ internal fun useCropLauncher(
     val cropActivityLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
-        if (result.resultCode == android.app.Activity.RESULT_OK) {
-            cropOutputUri?.let { croppedUri ->
-                onCroppedImageReady(croppedUri)
-            }
-        }
-        // Clean up crop output file
-        cropOutputUri?.toFile()?.delete()
+        val outputUri = cropOutputUri
         cropOutputUri = null
+        if (result.resultCode == android.app.Activity.RESULT_OK && outputUri != null) {
+            importCroppedImage(outputUri, onCroppedImageReady)
+        } else {
+            outputUri?.toFile()?.delete()
+        }
         onCleanup?.invoke()
     }
 
@@ -675,6 +675,18 @@ internal fun useCropLauncher(
     }
 
     return Pair(cropActivityLauncher, launchCrop)
+}
+
+internal fun importCroppedImage(uri: Uri, importImage: (Uri) -> Job) {
+    val file = uri.toFile()
+    try {
+        // Import reads asynchronously; retain the source until its job finishes,
+        // including any non-cancellable copy during composer disposal.
+        importImage(uri).invokeOnCompletion { file.delete() }
+    } catch (error: Throwable) {
+        file.delete()
+        throw error
+    }
 }
 
 @Composable

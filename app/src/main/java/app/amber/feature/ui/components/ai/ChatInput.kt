@@ -92,6 +92,7 @@ import androidx.core.net.toUri
 import com.dokar.sonner.ToastType
 import dev.chrisbanes.haze.HazeState
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -467,8 +468,8 @@ fun ChatInput(
         mimeType: String? = null,
         existingImport: ChatInputAttachmentImport? = null,
         onComplete: () -> Unit = {},
-    ) {
-        scope.launch {
+    ): Job {
+        return scope.launch {
             var import: ChatInputAttachmentImport? = null
             var copiedUri: Uri? = null
 
