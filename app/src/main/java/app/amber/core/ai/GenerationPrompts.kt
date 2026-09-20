@@ -47,6 +47,8 @@ internal fun buildGenerativeUiPrompt(setting: GenerativeUiSetting, model: Model?
             appendLine("- Prefer SVG with width=\"100%\" and viewBox=\"0 0 680 H\" for responsive rendering.")
             appendLine("- Keep every visible SVG element inside the viewBox: use at least 24px padding, and ensure x + width <= 656 and y + height <= H - 24 for a 680-wide viewBox.")
             appendLine("- Use 10-16px labels in compact diagrams, wrap long labels manually, and avoid dense text that can overflow small mobile cards.")
+            appendLine("- Declarative SVG animation is supported and plays inline: SMIL (<animate>, <animateTransform>, <animateMotion>, <set>, <mpath>) and CSS inside <style> (@keyframes, animation, transition). Use it when the request implies motion (moving scenes, looping demos); keep loops subtle and cycles under ~8s.")
+            appendLine("- Scripts do not run in widget_code, so JS-driven motion is impossible: do not use begin=\"indefinite\" or beginElement(); prefer begin=\"0s\" or attribute-only timing.")
             appendLine("- Never output generic placeholder titles or template-only widget code; every widget must contain real rendered SVG/HTML.")
             appendLine("- Do not use iframe, object, embed, form, meta, link, base tags, external CDNs, fixed positioning, or navigation.")
             if (setting.enableActions) {
@@ -132,7 +134,7 @@ private fun buildGenerativeUiModelGuidance(model: Model?): String {
             }
 
             else -> {
-                appendLine("- This model: prefer visible widget_code SVG directly; avoid hidden drafting and tool calls for static visuals.")
+                appendLine("- This model: prefer visible widget_code SVG directly; avoid hidden drafting and tool calls for inline visuals.")
             }
         }
     }

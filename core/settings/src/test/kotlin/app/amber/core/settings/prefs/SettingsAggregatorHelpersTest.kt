@@ -6,8 +6,10 @@ import app.amber.core.model.AMBER_AGENT_ID
 import app.amber.core.settings.LegacyAssistantProfile
 import app.amber.core.settings.DEFAULT_AUTO_MODEL_ID
 import app.amber.core.settings.DEFAULT_PROVIDERS
+import app.amber.core.settings.AgentRuntimeSetting
 import app.amber.core.settings.DisplaySetting
 import app.amber.core.settings.GeminiProviderIdRef
+import app.amber.core.settings.GenerativeUiSetting
 import app.amber.core.settings.OpenAIProviderIdRef
 import app.amber.core.settings.SeedGeminiImageModelId
 import app.amber.core.settings.SeedOpenAIImageModelId
@@ -158,6 +160,25 @@ class SettingsAggregatorHelpersTest {
         assertTrue(out.displaySetting.sendOnEnter)
         assertTrue(out.displaySetting.codeBlockAutoWrap)
         assertTrue(out.displaySetting.skipCropImage)
+    }
+
+    @Test
+    fun `consistency lifts only the legacy widget code budget`() {
+        fun settingsWith(chars: Int) = composeRawSettings(
+            ui = UIPrefsData(),
+            search = SearchPrefsData(),
+            agent = AgentPrefsData(
+                agentRuntime = AgentRuntimeSetting(
+                    generativeUi = GenerativeUiSetting(maxWidgetCodeChars = chars),
+                ),
+            ),
+            provider = ProviderPrefsData(),
+            chat = ChatPrefsData(),
+            ext = ExtensionPrefsData(),
+        )
+
+        assertEquals(20_000, applyCrossDomainConsistency(settingsWith(12_000)).agentRuntime.generativeUi.maxWidgetCodeChars)
+        assertEquals(8_000, applyCrossDomainConsistency(settingsWith(8_000)).agentRuntime.generativeUi.maxWidgetCodeChars)
     }
 
     @Test

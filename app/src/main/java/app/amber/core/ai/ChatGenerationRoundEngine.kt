@@ -811,7 +811,7 @@ class ChatGenerationRoundEngine(
             {"title":"可视化草图","widget_code":"<svg width=\"100%\" viewBox=\"0 0 680 260\" xmlns=\"http://www.w3.org/2000/svg\"><rect x=\"24\" y=\"24\" width=\"632\" height=\"212\" rx=\"18\" fill=\"#ffffff\" stroke=\"#e5e7eb\"/><text x=\"48\" y=\"64\" font-size=\"20\" font-weight=\"700\" fill=\"#111827\">可视化结果</text><rect x=\"48\" y=\"96\" width=\"160\" height=\"74\" rx=\"14\" fill=\"#eff6ff\" stroke=\"#bfdbfe\"/><text x=\"72\" y=\"140\" font-size=\"15\" fill=\"#1e3a8a\">起点</text><path d=\"M220 133 H300\" stroke=\"#94a3b8\" stroke-width=\"3\" marker-end=\"url(#arrow)\"/><rect x=\"312\" y=\"96\" width=\"160\" height=\"74\" rx=\"14\" fill=\"#f0fdf4\" stroke=\"#bbf7d0\"/><text x=\"336\" y=\"140\" font-size=\"15\" fill=\"#166534\">过程</text><path d=\"M484 133 H552\" stroke=\"#94a3b8\" stroke-width=\"3\" marker-end=\"url(#arrow)\"/><circle cx=\"600\" cy=\"133\" r=\"36\" fill=\"#fff7ed\" stroke=\"#fed7aa\"/><text x=\"582\" y=\"140\" font-size=\"15\" fill=\"#9a3412\">结果</text><defs><marker id=\"arrow\" markerWidth=\"8\" markerHeight=\"8\" refX=\"7\" refY=\"4\" orient=\"auto\"><path d=\"M0,0 L8,4 L0,8 Z\" fill=\"#94a3b8\"/></marker></defs></svg>"}
             ```
             Replace the labels with the actual answer content.
-            Keep the SVG small, static, and self-contained.
+            Keep the SVG small, declarative, and self-contained (SMIL/CSS animation only when the request asked for motion).
             Do not use renderer/spec in this retry because the timeline needs widget_code for streaming partial render.
             Do not put widget JSON, SVG, HTML, or renderer/spec inside hidden reasoning.
             Do not output Markdown-only prose for this retry.

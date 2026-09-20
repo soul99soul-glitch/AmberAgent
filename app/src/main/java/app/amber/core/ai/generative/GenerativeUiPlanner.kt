@@ -309,6 +309,10 @@ object GenerativeUiPlanner {
         "甘特图", "燃尽图", "象限图", "三省六部制",
         // Folk-equivalents the reviewer flagged as missing
         "家族树", "家谱图", "时间线", "时间轴", "鱼骨图", "韦恩图",
+        // Animated-vector requests — must stay SVG-qualified so "动画/animated"
+        // alone never steals anime / motion-picture intent from image-gen.
+        "svg 动画", "svg动画", "svg 动效", "svg动效", "动态svg", "动态 svg",
+        "svg 动图", "svg动图", "动画svg", "动画 svg", "会动的svg", "会动的 svg",
         // English — structural visualization terms
         "flowchart", "flow chart", "sequence diagram", "class diagram",
         "state diagram", "state machine", "mind map", "mindmap",
@@ -316,6 +320,7 @@ object GenerativeUiPlanner {
         "org chart", "tree diagram", "dependency graph", "call graph",
         "gantt", "burndown", "topology", "family tree", "timeline",
         "fishbone", "venn diagram",
+        "animated svg", "svg animation", "animated diagram",
     )
     private val DIAGRAM_STRONG_REGEX = Regex(
         """\b(diagram|flowchart|schematic|wireframe|mindmap)\b""",

@@ -30,6 +30,24 @@ class GenerativeWidgetParserTest {
     }
 
     @Test
+    fun parsesAnimatedSvgWidgetVerbatim() {
+        val svg = "<svg viewBox=\\\"0 0 680 200\\\"><style>.w{animation:s 2s linear infinite}@keyframes s{to{transform:rotate(360deg)}}</style><g class=\\\"w\\\"><circle cx=\\\"50\\\" cy=\\\"50\\\" r=\\\"20\\\"/><animateTransform attributeName=\\\"transform\\\" type=\\\"rotate\\\" from=\\\"0 50 50\\\" to=\\\"360 50 50\\\" dur=\\\"2s\\\" repeatCount=\\\"indefinite\\\"/></g></svg>"
+        val segments = GenerativeWidgetParser.parse(
+            """
+            ```show-widget
+            {"title":"Spin","widget_code":"$svg"}
+            ```
+            """.trimIndent(),
+            streaming = false,
+        )
+
+        val widget = segments.single() as GenerativeWidgetSegment.Widget
+        assertTrue(widget.complete)
+        assertTrue(widget.widgetCode.contains("<animateTransform"))
+        assertTrue(widget.widgetCode.contains("@keyframes"))
+    }
+
+    @Test
     fun extractsPartialWidgetCodeWhileStreaming() {
         val segments = GenerativeWidgetParser.parse(
             """

@@ -22,6 +22,7 @@ import app.amber.core.infra.AppScope
 import app.amber.core.settings.DEFAULT_AUTO_MODEL_ID
 import app.amber.core.settings.DEFAULT_PROVIDERS
 import app.amber.core.settings.GeminiProviderIdRef
+import app.amber.core.settings.GenerativeUiSetting
 import app.amber.core.settings.OpenAIProviderIdRef
 import app.amber.core.settings.REMOVED_DEFAULT_PROVIDER_IDS
 import app.amber.core.settings.SeedGeminiImageModel
@@ -101,6 +102,7 @@ class SettingsAggregator(
         val settingsForWrite = settings
             .withMigratedMemoryDreamLegacy()
             .withMigratedPromptDefaults()
+            .withMigratedGenerativeUiBudget()
             .normalizeRemovedDisplayFields()
         var legacyMigrationPending = false
         dataStore.edit { p ->
@@ -459,6 +461,7 @@ internal fun applyCrossDomainConsistency(settings: Settings): Settings {
     val migratedSettings = settings
         .withMigratedMemoryDreamLegacy()
         .withMigratedPromptDefaults()
+        .withMigratedGenerativeUiBudget()
         .normalizeRemovedDisplayFields()
     val validMcpServerIds = migratedSettings.mcpServers.map { it.id }.toSet()
     val validModeInjectionIds = migratedSettings.modeInjections.map { it.id }.toSet()
@@ -549,6 +552,23 @@ private fun Settings.normalizeRemovedDisplayFields(): Settings = copy(
         enableLatexRendering = true,
     ),
 )
+
+/**
+ * maxWidgetCodeChars ships persisted (JsonInstant encodeDefaults) at the old
+ * 12k default; animated SVG widgets need the new 20k headroom. Only lift the
+ * legacy default — a deliberately customized value is left alone.
+ */
+private fun Settings.withMigratedGenerativeUiBudget(): Settings {
+    val generativeUi = agentRuntime.generativeUi
+    if (generativeUi.maxWidgetCodeChars != LEGACY_WIDGET_CODE_CHARS) return this
+    return copy(
+        agentRuntime = agentRuntime.copy(
+            generativeUi = generativeUi.copy(maxWidgetCodeChars = GenerativeUiSetting().maxWidgetCodeChars),
+        )
+    )
+}
+
+private const val LEGACY_WIDGET_CODE_CHARS = 12_000
 
 private fun Settings.withMigratedMemoryDreamLegacy(): Settings {
     val worker = agentRuntime.memoryWorker

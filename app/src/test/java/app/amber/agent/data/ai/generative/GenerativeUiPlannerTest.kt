@@ -84,6 +84,19 @@ class GenerativeUiPlannerTest {
     }
 
     @Test
+    fun animatedSvgRequestsRouteToDiagramWidget() {
+        val setting = GenerativeUiSetting(enabled = true)
+        val messages = listOf(userMessage("画一个SVG动画：一只鹈鹕骑自行车，车轮在转"))
+
+        val prompt = GenerativeUiPlanner.buildPrompt(setting = setting, messages = messages)
+        val requirement = GenerativeUiPlanner.widgetRequirement(setting = setting, messages = messages)
+
+        assertTrue(prompt.contains("show-widget SVG"))
+        assertTrue(requirement.required)
+        assertFalse(requirement.expectSlides)
+    }
+
+    @Test
     fun toolMediatedDiagramStillRequiresFinalWidget() {
         val requirement = GenerativeUiPlanner.widgetRequirement(
             setting = GenerativeUiSetting(enabled = true),

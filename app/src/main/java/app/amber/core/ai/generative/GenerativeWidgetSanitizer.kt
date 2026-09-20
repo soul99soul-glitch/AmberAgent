@@ -16,7 +16,7 @@ data class SanitizedGenerativeWidget(
 )
 
 object GenerativeWidgetSanitizer {
-    private const val MAX_TAG_COUNT = 420
+    private const val MAX_TAG_COUNT = 600
     private const val MAX_TEXT_CHARS = 10_000
 
     private val scriptBlock = Regex("""<script\b[\s\S]*?</script\s*>""", RegexOption.IGNORE_CASE)
@@ -31,6 +31,27 @@ object GenerativeWidgetSanitizer {
     )
     private val eventAttribute = Regex(
         """\s+on[a-z]+\s*=\s*("[^"]*"|'[^']*'|[^\s>"']*)""",
+        RegexOption.IGNORE_CASE,
+    )
+    // SMIL elements mutate attributes at runtime, bypassing the static
+    // attribute checks above: <set attributeName="onclick" to="…"/> installs a
+    // live handler, <animate attributeName="href" to="javascript:…"/> launders
+    // a scheme the urlAttribute gate would have rejected. Only the tag carrying
+    // a dangerous attributeName target is dropped; geometry/paint targets stay.
+    // The tag matcher is quote-aware: [^>]* alone would stop at a '>' inside a
+    // quoted attribute and hide a trailing attributeName from inspection.
+    private val animationElementTag = Regex(
+        """<\s*(animate|animateColor|animateTransform|animateMotion|set)\b(?:[^>"']|"[^"]*"|'[^']*')*>""",
+        RegexOption.IGNORE_CASE,
+    )
+    private val animateTargetAttribute = Regex(
+        """attributeName\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]*))""",
+        RegexOption.IGNORE_CASE,
+    )
+    // Whole-value match — attributeName is an NCName, so "data-foo" is fine but
+    // "href"/"onclick"/entity-encoded variants are not.
+    private val dangerousAnimateTarget = Regex(
+        """^(?:on[a-z]+|href|xlink:href|src|srcdoc|srcset|style|action|formaction|poster|background|data)$""",
         RegexOption.IGNORE_CASE,
     )
     private val urlAttribute = Regex(
@@ -59,6 +80,9 @@ object GenerativeWidgetSanitizer {
             .replace(scriptOpen, "")
             .replace(dangerousBlock, "")
             .replace(dangerousVoid, "")
+            .replace(animationElementTag) { match ->
+                if (hasDangerousAnimationTarget(match.value)) "" else match.value
+            }
             .replace(eventAttribute, "")
             .replace(fontFace, "")
             .replace(cssImport, "")
@@ -100,6 +124,20 @@ object GenerativeWidgetSanitizer {
                 html = sanitized,
             )
         }
+    }
+
+    private fun hasDangerousAnimationTarget(tag: String): Boolean {
+        val match = animateTargetAttribute.find(tag) ?: return false
+        val raw = match.groupValues
+            .drop(1)
+            .firstOrNull { it.isNotEmpty() }
+            .orEmpty()
+            .trim()
+        // attributeName is an NCName — a value containing '&' is an entity-
+        // encoding attempt (&#104;ref → href), and an empty value is malformed;
+        // both fail closed.
+        if (raw.isEmpty() || raw.contains('&')) return true
+        return dangerousAnimateTarget.matches(raw)
     }
 
     private fun safetyViolation(html: String): String? {

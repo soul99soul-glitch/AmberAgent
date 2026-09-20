@@ -558,8 +558,7 @@ fun ExpandedGenerativeWidgetDialog(
                             SafeGenerativeWidgetWebView(
                                 html = html,
                                 setting = setting,
-                                streaming = false,
-                                modifier = Modifier.fillMaxSize(),
+                                streaming = !widget.complete,
                                 widgetKey = "expanded-${widget.title.orEmpty()}-${widget.widgetCode.toStableWidgetKeyFragment()}",
                                 minHeightDp = 240,
                                 fallbackHeightDp = 520,
@@ -895,7 +894,37 @@ private fun SafeGenerativeWidgetWebView(
             onWebViewReady(null)
         }
     }
+
+    // Pause declarative widget animation (SMIL timelines + CSS animations)
+    // when the host lifecycle stops; an infinite loop keeps compositing an
+    // offscreen WebView otherwise. Same pause/resume contract the Guizang
+    // deck uses, minus its low-power persistence.
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner, activeWebView) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_PAUSE, Lifecycle.Event.ON_STOP ->
+                    activeWebView?.evaluateJavascript(WIDGET_PAUSE_ANIMATIONS_JS, null)
+
+                Lifecycle.Event.ON_RESUME ->
+                    activeWebView?.evaluateJavascript(WIDGET_RESUME_ANIMATIONS_JS, null)
+
+                else -> Unit
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        if (!lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
+            activeWebView?.evaluateJavascript(WIDGET_PAUSE_ANIMATIONS_JS, null)
+        }
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
 }
+
+private const val WIDGET_PAUSE_ANIMATIONS_JS =
+    "window.__amberWidgetPaused=true;window.__amberWidgetApplyPause&&window.__amberWidgetApplyPause();"
+
+private const val WIDGET_RESUME_ANIMATIONS_JS =
+    "window.__amberWidgetPaused=false;window.__amberWidgetApplyResume&&window.__amberWidgetApplyResume();"
 
 private class WidgetBridge(
     private val onResize: (Int) -> Unit,
@@ -1999,7 +2028,43 @@ private fun String.toStableStreamingWidgetHtml(): String? {
 
     return stable
         .closeStreamingSvgIfNeeded()
+        .stripStreamingAnimations()
         .takeIf { it.length >= WIDGET_MIN_PARTIAL_RENDER_CHARS }
+}
+
+// Streaming pushes replace root.innerHTML on every debounce; a declarative
+// animation in the partial markup would restart from t=0 each push and flicker.
+// The preview drops SMIL nodes and mutes CSS animation so the scene draws
+// statically while streaming; the finalize push re-inserts the real markup and
+// animation starts exactly once.
+private val streamingSmilBlock = Regex(
+    """<\s*(animate|animateColor|animateTransform|animateMotion|set)\b[\s\S]*?<\s*/\s*\1\s*>""",
+    RegexOption.IGNORE_CASE,
+)
+private val streamingSmilVoid = Regex(
+    """<\s*(animate|animateColor|animateTransform|animateMotion|set)\b[^>]*?/\s*>""",
+    RegexOption.IGNORE_CASE,
+)
+private val streamingSmilLoneTag = Regex(
+    """<\s*/?\s*(animate|animateColor|animateTransform|animateMotion|set)\b[^>]*>""",
+    RegexOption.IGNORE_CASE,
+)
+// #root prefix beats single-class/id selectors, so a widget-authored
+// !important animation can't outrank the streaming mute.
+private const val STREAMING_ANIMATION_MUTE =
+    "<style>#root *,#root *::before,#root *::after{animation:none!important;transition:none!important}</style>"
+
+internal fun String.stripStreamingAnimations(): String {
+    if (isBlank()) return this
+    if (!contains("<animate", ignoreCase = true) && !contains("<set", ignoreCase = true)) {
+        return this + STREAMING_ANIMATION_MUTE
+    }
+    // Void forms first: a self-closed <animate/> consumed by the block regex
+    // would eat everything up to the next unrelated close tag.
+    return replace(streamingSmilVoid, "")
+        .replace(streamingSmilBlock, "")
+        .replace(streamingSmilLoneTag, "")
+        .plus(STREAMING_ANIMATION_MUTE)
 }
 
 private fun String.closeStreamingSvgIfNeeded(): String {
@@ -2046,6 +2111,7 @@ private fun buildReceiverHtml(
 // script runs gets queued instead of crashing with "is not a function".
 window.__amberWidgetPending = null;
 window.__amberWidgetReady = false;
+window.__amberWidgetPaused = false;
 window.__amberWidgetSetHtml = function(html){
   if (window.__amberWidgetReady && window.__amberWidgetSetHtmlReal) {
     window.__amberWidgetSetHtmlReal(html);
@@ -2125,6 +2191,18 @@ a{color:$primary;text-decoration:none;}
     }
     return Math.max(Math.ceil(maxBottom - rootRect.top), 1);
   }
+  window.__amberWidgetApplyPause = function(){
+    try{
+      document.querySelectorAll('svg').forEach(function(s){if(s.pauseAnimations)s.pauseAnimations()});
+      document.getAnimations().forEach(function(a){a.pause()});
+    }catch(e){}
+  };
+  window.__amberWidgetApplyResume = function(){
+    try{
+      document.querySelectorAll('svg').forEach(function(s){if(s.unpauseAnimations)s.unpauseAnimations()});
+      document.getAnimations().forEach(function(a){a.play()});
+    }catch(e){}
+  };
   function report(){
     if(timer) clearTimeout(timer);
     timer=setTimeout(function(){
@@ -2160,11 +2238,26 @@ a{color:$primary;text-decoration:none;}
     }
   }
   window.__amberWidgetSetHtmlReal = function(html){
-    if(root.innerHTML!==html){ root.innerHTML=html; clampSvgOverflow(); }
+    // Compare against the last PUSHED string, not root.innerHTML — serializing
+    // the DOM never round-trips byte-equal, so every recomposition would
+    // replace innerHTML and restart declarative animation timelines.
+    if(window.__amberWidgetLastHtml!==html){
+      window.__amberWidgetLastHtml=html;
+      root.innerHTML=html;
+      // A fresh <svg> starts its SMIL timeline unpaused — re-apply the host's
+      // pause state so a push landing while backgrounded stays frozen.
+      if(window.__amberWidgetPaused) window.__amberWidgetApplyPause();
+      clampSvgOverflow();
+    }
     report();
   };
   window.__amberWidgetFinalizeHtmlReal = function(html){
-    if(root.innerHTML!==html){ root.innerHTML=html; clampSvgOverflow(); }
+    if(window.__amberWidgetLastHtml!==html){
+      window.__amberWidgetLastHtml=html;
+      root.innerHTML=html;
+      if(window.__amberWidgetPaused) window.__amberWidgetApplyPause();
+      clampSvgOverflow();
+    }
     setTimeout(report, 32);
   };
   // Drain any push that landed before this script ran.

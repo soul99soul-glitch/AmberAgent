@@ -247,7 +247,7 @@ data class MiniAppSetting(
 @Serializable
 data class GenerativeUiSetting(
     val enabled: Boolean = true,
-    val maxWidgetCodeChars: Int = 12_000,
+    val maxWidgetCodeChars: Int = 20_000,
     val maxWidgetHeightDp: Int = 720,
     val enableActions: Boolean = true,
     val enableStructuredRenderers: Boolean = true,
