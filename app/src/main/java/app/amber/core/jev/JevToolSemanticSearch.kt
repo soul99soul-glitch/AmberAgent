@@ -36,6 +36,8 @@ class JevToolSemanticSearch(private val runtime: JevRuntime) : ToolSemanticSearc
         runKey: String?,
     ): SemanticToolRankResult? {
         if (candidates.isEmpty() || query.isBlank()) return null
+        val purpose = JevPurpose.TOOL_DISCOVERY
+        val initialConfig = runtime.configFor(purpose) ?: return null
         val threshold = runtime.policy.toolDiscoveryMinRelevance
         val scores = LinkedHashMap<String, Double>(candidates.size)
         var mode: JevMode? = null
@@ -73,7 +75,7 @@ class JevToolSemanticSearch(private val runtime: JevRuntime) : ToolSemanticSearc
                 append(chunkIndex)
             }
             val outcome = runtime.decide(
-                purpose = JevPurpose.TOOL_DISCOVERY,
+                purpose = purpose,
                 runKey = runKey,
                 state = state,
                 questions = questions,
@@ -81,7 +83,7 @@ class JevToolSemanticSearch(private val runtime: JevRuntime) : ToolSemanticSearc
                 cacheAnchor = anchor,
             ) ?: return null
             val evaluated = outcome.evaluated ?: return null
-            if (outcome.stale) return null
+            if (outcome.stale || runtime.configFor(purpose) != initialConfig) return null
             mode = outcome.mode
             evaluated.model?.let { model = it }
             latencyMs += evaluated.latencyMs
@@ -97,7 +99,7 @@ class JevToolSemanticSearch(private val runtime: JevRuntime) : ToolSemanticSearc
         runtime.calibration.append(
             JevCalibrationRecord(
                 timestamp = System.currentTimeMillis(),
-                purpose = JevPurpose.TOOL_DISCOVERY,
+                purpose = purpose,
                 mode = mode ?: return null,
                 model = model,
                 latencyMs = latencyMs,

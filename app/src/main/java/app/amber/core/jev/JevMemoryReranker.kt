@@ -22,6 +22,8 @@ class JevMemoryReranker(private val runtime: JevRuntime) : MemorySemanticReranke
         runKey: String?,
     ): MemorySemanticResult {
         if (records.isEmpty() || taskText.isBlank()) return MemorySemanticResult.NOT_APPLIED
+        val purpose = JevPurpose.MEMORY_RECALL
+        val initialConfig = runtime.configFor(purpose) ?: return MemorySemanticResult.NOT_APPLIED
         val threshold = runtime.policy.memoryRecallMinRelevance
         val candidates = records.take(MAX_CANDIDATES)
         val anchor = buildString {
@@ -57,7 +59,7 @@ class JevMemoryReranker(private val runtime: JevRuntime) : MemorySemanticReranke
                 )
             }
             val outcome = runtime.decide(
-                purpose = JevPurpose.MEMORY_RECALL,
+                purpose = purpose,
                 runKey = runKey,
                 state = state,
                 questions = questions,
@@ -65,7 +67,9 @@ class JevMemoryReranker(private val runtime: JevRuntime) : MemorySemanticReranke
                 cacheAnchor = "$anchor|$chunkIndex",
             ) ?: return MemorySemanticResult.NOT_APPLIED
             val evaluated = outcome.evaluated ?: return MemorySemanticResult.NOT_APPLIED
-            if (outcome.stale) return MemorySemanticResult.NOT_APPLIED
+            if (outcome.stale || runtime.configFor(purpose) != initialConfig) {
+                return MemorySemanticResult.NOT_APPLIED
+            }
             mode = outcome.mode
             evaluated.model?.let { model = it }
             latencyMs += evaluated.latencyMs
@@ -83,7 +87,7 @@ class JevMemoryReranker(private val runtime: JevRuntime) : MemorySemanticReranke
         runtime.calibration.append(
             JevCalibrationRecord(
                 timestamp = System.currentTimeMillis(),
-                purpose = JevPurpose.MEMORY_RECALL,
+                purpose = purpose,
                 mode = mode ?: return MemorySemanticResult.NOT_APPLIED,
                 model = model,
                 latencyMs = latencyMs,

@@ -92,6 +92,73 @@ class JevMemoryRerankerTest {
         assertTrue(calibration.records.isEmpty())
     }
 
+    @Test
+    fun shadowStillRecordsAllChunksWithoutApplying() = runTest {
+        val calibration = FreshCalibrationStore()
+        val transport = ScriptedTransport()
+        val result = JevMemoryReranker(runtime(JevMode.SHADOW, calibration, transport))
+            .rerank(records(40), taskText = "what did I say about coffee?", runKey = "run1")
+
+        assertFalse(result.applied)
+        assertEquals(2, transport.calls)
+        assertEquals(1, calibration.records.size)
+        assertEquals(JevMode.SHADOW, calibration.records.single().mode)
+        assertEquals(40, calibration.records.single().scores.size)
+    }
+
+    @Test
+    fun modeSwitchBetweenChunksDiscardsEarlierActiveScores() = runTest {
+        fun settings(mode: JevMode) = Settings(
+            jev = JevSetting(
+                enabled = true,
+                purposes = mapOf(JevPurpose.MEMORY_RECALL to mode),
+                dataScopes = setOf(JevDataScope.PERSONAL_MEMORY, JevDataScope.TASK_TEXT),
+            ),
+        )
+
+        val all = records(40)
+        val answer = all.joinToString(",") { """"${it.id}":{"type":"noul","noul":0.9}""" }
+        var liveSettings = settings(JevMode.ACTIVE)
+        var flipAfterNextRead = false
+        val transport = object : JevTransport {
+            var calls = 0
+
+            override suspend fun execute(request: JevHttpRequest): JevTransportResponse {
+                calls++
+                if (calls == 1) flipAfterNextRead = true
+                return JevTransportResponse.Http(
+                    200,
+                    """{"model":"jev-test","answers":{$answer}}""".toByteArray(),
+                    null,
+                )
+            }
+        }
+        val calibration = FreshCalibrationStore()
+        val runtime = JevRuntime(
+            coordinator = JevDecisionCoordinator(
+                client = JevClient(transport = transport),
+                apiKeyProvider = { "key" },
+                clock = { 1_000_000L },
+            ),
+            settingsProvider = {
+                val snapshot = liveSettings
+                if (flipAfterNextRead) {
+                    flipAfterNextRead = false
+                    liveSettings = settings(JevMode.SHADOW)
+                }
+                snapshot
+            },
+            calibration = calibration,
+        )
+
+        val result = JevMemoryReranker(runtime)
+            .rerank(all, taskText = "what did I say about coffee?", runKey = "run1")
+
+        assertFalse(result.applied)
+        assertEquals(1, transport.calls)
+        assertTrue(calibration.records.isEmpty())
+    }
+
     /** 局部独立记录器：IN_MEMORY 是进程级单例，会被其他测试污染。 */
     private class FreshCalibrationStore : JevCalibrationStore {
         val records = mutableListOf<JevCalibrationRecord>()

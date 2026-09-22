@@ -1,6 +1,7 @@
 package app.amber.feature.ui.pages.setting
 
 import android.content.Intent
+import androidx.core.content.FileProvider
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -64,6 +65,7 @@ import com.composables.icons.lucide.ChevronRight
 import com.composables.icons.lucide.Lucide
 import org.koin.androidx.compose.koinViewModel
 import org.koin.compose.koinInject
+import java.io.File
 
 private sealed interface ConnectionUi {
     data object Running : ConnectionUi
@@ -473,15 +475,25 @@ fun SettingJevPage(vm: SettingVM = koinViewModel()) {
                                     enabled = calibrationCount > 0,
                                     onClick = {
                                         scope.launch(Dispatchers.IO) {
-                                            val payload = calibrationStore.readAll()
-                                                .joinToString("\n") {
-                                                    calibrationJson.encodeToString(JevCalibrationRecord.serializer(), it)
-                                                }
+                                            val exportFile = File(context.cacheDir, "export/amber-jev-calibration.jsonl")
+                                            exportFile.parentFile?.mkdirs()
+                                            exportFile.writeText(
+                                                calibrationStore.readAll()
+                                                    .joinToString("\n") {
+                                                        calibrationJson.encodeToString(JevCalibrationRecord.serializer(), it)
+                                                    },
+                                            )
                                             withContext(Dispatchers.Main) {
+                                                val uri = FileProvider.getUriForFile(
+                                                    context,
+                                                    "${context.packageName}.fileprovider",
+                                                    exportFile,
+                                                )
                                                 val intent = Intent(Intent.ACTION_SEND).apply {
                                                     type = "text/plain"
                                                     putExtra(Intent.EXTRA_SUBJECT, "amber-jev-calibration.jsonl")
-                                                    putExtra(Intent.EXTRA_TEXT, payload)
+                                                    putExtra(Intent.EXTRA_STREAM, uri)
+                                                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                                                 }
                                                 try {
                                                     context.startActivity(Intent.createChooser(intent, null))

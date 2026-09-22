@@ -1,6 +1,7 @@
 package app.amber.core.ai.generative
 
 import app.amber.core.settings.GenerativeUiSetting
+import org.jsoup.Jsoup
 
 enum class GenerativeWidgetSanitizeStatus {
     READY,
@@ -42,10 +43,6 @@ object GenerativeWidgetSanitizer {
     // quoted attribute and hide a trailing attributeName from inspection.
     private val animationElementTag = Regex(
         """<\s*(animate|animateColor|animateTransform|animateMotion|set)\b(?:[^>"']|"[^"]*"|'[^']*')*>""",
-        RegexOption.IGNORE_CASE,
-    )
-    private val animateTargetAttribute = Regex(
-        """attributeName\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]*))""",
         RegexOption.IGNORE_CASE,
     )
     // Whole-value match — attributeName is an NCName, so "data-foo" is fine but
@@ -127,17 +124,12 @@ object GenerativeWidgetSanitizer {
     }
 
     private fun hasDangerousAnimationTarget(tag: String): Boolean {
-        val match = animateTargetAttribute.find(tag) ?: return false
-        val raw = match.groupValues
-            .drop(1)
-            .firstOrNull { it.isNotEmpty() }
-            .orEmpty()
-            .trim()
-        // attributeName is an NCName — a value containing '&' is an entity-
-        // encoding attempt (&#104;ref → href), and an empty value is malformed;
-        // both fail closed.
-        if (raw.isEmpty() || raw.contains('&')) return true
-        return dangerousAnimateTarget.matches(raw)
+        // Parse only this tag to distinguish real attributes from quoted text
+        // and decode entities. Keep the original markup for allowed animations.
+        val element = Jsoup.parseBodyFragment("<svg>$tag</svg>").selectFirst("svg > *") ?: return true
+        if (!element.hasAttr("attributeName")) return false
+        val target = element.attr("attributeName").trim()
+        return target.isEmpty() || target.contains('&') || dangerousAnimateTarget.matches(target)
     }
 
     private fun safetyViolation(html: String): String? {

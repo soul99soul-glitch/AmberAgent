@@ -196,6 +196,34 @@ class GenerativeWidgetSanitizerTest {
     }
 
     @Test
+    fun dropsDangerousAnimationTargetAfterDecoyAttributes() {
+        val attributes = listOf(
+            """data-note='attributeName="fill"' attributeName="href"""",
+            """data-note="attributeName='fill'" attributeName=href""",
+            """data-attributeName="fill" attributeName="href"""",
+        )
+        attributes.forEach { attrs ->
+            val result = GenerativeWidgetSanitizer.sanitize(
+                """<svg><a href="#go"><rect width="20" height="20"/><set $attrs to="java&#x73;cript:document.body.dataset.pwn=1" begin="0s"/></a></svg>""",
+                GenerativeUiSetting(),
+            )
+
+            assertEquals(GenerativeWidgetSanitizeStatus.READY, result.status)
+            assertFalse("dangerous animation survived: $attrs", result.html.contains("<set"))
+            assertTrue(result.html.contains("<rect"))
+        }
+    }
+
+    @Test
+    fun preservesGeometryAnimationWithDangerousTargetOnlyInAttributeText() {
+        val code = """<svg><circle><animate data-note='attributeName="href"' attributeName="cx" from="10" to="20" dur="1s"/></circle></svg>"""
+        val result = GenerativeWidgetSanitizer.sanitize(code, GenerativeUiSetting())
+
+        assertEquals(GenerativeWidgetSanitizeStatus.READY, result.status)
+        assertEquals(code, result.html)
+    }
+
+    @Test
     fun dropsAnimateTargetHiddenBehindQuotedGtAndEntities() {
         val result = GenerativeWidgetSanitizer.sanitize(
             """

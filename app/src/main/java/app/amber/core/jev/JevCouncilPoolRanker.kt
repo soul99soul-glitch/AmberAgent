@@ -27,7 +27,8 @@ class JevCouncilPoolRanker(private val runtime: JevRuntime) : CouncilPoolRanker 
         settings: Settings,
         councilSetting: ModelCouncilRuntimeSetting,
     ): List<Uuid>? {
-        if (runtime.configFor(JevPurpose.MODEL_ROUTING) == null) return null
+        val purpose = JevPurpose.MODEL_ROUTING
+        val initialConfig = runtime.configFor(purpose) ?: return null
         val pool = ModelCouncilValidator.defaultPoolModelIds(settings, councilSetting)
         if (pool.size < 2) return null
         val task = input["task"]?.jsonObject ?: input
@@ -80,7 +81,7 @@ class JevCouncilPoolRanker(private val runtime: JevRuntime) : CouncilPoolRanker 
                 append(chunkIndex)
             }
             val outcome = runtime.decide(
-                purpose = JevPurpose.MODEL_ROUTING,
+                purpose = purpose,
                 runKey = null,
                 state = state,
                 questions = questions,
@@ -88,7 +89,7 @@ class JevCouncilPoolRanker(private val runtime: JevRuntime) : CouncilPoolRanker 
                 cacheAnchor = anchor,
             ) ?: return null
             val evaluated = outcome.evaluated ?: return null
-            if (outcome.stale) return null
+            if (outcome.stale || runtime.configFor(purpose) != initialConfig) return null
             mode = outcome.mode
             evaluated.model?.let { model = it }
             latencyMs += evaluated.latencyMs
@@ -106,7 +107,7 @@ class JevCouncilPoolRanker(private val runtime: JevRuntime) : CouncilPoolRanker 
         runtime.calibration.append(
             JevCalibrationRecord(
                 timestamp = System.currentTimeMillis(),
-                purpose = JevPurpose.MODEL_ROUTING,
+                purpose = purpose,
                 mode = mode ?: return null,
                 model = model,
                 latencyMs = latencyMs,
