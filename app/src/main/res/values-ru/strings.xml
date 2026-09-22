@@ -3474,6 +3474,10 @@
   <string name="setting_jev_status_auth_paused">Состояние: пауза по авторизации — обновите ключ или запустите тест подключения</string>
   <string name="setting_jev_status_cooldown">Состояние: пауза после сбоев, осталось %1$d мс</string>
   <string name="setting_jev_status_last_error">Состояние: последняя ошибка %1$s</string>
+  <string name="setting_jev_calibration_count">Записей калибровки: %1$d</string>
+  <string name="setting_jev_calibration_desc">Оценки кандидатов, сверенные с текущим верхним выбором; только id и вероятности, для офлайн-настройки порогов</string>
+  <string name="setting_jev_calibration_export">Экспорт</string>
+  <string name="setting_jev_calibration_clear">Очистить</string>
   <string name="setting_jev_connection_budget">Дневной лимит запросов исчерпан</string>
   <string name="setting_jev_outcome_applied">Применено</string>
   <string name="setting_jev_outcome_shadow">Тень</string>

@@ -1,9 +1,12 @@
 package app.amber.core.di
 
 import app.amber.core.jev.AndroidJevUsageStore
+import app.amber.core.jev.FileJevCalibrationStore
+import app.amber.core.jev.JevCalibrationStore
 import app.amber.core.jev.JevClient
 import app.amber.core.jev.JevDecisionCoordinator
 import app.amber.core.jev.JevMemoryReranker
+import app.amber.core.jev.JevPolicy
 import app.amber.core.jev.JevRuntime
 import app.amber.core.jev.JevCouncilPoolRanker
 import app.amber.core.jev.JevToolOutputProjector
@@ -18,6 +21,7 @@ import app.amber.core.settings.secret.SecretStore
 import okhttp3.OkHttpClient
 import org.koin.android.ext.koin.androidContext
 import org.koin.dsl.module
+import java.io.File
 import java.util.concurrent.TimeUnit
 
 /** Jev 判断服务的 Key 存放位置；真实值只进 SecretStore，Settings 仅留掩码。 */
@@ -46,7 +50,18 @@ val jevModule = module {
             usageStore = AndroidJevUsageStore(androidContext()),
         )
     }
-    single { JevRuntime(coordinator = get(), settingsProvider = { get<SettingsAggregator>().settingsFlow.value }) }
+    single { JevPolicy() }
+    single<JevCalibrationStore> {
+        FileJevCalibrationStore(File(androidContext().filesDir, "jev/calibration.jsonl"))
+    }
+    single {
+        JevRuntime(
+            coordinator = get(),
+            settingsProvider = { get<SettingsAggregator>().settingsFlow.value },
+            policy = get(),
+            calibration = get(),
+        )
+    }
     single { JevMemoryReranker(get()) }
     single<MemorySemanticReranker> { get<JevMemoryReranker>() }
     single { JevToolSemanticSearch(get()) }

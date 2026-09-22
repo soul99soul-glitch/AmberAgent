@@ -3468,6 +3468,10 @@
   <string name="setting_jev_status_auth_paused">실행 상태: 인증 일시 중지——키를 변경하거나 연결 테스트를 실행하면 재개됩니다</string>
   <string name="setting_jev_status_cooldown">실행 상태: 쿨다운 중(남은 시간 %1$dms)</string>
   <string name="setting_jev_status_last_error">실행 상태: 최근 오류 %1$s</string>
+  <string name="setting_jev_calibration_count">캘리브레이션 기록: %1$d건</string>
+  <string name="setting_jev_calibration_desc">후보별 점수와 기존 경로의 최상위 선택을 대조한 기록입니다. id와 확률만 포함되며 오프라인 임계값 조정에 사용됩니다</string>
+  <string name="setting_jev_calibration_export">내보내기</string>
+  <string name="setting_jev_calibration_clear">지우기</string>
   <string name="setting_jev_connection_budget">오늘 요청 예산을 모두 사용했습니다</string>
   <string name="setting_jev_outcome_applied">적용</string>
   <string name="setting_jev_outcome_shadow">섀도우</string>

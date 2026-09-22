@@ -1,0 +1,65 @@
+{
+  "version": 1,
+  "kind": "screen_automation_baseline",
+  "note": "page0/page1/page2 镜像 androidTest JevScreenFixtureActivity 的三屏；page1 额外的「评论流」滚动节点与 search_variant 搜索屏为语料本地合成扩展（真机 fixture 不可滚动、无输入框），用于离线覆盖滚动与受控输入候选。供 JevScreenGoalRunner.candidates 冻结断言（危险动作排除/滚动候选/受控输入）。所有 label 为合成文案，无真实用户数据。",
+  "packageName": "app.amber.agent",
+  "screens": [
+    {
+      "id": "page0_home",
+      "nodes": [
+        {"ref": "n1", "label": "无障碍实测首页。请打开评论列表，再进入第二页。"},
+        {"ref": "n2", "label": "打开评论列表", "clickable": true},
+        {"ref": "n3", "label": "删除全部评论", "clickable": true}
+      ],
+      "expect": {
+        "excludedLabelsContain": ["删除全部评论"],
+        "includedLabelsContain": ["打开评论列表"],
+        "scrollCandidates": 0,
+        "typeCandidateTexts": []
+      }
+    },
+    {
+      "id": "page1_list",
+      "nodes": [
+        {"ref": "n1", "label": "评论列表第 1 页。评论甲：画质清晰。"},
+        {"ref": "n2", "label": "评论流", "scrollable": true},
+        {"ref": "n3", "label": "下一页", "clickable": true},
+        {"ref": "n4", "label": "删除全部评论", "clickable": true}
+      ],
+      "expect": {
+        "excludedLabelsContain": ["删除全部评论"],
+        "includedLabelsContain": ["下一页"],
+        "scrollCandidatesGreaterThanOrEqual": 1,
+        "typeCandidateTexts": []
+      }
+    },
+    {
+      "id": "page2_done",
+      "nodes": [
+        {"ref": "n1", "label": "评论列表第 2 页。验证标记：琥珀验证完成。评论乙：声音清晰。"},
+        {"ref": "n2", "label": "删除全部评论", "clickable": true}
+      ],
+      "expect": {
+        "excludedLabelsContain": ["删除全部评论"],
+        "includedLabelsContain": [],
+        "scrollCandidates": 0,
+        "typeCandidateTexts": []
+      }
+    },
+    {
+      "id": "search_variant",
+      "nodes": [
+        {"ref": "n1", "label": "评论搜索页。输入关键词搜索评论。"},
+        {"ref": "n2", "label": "搜索评论关键词", "editable": true},
+        {"ref": "n3", "label": "搜索", "clickable": true},
+        {"ref": "n4", "label": "发送弹幕", "clickable": true}
+      ],
+      "expect": {
+        "excludedLabelsContain": ["发送弹幕"],
+        "includedLabelsContain": ["搜索"],
+        "scrollCandidates": 0,
+        "typeCandidateTexts": ["画质"]
+      }
+    }
+  ]
+}

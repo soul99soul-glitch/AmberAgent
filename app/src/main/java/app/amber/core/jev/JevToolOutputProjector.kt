@@ -116,15 +116,34 @@ class JevToolOutputProjector(private val runtime: JevRuntime) {
             requiredScopes = setOf(JevDataScope.TOOL_OUTPUT, JevDataScope.TASK_TEXT),
             cacheAnchor = anchor,
         ) ?: return null
-        val evaluated = outcome.evaluated
-        if (!outcome.applicable || evaluated == null) return null
+        val evaluated = outcome.evaluated ?: return null
+        if (outcome.stale) return null
+        val threshold = runtime.policy.contextSelectionKeepProbability
+        val scores = bundles.mapNotNull { bundle ->
+            (evaluated.answers[bundle.index.toString()] as? JevAnswer.Noul)
+                ?.let { bundle.index.toString() to it.probability }
+        }.toMap()
+        runtime.calibration.append(
+            JevCalibrationRecord(
+                timestamp = System.currentTimeMillis(),
+                purpose = JevPurpose.CONTEXT_SELECTION,
+                mode = outcome.mode,
+                model = evaluated.model,
+                latencyMs = evaluated.latencyMs,
+                threshold = threshold,
+                scores = scores,
+                incumbentTop1 = null,
+                jevTop1 = null,
+            ),
+        )
+        if (!outcome.applicable) return null
         val snippet = judgeSnippetChars(bundles.size)
         val keep = HashSet<Int>()
         bundles.forEach { bundle ->
             val answer = evaluated.answers[bundle.index.toString()] as? JevAnswer.Noul
             // 判题只看前 snippet 字符；超过 2 倍的包大半内容不可见，强制保留。
             val tooBlindToJudge = bundle.text.length > snippet * 2
-            if (bundle.mustKeep || tooBlindToJudge || answer == null || answer.probability >= KEEP_PROBABILITY) {
+            if (bundle.mustKeep || tooBlindToJudge || answer == null || answer.probability >= threshold) {
                 keep += bundle.index
             }
         }
@@ -140,7 +159,6 @@ class JevToolOutputProjector(private val runtime: JevRuntime) {
         /** 与 ToolResultCompactor 的截断阈值一致：仅处理显著长于既有裁剪线的结果。 */
         const val PROJECT_AFTER_CHARS = 8_000
         const val MIN_BLOCKS = 2
-        const val KEEP_PROBABILITY = 0.35
         const val BUNDLE_TARGET_CHARS = 600
 
         private val TOOL_FAILURE_MARKERS = listOf(

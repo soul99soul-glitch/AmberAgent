@@ -296,7 +296,7 @@ class JevWebGoalRunner(private val runtime: JevRuntime) {
             ?: return StepOutcome(null, "missing_action_answer")
         // 低置信门：Jev 自报信心不足时交还主模型，不替它下注。
         val confidence = actionAnswer.confidence
-        if (confidence != null && confidence < LOW_CONFIDENCE_THRESHOLD) {
+        if (confidence != null && confidence < runtime.policy.webLowConfidenceThreshold) {
             return StepOutcome(null, "low_confidence:$confidence")
         }
         val action = actionAnswer.selected.takeIf { it in actionOptions }
@@ -307,7 +307,7 @@ class JevWebGoalRunner(private val runtime: JevRuntime) {
             var best: Pair<Int, Double>? = null
             elements.forEachIndexed { index, _ ->
                 val answer = evaluated.answers["target_$index"] as? JevAnswer.Noul ?: return@forEachIndexed
-                if (answer.probability >= TARGET_THRESHOLD && (best == null || answer.probability > best!!.second)) {
+                if (answer.probability >= runtime.policy.webTargetThreshold && (best == null || answer.probability > best!!.second)) {
                     best = index to answer.probability
                 }
             }
@@ -331,7 +331,7 @@ class JevWebGoalRunner(private val runtime: JevRuntime) {
                 return StepOutcome(StepDecision("handback", null, null, "no_text_value", null), null)
             }
         }
-        val doneVerified = (evaluated.answers["done_check"] as? JevAnswer.Noul)?.let { it.probability >= DONE_VERIFIED_THRESHOLD }
+        val doneVerified = (evaluated.answers["done_check"] as? JevAnswer.Noul)?.let { it.probability >= runtime.policy.webDoneVerifiedThreshold }
         return StepOutcome(StepDecision(action, element, text, element?.label, doneVerified), null)
     }
 
@@ -354,9 +354,5 @@ class JevWebGoalRunner(private val runtime: JevRuntime) {
         const val DEFAULT_MAX_DURATION_MS = 600_000L
         const val MAX_NO_PROGRESS = 10
         const val MAX_ELEMENTS = 24
-        const val TARGET_THRESHOLD = 0.5
-        const val DONE_VERIFIED_THRESHOLD = 0.6
-        /** Choice 答案自报信心低于此值时交还主模型（0.5 与 iOS 一致）。 */
-        const val LOW_CONFIDENCE_THRESHOLD = 0.5
     }
 }

@@ -3534,6 +3534,10 @@ My task:</string>
   <string name="setting_jev_status_auth_paused">Runtime: auth paused — update the key or run a connection test to resume</string>
   <string name="setting_jev_status_cooldown">Runtime: cooling down, %1$d ms left</string>
   <string name="setting_jev_status_last_error">Runtime: last error %1$s</string>
+  <string name="setting_jev_calibration_count">Calibration records: %1$d</string>
+  <string name="setting_jev_calibration_desc">Per-candidate scores reconciled with the incumbent top pick; ids and probabilities only, for offline threshold tuning</string>
+  <string name="setting_jev_calibration_export">Export</string>
+  <string name="setting_jev_calibration_clear">Clear</string>
   <string name="setting_jev_connection_budget">Daily request budget exhausted</string>
   <string name="setting_jev_outcome_applied">Applied</string>
   <string name="setting_jev_outcome_shadow">Shadow</string>

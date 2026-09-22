@@ -10,6 +10,10 @@ import kotlinx.serialization.json.JsonElement
 class JevRuntime(
     private val coordinator: JevDecisionCoordinator,
     private val settingsProvider: () -> Settings,
+    /** 逐用途置信阈值；policyVersion 参与缓存键，阈值变更须递增版本。 */
+    val policy: JevPolicy = JevPolicy(),
+    /** 校准记录落点；默认内存实现（测试），生产由 DI 注入文件实现。 */
+    val calibration: JevCalibrationStore = JevCalibrationStore.IN_MEMORY,
 ) {
     fun configFor(purpose: JevPurpose): JevRuntimeConfig? {
         val setting = settingsProvider().jev
@@ -25,7 +29,7 @@ class JevRuntime(
                 JevApiMode.VERCEL -> setting.vercelModel?.takeIf { it.isNotBlank() }
                     ?: JevLimits.VERCEL_DEFAULT_MODEL
             },
-            policyVersion = POLICY_VERSION,
+            policyVersion = policy.policyVersion,
             apiMode = setting.apiMode,
             endpoint = jevEndpointFor(setting.apiMode, setting.baseUrl),
         )
@@ -47,11 +51,6 @@ class JevRuntime(
         val decision = coordinator.decide(purpose, config, runKey, state, questions, requiredScopes, cacheAnchor)
         val stale = configFor(purpose) != config
         return JevRuntimeOutcome(config.mode, decision, stale)
-    }
-
-    companion object {
-        /** 判断语义版本：VERCEL 换评估模型契约、预算档位变化时递增（参与缓存键）。 */
-        const val POLICY_VERSION = 2
     }
 }
 

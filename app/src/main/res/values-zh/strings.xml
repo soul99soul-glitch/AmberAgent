@@ -3532,6 +3532,10 @@
   <string name="setting_jev_status_auth_paused">运行态：认证暂停——更新 Key 或运行连接测试后恢复</string>
   <string name="setting_jev_status_cooldown">运行态：冷却中，剩余 %1$d 毫秒</string>
   <string name="setting_jev_status_last_error">运行态：最近错误 %1$s</string>
+  <string name="setting_jev_calibration_count">校准记录：%1$d 条</string>
+  <string name="setting_jev_calibration_desc">逐候选判分与原路径首选对账，仅含 id 与概率；导出供离线校准阈值</string>
+  <string name="setting_jev_calibration_export">导出</string>
+  <string name="setting_jev_calibration_clear">清除</string>
   <string name="setting_jev_connection_budget">今日请求预算已耗尽</string>
   <string name="setting_jev_outcome_applied">已应用</string>
   <string name="setting_jev_outcome_shadow">影子</string>

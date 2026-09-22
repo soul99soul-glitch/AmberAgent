@@ -1,8 +1,10 @@
 package app.amber.feature.ui.pages.setting
 
+import android.content.Intent
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -19,13 +21,16 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
@@ -33,8 +38,12 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.Json
 import app.amber.agent.R
 import app.amber.core.jev.JevApiMode
+import app.amber.core.jev.JevCalibrationRecord
+import app.amber.core.jev.JevCalibrationStore
 import app.amber.core.jev.JevConnectionTestResult
 import app.amber.core.jev.JevDataScope
 import app.amber.core.jev.JevDecisionCoordinator
@@ -67,6 +76,8 @@ private fun maskKey(key: String): String? =
         if (plain.length <= 8) "••••" else plain.take(3) + "…" + plain.takeLast(4)
     }
 
+private val calibrationJson = Json { ignoreUnknownKeys = true }
+
 @Composable
 fun SettingJevPage(vm: SettingVM = koinViewModel()) {
     val settings by vm.settings.collectAsStateWithLifecycle()
@@ -75,6 +86,8 @@ fun SettingJevPage(vm: SettingVM = koinViewModel()) {
     val scope = rememberCoroutineScope()
     val secretStore = koinInject<SecretStore>()
     val coordinator = koinInject<JevDecisionCoordinator>()
+    val calibrationStore = koinInject<JevCalibrationStore>()
+    val context = LocalContext.current
     var editingKey by remember { mutableStateOf(false) }
     var keyInput by remember { mutableStateOf("") }
     var editingBaseUrl by remember { mutableStateOf(false) }
@@ -82,7 +95,13 @@ fun SettingJevPage(vm: SettingVM = koinViewModel()) {
     var editingModel by remember { mutableStateOf(false) }
     var modelInput by remember { mutableStateOf("") }
     var connection by remember { mutableStateOf<ConnectionUi?>(null) }
+    var calibrationCount by remember { mutableStateOf(0) }
+    var calibrationTick by remember { mutableStateOf(0) }
     val jev = settings.jev
+
+    LaunchedEffect(calibrationTick) {
+        calibrationCount = withContext(Dispatchers.IO) { calibrationStore.readAll().size }
+    }
 
     fun updateJev(transform: (JevSetting) -> JevSetting) {
         vm.updateSettings { current -> current.copy(jev = transform(current.jev)) }
@@ -427,6 +446,67 @@ fun SettingJevPage(vm: SettingVM = koinViewModel()) {
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = if (runtime.authPaused) MaterialTheme.colorScheme.error else workspaceColors().muted,
                             )
+                        },
+                    )
+                    item(
+                        modifier = Modifier.settingTwoLine(),
+                        headlineContent = {
+                            Text(
+                                stringResource(R.string.setting_jev_calibration_count, calibrationCount),
+                                style = MaterialTheme.typography.bodyMedium,
+                            )
+                        },
+                        supportingContent = {
+                            Text(
+                                stringResource(R.string.setting_jev_calibration_desc),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = workspaceColors().muted,
+                            )
+                        },
+                        trailingContent = {
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                TextButton(
+                                    modifier = Modifier.heightIn(min = 48.dp),
+                                    enabled = calibrationCount > 0,
+                                    onClick = {
+                                        scope.launch(Dispatchers.IO) {
+                                            val payload = calibrationStore.readAll()
+                                                .joinToString("\n") {
+                                                    calibrationJson.encodeToString(JevCalibrationRecord.serializer(), it)
+                                                }
+                                            withContext(Dispatchers.Main) {
+                                                val intent = Intent(Intent.ACTION_SEND).apply {
+                                                    type = "text/plain"
+                                                    putExtra(Intent.EXTRA_SUBJECT, "amber-jev-calibration.jsonl")
+                                                    putExtra(Intent.EXTRA_TEXT, payload)
+                                                }
+                                                try {
+                                                    context.startActivity(Intent.createChooser(intent, null))
+                                                } catch (e: Exception) {
+                                                    e.printStackTrace()
+                                                }
+                                            }
+                                        }
+                                    },
+                                ) {
+                                    Text(stringResource(R.string.setting_jev_calibration_export))
+                                }
+                                TextButton(
+                                    modifier = Modifier.heightIn(min = 48.dp),
+                                    enabled = calibrationCount > 0,
+                                    onClick = {
+                                        scope.launch(Dispatchers.IO) {
+                                            calibrationStore.clear()
+                                            calibrationTick++
+                                        }
+                                    },
+                                ) {
+                                    Text(stringResource(R.string.setting_jev_calibration_clear))
+                                }
+                            }
                         },
                     )
                 }

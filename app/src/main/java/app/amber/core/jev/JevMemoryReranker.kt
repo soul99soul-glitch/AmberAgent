@@ -22,6 +22,7 @@ class JevMemoryReranker(private val runtime: JevRuntime) : MemorySemanticReranke
         runKey: String?,
     ): MemorySemanticResult {
         if (records.isEmpty() || taskText.isBlank()) return MemorySemanticResult.NOT_APPLIED
+        val threshold = runtime.policy.memoryRecallMinRelevance
         val candidates = records.take(MAX_CANDIDATES)
         val anchor = buildString {
             append("mem|")
@@ -29,6 +30,10 @@ class JevMemoryReranker(private val runtime: JevRuntime) : MemorySemanticReranke
             append('|')
             append(candidates.joinToString(",") { "${it.id}:${it.content.hashCode()}:${it.updatedAt}" }.hashCode())
         }
+        val scores = LinkedHashMap<String, Double>(candidates.size)
+        var mode: JevMode? = null
+        var model: String? = null
+        var latencyMs = 0L
         val ranked = ArrayList<Pair<Int, Double>>(candidates.size)
         candidates.chunked(JevLimits.MAX_QUESTIONS_PER_REQUEST).forEachIndexed { chunkIndex, chunk ->
             val state = buildJsonObject {
@@ -59,15 +64,35 @@ class JevMemoryReranker(private val runtime: JevRuntime) : MemorySemanticReranke
                 requiredScopes = setOf(JevDataScope.PERSONAL_MEMORY, JevDataScope.TASK_TEXT),
                 cacheAnchor = "$anchor|$chunkIndex",
             ) ?: return MemorySemanticResult.NOT_APPLIED
-            val evaluated = outcome.evaluated
-            if (!outcome.applicable || evaluated == null) return MemorySemanticResult.NOT_APPLIED
+            val evaluated = outcome.evaluated ?: return MemorySemanticResult.NOT_APPLIED
+            if (outcome.stale) return MemorySemanticResult.NOT_APPLIED
+            mode = outcome.mode
+            evaluated.model?.let { model = it }
+            latencyMs += evaluated.latencyMs
             chunk.forEach { record ->
-                val answer = evaluated.answers[record.id.toString()] as? JevAnswer.Noul ?: return@forEach
-                if (answer.probability >= RELEVANCE_THRESHOLD) {
-                    ranked += record.id to answer.probability
+                (evaluated.answers[record.id.toString()] as? JevAnswer.Noul)?.let {
+                    scores[record.id.toString()] = it.probability
                 }
             }
+            // shadow：判分已收集供校准记录，不应用排序。
+            if (!outcome.applicable) return@forEachIndexed
+            chunk.forEach { record ->
+                scores[record.id.toString()]?.takeIf { it >= threshold }?.let { ranked += record.id to it }
+            }
         }
+        runtime.calibration.append(
+            JevCalibrationRecord(
+                timestamp = System.currentTimeMillis(),
+                purpose = JevPurpose.MEMORY_RECALL,
+                mode = mode ?: return MemorySemanticResult.NOT_APPLIED,
+                model = model,
+                latencyMs = latencyMs,
+                threshold = threshold,
+                scores = scores,
+                incumbentTop1 = candidates.first().id.toString(),
+                jevTop1 = scores.entries.filter { it.value >= threshold }.maxByOrNull { it.value }?.key,
+            ),
+        )
         if (ranked.isEmpty()) return MemorySemanticResult.NOT_APPLIED
         return MemorySemanticResult(
             rankedIds = ranked.sortedByDescending { it.second }.map { it.first },
@@ -79,7 +104,6 @@ class JevMemoryReranker(private val runtime: JevRuntime) : MemorySemanticReranke
         /** 与判断服务候选上限一致；超出部分沿用词面排序（记录在指标覆盖里）。 */
         const val MAX_CANDIDATES = 64
         const val CONTENT_SNIPPET_CHARS = 400
-        const val RELEVANCE_THRESHOLD = 0.5
     }
 }
 

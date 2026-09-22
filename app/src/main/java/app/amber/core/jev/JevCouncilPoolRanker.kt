@@ -40,7 +40,11 @@ class JevCouncilPoolRanker(private val runtime: JevRuntime) : CouncilPoolRanker 
             modelId to model
         }
         if (candidates.size < 2) return null
-
+        val threshold = runtime.policy.modelRoutingMinSuitability
+        val scores = LinkedHashMap<String, Double>(candidates.size)
+        var mode: JevMode? = null
+        var model: String? = null
+        var latencyMs = 0L
         val ranked = ArrayList<Pair<Uuid, Double>>(candidates.size)
         candidates.chunked(JevLimits.MAX_QUESTIONS_PER_REQUEST).forEachIndexed { chunkIndex, chunk ->
             val state: JsonElement = buildJsonObject {
@@ -83,23 +87,39 @@ class JevCouncilPoolRanker(private val runtime: JevRuntime) : CouncilPoolRanker 
                 requiredScopes = setOf(JevDataScope.TASK_TEXT, JevDataScope.TOOL_METADATA),
                 cacheAnchor = anchor,
             ) ?: return null
-            val evaluated = outcome.evaluated
-            if (!outcome.applicable || evaluated == null) return null
+            val evaluated = outcome.evaluated ?: return null
+            if (outcome.stale) return null
+            mode = outcome.mode
+            evaluated.model?.let { model = it }
+            latencyMs += evaluated.latencyMs
             chunk.forEach { (modelId, _) ->
-                val answer = evaluated.answers[modelId.toString()] as? JevAnswer.Noul ?: return@forEach
-                if (answer.probability >= SUITABILITY_THRESHOLD) {
-                    ranked += modelId to answer.probability
+                (evaluated.answers[modelId.toString()] as? JevAnswer.Noul)?.let {
+                    scores[modelId.toString()] = it.probability
                 }
             }
+            // shadow：判分已收集供校准记录，不应用排序。
+            if (!outcome.applicable) return@forEachIndexed
+            chunk.forEach { (modelId, _) ->
+                scores[modelId.toString()]?.takeIf { it >= threshold }?.let { ranked += modelId to it }
+            }
         }
+        runtime.calibration.append(
+            JevCalibrationRecord(
+                timestamp = System.currentTimeMillis(),
+                purpose = JevPurpose.MODEL_ROUTING,
+                mode = mode ?: return null,
+                model = model,
+                latencyMs = latencyMs,
+                threshold = threshold,
+                scores = scores,
+                incumbentTop1 = candidates.first().first.toString(),
+                jevTop1 = scores.entries.filter { it.value >= threshold }.maxByOrNull { it.value }?.key,
+            ),
+        )
         if (ranked.size < 2) return null
         return ranked.sortedByDescending { it.second }.map { it.first }
     }
 
     private fun JsonObject.stringField(key: String): String? =
         (this[key] as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull?.takeIf { it.isNotBlank() }
-
-    companion object {
-        const val SUITABILITY_THRESHOLD = 0.3
-    }
 }

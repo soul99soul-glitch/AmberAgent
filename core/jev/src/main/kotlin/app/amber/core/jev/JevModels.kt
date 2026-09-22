@@ -126,7 +126,7 @@ sealed interface JevDecision {
 }
 
 /**
- * 初始实验参数（非供应商承诺）。实测后可调整并升级 policyVersion。
+ * 初始实验参数（非供应商承诺）。实测后可调整并升级 JevPolicy.CURRENT_POLICY_VERSION。
  */
 object JevLimits {
     const val ENDPOINT = "https://api.typesafe.ai/v1/systemone"

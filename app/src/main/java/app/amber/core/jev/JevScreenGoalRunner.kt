@@ -135,11 +135,11 @@ class JevScreenGoalRunner(
                         if (fresh == null || fresh.id != snapshot.id || fresh.packageName != packageName) {
                             return@withTimeoutOrNull finish("handback", "completion_snapshot_changed")
                         }
-                        return@withTimeoutOrNull if (verified >= 0.85) finish("completed")
+                        return@withTimeoutOrNull if (verified >= runtime.policy.screenDoneVerifiedThreshold) finish("completed")
                         else finish("handback", "done_not_verified")
                     }
                     val safe = (evaluated.answers["safe_$choice"] as? JevAnswer.Noul)?.probability ?: 0.0
-                    if (safe < READ_ONLY_THRESHOLD) {
+                    if (safe < runtime.policy.screenReadOnlyThreshold) {
                         steps += buildJsonObject { put("choice", choice); put("safe_probability", safe); put("dispatched", false) }
                         return@withTimeoutOrNull finish("needs_user_action", "action_not_read_only")
                     }
@@ -205,9 +205,8 @@ class JevScreenGoalRunner(
     companion object {
         private val SCOPES = setOf(JevDataScope.SCREEN_CONTENT, JevDataScope.TASK_TEXT)
         // Noul is a classification score, not a security guarantee. Native identity checks,
-        // excluded actions and explicit tool approval remain mandatory. Real navigation probes
-        // score 0.84–0.88; 0.9 rejected even a labelled next-page button.
-        private const val READ_ONLY_THRESHOLD = 0.8
+        // excluded actions and explicit tool approval remain mandatory. Threshold values live
+        // in JevPolicy (screenReadOnlyThreshold tuned against real-device probes 0.84–0.88).
         private val BLOCKED = Regex("发送|发布|支付|付款|购买|下单|删除|清空|授权|允许|登录|登出|退出登录|密码|验证码|点赞|投币|收藏|关注|订阅|充值|转账|提交|确认|用户名|账号|邮箱|\\b(send|publish|post|submit|confirm|pay|buy|purchase|delete|authorize|allow|login|password|username|email|account|subscribe|follow|like|donate)\\b", RegexOption.IGNORE_CASE)
 
         private fun readableScreen(snapshot: ScreenSnapshot): String = snapshot.nodes

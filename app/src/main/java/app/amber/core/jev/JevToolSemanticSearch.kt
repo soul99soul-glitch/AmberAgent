@@ -36,6 +36,11 @@ class JevToolSemanticSearch(private val runtime: JevRuntime) : ToolSemanticSearc
         runKey: String?,
     ): SemanticToolRankResult? {
         if (candidates.isEmpty() || query.isBlank()) return null
+        val threshold = runtime.policy.toolDiscoveryMinRelevance
+        val scores = LinkedHashMap<String, Double>(candidates.size)
+        var mode: JevMode? = null
+        var model: String? = null
+        var latencyMs = 0L
         val ranked = ArrayList<Pair<String, Double>>(candidates.size)
         candidates.chunked(JevLimits.MAX_QUESTIONS_PER_REQUEST).forEachIndexed { chunkIndex, chunk ->
             val state: kotlinx.serialization.json.JsonElement = buildJsonObject {
@@ -75,21 +80,35 @@ class JevToolSemanticSearch(private val runtime: JevRuntime) : ToolSemanticSearc
                 requiredScopes = setOf(JevDataScope.TOOL_METADATA, JevDataScope.TASK_TEXT),
                 cacheAnchor = anchor,
             ) ?: return null
-            val evaluated = outcome.evaluated
-            if (!outcome.applicable || evaluated == null) return null
+            val evaluated = outcome.evaluated ?: return null
+            if (outcome.stale) return null
+            mode = outcome.mode
+            evaluated.model?.let { model = it }
+            latencyMs += evaluated.latencyMs
             chunk.forEach { candidate ->
-                val answer = evaluated.answers[candidate.name] as? JevAnswer.Noul ?: return@forEach
-                if (answer.probability >= RELEVANCE_THRESHOLD) {
-                    ranked += candidate.name to answer.probability
-                }
+                (evaluated.answers[candidate.name] as? JevAnswer.Noul)?.let { scores[candidate.name] = it.probability }
+            }
+            // shadow：判分已收集供校准记录，不应用排序。
+            if (!outcome.applicable) return@forEachIndexed
+            chunk.forEach { candidate ->
+                scores[candidate.name]?.takeIf { it >= threshold }?.let { ranked += candidate.name to it }
             }
         }
+        runtime.calibration.append(
+            JevCalibrationRecord(
+                timestamp = System.currentTimeMillis(),
+                purpose = JevPurpose.TOOL_DISCOVERY,
+                mode = mode ?: return null,
+                model = model,
+                latencyMs = latencyMs,
+                threshold = threshold,
+                scores = scores,
+                incumbentTop1 = candidates.first().name,
+                jevTop1 = scores.entries.filter { it.value >= threshold }.maxByOrNull { it.value }?.key,
+            ),
+        )
         if (ranked.isEmpty()) return null
         val selected = ranked.sortedByDescending { it.second }.take(limit.coerceAtLeast(1)).map { it.first }
         return SemanticToolRankResult(rankedNames = selected, applied = true)
-    }
-
-    companion object {
-        const val RELEVANCE_THRESHOLD = 0.5
     }
 }
