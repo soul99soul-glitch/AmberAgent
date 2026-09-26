@@ -252,15 +252,15 @@ class TerminalRuntime(
         jobs[id]?.snapshot() ?: error("Unknown terminal job: $id")
     }
 
-    suspend fun waitJob(id: String, timeoutMillis: Long = DEFAULT_WAIT_TIMEOUT_MS): TerminalJobSnapshot {
-        val deadline = System.currentTimeMillis() + timeoutMillis.coerceAtLeast(0L)
-        while (System.currentTimeMillis() < deadline) {
-            val snapshot = readJob(id)
-            if (!snapshot.running) return snapshot
-            delay(WAIT_POLL_MS)
+    suspend fun waitJob(id: String, timeoutMillis: Long = DEFAULT_WAIT_TIMEOUT_MS): TerminalJobSnapshot =
+        withContext(Dispatchers.IO) {
+            val job = jobs[id] ?: error("Unknown terminal job: $id")
+            val deadline = System.currentTimeMillis() + timeoutMillis.coerceAtLeast(0L)
+            while (System.currentTimeMillis() < deadline && job.status.get().running) {
+                delay(WAIT_POLL_MS)
+            }
+            (jobs[id] ?: error("Unknown terminal job: $id")).snapshot()
         }
-        return readJob(id)
-    }
 
     suspend fun stopJob(id: String, reason: String = "Command cancelled by user."): TerminalJobSnapshot =
         withContext(Dispatchers.IO) {

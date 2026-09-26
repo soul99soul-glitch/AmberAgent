@@ -720,7 +720,6 @@ private fun SafeGenerativeWidgetWebView(
         if (streaming) delay(STREAM_WIDGET_DEBOUNCE_MS)
         renderedHtml = nextHtml
     }
-    val latestHtml by rememberUpdatedState(renderedHtml)
     val maxHeight = (maxHeightOverrideDp ?: setting.maxWidgetHeightDp)
         .coerceIn(minHeightDp, 1600)
     val cacheKey = remember(widgetKey) {
@@ -730,6 +729,8 @@ private fun SafeGenerativeWidgetWebView(
     // mid-stream creates a brief window where LaunchedEffect skips the push because
     // activeWebView is momentarily null.
     var activeWebView by remember { mutableStateOf<WebView?>(null) }
+    // A new WebView gets its first payload only after its receiver page has loaded.
+    var readyWebView by remember { mutableStateOf<WebView?>(null) }
     val bridgeToken = remember { UUID.randomUUID().toString() }
     // Same reasoning as activeWebView above: cacheKey changes every chunk in early streaming
     // (because widgetCode.take(120) keeps growing), and resetting heightDp to minHeightDp
@@ -786,8 +787,8 @@ private fun SafeGenerativeWidgetWebView(
             fillContainer = fillContainer,
         )
     }
-    LaunchedEffect(renderedHtml, streaming, activeWebView) {
-        val target = activeWebView ?: return@LaunchedEffect
+    LaunchedEffect(renderedHtml, streaming, readyWebView) {
+        val target = readyWebView ?: return@LaunchedEffect
         val next = renderedHtml.takeIf { it.isNotBlank() } ?: return@LaunchedEffect
         target.pushWidgetHtml(next, finalize = !streaming)
     }
@@ -848,9 +849,10 @@ private fun SafeGenerativeWidgetWebView(
                         }
 
                         override fun onPageFinished(view: WebView?, url: String?) {
-                            view?.pushWidgetHtml(latestHtml, finalize = !streaming)
+                            if (view === activeWebView) readyWebView = view
                         }
                     }
+                    activeWebView = this
                     loadDataWithBaseURL(
                         "https://amberagent.widget.local/",
                         receiverHtml,
@@ -858,16 +860,12 @@ private fun SafeGenerativeWidgetWebView(
                         "utf-8",
                         null,
                     )
-                    activeWebView = this
                     onWebViewReady(this)
                 }
             },
             update = { webView ->
                 activeWebView = webView
                 onWebViewReady(webView)
-                webView.post {
-                    webView.pushWidgetHtml(latestHtml, finalize = !streaming)
-                }
             },
         )
     }
@@ -2145,7 +2143,7 @@ a{color:$primary;text-decoration:none;}
 <script>
 (function(){
   var root=document.getElementById('root');
-  var timer=null;
+  var reportFrame=null;
   // Content-aware height: streaming widget skeletons report huge
   // scrollHeight before any real content arrives (empty table rows already
   // carry the receiver CSS border+padding, placeholder divs carry template
@@ -2160,8 +2158,9 @@ a{color:$primary;text-decoration:none;}
     }
     return false;
   }
-  function isContentElement(el){
-    var tag = el.tagName;
+  function isContentElement(el, cs){
+    // Inline <svg> in an HTML document reports a lowercase tagName.
+    var tag = el.tagName.toUpperCase();
     if (tag === 'IMG' || tag === 'SVG' || tag === 'CANVAS' ||
         tag === 'VIDEO' || tag === 'IFRAME' || tag === 'HR') return true;
     if (tag === 'TD' || tag === 'TH') {
@@ -2169,7 +2168,6 @@ a{color:$primary;text-decoration:none;}
       return hasDirectText(el) || el.querySelector('img,svg,canvas,video') !== null;
     }
     if (hasDirectText(el)) return true;
-    var cs = window.getComputedStyle(el);
     if (cs.backgroundColor && cs.backgroundColor !== 'rgba(0, 0, 0, 0)' && cs.backgroundColor !== 'transparent') {
       return true;
     }
@@ -2183,11 +2181,10 @@ a{color:$primary;text-decoration:none;}
     while ((el = walker.nextNode())) {
       var cs = window.getComputedStyle(el);
       if (cs.display === 'none' || cs.visibility === 'hidden') continue;
+      if (!isContentElement(el, cs)) continue;
       var r = el.getBoundingClientRect();
       if (r.width <= 0 || r.height <= 0) continue;
-      if (isContentElement(el)) {
-        maxBottom = Math.max(maxBottom, r.bottom);
-      }
+      maxBottom = Math.max(maxBottom, r.bottom);
     }
     return Math.max(Math.ceil(maxBottom - rootRect.top), 1);
   }
@@ -2204,10 +2201,11 @@ a{color:$primary;text-decoration:none;}
     }catch(e){}
   };
   function report(){
-    if(timer) clearTimeout(timer);
-    timer=setTimeout(function(){
+    if(reportFrame !== null) return;
+    reportFrame=requestAnimationFrame(function(){
+      reportFrame=null;
       AmberWidget.resize(contentExtentBottom());
-    }, 16);
+    });
   }
   function clampSvgOverflow(){
     // 1) Force every SVG to clip to its viewBox.

@@ -90,6 +90,7 @@ fun createToolSearchTool(
         - If the needed tool is not currently visible, call `$TOOL_SEARCH_TOOL_NAME` with a concrete query. It exposes the best matching schemas for the next generation step.
         - `tools_list` is only a debug/catalog view. A hidden tool listed by `tools_list` is not callable until `$TOOL_SEARCH_TOOL_NAME` exposes it.
         - If you used `tools_list` to identify a tool name, call `$TOOL_SEARCH_TOOL_NAME` again with that exact tool name, then execute a name from `expanded_tools` on the next step.
+        - For app theme generation or refinement (主题、换肤), search for theme_pack tools, read theme_pack_status, then prepare via theme_pack_import. Use base_id=current and only changed fields for refinements; the user confirms 套用 to save a try-on.
         - Resident tools currently stay visible without search: $residentCount core tools plus discovered tools.
         """.trimIndent()
     },
@@ -362,6 +363,9 @@ class ToolSearchIndex(
         }
         if (name.startsWith("provider_") || name == "settings_set_model_slot") {
             addAll(listOf("配置提供商", "提供商", "provider", "API Key", "api key", "密钥", "默认模型", "模型槽位", "刷新模型列表", "模型列表", "provider 配置", "模型设置"))
+        }
+        if (name.startsWith("theme_pack_")) {
+            addAll(listOf("主题", "生成主题", "修改主题", "微调主题", "换肤", "配色", "外观", "试穿", "theme", "appearance", "skin"))
         }
     }
 

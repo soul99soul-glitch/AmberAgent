@@ -1,5 +1,8 @@
 package app.amber.feature.ui.pages.sessionhome
 
+import android.content.pm.ActivityInfo
+import android.os.Build
+import androidx.activity.compose.LocalActivity
 import androidx.compose.ui.platform.LocalDensity
 
 import app.amber.feature.ui.utils.amberTraceMeasure
@@ -20,7 +23,6 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.indication
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -55,9 +57,12 @@ import androidx.compose.material3.SwipeToDismissBoxState
 import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -66,12 +71,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.dropShadow
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.compositeOver
-import androidx.compose.ui.graphics.shadow.Shadow
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -105,6 +108,11 @@ import app.amber.feature.modelcouncil.CouncilRoomOpResult
 import app.amber.feature.modelcouncil.toCouncilParticipant
 import app.amber.feature.ui.components.ui.UIAvatar
 import app.amber.feature.ui.components.ds.amberCanvas
+import app.amber.feature.ui.components.ds.AmberDepthStyle
+import app.amber.feature.ui.components.ds.LocalAmberHdrPress
+import app.amber.feature.ui.components.ds.amberPressHighlight
+import app.amber.feature.ui.components.ds.amberRim
+import app.amber.feature.ui.components.ds.amberShadow
 import app.amber.feature.ui.context.LocalNavController
 import app.amber.feature.ui.context.LocalSettings
 import app.amber.feature.ui.context.LocalToaster
@@ -122,7 +130,6 @@ import kotlin.uuid.Uuid
 import kotlinx.coroutines.launch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.ripple
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.ui.res.painterResource
 import androidx.paging.LoadState
@@ -148,6 +155,7 @@ import dev.chrisbanes.haze.hazeSource
 import dev.chrisbanes.haze.rememberHazeState
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import org.koin.androidx.compose.koinViewModel
+import org.koin.compose.getKoin
 import org.koin.compose.koinInject
 import kotlinx.coroutines.CancellationException
 
@@ -185,7 +193,6 @@ fun SessionHomePage() {
     val lastConversationId = rememberSharedPreferenceString(LAST_CONVERSATION_ID_PREF).value
     val listState = rememberLazyListState()
     val hazeState = rememberHazeState()
-    var showResumePicker by rememberSaveable { mutableStateOf(false) }
     val hasTopOverflow by remember {
         derivedStateOf { listState.canScrollBackward }
     }
@@ -203,6 +210,44 @@ fun SessionHomePage() {
     val scope = rememberCoroutineScope()
     val fabShape = CircleShape
     val fabInteractionSource = remember { MutableInteractionSource() }
+    val fabFill = remember(tokens.accent) {
+        val hsv = FloatArray(3)
+        android.graphics.Color.colorToHSV(tokens.accent.toArgb(), hsv)
+        Brush.verticalGradient(
+            listOf(
+                Color.hsv(hsv[0], hsv[1], (hsv[2] + 0.035f).coerceAtMost(1f)),
+                Color.hsv(hsv[0], hsv[1], (hsv[2] - 0.025f).coerceAtLeast(0f)),
+            ),
+        )
+    }
+    val activity = LocalActivity.current
+    val window = activity?.window
+    val display = activity?.display
+    val hdrAvailable = Build.VERSION.SDK_INT >= 34 && display?.isHdr == true &&
+        display.isHdrSdrRatioAvailable
+    var hdrPressCount by remember { mutableIntStateOf(0) }
+    val onHdrPress = remember { { pressed: Boolean -> hdrPressCount += if (pressed) 1 else -1 } }
+    val previousHeadroom = remember(window, hdrAvailable) {
+        if (hdrAvailable && Build.VERSION.SDK_INT >= 35) window?.desiredHdrHeadroom ?: 0f else 0f
+    }
+    // 首页可见期间常驻 HDR 色彩模式；按压只改变 headroom，避免逐次切模式闪屏。
+    DisposableEffect(window, hdrAvailable) {
+        if (hdrAvailable && window != null) {
+            val previousColorMode = window.colorMode
+            window.colorMode = ActivityInfo.COLOR_MODE_HDR
+            onDispose {
+                if (Build.VERSION.SDK_INT >= 35) window.setDesiredHdrHeadroom(previousHeadroom)
+                window.colorMode = previousColorMode
+            }
+        } else {
+            onDispose { }
+        }
+    }
+    LaunchedEffect(window, hdrAvailable, hdrPressCount) {
+        if (hdrAvailable && Build.VERSION.SDK_INT >= 35) {
+            window?.setDesiredHdrHeadroom(if (hdrPressCount > 0) 1.8f else 1.0f)
+        }
+    }
     val operationError = stringResource(R.string.error_title_operation)
 
     LaunchedEffect(homeSearchQuery, untitledConversationLabel) {
@@ -211,7 +256,7 @@ fun SessionHomePage() {
 
     // Council Room: 首页没有「当前会话」，每次点议会现开一个新会话承载（council_state
     // 以 UPDATE 写在会话行上，行不存在房间会丢，故必须先落库；开房失败则回收占位会话）。
-    val councilRoomManager: CouncilRoomManager = koinInject()
+    val koin = getKoin()
     val settingsStore: SettingsAggregator = koinInject()
     val conversationRepo: ConversationRepository = koinInject()
     val restoreWriteGate: SyncRestoreWriteGate = koinInject()
@@ -226,6 +271,7 @@ fun SessionHomePage() {
             ).updateCurrentMessages(councilSettings.presetMessages)
             var placeholderInserted = false
             try {
+                val councilRoomManager = koin.get<CouncilRoomManager>()
                 restoreWriteGate.withCurrentWriterOrCancel {
                     conversationRepo.insertConversation(councilConversation)
                 }
@@ -303,6 +349,7 @@ fun SessionHomePage() {
         }
     }
 
+    CompositionLocalProvider(LocalAmberHdrPress provides if (hdrAvailable) onHdrPress else null) {
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -380,10 +427,8 @@ fun SessionHomePage() {
 
                 item(key = "home_features") {
                     HomeFeatureRail(
-                        resumeCandidate = continueCandidates.firstOrNull(),
-                        resumeCount = continueCandidates.size,
+                        resumeCandidate = continueCandidates.maxByOrNull { it.lastUpdatedAt },
                         onOpenResume = openContinueCandidate,
-                        onChooseResume = { showResumePicker = true },
                         onDeepRead = { navController.navigate(Screen.TodayBoard) },
                         onMiniApps = { navController.navigate(Screen.MiniAppList) },
                         onNovel = { navController.navigate(Screen.NovelProjects) },
@@ -515,17 +560,10 @@ fun SessionHomePage() {
             Box(
                 modifier = Modifier
                     .height(40.dp)
-                    .dropShadow(
-                        shape = fabShape,
-                        shadow = Shadow(
-                            radius = 12.dp,
-                            color = Color.Black.copy(alpha = if (tokens.isDark) 0.24f else 0.14f),
-                            offset = DpOffset(x = 0.dp, y = 4.dp),
-                        ),
-                    )
-                    .clip(fabShape)
-                    .background(tokens.accent)
-                    .indication(fabInteractionSource, ripple(bounded = false))
+                    .amberPressHighlight(fabInteractionSource, fabShape, DpOffset(0.dp, 4.dp), hdrHighlight = true)
+                    .amberShadow(fabShape, AmberDepthStyle.Accent)
+                    .background(fabFill, fabShape)
+                    .amberRim(fabShape, AmberDepthStyle.Accent)
                     .padding(horizontal = 14.dp),
                 contentAlignment = Alignment.Center,
             ) {
@@ -551,16 +589,6 @@ fun SessionHomePage() {
             }
         }
     }
-
-    if (showResumePicker && continueCandidates.isNotEmpty()) {
-        ContinueCandidatesSheet(
-            candidates = continueCandidates,
-            onOpen = { candidate ->
-                showResumePicker = false
-                openContinueCandidate(candidate)
-            },
-            onDismiss = { showResumePicker = false },
-        )
     }
 }
 
@@ -622,6 +650,7 @@ internal fun HomeHeader(
     val searchInteraction = remember { MutableInteractionSource() }
     val settingsInteraction = remember { MutableInteractionSource() }
     val profileInteraction = remember { MutableInteractionSource() }
+    val searchShape = remember { androidx.compose.foundation.shape.RoundedCornerShape(16.dp) }
 
     // 终端光标：1.05s steps 闪烁（前半段不透明，后半段隐藏）
     val transition = rememberInfiniteTransition(label = "home-cursor")
@@ -704,14 +733,10 @@ internal fun HomeHeader(
                         modifier = Modifier
                             .width(58.dp)
                             .height(32.dp)
-                            .clip(androidx.compose.foundation.shape.RoundedCornerShape(16.dp))
-                            .background(tokens.surface2)
-                            .border(
-                                1.dp,
-                                tokens.line,
-                                androidx.compose.foundation.shape.RoundedCornerShape(16.dp),
-                            )
-                            .indication(searchInteraction, ripple(bounded = false)),
+                            .amberPressHighlight(searchInteraction, searchShape, DpOffset(0.dp, 6.dp), hdrHighlight = true)
+                            .amberShadow(searchShape, AmberDepthStyle.Chip)
+                            .background(tokens.surface2, searchShape)
+                            .amberRim(searchShape, AmberDepthStyle.Chip),
                         contentAlignment = Alignment.Center,
                     ) {
                         Row(
@@ -750,10 +775,10 @@ internal fun HomeHeader(
                 Box(
                     modifier = Modifier
                         .size(32.dp)
-                        .clip(CircleShape)
-                        .background(tokens.surface2)
-                        .border(1.dp, tokens.line, CircleShape)
-                        .indication(settingsInteraction, ripple(bounded = false)),
+                        .amberPressHighlight(settingsInteraction, CircleShape, DpOffset(6.dp, 6.dp), hdrHighlight = true)
+                        .amberShadow(CircleShape, AmberDepthStyle.Chip)
+                        .background(tokens.surface2, CircleShape)
+                        .amberRim(CircleShape, AmberDepthStyle.Chip),
                     contentAlignment = Alignment.Center,
                 ) {
                     Icon(
@@ -781,8 +806,8 @@ internal fun HomeHeader(
                 Box(
                     modifier = Modifier
                         .size(32.dp)
-                        .clip(CircleShape)
-                        .indication(profileInteraction, ripple(bounded = false)),
+                        .amberPressHighlight(profileInteraction, CircleShape, DpOffset(6.dp, 6.dp), hdrHighlight = true)
+                        .amberRim(CircleShape, AmberDepthStyle.Chip),
                     contentAlignment = Alignment.Center,
                 ) {
                     UIAvatar(
@@ -1164,13 +1189,11 @@ private fun HomeConversationHeader() {
     }
 }
 
-/** 继续卡片 + 功能入口：真实数据驱动，空数据时只保留功能入口。 */
+/** 继续卡片 + 功能入口：真实数据驱动，空数据时只保留功能入口。「继续」只恢复展示中的最新候选。 */
 @Composable
 internal fun HomeFeatureRail(
     resumeCandidate: ContinueCandidate?,
-    resumeCount: Int = if (resumeCandidate == null) 0 else 1,
     onOpenResume: (ContinueCandidate) -> Unit,
-    onChooseResume: () -> Unit = {},
     onDeepRead: () -> Unit,
     onMiniApps: () -> Unit,
     onNovel: () -> Unit,
@@ -1178,7 +1201,6 @@ internal fun HomeFeatureRail(
     onCouncil: () -> Unit,
 ) {
     val tokens = LocalAmberTokens.current
-    val countBadgeSize = with(LocalDensity.current) { 16.dp * fontScale }
     val features = listOf(
         FeatureEntry(Lucide.BookOpenText, stringResource(R.string.session_home_feature_deep_read), onDeepRead),
         FeatureEntry(Lucide.Grid2x2, stringResource(R.string.session_home_feature_mini_apps), onMiniApps),
@@ -1188,26 +1210,29 @@ internal fun HomeFeatureRail(
     )
 
     val railShape = AmberContinuousShape(cornerRadius = 22.dp)
+    val resumeInteraction = remember { MutableInteractionSource() }
+    val resumeButtonInteraction = remember { MutableInteractionSource() }
+    val resumeIconShape = remember { androidx.compose.foundation.shape.RoundedCornerShape(12.dp) }
+    val resumeButtonShape = remember { androidx.compose.foundation.shape.RoundedCornerShape(18.dp) }
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 8.dp)
-            .shadow(
-                elevation = 7.dp,
-                shape = railShape,
-                ambientColor = tokens.ink.copy(alpha = 0.18f),
-                spotColor = tokens.ink.copy(alpha = 0.12f),
-            )
+            .amberShadow(railShape, AmberDepthStyle.Card)
             .clip(railShape)
             .background(tokens.surface)
-            .border(0.5.dp, tokens.line.copy(alpha = 0.72f), railShape),
+            .amberRim(railShape, AmberDepthStyle.Card),
     ) {
         resumeCandidate?.let { candidate ->
             val feature = continueFeatureSpec(candidate.sourceKind)
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clickable { onOpenResume(candidate) }
+                    .clickable(
+                        interactionSource = resumeInteraction,
+                        indication = null,
+                        onClick = { onOpenResume(candidate) },
+                    )
                     .padding(horizontal = 14.dp, vertical = 10.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -1215,8 +1240,14 @@ internal fun HomeFeatureRail(
                 Box(
                     modifier = Modifier
                         .size(36.dp)
-                        .clip(androidx.compose.foundation.shape.RoundedCornerShape(12.dp))
-                        .background(tokens.accent.copy(alpha = 0.12f)),
+                        .amberPressHighlight(
+                            resumeInteraction,
+                            resumeIconShape,
+                            pressOffset = DpOffset(14.dp, 10.dp),
+                            scaleOnPress = false,
+                        )
+                        .background(tokens.accent.copy(alpha = 0.12f), resumeIconShape)
+                        .amberRim(resumeIconShape, AmberDepthStyle.Chip, drawBottom = false),
                     contentAlignment = Alignment.Center,
                 ) {
                     Icon(
@@ -1247,11 +1278,14 @@ internal fun HomeFeatureRail(
                 }
                 Row(
                     modifier = Modifier
-                        .clip(androidx.compose.foundation.shape.RoundedCornerShape(18.dp))
-                        .background(tokens.accent.copy(alpha = 0.14f))
-                        .clickable {
-                            if (resumeCount > 1) onChooseResume() else onOpenResume(candidate)
-                        }
+                        .amberPressHighlight(resumeButtonInteraction, resumeButtonShape)
+                        .background(tokens.accent.copy(alpha = 0.14f), resumeButtonShape)
+                        .amberRim(resumeButtonShape, AmberDepthStyle.Chip, drawBottom = false)
+                        .clickable(
+                            interactionSource = resumeButtonInteraction,
+                            indication = null,
+                            onClick = { onOpenResume(candidate) },
+                        )
                         .padding(horizontal = 14.dp, vertical = 6.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(5.dp),
@@ -1263,24 +1297,6 @@ internal fun HomeFeatureRail(
                         fontWeight = FontWeight.SemiBold,
                         color = tokens.accent,
                     )
-                    if (resumeCount > 1) {
-                        Box(
-                            modifier = Modifier
-                                .size(countBadgeSize)
-                                .clip(CircleShape)
-                                .background(tokens.accent.copy(alpha = 0.16f)),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Text(
-                                text = resumeCount.toString(),
-                                fontSize = 9.sp,
-                                lineHeight = 10.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = tokens.accent,
-                                maxLines = 1,
-                            )
-                        }
-                    }
                 }
             }
             Box(
@@ -1299,11 +1315,17 @@ internal fun HomeFeatureRail(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             features.forEach { feature ->
+                val interaction = remember { MutableInteractionSource() }
+                val featureShape = remember { androidx.compose.foundation.shape.RoundedCornerShape(10.dp) }
                 Column(
                     modifier = Modifier
                         .weight(1f)
-                        .clip(androidx.compose.foundation.shape.RoundedCornerShape(10.dp))
-                        .clickable(onClick = feature.onClick)
+                        .amberPressHighlight(interaction, featureShape, scaleOnPress = false)
+                        .clickable(
+                            interactionSource = interaction,
+                            indication = null,
+                            onClick = feature.onClick,
+                        )
                         .heightIn(min = 48.dp)
                         .padding(vertical = 0.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
@@ -1323,82 +1345,6 @@ internal fun HomeFeatureRail(
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
-                }
-            }
-        }
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-internal fun ContinueCandidatesSheet(
-    candidates: List<ContinueCandidate>,
-    onOpen: (ContinueCandidate) -> Unit,
-    onDismiss: () -> Unit,
-) {
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    val tokens = LocalAmberTokens.current
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = sheetState,
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
-        ) {
-            Text(
-                text = stringResource(R.string.session_home_continue),
-                fontFamily = JetBrainsMonoFamily,
-                fontSize = 12.sp,
-                color = tokens.ink2,
-            )
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(max = 420.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp),
-            ) {
-                items(
-                    items = candidates,
-                    key = { candidate -> "${candidate.sourceKind.name}:${candidate.sourceId}" },
-                ) { candidate ->
-                    val feature = continueFeatureSpec(candidate.sourceKind)
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .heightIn(min = 52.dp)
-                            .clickable { onOpen(candidate) }
-                            .padding(horizontal = 8.dp, vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    ) {
-                        Icon(
-                            imageVector = feature.icon,
-                            contentDescription = null,
-                            modifier = Modifier.size(20.dp),
-                            tint = tokens.accent,
-                        )
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = feature.label,
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = tokens.ink,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                            Text(
-                                text = candidate.title,
-                                fontSize = 11.sp,
-                                lineHeight = 15.sp,
-                                color = tokens.ink2,
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        }
-                    }
                 }
             }
         }
@@ -1468,6 +1414,7 @@ private fun HomeSessionRow(
     val deleteLabel = stringResource(R.string.delete)
     val pinLabel = stringResource(R.string.history_page_pin)
     val unpinLabel = stringResource(R.string.history_page_unpin)
+    val rowInteraction = remember { MutableInteractionSource() }
     val dismissState = rememberSwipeToDismissBoxState(
         positionalThreshold = SwipeToDismissBoxDefaults.positionalThreshold,
         // 置顶是「动作后行仍保留」的方向：在 confirmValueChange 里执行动作并返回
@@ -1546,7 +1493,9 @@ private fun HomeSessionRow(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp)
-            .clip(rowShape),
+            .amberShadow(rowShape, AmberDepthStyle.Card, drawTop = isFirst, drawBottom = isLast)
+            .clip(rowShape)
+            .amberRim(rowShape, AmberDepthStyle.Card, drawTop = isFirst, drawBottom = isLast),
     ) {
             Column(
                 modifier = Modifier
@@ -1556,8 +1505,13 @@ private fun HomeSessionRow(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
+                        .amberPressHighlight(rowInteraction, rowShape, scaleOnPress = false)
                         .background(rowSurface)
-                        .clickable(onClick = onOpen)
+                        .clickable(
+                            interactionSource = rowInteraction,
+                            indication = null,
+                            onClick = onOpen,
+                        )
                         .padding(horizontal = 14.dp, vertical = 13.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {

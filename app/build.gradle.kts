@@ -93,6 +93,7 @@ plugins {
     alias(libs.plugins.ksp)
     alias(libs.plugins.google.services)
     alias(libs.plugins.firebase.crashlytics)
+    alias(libs.plugins.baselineprofile)
     // (Previously) org.mozilla.rust-android-gradle.rust-android — REMOVED for
     // AGP 9 incompatibility (see document/build.gradle.kts header). Native
     // builds for libmarkdown_parser.so + libregex_transformer.so are driven
@@ -241,6 +242,25 @@ android {
             )
             manifestPlaceholders["xiaomiXmsBuildTypeDebug"] = "true"
         }
+        // The plugin uses these release-derived variants on device; debug signing
+        // keeps them buildable without the distribution keystore.
+        // The plugin skips initWith(release) for build types that already exist.
+        create("benchmarkRelease") {
+            initWith(getByName("release"))
+            signingConfig = signingConfigs.getByName("debug")
+            (this as ExtensionAware).extensions.configure<CrashlyticsExtension>("firebaseCrashlytics") {
+                mappingFileUploadEnabled = false
+            }
+        }
+        create("nonMinifiedRelease") {
+            initWith(getByName("release"))
+            signingConfig = signingConfigs.getByName("debug")
+            isMinifyEnabled = false
+            isShrinkResources = false
+            (this as ExtensionAware).extensions.configure<CrashlyticsExtension>("firebaseCrashlytics") {
+                mappingFileUploadEnabled = false
+            }
+        }
     }
 
     compileOptions {
@@ -324,6 +344,10 @@ android {
             jniLibs.srcDirs("${layout.buildDirectory.get()}/rustJniLibs/android")
         }
     }
+}
+
+baselineProfile {
+    automaticGenerationDuringBuild = false
 }
 
 googleServicesPackageByVariant.forEach { (variant, packageName) ->
@@ -610,6 +634,7 @@ kotlin {
 }
 
 dependencies {
+    baselineProfile(project(":app:baselineprofile"))
     implementation(libs.androidx.core.ktx)
     implementation("androidx.documentfile:documentfile:1.1.0")
     implementation(libs.androidx.lifecycle.runtime.ktx)

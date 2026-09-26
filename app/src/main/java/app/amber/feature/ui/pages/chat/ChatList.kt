@@ -18,7 +18,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.unit.dp
-import dev.chrisbanes.haze.HazeState
 import kotlinx.coroutines.withTimeoutOrNull
 import app.amber.ai.ui.UIMessage
 import app.amber.core.context.ActiveCompactBoundary
@@ -161,7 +160,6 @@ internal fun ChatList(
     processingStatus: String? = null,
     previewMode: Boolean,
     settings: Settings,
-    hazeState: HazeState,
     errors: List<ChatError> = emptyList(),
     globalErrors: List<ChatError> = emptyList(),
     onDismissError: (Uuid) -> Unit = {},
@@ -203,7 +201,6 @@ internal fun ChatList(
                 innerPadding = innerPadding,
                 conversation = conversation,
                 settings = settings,
-                hazeState = hazeState,
                 onJumpToMessage = onJumpToMessage,
                 animatedVisibilityScope = this@AnimatedContent,
             )
@@ -222,7 +219,6 @@ internal fun ChatList(
                 loading = loading,
                 processingStatus = processingStatus,
                 settings = settings,
-                hazeState = hazeState,
                 errors = errors,
                 globalErrors = globalErrors,
                 onDismissError = onDismissError,

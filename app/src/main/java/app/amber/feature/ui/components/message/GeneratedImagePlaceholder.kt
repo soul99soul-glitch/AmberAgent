@@ -7,7 +7,7 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -16,6 +16,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.unit.dp
 import app.amber.feature.ui.components.ui.workspaceColors
@@ -61,45 +62,52 @@ fun GeneratedImagePlaceholder(
         color = workspace.paper,
         border = BorderStroke(1.dp, workspace.hairline),
     ) {
-        Canvas(
+        Spacer(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(20.dp),
-        ) {
-            val spacing = 14.dp.toPx()
-            val dotRadius = 1.6.dp.toPx()
-            // Count cells (not gridlines): `0 until cols` then center the
-            // packed grid inside the canvas so dots are equidistant from
-            // all edges regardless of aspect ratio. Using `0..cols` plus
-            // the centering math would push the last column off the right
-            // edge by half a spacing — visually negligible but mathematically
-            // wrong; switch to half-spacing offset for a clean fit.
-            val cols = (size.width / spacing).toInt().coerceAtLeast(1)
-            val rows = (size.height / spacing).toInt().coerceAtLeast(1)
-            val xOffset = (size.width - (cols - 1) * spacing) / 2f
-            val yOffset = (size.height - (rows - 1) * spacing) / 2f
-            val diagonalRange = (cols + rows).toFloat().coerceAtLeast(1f)
+                .padding(20.dp)
+                .drawWithCache {
+                    val spacing = 14.dp.toPx()
+                    val dotRadius = 1.6.dp.toPx()
+                    // Count cells (not gridlines): `0 until cols` then center the
+                    // packed grid inside the canvas so dots are equidistant from
+                    // all edges regardless of aspect ratio. Using `0..cols` plus
+                    // the centering math would push the last column off the right
+                    // edge by half a spacing — visually negligible but mathematically
+                    // wrong; switch to half-spacing offset for a clean fit.
+                    val cols = (size.width / spacing).toInt().coerceAtLeast(1)
+                    val rows = (size.height / spacing).toInt().coerceAtLeast(1)
+                    val xOffset = (size.width - (cols - 1) * spacing) / 2f
+                    val yOffset = (size.height - (rows - 1) * spacing) / 2f
+                    val diagonalRange = (cols + rows).toFloat().coerceAtLeast(1f)
+                    val dots = buildList {
+                        for (col in 0 until cols) {
+                            for (row in 0 until rows) {
+                                val x = xOffset + col * spacing
+                                val y = yOffset + row * spacing
+                                add(Offset(x, y) to (col + row).toFloat() / diagonalRange)
+                            }
+                        }
+                    }
 
-            for (col in 0 until cols) {
-                for (row in 0 until rows) {
-                    val x = xOffset + col * spacing
-                    val y = yOffset + row * spacing
-                    // Diagonal-traveling wave: dots near the upper-left peak
-                    // first as `phase` advances from 0 → 1.
-                    val diagonal = (col + row).toFloat() / diagonalRange
-                    val wavePhase = (phase + diagonal) % 1f
-                    // Triangle wave: 0 at peak, 1 at trough. Smoother than
-                    // sine here because the gradient feels more "sweeping".
-                    val distance = ((wavePhase - 0.5f).absoluteValue) * 2f
-                    val alpha = (0.12f + 0.52f * (1f - distance)).coerceIn(0.08f, 0.64f)
-                    drawCircle(
-                        color = workspace.muted.copy(alpha = alpha),
-                        radius = dotRadius,
-                        center = Offset(x, y),
-                    )
+                    onDrawBehind {
+                        dots.forEach { (center, diagonal) ->
+                            // Diagonal-traveling wave: dots near the upper-left peak
+                            // first as `phase` advances from 0 → 1.
+                            val wavePhase = (phase + diagonal) % 1f
+                            // Triangle wave: 0 at peak, 1 at trough. Smoother than
+                            // sine here because the gradient feels more "sweeping".
+                            val distance = ((wavePhase - 0.5f).absoluteValue) * 2f
+                            val alpha = (0.12f + 0.52f * (1f - distance)).coerceIn(0.08f, 0.64f)
+                            drawCircle(
+                                color = workspace.muted.copy(alpha = alpha),
+                                radius = dotRadius,
+                                center = center,
+                            )
+                        }
+                    }
                 }
-            }
-        }
+        )
     }
 }
 

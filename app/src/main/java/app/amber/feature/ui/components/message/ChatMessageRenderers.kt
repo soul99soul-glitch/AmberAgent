@@ -82,7 +82,9 @@ internal fun VirtualizedAssistantText(
                     contentAlignment = androidx.compose.ui.Alignment.TopStart,
                 ) {
                     val amberTokens = LocalAmberTokens.current
-                    val assistantBubbleShape = RoundedCornerShape(
+                    val assistantBubbleShape = app.amber.feature.ui.theme.LocalThemeDesign.current?.components?.bubbleRadius
+                        ?.let { RoundedCornerShape(it.toFloat().dp) }
+                        ?: RoundedCornerShape(
                         topStart = 14.dp,
                         topEnd = 14.dp,
                         bottomStart = 5.dp,

@@ -8,7 +8,6 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
-import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Arrangement
@@ -30,6 +29,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.animation.core.AnimationVector2D
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
@@ -138,14 +138,15 @@ fun ImagePreviewDialog(
         // Dismiss threshold scales with screen density; 25% of typical phone height.
         val dismissPx = with(density) { 200.dp.toPx() }
 
-        // Backdrop fades as the image is dragged — same trick Twitter / IG use.
-        val dragMagnitude = abs(translate.value.y)
-        val backdropAlpha = (1f - (dragMagnitude / (dismissPx * 1.6f))).coerceIn(0f, 1f)
-
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(Color.Black.copy(alpha = backdropAlpha))
+                .drawBehind {
+                    // Backdrop fades as the image is dragged — same trick Twitter / IG use.
+                    val dragMagnitude = abs(translate.value.y)
+                    val backdropAlpha = (1f - (dragMagnitude / (dismissPx * 1.6f))).coerceIn(0f, 1f)
+                    drawRect(Color.Black.copy(alpha = backdropAlpha))
+                }
                 .pointerInput(images) {
                     // Custom vertical-dominant gesture detector. We have to share
                     // the touch stream with the pager's horizontal-swipe + pinch-

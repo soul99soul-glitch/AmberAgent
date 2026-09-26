@@ -145,60 +145,19 @@ class HomeCompactLayoutTest {
     }
 
     @Test
-    fun resumeCountBadgeSharesThePillWithoutAddingHeight() {
-        var opened = 0
+    fun continuePillAlwaysResumesTheShownCandidate() {
         var resumed = 0
-        var count by mutableStateOf(1)
         content {
             HomeFeatureRail(
                 resumeCandidate = candidate(running = false),
-                resumeCount = count,
                 onOpenResume = { resumed++ },
-                onChooseResume = { opened++ },
                 onDeepRead = {}, onMiniApps = {}, onNovel = {}, onWebMount = {}, onCouncil = {},
             )
         }
         val label = context.getString(R.string.session_home_continue)
-        val initialHeight = compose.onRoot().fetchSemanticsNode().boundsInRoot.height
         compose.onNodeWithText(label).performClick()
         assertEquals(1, resumed)
-        assertEquals(0, opened)
-        compose.runOnIdle { count = 3 }
-        val continueText = compose.onNodeWithText(label, useUnmergedTree = true)
-        val countText = compose.onNodeWithText("3", useUnmergedTree = true)
-        assertEquals(initialHeight, compose.onRoot().fetchSemanticsNode().boundsInRoot.height, 0.5f)
-        assertEquals(
-            continueText.fetchSemanticsNode().boundsInRoot.center.y,
-            countText.fetchSemanticsNode().boundsInRoot.center.y,
-            0.5f,
-        )
-        compose.onNodeWithText("$label · 2").assertDoesNotExist()
-        compose.onNodeWithText(label).performClick()
-        assertEquals(1, opened)
-        assertEquals(1, resumed)
-    }
-
-    @Test
-    fun continueCandidatesSheetReturnsTheSelectedCandidate() {
-        var opened: ContinueCandidate? = null
-        val first = candidate(running = false, id = "candidate-one", title = "first candidate")
-        val second = candidate(running = false, id = "candidate-two", title = "second candidate")
-        compose.setContent {
-            CompositionLocalProvider(
-                LocalAmberTokens provides buildAmberTokens(AmberBase.LIGHT, Color(0xFFB8623A)),
-            ) {
-                MaterialTheme {
-                    ContinueCandidatesSheet(
-                        candidates = listOf(first, second),
-                        onOpen = { opened = it },
-                        onDismiss = {},
-                    )
-                }
-            }
-        }
-        compose.waitForIdle()
-        compose.onNodeWithText("second candidate", useUnmergedTree = true).performClick()
-        assertEquals(second.route, opened?.route)
+        compose.onNodeWithText("3").assertDoesNotExist()
     }
 
     @Test

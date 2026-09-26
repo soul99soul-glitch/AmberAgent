@@ -1,7 +1,10 @@
 package app.amber.feature.task
 
 import android.content.Context
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -20,9 +23,10 @@ import java.util.concurrent.ConcurrentHashMap
 class AgentTaskStore(
     context: Context,
     private val json: Json,
+    loadDispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) {
-    private val appFilesDir = context.filesDir
-    private val taskDir = File(context.filesDir, "amberagent/tasks").also { it.mkdirs() }
+    private lateinit var appFilesDir: File
+    private lateinit var taskDir: File
     private val recoveryManager = AgentTaskRecoveryManager()
     private val mutex = Mutex()
     private val tasks = ConcurrentHashMap<String, AgentTaskSnapshot>()
@@ -30,11 +34,16 @@ class AgentTaskStore(
     private val retryCallbacks = ConcurrentHashMap<String, suspend () -> Boolean>()
     private val _tasksFlow = MutableStateFlow<List<AgentTaskSnapshot>>(emptyList())
     val tasksFlow: StateFlow<List<AgentTaskSnapshot>> = _tasksFlow.asStateFlow()
-
-    init {
+    private val startupSnapshots = CoroutineScope(loadDispatcher).async {
+        appFilesDir = context.filesDir
+        taskDir = File(appFilesDir, "amberagent/tasks")
+        taskDir.mkdirs()
         loadSnapshots()
-        publish()
+        listSnapshots().also { _tasksFlow.value = it }
     }
+
+    /** Waits for disk recovery and returns the exact snapshot baseline from that load. */
+    suspend fun awaitReady(): List<AgentTaskSnapshot> = startupSnapshots.await()
 
     suspend fun register(
         snapshot: AgentTaskSnapshot,
@@ -46,23 +55,26 @@ class AgentTaskStore(
         snapshot: AgentTaskSnapshot,
         cancel: (suspend () -> Boolean)? = null,
         retry: (suspend () -> Boolean)? = null,
-    ): AgentTaskSnapshot = mutex.withLock {
-        // Install the durable snapshot before publishing it to in-memory consumers. A
-        // failed write must leave both the previous task and its callbacks untouched.
-        persist(snapshot)
-        tasks[snapshot.taskId] = snapshot
-        if (cancel != null) {
-            cancelCallbacks[snapshot.taskId] = cancel
-        } else if (!snapshot.cancelCapability) {
-            cancelCallbacks.remove(snapshot.taskId)
+    ): AgentTaskSnapshot {
+        awaitReady()
+        return mutex.withLock {
+            // Install the durable snapshot before publishing it to in-memory consumers. A
+            // failed write must leave both the previous task and its callbacks untouched.
+            persist(snapshot)
+            tasks[snapshot.taskId] = snapshot
+            if (cancel != null) {
+                cancelCallbacks[snapshot.taskId] = cancel
+            } else if (!snapshot.cancelCapability) {
+                cancelCallbacks.remove(snapshot.taskId)
+            }
+            if (retry != null) {
+                retryCallbacks[snapshot.taskId] = retry
+            } else if (!snapshot.retryPolicy.retryable) {
+                retryCallbacks.remove(snapshot.taskId)
+            }
+            publish()
+            snapshot
         }
-        if (retry != null) {
-            retryCallbacks[snapshot.taskId] = retry
-        } else if (!snapshot.retryPolicy.retryable) {
-            retryCallbacks.remove(snapshot.taskId)
-        }
-        publish()
-        snapshot
     }
 
     /**
@@ -88,50 +100,67 @@ class AgentTaskStore(
         outputRef: AgentTaskOutputRef? = null,
         lastHeartbeatMs: Long? = null,
         expectedSpec: JsonObject? = null,
-    ): AgentTaskSnapshot? = mutex.withLock {
-        val current = tasks[taskId] ?: return@withLock null
-        if (expectedSpec != null && expectedSpec != current.spec) return@withLock null
-        val next = current.copy(
-            status = status ?: current.status,
-            queueState = queueState ?: status?.toQueueState(current.type) ?: current.queueState,
-            summary = summary ?: current.summary,
-            error = if (clearError) error else error ?: current.error,
-            lastErrorCode = if (clearError || clearLastErrorCode) lastErrorCode else lastErrorCode ?: current.lastErrorCode,
-            outputPath = outputPath ?: current.outputPath,
-            outputOffset = outputOffset ?: current.outputOffset,
-            cancelCapability = cancelCapability ?: current.cancelCapability,
-            recoveryState = recoveryState ?: status?.toRecoveryState(current.type, current.retryPolicy) ?: current.recoveryState,
-            retryPolicy = retryPolicy ?: current.retryPolicy,
-            outputRef = outputRef ?: current.outputRef,
-            lastHeartbeatMs = lastHeartbeatMs ?: current.lastHeartbeatMs,
-            updatedAtMs = System.currentTimeMillis(),
-        )
-        // See upsert: persistence is the commit point, publication follows it.
-        persist(next)
-        tasks[taskId] = next
-        publish()
-        next
+    ): AgentTaskSnapshot? {
+        awaitReady()
+        return mutex.withLock {
+            val current = tasks[taskId] ?: return@withLock null
+            if (expectedSpec != null && expectedSpec != current.spec) return@withLock null
+            val next = current.copy(
+                status = status ?: current.status,
+                queueState = queueState ?: status?.toQueueState(current.type) ?: current.queueState,
+                summary = summary ?: current.summary,
+                error = if (clearError) error else error ?: current.error,
+                lastErrorCode = if (clearError || clearLastErrorCode) lastErrorCode else lastErrorCode ?: current.lastErrorCode,
+                outputPath = outputPath ?: current.outputPath,
+                outputOffset = outputOffset ?: current.outputOffset,
+                cancelCapability = cancelCapability ?: current.cancelCapability,
+                recoveryState = recoveryState ?: status?.toRecoveryState(current.type, current.retryPolicy) ?: current.recoveryState,
+                retryPolicy = retryPolicy ?: current.retryPolicy,
+                outputRef = outputRef ?: current.outputRef,
+                lastHeartbeatMs = lastHeartbeatMs ?: current.lastHeartbeatMs,
+                updatedAtMs = System.currentTimeMillis(),
+            )
+            // See upsert: persistence is the commit point, publication follows it.
+            persist(next)
+            tasks[taskId] = next
+            publish()
+            next
+        }
     }
 
-    suspend fun remove(taskId: String): Boolean = mutex.withLock {
-        val existed = tasks.containsKey(taskId)
-        deleteSnapshotFile(taskId)
-        val removed = tasks.remove(taskId) != null
-        cancelCallbacks.remove(taskId)
-        retryCallbacks.remove(taskId)
-        publish()
-        removed || existed
+    suspend fun remove(taskId: String): Boolean {
+        awaitReady()
+        return mutex.withLock {
+            val existed = tasks.containsKey(taskId)
+            deleteSnapshotFile(taskId)
+            val removed = tasks.remove(taskId) != null
+            cancelCallbacks.remove(taskId)
+            retryCallbacks.remove(taskId)
+            publish()
+            removed || existed
+        }
     }
 
-    fun list(type: String? = null, status: AgentTaskStatus? = null): List<AgentTaskSnapshot> =
-        tasks.values
-            .filter { type == null || it.type == type }
-            .filter { status == null || it.status == status }
-            .sortedWith(compareByDescending<AgentTaskSnapshot> { it.status.running }.thenByDescending { it.updatedAtMs })
+    suspend fun list(type: String? = null, status: AgentTaskStatus? = null): List<AgentTaskSnapshot> {
+        awaitReady()
+        return listSnapshots(type, status)
+    }
 
-    fun read(taskId: String): AgentTaskSnapshot? = tasks[taskId]
+    suspend fun read(taskId: String): AgentTaskSnapshot? {
+        awaitReady()
+        return tasks[taskId]
+    }
+
+    private fun listSnapshots(
+        type: String? = null,
+        status: AgentTaskStatus? = null,
+    ): List<AgentTaskSnapshot> = tasks.values
+        .filter { type == null || it.type == type }
+        .filter { status == null || it.status == status }
+        .sortedWith(compareByDescending<AgentTaskSnapshot> { it.status.running }.thenByDescending { it.updatedAtMs })
 
     suspend fun cancel(taskId: String): AgentTaskSnapshot = withContext(Dispatchers.IO) {
+        awaitReady()
         val current = tasks[taskId] ?: error("Unknown agent task: $taskId")
         if (!current.status.running) return@withContext current
         val callback = cancelCallbacks[taskId]
@@ -151,6 +180,7 @@ class AgentTaskStore(
     }
 
     suspend fun retry(taskId: String): AgentTaskSnapshot = withContext(Dispatchers.IO) {
+        awaitReady()
         val current = tasks[taskId] ?: error("Unknown agent task: $taskId")
         if (!current.retryPolicy.retryable) {
             return@withContext update(
@@ -198,33 +228,39 @@ class AgentTaskStore(
         } ?: current
     }
 
-    suspend fun cleanup(taskId: String, deletePrivateOutput: Boolean = false): Boolean = mutex.withLock {
-        val current = tasks[taskId] ?: return@withLock false
-        if (deletePrivateOutput) {
-            privateOutputFile(current)?.let { output ->
-                if (output.exists() && !output.delete() && output.exists()) {
-                    throw IOException("Failed to delete task output: ${output.absolutePath}")
+    suspend fun cleanup(taskId: String, deletePrivateOutput: Boolean = false): Boolean {
+        awaitReady()
+        return mutex.withLock {
+            val current = tasks[taskId] ?: return@withLock false
+            if (deletePrivateOutput) {
+                privateOutputFile(current)?.let { output ->
+                    if (output.exists() && !output.delete() && output.exists()) {
+                        throw IOException("Failed to delete task output: ${output.absolutePath}")
+                    }
                 }
             }
+            deleteSnapshotFile(taskId)
+            tasks.remove(taskId)
+            cancelCallbacks.remove(taskId)
+            retryCallbacks.remove(taskId)
+            publish()
+            true
         }
-        deleteSnapshotFile(taskId)
-        tasks.remove(taskId)
-        cancelCallbacks.remove(taskId)
-        retryCallbacks.remove(taskId)
-        publish()
-        true
     }
 
-    suspend fun reconcileOnStartup(): List<AgentTaskSnapshot> = mutex.withLock {
-        val now = System.currentTimeMillis()
-        val recovered = tasks.values.map { recoveryManager.recoverOnStartup(it, now) }
-        // Persist all recovered snapshots before exposing any of them to observers.
-        recovered.forEach(::persist)
-        recovered.forEach { snapshot ->
-            tasks[snapshot.taskId] = snapshot
+    suspend fun reconcileOnStartup(): List<AgentTaskSnapshot> {
+        awaitReady()
+        return mutex.withLock {
+            val now = System.currentTimeMillis()
+            val recovered = tasks.values.map { recoveryManager.recoverOnStartup(it, now) }
+            // Persist all recovered snapshots before exposing any of them to observers.
+            recovered.forEach(::persist)
+            recovered.forEach { snapshot ->
+                tasks[snapshot.taskId] = snapshot
+            }
+            publish()
+            recovered.sortedByDescending { it.updatedAtMs }
         }
-        publish()
-        recovered.sortedByDescending { it.updatedAtMs }
     }
 
     private fun loadSnapshots() {
@@ -287,7 +323,7 @@ class AgentTaskStore(
     }
 
     private fun publish() {
-        _tasksFlow.value = list()
+        _tasksFlow.value = listSnapshots()
     }
 }
 

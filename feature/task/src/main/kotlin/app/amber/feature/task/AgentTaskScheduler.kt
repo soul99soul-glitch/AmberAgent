@@ -77,12 +77,12 @@ class AgentTaskScheduler(
 
     suspend fun reconcileOnStartup(): List<AgentTaskSnapshot> = taskStore.reconcileOnStartup()
 
-    fun list(type: String? = null, status: AgentTaskStatus? = null): List<AgentTaskSnapshot> =
+    suspend fun list(type: String? = null, status: AgentTaskStatus? = null): List<AgentTaskSnapshot> =
         taskStore.list(type = type, status = status)
 
-    fun read(taskId: String): AgentTaskSnapshot? = taskStore.read(taskId)
+    suspend fun read(taskId: String): AgentTaskSnapshot? = taskStore.read(taskId)
 
-    fun status(): AgentRuntimeStatus {
+    suspend fun status(): AgentRuntimeStatus {
         val tasks = taskStore.list()
         return AgentRuntimeStatus(
             total = tasks.size,

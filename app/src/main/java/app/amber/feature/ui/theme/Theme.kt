@@ -21,7 +21,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.compositeOver
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -29,10 +31,14 @@ import androidx.compose.ui.unit.sp
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import kotlinx.serialization.Serializable
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import app.amber.core.settings.themeContrast
+import app.amber.core.settings.themeRgb
 import app.amber.feature.ui.hooks.rememberAmoledDarkMode
 import app.amber.feature.ui.hooks.rememberColorMode
 import app.amber.feature.ui.hooks.rememberUserSettingsState
 import app.amber.feature.ui.pages.chat.toChatTheme
+import org.koin.compose.koinInject
 
 private val ExtendLightColors = lightExtendColors()
 private val ExtendDarkColors = darkExtendColors()
@@ -153,10 +159,33 @@ fun AmberAgentTheme(
         ColorMode.DARK -> true
     }
     val amoledDarkMode by rememberAmoledDarkMode()
+    val settings by rememberUserSettingsState()
+    val themePackageManager = koinInject<ThemePackageManager>()
+    val tryOn by themePackageManager.tryOn.collectAsStateWithLifecycle()
+    // A prepared Agent candidate is rendered globally, but remains only in the manager's
+    // in-memory try-on. Settings/LocalSettings continue to expose the persisted value.
+    val displaySetting = tryOn?.candidate ?: settings.displaySetting
+    val themePack = displaySetting.themePack
+    val themeDesign = themePack?.design
+    val effectiveAmoledDarkMode =
+        darkTheme && amoledDarkMode && themeDesign?.dark == null
+    val explicitSystemBarBackground = themePack?.let { pack ->
+        if (effectiveAmoledDarkMode) {
+            AMOLED_DARK_BACKGROUND
+        } else {
+            val palette = if (darkTheme) themeDesign?.dark else themeDesign?.light
+            palette?.background?.let(::parseThemeColor)
+                ?: themePackPaperTokens(pack.paper, darkTheme)?.bg
+        }
+    }
+    val systemBarsHaveDarkBackground = explicitSystemBarBackground?.let { color ->
+        val rgb = color.toArgb() and 0xFFFFFF
+        themeContrast(rgb, 0xFFFFFF) > themeContrast(rgb, 0x000000)
+    } ?: darkTheme
 
     val colorScheme = if (darkTheme) NotionDarkScheme else NotionLightScheme
-    val colorSchemeConverted = remember(darkTheme, amoledDarkMode, colorScheme) {
-        if (darkTheme && amoledDarkMode) {
+    val colorSchemeConverted = remember(darkTheme, effectiveAmoledDarkMode, colorScheme) {
+        if (effectiveAmoledDarkMode) {
             colorScheme.copy(
                 background = AMOLED_DARK_BACKGROUND,
                 surface = Color(0xFF050505),
@@ -190,7 +219,7 @@ fun AmberAgentTheme(
                 // SystemBarStyle.auto() keys off system night mode and re-fires on
                 // insets/config updates — on ColorOS that races and restores white
                 // icons on a light app canvas. light()/dark() pin icon polarity.
-                val barStyle = if (darkTheme) {
+                val barStyle = if (systemBarsHaveDarkBackground) {
                     SystemBarStyle.dark(AndroidColor.TRANSPARENT)
                 } else {
                     SystemBarStyle.light(AndroidColor.TRANSPARENT, AndroidColor.TRANSPARENT)
@@ -201,8 +230,8 @@ fun AmberAgentTheme(
                 )
                 WindowCompat.getInsetsController(window, window.decorView).apply {
                     // true → dark icons (for light backgrounds)
-                    isAppearanceLightStatusBars = !darkTheme
-                    isAppearanceLightNavigationBars = !darkTheme
+                    isAppearanceLightStatusBars = !systemBarsHaveDarkBackground
+                    isAppearanceLightNavigationBars = !systemBarsHaveDarkBackground
                     systemBarsBehavior =
                         WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
                 }
@@ -210,34 +239,38 @@ fun AmberAgentTheme(
         }
     }
 
-    val settings by rememberUserSettingsState()
-
     // Graphite redesign (D2/D3): base family × system dark-mode → one of 4 bases; the accent is
     // an independent user setting. chatTheme is derived from the new tokens via the compat adapter
     // so existing LocalChatTheme consumers work.
     val amberBase = when {
-        settings.displaySetting.amberBaseFamily == "SAGE" && darkTheme -> AmberBase.SAGE_DARK
-        settings.displaySetting.amberBaseFamily == "SAGE" -> AmberBase.SAGE
+        displaySetting.amberBaseFamily == "SAGE" && darkTheme -> AmberBase.SAGE_DARK
+        displaySetting.amberBaseFamily == "SAGE" -> AmberBase.SAGE
         darkTheme -> AmberBase.DARK
         else -> AmberBase.LIGHT
     }
-    val amberAccent = parseAccent(settings.displaySetting.accentColor)
-    val amberTokens = remember(amberBase, amberAccent, amoledDarkMode, darkTheme) {
-        val tokens = buildAmberTokens(amberBase, amberAccent)
-        if (amoledDarkMode && darkTheme) tokens.copy(
+    val themeBaseTokens = remember(themePack?.paper, amberBase, darkTheme) {
+        themePack?.let { themePackPaperTokens(it.paper, darkTheme) } ?: baseTokens(amberBase)
+    }
+    val amberAccent = themePack?.accentHex?.let(::parseThemeColor)
+        ?: parseAccent(displaySetting.accentColor)
+    val amberTokens = remember(themeBaseTokens, amberAccent, effectiveAmoledDarkMode, darkTheme, themeDesign, themePack?.inkHex) {
+        val tokens = buildAmberTokens(themeBaseTokens, amberAccent, themeDesign)
+        val documentInk = themePack?.inkHex?.let(::parseThemeColor)
+        val withDocumentInk = if (documentInk != null) tokens.copy(accentInk = documentInk) else tokens
+        if (effectiveAmoledDarkMode) withDocumentInk.copy(
             bg = AMOLED_DARK_BACKGROUND,
             surface = Color(0xFF050505),
             surface2 = Color(0xFF101010),
             raised = Color(0xFF141414),
             codeBg = Color(0xFF101010),
-        ) else tokens
+        ) else withDocumentInk
     }
     val chatTheme = remember(amberTokens) { amberTokens.toChatTheme() }
 
-    val themedColorScheme = remember(colorSchemeConverted, chatTheme, amoledDarkMode, darkTheme) {
+    val themedColorScheme = remember(colorSchemeConverted, chatTheme, effectiveAmoledDarkMode, darkTheme) {
         run {
             // AmoledDark 时保留纯黑 bg/surface（省电），其他主题 token 仍跟 chatTheme
-            val useAmoledBlack = amoledDarkMode && darkTheme
+            val useAmoledBlack = effectiveAmoledDarkMode
             colorSchemeConverted.copy(
                 background = if (useAmoledBlack) colorSchemeConverted.background else chatTheme.bg,
                 onBackground = chatTheme.ink,
@@ -298,10 +331,12 @@ fun AmberAgentTheme(
 
     CompositionLocalProvider(
         LocalDarkMode provides darkTheme,
-        LocalAmoledDarkMode provides (darkTheme && amoledDarkMode),
+        LocalAmoledDarkMode provides effectiveAmoledDarkMode,
         LocalExtendColors provides extendColors,
         LocalOverscrollFactory provides null,
         LocalAmberTokens provides amberTokens,
+        LocalThemeDesign provides themeDesign,
+        LocalThemeCanvasStyle provides themePack?.canvasStyle,
         LocalAmberType provides defaultAmberTextStyles(),
         app.amber.feature.ui.pages.chat.LocalChatTheme provides chatTheme,
         // Bug fix: M3 LocalContentColor 默认 Color.Black. 没有 Surface 显式 provide 时
@@ -311,8 +346,8 @@ fun AmberAgentTheme(
     ) {
         MaterialTheme(
             colorScheme = themedColorScheme,
-            typography = AmberTypography,
-            shapes = AmberShapes,
+            typography = themeTypography(themePack?.chromeTypeface),
+            shapes = themeShapes(themeDesign),
             content = content,
         )
     }
@@ -328,4 +363,33 @@ private fun parseAccent(hex: String): Color = try {
     Color(android.graphics.Color.parseColor(if (hex.startsWith("#")) hex else "#$hex"))
 } catch (e: IllegalArgumentException) {
     Color(0xFFB8623A)
+}
+
+private fun parseThemeColor(hex: String): Color? = themeRgb(hex)?.let(::opaqueColor)
+
+private fun chromeFontFamily(typeface: String?): FontFamily? = when (typeface) {
+    null -> null
+    "system" -> FontFamily.Default
+    "rounded" -> HankenGrotesk
+    "serif" -> NotoSerifSC
+    "monospace" -> JetBrainsMonoFamily
+    else -> null
+}
+
+private fun themeTypography(typeface: String?): androidx.compose.material3.Typography {
+    val family = chromeFontFamily(typeface) ?: return AmberTypography
+    return AmberTypography.copy(
+        displayLarge = AmberTypography.displayLarge.copy(fontFamily = family),
+        displayMedium = AmberTypography.displayMedium.copy(fontFamily = family),
+        displaySmall = AmberTypography.displaySmall.copy(fontFamily = family),
+        headlineLarge = AmberTypography.headlineLarge.copy(fontFamily = family),
+        headlineMedium = AmberTypography.headlineMedium.copy(fontFamily = family),
+        headlineSmall = AmberTypography.headlineSmall.copy(fontFamily = family),
+        titleLarge = AmberTypography.titleLarge.copy(fontFamily = family),
+        titleMedium = AmberTypography.titleMedium.copy(fontFamily = family),
+        titleSmall = AmberTypography.titleSmall.copy(fontFamily = family),
+        labelLarge = AmberTypography.labelLarge.copy(fontFamily = family),
+        labelMedium = AmberTypography.labelMedium.copy(fontFamily = family),
+        labelSmall = AmberTypography.labelSmall.copy(fontFamily = family),
+    )
 }

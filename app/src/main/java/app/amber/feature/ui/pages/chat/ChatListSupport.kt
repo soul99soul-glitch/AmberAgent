@@ -154,6 +154,7 @@ internal fun rememberChatTimelinePlan(
     pendingMessageCount: Int,
 ): ChatTimelinePlan {
     val virtualItemCache = remember(conversation.id) { ChatVirtualItemCache() }
+    val planReuseCache = remember(conversation.id) { ChatTimelinePlanReuseCache() }
     val postSendState = remember(conversation.id, conversation.messageNodes, activeGeneration) {
         buildPostSendTimelineState(conversation, activeGeneration)
     }
@@ -178,7 +179,7 @@ internal fun rememberChatTimelinePlan(
             messageCount = conversation.messageNodes.size,
             cache = virtualItemCache,
         ) {
-            buildChatTimelinePlan(
+            planReuseCache.build(
                 conversation = conversation,
                 assistant = regexes,
                 showAssistantBubble = showAssistantBubble,
@@ -263,6 +264,82 @@ internal data class ChatTimelinePlan(
 
     /** Lazy index of a message's visual-bottom slice, for jump targets. */
     fun lazyIndexForMessage(messageIndex: Int): Int? = lazyIndexByMessageIndex[messageIndex]
+}
+
+private data class ChatTimelinePlanInputs(
+    val assistant: List<AssistantRegex>,
+    val showAssistantBubble: Boolean,
+    val timelineLoading: Boolean,
+    val hasHistoryLoadingItem: Boolean,
+    val pendingMessageCount: Int,
+    val postSendState: PostSendTimelineState,
+    val protectedStreamingNodeIds: Set<Uuid>,
+)
+
+/** entry 若新增依赖相邻节点或其它 composition 状态，必须同步加入 [ChatTimelinePlanInputs]。 */
+internal class ChatTimelinePlanReuseCache {
+    private var previousNodes: List<MessageNode>? = null
+    private var previousInputs: ChatTimelinePlanInputs? = null
+    private var previousPlan: ChatTimelinePlan? = null
+
+    fun build(
+        conversation: Conversation,
+        assistant: List<AssistantRegex>?,
+        showAssistantBubble: Boolean,
+        timelineLoading: Boolean,
+        hasHistoryLoadingItem: Boolean,
+        pendingMessageCount: Int,
+        postSendState: PostSendTimelineState,
+        virtualItemCache: ChatVirtualItemCache,
+        protectedStreamingNodeIds: Set<Uuid> = emptySet(),
+    ): ChatTimelinePlan {
+        val nodes = conversation.messageNodes
+        val inputs = ChatTimelinePlanInputs(
+            assistant = assistant.orEmpty().toList(),
+            showAssistantBubble = showAssistantBubble,
+            timelineLoading = timelineLoading,
+            hasHistoryLoadingItem = hasHistoryLoadingItem,
+            pendingMessageCount = pendingMessageCount,
+            postSendState = postSendState,
+            protectedStreamingNodeIds = protectedStreamingNodeIds.toSet(),
+        )
+        val priorNodes = previousNodes
+        val priorPlan = previousPlan
+        val prefixStart = if (
+            priorNodes != null && priorPlan != null && previousInputs == inputs &&
+            nodes.size == priorNodes.size && nodes.isNotEmpty() &&
+            (0 until nodes.lastIndex).all { index -> nodes[index] === priorNodes[index] }
+        ) {
+            if (nodes.size == 1) {
+                if (hasHistoryLoadingItem) priorPlan.entries.lastIndex else priorPlan.entries.size
+            } else {
+                priorPlan.lazyIndexForMessage(nodes.lastIndex - 1)
+            }
+        } else {
+            null
+        }
+        val reusedPrefixEntries = if (prefixStart != null && priorPlan != null) {
+            priorPlan.entries.subList(prefixStart, priorPlan.entries.size)
+        } else {
+            null
+        }
+        val plan = buildChatTimelinePlan(
+            conversation = conversation,
+            assistant = assistant,
+            showAssistantBubble = showAssistantBubble,
+            timelineLoading = timelineLoading,
+            hasHistoryLoadingItem = hasHistoryLoadingItem,
+            pendingMessageCount = pendingMessageCount,
+            postSendState = postSendState,
+            virtualItemCache = virtualItemCache,
+            protectedStreamingNodeIds = protectedStreamingNodeIds,
+            reusedPrefixEntries = reusedPrefixEntries,
+        )
+        previousNodes = nodes
+        previousInputs = inputs
+        previousPlan = plan
+        return plan
+    }
 }
 
 internal sealed interface ChatTimelineEntry {
@@ -474,6 +551,7 @@ internal fun buildChatTimelinePlan(
     postSendState: PostSendTimelineState,
     virtualItemCache: ChatVirtualItemCache,
     protectedStreamingNodeIds: Set<Uuid> = emptySet(),
+    reusedPrefixEntries: List<ChatTimelineEntry>? = null,
 ): ChatTimelinePlan {
     val regexes = assistant.orEmpty()
     // Built in reading order (oldest → newest, slices in reading order), then
@@ -481,55 +559,28 @@ internal fun buildChatTimelinePlan(
     // lazy index 0 must be the visual bottom (newest content). A flat reversal
     // flips both the inter-message order and the intra-message virtual slice
     // order in one step.
-    val readingOrderEntries = buildList {
-        if (hasHistoryLoadingItem) add(ChatTimelineEntry.HistoryLoading)
-        conversation.messageNodes.forEachIndexed { index, node ->
-            val keepAsSingleItem = node.id in protectedStreamingNodeIds ||
-                (index == conversation.messageNodes.lastIndex &&
-                    index == postSendState.hiddenAssistantMessageIndex)
-            if (index == postSendState.hiddenAssistantMessageIndex && !keepAsSingleItem) {
-                add(ChatTimelineEntry.PostSendHiddenAssistant(index, node))
-                return@forEachIndexed
+    val entries = if (reusedPrefixEntries == null) {
+        buildList {
+            if (hasHistoryLoadingItem) add(ChatTimelineEntry.HistoryLoading)
+            conversation.messageNodes.forEachIndexed { index, node ->
+                addTimelineMessageEntries(
+                    index, node, conversation.messageNodes.lastIndex, regexes,
+                    showAssistantBubble, timelineLoading, postSendState,
+                    virtualItemCache, protectedStreamingNodeIds,
+                )
             }
-            val isLastMessage = index == conversation.messageNodes.lastIndex
-            val isLoadingMessage = timelineLoading && isLastMessage
-            val virtualItems = virtualItemCache.getOrBuild(
-                node = node,
-                regexes = regexes,
-                showAssistantBubble = showAssistantBubble,
-                loading = isLoadingMessage,
-                lastMessage = isLastMessage,
-                forceSingleItem = keepAsSingleItem,
+            addTimelineTrailingEntries(postSendState, pendingMessageCount)
+        }.reversed()
+    } else {
+        buildList {
+            addTimelineMessageEntries(
+                conversation.messageNodes.lastIndex, conversation.messageNodes.last(),
+                conversation.messageNodes.lastIndex, regexes, showAssistantBubble,
+                timelineLoading, postSendState, virtualItemCache, protectedStreamingNodeIds,
             )
-            if (virtualItems == null) {
-                add(ChatTimelineEntry.Message(index, node))
-            } else {
-                virtualItems.forEachIndexed { virtualIndex, virtualItem ->
-                    add(
-                        ChatTimelineEntry.VirtualMessage(
-                            messageIndex = index,
-                            node = node,
-                            item = virtualItem,
-                            virtualIndex = virtualIndex,
-                            virtualCount = virtualItems.size,
-                        )
-                    )
-                }
-            }
-        }
-        // Reading order: directly below the newest message, above the
-        // post-send waiting / pending entries — reversed emission keeps that
-        // visual position (between the newest message group and Waiting).
-        add(ChatTimelineEntry.TailCompactMarkers)
-        if (postSendState.waitingForAssistantContent && postSendState.assistantMessageIndex == null) {
-            add(ChatTimelineEntry.PostSendWaitingAssistant)
-        }
-        repeat(pendingMessageCount) { index ->
-            add(ChatTimelineEntry.Pending(index))
-        }
-        add(ChatTimelineEntry.TimelineTail)
+            addTimelineTrailingEntries(postSendState, pendingMessageCount)
+        }.reversed() + reusedPrefixEntries
     }
-    val entries = readingOrderEntries.reversed()
     val lazyItemMessageIndexes = entries.map { entry -> entry.messageIndex }
     // First occurrence in reversed order = the message's reading-last slice
     // (visual bottom). scrollToItem under reverseLayout pins the target at the
@@ -550,6 +601,63 @@ internal fun buildChatTimelinePlan(
         postSendState = postSendState,
         timelineLoading = timelineLoading,
     )
+}
+
+private fun MutableList<ChatTimelineEntry>.addTimelineMessageEntries(
+    index: Int,
+    node: MessageNode,
+    lastIndex: Int,
+    regexes: List<AssistantRegex>,
+    showAssistantBubble: Boolean,
+    timelineLoading: Boolean,
+    postSendState: PostSendTimelineState,
+    virtualItemCache: ChatVirtualItemCache,
+    protectedStreamingNodeIds: Set<Uuid>,
+) {
+    val keepAsSingleItem = node.id in protectedStreamingNodeIds ||
+        (index == lastIndex && index == postSendState.hiddenAssistantMessageIndex)
+    if (index == postSendState.hiddenAssistantMessageIndex && !keepAsSingleItem) {
+        add(ChatTimelineEntry.PostSendHiddenAssistant(index, node))
+        return
+    }
+    val isLastMessage = index == lastIndex
+    val isLoadingMessage = timelineLoading && isLastMessage
+    val virtualItems = virtualItemCache.getOrBuild(
+        node = node,
+        regexes = regexes,
+        showAssistantBubble = showAssistantBubble,
+        loading = isLoadingMessage,
+        lastMessage = isLastMessage,
+        forceSingleItem = keepAsSingleItem,
+    )
+    if (virtualItems == null) {
+        add(ChatTimelineEntry.Message(index, node))
+    } else {
+        virtualItems.forEachIndexed { virtualIndex, virtualItem ->
+            add(
+                ChatTimelineEntry.VirtualMessage(
+                    messageIndex = index,
+                    node = node,
+                    item = virtualItem,
+                    virtualIndex = virtualIndex,
+                    virtualCount = virtualItems.size,
+                )
+            )
+        }
+    }
+}
+
+private fun MutableList<ChatTimelineEntry>.addTimelineTrailingEntries(
+    postSendState: PostSendTimelineState,
+    pendingMessageCount: Int,
+) {
+    // Reading order: below the newest message and above waiting / pending entries.
+    add(ChatTimelineEntry.TailCompactMarkers)
+    if (postSendState.waitingForAssistantContent && postSendState.assistantMessageIndex == null) {
+        add(ChatTimelineEntry.PostSendWaitingAssistant)
+    }
+    repeat(pendingMessageCount) { index -> add(ChatTimelineEntry.Pending(index)) }
+    add(ChatTimelineEntry.TimelineTail)
 }
 
 private inline fun measureChatTimelinePlan(

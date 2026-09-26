@@ -17,6 +17,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.emitAll
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.delay
 import java.io.File
 import kotlin.uuid.Uuid
@@ -91,16 +93,10 @@ class SubAgentDockState(
     private val persistedStatuses = mutableMapOf<SubAgentDockRunKey, SubAgentRunStatus>()
     private val persistedStatusJobs = mutableMapOf<SubAgentDockRunKey, Job>()
     private val persistedStatusResolved = mutableSetOf<SubAgentDockRunKey>()
-    // StateFlow conflates. Capture the already-loaded task-store baseline synchronously so a
-    // generation registered after this singleton exists still qualifies for the dock even when
-    // its register → terminal transition completes before the collector's first reduction.
-    private val startupBaseline = agentTaskStore.tasksFlow.value
-        .filter { it.type == SUBAGENT_TASK_TYPE }
-        .map { it.toDockRunKey() to it.status.keepsDockObserved }
-    private val startupRunKeys = startupBaseline.mapTo(mutableSetOf()) { it.first }
-    private val processRunKeys = startupBaseline
-        .filter { it.second }
-        .mapTo(mutableSetOf()) { it.first }
+    // StateFlow conflates. Capture the disk-loaded baseline before collecting task updates so a
+    // generation registered after recovery still qualifies if it reaches terminal state first.
+    private val startupRunKeys = mutableSetOf<SubAgentDockRunKey>()
+    private val processRunKeys = mutableSetOf<SubAgentDockRunKey>()
     private var taskSnapshots: List<AgentTaskSnapshot> = emptyList()
     private var dockEnabled: Boolean = settingsStore.settingsFlow.value.agentRuntime.subAgent.dockEnabled
     private var autoHideAfterMs: Long = settingsStore.settingsFlow.value.agentRuntime.subAgent.dockAutoHideAfterMs
@@ -121,6 +117,12 @@ class SubAgentDockState(
             }
         }
         appScope.launch {
+            val startupBaseline = agentTaskStore.awaitReady()
+                .filter { it.type == SUBAGENT_TASK_TYPE }
+            startupRunKeys += startupBaseline.map { it.toDockRunKey() }
+            processRunKeys += startupBaseline
+                .filter { it.status.keepsDockObserved }
+                .map { it.toDockRunKey() }
             agentTaskStore.tasksFlow.collect { snapshots ->
                 taskSnapshots = snapshots.filter { it.type == SUBAGENT_TASK_TYPE }
                 markProcessRunKeys()
@@ -162,13 +164,17 @@ class SubAgentDockState(
      * Cold details stream for the explicitly opened task sheet. The compact dock never collects
      * this path, so live parts and bounded transcript reads stay out of the global metadata rail.
      */
-    fun detailsFlow(key: SubAgentDockRunKey, runRoot: File): Flow<SubAgentDockDetails> =
-        subAgentDockDetailsFlow(
-            agentTaskStore = agentTaskStore,
-            subAgentManager = subAgentManager,
-            key = key,
-            runRoot = runRoot,
+    fun detailsFlow(key: SubAgentDockRunKey, runRoot: File): Flow<SubAgentDockDetails> = flow {
+        agentTaskStore.awaitReady()
+        emitAll(
+            subAgentDockDetailsFlow(
+                agentTaskStore = agentTaskStore,
+                subAgentManager = subAgentManager,
+                key = key,
+                runRoot = runRoot,
+            )
         )
+    }
 
     private fun reconcileRunCollectors() {
         val activeSnapshots = taskSnapshots.filter { it.status.keepsDockObserved }

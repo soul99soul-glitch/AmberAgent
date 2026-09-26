@@ -1,7 +1,10 @@
 package app.amber.feature.task
 
 import android.content.ContextWrapper
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.yield
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
@@ -19,6 +22,8 @@ import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 import java.io.File
 import java.io.IOException
+import java.util.ArrayDeque
+import kotlin.coroutines.CoroutineContext
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
@@ -59,14 +64,72 @@ class AgentTaskStoreTest {
             recoveryState = AgentTaskRecoveryState.ACTIVE,
             retryPolicy = AgentTaskRetryPolicy(),
         )
-        store(root).register(running)
+        val taskStore = store(root)
+        taskStore.register(running)
 
-        val recovered = store(root).read(running.taskId)!!
+        val recoveredStore = store(root)
+        val recovered = recoveredStore.read(running.taskId)!!
 
         assertEquals(AgentTaskStatus.INTERRUPTED, recovered.status)
         assertEquals(AgentTaskQueueState.TERMINAL, recovered.queueState)
         assertEquals("interrupted_by_restart", recovered.lastErrorCode)
         assertEquals(recovered, readSnapshot(root, running.taskId))
+
+        val updated = recoveredStore.update(running.taskId, summary = "recovered and updated")!!
+        assertEquals("recovered and updated", recoveredStore.read(running.taskId)?.summary)
+        val reloaded = store(root).read(running.taskId)!!
+        assertEquals(updated.summary, reloaded.summary)
+        assertEquals(updated.status, reloaded.status)
+    }
+
+    @Test
+    fun `reads and writes wait for asynchronous startup recovery`() = runBlocking {
+        val root = tempFolder.newFolder("files")
+        val running = snapshot(
+            status = AgentTaskStatus.RUNNING,
+            queueState = AgentTaskQueueState.ACTIVE,
+            recoveryState = AgentTaskRecoveryState.ACTIVE,
+            retryPolicy = AgentTaskRetryPolicy(),
+        )
+        store(root).register(running)
+
+        val readDispatcher = QueuedDispatcher()
+        val readStore = AgentTaskStore(TestContext(root), json, readDispatcher)
+        val startupSnapshots = async { readStore.awaitReady() }
+        val pendingRead = async { readStore.read(running.taskId) }
+        val pendingList = async { readStore.list() }
+        yield()
+
+        assertTrue(readStore.tasksFlow.value.isEmpty())
+        assertFalse(startupSnapshots.isCompleted)
+        assertFalse(pendingRead.isCompleted)
+        assertFalse(pendingList.isCompleted)
+
+        readDispatcher.runAll()
+
+        val baseline = startupSnapshots.await().single()
+        assertEquals(AgentTaskStatus.INTERRUPTED, baseline.status)
+        assertEquals(baseline, pendingRead.await())
+        assertEquals(listOf(baseline), pendingList.await())
+        assertEquals(listOf(baseline), readStore.tasksFlow.value)
+
+        readStore.update(running.taskId, summary = "after startup baseline")
+        assertEquals(listOf(baseline), readStore.awaitReady())
+
+        val writeDispatcher = QueuedDispatcher()
+        val writeStore = AgentTaskStore(TestContext(root), json, writeDispatcher)
+        val pendingWrite = async {
+            writeStore.update(running.taskId, summary = "written after recovery")
+        }
+        assertFalse(pendingWrite.isCompleted)
+
+        writeDispatcher.runAll()
+
+        val updated = pendingWrite.await()!!
+        val reloaded = store(root).read(running.taskId)!!
+        assertEquals("written after recovery", updated.summary)
+        assertEquals(updated.summary, reloaded.summary)
+        assertEquals(AgentTaskStatus.INTERRUPTED, reloaded.status)
     }
 
     @Test
@@ -139,6 +202,7 @@ class AgentTaskStoreTest {
     fun `failed register does not expose a task that was never saved`() = runBlocking {
         val root = tempFolder.newFolder("files")
         val store = store(root)
+        store.awaitReady()
         val taskDir = File(root, "amberagent/tasks")
         assertTrue(taskDir.delete())
         assertTrue(taskDir.createNewFile())
@@ -239,5 +303,20 @@ class AgentTaskStoreTest {
         private val root = filesDir
 
         override fun getFilesDir(): File = root
+    }
+
+    private class QueuedDispatcher : CoroutineDispatcher() {
+        private val queued = ArrayDeque<Runnable>()
+
+        override fun dispatch(context: CoroutineContext, block: Runnable) {
+            queued.addLast(block)
+        }
+
+        fun runAll() {
+            while (true) {
+                val next = if (queued.isEmpty()) null else queued.removeFirst()
+                next?.run() ?: return
+            }
+        }
     }
 }

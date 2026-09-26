@@ -1,7 +1,6 @@
 package app.amber.feature.ui.pages.setting
 
 import android.content.Intent
-import android.graphics.Color as AndroidColor
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -16,9 +15,11 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.draw.clip
-import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -28,6 +29,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -37,26 +39,29 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.core.content.FileProvider
 import app.amber.agent.R
 import app.amber.core.settings.DisplaySetting
-import app.amber.core.utils.JsonInstant
+import app.amber.core.utils.navigateToChatPage
 import app.amber.feature.ui.components.ui.workspaceColors
 import app.amber.feature.ui.components.ui.WorkspaceStatusPill
 import app.amber.feature.ui.components.ui.WorkspaceTone
+import app.amber.feature.ui.context.LocalNavController
 import app.amber.feature.ui.context.LocalToaster
 import app.amber.feature.ui.theme.ThemePackage
 import app.amber.feature.ui.theme.ThemePackageApplyResult
-import app.amber.feature.ui.theme.ThemePackageExporter
 import app.amber.feature.ui.theme.ThemePackageImportResult
 import app.amber.feature.ui.theme.ThemePackageManager
-import app.amber.feature.ui.theme.AmberBase
-import app.amber.feature.ui.theme.buildAmberTokens
+import app.amber.feature.ui.theme.ThemePackTransfer
+import app.amber.feature.ui.theme.LocalAmberTokens
 import app.amber.feature.ui.theme.SIT_TERRACOTTA_ACCENT_HEX
 import com.dokar.sonner.ToastType
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.koin.compose.koinInject
+import java.io.File
 
 /**
  * P8-09 — 主题设置区接入：主题库区块（导出当前主题 / 导入主题包 + preview /
@@ -72,9 +77,10 @@ fun ThemeLibrarySection(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val toaster = LocalToaster.current
+    val navigator = LocalNavController.current
     val importedPackages by manager.observeLibrary().collectAsState(initial = emptyList())
-    var importPreview by remember { mutableStateOf<ThemePackageImportResult.Preview?>(null) }
-    var importError by remember { mutableStateOf<List<String>?>(null) }
+    val activeTryOn by manager.tryOn.collectAsState(initial = null)
+    var themeRequest by rememberSaveable { mutableStateOf("") }
     var applyMessage by remember { mutableStateOf<String?>(null) }
 
     // applyMessage 只在失败时赋值；弹一次 toast 后立即清空，避免重复弹出
@@ -96,38 +102,139 @@ fun ThemeLibrarySection(
                 }.getOrNull()
             }
             if (json == null) {
-                importError = listOf(context.getString(R.string.setting_theme_library_read_failed))
+                applyMessage = context.getString(R.string.setting_theme_library_read_failed)
                 return@launch
             }
-            when (val result = manager.prepareImport(json)) {
-                is ThemePackageImportResult.Preview -> importPreview = result
-                is ThemePackageImportResult.Rejected -> importError = result.issues
+            val result = try {
+                manager.prepareImport(json)
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                applyMessage = error.localizedMessage ?: context.getString(R.string.setting_theme_library_try_on_failed)
+                return@launch
+            }
+            when (result) {
+                is ThemePackageImportResult.Preview -> Unit
+                is ThemePackageImportResult.Rejected -> applyMessage = result.issues.joinToString("\n")
             }
         }
     }
 
     val exportCurrent: () -> Unit = {
-        val pkg = ThemePackageExporter.export(displaySetting)
-        val text = JsonInstant.encodeToString(ThemePackage.serializer(), pkg)
-        val send = Intent(Intent.ACTION_SEND).apply {
-            type = "text/plain"
-            putExtra(
-                Intent.EXTRA_SUBJECT,
-                context.getString(R.string.setting_theme_library_export_subject, pkg.name),
-            )
-            putExtra(Intent.EXTRA_TEXT, text)
+        val exported = ThemePackTransfer.export(displaySetting)
+        val currentLibraryEntry = importedPackages.firstOrNull {
+            it.id == displaySetting.appliedThemePackageId
         }
-        runCatching {
-            context.startActivity(
-                Intent.createChooser(
-                    send,
-                    context.getString(R.string.setting_theme_library_export_chooser),
+        val document = exported.copy(
+            id = currentLibraryEntry?.id ?: displaySetting.themePack?.id ?: exported.id,
+            displayName = currentLibraryEntry?.name
+                ?: displaySetting.themePack?.displayName
+                ?: context.getString(R.string.setting_theme_library_custom_theme_name),
+        )
+        val safeId = document.id
+            .map { char -> if (char.isLetterOrDigit() || char in "._-") char else '-' }
+            .joinToString("")
+            .trim('.', '-', '_')
+            .take(80)
+            .ifBlank { "theme" }
+        val fileName = "amber-theme-$safeId.json"
+        scope.launch {
+            val file = try {
+                withContext(Dispatchers.IO) {
+                    val exportDir = File(context.cacheDir, "theme-export")
+                    check(exportDir.isDirectory || exportDir.mkdirs()) { "Unable to create export directory" }
+                    File(exportDir, fileName).apply {
+                        writeText(ThemePackTransfer.encode(document), Charsets.UTF_8)
+                    }
+                }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                toaster.show(context.getString(R.string.setting_theme_library_export_failed), type = ToastType.Error)
+                return@launch
+            }
+
+            try {
+                val uri = FileProvider.getUriForFile(
+                    context,
+                    "${context.packageName}.fileprovider",
+                    file,
                 )
-            )
+                val send = Intent(Intent.ACTION_SEND).apply {
+                    type = "application/json"
+                    putExtra(Intent.EXTRA_STREAM, uri)
+                    putExtra(
+                        Intent.EXTRA_SUBJECT,
+                        context.getString(R.string.setting_theme_library_export_subject, document.displayName),
+                    )
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+                context.startActivity(
+                    Intent.createChooser(
+                        send,
+                        context.getString(R.string.setting_theme_library_export_chooser),
+                    )
+                )
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                toaster.show(context.getString(R.string.setting_theme_library_export_failed), type = ToastType.Error)
+            }
         }
     }
 
+    fun openThemeChat(promptRes: Int) {
+        val request = themeRequest.trim()
+        if (request.isEmpty()) {
+            applyMessage = context.getString(R.string.setting_theme_library_empty_request)
+            return
+        }
+        navigateToChatPage(
+            navigator = navigator,
+            initText = context.getString(promptRes, request),
+        )
+    }
+
     Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        SettingCardGroup(
+            title = stringResource(R.string.setting_theme_library_ai_title),
+        ) {
+            rawItem {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 10.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    Text(stringResource(R.string.setting_theme_library_ai_desc))
+                    OutlinedTextField(
+                        value = themeRequest,
+                        onValueChange = { themeRequest = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        placeholder = { Text(stringResource(R.string.setting_theme_library_ai_request_hint)) },
+                        minLines = 3,
+                        maxLines = 5,
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(
+                            onClick = { openThemeChat(R.string.setting_theme_library_generate_prompt) },
+                            enabled = themeRequest.isNotBlank(),
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            Text(stringResource(R.string.setting_theme_library_generate_and_try_on))
+                        }
+                        OutlinedButton(
+                            onClick = { openThemeChat(R.string.setting_theme_library_modify_prompt) },
+                            enabled = themeRequest.isNotBlank(),
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            Text(stringResource(R.string.setting_theme_library_modify_and_try_on))
+                        }
+                    }
+                }
+            }
+        }
+
         SettingCardGroup(
             title = stringResource(R.string.setting_theme_library_title),
         ) {
@@ -150,6 +257,46 @@ fun ThemeLibrarySection(
                 },
             )
 
+        }
+
+        activeTryOn?.let { preview ->
+            SettingCardGroup(
+                title = stringResource(R.string.setting_theme_library_import_preview),
+            ) {
+                rawItem {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 10.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        Text(preview.pkg.name, style = MaterialTheme.typography.titleMedium)
+                        ThemePackageTokenPreview(preview.candidate)
+                        Text(
+                            stringResource(
+                                R.string.setting_theme_library_token_counts,
+                                preview.pkg.colors.size,
+                                preview.pkg.fonts.size,
+                                preview.pkg.layout.size,
+                                if (preview.pkg.id.startsWith(ThemePackage.BUILTIN_ID_PREFIX)) {
+                                    stringResource(R.string.setting_theme_library_builtin_id_suffix)
+                                } else {
+                                    ""
+                                },
+                            ),
+                        )
+                        if (preview.unknownTokens.isNotEmpty()) {
+                            Text(
+                                stringResource(
+                                    R.string.setting_theme_library_unknown_tokens,
+                                    preview.unknownTokens.joinToString(", "),
+                                ),
+                                color = Color(0xFFB45F06),
+                            )
+                        }
+                    }
+                }
+            }
         }
 
         SettingCardGroup(
@@ -256,89 +403,6 @@ fun ThemeLibrarySection(
         }
     }
 
-    // 导入 preview：包名 / token 概览 / 最小 token 视觉预览 / 未知 token 提示。
-    // 这里展示的是内存 candidate；取消只丢弃 try-on，不会写入库或 Settings。
-    importPreview?.let { preview ->
-        val pkg = preview.pkg
-        AlertDialog(
-            onDismissRequest = {
-                manager.discardTryOn(pkg.id, preview.candidateDigest)
-                importPreview = null
-            },
-            title = { Text(stringResource(R.string.setting_theme_library_import_title)) },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text(pkg.name, style = MaterialTheme.typography.titleMedium)
-                    ThemePackageTokenPreview(preview.candidate)
-                    Text(
-                        stringResource(
-                            R.string.setting_theme_library_token_counts,
-                            pkg.colors.size,
-                            pkg.fonts.size,
-                            pkg.layout.size,
-                            if (pkg.id.startsWith(ThemePackage.BUILTIN_ID_PREFIX)) {
-                                stringResource(R.string.setting_theme_library_builtin_id_suffix)
-                            } else {
-                                ""
-                            },
-                        ),
-                    )
-                    if (preview.unknownTokens.isNotEmpty()) {
-                        Text(
-                            stringResource(
-                                R.string.setting_theme_library_unknown_tokens,
-                                preview.unknownTokens.joinToString(", "),
-                            ),
-                            color = Color(0xFFB45F06),
-                        )
-                    }
-                }
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        scope.launch {
-                            val result = manager.applyPrepared(pkg.id, preview.candidateDigest)
-                            applyMessage = when (result) {
-                                ThemePackageApplyResult.Applied,
-                                ThemePackageApplyResult.AlreadyApplied,
-                                -> null
-                                ThemePackageApplyResult.Reverted -> context.getString(R.string.setting_theme_library_apply_reverted_error)
-                                else -> context.getString(R.string.setting_theme_library_apply_error)
-                            }
-                            if (result == ThemePackageApplyResult.Applied ||
-                                result == ThemePackageApplyResult.AlreadyApplied
-                            ) {
-                                importPreview = null
-                            }
-                        }
-                    },
-                ) { Text(stringResource(R.string.setting_theme_library_import_apply)) }
-            },
-            dismissButton = {
-                TextButton(
-                    onClick = {
-                        manager.discardTryOn(pkg.id, preview.candidateDigest)
-                        importPreview = null
-                    },
-                ) { Text(stringResource(R.string.cancel)) }
-            },
-        )
-    }
-
-    // 导入校验失败提示
-    importError?.let { issues ->
-        AlertDialog(
-            onDismissRequest = { importError = null },
-            title = { Text(stringResource(R.string.setting_theme_library_import_failed_title)) },
-            text = { Text(issues.joinToString("\n")) },
-            confirmButton = {
-                TextButton(onClick = { importError = null }) {
-                    Text(stringResource(R.string.update_card_close))
-                }
-            },
-        )
-    }
 }
 
 @Composable
@@ -385,16 +449,10 @@ internal fun ThemeFamilyChoice(
     }
 }
 
-/** 只用 Android 已支持的 base/accent tokens，避免把 iOS 专属槽位冒充成 Android 能力。 */
+/** The swatch follows the same active try-on and light/dark palette as the surrounding app. */
 @Composable
 private fun ThemePackageTokenPreview(displaySetting: DisplaySetting) {
-    val base = when (displaySetting.amberBaseFamily) {
-        "SAGE" -> AmberBase.SAGE
-        else -> AmberBase.LIGHT
-    }
-    val accent = runCatching { Color(AndroidColor.parseColor(displaySetting.accentColor)) }
-        .getOrDefault(Color(0xFFB8623A))
-    val tokens = buildAmberTokens(base, accent)
+    val tokens = LocalAmberTokens.current
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Row(
             modifier = Modifier
@@ -412,7 +470,7 @@ private fun ThemePackageTokenPreview(displaySetting: DisplaySetting) {
                     .background(tokens.accent),
             )
             Text(
-                "${displaySetting.amberBaseFamily} · ${displaySetting.accentColor}",
+                "${displaySetting.themePack?.displayName ?: displaySetting.amberBaseFamily} · ${displaySetting.accentColor}",
                 color = tokens.ink,
                 style = MaterialTheme.typography.labelSmall,
             )

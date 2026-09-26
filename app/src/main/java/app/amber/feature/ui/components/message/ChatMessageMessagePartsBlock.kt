@@ -74,6 +74,7 @@ import app.amber.feature.ui.modifier.shimmer
 import app.amber.feature.ui.context.LocalNavController
 import app.amber.feature.ui.context.LocalSettings
 import app.amber.feature.ui.theme.LocalAmberTokens
+import app.amber.feature.ui.theme.LocalThemeDesign
 import app.amber.feature.ui.pages.miniapp.components.MiniAppChatCard
 import kotlin.time.Duration.Companion.milliseconds
 
@@ -237,7 +238,9 @@ internal fun MessagePartsBlock(
                                     // bottomStart), right-aligned, max-width ~92% of available.
                                     // The bottomEnd corner keeps the same 14dp radius as the
                                     // right-side prototype; the entire bubble stays softly round.
-                                    val userBubbleShape = androidx.compose.foundation.shape.RoundedCornerShape(
+                                    val userBubbleShape = LocalThemeDesign.current?.components?.bubbleRadius
+                                        ?.let { RoundedCornerShape(it.toFloat().dp) }
+                                        ?: androidx.compose.foundation.shape.RoundedCornerShape(
                                         topStart = 23.dp,
                                         topEnd = 23.dp,
                                         bottomEnd = 14.dp,
@@ -338,7 +341,9 @@ internal fun MessagePartsBlock(
                                             contentAlignment = Alignment.TopStart,
                                         ) {
                                             val amberTokens = LocalAmberTokens.current
-                                            val assistantBubbleShape = RoundedCornerShape(
+                                            val assistantBubbleShape = LocalThemeDesign.current?.components?.bubbleRadius
+                                                ?.let { RoundedCornerShape(it.toFloat().dp) }
+                                                ?: RoundedCornerShape(
                                                 topStart = 14.dp,
                                                 topEnd = 14.dp,
                                                 bottomStart = 5.dp,

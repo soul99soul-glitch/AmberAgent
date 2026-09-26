@@ -18,13 +18,14 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 /**
  * 任务气泡驱动器：agent 任务（含 GUI 操控）运行期间，在系统悬浮气泡里展示
- * 当前步骤、回复预览与内联审批。数据全部来自 StateFlow 快照 + 1s tick
- * （与 LiveModeManager 同款模式），仅主线程操作窗口。
+ * 当前步骤、回复预览与内联审批。活跃任务期间每秒刷新状态，空闲时挂起等待新 run；
+ * 仅主线程操作窗口。
  * 与 Live 伴随气泡共用 [BubbleWindow] 并互斥——任务气泡亮着时 Live 让位。
  */
 class AgentTaskBubbleController(
@@ -50,7 +51,7 @@ class AgentTaskBubbleController(
         loopJob = appScope.launch(Dispatchers.Main.immediate) {
             while (isActive) {
                 tick()
-                delay(TICK_MS)
+                waitForNextTick()
             }
         }
     }
@@ -74,7 +75,6 @@ class AgentTaskBubbleController(
 
         val picked = AgentBubbleReducer.pickConversation(activeIds, activity?.conversationId, prev)
         var messages: List<app.amber.ai.ui.UIMessage>? = null
-        var finalText: String? = null
         var failed = false
         var cancelled = false
         if (picked != null) {
@@ -87,7 +87,6 @@ class AgentTaskBubbleController(
                 parseUuid(id)?.let { uuid ->
                     val conversation = chatService.getConversationFlow(uuid).value
                     messages = conversation.currentMessages
-                    finalText = AgentBubbleReducer.lastAssistantText(conversation.currentMessages)
                     when (chatService.lastRunOutcomes.value[uuid]) {
                         app.amber.core.agent.runtime.RunStatus.CANCELLED -> cancelled = true
                         app.amber.core.agent.runtime.RunStatus.COMPLETED, null -> failed = false
@@ -97,6 +96,11 @@ class AgentTaskBubbleController(
             }
         }
 
+        val finalText = if (picked == null && prev.phase == AgentBubblePhase.RUNNING) {
+            messages?.let { AgentBubbleReducer.lastAssistantText(it) }
+        } else {
+            null
+        }
         val next = AgentBubbleReducer.reduce(
             previous = prev,
             pickedConversationId = picked,
@@ -109,6 +113,21 @@ class AgentTaskBubbleController(
         )
         _uiState.value = next
         syncWindow(next, enabled, service, foregroundIsAmber)
+    }
+
+    /**
+     * 活跃任务或结束停留期间继续刷新回复预览、前台应用门控和停留计时；
+     * 只有 IDLE 且隐藏时挂起等待新的活跃 run。
+     */
+    private suspend fun waitForNextTick() {
+        val activeRuns = chatService.activeConversationIds
+        val state = _uiState.value
+        if (activeRuns.value.isNotEmpty() || _visible.value || state.isActive) {
+            delay(TICK_MS)
+            return
+        }
+
+        activeRuns.first { it.isNotEmpty() }
     }
 
     private fun syncWindow(

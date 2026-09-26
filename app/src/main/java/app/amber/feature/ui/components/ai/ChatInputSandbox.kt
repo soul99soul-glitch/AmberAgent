@@ -77,11 +77,17 @@ import app.amber.feature.webview.WebViewOperationStore
 import app.amber.feature.ui.components.ui.workspaceColors
 import app.amber.feature.ui.components.webview.WebView
 import app.amber.feature.ui.components.webview.rememberWebViewState
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 import org.koin.compose.koinInject
 import java.io.File
 import java.net.URLEncoder
+
+private val readablePageParseScope = CoroutineScope(Dispatchers.Default.limitedParallelism(1))
 
 internal fun String.normalizedWebPreviewUrl(): String {
     val raw = trim()
@@ -149,35 +155,43 @@ internal fun extractReadablePage(
     """.trimIndent()
     webView.post {
         webView.evaluateJavascript(script) { raw ->
-            runCatching {
-                if (raw.isNullOrBlank() || raw == "null") return@runCatching
-                val decoded = JSONArray("[$raw]").getString(0)
-                val payload = JSONObject(decoded)
-                val linksJson = payload.optJSONArray("links")
-                val links = buildList {
-                    if (linksJson != null) {
-                        for (index in 0 until linksJson.length()) {
-                            val item = linksJson.optJSONObject(index) ?: continue
-                            val linkUrl = item.optString("url").trim()
-                            if (linkUrl.isBlank()) continue
-                            add(
-                                WebViewLink(
-                                    title = item.optString("title").ifBlank { linkUrl },
-                                    url = linkUrl,
+            val callbackUrl = webView.url
+            readablePageParseScope.launch {
+                runCatching {
+                    if (raw.isNullOrBlank() || raw == "null") return@runCatching
+                    val decoded = JSONArray("[$raw]").getString(0)
+                    val payload = JSONObject(decoded)
+                    val linksJson = payload.optJSONArray("links")
+                    val links = buildList {
+                        if (linksJson != null) {
+                            for (index in 0 until linksJson.length()) {
+                                val item = linksJson.optJSONObject(index) ?: continue
+                                val linkUrl = item.optString("url").trim()
+                                if (linkUrl.isBlank()) continue
+                                add(
+                                    WebViewLink(
+                                        title = item.optString("title").ifBlank { linkUrl },
+                                        url = linkUrl,
+                                    )
                                 )
-                            )
+                            }
                         }
                     }
+                    val pageUrl = payload.optString("url").ifBlank { callbackUrl }
+                    val title = payload.optString("title")
+                    val readableText = payload.optString("text")
+                    withContext(Dispatchers.Main.immediate) {
+                        store.updateReadablePage(
+                            loadId = loadId,
+                            url = pageUrl,
+                            title = title,
+                            readableText = readableText,
+                            links = links,
+                        )
+                    }
+                }.onFailure {
+                    Log.w("ChatInput", "Failed to extract WebView readable content", it)
                 }
-                store.updateReadablePage(
-                    loadId = loadId,
-                    url = payload.optString("url").ifBlank { webView.url },
-                    title = payload.optString("title"),
-                    readableText = payload.optString("text"),
-                    links = links,
-                )
-            }.onFailure {
-                Log.w("ChatInput", "Failed to extract WebView readable content", it)
             }
         }
     }

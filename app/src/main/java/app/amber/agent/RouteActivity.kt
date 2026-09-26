@@ -9,10 +9,11 @@ import android.os.Build
 import android.os.Bundle
 import android.util.Log
 import android.view.KeyEvent
+import android.view.View
+import android.view.ViewTreeObserver
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
@@ -34,6 +35,9 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.CircularProgressIndicator
@@ -165,6 +169,8 @@ import app.amber.feature.ui.pages.webview.WebViewPage
 import app.amber.feature.ui.pages.webmount.WebMountSessionPage
 import app.amber.feature.ui.theme.LocalDarkMode
 import app.amber.feature.ui.theme.AmberAgentTheme
+import app.amber.feature.ui.theme.ThemePackageManager
+import app.amber.feature.ui.theme.ThemeTryOnHost
 import app.amber.core.utils.base64Encode
 import app.amber.core.utils.CrashHandler
 import okhttp3.OkHttpClient
@@ -266,50 +272,56 @@ class RouteActivity : ComponentActivity() {
         if (savedInstanceState == null && intent?.getBooleanExtra(EXTRA_OPEN_LIVE_COMPANION, false) == true) {
             LiveCompanionDeepLink.request()
         }
-        // Cold-start theme flash: the first composed frame reads
-        // settingsFlow's initialValue (Settings.dummy(), default terracotta
-        // accent) until the DataStore flow emits the user's saved theme — the
-        // user sees the wrong color scheme flash before their own loads.
-        // Block once here while the system splash is still on screen; a 2s
-        // timeout guards a corrupted store from stalling startup (falls back
-        // to the dummy frame, i.e. the old behavior).
-        runBlocking {
+        // Keep the launch window visible until settings are ready so Compose's
+        // first frame uses the saved theme. A timeout preserves the dummy
+        // settings fallback without blocking the main thread.
+        var contentReady = false
+        val contentView = findViewById<View>(android.R.id.content)
+        contentView.viewTreeObserver.addOnPreDrawListener(object : ViewTreeObserver.OnPreDrawListener {
+            override fun onPreDraw(): Boolean {
+                if (!contentReady) return false
+                contentView.viewTreeObserver.removeOnPreDrawListener(this)
+                return true
+            }
+        })
+        lifecycleScope.launch {
             withTimeoutOrNull(2_000) {
                 settingsStore.settingsFlow.first { !it.init }
             }
-        }
-        // W16-B: refresh dynamic launcher shortcuts after settings are
-        // initialized; failures never block startup.
-        lifecycleScope.launch {
-            runCatching {
-                app.amber.feature.tools.DynamicShortcutPublisher.publish(
-                    context = this@RouteActivity,
-                    settingsStore = settingsStore,
-                    conversationRepository = conversationRepository,
-                )
-            }
-        }
-        setContent {
-            AmberAgentTheme {
-                setSingletonImageLoaderFactory { context ->
-                    ImageLoader.Builder(context)
-                        .crossfade(true)
-                        .components {
-                            add(OkHttpNetworkFetcherFactory(
-                                callFactory = { okHttpClient },
-                                cacheStrategy = { CacheControlCacheStrategy() },
-                            ))
-                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                                add(AnimatedImageDecoder.Factory())
-                            } else {
-                                add(GifDecoder.Factory())
-                            }
-                            add(SvgDecoder.Factory(scaleToDensity = true))
-                        }
-                        .build()
+            // W16-B: refresh dynamic launcher shortcuts after settings are
+            // initialized; failures never block startup.
+            lifecycleScope.launch {
+                runCatching {
+                    app.amber.feature.tools.DynamicShortcutPublisher.publish(
+                        context = this@RouteActivity,
+                        settingsStore = settingsStore,
+                        conversationRepository = conversationRepository,
+                    )
                 }
-                AppRoutes()
             }
+            setContent {
+                AmberAgentTheme {
+                    setSingletonImageLoaderFactory { context ->
+                        ImageLoader.Builder(context)
+                            .crossfade(true)
+                            .components {
+                                add(OkHttpNetworkFetcherFactory(
+                                    callFactory = { okHttpClient },
+                                    cacheStrategy = { CacheControlCacheStrategy() },
+                                ))
+                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                                    add(AnimatedImageDecoder.Factory())
+                                } else {
+                                    add(GifDecoder.Factory())
+                                }
+                                add(SvgDecoder.Factory(scaleToDensity = true))
+                            }
+                            .build()
+                    }
+                    AppRoutes()
+                }
+            }
+            contentReady = true
         }
     }
 
@@ -508,6 +520,8 @@ class RouteActivity : ComponentActivity() {
         val toastState = rememberToasterState()
         val settings by settingsStore.settingsFlow.collectAsStateWithLifecycle()
         val eventBus = koinInject<AppEventBus>()
+        val themePackageManager = koinInject<ThemePackageManager>()
+        val themeTryOn by themePackageManager.tryOn.collectAsStateWithLifecycle()
 
         val notificationLink = remember { notificationDeepLinkFrom(intent) }
         val startScreen = remember {
@@ -618,18 +632,20 @@ class RouteActivity : ComponentActivity() {
                     alignment = Alignment.TopCenter,
                     showCloseButton = true,
                 )
-                Box(
+                Column(
                     modifier = Modifier
                         .fillMaxSize()
                         .background(MaterialTheme.colorScheme.background)
+                        .then(if (themeTryOn != null) Modifier.windowInsetsPadding(WindowInsets.statusBars) else Modifier)
                 ) {
+                    ThemeTryOnHost(manager = themePackageManager)
                     NavDisplay(
                         backStack = backStack,
                         entryDecorators = listOf(
                             rememberSaveableStateHolderNavEntryDecorator(),
                             rememberViewModelStoreNavEntryDecorator(),
                         ),
-                        modifier = Modifier.fillMaxSize(),
+                        modifier = Modifier.fillMaxSize().weight(1f),
                         onBack = { backStack.removeLastOrNull() },
                         transitionSpec = {
                             if (backStack.size == 1) fadeIn() togetherWith fadeOut()

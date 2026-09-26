@@ -4,6 +4,7 @@ import app.amber.agent.data.db.dao.ThemePackageDAO
 import app.amber.agent.data.db.entity.ThemePackageEntity
 import app.amber.core.settings.Settings
 import app.amber.core.settings.DisplaySetting
+import app.amber.core.settings.ThemePackDocument
 import app.amber.core.settings.prefs.SettingsAggregator
 import app.amber.core.sync.core.SyncRestoreWriteGate
 import app.amber.core.utils.JsonInstant
@@ -139,6 +140,7 @@ class ThemePackageManager(
         }
 
         return withThemeWrite {
+            if (_tryOn.value?.candidateDigest != candidateDigest) return@withThemeWrite ThemePackageApplyResult.NotPrepared
             // Read the current snapshot after the writer reaches the gate. A
             // user action waiting behind restore must apply to the imported
             // settings, not to the pre-restore snapshot it first observed.
@@ -163,7 +165,7 @@ class ThemePackageManager(
                     updateWithRollback(current, current.copy(displaySetting = nextDisplay))
                 }
                 if (result == ThemePackageApplyResult.Applied || result == ThemePackageApplyResult.AlreadyApplied) {
-                    clearTryOn()
+                    discardTryOn(packageId, candidateDigest)
                 } else {
                     restoreEntity(prepared.pkg.id, previousEntity)
                 }
@@ -192,14 +194,36 @@ class ThemePackageManager(
         tryOn = _tryOn.value,
     )
 
+    /** A continuation always edits the visible candidate before the saved recipe. */
+    suspend fun recipe(id: String = "current"): ThemePackDocument {
+        val current = settingsStore.settingsFlow.first().displaySetting
+        _tryOn.value?.let { preview ->
+            if (id == "current" || id == preview.pkg.id) {
+                return ThemePackTransfer.fromPackage(preview.pkg, preview.candidate)
+            }
+        }
+        if (id == "current" || id == current.appliedThemePackageId) {
+            if (current.appliedThemePackageId == null && current.themePack == null) {
+                val builtin = ThemePackTransfer.builtin("builtin:${current.amberBaseFamily}")
+                if (builtin?.accentHex.equals(current.accentColor, ignoreCase = true)) return requireNotNull(builtin)
+            }
+            val exported = ThemePackTransfer.export(current)
+            val entity = current.appliedThemePackageId?.let { dao.getById(it) }
+            return if (entity != null) exported.copy(id = entity.id, displayName = entity.name) else exported
+        }
+        ThemePackTransfer.builtin(id)?.let { return it }
+        val entity = dao.getById(id) ?: error("找不到主题 $id，请先调用 theme_pack_status")
+        val validation = ThemePackageValidator.validateJson(entity.json) as? ThemePackageValidation.Valid
+            ?: error("主题 $id 的配方已损坏")
+        return ThemePackTransfer.fromPackage(validation.themePackage, current)
+    }
+
     suspend fun apply(packageId: String): ThemePackageApplyResult {
         return withThemeWrite {
             val entity = dao.getById(packageId) ?: return@withThemeWrite ThemePackageApplyResult.NotFound
-            val pkg = runCatching { JsonInstant.decodeFromString(ThemePackage.serializer(), entity.json) }
-                .getOrNull() ?: return@withThemeWrite ThemePackageApplyResult.Corrupt
-            if (ThemePackageValidator.validatePackage(pkg) !is ThemePackageValidation.Valid) {
-                return@withThemeWrite ThemePackageApplyResult.Corrupt
-            }
+            val validation = ThemePackageValidator.validateJson(entity.json) as? ThemePackageValidation.Valid
+                ?: return@withThemeWrite ThemePackageApplyResult.Corrupt
+            val pkg = validation.themePackage
             val current = settingsStore.settingsFlow.first()
             val nextDisplay = ThemePackageApplier.applyTokens(pkg, current.displaySetting)
                 .copy(appliedThemePackageId = pkg.id)
@@ -224,6 +248,7 @@ class ThemePackageManager(
                     SIT_TERRACOTTA_ACCENT_HEX
                 } else current.displaySetting.accentColor,
                 appliedThemePackageId = null,
+                themePack = null,
             )
             if (nextDisplay == current.displaySetting) {
                 clearTryOn()

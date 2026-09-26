@@ -33,6 +33,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.semantics.Role
@@ -46,6 +47,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import app.amber.feature.ui.theme.LocalAmberTokens
 import app.amber.feature.ui.theme.LocalAmberType
+import app.amber.feature.ui.theme.LocalThemeDesign
 
 /**
  * Amber · "Terminal × Modern" design-system primitives. Stateless, token-driven building blocks
@@ -82,11 +84,31 @@ fun AmberCard(
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val t = LocalAmberTokens.current
-    Column(
+    val components = LocalThemeDesign.current?.components
+    val radius = components?.cardRadius?.toFloat()?.dp ?: 14.dp
+    val borderWidth = components?.borderWidth?.toFloat()?.dp ?: 1.dp
+    val shadowRadius = components?.shadowRadius?.toFloat()?.dp ?: 0.dp
+    val shadowOpacity = components?.shadowOpacity?.toFloat() ?: 0f
+    val shape = RoundedCornerShape(radius)
+    val shadowModifier = if (shadowRadius > 0.dp && shadowOpacity > 0f) {
+        modifier.shadow(
+            elevation = shadowRadius,
+            shape = shape,
+            clip = false,
+            ambientColor = Color.Black.copy(alpha = shadowOpacity),
+            spotColor = Color.Black.copy(alpha = shadowOpacity),
+        )
+    } else {
         modifier
-            .clip(RoundedCornerShape(14.dp))
+    }
+    Column(
+        shadowModifier
+            .clip(shape)
             .background(containerColor ?: t.surface)
-            .border(1.dp, borderColor ?: t.line, RoundedCornerShape(14.dp)),
+            .then(
+                if (borderWidth > 0.dp) Modifier.border(borderWidth, borderColor ?: t.line, shape)
+                else Modifier,
+            ),
         content = content,
     )
 }

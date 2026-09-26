@@ -49,7 +49,6 @@ import com.composables.icons.lucide.ArrowUpToLine
 import com.composables.icons.lucide.ChevronDown
 import com.composables.icons.lucide.ChevronUp
 import com.composables.icons.lucide.Lucide
-import dev.chrisbanes.haze.HazeState
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import app.amber.agent.R
@@ -66,7 +65,6 @@ internal fun ChatListPreview(
     conversation: Conversation,
     contextCompacts: List<ConversationCompact> = emptyList(),
     settings: Settings,
-    hazeState: HazeState,
     animatedVisibilityScope: AnimatedVisibilityScope,
     onJumpToMessage: (Int) -> Unit
 ) {

@@ -3465,24 +3465,23 @@
   <string name="setting_jev_title">Jev 判断服务</string>
   <string name="setting_jev_service_section">服务</string>
   <string name="setting_jev_master_title">启用 Jev</string>
-  <string name="setting_jev_master_desc">使用外部判断服务（TypeSafe systemone 或 Vercel AI Gateway）辅助工具发现、记忆召回等。需要 API Key；不会出现在聊天模型列表中。</string>
+  <string name="setting_jev_master_desc">外部判断服务，辅助工具发现、记忆召回等。需要 API Key。</string>
   <string name="setting_jev_api_mode_title">调用模式</string>
-  <string name="setting_jev_api_mode_desc">Typesafe 直连 api.typesafe.ai 原生接口；Vercel 走 AI Gateway 的 evaluation-model 评估端点（模型 id 经请求头传递）。</string>
+  <string name="setting_jev_api_mode_desc">Typesafe 直连官方接口；Vercel 走 AI Gateway 评估端点。</string>
   <string name="setting_jev_api_mode_typesafe">Typesafe</string>
   <string name="setting_jev_api_mode_vercel">Vercel</string>
   <string name="setting_jev_base_url_title">网关 Base URL</string>
   <string name="setting_jev_base_url_desc">Vercel 模式的网关基础地址，自动追加 /evaluation-model。</string>
   <string name="setting_jev_base_url_dialog_title">设置网关 Base URL</string>
   <string name="setting_jev_model_title">模型</string>
-  <string name="setting_jev_model_desc">Typesafe：可选固定版本（留空跟随 jev-latest）；Vercel：网关评估模型 id，默认 typesafe-ai/jev。</string>
+  <string name="setting_jev_model_desc">Typesafe 留空跟随默认版本；Vercel 填网关模型 id（默认 typesafe-ai/jev）。</string>
   <string name="setting_jev_model_dialog_title">设置 Jev 模型</string>
   <string name="setting_jev_value_unset">未设置</string>
   <string name="setting_jev_value_clear">清除</string>
   <string name="setting_jev_key_title">API Key</string>
   <string name="setting_jev_key_unset">未设置</string>
   <string name="setting_jev_key_dialog_title">设置 Jev API Key</string>
-  <string name="setting_jev_key_hint">仅写入设备 Keystore，不进入聊天与日志</string>
-  <string name="setting_jev_key_hint2">保存新 Key 会替换已保存的 Key。</string>
+  <string name="setting_jev_key_hint">仅存于设备 Keystore</string>
   <string name="setting_jev_key_save">保存</string>
   <string name="setting_jev_key_clear">清除 Key</string>
   <string name="setting_jev_connection_title">连接测试</string>
@@ -3493,7 +3492,7 @@
   <string name="setting_jev_connection_key_missing">请先设置 API Key</string>
   <string name="setting_jev_connection_model_required">请先设置模型——Vercel 模式需要网关模型 id</string>
   <string name="setting_jev_connection_failed">失败：%1$s</string>
-  <string name="setting_jev_shadow_notice">Shadow 模式同样会把数据发送到外部服务，不是本地模式；仅在下方允许的范围内外发。</string>
+  <string name="setting_jev_shadow_notice">Shadow 模式同样外发数据，仅限下方允许的范围。</string>
   <string name="setting_jev_purposes_section">用途模式</string>
   <string name="setting_jev_purpose_tool_discovery">工具发现</string>
   <string name="setting_jev_purpose_tool_discovery_desc">大目录（超过 40 个工具）时对 tool_search 做语义重排</string>
@@ -3506,7 +3505,7 @@
   <string name="setting_jev_purpose_web_automation">网页自动化</string>
   <string name="setting_jev_purpose_web_automation_desc">为明确的网页目标执行有界快速操作（wm_run_goal）</string>
   <string name="setting_jev_purpose_screen_automation">屏幕自动化</string>
-  <string name="setting_jev_purpose_screen_automation_desc">为明确的无障碍屏幕目标执行有限快速操作（screen_run_goal）。Jev 是判断服务，不是 JS 引擎。</string>
+  <string name="setting_jev_purpose_screen_automation_desc">为明确的屏幕目标执行有限快速操作（screen_run_goal）</string>
   <string name="setting_jev_mode_off">关闭</string>
   <string name="setting_jev_mode_shadow">影子</string>
   <string name="setting_jev_mode_active">启用</string>
@@ -3522,7 +3521,7 @@
   <string name="setting_jev_scope_web_content">网页内容</string>
   <string name="setting_jev_scope_web_content_desc">网页快照状态</string>
   <string name="setting_jev_scope_screen_content">屏幕内容</string>
-  <string name="setting_jev_scope_screen_content_desc">可能发送给 Jev、用于屏幕目标判断的无障碍节点文本与摘要</string>
+  <string name="setting_jev_scope_screen_content_desc">无障碍节点文本与摘要，用于屏幕目标判断</string>
   <string name="setting_jev_status_section">状态与开销</string>
   <string name="setting_jev_status_daily">今日请求：%1$d / %2$d</string>
   <string name="setting_jev_status_metrics">近期判断：共 %1$d 次，应用 %2$d、影子 %3$d、缓存 %4$d、回退 %5$d、失败 %6$d</string>
@@ -3533,7 +3532,7 @@
   <string name="setting_jev_status_cooldown">运行态：冷却中，剩余 %1$d 毫秒</string>
   <string name="setting_jev_status_last_error">运行态：最近错误 %1$s</string>
   <string name="setting_jev_calibration_count">校准记录：%1$d 条</string>
-  <string name="setting_jev_calibration_desc">逐候选判分与原路径首选对账，仅含 id 与概率；导出供离线校准阈值</string>
+  <string name="setting_jev_calibration_desc">判分对账记录，仅含 id 与概率</string>
   <string name="setting_jev_calibration_export">导出</string>
   <string name="setting_jev_calibration_clear">清除</string>
   <string name="setting_jev_connection_budget">今日请求预算已耗尽</string>
@@ -3542,4 +3541,18 @@
   <string name="setting_jev_outcome_cache">缓存命中</string>
   <string name="setting_jev_outcome_fallback">已回退原路径</string>
   <string name="setting_jev_outcome_failed">失败</string>
+  <string name="setting_theme_library_ai_title">用 AI 生成主题</string>
+  <string name="setting_theme_library_ai_desc">描述主题需求后，会在新对话中打开为未发送的草稿。</string>
+  <string name="setting_theme_library_ai_request_hint">描述你想生成的主题，或要修改的内容</string>
+  <string name="setting_theme_library_generate_and_try_on">生成并试穿</string>
+  <string name="setting_theme_library_modify_and_try_on">修改并试穿</string>
+  <string name="setting_theme_library_generate_prompt">请根据下方需求为此 Android 应用创建一个新主题。先用 tool_search 查找主题工具，再调用 theme_pack_status(id=current) 查看当前主题的完整基础配方。以该配方为起点，只修改满足需求所必需的字段，并生成新的 id 和 display_name。首次调用 theme_pack_import 时要提交完整配方并省略 base_id，以便创建新主题。之后继续微调时，再调用 theme_pack_status(id=current)，然后用 theme_pack_import(base_id=current) 仅提交本次要求的改动。只准备预览，不要套用或持久化。等待我的反馈，并在本次对话中继续微调。只有我明确提出套用时才套用。需求：%1$s</string>
+  <string name="setting_theme_library_modify_prompt">请根据下方需求修改当前主题。先用 tool_search 查找主题工具，再调用 theme_pack_status(id=current) 查看当前主题和正在试穿的候选。若有正在试穿的候选，则从该候选继续；否则以当前主题为基础。调用 theme_pack_import(base_id=current) 时只填写我这次指定的字段，保留其他所有值以及现有主题包的 id 和 display_name。仅准备预览，不要套用或持久化。保持本次对话可继续修改。只有我明确提出套用时才套用。需求：%1$s</string>
+  <string name="setting_theme_library_previewing">正在试穿：%1$s</string>
+  <string name="setting_theme_library_restore">还原</string>
+  <string name="setting_theme_library_import_preview">主题试穿预览</string>
+  <string name="setting_theme_library_try_on_failed">无法更新主题预览</string>
+  <string name="setting_theme_library_empty_request">请先描述主题需求。</string>
+  <string name="setting_theme_library_custom_theme_name">我的自定义主题</string>
+  <string name="setting_theme_library_export_failed">无法导出或分享主题文件</string>
 </resources>

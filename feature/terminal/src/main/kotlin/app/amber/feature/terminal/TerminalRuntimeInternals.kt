@@ -190,7 +190,9 @@ class TerminalJobLog(
         file.parentFile?.mkdirs()
         val incoming = text.toByteArray(Charsets.UTF_8)
         val currentLength = file.takeIf { it.exists() }?.length() ?: 0L
-        if (currentLength + incoming.size <= maxBytes) {
+        // Disk use may grow to 1.5x maxBytes before the log is trimmed back to maxBytes.
+        val truncateAtBytes = maxBytes.toLong() + maxBytes / 2
+        if (currentLength + incoming.size <= truncateAtBytes) {
             file.appendBytes(incoming)
             return
         }

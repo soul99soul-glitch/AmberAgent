@@ -15,8 +15,8 @@ object ThemePackageExporter {
 
     fun export(displaySetting: DisplaySetting): ThemePackage = ThemePackage(
         schemaVersion = ThemePackage.CURRENT_SCHEMA_VERSION,
-        id = EXPORTED_PACKAGE_ID,
-        name = "我的自定义主题",
+        id = displaySetting.themePack?.id ?: EXPORTED_PACKAGE_ID,
+        name = displaySetting.themePack?.displayName ?: "我的自定义主题",
         colors = mapOf(
             "baseFamily" to displaySetting.amberBaseFamily,
             "accent" to displaySetting.accentColor,
@@ -29,6 +29,7 @@ object ThemePackageExporter {
             "showUserAvatar" to displaySetting.showUserAvatar.toString(),
             "showAssistantBubble" to displaySetting.showAssistantBubble.toString(),
         ),
+        document = displaySetting.themePack,
     )
 }
 
@@ -40,7 +41,7 @@ object ThemePackageExporter {
 object ThemePackageApplier {
 
     fun applyTokens(pkg: ThemePackage, current: DisplaySetting): DisplaySetting {
-        var next = current
+        var next = current.copy(themePack = pkg.document)
         pkg.colors["baseFamily"]?.let { value ->
             next = next.copy(amberBaseFamily = value)
         }

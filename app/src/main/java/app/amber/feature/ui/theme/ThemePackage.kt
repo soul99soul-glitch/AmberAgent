@@ -1,7 +1,9 @@
 package app.amber.feature.ui.theme
 
 import app.amber.core.utils.JsonInstant
+import app.amber.core.settings.ThemePackDocument
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonObject
 
 /**
  * P8-09 — 主题包 JSON schema（schemaVersion 1）。
@@ -20,6 +22,8 @@ data class ThemePackage(
     val colors: Map<String, String> = emptyMap(),
     val fonts: Map<String, String> = emptyMap(),
     val layout: Map<String, String> = emptyMap(),
+    /** Portable v1 document; old Android token packages keep this null. */
+    val document: ThemePackDocument? = null,
 ) {
     companion object {
         const val CURRENT_SCHEMA_VERSION = 1
@@ -60,7 +64,7 @@ object ThemePackageTokens {
         token in LAYOUT_TOKENS && value in BOOLEAN_VALUES
 
     private fun isHexColor(value: String): Boolean {
-        if (!value.startsWith("#") || value.length !in 7..9) return false
+        if (!value.startsWith("#") || value.length !in setOf(7, 9)) return false
         return value.drop(1).all { it in "0123456789abcdefABCDEF" }
     }
 }
@@ -83,6 +87,14 @@ sealed interface ThemePackageValidation {
 object ThemePackageValidator {
 
     fun validateJson(json: String): ThemePackageValidation {
+        val objectInput = runCatching { JsonInstant.parseToJsonElement(json) as? JsonObject }.getOrNull()
+        if (objectInput?.containsKey("format") == true) {
+            val document = runCatching { ThemePackTransfer.decode(json) }.getOrNull()
+                ?: return ThemePackageValidation.Invalid(listOf("不是有效的 amber.theme.pack v1 主题文件"))
+            val issues = ThemePackTransfer.validationIssues(document)
+            if (issues.isNotEmpty()) return ThemePackageValidation.Invalid(issues)
+            return validatePackage(ThemePackTransfer.asPackage(document))
+        }
         val pkg = runCatching { JsonInstant.decodeFromString(ThemePackage.serializer(), json) }
             .getOrNull()
         if (pkg == null) {
@@ -105,6 +117,10 @@ object ThemePackageValidator {
         }
         if (pkg.name.isBlank()) {
             issues += "主题包 name 不能为空"
+        }
+        pkg.document?.let { document ->
+            issues += ThemePackTransfer.validationIssues(document)
+            if (pkg.id != document.id || pkg.name != document.displayName) issues += "主题身份与配方不一致"
         }
         validateSection(pkg.colors, ThemePackageTokens.COLOR_TOKENS, "颜色", ::isValidColorTokenSafe, issues, unknown)
         validateSection(pkg.fonts, ThemePackageTokens.FONT_TOKENS, "字体", ::isValidFontTokenSafe, issues, unknown)

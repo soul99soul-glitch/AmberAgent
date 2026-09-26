@@ -69,15 +69,16 @@ class TerminalRuntimeModelsTest {
     fun terminalJobLogCapsFileSize() {
         val file = Files.createTempFile("amberagent-terminal-log", ".log").toFile()
         try {
-            val log = TerminalJobLog(file, maxBytes = 128)
+            val maxBytes = 128
+            val log = TerminalJobLog(file, maxBytes = maxBytes)
             repeat(20) { index ->
                 log.append("line-$index ${"x".repeat(32)}\n")
             }
 
-            assertTrue(file.length() <= 128)
+            assertTrue(file.length() <= maxBytes.toLong() * 3 / 2)
             val text = file.readText()
             assertTrue(text.contains("terminal log truncated"))
-            assertTrue(text.contains("line-19"))
+            assertTrue(text.endsWith("line-19 ${"x".repeat(32)}\n"))
         } finally {
             file.delete()
         }

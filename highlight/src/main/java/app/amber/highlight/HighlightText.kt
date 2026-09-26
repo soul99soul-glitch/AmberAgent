@@ -23,6 +23,8 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.util.fastForEach
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 val LocalHighlighter = compositionLocalOf<Highlighter> { error("No Highlighter provided") }
 
@@ -45,25 +47,27 @@ fun HighlightText(
     minLines: Int = 1,
 ) {
     val highlighter = LocalHighlighter.current
-    var tokens: List<HighlightToken> by remember { mutableStateOf(emptyList()) }
     var annotatedString by remember { mutableStateOf(AnnotatedString(code)) }
 
     val updatedCode by rememberUpdatedState(code)
     val updatedLanguage by rememberUpdatedState(language)
     LaunchedEffect(Unit) {
-        snapshotFlow { updatedCode to updatedLanguage }.collect {
-            tokens = if (updatedCode.length <= MAX_CODE_LENGTH) {
-                highlighter.highlight(updatedCode, updatedLanguage)
-            } else {
-                listOf(
-                    HighlightToken.Plain(content = updatedCode)
-                )
-            }
-            annotatedString = buildAnnotatedString {
-                tokens.fastForEach { token ->
-                    buildHighlightText(token, colors)
+        snapshotFlow { updatedCode to updatedLanguage }.collect { (currentCode, currentLanguage) ->
+            val highlightedString = withContext(Dispatchers.Default) {
+                val tokens = if (currentCode.length <= MAX_CODE_LENGTH) {
+                    highlighter.highlight(currentCode, currentLanguage)
+                } else {
+                    listOf(
+                        HighlightToken.Plain(content = currentCode)
+                    )
+                }
+                buildAnnotatedString {
+                    tokens.fastForEach { token ->
+                        buildHighlightText(token, colors)
+                    }
                 }
             }
+            annotatedString = highlightedString
         }
     }
 

@@ -95,7 +95,9 @@ fun WorkspaceFilePreview(
             in setOf("png", "jpg", "jpeg", "gif", "webp") -> {
                 runCatching {
                     val bytes = workspaceManager.readBytes(relativePath)
-                    val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                    val bitmap = withContext(Dispatchers.Default) {
+                        BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                    }
                     if (bitmap != null) PreviewContent.Image(bitmap)
                     else PreviewContent.Error(decodeImageFailedMessage)
                 }.getOrElse { PreviewContent.Error(it.message ?: readFailedMessage) }

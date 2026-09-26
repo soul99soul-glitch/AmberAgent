@@ -30,6 +30,7 @@ import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -46,6 +47,8 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontStyle
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.OffsetMapping
 import androidx.compose.ui.text.input.TransformedText
 import androidx.compose.ui.text.input.VisualTransformation
@@ -53,7 +56,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
 import app.amber.highlight.HighlightText
@@ -84,6 +89,7 @@ import kotlin.time.Clock
 
 private const val COLLAPSE_LINES = 10
 private const val CODE_HIGHLIGHT_CROSSFADE_MS = 120
+private const val MAX_HIGHLIGHT_LINE_LENGTH = 4096
 
 internal fun displayCodeBlockContent(
     code: String,
@@ -190,6 +196,7 @@ fun HighlightCodeBlock(
                     when {
                         showLineNumbers && autoWrap -> {
                             CodeBlockWithLineNumbersWrapped(
+                                displayCode = displayCode,
                                 displayLines = displayLines,
                                 language = language,
                                 textStyle = textStyle,
@@ -255,6 +262,7 @@ fun HighlightCodeBlock(
 
 @Composable
 private fun CodeBlockWithLineNumbersWrapped(
+    displayCode: String,
     displayLines: List<String>,
     language: String,
     textStyle: TextStyle,
@@ -263,6 +271,41 @@ private fun CodeBlockWithLineNumbersWrapped(
 ) {
     val lineNumberWidth = remember(displayLines.size) {
         displayLines.size.toString().length
+    }
+    val highlighter = LocalHighlighter.current
+    var highlightedLines by remember(language, colorPalette) {
+        mutableStateOf(emptyList<AnnotatedString>())
+    }
+    LaunchedEffect(displayCode, language, colorPalette, completeCodeBlock) {
+        if (completeCodeBlock) {
+            highlightedLines = withContext(Dispatchers.Default) {
+                val codeToHighlight = displayLines.joinToString("\n") { line ->
+                    if (line.length > MAX_HIGHLIGHT_LINE_LENGTH) {
+                        " ".repeat(line.length)
+                    } else {
+                        line
+                    }
+                }
+                val tokens = highlighter.highlight(codeToHighlight, language)
+                val highlightedCode = buildAnnotatedString {
+                    tokens.forEach { buildHighlightText(it, colorPalette) }
+                }
+                if (highlightedCode.length != displayCode.length) {
+                    displayLines.map(::AnnotatedString)
+                } else {
+                    var start = 0
+                    displayLines.map { line ->
+                        val highlightedLine = if (line.length <= MAX_HIGHLIGHT_LINE_LENGTH) {
+                            highlightedCode.subSequence(start, start + line.length)
+                        } else {
+                            AnnotatedString(line)
+                        }
+                        start += line.length + 1
+                        highlightedLine
+                    }
+                }
+            }
+        }
     }
     SelectionContainer {
         Column {
@@ -279,16 +322,36 @@ private fun CodeBlockWithLineNumbersWrapped(
                         softWrap = false,
                         modifier = Modifier.padding(end = 8.dp)
                     )
-                    SmoothHighlightText(
-                        highlighted = completeCodeBlock,
-                        code = line,
-                        language = language,
-                        textStyle = textStyle,
-                        colorPalette = colorPalette,
-                        overflow = TextOverflow.Visible,
-                        softWrap = true,
+                    Crossfade(
+                        targetState = completeCodeBlock,
+                        animationSpec = tween(CODE_HIGHLIGHT_CROSSFADE_MS),
+                        label = "code-highlight",
                         modifier = Modifier.weight(1f),
-                    )
+                    ) { showHighlight ->
+                        if (showHighlight) {
+                            Text(
+                                text = highlightedLines.getOrNull(index)
+                                    ?.takeIf { it.text == line }
+                                    ?: AnnotatedString(line),
+                                fontSize = textStyle.fontSize,
+                                lineHeight = textStyle.lineHeight,
+                                overflow = TextOverflow.Visible,
+                                softWrap = true,
+                                fontFamily = JetbrainsMono,
+                                fontStyle = FontStyle.Normal,
+                                fontWeight = FontWeight.Normal,
+                            )
+                        } else {
+                            Text(
+                                text = line,
+                                fontSize = textStyle.fontSize,
+                                lineHeight = textStyle.lineHeight,
+                                overflow = TextOverflow.Visible,
+                                softWrap = true,
+                                fontFamily = JetbrainsMono,
+                            )
+                        }
+                    }
                 }
             }
         }

@@ -3411,24 +3411,23 @@
   <string name="setting_jev_title">Служба оценки Jev</string>
   <string name="setting_jev_service_section">Служба</string>
   <string name="setting_jev_master_title">Включить Jev</string>
-  <string name="setting_jev_master_desc">Внешняя служба оценок (TypeSafe systemone или Vercel AI Gateway) помогает искать инструменты и вспоминать память. Требуется API-ключ; в списке моделей чата не появляется.</string>
+  <string name="setting_jev_master_desc">Внешний сервис оценок для поиска инструментов, извлечения памяти и др. Нужен API-ключ.</string>
   <string name="setting_jev_api_mode_title">Режим API</string>
-  <string name="setting_jev_api_mode_desc">Typesafe напрямую вызывает api.typesafe.ai; Vercel использует эндпоинт evaluation-model в AI Gateway (id модели передаётся заголовком).</string>
+  <string name="setting_jev_api_mode_desc">Typesafe — прямой вызов официального API; Vercel — через эндпоинт оценки AI Gateway.</string>
   <string name="setting_jev_api_mode_typesafe">Typesafe</string>
   <string name="setting_jev_api_mode_vercel">Vercel</string>
   <string name="setting_jev_base_url_title">Base URL шлюза</string>
   <string name="setting_jev_base_url_desc">Базовый адрес шлюза для режима Vercel; /evaluation-model добавляется автоматически.</string>
   <string name="setting_jev_base_url_dialog_title">Указать Base URL шлюза</string>
   <string name="setting_jev_model_title">Модель</string>
-  <string name="setting_jev_model_desc">Typesafe: закреплённая версия (необязательно, пусто = jev-latest). Vercel: id оценочной модели шлюза (по умолчанию typesafe-ai/jev).</string>
+  <string name="setting_jev_model_desc">Пусто — версия по умолчанию; для Vercel укажите id модели шлюза (по умолчанию typesafe-ai/jev).</string>
   <string name="setting_jev_model_dialog_title">Задать модель Jev</string>
   <string name="setting_jev_value_unset">Не задано</string>
   <string name="setting_jev_value_clear">Очистить</string>
   <string name="setting_jev_key_title">API-ключ</string>
   <string name="setting_jev_key_unset">Не задан</string>
   <string name="setting_jev_key_dialog_title">Задать API-ключ Jev</string>
-  <string name="setting_jev_key_hint">Хранится только в хранилище ключей устройства; не попадает в чаты и логи</string>
-  <string name="setting_jev_key_hint2">Сохранение нового ключа заменит существующий.</string>
+  <string name="setting_jev_key_hint">Хранится только в Keystore устройства</string>
   <string name="setting_jev_key_save">Сохранить</string>
   <string name="setting_jev_key_clear">Удалить ключ</string>
   <string name="setting_jev_connection_title">Проверка соединения</string>
@@ -3439,7 +3438,7 @@
   <string name="setting_jev_connection_key_missing">Сначала задайте API-ключ</string>
   <string name="setting_jev_connection_model_required">Сначала задайте модель — для режима Vercel нужен id модели шлюза</string>
   <string name="setting_jev_connection_failed">Ошибка: %1$s</string>
-  <string name="setting_jev_shadow_notice">Режим «Тень» также отправляет данные внешнему сервису — это не локальный режим. Данные уходят только в разрешённых ниже пределах.</string>
+  <string name="setting_jev_shadow_notice">В режиме Shadow данные всё равно отправляются — только в рамках разрешённых ниже областей.</string>
   <string name="setting_jev_purposes_section">Режимы по назначению</string>
   <string name="setting_jev_purpose_tool_discovery">Поиск инструментов</string>
   <string name="setting_jev_purpose_tool_discovery_desc">Семантическое переупорядочивание tool_search в больших каталогах (более 40 инструментов)</string>
@@ -3449,6 +3448,8 @@
   <string name="setting_jev_purpose_context_selection_desc">Скрывает малорелевантные блоки длинных выводов инструментов; оригинал восстановим</string>
   <string name="setting_jev_purpose_model_routing">Маршрутизация моделей</string>
   <string name="setting_jev_purpose_model_routing_desc">Выбирает модели мест совета там, где действует автовыбор</string>
+  <string name="setting_jev_purpose_screen_automation">Автоматизация экрана</string>
+  <string name="setting_jev_purpose_screen_automation_desc">Ограниченные быстрые действия для ясной цели на экране (screen_run_goal)</string>
   <string name="setting_jev_purpose_web_automation">Веб-автоматизация</string>
   <string name="setting_jev_purpose_web_automation_desc">Ограниченные быстрые действия для явных веб-целей (wm_run_goal)</string>
   <string name="setting_jev_mode_off">Выкл</string>
@@ -3465,6 +3466,8 @@
   <string name="setting_jev_scope_tool_output_desc">Блоки длинных результатов инструментов</string>
   <string name="setting_jev_scope_web_content">Веб-содержимое</string>
   <string name="setting_jev_scope_web_content_desc">Состояние снимков веб-страниц</string>
+  <string name="setting_jev_scope_screen_content">Содержимое экрана</string>
+  <string name="setting_jev_scope_screen_content_desc">Текст и сводки узлов доступности для оценки целей на экране</string>
   <string name="setting_jev_status_section">Статус и расход</string>
   <string name="setting_jev_status_daily">Запросов сегодня: %1$d / %2$d</string>
   <string name="setting_jev_status_metrics">Недавние оценки: всего %1$d, применено %2$d, тень %3$d, кэш %4$d, откатов %5$d, ошибок %6$d</string>
@@ -3475,7 +3478,7 @@
   <string name="setting_jev_status_cooldown">Состояние: пауза после сбоев, осталось %1$d мс</string>
   <string name="setting_jev_status_last_error">Состояние: последняя ошибка %1$s</string>
   <string name="setting_jev_calibration_count">Записей калибровки: %1$d</string>
-  <string name="setting_jev_calibration_desc">Оценки кандидатов, сверенные с текущим верхним выбором; только id и вероятности, для офлайн-настройки порогов</string>
+  <string name="setting_jev_calibration_desc">Записи сверки оценок; только id и вероятности</string>
   <string name="setting_jev_calibration_export">Экспорт</string>
   <string name="setting_jev_calibration_clear">Очистить</string>
   <string name="setting_jev_connection_budget">Дневной лимит запросов исчерпан</string>

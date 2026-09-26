@@ -127,19 +127,20 @@ class ChatTurnAgent(
                             it.role == app.amber.ai.core.MessageRole.ASSISTANT
                         }
                         if (tail != null) {
-                            val partsHash = tail.streamPartsHash()
                             val charCount = tail.streamContentLength()
+                            val nowMs = System.currentTimeMillis()
+                            val messageId = tail.id.toString()
+                            lateinit var partsHash: String
                             val due = checkpointCoalescer.offer(
-                                nowMs = System.currentTimeMillis(),
-                                messageId = tail.id.toString(),
-                                partsHash = partsHash,
+                                nowMs = nowMs,
+                                messageId = messageId,
                                 charCount = charCount,
-                            )
+                            ) { tail.streamPartsHash().also { partsHash = it } }
                             if (due) {
                                 scope.events.commit(
                                     ChatEventPayload.StreamCheckpoint(
                                         conversationId = input.conversationId.value,
-                                        messageId = tail.id.toString(),
+                                        messageId = messageId,
                                         partsHash = partsHash,
                                         toolStates = tail.toolStateSnapshots(),
                                         charCount = charCount,

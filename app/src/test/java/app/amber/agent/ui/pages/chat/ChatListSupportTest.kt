@@ -16,6 +16,14 @@ import kotlin.uuid.Uuid
 
 class ChatListSupportTest {
     @Test
+    fun `timeline boundary item keys stay fixed`() {
+        val source = repoFile("src/main/java/app/amber/feature/ui/pages/chat/ChatListNormalSection.kt").readText()
+
+        assertTrue(source.contains("ChatTimelineEntry.TimelineTail -> TimelineTailKey"))
+        assertTrue(source.contains("ChatTimelineEntry.HistoryLoading -> HistoryLoadingItemKey"))
+    }
+
+    @Test
     fun `latest render token is empty for empty conversation`() {
         val conversation = Conversation(
             assistantId = Uuid.random(),
@@ -193,7 +201,6 @@ class ChatListSupportTest {
         // 尾部 compact 标记是常驻 plan entry（无标记时渲染 0 尺寸占位），否则
         // 反转发射序下它会把其后所有消息条目的 lazy index 推偏 +1。
         assertTrue(plan.contains("add(ChatTimelineEntry.TailCompactMarkers)"))
-        assertTrue(section.contains("contentType = \"compact-timeline-tail\""))
         assertTrue(section.contains("Spacer(Modifier.fillMaxWidth())"))
     }
 
@@ -225,7 +232,6 @@ class ChatListSupportTest {
 
         // 倒序发射下 Hidden 之后还有全部更早消息，不发 item 会让 plan 数组
         // 与真实 lazy index 错位（破坏 prewarm 与跳转映射）。
-        assertTrue(source.contains("contentType = \"post-send-hidden-assistant\""))
         assertTrue(source.contains("Spacer(Modifier.fillMaxWidth())"))
     }
 
@@ -248,8 +254,6 @@ class ChatListSupportTest {
         // reverseLayout 下跟随时 TimelineTail item 恒在底部视口内，列表内指示器
         // 足够；pin 交接/保留圆点等防抖机制已删除。
         assertTrue(source.contains("tailIndicatorReserveVisible"))
-        assertTrue(source.contains("key = TimelineTailKey"))
-        assertTrue(source.contains("contentType = \"timeline-tail\""))
         assertTrue(source.contains("TimelineTailWorkingIndicator("))
         assertFalse(source.contains("pinTailIndicator"))
         assertFalse(source.contains("retainedTailIndicatorMessageId"))

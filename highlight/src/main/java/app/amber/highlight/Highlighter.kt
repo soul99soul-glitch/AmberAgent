@@ -6,7 +6,9 @@ import com.whl.quickjs.android.QuickJSLoader
 import com.whl.quickjs.wrapper.QuickJSArray
 import com.whl.quickjs.wrapper.QuickJSContext
 import com.whl.quickjs.wrapper.QuickJSObject
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.descriptors.SerialDescriptor
@@ -65,10 +67,11 @@ class Highlighter(ctx: Context) {
      * steady-state non-sampled path.
      */
     suspend fun highlight(code: String, language: String): List<HighlightToken> {
-        HighlightNativeSwitch.highlightOrNull(code, language) {
-            highlightJvm(code, language)
-        }?.let { return it }
-        return highlightJvm(code, language)
+        return withContext(Dispatchers.Default) {
+            HighlightNativeSwitch.highlightOrNull(code, language) {
+                highlightJvm(code, language)
+            } ?: highlightJvm(code, language)
+        }
     }
 
     private suspend fun highlightJvm(code: String, language: String): List<HighlightToken> =

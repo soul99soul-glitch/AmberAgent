@@ -23,7 +23,7 @@ class StreamCheckpointCoalescer(
     private var emittedChars = 0L
     private var tailMessageId: String? = null
 
-    fun offer(nowMs: Long, messageId: String, partsHash: String, charCount: Long): Boolean {
+    fun offer(nowMs: Long, messageId: String, charCount: Long, partsHash: () -> String): Boolean {
         if (lastEmitAt == Long.MIN_VALUE) {
             lastEmitAt = nowMs
         }
@@ -33,12 +33,13 @@ class StreamCheckpointCoalescer(
             tailMessageId = messageId
             emittedChars = 0L
         }
-        if (partsHash == lastEmittedHash) return false
         val due = nowMs - lastEmitAt >= minIntervalMs ||
             charCount - emittedChars >= charThreshold
         if (!due) return false
+        val hash = partsHash()
+        if (hash == lastEmittedHash) return false
         lastEmitAt = nowMs
-        lastEmittedHash = partsHash
+        lastEmittedHash = hash
         emittedChars = charCount
         return true
     }

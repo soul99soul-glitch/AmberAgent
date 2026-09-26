@@ -1,0 +1,69 @@
+{
+  "format": "amber.theme.pack",
+  "version": 1,
+  "id": "cross-platform-v1-garden",
+  "displayName": "山雨入林 · 双端配方",
+  "paper": "paper",
+  "accentHex": "#315B42",
+  "inkHex": "#FFFFFF",
+  "canvasStyle": "paperGrain",
+  "brandMark": "serifWordmark",
+  "shortcutIconStyle": "phosphorFill",
+  "chromeTypeface": "rounded",
+  "canvasScope": "appWide",
+  "bubbleChrome": "soft",
+  "glassChrome": "quieter",
+  "emptyArt": "character",
+  "settingsChrome": true,
+  "launchBrand": "matchBrand",
+  "assetMode": "builtinOnly",
+  "immersivePolicy": "hidden",
+  "design": {
+    "light": {
+      "background": "#F5F7F4",
+      "surface": "#FFFFFF",
+      "foreground": "#17211A",
+      "mutedForeground": "#46584B",
+      "border": "#D3DDD4"
+    },
+    "dark": {
+      "background": "#121915",
+      "surface": "#1C2620",
+      "foreground": "#EAF2EB",
+      "mutedForeground": "#B4C5B7",
+      "border": "#39473D"
+    },
+    "gradient": {
+      "colors": ["#F7F9F5", "#DDEAD9"],
+      "darkColors": ["#17211A", "#243A2D"],
+      "angle": 38.123456789
+    },
+    "patterns": [
+      {
+        "kind": "dots",
+        "color": "#54725D",
+        "opacity": 0.123456789,
+        "spacing": 28.123456789,
+        "size": 1.5
+      },
+      {
+        "kind": "diagonal",
+        "color": "#6B8A72",
+        "opacity": 0.08,
+        "spacing": 36.0,
+        "size": 2.0
+      }
+    ],
+    "components": {
+      "cardRadius": 18.0,
+      "bubbleRadius": 16.0,
+      "controlRadius": 12.0,
+      "borderWidth": 1.0,
+      "shadowOpacity": 0.123456789,
+      "shadowRadius": 8.123456789,
+      "brandText": "林间琥珀",
+      "brandSize": 28.0,
+      "brandTracking": 1.123456789
+    }
+  }
+}

@@ -142,7 +142,7 @@ class ChatVM(
      * via [kernelRunStatus] for run lifecycle (running/completed/failed/cancelled).
      */
     val activeKernelRunId: StateFlow<app.amber.core.agent.runtime.AgentRunId?> =
-        chatService.getActiveKernelRunFlow(_conversationId)
+        chatService.getActiveKernelRunFlow(_conversationId, viewModelScope)
 
     /**
      * Latest snapshot from runner.observe(activeKernelRunId). Null status when

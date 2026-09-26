@@ -41,10 +41,11 @@ class AgentTaskTools(
                 AgentTaskStatus.entries.firstOrNull { it.name.equals(raw, ignoreCase = true) }
             }
             val type = input.string("type")?.takeIf { it.isNotBlank() }
+            val tasks = taskScheduler.list(type = type, status = status)
             textJson {
                 put("status", "ok")
                 put("tasks", buildJsonArray {
-                    taskScheduler.list(type = type, status = status).forEach { add(it.toJson()) }
+                    tasks.forEach { add(it.toJson()) }
                 })
             }
         }

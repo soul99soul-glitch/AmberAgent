@@ -298,7 +298,7 @@ class ConversationContextEngine(
         runKey: String?,
     ): List<UIMessage> = toolOutputProjector?.projectMessages(messages, runKey) ?: messages
 
-    private fun prepareMessagesWithCompacts(
+    private suspend fun prepareMessagesWithCompacts(
         messages: List<UIMessage>,
         activeCompacts: List<ConversationCompact>,
         policy: CompactPolicy,

@@ -90,7 +90,6 @@ import androidx.core.content.FileProvider
 import androidx.core.net.toFile
 import androidx.core.net.toUri
 import com.dokar.sonner.ToastType
-import dev.chrisbanes.haze.HazeState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -237,7 +236,6 @@ fun ChatInput(
     compactLifecycleState: CompactLifecycleState = CompactLifecycleState.idle(),
     pendingQueueCount: Int = 0,
     settings: Settings,
-    hazeState: HazeState,
     timelineScrolling: Boolean = false,
     enableSearch: Boolean,
     onToggleSearch: (Boolean) -> Unit,

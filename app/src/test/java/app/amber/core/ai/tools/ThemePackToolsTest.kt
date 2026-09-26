@@ -13,10 +13,16 @@ import app.amber.feature.runtime.PermissionDecisionAction
 import app.amber.feature.runtime.PermissionDecisionResolver
 import app.amber.feature.ui.theme.ThemePackageManager
 import app.amber.feature.ui.theme.ThemeSettingsStore
+import app.amber.feature.ui.theme.ThemePackTransfer
+import app.amber.feature.ui.theme.ThemePackageApplyResult
+import app.amber.feature.ui.theme.ThemePackageImportResult
+import java.io.File
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.buildJsonArray
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.put
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -153,6 +159,88 @@ class ThemePackToolsTest {
         assertTrue(discardText.contains("\"status\":\"rejected\""))
         assertTrue(discardText.contains("binding_required"))
         assertTrue(manager.tryOn.value != null)
+    }
+
+    @Test
+    fun `portable theme continues latest draft and updates one saved recipe`() = runTest {
+        val fixture = File("../test-fixtures/themes/cross-platform-v1.json").readText()
+        val original = ThemePackTransfer.decode(fixture)
+        val before = manager.status().current
+        val imported = manager.prepareImport(fixture) as ThemePackageImportResult.Preview
+        val import = createThemePackTools(manager).single { it.name == TOOL_THEME_PACK_IMPORT }
+        assertEquals(original, manager.recipe())
+        assertEquals(before, manager.status().current)
+
+        import.execute(buildJsonObject {
+            put("base_id", "current")
+            put("design", buildJsonObject {
+                put("components", buildJsonObject { put("cardRadius", 12) })
+            })
+        })
+        import.execute(buildJsonObject {
+            put("base_id", "current")
+            put("design", buildJsonObject {
+                put("light", buildJsonObject { put("border", "#B3A89C") })
+            })
+        })
+        val design = requireNotNull(original.design)
+        val expected = original.copy(design = design.copy(
+            components = design.components!!.copy(cardRadius = 12.0),
+            light = design.light!!.copy(border = "#B3A89C"),
+        ))
+        assertEquals(expected, manager.recipe())
+        assertEquals(before, manager.status().current)
+        assertTrue(manager.status().installed.isEmpty())
+        assertEquals(ThemePackageApplyResult.NotPrepared, manager.applyPrepared(imported.pkg.id, imported.candidateDigest))
+        val candidate = manager.tryOn.value!!
+        assertEquals(ThemePackageApplyResult.Applied, manager.applyPrepared(candidate.pkg.id, candidate.candidateDigest))
+
+        import.execute(buildJsonObject {
+            put("base_id", original.id)
+            put("design", buildJsonObject { put("patterns", buildJsonArray {}) })
+        })
+        val second = manager.tryOn.value!!
+        import.execute(buildJsonObject {
+            put("action", "apply"); put("id", second.pkg.id); put("candidate_digest", second.candidateDigest)
+        })
+        assertEquals(listOf(original.id), manager.status().installed.map { it.id })
+        val finalRecipe = expected.copy(design = expected.design!!.copy(patterns = emptyList()))
+        val export = ThemePackTransfer.encode(ThemePackTransfer.export(manager.status().current.displaySetting))
+        assertEquals(finalRecipe, ThemePackTransfer.decode(export))
+        // Exercise the persisted portable JSON path as a later library selection would.
+        manager.applyBuiltin("WARM")
+        assertEquals(ThemePackageApplyResult.Applied, manager.apply(original.id))
+        assertEquals(finalRecipe, manager.recipe())
+        File("build/reports/theme-android-export.json").apply { parentFile.mkdirs() }.writeText(export)
+    }
+
+    @Test
+    fun `builtin edit creates one copy and invalid refinement retains the preview`() = runTest {
+        val import = createThemePackTools(manager).single { it.name == TOOL_THEME_PACK_IMPORT }
+        import.execute(buildJsonObject {
+            put("base_id", "current")
+            put("design", buildJsonObject { put("components", buildJsonObject { put("cardRadius", 12) }) })
+        })
+        val first = manager.recipe()
+        assertFalse(first.id in ThemePackTransfer.builtinIds)
+        assertNull(first.design?.light)
+        import.execute(buildJsonObject {
+            put("base_id", "current")
+            put("design", buildJsonObject { put("components", buildJsonObject { put("cardRadius", JsonNull) }) })
+        })
+        val current = manager.tryOn.value!!
+        assertEquals(first.id, current.pkg.id)
+        assertNull(manager.recipe().design?.components?.cardRadius)
+        val failure = runCatching {
+            import.execute(buildJsonObject {
+                put("base_id", "current"); put("accent_hex", "#FFFFFF"); put("ink_hex", "#FFFFFF")
+            })
+        }.exceptionOrNull()
+        assertTrue(failure is IllegalArgumentException)
+        assertEquals(current, manager.tryOn.value)
+        assertTrue(manager.discardTryOn(current.pkg.id, current.candidateDigest))
+        assertTrue(manager.status().installed.isEmpty())
+        assertNull(manager.status().current.displaySetting.themePack)
     }
 
     private class FakeThemeSettingsStore(initial: Settings) : ThemeSettingsStore {

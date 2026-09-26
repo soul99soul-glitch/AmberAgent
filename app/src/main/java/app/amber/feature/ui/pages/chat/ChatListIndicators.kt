@@ -8,7 +8,6 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -36,8 +35,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.scale
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
@@ -139,7 +139,7 @@ private fun AgentWaitingDot(
     // accent 取自聊天主题 token (随 amberBase + accent 色解析), 替代硬编码 workspace.blue.
     val accent = app.amber.feature.ui.pages.chat.LocalChatTheme.current.accent
     val transition = rememberInfiniteTransition(label = "agent_waiting_dot")
-    val dotScale by transition.animateFloat(
+    val dotScale = transition.animateFloat(
         initialValue = 0.82f,
         targetValue = 1.2f,
         animationSpec = infiniteRepeatable(
@@ -148,7 +148,7 @@ private fun AgentWaitingDot(
         ),
         label = "agent_waiting_dot_scale",
     )
-    val haloAlpha by transition.animateFloat(
+    val haloAlpha = transition.animateFloat(
         initialValue = 0.08f,
         targetValue = 0.18f,
         animationSpec = infiniteRepeatable(
@@ -157,7 +157,7 @@ private fun AgentWaitingDot(
         ),
         label = "agent_waiting_dot_halo",
     )
-    val dotAlpha by transition.animateFloat(
+    val dotAlpha = transition.animateFloat(
         initialValue = 0.56f,
         targetValue = 0.94f,
         animationSpec = infiniteRepeatable(
@@ -173,16 +173,26 @@ private fun AgentWaitingDot(
         Box(
             modifier = Modifier
                 .size(16.dp)
-                .scale(dotScale)
+                .graphicsLayer {
+                    scaleX = dotScale.value
+                    scaleY = dotScale.value
+                }
                 .clip(CircleShape)
-                .background(accent.copy(alpha = haloAlpha))
+                .drawBehind {
+                    drawRect(accent.copy(alpha = haloAlpha.value))
+                }
         )
         Box(
             modifier = Modifier
                 .size(7.dp)
-                .scale(dotScale)
+                .graphicsLayer {
+                    scaleX = dotScale.value
+                    scaleY = dotScale.value
+                }
                 .clip(CircleShape)
-                .background(accent.copy(alpha = dotAlpha))
+                .drawBehind {
+                    drawRect(accent.copy(alpha = dotAlpha.value))
+                }
         )
     }
 }

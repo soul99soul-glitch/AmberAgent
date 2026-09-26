@@ -9,20 +9,18 @@ import androidx.compose.animation.core.tween
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.composed
-import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.TileMode
+import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.unit.IntSize
 
 /**
  * 为 Composable 添加 Shimmer 加载效果的 Modifier.
@@ -47,8 +45,6 @@ fun Modifier.shimmer(
         // 如果不处于加载状态，则不应用任何效果
         this
     } else {
-        // 记住组件的尺寸，以便计算渐变
-        var size by remember { mutableStateOf(IntSize.Zero) }
         // 创建无限循环动画
         val transition = rememberInfiniteTransition(label = "ShimmerTransition")
         val translateAnimation = transition.animateFloat(
@@ -72,50 +68,43 @@ fun Modifier.shimmer(
         }
         // 应用绘制效果
         this
-            .onGloballyPositioned { layoutCoordinates ->
-                // 获取组件的实际尺寸
-                size = layoutCoordinates.size
-            }
             .graphicsLayer { alpha = 0.99f } // 开启混合
-            .drawWithContent { // 使用 drawWithContent 获取绘制上下文
-                if (size == IntSize.Zero) {
-                    // 如果尺寸未知，先绘制原始内容
-                    drawContent()
-                    return@drawWithContent
+            .drawWithCache {
+                if (size == Size.Zero) {
+                    onDrawWithContent { drawContent() }
+                } else {
+                    val width = size.width
+                    val height = size.height
+                    // 计算渐变的实际宽度（像素）
+                    // 我们需要考虑对角线长度，以确保倾斜时能完全覆盖
+                    val diagonal = kotlin.math.sqrt(width * width + height * height)
+                    val gradientWidth = diagonal * gradientWidthRatio
+                    val totalDistance = diagonal + gradientWidth
+                    val directionX = kotlin.math.cos(angleRad)
+                    val directionY = kotlin.math.sin(angleRad)
+                    val shimmerBrush = Brush.linearGradient(
+                        colors = colors,
+                        start = Offset.Zero,
+                        end = Offset(gradientWidth * directionX, gradientWidth * directionY),
+                        tileMode = TileMode.Clamp // Clamp 模式确保渐变颜色在边缘处固定
+                    )
+
+                    onDrawWithContent {
+                        drawContent()
+                        // 平移渐变并反向移动绘制区域，保证矩形仍覆盖组件。
+                        val currentOffset = translateAnimation.value * totalDistance - gradientWidth
+                        val dx = currentOffset * directionX
+                        val dy = currentOffset * directionY
+                        translate(dx, dy) {
+                            drawRect(
+                                brush = shimmerBrush,
+                                topLeft = Offset(-dx, -dy),
+                                size = size,
+                                blendMode = BlendMode.DstIn
+                            )
+                        }
+                    }
                 }
-                val width = size.width.toFloat()
-                val height = size.height.toFloat()
-                // 计算渐变的实际宽度（像素）
-                // 我们需要考虑对角线长度，以确保倾斜时能完全覆盖
-                val diagonal = kotlin.math.sqrt(width * width + height * height)
-                val gradientWidth = diagonal * gradientWidthRatio
-                // 计算动画当前位置的偏移量
-                // 动画值从 0 到 1，映射到移动距离
-                // 总移动距离需要覆盖组件加上渐变宽度，确保完全扫过
-                // 我们让它从完全在组件左/上侧开始，移动到完全在右/下侧结束
-                val totalDistance = diagonal + gradientWidth
-                val currentOffset = translateAnimation.value * totalDistance - gradientWidth
-                // 计算渐变的起始点和结束点，考虑角度
-                val startX = currentOffset * kotlin.math.cos(angleRad)
-                val startY = currentOffset * kotlin.math.sin(angleRad)
-                val endX = (currentOffset + gradientWidth) * kotlin.math.cos(angleRad)
-                val endY = (currentOffset + gradientWidth) * kotlin.math.sin(angleRad)
-                // 创建线性渐变 Brush
-                val shimmerBrush = Brush.linearGradient(
-                    colors = colors,
-                    start = Offset(startX, startY),
-                    end = Offset(endX, endY),
-                    tileMode = TileMode.Clamp // Clamp 模式确保渐变颜色在边缘处固定
-                )
-                // 1. 先绘制原始内容
-                drawContent()
-                // 2. 在原始内容之上绘制一个矩形，使用 Shimmer Brush 和 DstIn 混合模式
-                // BlendMode.DstIn: 只保留目标（原始内容）与源（Shimmer渐变）重叠的部分，
-                // 并且使用源的 Alpha 值。这使得渐变亮部显示内容，暗部（透明部）隐藏内容。
-                drawRect(
-                    brush = shimmerBrush,
-                    blendMode = BlendMode.DstIn
-                )
             }
     }
 }

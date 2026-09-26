@@ -4,7 +4,9 @@ import android.app.Notification
 import android.content.Context
 import android.service.notification.StatusBarNotification
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import app.amber.feature.board.BoardSignalSourceType
 import app.amber.feature.board.aggregator.SignalAggregator
 import app.amber.feature.system.AmberNotificationListenerService
@@ -39,9 +41,12 @@ class NotificationSignalCollector(
     }
 
     override fun onNotificationPosted(sbn: StatusBarNotification) {
-        val signal = convert(sbn) ?: return
+        if (!passesCheapFilters(sbn)) return
         ioScope.launch {
-            runCatching { aggregator.ingest(signal) }
+            runCatching {
+                val signal = withContext(Dispatchers.Default) { convertContent(sbn) } ?: return@runCatching
+                aggregator.ingest(signal)
+            }
                 .onFailure { android.util.Log.w(TAG, "ingest from listener failed", it) }
         }
     }
@@ -49,29 +54,30 @@ class NotificationSignalCollector(
     override suspend fun collect(limit: Int): List<RawBoardSignal> {
         val snapshots = AmberNotificationListenerService.getActiveNotificationsSnapshot()
         return mergeNotifications(
-            snapshots.mapNotNull { convert(it) }
+            snapshots.mapNotNull { sbn ->
+                if (passesCheapFilters(sbn)) convertContent(sbn) else null
+            }
         ).take(limit)
     }
 
-    /**
-     * Translate a [StatusBarNotification] into our raw shape. Hard-filters:
-     *  - Foreground service notifications (persistent, low signal).
-     *  - Empty / blank notifications.
-     *  - Our own app's notifications (avoid feedback loops).
-     *  - Known low-signal packages (shopping, delivery, system bloatware).
-     */
-    private fun convert(sbn: StatusBarNotification): RawBoardSignal? {
-        val notif = sbn.notification ?: return null
+    /** Apply package and notification-flag filters before reading notification text. */
+    private fun passesCheapFilters(sbn: StatusBarNotification): Boolean {
+        val notif = sbn.notification ?: return false
         val ourPackage = context.packageName
-        if (sbn.packageName == ourPackage) return null
+        if (sbn.packageName == ourPackage) return false
 
         val isForegroundService = notif.flags and Notification.FLAG_FOREGROUND_SERVICE != 0
-        if (isForegroundService) return null
+        if (isForegroundService) return false
 
         // Package-level filtering
         val pkg = sbn.packageName
-        if (isLowSignalPackage(pkg)) return null
+        return !isLowSignalPackage(pkg)
+    }
 
+    /** Translate a notification that passed [passesCheapFilters] into our raw shape. */
+    private fun convertContent(sbn: StatusBarNotification): RawBoardSignal? {
+        val notif = sbn.notification ?: return null
+        val pkg = sbn.packageName
         val extras = notif.extras
         val title = extras.getCharSequence(Notification.EXTRA_TITLE)?.toString().orEmpty().trim()
         val text = extras.getCharSequence(Notification.EXTRA_TEXT)?.toString().orEmpty().trim()

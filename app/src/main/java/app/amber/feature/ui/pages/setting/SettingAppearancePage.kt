@@ -41,7 +41,9 @@ import app.amber.feature.ui.hooks.rememberAmoledDarkMode
 import app.amber.feature.ui.hooks.rememberColorMode
 import app.amber.feature.ui.theme.AmberAccents
 import app.amber.feature.ui.theme.ColorMode
+import app.amber.feature.ui.theme.ThemePackageManager
 import app.amber.core.utils.plus
+import org.koin.compose.koinInject
 import org.koin.androidx.compose.koinViewModel
 
 @Composable
@@ -50,10 +52,34 @@ fun SettingAppearancePage(vm: SettingVM = koinViewModel()) {
     var colorMode by rememberColorMode()
     var amoledDarkMode by rememberAmoledDarkMode()
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
+    val themePackageManager: ThemePackageManager = koinInject()
 
     fun updateDisplaySetting(transform: (DisplaySetting) -> DisplaySetting) {
+        val display = vm.settings.value.displaySetting
+        val updated = transform(display)
+        val themeValueChanged = updated.amberBaseFamily != display.amberBaseFamily ||
+            !updated.accentColor.equals(display.accentColor, ignoreCase = true)
+        if (!themeValueChanged) return
+
+        themePackageManager.tryOn.value?.let { candidate ->
+            themePackageManager.discardTryOn(candidate.pkg.id, candidate.candidateDigest)
+        }
+
         vm.updateSettings { current ->
-            current.copy(displaySetting = transform(current.displaySetting))
+            val currentDisplay = current.displaySetting
+            val currentUpdated = transform(currentDisplay)
+            val changed = currentUpdated.amberBaseFamily != currentDisplay.amberBaseFamily ||
+                !currentUpdated.accentColor.equals(currentDisplay.accentColor, ignoreCase = true)
+            if (!changed) {
+                current
+            } else {
+                current.copy(
+                    displaySetting = currentUpdated.copy(
+                        appliedThemePackageId = null,
+                        themePack = null,
+                    ),
+                )
+            }
         }
     }
 

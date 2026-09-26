@@ -3467,24 +3467,23 @@ My task:</string>
   <string name="setting_jev_title">Jev Judgment Service</string>
   <string name="setting_jev_service_section">Service</string>
   <string name="setting_jev_master_title">Enable Jev</string>
-  <string name="setting_jev_master_desc">Uses an external judgment service (TypeSafe systemone or Vercel AI Gateway) for tool discovery, memory recall and more. Needs an API key. Never appears in the chat model list.</string>
+  <string name="setting_jev_master_desc">External judgment service that assists tool discovery, memory recall and more. Requires an API key.</string>
   <string name="setting_jev_api_mode_title">API mode</string>
-  <string name="setting_jev_api_mode_desc">Typesafe calls api.typesafe.ai natively; Vercel calls the AI Gateway evaluation-model endpoint (model id goes in a request header).</string>
+  <string name="setting_jev_api_mode_desc">Typesafe calls the official API; Vercel goes through the AI Gateway evaluation endpoint.</string>
   <string name="setting_jev_api_mode_typesafe">Typesafe</string>
   <string name="setting_jev_api_mode_vercel">Vercel</string>
   <string name="setting_jev_base_url_title">Gateway base URL</string>
   <string name="setting_jev_base_url_desc">Gateway base URL for Vercel mode; /evaluation-model is appended.</string>
   <string name="setting_jev_base_url_dialog_title">Set gateway base URL</string>
   <string name="setting_jev_model_title">Model</string>
-  <string name="setting_jev_model_desc">Typesafe: optional pinned version (blank follows jev-latest). Vercel: gateway evaluation model id, default typesafe-ai/jev.</string>
+  <string name="setting_jev_model_desc">Leave empty for the default version; for Vercel enter the gateway model id (default typesafe-ai/jev).</string>
   <string name="setting_jev_model_dialog_title">Set Jev model</string>
   <string name="setting_jev_value_unset">Not set</string>
   <string name="setting_jev_value_clear">Clear</string>
   <string name="setting_jev_key_title">API Key</string>
   <string name="setting_jev_key_unset">Not set</string>
   <string name="setting_jev_key_dialog_title">Set Jev API key</string>
-  <string name="setting_jev_key_hint">Stored only in the device keystore; never entered into chats or logs</string>
-  <string name="setting_jev_key_hint2">Saving a new key replaces the stored one.</string>
+  <string name="setting_jev_key_hint">Stored only in the device Keystore</string>
   <string name="setting_jev_key_save">Save</string>
   <string name="setting_jev_key_clear">Clear key</string>
   <string name="setting_jev_connection_title">Connection test</string>
@@ -3495,7 +3494,7 @@ My task:</string>
   <string name="setting_jev_connection_key_missing">Set an API key first</string>
   <string name="setting_jev_connection_model_required">Set a model first — Vercel mode needs a gateway model id</string>
   <string name="setting_jev_connection_failed">Failed: %1$s</string>
-  <string name="setting_jev_shadow_notice">Shadow mode also sends data to the external service; it is not a local mode. Data only leaves the device within the scopes allowed below.</string>
+  <string name="setting_jev_shadow_notice">Shadow mode still sends data — limited to the scopes allowed below.</string>
   <string name="setting_jev_purposes_section">Purposes</string>
   <string name="setting_jev_purpose_tool_discovery">Tool discovery</string>
   <string name="setting_jev_purpose_tool_discovery_desc">Semantic rerank for tool search in large catalogs (more than 40 tools)</string>
@@ -3508,7 +3507,7 @@ My task:</string>
   <string name="setting_jev_purpose_web_automation">Web automation</string>
   <string name="setting_jev_purpose_web_automation_desc">Bounded quick actions for explicit web goals (wm_run_goal)</string>
   <string name="setting_jev_purpose_screen_automation">Screen automation</string>
-  <string name="setting_jev_purpose_screen_automation_desc">Bounded quick actions for explicit accessibility screen goals (screen_run_goal). Jev is a judgment service, not a JavaScript engine.</string>
+  <string name="setting_jev_purpose_screen_automation_desc">Bounded quick actions for a clear screen goal (screen_run_goal)</string>
   <string name="setting_jev_mode_off">Off</string>
   <string name="setting_jev_mode_shadow">Shadow</string>
   <string name="setting_jev_mode_active">Active</string>
@@ -3524,7 +3523,7 @@ My task:</string>
   <string name="setting_jev_scope_web_content">Web content</string>
   <string name="setting_jev_scope_web_content_desc">Web page snapshot state</string>
   <string name="setting_jev_scope_screen_content">Screen content</string>
-  <string name="setting_jev_scope_screen_content_desc">Accessibility node text and summaries that may be sent to Jev for screen goal decisions</string>
+  <string name="setting_jev_scope_screen_content_desc">Accessibility node text and summaries for screen-goal judging</string>
   <string name="setting_jev_status_section">Status and usage</string>
   <string name="setting_jev_status_daily">Requests today: %1$d / %2$d</string>
   <string name="setting_jev_status_metrics">Recent judgments: %1$d total, applied %2$d, shadow %3$d, cached %4$d, fallbacks %5$d, failed %6$d</string>
@@ -3535,7 +3534,7 @@ My task:</string>
   <string name="setting_jev_status_cooldown">Runtime: cooling down, %1$d ms left</string>
   <string name="setting_jev_status_last_error">Runtime: last error %1$s</string>
   <string name="setting_jev_calibration_count">Calibration records: %1$d</string>
-  <string name="setting_jev_calibration_desc">Per-candidate scores reconciled with the incumbent top pick; ids and probabilities only, for offline threshold tuning</string>
+  <string name="setting_jev_calibration_desc">Score reconciliation records; ids and probabilities only</string>
   <string name="setting_jev_calibration_export">Export</string>
   <string name="setting_jev_calibration_clear">Clear</string>
   <string name="setting_jev_connection_budget">Daily request budget exhausted</string>
@@ -3544,4 +3543,18 @@ My task:</string>
   <string name="setting_jev_outcome_cache">Cache hit</string>
   <string name="setting_jev_outcome_fallback">Fell back to the original path</string>
   <string name="setting_jev_outcome_failed">Failed</string>
+  <string name="setting_theme_library_ai_title">Create with AI</string>
+  <string name="setting_theme_library_ai_desc">Describe a theme. It opens as an unsent draft in a new chat.</string>
+  <string name="setting_theme_library_ai_request_hint">Describe the theme you want, or the changes to make</string>
+  <string name="setting_theme_library_generate_and_try_on">Generate and try on</string>
+  <string name="setting_theme_library_modify_and_try_on">Modify and try on</string>
+  <string name="setting_theme_library_generate_prompt">Create a new theme for this Android app from the request below. First use tool_search to locate the theme tools, then call theme_pack_status(id=current) to inspect the current theme and its complete base recipe. Use that recipe as the starting point, change only fields needed for my request, and choose a new id and display_name. For the first theme_pack_import call, include the complete recipe and omit base_id so it creates a new theme. For later refinements, inspect status(id=current) again and call theme_pack_import(base_id=current) with only the requested changes. Prepare a preview only; do not apply or persist it. Wait for my feedback and keep refining in this chat. Apply only after I explicitly ask. Request: %1$s</string>
+  <string name="setting_theme_library_modify_prompt">Modify my current theme from the request below. First use tool_search to locate the theme tools, then call theme_pack_status(id=current) to inspect the current theme and active preview. Continue from the active preview if one exists; otherwise use the current theme. Call theme_pack_import(base_id=current) with only the fields named in my request. Preserve every other value, including the existing package id and display_name. Prepare a preview only; do not apply or persist it. Keep this chat open for further changes. Apply only after I explicitly ask. Request: %1$s</string>
+  <string name="setting_theme_library_previewing">Previewing %1$s</string>
+  <string name="setting_theme_library_restore">Restore</string>
+  <string name="setting_theme_library_import_preview">Theme preview</string>
+  <string name="setting_theme_library_try_on_failed">Unable to update the theme preview</string>
+  <string name="setting_theme_library_empty_request">Describe a theme first.</string>
+  <string name="setting_theme_library_custom_theme_name">My custom theme</string>
+  <string name="setting_theme_library_export_failed">Unable to export or share the theme file</string>
 </resources>

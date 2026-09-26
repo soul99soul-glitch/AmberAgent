@@ -541,11 +541,6 @@ fun SettingJevPage(vm: SettingVM = koinViewModel()) {
                                 Text(stringResource(R.string.setting_jev_key_hint))
                             },
                         )
-                        Text(
-                            stringResource(R.string.setting_jev_key_hint2),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = workspaceColors().muted,
-                        )
                         if (jev.apiKeyMask != null) {
                             TextButton(
                                 onClick = {

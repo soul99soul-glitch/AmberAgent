@@ -11,6 +11,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.ProcessLifecycleOwner
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
@@ -999,10 +1000,13 @@ class ChatService(
             .stateIn(appScope, kotlinx.coroutines.flow.SharingStarted.Eagerly, emptySet())
 
     /** Latest active kernel-path run for a conversation, or null if none. */
-    fun getActiveKernelRunFlow(conversationId: Uuid): StateFlow<app.amber.core.agent.runtime.AgentRunId?> =
+    fun getActiveKernelRunFlow(
+        conversationId: Uuid,
+        scope: CoroutineScope,
+    ): StateFlow<app.amber.core.agent.runtime.AgentRunId?> =
         activeKernelRuns
             .map { it[conversationId] }
-            .stateIn(appScope, kotlinx.coroutines.flow.SharingStarted.Eagerly, null)
+            .stateIn(scope, kotlinx.coroutines.flow.SharingStarted.Eagerly, activeKernelRuns.value[conversationId])
 
     /** Exposes the AgentRunner for UI ViewModels to call observe() directly. */
     fun kernelRunner(): app.amber.core.agent.runtime.AgentRunner? = agentRunner

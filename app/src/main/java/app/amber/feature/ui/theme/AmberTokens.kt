@@ -3,6 +3,10 @@ package app.amber.feature.ui.theme
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
+import app.amber.core.settings.ThemeDesign
+import app.amber.core.settings.themeContrast
+import app.amber.core.settings.themeRgb
 
 /**
  * Amber · "Terminal × Modern" graphite design tokens.
@@ -99,14 +103,9 @@ val AmberAccents: List<AmberAccent> = listOf(
 /**
  * Text/icon color drawn on an accent fill. Curated accents use a dark ink when white misses AA contrast.
  */
-fun accentInkFor(accent: Color): Color = when (accent) {
-    Color(0xFFB8623A) -> Color(0xFF000000) // terracotta needs true black to clear 4.5:1
-    Color(0xFF5E9C6E),
-    Color(0xFF4F86D6),
-    Color(0xFF9277C4),
-    Color(0xFFC2607A),
-    -> Color(0xFF0F150E)
-    else -> Color(0xFFFFFFFF)
+fun accentInkFor(accent: Color): Color {
+    val rgb = accent.toArgb() and 0xFFFFFF
+    return if (themeContrast(rgb, 0x000000) >= themeContrast(rgb, 0xFFFFFF)) Color.Black else Color.White
 }
 
 /**
@@ -117,5 +116,102 @@ fun accentInkFor(accent: Color): Color = when (accent) {
  * the per-base green. The per-base `signal` greens above are kept as the design's original
  * values should the dual-color semantics ever return.
  */
-fun buildAmberTokens(base: AmberBase, accent: Color): AmberTokens =
-    baseTokens(base).copy(accent = accent, accentInk = accentInkFor(accent), signal = accent)
+fun buildAmberTokens(
+    base: AmberBase,
+    accent: Color,
+    design: ThemeDesign? = null,
+): AmberTokens = buildAmberTokens(baseTokens(base), accent, design)
+
+internal fun buildAmberTokens(
+    base: AmberTokens,
+    accent: Color,
+    design: ThemeDesign?,
+): AmberTokens {
+    val palette = if (base.isDark) design?.dark else design?.light
+    val themedBase = palette?.toTokens(base) ?: base
+    return themedBase.copy(accent = accent, accentInk = accentInkFor(accent), signal = accent)
+}
+
+/** Returns one of the five portable document paper presets for the active color mode. */
+internal fun themePackPaperTokens(paper: String, isDark: Boolean): AmberTokens? {
+    val colors = when (paper to isDark) {
+        "paper" to false -> PaperPalette(0xEFE7D6, 0xFFFDF7, 0xF0EBE2, 0x1B1813, 0x5B5449, 0x746D62, 0x918A80, 0xDBCEBC, 0xECE3D6)
+        "neutral" to false -> PaperPalette(0xECE8E4, 0xF6F5F3, 0xEDEBE7, 0x161514, 0x55524D, 0x716D67, 0x8F8B85, 0xD9D5CF, 0xE4E1DC)
+        "white" to false -> PaperPalette(0xF5F5F4, 0xFFFFFF, 0xEEEEED, 0x1A1A1A, 0x5C5C5C, 0x737373, 0x8E8E8E, 0xD4D4D4, 0xE5E5E5)
+        "pi" to false -> PaperPalette(0xF3F0EB, 0xFAF9F7, 0xEBE7E0, 0x1C1B19, 0x4A4640, 0x6A6560, 0x9A948C, 0xD4CFC7, 0xE8E4DC)
+        "notion" to false -> PaperPalette(0xF6F5F4, 0xFFFFFF, 0xEFEEEC, 0x1A1918, 0x31302E, 0x615D59, 0xA39E98, 0xE6E5E3, 0xF0EFED)
+        "paper" to true -> PaperPalette(0x14110E, 0x221E19, 0x2E2822, 0xF5F0E8, 0xC8BDB0, 0xA89888, 0x6E6258, 0x3D342C, 0x2A241E)
+        "neutral" to true -> PaperPalette(0x0E0D10, 0x1F1D23, 0x2B2930, 0xF4F1ED, 0xC3BEC5, 0xAAA5AD, 0x6E6760, 0x3A3741, 0x2A2830)
+        "white" to true -> PaperPalette(0x111111, 0x1C1C1C, 0x282828, 0xF5F5F5, 0xBDBDBD, 0x8E8E8E, 0x6B6B6B, 0x383838, 0x2A2A2A)
+        "pi" to true -> PaperPalette(0x12110F, 0x1E1C18, 0x2A2722, 0xF3F0EB, 0xC4BEB4, 0x9A948C, 0x6A6560, 0x3A3630, 0x28251F)
+        "notion" to true -> PaperPalette(0x191919, 0x252525, 0x2F2F2F, 0xEBEBEB, 0xB4B4B4, 0x9B9B9B, 0x6F6F6F, 0x373737, 0x2C2C2C)
+        else -> return null
+    }
+    return AmberTokens(
+        bg = colors.background.color(),
+        surface = colors.surface.color(),
+        surface2 = colors.surface2.color(),
+        raised = colors.surface.color(),
+        ink = colors.foreground.color(),
+        ink2 = colors.foreground2.color(),
+        ink3 = colors.muted.color(),
+        ink4 = colors.muted2.color(),
+        line = colors.border.color(),
+        line2 = colors.borderSoft.color(),
+        userBg = colors.foreground.color(),
+        userInk = colors.background.color(),
+        codeBg = colors.surface2.color(),
+        signal = Color(0xFF5E9C6E),
+        accent = Color(0xFFB8623A),
+        accentInk = accentInkFor(Color(0xFFB8623A)),
+        isDark = isDark,
+    )
+}
+
+private data class PaperPalette(
+    val background: Int,
+    val surface: Int,
+    val surface2: Int,
+    val foreground: Int,
+    val foreground2: Int,
+    val muted: Int,
+    val muted2: Int,
+    val border: Int,
+    val borderSoft: Int,
+)
+
+private fun Int.color(): Color = Color(0xFF000000L or toLong())
+
+private fun ThemeDesign.Palette.toTokens(base: AmberTokens): AmberTokens? {
+    val background = background.colorOrNull() ?: return null
+    val surface = surface.colorOrNull() ?: return null
+    val foreground = foreground.colorOrNull() ?: return null
+    val muted = mutedForeground.colorOrNull() ?: return null
+    val border = border.colorOrNull() ?: return null
+    val surface2 = midpoint(background, surface)
+    return base.copy(
+        bg = background,
+        surface = surface,
+        surface2 = surface2,
+        raised = surface,
+        ink = foreground,
+        ink2 = muted,
+        ink3 = muted,
+        ink4 = muted,
+        line = border,
+        line2 = border,
+        userBg = foreground,
+        userInk = background,
+        codeBg = surface2,
+    )
+}
+
+private fun String.colorOrNull(): Color? = themeRgb(this)?.let { Color(0xFF000000L or it.toLong()) }
+
+private fun midpoint(first: Color, second: Color): Color {
+    val a = first.toArgb()
+    val b = second.toArgb()
+    fun channel(shift: Int): Int = (((a shr shift) and 0xFF) + ((b shr shift) and 0xFF)) / 2
+    val rgb = (channel(16) shl 16) or (channel(8) shl 8) or channel(0)
+    return Color(0xFF000000L or rgb.toLong())
+}

@@ -8,7 +8,7 @@ import app.amber.feature.tools.ToolRegistry
 class AgentCapabilitySnapshotBuilder(
     private val agentTaskStore: AgentTaskStore? = null,
 ) {
-    fun build(tools: List<Tool>, maxChars: Int = DEFAULT_MAX_CHARS): UIMessage {
+    suspend fun build(tools: List<Tool>, maxChars: Int = DEFAULT_MAX_CHARS): UIMessage {
         return build(tools = tools, tasks = agentTaskStore?.list().orEmpty(), maxChars = maxChars)
     }
 

@@ -398,6 +398,8 @@ data class DisplaySetting(
     val accentColor: String = "#B8623A",
     // P8-09 主题库：当前生效的导入主题包 id（null = 未应用导入包 / 内置主题）。
     val appliedThemePackageId: String? = null,
+    /** Portable iOS/Android theme recipe; absent for settings written before amber.theme.pack. */
+    val themePack: ThemePackDocument? = null,
 )
 
 @Serializable
