@@ -1,13 +1,14 @@
-// SettingAgentExecutionPageFull — 假数据/假保存页已下线:本路由保留兼容,进入即跳转真实页面 ChatAgentExecutionPage
-// (原实现数据伪造/保存不落盘,详见 docs/plans/2026-08-25-harmony-parity-backlog.md F1)
+// SettingAgentExecutionPageFull — 假数据/假保存页已下线:本路由保留兼容。
+// 2026-09-28 层级修正:执行/显示设置并入「运行环境」(iOS ExecutionSettingsView 同构),
+// 进入即跳转 SettingSandboxPage。
 import { router } from '@kit.ArkUI';
-import { BG, INK3, BODY, TITLE, INK } from '../design/tokens.ets';
+import { BG } from '../design/tokens.ets';
 
 @Entry
 @Component
 struct SettingAgentExecutionPageFull {
   aboutToAppear(): void {
-    router.replaceUrl({ url: 'pages/ChatAgentExecutionPage' });
+    router.replaceUrl({ url: 'pages/SettingSandboxPage' });
   }
 
   build(): void {

@@ -4,7 +4,7 @@
 // (CenteredTitleBar/PlainSection/CardGroup r18+描边/CardToggleRow),逻辑零改动。
 import { ACCENT, BG, INK3, GUTTER, TEXT_STYLES } from '../design/tokens.ets';
 import {
-  CenteredTitleBar, PlainSection, CardGroup, CardToggleRow, PageSpacer,
+  CenteredTitleBar, PlainSection, CardGroup, CardRow, CardToggleRow, PageSpacer,
 } from '../components/PageTemplate.ets';
 import {
   loadAgentRuntimeSnapshot, updateAgentRuntimePermissions,
@@ -12,6 +12,7 @@ import {
 import type { AgentRuntimeSnapshot } from '../platform_impl/AgentRuntimePrefs.ets';
 import { getChatKvStore } from '../di/AppContainer.ets';
 import { FONT_SANS_MEDIUM } from '../design/fonts.ets';
+import { router } from '@kit.ArkUI';
 
 @Entry
 @Component
@@ -85,6 +86,19 @@ struct ChatAgentPermissionsPage {
 
   // ── 卡片内容(@Builder:组件构造必须在 builder 上下文,铁律 4b)──
 
+  // 「系统权限」组:跳转权限与能力子页(iOS PermissionsApprovalView 同构:
+  //   系统权限 = 权限与批准下的子页,不再占据设置根页独立行)
+  @Builder
+  SystemAccessGroup(): void {
+    CardRow({
+      label: '系统权限',
+      desc: '日历、通知、文件、通讯录等系统能力的授权状态与申请',
+      iconName: 'ph_lock',
+      isLast: true,
+      onRowClick: (): void => { router.pushUrl({ url: 'pages/SettingSystemAccessPage' }); },
+    })
+  }
+
   // 「批准策略」组:全局自动批准 + 高风险自动批准(确认弹窗逻辑原样)
   @Builder
   ApprovalGroup(): void {
@@ -138,6 +152,9 @@ struct ChatAgentPermissionsPage {
                 .width('100%')
                 .padding({ left: 16, right: 16, top: 12, bottom: 4 })
             }
+            PlainSection({ label: '系统权限' })
+            CardGroup({ radius: 18, stroke: true, content: (): void => { this.SystemAccessGroup(); } })
+              .margin({ left: GUTTER, right: GUTTER })
             PlainSection({ label: '批准策略' })
             CardGroup({ radius: 18, stroke: true, content: (): void => { this.ApprovalGroup(); } })
               .margin({ left: GUTTER, right: GUTTER })

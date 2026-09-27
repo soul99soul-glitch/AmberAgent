@@ -4,17 +4,26 @@
 // (CenteredTitleBar/PlainSection/CardGroup r18+描边/CardRow/CardToggleRow/FooterNote),逻辑零改动。
 import type { AgentRuntimeSnapshot } from '../platform_impl/AgentRuntimePrefs.ets';
 import {
-  loadAgentRuntimeSnapshot, updateSpeculativeToolExecution,
+  loadAgentRuntimeSnapshot, updateSpeculativeToolExecution, updateAgentRuntimeExecution,
 } from '../platform_impl/AgentRuntimePrefs.ets';
+import type { AgentOperationPreviewMode } from '../platform_impl/AgentRuntimePrefs.ets';
 import { getChatKvStore } from '../di/AppContainer.ets';
 import {
-  BG, INK, INK3, TEXT_STYLES, GUTTER, lineHeightForSize,
+  BG, INK, INK3, LINE, TEXT_STYLES, GUTTER, lineHeightForSize,
 } from '../design/tokens.ets';
 import { FONT_MONO_MEDIUM, FONT_SANS_MEDIUM } from '../design/fonts.ets';
 import {
   CenteredTitleBar, PlainSection, CardGroup, CardRow, CardToggleRow,
-  FooterNote, BtnGhost, PageSpacer,
+  FooterNote, BtnGhost, PageSpacer, Seg,
 } from '../components/PageTemplate.ets';
+
+const TOOL_LOOP_STEP_OPTIONS: number[] = [64, 128, 256, 384, 512];
+const RETRY_COUNT_OPTIONS: number[] = [1, 2, 3, 5];
+const PREVIEW_MODE_OPTIONS: AgentOperationPreviewMode[] = ['always', 'auto', 'hidden'];
+const PREVIEW_MODE_LABELS: string[] = ['常驻', '自动', '隐藏'];
+
+const coerceIn = (v: number, lo: number, hi: number): number =>
+  Math.min(Math.max(v, lo), hi);
 
 @Entry
 @Component
@@ -44,6 +53,37 @@ struct SettingSandboxPage {
     const next: number = Math.min(Math.max(current + delta, 1), 8);
     updateSpeculativeToolExecution(getChatKvStore(), { maxConcurrentTools: next })
       .then((s: AgentRuntimeSnapshot): void => { this.snap = s; });
+  }
+
+  // ── 执行参数/生成稳定性(原「运行与显示」页并入;运行环境 = 执行设置统一入口) ──
+
+  private setPreviewMode(mode: AgentOperationPreviewMode): void {
+    updateAgentRuntimeExecution(getChatKvStore(), { operationPreviewMode: mode })
+      .then((s: AgentRuntimeSnapshot): void => { this.snap = s; });
+  }
+
+  private setToolLoopSteps(steps: number): void {
+    updateAgentRuntimeExecution(getChatKvStore(), { maxToolLoopSteps: steps })
+      .then((s: AgentRuntimeSnapshot): void => { this.snap = s; });
+  }
+
+  private setRetryEnabled(checked: boolean): void {
+    updateAgentRuntimeExecution(getChatKvStore(), { retryEnabled: checked })
+      .then((s: AgentRuntimeSnapshot): void => { this.snap = s; });
+  }
+
+  private setRetryMaxRetries(maxRetries: number): void {
+    updateAgentRuntimeExecution(getChatKvStore(), { retryMaxRetries: maxRetries })
+      .then((s: AgentRuntimeSnapshot): void => { this.snap = s; });
+  }
+
+  private numericLabels(options: number[], suffix: string): string[] {
+    return options.map((opt: number): string => `${opt} ${suffix}`);
+  }
+
+  private optionIndex(options: number[], selected: number): number {
+    const idx: number = options.indexOf(selected);
+    return idx >= 0 ? idx : 0;
   }
 
   // ── 卡片内容(@Builder:组件构造必须在 builder 上下文,
@@ -82,6 +122,78 @@ struct SettingSandboxPage {
       iconName: 'cpu', plateSize: 28,
       showChevron: false, isLast: true,
     })
+  }
+
+  // 卡组内发丝分隔线(内缩至行文字起点,同 CardRow 分隔规则)
+  @Builder
+  CardHairline(): void {
+    Row() {
+      Row()
+        .width('100%')
+        .height(1)
+        .backgroundColor(LINE)
+    }
+    .width('100%')
+    .padding({ left: 14, right: 14 })
+  }
+
+  // 卡内选择块:标题/描述 + Seg(与「并发工具」组同卡规格)
+  @Builder
+  SegRow(title: string, desc: string, labels: string[], selected: number,
+    onSelect: (idx: number) => void): void {
+    Column() {
+      Text(title)
+        .fontSize(16)
+        .fontWeight(FontWeight.Medium)
+        .lineHeight(TEXT_STYLES.body.lineHeight)
+        .fontFamily(FONT_SANS_MEDIUM)
+        .fontColor(INK)
+        .width('100%')
+      Text(desc)
+        .fontSize(12)
+        .lineHeight(lineHeightForSize(12))
+        .fontFamily(FONT_SANS_MEDIUM)
+        .fontColor(INK3)
+        .maxLines(2)
+        .textOverflow({ overflow: TextOverflow.Ellipsis })
+        .margin({ top: 2 })
+        .width('100%')
+      Seg({
+        options: labels,
+        selected: selected,
+        onSelect: (idx: number): void => { onSelect(idx); },
+      })
+        .margin({ top: 12 })
+    }
+    .width('100%')
+    .padding({ left: 14, right: 14, top: 12, bottom: 12 })
+  }
+
+  // 「执行参数」组:操作预览 + 工具循环上限
+  @Builder
+  ExecutionCard(snapshot: AgentRuntimeSnapshot): void {
+    this.SegRow('操作预览', '控制输入框上方的 Agent 实时操作预览显示方式。',
+      PREVIEW_MODE_LABELS, PREVIEW_MODE_OPTIONS.indexOf(snapshot.operationPreviewMode),
+      (idx: number): void => { this.setPreviewMode(PREVIEW_MODE_OPTIONS[idx]); })
+    this.CardHairline()
+    this.SegRow('工具循环上限', '单次回复最多调用多少轮工具。',
+      this.numericLabels(TOOL_LOOP_STEP_OPTIONS, '步'),
+      this.optionIndex(TOOL_LOOP_STEP_OPTIONS, coerceIn(snapshot.maxToolLoopSteps, 16, 512)),
+      (idx: number): void => { this.setToolLoopSteps(TOOL_LOOP_STEP_OPTIONS[idx]); })
+  }
+
+  // 「生成稳定性」组:自动重试 + 重试上限
+  @Builder
+  StabilityCard(snapshot: AgentRuntimeSnapshot): void {
+    CardToggleRow({
+      label: '自动重试生成', desc: '网络或服务临时中断时自动重试。',
+      checked: snapshot.generationRetry.enabled,
+      onToggle: (): void => { this.setRetryEnabled(!snapshot.generationRetry.enabled); },
+    })
+    this.SegRow('重试上限', '单次模型调用最多重试次数。',
+      this.numericLabels(RETRY_COUNT_OPTIONS, '次'),
+      this.optionIndex(RETRY_COUNT_OPTIONS, coerceIn(snapshot.generationRetry.maxRetries, 1, 5)),
+      (idx: number): void => { this.setRetryMaxRetries(RETRY_COUNT_OPTIONS[idx]); })
   }
 
   @Builder
@@ -190,6 +302,15 @@ struct SettingSandboxPage {
           CardGroup({ radius: 18, stroke: true, content: (): void => { this.TerminalCard(); } })
             .margin({ left: GUTTER, right: GUTTER })
 
+          if (!this.loadError && this.snap !== null) {
+            PlainSection({ label: '执行参数' })
+            CardGroup({ radius: 18, stroke: true, content: (): void => {
+              const s = this.snap;
+              if (s !== null) { this.ExecutionCard(s); }
+            } })
+              .margin({ left: GUTTER, right: GUTTER })
+          }
+
           PlainSection({ label: '并发工具' })
           if (this.loadError) {
             CardGroup({ radius: 18, stroke: true, content: (): void => { this.ErrorCard(); } })
@@ -198,6 +319,15 @@ struct SettingSandboxPage {
             CardGroup({ radius: 18, stroke: true, content: (): void => {
               const s = this.snap;
               if (s !== null) { this.ConcurrencyCard(s); }
+            } })
+              .margin({ left: GUTTER, right: GUTTER })
+          }
+
+          if (!this.loadError && this.snap !== null) {
+            PlainSection({ label: '生成稳定性' })
+            CardGroup({ radius: 18, stroke: true, content: (): void => {
+              const s = this.snap;
+              if (s !== null) { this.StabilityCard(s); }
             } })
               .margin({ left: GUTTER, right: GUTTER })
           }

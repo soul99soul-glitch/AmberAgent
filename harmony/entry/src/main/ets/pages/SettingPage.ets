@@ -111,8 +111,10 @@ struct SettingPage {
   GeneralCard(): void {
     CardRow({ label: '外观', valueText: this.appearanceValue, iconName: 'ph_sun',
       onRowClick: (): void => { this.go('pages/SettingAppearancePage'); } })
-    CardRow({ label: '显示与字体', iconName: 'gear', isLast: true,
+    CardRow({ label: '显示与字体', iconName: 'gear',
       onRowClick: (): void => { this.go('pages/SettingDisplayPage'); } })
+    CardRow({ label: 'Mac Gateway', iconName: 'link', isLast: true,
+      onRowClick: (): void => { this.go('pages/SettingMacGatewayPage'); } })
   }
 
   @Builder
@@ -121,14 +123,11 @@ struct SettingPage {
       onRowClick: (): void => { this.go('pages/SettingAgentMemoryPageFull'); } })
     CardRow({ label: '运行环境', iconName: 'ph_code',
       onRowClick: (): void => { this.go('pages/SettingSandboxPage'); } })
-    CardRow({ label: '运行与显示', iconName: 'eye',
-      onRowClick: (): void => { this.go('pages/ChatAgentExecutionPage'); } })
     CardRow({ label: '技能', iconName: 'puzzle',
       onRowClick: (): void => { this.go('pages/SkillsPage'); } })
-    CardRow({ label: '权限与批准', iconName: 'shield',
+    // 权限与批准 = 系统权限的父级(iOS:系统权限在其内作子页);执行/显示并入运行环境
+    CardRow({ label: '权限与批准', iconName: 'shield', isLast: true,
       onRowClick: (): void => { this.go('pages/ChatAgentPermissionsPage'); } })
-    CardRow({ label: '系统权限', iconName: 'ph_lock', isLast: true,
-      onRowClick: (): void => { this.go('pages/SettingSystemAccessPage'); } })
   }
 
   @Builder
@@ -159,10 +158,8 @@ struct SettingPage {
       onRowClick: (): void => { this.go('pages/MiniAppSettingsPage'); } })
     CardRow({ label: '小说创作', iconName: 'ph_pencil',
       onRowClick: (): void => { this.go('pages/NovelProjectsPage'); } })
-    CardRow({ label: '深度阅读', iconName: 'book',
+    CardRow({ label: '深度阅读', iconName: 'book', isLast: true,
       onRowClick: (): void => { this.go('pages/SettingDeepReadPage'); } })
-    CardRow({ label: 'Mac Gateway', iconName: 'link', isLast: true,
-      onRowClick: (): void => { this.go('pages/SettingMacGatewayPage'); } })
   }
 
   @Builder
