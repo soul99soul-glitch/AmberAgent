@@ -72,6 +72,18 @@ export class WebMountSession {
   private enabled: boolean = true;
   private tabs: WebMountTab[] = [{ id: 'main', title: '', url: '' }];
   private activeTabId: string = 'main';
+  // bot/hand 租约(iOS/Android 接管模式):hand = 用户手动控制,Agent 写操作暂停
+  private lease: string = 'bot';
+
+  // 租约切换(发布 AppStorage,UI 订阅 'webmountLease')
+  public setLease(value: string): void {
+    this.lease = value;
+    AppStorage.setOrCreate<string>('webmountLease', value);
+  }
+
+  public getLease(): string {
+    return this.lease;
+  }
 
   // 返回按 owner 的 unbind:仅当 hooks 仍是本次绑定的对象时才解绑,
   // 多页/退出重开时旧页面不会解掉新页面刚绑定的 hooks。
@@ -243,6 +255,9 @@ export class WebMountSession {
     }
     this.currentUrl = finalUrl;
     this.touchActiveTab(finalUrl);
+    // 页面状态发布(ChatPage 接管条订阅 'webmountUrl'/'webmountReady')
+    AppStorage.setOrCreate<string>('webmountUrl', this.currentUrl);
+    AppStorage.setOrCreate<boolean>('webmountReady', this.pageReady);
     const waiters: SettleWaiter[] = this.pageEndWaiters;
     this.pageEndWaiters = [];
     for (const w of waiters) w.settle();
@@ -469,6 +484,33 @@ export const setWebMountGlobalEnabled = (value: boolean): void => {
   if (globalSession !== null) globalSession.setEnabled(value);
 };
 
+// WebMountSurface — 会话可视面(同一 controller;offscreen host 与接管面板共用)
+@Component
+export struct WebMountSurface {
+  private session: WebMountSession = getWebMountSession();
+
+  build(): void {
+    Web({ src: 'about:blank', controller: this.session.getController() })
+      .id(WEB_HOST_ID)
+      .onControllerAttached((): void => {
+        this.session.markControllerAttached();
+      })
+      // L02:每次主框架导航(含重定向)同步核验授权,未授权一律阻止
+      .onLoadIntercept((event: OnLoadInterceptEvent): boolean => {
+        const request: WebResourceRequest = event.data;
+        if (!request.isMainFrame()) return false;
+        return this.session.shouldBlockUrl(request.getRequestUrl());
+      })
+      .onPageEnd((event: OnPageEndEvent): void => {
+        this.session.markPageEnd(event.url);
+      })
+      // 卸载对称复位:hostMounted/UI context/未完成等待者
+      .onDetach((): void => {
+        this.session.markControllerDetached();
+      })
+  }
+}
+
 // WebMountHost — 会话宿主组件:真实尺寸渲染但 position 移出可视区
 //   (Visibility.None/尺寸 0 会导致 Web 不渲染、截图黑,移出屏保持渲染树真实)
 @Component
@@ -482,27 +524,9 @@ export struct WebMountHost {
 
   build(): void {
     if (this.visible) {
-      Web({ src: 'about:blank', controller: this.session.getController() })
-        .id(WEB_HOST_ID)
+      WebMountSurface()
         .width(360).height(720)
         .position({ x: -2000, y: 0 })
-        // R07:controller 真正 attached 才算宿主就绪(不是外层 aboutToAppear/初始 pageEnd)
-        .onControllerAttached((): void => {
-          this.session.markControllerAttached();
-        })
-        // L02:每次主框架导航(含重定向)同步核验授权,未授权一律阻止
-        .onLoadIntercept((event: OnLoadInterceptEvent): boolean => {
-          const request: WebResourceRequest = event.data;
-          if (!request.isMainFrame()) return false;
-          return this.session.shouldBlockUrl(request.getRequestUrl());
-        })
-        .onPageEnd((event: OnPageEndEvent): void => {
-          this.session.markPageEnd(event.url);
-        })
-        // 卸载对称复位:hostMounted/UI context/未完成等待者
-        .onDetach((): void => {
-          this.session.markControllerDetached();
-        })
     }
   }
 }

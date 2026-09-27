@@ -1,10 +1,12 @@
-// WebMountTools — WebMount 工具集(MVP 9 件,命名对齐 Android wm_* 全家)
+// WebMountTools — WebMount 工具集(命名对齐 Android wm_* 全家)
 //
-// Android 基准: feature/webmount/tools(30+ 工具,多 session/tab);鸿蒙 MVP 单会话:
-//   wm_open / wm_state / wm_extract / wm_click / wm_type / wm_scroll /
-//   wm_screenshot / wm_eval。未移植件(tap/keys/select/find/wait/back/forward/
-//   tab_*/visual_*/signed_fetch/network_inspect/stations/site_*)后续梯队;
-//   session_id 参数在单会话下接受并回显为 'main'。
+// 现有 21 件:wm_open/state/extract/click/type/scroll/screenshot/eval(审批)、
+//   wm_stations/site_add/site_remove(审批)、wm_find/wait/back/forward/reload/
+//   keys/select/tab_list/tab_open/tab_select/tab_close/read_page;
+//   bot/hand 租约:hand(用户接管)下写操作拒绝,只读放行(guardPage mutating)。
+// 未移植(登记):tap(≈click,触摸事件变体)、signed_fetch、network_inspect、
+//   oauth_connect/refresh、site_adapter/site_memory、profile_synthesize、
+//   recipe_candidates、fetch_replay、run_goal、observe — 高级子系统,后续梯队。
 //
 // 本批安全收口:
 //   L01 — 所有动态值只经 JSON 字符串编码注入,不再拼入脚本文本(error 文案里的
@@ -91,11 +93,17 @@ const syncEnabled = async (
 //   P2-1:按 OR 语义同步 enabled;仅当 global||assistant 都为假才拒绝
 //   (覆盖生成中途用户关闭全局、且助手未单独勾选)。
 //   revoke 之后再次调用也会拒绝并复位页面(即便实时通知已复位,这里仍兜底)。
+//   bot/hand:hand 租约(用户接管)下,mutating 操作一律拒绝(bot-only),
+//   只读操作(state/extract/screenshot/find)经 mutating=false 放行。
 const guardPage = async (
   session: WebMountSession, kv: KeyValueStore, assistantEnabled: boolean,
+  mutating: boolean = true,
 ): Promise<string | null> => {
   const enabled: boolean = await syncEnabled(session, kv, assistantEnabled);
   if (!enabled) return 'WebMount is disabled for this conversation';
+  if (mutating && session.getLease() === 'hand') {
+    return 'user has control of the WebMount session (hand mode); agent actions are paused until control is returned';
+  }
   const sites: UserSiteEntry[] = await loadWebMountSites(kv);
   session.setUrlGate(makeSiteGate(sites));
   const current: string = session.getUrl();
@@ -208,7 +216,7 @@ export const createWebMountTools = (
     description: 'Extract current page outline: title, visible text (up to 5000 chars) and '
       + 'interactive elements with refs; wm_click accepts the returned ref.',
     execute: async (_input: JsonValue): Promise<UIMessagePart[]> => {
-      const blocked: string | null = await guardPage(session, getChatKvStore(), assistantEnabled);
+      const blocked: string | null = await guardPage(session, getChatKvStore(), assistantEnabled, false);
       if (blocked !== null) return errorPart(blocked);
       return evalToPart(session, EXTRACT_JS);
     },
@@ -279,7 +287,7 @@ export const createWebMountTools = (
     name: 'wm_screenshot',
     description: 'Capture a PNG screenshot of the WebMount session viewport (base64 data URL image).',
     execute: async (_input: JsonValue): Promise<UIMessagePart[]> => {
-      const blocked: string | null = await guardPage(session, getChatKvStore(), assistantEnabled);
+      const blocked: string | null = await guardPage(session, getChatKvStore(), assistantEnabled, false);
       if (blocked !== null) return errorPart(blocked);
       const dataUrl: string = await session.screenshotDataUrl();
       return [{ type: 'image', url: dataUrl, metadata: null }];
@@ -564,8 +572,125 @@ export const createWebMountTools = (
     },
   });
 
+  // wm_find(只读):selector 计数 + 文本存在性,不回传整页大纲
+  const findTool: AgentTool = makeAgentTool({
+    name: 'wm_find',
+    description: 'Check whether a CSS selector exists (match count) and/or a text is present '
+      + 'on the current page. Read-only, no page outline returned.',
+    parameters: (): InputSchemaObj | null => makeInputSchemaObj({
+      'selector': { type: 'string', description: 'CSS selector to count (optional).' },
+      'text': { type: 'string', description: 'Text to search in body (optional).' },
+    } as JsonObject, null),
+    execute: async (input: JsonValue): Promise<UIMessagePart[]> => {
+      const selector: string = strOf(input, 'selector', '');
+      const text: string = strOf(input, 'text', '');
+      if (selector.length === 0 && text.length === 0) {
+        throw new Error('selector or text is required');
+      }
+      const blocked: string | null = await guardPage(session, getChatKvStore(), assistantEnabled, false);
+      if (blocked !== null) return errorPart(blocked);
+      return evalToPart(session, `(function(){
+        const sel = ${jsonString(selector)};
+        const t = ${jsonString(text)};
+        const count = sel.length > 0 ? document.querySelectorAll(sel).length : undefined;
+        const bodyText = (document.body ? document.body.innerText : '');
+        const found = t.length > 0 ? bodyText.indexOf(t) >= 0 : undefined;
+        return { count, text_found: found, url: location.href };
+      })()`);
+    },
+  });
+
+  // wm_keys:键盘输入(文本逐字 + {Enter}/{Tab}/{Escape}/{Backspace} 特殊键)
+  const keysTool: AgentTool = makeAgentTool({
+    name: 'wm_keys',
+    description: 'Send keyboard input to an element (or the focused element): literal text '
+      + 'plus special keys written as {Enter} {Tab} {Escape} {Backspace}.',
+    parameters: (): InputSchemaObj | null => makeInputSchemaObj({
+      'keys': { type: 'string', description: 'Text to type; embed {Enter}/{Tab}/{Escape}/{Backspace} for special keys.' },
+      'selector': { type: 'string', description: 'CSS selector of the target element (optional; defaults to focused element).' },
+    } as JsonObject, ['keys']),
+    execute: async (input: JsonValue): Promise<UIMessagePart[]> => {
+      const keys: string = strOf(input, 'keys', '');
+      if (keys.length === 0) throw new Error('keys is required');
+      const selector: string = strOf(input, 'selector', '');
+      const blocked: string | null = await guardPage(session, getChatKvStore(), assistantEnabled);
+      if (blocked !== null) return errorPart(blocked);
+      return evalToPart(session, `(function(){
+        const sel = ${jsonString(selector)};
+        const el = sel.length > 0 ? document.querySelector(sel) : document.activeElement;
+        if (!el) return { sent: false, error: 'no target element' };
+        el.focus();
+        const input = ${jsonString(keys)};
+        const special = (name) => {
+          el.dispatchEvent(new KeyboardEvent('keydown', { key: name, bubbles: true }));
+          el.dispatchEvent(new KeyboardEvent('keyup', { key: name, bubbles: true }));
+        };
+        let sent = 0;
+        let buf = '';
+        let i = 0;
+        const flush = () => {
+          if (buf.length === 0) return;
+          for (const ch of buf) {
+            el.dispatchEvent(new KeyboardEvent('keydown', { key: ch, bubbles: true }));
+          }
+          if (document.activeElement === el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA')) {
+            const start = el.selectionStart == null ? el.value.length : el.selectionStart;
+            const end = el.selectionEnd == null ? start : el.selectionEnd;
+            el.value = el.value.slice(0, start) + buf + el.value.slice(end);
+            el.selectionStart = el.selectionEnd = start + buf.length;
+            el.dispatchEvent(new Event('input', { bubbles: true }));
+          }
+          sent += buf.length;
+          buf = '';
+        };
+        while (i < input.length) {
+          if (input[i] === '{') {
+            const end = input.indexOf('}', i);
+            if (end > i) {
+              flush();
+              special(input.substring(i + 1, end));
+              i = end + 1;
+              continue;
+            }
+          }
+          buf += input[i];
+          i++;
+        }
+        flush();
+        return { sent: true, count: sent };
+      })()`);
+    },
+  });
+
+  // wm_select:下拉框选择(value 精确匹配;change 事件)
+  const selectTool: AgentTool = makeAgentTool({
+    name: 'wm_select',
+    description: 'Select an option (by value) of a <select> element and fire change.',
+    parameters: (): InputSchemaObj | null => makeInputSchemaObj({
+      'selector': { type: 'string', description: 'CSS selector of the select element.' },
+      'value': { type: 'string', description: 'Option value to select.' },
+    } as JsonObject, ['selector', 'value']),
+    execute: async (input: JsonValue): Promise<UIMessagePart[]> => {
+      const selector: string = strOf(input, 'selector', '');
+      const value: string = strOf(input, 'value', '');
+      if (selector.length === 0) throw new Error('selector is required');
+      const blocked: string | null = await guardPage(session, getChatKvStore(), assistantEnabled);
+      if (blocked !== null) return errorPart(blocked);
+      return evalToPart(session, `(function(){
+        const sel = ${jsonString(selector)};
+        const value = ${jsonString(value)};
+        const el = document.querySelector(sel);
+        if (el === null) return { selected: false, error: 'element not found' };
+        if (el.tagName.toLowerCase() !== 'select') return { selected: false, error: 'not a select element' };
+        el.value = value;
+        el.dispatchEvent(new Event('change', { bubbles: true }));
+        return { selected: el.value === value };
+      })()`);
+    },
+  });
+
   const extras: AgentTool[] = [
-    waitTool, backTool, forwardTool, reloadTool,
+    findTool, waitTool, backTool, forwardTool, reloadTool, keysTool, selectTool,
     tabListTool, tabOpenTool, tabSelectTool, tabCloseTool, readPageTool,
   ];
 

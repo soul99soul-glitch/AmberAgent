@@ -137,7 +137,7 @@ import { Icon } from '../components/ui/Icon.ets';
 import { DotText, DotGround } from '../components/ui/DotMatrix.ets';
 import { addFavorite } from '../platform_impl/FavoriteStore.ets';
 import { notifyGenerationDone } from '../platform_impl/NotificationNotifier.ets';
-import { WebMountHost, getWebMountSession } from '../platform_impl/WebMountSession.ets';
+import { WebMountHost, getWebMountSession, WebMountSurface } from '../platform_impl/WebMountSession.ets';
 import type { WebMountHookBinding } from '../platform_impl/WebMountSession.ets';
 import { createWebMountTools } from '../platform_impl/WebMountTools.ets';
 import { ChatInput } from '../components/ChatInput.ets';
@@ -1948,6 +1948,11 @@ struct ChatPage {
   private webmountGlobalEnabled: boolean = false;
   private webmountEvalEnabled: boolean = false;
   @State webmountHostVisible: boolean = false;
+  // WebMount 接管条/面板(bot/hand 租约;C4-2)
+  @StorageProp('webmountUrl') webmountUrl: string = '';
+  @StorageProp('webmountReady') webmountReady: boolean = false;
+  @StorageProp('webmountLease') webmountLease: string = 'bot';
+  @State webmountSheetOpen: boolean = false;
   private webmountHookBinding: WebMountHookBinding | null = null;
   private maybeGenerationDoneNotification(rt: ChatRuntime): void {
     if (!this.enableGenerationNotification) return;
@@ -2364,6 +2369,59 @@ struct ChatPage {
       this.pendingImages = [...this.pendingImages, dataUrl];
       this.inputText = '修改这张图片：';
     }).catch((): void => {});
+  }
+
+  // ── WebMount 接管面板(bot/hand;C4-2) ──
+
+  private webmountHostOf(url: string): string {
+    const m: RegExpMatchArray | null = url.match(/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\/([^/?#]+)/);
+    return m !== null ? m[1] : url;
+  }
+
+  // 打开面板:offscreen host 先卸载(同一 controller 换挂到面板 Web)
+  private openWebmountSheet(): void {
+    this.webmountHostVisible = false;
+    this.webmountSheetOpen = true;
+  }
+
+  private closeWebmountSheet(): void {
+    this.webmountSheetOpen = false;
+    this.webmountHostVisible = true;
+  }
+
+  private toggleWebmountLease(): void {
+    getWebMountSession().setLease(this.webmountLease === 'hand' ? 'bot' : 'hand');
+  }
+
+  @Builder
+  private webmountSheet() {
+    Column() {
+      Row() {
+        Text(this.webmountHostOf(this.webmountUrl))
+          .fontSize(16).fontColor(INK).layoutWeight(1)
+          .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+        Text(this.webmountLease === 'hand' ? '交还控制' : '接管')
+          .fontSize(14).fontColor(ACCENT)
+          .padding({ left: 12, top: 8, bottom: 8 })
+          .onClick((): void => { this.toggleWebmountLease(); })
+        Text('关闭')
+          .fontSize(14).fontColor(INK3)
+          .padding({ left: 12, top: 8, bottom: 8 })
+          .onClick((): void => { this.closeWebmountSheet(); })
+      }
+      .width('100%')
+      if (this.webmountLease === 'hand') {
+        Text('你正在手动控制 — Agent 的点击/输入/脚本已暂停,交还后恢复')
+          .fontSize(META).fontColor(INK3)
+          .width('100%')
+          .padding({ top: 6, bottom: 2 })
+      }
+      WebMountSurface()
+        .layoutWeight(1)
+        .width('100%')
+        .margin({ top: 8 })
+    }
+    .width('100%').height('100%').padding(16).backgroundColor(BG)
   }
 
   private async loadAttachDataUrl(url: string): Promise<string | null> {
@@ -5316,6 +5374,27 @@ struct ChatPage {
               getChatRepository().list().catch((e: Error): void => { this.errorMsg = e.message; });
             })
         }
+        // WebMount 接管条(C4-2):会话有页面时显示;点开接管面板
+        if (this.webmountUrl.length > 0 && this.webmountReady && !this.webmountSheetOpen) {
+          Row() {
+            Icon({ name: 'globe', iconSize: 14, color: this.accentColorStore })
+            Text(`WebMount · ${this.webmountHostOf(this.webmountUrl)}`)
+              .fontSize(META).fontColor(INK2)
+              .margin({ left: 6 })
+              .layoutWeight(1)
+              .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+            Text(this.webmountLease === 'hand' ? '手动控制中' : '查看 / 接管')
+              .fontSize(META).fontColor(this.accentColorStore)
+          }
+          .width('100%')
+          .padding({ left: 14, right: 14, top: 8, bottom: 8 })
+          .margin({ left: 20, right: 20, bottom: 2 })
+          .backgroundColor(SURFACE)
+          .borderRadius(10)
+          .border({ width: 1, color: LINE })
+          .onClick((): void => { this.openWebmountSheet(); })
+          .accessibilityText('打开 WebMount 浏览器面板')
+        }
         ChatInput({
           disabled: this.storageDegraded || !this.conversationLoaded,
           text: this.inputText,
@@ -5467,6 +5546,13 @@ struct ChatPage {
     })
     .bindSheet($$this.artifactShelfOpen, this.artifactShelfSheet(), {
       height: '85%', showClose: false,
+    })
+    .bindSheet($$this.webmountSheetOpen, this.webmountSheet(), {
+      height: '92%', showClose: false,
+      onDisappear: (): void => {
+        // sheet 关闭(offscreen/手势):恢复 offscreen host 挂载
+        if (!this.webmountHostVisible) this.webmountHostVisible = true;
+      },
     })
     // 1:1 原型 slideInR .28s ease-out:整页入场 translateX 20→0 + opacity 0→1
     //   乘 themeTick 读取建依赖:主题变更 onPageShow 后 build 重读令牌
