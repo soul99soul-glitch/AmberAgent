@@ -1,4 +1,6 @@
 // ChatTaskModelsPage — 任务模型设置面(D-094)
+// 2026-09-27 二级页 iOS 对齐(基准 IMG_1990 风格):仅换视觉骨架
+//   (CenteredTitleBar/PlainSection/CardGroup r18+描边/iOS 卡片行),逻辑零改动。
 // Android 锚点:SettingModelPage.kt 辅助任务区(:433-700)—
 //   title(:433-470)/suggestion(:472-509)/compress(:556-592):
 //     allowClear;follows = findModelById(id) == null → '跟随当前聊天模型' +
@@ -9,11 +11,11 @@
 //     '跟随压缩模型' + '当前跟随压缩模型：X';onClear → AUTO + follow=true;
 //     onSelect → id + follow=false
 import {
-  ACCENT, BG, INK, INK2, INK3, OVERLAY, SURFACE, META, BODY, TEXT_STYLES, lineHeightForSize,
+  ACCENT, BG, GUTTER, INK, INK3, INK4, LINE, OVERLAY, SURFACE, TEXT_STYLES, accentSoftBg, lineHeightForSize,
 } from '../design/tokens.ets';
-import { PageTitleBar, SectionHeader, PaperSeparator, BtnGhost, BtnFill } from '../components/PageTemplate.ets';
+import { CenteredTitleBar, PlainSection, CardGroup, BtnGhost, BtnFill } from '../components/PageTemplate.ets';
 import { Icon } from '../components/ui/Icon.ets';
-import { FONT_MONO, FONT_MONO_MEDIUM, FONT_SANS_SEMIBOLD } from '../design/fonts.ets';
+import { FONT_MONO, FONT_MONO_MEDIUM, FONT_SANS_MEDIUM } from '../design/fonts.ets';
 import { router } from '@kit.ArkUI';
 import {
   loadProviders, hasUsableAuth, DEFAULT_AUTO_MODEL_ID,
@@ -69,6 +71,8 @@ struct ChatTaskModelsPage {
   @State ocrHealthLabel: string = '检测中';
   // 健康探测用原始 providers(Android settings.providers 未过滤;显示用 usable 过滤列表)
   private rawProviders: ProviderSetting[] = [];
+  // iOS 二级页 accent 动态色(与 PageTemplate CardRow 家族一致)
+  @StorageProp('accentColor') accentColorStore: string = ACCENT;
 
   aboutToAppear(): void {
     this.refresh();
@@ -218,74 +222,170 @@ struct ChatTaskModelsPage {
     saveTaskPrompt(this.promptKey(), def).then((): void => { this.refresh(); });
   }
 
+  // iOS 二级页任务行(基准 IMG_1990;视觉规格同 PageTemplate.CardRow):
+  //   主行 = 28 accent 图标座 + 标题 16/副标题 12 + 等宽当前值 + 箭头,整行点击进选择页;
+  //   副行(左缩进至标题起点 54)= 跟随回显(mono)+ 提示词 / 清除动作;发丝分隔线内缩 54。
+  //   功能与原 taskCard 一一对应:选择→整行,提示词→openPromptEditor,清除→clearTaskModel/clearWorkerModel
   @Builder
-  taskCard(title: string, desc: string, currentLine: string, followLine: string,
+  taskRow(title: string, desc: string, iconName: string, currentLine: string, followLine: string,
     showClear: boolean, clearText: string, task: string, hasPrompt: boolean,
     isWorkerRow: boolean, isLast: boolean) {
     Column() {
       Row() {
+        Row() {
+          Icon({ name: iconName, iconSize: 15, color: this.accentColorStore })
+        }
+        .width(28).height(28)
+        .borderRadius(7)
+        .backgroundColor(accentSoftBg(this.accentColorStore))
+        .justifyContent(FlexAlign.Center)
+        .alignItems(VerticalAlign.Center)
+        .margin({ right: 12 })
+
         Column() {
           Text(title)
-            .fontSize(BODY).fontWeight(600).lineHeight(TEXT_STYLES.body.lineHeight)
-            .fontFamily(FONT_SANS_SEMIBOLD).fontColor(INK)
+            .fontSize(16).fontWeight(FontWeight.Medium).lineHeight(lineHeightForSize(16))
+            .fontFamily(FONT_SANS_MEDIUM).fontColor(INK)
             .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
-          Text(desc)
-            .fontSize(TEXT_STYLES.secondary.size).fontWeight(FontWeight.Normal)
-            .lineHeight(TEXT_STYLES.secondary.lineHeight).fontFamily(TEXT_STYLES.secondary.family)
-            .fontColor(INK3).margin({ top: 4 })
-            .maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis })
+          if (desc.length > 0) {
+            Text(desc)
+              .fontSize(12).lineHeight(lineHeightForSize(12))
+              .fontFamily(FONT_SANS_MEDIUM).fontColor(INK3)
+              .maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis })
+              .margin({ top: 2 })
+          }
         }
         .alignItems(HorizontalAlign.Start).layoutWeight(1)
-        if (hasPrompt) {
-          Text('提示词')
-            .fontSize(META).fontWeight(FontWeight.Medium).lineHeight(TEXT_STYLES.meta.lineHeight)
-            .fontFamily(FONT_MONO_MEDIUM).fontColor(ACCENT)
-            .onClick((): void => { this.openPromptEditor(task); })
-        }
+
+        Text(currentLine)
+          .fontSize(TEXT_STYLES.meta.size).fontWeight(FontWeight.Medium)
+          .lineHeight(TEXT_STYLES.meta.lineHeight)
+          .fontFamily(FONT_MONO_MEDIUM).fontColor(INK3)
+          .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+          .margin({ left: 8, right: 6 })
+        Icon({ name: 'chevron_right', iconSize: 16, color: INK4 })
       }
       .width('100%')
+      .alignItems(VerticalAlign.Center)
+      .constraintSize({ minHeight: 52 })
+      .padding({ left: 14, right: 14, top: 10, bottom: 10 })
+      .onClick((): void => { this.openPicker(task); })
 
-      Row() {
-        Column() {
-          Row() {
-            Text(currentLine)
-              .fontSize(META).fontWeight(FontWeight.Medium).lineHeight(TEXT_STYLES.meta.lineHeight)
-              .fontFamily(FONT_MONO).fontColor(INK2)
-              .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
-            Icon({ name: 'chevron_down', iconSize: 12, color: INK3 }).margin({ left: 4 })
-          }
+      if (followLine.length > 0 || hasPrompt || showClear) {
+        Row() {
           if (followLine.length > 0) {
             Text(followLine)
-              .fontSize(META).fontWeight(FontWeight.Normal).lineHeight(TEXT_STYLES.meta.lineHeight)
-              .fontFamily(FONT_MONO).fontColor(INK3).margin({ top: 3 })
+              .fontSize(TEXT_STYLES.meta.size).fontWeight(FontWeight.Normal)
+              .lineHeight(TEXT_STYLES.meta.lineHeight)
+              .fontFamily(FONT_MONO).fontColor(INK3)
               .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+              .layoutWeight(1)
+          } else {
+            Blank()
+          }
+          if (hasPrompt) {
+            Text('提示词')
+              .fontSize(TEXT_STYLES.meta.size).fontWeight(FontWeight.Medium)
+              .lineHeight(TEXT_STYLES.meta.lineHeight)
+              .fontFamily(FONT_MONO_MEDIUM).fontColor(this.accentColorStore)
+              .padding({ left: 10, top: 6, bottom: 6 })
+              .onClick((): void => { this.openPromptEditor(task); })
+          }
+          if (showClear) {
+            Text(clearText)
+              .fontSize(TEXT_STYLES.meta.size).fontWeight(FontWeight.Normal)
+              .lineHeight(TEXT_STYLES.meta.lineHeight)
+              .fontFamily(FONT_MONO).fontColor(INK3)
+              .padding({ left: 10, right: 4, top: 6, bottom: 6 })
+              .onClick((): void => {
+                if (isWorkerRow) {
+                  this.clearWorkerModel(task === 'daydream');
+                } else {
+                  this.clearTaskModel(task);
+                }
+              })
           }
         }
-        .alignItems(HorizontalAlign.Start).layoutWeight(1)
-        Text('选择')
-          .fontSize(META).fontWeight(FontWeight.Medium).lineHeight(TEXT_STYLES.meta.lineHeight)
-          .fontFamily(FONT_MONO_MEDIUM).fontColor(ACCENT).margin({ right: 16 })
-          .onClick((): void => { this.openPicker(task); })
-        if (showClear) {
-          Text(clearText)
-            .fontSize(META).fontWeight(FontWeight.Normal).lineHeight(TEXT_STYLES.meta.lineHeight)
-            .fontFamily(FONT_MONO).fontColor(INK3)
-            .onClick((): void => {
-              if (isWorkerRow) {
-                this.clearWorkerModel(task === 'daydream');
-              } else {
-                this.clearTaskModel(task);
-              }
-            })
-        }
+        .width('100%')
+        .alignItems(VerticalAlign.Center)
+        .padding({ left: 54, right: 10, bottom: 10 })
       }
-      .width('100%').margin({ top: 10 })
+
+      if (!isLast) {
+        // 发丝分隔线:width('100%')+margin 在本布局下不生效,走外层 padding 内缩至标题起点(14+28+12)
+        Row() {
+          Row()
+            .width('100%')
+            .height(1)
+            .backgroundColor(LINE)
+        }
+        .width('100%')
+        .padding({ left: 54, right: 14 })
+      }
     }
     .width('100%')
-    .padding({ left: 16, right: 16, top: 12, bottom: 12 })
-    if (!isLast) {
-      PaperSeparator()
-    }
+  }
+
+  // 卡片内容(@Builder:组件构造必须在 builder 上下文,铁律 4b)
+  // 六个任务行,参数与原 taskCard 调用逐一对应(逻辑零改动)
+  @Builder
+  TaskCard(): void {
+    // 标题总结模型(:433-470)
+    this.taskRow('标题总结模型',
+      '用于总结对话标题的模型, 推荐使用快速且便宜的模型', 'edit',
+      this.followsChat(this.titleUuid) ? '跟随当前聊天模型' : this.selectedName(this.titleUuid),
+      this.followsChat(this.titleUuid)
+        ? (this.titleFallback.length > 0 ? `当前使用：${this.titleFallback}` : '暂无可用聊天模型')
+        : '',
+      !this.followsChat(this.titleUuid), '恢复为跟随当前聊天模型', 'title', true, false, false)
+
+    // 聊天建议模型(:472-509)
+    this.taskRow('聊天建议模型',
+      '用于生成对话建议的模型, 推荐使用快速且便宜的模型', 'spark',
+      this.followsChat(this.suggestionUuid) ? '跟随当前聊天模型' : this.selectedName(this.suggestionUuid),
+      this.followsChat(this.suggestionUuid)
+        ? (this.suggestionFallback.length > 0 ? `当前使用：${this.suggestionFallback}` : '暂无可用聊天模型')
+        : '',
+      !this.followsChat(this.suggestionUuid), '恢复为跟随当前聊天模型', 'suggestion', true, false, false)
+
+    // 压缩模型(:556-592)
+    this.taskRow('压缩模型',
+      '用于压缩对话历史的模型', 'history',
+      this.followsChat(this.compressUuid) ? '跟随当前聊天模型' : this.selectedName(this.compressUuid),
+      this.followsChat(this.compressUuid)
+        ? (this.compressFallback.length > 0 ? `当前使用：${this.compressFallback}` : '暂无可用聊天模型')
+        : '',
+      !this.followsChat(this.compressUuid), '恢复为跟随当前聊天模型', 'compress', true, false, false)
+
+    // 记忆提取模型(:594-645)— follows = followCompressModel && findById==null(:600)
+    this.taskRow('记忆提取模型',
+      '用于对话结束后提取候选记忆，轻量稳定即可', 'brain',
+      (this.workerFollow && this.followsChat(this.workerUuid))
+        ? '跟随压缩模型' : this.selectedName(this.workerUuid),
+      (this.workerFollow && this.followsChat(this.workerUuid))
+        ? `当前跟随压缩模型：${this.compressFallback.length > 0 ? this.compressFallback : '不可用'}`
+        : '',
+      !(this.workerFollow && this.followsChat(this.workerUuid)), '恢复跟随压缩模型',
+      'worker', false, true, false)
+
+    // Daydream 模型(:647-700)
+    this.taskRow('Daydream 模型',
+      '用于后台整理、合并和审查记忆，建议选择推理更强的模型', 'star',
+      (this.daydreamFollow && this.followsChat(this.daydreamUuid))
+        ? '跟随压缩模型' : this.selectedName(this.daydreamUuid),
+      (this.daydreamFollow && this.followsChat(this.daydreamUuid))
+        ? `当前跟随压缩模型：${this.compressFallback.length > 0 ? this.compressFallback : '不可用'}`
+        : '',
+      !(this.daydreamFollow && this.followsChat(this.daydreamUuid)), '恢复跟随压缩模型',
+      'daydream', false, true, false)
+
+    // 视觉识别模型(:511-553;D-098)— 无 allowClear;IMAGE 模态过滤在 picker;
+    //   D-111:desc 健康后缀 "${desc} · ${health.label}"(:529 逐字)
+    this.taskRow('视觉识别模型',
+      `当前聊天模型不能直接读取图片时，用它理解图片内容 · ${this.ocrHealthLabel}`, 'eye',
+      this.selectedName(this.ocrUuid).length > 0 ? this.selectedName(this.ocrUuid) : '未配置',
+      '',
+      false, '', 'ocr', true, false, true)
   }
 
   @Builder
@@ -340,7 +440,7 @@ struct ChatTaskModelsPage {
   build() {
     Stack() {
       Column() {
-        PageTitleBar({ title: '任务模型' })
+        CenteredTitleBar({ title: '任务模型' })
 
         if (!this.loaded) {
           Text('加载中…')
@@ -353,63 +453,10 @@ struct ChatTaskModelsPage {
         } else {
           Scroll() {
             Column() {
-              // 标题总结模型(:433-470)
-              SectionHeader({ label: '辅助任务' })
-              this.taskCard('标题总结模型',
-                '用于总结对话标题的模型, 推荐使用快速且便宜的模型',
-                this.followsChat(this.titleUuid) ? '跟随当前聊天模型' : this.selectedName(this.titleUuid),
-                this.followsChat(this.titleUuid)
-                  ? (this.titleFallback.length > 0 ? `当前使用：${this.titleFallback}` : '暂无可用聊天模型')
-                  : '',
-                !this.followsChat(this.titleUuid), '恢复为跟随当前聊天模型', 'title', true, false, false)
-
-              // 聊天建议模型(:472-509)
-              this.taskCard('聊天建议模型',
-                '用于生成对话建议的模型, 推荐使用快速且便宜的模型',
-                this.followsChat(this.suggestionUuid) ? '跟随当前聊天模型' : this.selectedName(this.suggestionUuid),
-                this.followsChat(this.suggestionUuid)
-                  ? (this.suggestionFallback.length > 0 ? `当前使用：${this.suggestionFallback}` : '暂无可用聊天模型')
-                  : '',
-                !this.followsChat(this.suggestionUuid), '恢复为跟随当前聊天模型', 'suggestion', true, false, false)
-
-              // 压缩模型(:556-592)
-              this.taskCard('压缩模型',
-                '用于压缩对话历史的模型',
-                this.followsChat(this.compressUuid) ? '跟随当前聊天模型' : this.selectedName(this.compressUuid),
-                this.followsChat(this.compressUuid)
-                  ? (this.compressFallback.length > 0 ? `当前使用：${this.compressFallback}` : '暂无可用聊天模型')
-                  : '',
-                !this.followsChat(this.compressUuid), '恢复为跟随当前聊天模型', 'compress', true, false, false)
-
-              // 记忆提取模型(:594-645)— follows = followCompressModel && findById==null(:600)
-              this.taskCard('记忆提取模型',
-                '用于对话结束后提取候选记忆，轻量稳定即可',
-                (this.workerFollow && this.followsChat(this.workerUuid))
-                  ? '跟随压缩模型' : this.selectedName(this.workerUuid),
-                (this.workerFollow && this.followsChat(this.workerUuid))
-                  ? `当前跟随压缩模型：${this.compressFallback.length > 0 ? this.compressFallback : '不可用'}`
-                  : '',
-                !(this.workerFollow && this.followsChat(this.workerUuid)), '恢复跟随压缩模型',
-                'worker', false, true, false)
-
-              // Daydream 模型(:647-700)
-              this.taskCard('Daydream 模型',
-                '用于后台整理、合并和审查记忆，建议选择推理更强的模型',
-                (this.daydreamFollow && this.followsChat(this.daydreamUuid))
-                  ? '跟随压缩模型' : this.selectedName(this.daydreamUuid),
-                (this.daydreamFollow && this.followsChat(this.daydreamUuid))
-                  ? `当前跟随压缩模型：${this.compressFallback.length > 0 ? this.compressFallback : '不可用'}`
-                  : '',
-                !(this.daydreamFollow && this.followsChat(this.daydreamUuid)), '恢复跟随压缩模型',
-                'daydream', false, true, false)
-
-              // 视觉识别模型(:511-553;D-098)— 无 allowClear;IMAGE 模态过滤在 picker;
-              //   D-111:desc 健康后缀 "${desc} · ${health.label}"(:529 逐字)
-              this.taskCard('视觉识别模型',
-                `当前聊天模型不能直接读取图片时，用它理解图片内容 · ${this.ocrHealthLabel}`,
-                this.selectedName(this.ocrUuid).length > 0 ? this.selectedName(this.ocrUuid) : '未配置',
-                '',
-                false, '', 'ocr', true, false, true)
+              // 辅助任务组(六个任务行,逻辑与原纸面列表一致)
+              PlainSection({ label: '辅助任务' })
+              CardGroup({ radius: 18, stroke: true, content: (): void => { this.TaskCard(); } })
+                .margin({ left: GUTTER, right: GUTTER })
             }
             .width('100%').padding({ top: 2, bottom: 32 })
           }

@@ -63,6 +63,10 @@ export let BG_GLASS: string = '#CCEFE7D6';      // 头部毛玻璃底(80% BG)
 // applyTheme — 浅/深双主题(session-home.html 令牌逐值)
 let darkTheme: boolean = false;
 
+// 卡片面级 accent 浅底:ACCENT_LIGHT(#FFF5F0)在 SURFACE 白卡上不可见;
+// 图标座/状态 chip 在卡内改用 accent 12% alpha(深浅主题在卡上均成立,随 accent 五色动态)
+export const accentSoftBg = (accent: string): string => `#1F${accent.substring(1)}`;
+
 const accentLightFor = (hex: string, dark: boolean): string => {
   if (dark) {
     if (hex === '#5E9C6E') return '#1D2B22';

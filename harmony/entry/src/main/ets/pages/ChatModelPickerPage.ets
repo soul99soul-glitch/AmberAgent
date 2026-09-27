@@ -4,11 +4,11 @@
 // 助手已绑定 chatModelId 时改写绑定内部 UUID,否则写全局 chat_selected_* 键)。
 // router 参数 assistantId(可选;由 ChatPage 打开完整选择器时携带)决定「当前」标记
 // 与写目标,避免绑定助手会话里菜单/选择器显示与发送实际模型不一致。
-import {
-  ACCENT, BG, INK, INK2, INK3, LINE, META, TEXT_STYLES, lineHeightForSize,
-} from '../design/tokens.ets';
-import { PageTitleBar, PaperSeparator, PageSpacer } from '../components/PageTemplate.ets';
-import { FONT_MONO_MEDIUM, FONT_MONO_SEMIBOLD } from '../design/fonts.ets';
+// 2026-09-27 二级页 iOS 对齐(基准 IMG_1990):仅换视觉骨架
+// (CenteredTitleBar/CardGroup r18+描边/CardRow accent 座),逻辑零改动。
+import { ACCENT, BG, INK2, INK3, GUTTER, TEXT_STYLES, lineHeightForSize } from '../design/tokens.ets';
+import { CenteredTitleBar, CardGroup, CardRow } from '../components/PageTemplate.ets';
+import { FONT_SANS_MEDIUM } from '../design/fonts.ets';
 import { router, promptAction } from '@kit.ArkUI';
 import { loadProviders, hasUsableAuth } from '@amber/chat-domain';
 import { getChatKvStore, ChatProviderChoice } from '../di/AppContainer.ets';
@@ -101,33 +101,55 @@ struct ChatModelPickerPage {
       });
   }
 
+  // ── 卡片内容(@Builder:组件构造必须在 builder 上下文,
+  //    裸 lambda 直接 new 组件会炸 "class constructor cannot called without 'new'")──
+
+  // 助手绑定清除行(UI-F34):accent 动作标题 + 说明,整行可点
   @Builder
-  clearBindingRow() {
+  BindingCard(): void {
     Row() {
       Column() {
         Text('跟随全局选择')
-          .fontSize(14).fontWeight(600).lineHeight(lineHeightForSize(14))
-          .fontFamily(FONT_MONO_SEMIBOLD).fontColor(ACCENT)
+          .fontSize(16).fontWeight(FontWeight.Medium).lineHeight(lineHeightForSize(16))
+          .fontFamily(FONT_SANS_MEDIUM).fontColor(ACCENT)
         Text('清除该助手的模型绑定')
           .fontSize(12).fontWeight(FontWeight.Medium).lineHeight(lineHeightForSize(12))
-          .fontFamily(FONT_MONO_MEDIUM).fontColor(INK3).margin({ top: 4 })
+          .fontFamily(FONT_SANS_MEDIUM).fontColor(INK3).margin({ top: 2 })
       }
       .alignItems(HorizontalAlign.Start).layoutWeight(1)
     }
-    .width('100%').constraintSize({ minHeight: 64 })
-    .padding({ left: 16, right: 16, top: 12, bottom: 12 })
+    .width('100%').constraintSize({ minHeight: 52 })
+    .padding({ left: 14, right: 14, top: 10, bottom: 10 })
     .onClick((): void => this.clearBinding())
+  }
+
+  // 模型列表行:iOS AmberFormRow 骨架(accent 浅底图标座 + 标题/副标题 + 箭头)
+  // 选中项以右侧「当前」值标记(数据与写入口同原实现)
+  @Builder
+  ModelCards(): void {
+    ForEach(this.rows, (row: ModelRow, idx: number): void => {
+      CardRow({
+        label: row.modelId,
+        desc: `${row.providerName} · ${row.providerType}`,
+        valueText: row.selected ? '当前' : '',
+        iconName: 'brain',
+        plateStyle: 'accent',
+        plateSize: 28,
+        isLast: idx === this.rows.length - 1,
+        onRowClick: (): void => this.pick(row),
+      })
+    }, (row: ModelRow): string => `${row.providerId}/${row.modelId}`)
   }
 
   build() {
     Column() {
-      PageTitleBar({ title: '选择模型' })
+      CenteredTitleBar({ title: '选择模型' })
 
+      // 清除绑定入口(UI-F34)在所有分支前渲染:已绑定但无可用模型时也必须可达
       if (this.bound) {
-        this.clearBindingRow()
-        PaperSeparator()
+        CardGroup({ radius: 18, stroke: true, content: (): void => { this.BindingCard(); } })
+          .margin({ left: GUTTER, right: GUTTER, top: 8 })
       }
-
       if (!this.loaded) {
         Text('加载中…')
           .fontSize(TEXT_STYLES.body.size)
@@ -163,36 +185,9 @@ struct ChatModelPickerPage {
       } else {
         Scroll() {
           Column() {
-            ForEach(this.rows, (row: ModelRow, idx: number): void => {
-              Column() {
-                Row() {
-                  Column() {
-                    Text(row.modelId)
-                      .fontSize(13).fontWeight(600).lineHeight(lineHeightForSize(13))
-                      .fontFamily(FONT_MONO_SEMIBOLD).fontColor(row.selected ? ACCENT : INK)
-                      .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
-                    Text(`${row.providerName} · ${row.providerType}`)
-                      .fontSize(12).fontWeight(FontWeight.Medium).lineHeight(lineHeightForSize(12))
-                      .fontFamily(FONT_MONO_MEDIUM).fontColor(INK3).margin({ top: 4 })
-                      .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
-                  }
-                  .alignItems(HorizontalAlign.Start).layoutWeight(1)
-                  if (row.selected) {
-                    Text('当前')
-                      .fontSize(META).fontWeight(600).lineHeight(TEXT_STYLES.meta.lineHeight)
-                      .fontFamily(FONT_MONO_MEDIUM).fontColor(ACCENT)
-                  }
-                }
-                .width('100%').constraintSize({ minHeight: 64 })
-                .padding({ left: 16, right: 16, top: 12, bottom: 12 })
-                .onClick((): void => this.pick(row))
-                if (idx < this.rows.length - 1) {
-                  PaperSeparator()
-                }
-              }
-              .width('100%')
-            }, (row: ModelRow): string => `${row.providerId}/${row.modelId}`)
-            PageSpacer()
+            CardGroup({ radius: 18, stroke: true, content: (): void => { this.ModelCards(); } })
+              .margin({ left: GUTTER, right: GUTTER, top: 8 })
+            Column() {}.height(40)
           }
           .width('100%')
         }

@@ -9,12 +9,17 @@
 //   - Responses API、Google Service Account 当前不支持;保存时迁移到已支持边界
 //   - brand 编辑及 openai account 区(余额等)= P1
 //   - 编辑中切换选中会丢弃未保存修改(MVP 草稿语义)
+// 视觉:2026-09-27 二级页 iOS 对齐(基准截图 IMG_1989)——居中标题 + accent 圆添加、
+//   搜索胶囊、PlainSection 组标、r18 发丝描边卡组、圆形字母头像 + StatusChip;
+//   逻辑(加载/筛选/跳转/添加)零改动。
 import {
-  ACCENT, BG, INK, INK2, INK3, INK4, SURFACE, LINE, LINE2, BODY2, META, TINY, LABEL,
-  TEXT_STYLES, lineHeightForSize,
+  ACCENT, BG, INK, INK2, INK3, INK4, SURFACE, SURFACE2, LINE, TEXT_STYLES, lineHeightForSize,
 } from '../design/tokens.ets';
-import { PageTitleBar, PageSpacer, Chip, BtnGhost, PaperSeparator } from '../components/PageTemplate.ets';
-import { FONT_MONO, FONT_MONO_MEDIUM, FONT_SANS_SEMIBOLD } from '../design/fonts.ets';
+import {
+  CenteredTitleBar, PlainSection, CardGroup, StatusChip, FooterNote, PageSpacer,
+} from '../components/PageTemplate.ets';
+import { FONT_MONO, FONT_SANS_SEMIBOLD } from '../design/fonts.ets';
+import { Icon } from '../components/ui/Icon.ets';
 import { router, promptAction } from '@kit.ArkUI';
 import type { ProviderSetting } from '@amber/chat-domain';
 import { setPendingProvider } from './ChatProviderDetailPage.ets';
@@ -119,55 +124,47 @@ struct ChatProviderSettingsPage {
     return n;
   }
 
+  // 状态 chip 文案/色调:鸿蒙仅 API Key — 有 key 即已配置(绿),否则未填写(灰)
+  private chipLabel(auth: string): string {
+    return auth === 'key' ? '已配置' : '未填写';
+  }
+
+  private chipTone(auth: string): string {
+    return auth === 'key' ? 'success' : 'muted';
+  }
+
+  // iOS 圆形字母头像:40 圆 SURFACE2 底 + 名称首字(单字符,对齐 iOS)+ 右下 8 状态点(启用=accent,否则灰)
   @Builder
-  registryStat(value: number, label: string, accent: boolean) {
-    Row() {
-      Text(`${value}`)
-        .fontSize(META).fontWeight(600).lineHeight(TEXT_STYLES.meta.lineHeight)
-        .fontFamily(FONT_MONO_MEDIUM).fontColor(accent ? this.accentColorStore : INK)
-      Text(` ${label}`)
-        .fontSize(TINY).fontWeight(FontWeight.Normal).lineHeight(lineHeightForSize(TINY))
-        .fontFamily(TEXT_STYLES.secondary.family).fontColor(INK3)
+  providerAvatar(row: ProviderRow) {
+    Stack({ alignContent: Alignment.BottomEnd }) {
+      Text(row.name.charAt(0).toUpperCase())
+        .fontSize(18).fontWeight(600).lineHeight(lineHeightForSize(18))
+        .fontFamily(FONT_SANS_SEMIBOLD)
+        .fontColor(row.enabled ? INK2 : INK4)
+        .width(40).height(40)
+        .borderRadius(20)
+        .backgroundColor(SURFACE2)
+        .textAlign(TextAlign.Center)
+      Column()
+        .width(8).height(8).borderRadius(4)
+        .backgroundColor(row.enabled ? this.accentColorStore : INK4)
     }
-    .alignItems(VerticalAlign.Center)
+    .width(40).height(40)
   }
 
   @Builder
-  registrySep() {
-    Column()
-      .width(1).height(11)
-      .backgroundColor(LINE2)
-      .margin({ left: 13, right: 13 })
-  }
-
-  @Builder
-  providerRegistryRow(row: ProviderRow, isLast: boolean) {
+  providerCardRow(row: ProviderRow, isLast: boolean) {
     Column() {
       Row() {
-        Text(row.mono)
-          .fontSize(TINY).fontWeight(600).lineHeight(TEXT_STYLES.tinyTag.lineHeight)
-          .fontFamily(FONT_MONO_MEDIUM)
-          .fontColor(row.enabled ? INK2 : INK4)
-          .width(40).height(40)
-          .borderRadius(20)
-          .backgroundColor(SURFACE)
-          .border({ width: 1, color: LINE })
-          .textAlign(TextAlign.Center)
+        this.providerAvatar(row)
         Column() {
-          Row() {
-            Text(row.name)
-              .fontSize(15).fontWeight(600).lineHeight(TEXT_STYLES.body.lineHeight)
-              .fontFamily(FONT_SANS_SEMIBOLD)
-              .fontColor(row.enabled ? INK : INK3)
-              .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
-            if (row.enabled) {
-              Column().width(6).height(6).borderRadius(3)
-                .backgroundColor(this.accentColorStore).margin({ left: 7 })
-            }
-          }
-          .alignItems(VerticalAlign.Center)
+          Text(row.name)
+            .fontSize(17).fontWeight(600).lineHeight(lineHeightForSize(17))
+            .fontFamily(FONT_SANS_SEMIBOLD)
+            .fontColor(INK)
+            .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
           Text(row.slug)
-            .fontSize(META).fontWeight(FontWeight.Medium).lineHeight(TEXT_STYLES.meta.lineHeight)
+            .fontSize(12).lineHeight(lineHeightForSize(12))
             .fontFamily(FONT_MONO).fontColor(INK3)
             .margin({ top: 3 })
             .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
@@ -176,40 +173,60 @@ struct ChatProviderSettingsPage {
         .layoutWeight(1)
         .margin({ left: 12 })
 
-        Column() {
-          Chip({ text: row.auth })
-          Row() {
-            Text(`${row.modelsCount}`)
-              .fontSize(TINY).fontWeight(FontWeight.Medium).lineHeight(lineHeightForSize(TINY))
-              .fontFamily(FONT_MONO_MEDIUM).fontColor(row.modelsCount > 0 ? INK2 : INK4)
-            Text(' 个模型')
-              .fontSize(TINY).fontWeight(FontWeight.Normal).lineHeight(lineHeightForSize(TINY))
-              .fontFamily(TEXT_STYLES.secondary.family).fontColor(row.modelsCount > 0 ? INK2 : INK4)
-          }
-          .margin({ top: 4 })
-        }
-        .alignItems(HorizontalAlign.End)
+        StatusChip({ text: this.chipLabel(row.auth), tone: this.chipTone(row.auth) })
       }
       .width('100%')
-      .padding({ left: 16, right: 16, top: 12, bottom: 12 })
       .alignItems(VerticalAlign.Center)
+      .constraintSize({ minHeight: 52 })
+      .padding({ left: 14, right: 14, top: 6, bottom: 6 })
+      .onClick((): void => {
+        const params: Record<string, string> = {};
+        params['providerId'] = row.id;
+        router.pushUrl({ url: 'pages/ChatProviderDetailPage', params: params });
+      })
+      if (!isLast) {
+        // 分隔线内缩对齐文字起点(行 padding 14 + 头像 40 + 间距 12)
+        Row() {
+          Row()
+            .width('100%')
+            .height(1)
+            .backgroundColor(LINE)
+        }
+        .width('100%')
+        .padding({ left: 66, right: 14 })
+      }
     }
     .width('100%')
-    .onClick((): void => {
-      const params: Record<string, string> = {};
-      params['providerId'] = row.id;
-      router.pushUrl({ url: 'pages/ChatProviderDetailPage', params: params });
-    })
-    if (!isLast) {
-      PaperSeparator()
-    }
+  }
+
+  @Builder
+  enabledCards(): void {
+    ForEach(this.filteredRows().filter((r: ProviderRow): boolean => r.enabled),
+      (row: ProviderRow, idx: number): void => {
+        this.providerCardRow(row,
+          idx === this.filteredRows().filter((r: ProviderRow): boolean => r.enabled).length - 1)
+      }, (row: ProviderRow): string => `on-${row.id}`)
+  }
+
+  @Builder
+  disabledCards(): void {
+    ForEach(this.filteredRows().filter((r: ProviderRow): boolean => !r.enabled),
+      (row: ProviderRow, idx: number): void => {
+        Column() {
+          this.providerCardRow(row,
+            idx === this.filteredRows().filter((r: ProviderRow): boolean => !r.enabled).length - 1)
+        }
+        .opacity(0.42)
+      }, (row: ProviderRow): string => `off-${row.id}`)
   }
 
   build() {
     Stack() {
     Column() {
-      PageTitleBar({
-        title: '提供商',
+      CenteredTitleBar({
+        title: '服务商',
+        actionIcon: 'plus',
+        onAction: (): void => { this.sheetShow = true; },
       })
 
       if (!this.loaded) {
@@ -228,103 +245,60 @@ struct ChatProviderSettingsPage {
       } else {
         Scroll() {
           Column() {
-            // ── Provider 注册表(amber-zhenji / Android SettingProviderPage 1:1)──
-            Row() {
-              Row({ space: 1 }) {
-                Column().width(3).height(5).borderRadius(1).backgroundColor(this.accentColorStore)
-                Column().width(3).height(9).borderRadius(1).backgroundColor(this.accentColorStore)
-                Column().width(3).height(13).borderRadius(1).backgroundColor(this.accentColorStore)
-              }
-              .alignItems(VerticalAlign.Bottom)
-              .margin({ right: 9 })
-              this.registryStat(this.all.length, '提供商', false)
-              this.registrySep()
-              this.registryStat(this.totalModelCount(), '模型', false)
-              this.registrySep()
-              this.registryStat(this.onlineCount(), '在线', true)
-              Blank()
-              // + 添加(ghost,accent 描边)
-              BtnGhost({ label: '＋ 添加', onTap: (): void => { this.sheetShow = true; } })
-            }
-            .width('100%')
-            .alignItems(VerticalAlign.Center)
-            .padding({ left: 16, right: 16 })
-            .margin({ top: 12, bottom: 2 })
-
-            // 终端风筛选(▸ + mono 输入 + line2 底线)
+            // ── 搜索胶囊(iOS IMG_1989:圆角输入条 + 放大镜)──
             Column() {
               Row() {
-                Text('▸').fontSize(META).lineHeight(TEXT_STYLES.meta.lineHeight).fontWeight(FontWeight.Medium)
-                  .fontFamily(FONT_MONO_MEDIUM).fontColor(this.accentColorStore)
-                TextInput({ text: this.filterQuery, placeholder: '筛选提供商' })
-                  .fontSize(META).lineHeight(TEXT_STYLES.meta.lineHeight).fontWeight(FontWeight.Medium)
+                Icon({ name: 'search', iconSize: 16, color: INK4 })
+                TextInput({ text: this.filterQuery, placeholder: '搜索服务商' })
+                  .fontSize(15)
                   .fontColor(INK)
-                  .fontFamily(FONT_MONO_MEDIUM)
                   .placeholderColor(INK4)
-                  .placeholderFont({ size: 12 })
+                  .placeholderFont({ size: 15 })
                   .backgroundColor(Color.Transparent)
-                  .padding({ top: 0, bottom: 0, left: 7, right: 0 })
-                  .constraintSize({ minHeight: 40 })
+                  .padding({ top: 0, bottom: 0, left: 9, right: 0 })
+                  .constraintSize({ minHeight: 44 })
                   .layoutWeight(1)
                   .onChange((v: string): void => { this.filterQuery = v; })
                 if (this.filterQuery.length > 0) {
-                  Text('✕').fontSize(META).lineHeight(TEXT_STYLES.meta.lineHeight).fontWeight(FontWeight.Medium)
-                    .fontFamily(FONT_MONO_MEDIUM).fontColor(INK3)
-                    .width(24).height(24).textAlign(TextAlign.Center)
-                    .onClick((): void => { this.filterQuery = ''; })
+                  Row() {
+                    Icon({ name: 'close', iconSize: 13, color: INK3 })
+                  }
+                  .width(26).height(26)
+                  .justifyContent(FlexAlign.Center)
+                  .alignItems(VerticalAlign.Center)
+                  .onClick((): void => { this.filterQuery = ''; })
                 }
               }
               .width('100%')
               .alignItems(VerticalAlign.Center)
-              .constraintSize({ minHeight: 48 })
-              Column().width('100%').height(1).backgroundColor(LINE2)
+              .constraintSize({ minHeight: 46 })
+              .padding({ left: 14, right: 9 })
+              .borderRadius(23)
+              .backgroundColor(SURFACE)
             }
             .width('100%')
             .padding({ left: 16, right: 16 })
-            .margin({ top: 8, bottom: 2 })
 
-            Row() {
-              Text('//').fontSize(LABEL).fontWeight(600).lineHeight(TEXT_STYLES.eyebrow.lineHeight)
-                .fontColor(this.accentColorStore).fontFamily(FONT_MONO_MEDIUM)
-              Text(` 在线 · ${this.filteredRows().filter((r: ProviderRow): boolean => r.enabled).length}`)
-                .fontSize(LABEL).fontWeight(FontWeight.Medium).lineHeight(TEXT_STYLES.eyebrow.lineHeight)
-                .fontColor(INK2).fontFamily(FONT_MONO_MEDIUM)
-              Blank().layoutWeight(1).height(1).backgroundColor(LINE).margin({ left: 10 })
+            // ── 启用中的服务商(iOS 卡组:r18 + 发丝描边)──
+            PlainSection({ label: '服务商' })
+            Column() {
+              CardGroup({ radius: 18, stroke: true, content: (): void => { this.enabledCards(); } })
             }
             .width('100%')
-            .padding({ top: 18, bottom: 11, left: 16, right: 16 })
-            .alignItems(VerticalAlign.Center)
+            .padding({ left: 16, right: 16 })
 
-            ForEach(this.filteredRows().filter((r: ProviderRow): boolean => r.enabled),
-              (row: ProviderRow, idx: number): void => {
-                this.providerRegistryRow(row,
-                  idx === this.filteredRows().filter((r: ProviderRow): boolean => r.enabled).length - 1)
-              }, (row: ProviderRow): string => `on-${row.id}`)
-
-            ForEach(this.filteredRows().filter((r: ProviderRow): boolean => !r.enabled),
-              (row: ProviderRow, idx: number): void => {
-                if (idx === 0) {
-                  Row() {
-                    Text('//').fontSize(LABEL).fontWeight(600).lineHeight(TEXT_STYLES.eyebrow.lineHeight)
-                      .fontColor(this.accentColorStore).fontFamily(FONT_MONO_MEDIUM)
-                    Text(` 未启用 · ${this.filteredRows().filter((r: ProviderRow): boolean => !r.enabled).length}`)
-                      .fontSize(LABEL).fontWeight(FontWeight.Medium).lineHeight(TEXT_STYLES.eyebrow.lineHeight)
-                      .fontColor(INK2).fontFamily(FONT_MONO_MEDIUM)
-                    Blank().layoutWeight(1).height(1).backgroundColor(LINE).margin({ left: 10 })
-                  }
-                  .width('100%')
-                  .padding({ top: 22, bottom: 11, left: 16, right: 16 })
-                  .alignItems(VerticalAlign.Center)
-                }
-                Column() {
-                  this.providerRegistryRow(row,
-                    idx === this.filteredRows().filter((r: ProviderRow): boolean => !r.enabled).length - 1)
-                }
-                .opacity(0.42)
-              }, (row: ProviderRow): string => `off-${row.id}`)
+            // ── 未启用的服务商(保留鸿蒙分组,按规范排布)──
+            if (this.filteredRows().filter((r: ProviderRow): boolean => !r.enabled).length > 0) {
+              PlainSection({ label: '未启用' })
+              Column() {
+                CardGroup({ radius: 18, stroke: true, content: (): void => { this.disabledCards(); } })
+              }
+              .width('100%')
+              .padding({ left: 16, right: 16 })
+            }
 
             if (this.filteredRows().length === 0) {
-              Text('没有匹配的提供商')
+              Text('没有匹配的服务商')
                 .fontSize(TEXT_STYLES.body.size)
                 .fontWeight(TEXT_STYLES.body.weight)
                 .lineHeight(TEXT_STYLES.body.lineHeight)
@@ -334,6 +308,10 @@ struct ChatProviderSettingsPage {
                 .padding({ top: 28, bottom: 28 })
                 .textAlign(TextAlign.Center)
             }
+
+            FooterNote({
+              text: `${this.all.length} 个服务商 · ${this.totalModelCount()} 个模型 · ${this.onlineCount()} 个在线`,
+            })
 
             Column().height(18)
 

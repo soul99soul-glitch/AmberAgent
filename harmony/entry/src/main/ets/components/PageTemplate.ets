@@ -11,7 +11,7 @@ import { router } from '@kit.ArkUI';
 import {
   INK, INK2, INK3, INK4, SURFACE, SURFACE2, RAISED, LINE, LINE2, BG,
   ACCENT, ACCENT_INK, ACCENT_LIGHT, SIGNAL, ERROR, CODE_BG,
-  WARNING_FG, WARNING_BG, ERROR_BG, SUCCESS_BG, SUCCESS_FG,
+  WARNING_FG, WARNING_BG, ERROR_BG, SUCCESS_BG, SUCCESS_FG, accentSoftBg,
   TITLE, HEADER, BODY, BODY2, META, MONO_SMALL, LABEL, TINY, TEXT_STYLES,
   PAD_CARD, PAD_ITEM, RADIUS, RADIUS_PILL, GUTTER, lineHeightForSize,
 } from '../design/tokens.ets';
@@ -416,7 +416,7 @@ export struct CardRow {
           }
           .width(this.plateSize).height(this.plateSize)
           .borderRadius(this.plateSize >= 32 ? 9 : 7)
-          .backgroundColor(this.plateStyle === 'accent' ? ACCENT_LIGHT : SURFACE2)
+          .backgroundColor(this.plateStyle === 'accent' ? accentSoftBg(this.accentColorStore) : SURFACE2)
           .justifyContent(FlexAlign.Center)
           .alignItems(VerticalAlign.Center)
           .margin({ right: 12 })
@@ -690,7 +690,7 @@ export struct StatusChip {
 
   private bg(): string {
     if (this.tone === 'success') return SUCCESS_BG;
-    if (this.tone === 'accent') return ACCENT_LIGHT;
+    if (this.tone === 'accent') return accentSoftBg(this.accentColorStore);
     if (this.tone === 'warn') return WARNING_BG;
     if (this.tone === 'error') return ERROR_BG;
     return SURFACE2;
