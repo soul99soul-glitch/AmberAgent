@@ -47,7 +47,7 @@ const abilityFromWire = (s: string): ModelAbility => {
 const BUILT_IN_TOOLS: ReadonlyArray<string> = ['search', 'url_context', 'image_generation'];
 const GOOGLE_AUTH_MODES: ReadonlyArray<string> = ['api_key', 'gemini_code_assist_oauth'];
 const OPENAI_AUTH_MODES: ReadonlyArray<string> = [
-  'api_key', 'codex_oauth', 'zhipu_coding_plan', 'kimi_coding_plan',
+  'api_key', 'codex_oauth', 'grok_oauth', 'zhipu_coding_plan', 'kimi_coding_plan',
   'mimo_coding_plan', 'minimax_token_plan',
 ];
 const OPENAI_BRANDS: ReadonlyArray<string> = [

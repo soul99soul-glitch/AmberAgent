@@ -184,6 +184,7 @@ export const openAIAuthModeFixedBaseUrl = (mode: OpenAIAuthMode): string | null 
   switch (mode) {
     case 'api_key': return null;
     case 'codex_oauth': return 'https://chatgpt.com/backend-api/codex';
+    case 'grok_oauth': return 'https://cli-chat-proxy.grok.com/v1';
     case 'zhipu_coding_plan': return 'https://open.bigmodel.cn/api/coding/paas/v4';
     case 'kimi_coding_plan': return 'https://api.kimi.com/coding/v1';
     case 'mimo_coding_plan': return 'https://token-plan-cn.xiaomimimo.com/v1';

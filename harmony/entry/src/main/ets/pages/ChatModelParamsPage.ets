@@ -19,11 +19,12 @@
 import {
   ACCENT, BG, ERROR, INK, INK3, LINE, RAISED, TEXT_STYLES,
 } from '../design/tokens.ets';
-import { PageTitleBar, SectionHeader, PaperSeparator, BtnFill, BtnGhost } from '../components/PageTemplate.ets';
+import { PageTitleBar, SectionHeader, PaperSeparator, BtnFill, BtnGhost, Seg, ToggleRow } from '../components/PageTemplate.ets';
 import { FONT_MONO, FONT_MONO_MEDIUM } from '../design/fonts.ets';
 import { router } from '@kit.ArkUI';
 import type {
   CustomBody, CustomHeader, JsonValue, ProviderModel, ProviderSetting,
+  ModelType, ModalityFull,
 } from '@amber/chat-domain';
 import { loadProviders, saveProviders } from '@amber/chat-domain';
 import { getChatKvStore } from '../di/AppContainer.ets';
@@ -42,6 +43,10 @@ interface RouterParams {
   modelId?: string;
 }
 
+// 模型类型 Seg 值(ModelType:chat/image/embedding)
+const MODEL_TYPE_OPTIONS: string[] = ['聊天', '生图', '嵌入'];
+const MODEL_TYPE_VALUES: string[] = ['chat', 'image', 'embedding'];
+
 @Entry
 @Component
 struct ChatModelParamsPage {
@@ -59,6 +64,12 @@ struct ChatModelParamsPage {
   // 提供商覆写(D-109 补:展示 + 移除;新增/编辑待提供商编辑器支持 detached 模式)
   @State overwriteName: string = '';
   private hasOverwrite: boolean = false;
+  // 模型属性(类型/输入模态/上下文窗口;Android 单模型表单对齐)
+  @State modelType: string = 'chat';
+  @State inputText: boolean = true;
+  @State inputImage: boolean = false;
+  @State inputAudio: boolean = false;
+  @State contextWindowText: string = '';
 
   aboutToAppear(): void {
     const params = router.getParams() as RouterParams;
@@ -85,6 +96,13 @@ struct ChatModelParamsPage {
         this.hasOverwrite = model.providerOverwrite !== null;
         this.overwriteName = model.providerOverwrite !== null
           ? model.providerOverwrite.name : '';
+        // 模型属性草稿
+        this.modelType = model.type;
+        this.inputText = model.inputModalities.indexOf('text') >= 0;
+        this.inputImage = model.inputModalities.indexOf('image') >= 0;
+        this.inputAudio = model.inputModalities.indexOf('audio') >= 0;
+        this.contextWindowText = model.contextWindowTokens !== null
+          ? `${model.contextWindowTokens}` : '';
       }
       this.loaded = true;
     });
@@ -191,6 +209,28 @@ struct ChatModelParamsPage {
 
   // ===== 确认/取消(:706-720) =====
 
+  private draftInputModalities(): ModalityFull[] {
+    const out: ModalityFull[] = [];
+    if (this.inputText) out.push('text');
+    if (this.inputImage) out.push('image');
+    if (this.inputAudio) out.push('audio');
+    // 至少保留 text(空模态无意义;Android 表单同样不允许全空)
+    return out.length > 0 ? out : ['text'];
+  }
+
+  private draftContextWindow(): number | null {
+    const raw: string = this.contextWindowText.trim();
+    if (raw.length === 0) return null;
+    const n: number = Number(raw);
+    if (!Number.isFinite(n) || n <= 0) return null;
+    return Math.trunc(n);
+  }
+
+  private modelTypeIndex(): number {
+    const idx: number = MODEL_TYPE_VALUES.indexOf(this.modelType);
+    return idx >= 0 ? idx : 0;
+  }
+
   private confirm(): void {
     if (this.provider === null) return;
     const provider: ProviderSetting = this.provider;
@@ -202,15 +242,19 @@ struct ChatModelParamsPage {
       (k: string, i: number): CustomBody => ({
         key: k.trim(), value: this.bodyValues[i] ?? '',
       }));
+    const inputModalities: ModalityFull[] = this.draftInputModalities();
+    const contextWindow: number | null = this.draftContextWindow();
+    const modelType: string = this.modelType;
     const models: ProviderModel[] = provider.models.map((m: ProviderModel): ProviderModel => {
       if (m.id !== this.modelRowId) return m;
       // arkts-no-spread:显式字段拷贝
       return {
-        modelId: m.modelId, displayName: m.displayName, id: m.id, type: m.type,
+        modelId: m.modelId, displayName: m.displayName, id: m.id,
+        type: modelType as ModelType,
         customHeaders: headers, customBodies: bodies,
-        inputModalities: m.inputModalities, outputModalities: m.outputModalities,
+        inputModalities: inputModalities, outputModalities: m.outputModalities,
         abilities: m.abilities, tools: m.tools,
-        contextWindowTokens: m.contextWindowTokens, providerOverwrite: m.providerOverwrite,
+        contextWindowTokens: contextWindow, providerOverwrite: m.providerOverwrite,
       };
     });
     loadProviders(getChatKvStore()).then((list: ProviderSetting[] | null): void => {
@@ -313,6 +357,41 @@ struct ChatModelParamsPage {
               .lineHeight(TEXT_STYLES.secondary.lineHeight).fontFamily(TEXT_STYLES.secondary.family)
               .fontColor(INK3).width('100%')
               .padding({ left: 16, right: 16, top: this.hasOverwrite ? 8 : 12, bottom: 8 })
+
+            // ── 模型属性(类型/输入模态/上下文窗口;Android 单模型表单对齐) ──
+            SectionHeader({ label: '模型属性' })
+            Column() {
+              Text('类型')
+                .fontSize(TEXT_STYLES.secondary.size).fontWeight(FontWeight.Medium)
+                .lineHeight(TEXT_STYLES.secondary.lineHeight).fontFamily(TEXT_STYLES.secondary.family)
+                .fontColor(INK3).margin({ bottom: 4 })
+              Seg({
+                options: MODEL_TYPE_OPTIONS,
+                selected: this.modelTypeIndex(),
+                onSelect: (idx: number): void => { this.modelType = MODEL_TYPE_VALUES[idx]; },
+              })
+              Text('输入模态')
+                .fontSize(TEXT_STYLES.secondary.size).fontWeight(FontWeight.Medium)
+                .lineHeight(TEXT_STYLES.secondary.lineHeight).fontFamily(TEXT_STYLES.secondary.family)
+                .fontColor(INK3).margin({ top: 12, bottom: 4 })
+              ToggleRow({
+                label: '文本', checked: this.inputText, isLast: false,
+                onToggle: (): void => { this.inputText = !this.inputText; },
+              })
+              ToggleRow({
+                label: '图片', checked: this.inputImage, isLast: false,
+                onToggle: (): void => { this.inputImage = !this.inputImage; },
+              })
+              ToggleRow({
+                label: '音频', checked: this.inputAudio, isLast: true,
+                onToggle: (): void => { this.inputAudio = !this.inputAudio; },
+              })
+              Column().height(12)
+              this.textField('上下文窗口(tokens)', this.contextWindowText, '留空 = 未知',
+                (v: string): void => { this.contextWindowText = v; })
+            }
+            .width('100%').alignItems(HorizontalAlign.Start)
+            .padding({ left: 16, right: 16, top: 12, bottom: 4 })
 
             // ── 请求伪装(UA 预设;iOS/Android 同源,写入下方自定义 Headers) ──
             SectionHeader({ label: '请求伪装' })

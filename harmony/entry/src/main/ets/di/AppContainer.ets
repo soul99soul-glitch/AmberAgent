@@ -27,6 +27,8 @@ import { createTavilyAndFallbackRegistry } from '../platform_impl/SearchRegistry
 import { createNotificationNotifier, notifyCronRunning, notifyCronCompleted, notifyCronFailed } from '../platform_impl/NotificationNotifier.ets';
 import { createFileStore } from '../platform_impl/FileStore.ets';
 import { getChatKeyRoulette } from '../platform_impl/KeyRouletteSupport.ets';
+import { getValidCodexToken } from '../platform_impl/CodexOAuthClient.ets';
+import { getValidGrokToken } from '../platform_impl/GrokOAuthClient.ets';
 import { createModelCouncilRunner } from '../platform_impl/ModelCouncilRunner.ets';
 import { createEntryNovelChatRunAdapter } from '../platform_impl/NovelChatRunAdapter.ets';
 import {
@@ -1288,6 +1290,7 @@ export const describeChatModel = async (): Promise<string> => {
 //   分发/auth/header 语义与 D-046/D-078 逐字一致,未落地传输显式抛错)
 export const buildProviderApi = (
   chosen: ProviderSetting, customHeaderRecord: Record<string, string>,
+  oauthAccountId: string = '',
 ): OpenAIChatApi => {
   // useResponseApi=true 走 createOpenAIChatApi 内部分流(Responses);不再在此 throw
   if (!hasUsableAuth(chosen)) {
@@ -1336,6 +1339,13 @@ export const buildProviderApi = (
     headers: (): Record<string, string> => {
       const auth: Record<string, string> =
         openAIAuthHeaders(openaiSetting.authMode, openaiSetting.baseUrl, nextToken());
+      // codex 后端要求 ChatGPT-Account-Id(有 accountId 时注入)
+      if (oauthAccountId.length > 0) auth['ChatGPT-Account-Id'] = oauthAccountId;
+      // grok cli-chat-proxy 要求 CLI 身份头(iOS IOSGrokCliProxyIdentity 同款)
+      if (openaiSetting.authMode === 'grok_oauth') {
+        auth['User-Agent'] = 'grok-shell/0.2.101 (ios; arm64)';
+        auth['x-grok-client-identifier'] = 'grok-shell';
+      }
       // customHeaders 后写覆盖(auth 冲突时 custom 赢,同 claude/google 层语义)
       for (const k of Object.keys(customHeaderRecord)) auth[k] = customHeaderRecord[k];
       return auth;
@@ -1402,7 +1412,19 @@ export const resolveChatRuntime = async (
   // auth header 归属:openai 由 adapter(openAIAuthHeaders);claude/google 由各自
   // api 层从 setting.apiKey 注入(x-api-key / x-goog-api-key)。
   // 未落地传输模式(OAuth/Vertex service account)在 api 层显式抛错(非静默)。
-  const api: OpenAIChatApi = buildProviderApi(chosen, customHeaderRecord);
+  // codex/grok:resolve 为 async 天然刷新点(刷新流程内部同步写回 provider.apiKey);
+  //   codex 另需 ChatGPT-Account-Id 头(iOS modelsRequest 同款);子代理路径(681)
+  //   走同步调用,accountId 传空(v1 登记)
+  let codexAccountId: string = '';
+  const chosenVariant: ProviderSettingOpenAIVariant | null = chosen.type === 'openai'
+    ? chosen as ProviderSettingOpenAIVariant : null;
+  if (chosenVariant !== null && chosenVariant.authMode === 'codex_oauth') {
+    const codexTokens = await getValidCodexToken(chosenVariant.id).catch((): null => null);
+    if (codexTokens !== null) codexAccountId = codexTokens.accountId;
+  } else if (chosenVariant !== null && chosenVariant.authMode === 'grok_oauth') {
+    await getValidGrokToken(chosenVariant.id).catch((): null => null);
+  }
+  const api: OpenAIChatApi = buildProviderApi(chosen, customHeaderRecord, codexAccountId);
   return {
     api, assistant, params,
     contextMessageSize: sessionDefaults.contextMessageSize,

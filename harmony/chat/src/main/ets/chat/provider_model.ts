@@ -74,6 +74,7 @@ export const reasoningLevelBudgetTokens = (level: ReasoningLevel): number =>
 export type OpenAIAuthMode =
   | 'api_key'
   | 'codex_oauth'
+  | 'grok_oauth'
   | 'zhipu_coding_plan'
   | 'kimi_coding_plan'
   | 'mimo_coding_plan'
