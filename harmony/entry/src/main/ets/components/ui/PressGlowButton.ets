@@ -11,8 +11,9 @@
 //   尺寸: btnWidth/btnHeight prop(0 = 包内容,如 FAB);别在调用点挂 .width/.height
 //   底: bgMode 'glass' 玻璃渐变+细边(默认) | 'solid' accent 实底 | 'plain' 无底(内容自带)
 
-import { curves } from '@kit.ArkUI';
+import { curves, window } from '@kit.ArkUI';
 import { uiEffect } from '@kit.ArkGraphics2D';
+import type { Context } from '@kit.AbilityKit';
 import { HOME_GLASS_BOTTOM, HOME_GLASS_EDGE, HOME_GLASS_SHADOW, HOME_GLASS_TOP } from '../../design/tokens.ets';
 
 const HOLD_DELAY_MS: number = 170;
@@ -71,6 +72,16 @@ export struct PressGlowButton {
     }
   }
 
+  // 按住时的“HDR 时刻”:窗口亮度顶到 1.0(面板满亮度,与系统当前值无关),
+  // 松开回 -1 恢复系统亮度;这是真机面板上唯一必然可感的提亮手段
+  private boostWindowBrightness(on: boolean): void {
+    const ctx: Context | undefined = this.getUIContext().getHostContext();
+    if (ctx === undefined) return;
+    window.getLastWindow(ctx).then((win: window.Window): void => {
+      win.setWindowBrightness(on ? 1.0 : -1);
+    }).catch((): void => {});
+  }
+
   private setPressed(down: boolean): void {
     if (this.holdTimer >= 0) {
       clearTimeout(this.holdTimer);
@@ -84,15 +95,22 @@ export struct PressGlowButton {
         animateTo({ duration: 180, curve: Curve.EaseOut }, (): void => {
           this.held = true;
         });
+        this.boostWindowBrightness(true);
       }, HOLD_DELAY_MS);
     } else {
+      const wasHeld: boolean = this.held;
       animateTo({ duration: 320, curve: curves.springCurve(0, 1, 180, 24) }, (): void => {
         this.pressScale = 1;
       });
       animateTo({ duration: 200, curve: Curve.EaseIn }, (): void => {
         this.held = false;
       });
+      if (wasHeld) this.boostWindowBrightness(false);
     }
+  }
+
+  aboutToDisappear(): void {
+    if (this.held) this.boostWindowBrightness(false);
   }
 
   build(): void {
