@@ -96,6 +96,15 @@ export struct PressGlowButton {
     }
   }
 
+  // 本色光斑资源(accent 五色一一对应;核心 = 提亮 30% 的 accent 本色,不是白)
+  private spotImage(): Resource {
+    if (this.accentColor === '#5E9C6E') return $r('app.media.radial_spot_5e9c6e');
+    if (this.accentColor === '#4F86D6') return $r('app.media.radial_spot_4f86d6');
+    if (this.accentColor === '#9277C4') return $r('app.media.radial_spot_9277c4');
+    if (this.accentColor === '#C2607A') return $r('app.media.radial_spot_c2607a');
+    return $r('app.media.radial_spot_b8623a');
+  }
+
   // solid 光斑尺寸:按钮高的 1.6 倍,只覆盖触点周围;
   // Area 异常值(包内容 Stack 可能上报父约束)一律回退 btnHeight,防满屏
   private spotSize(): number {
@@ -123,21 +132,14 @@ export struct PressGlowButton {
     Stack() {
       if (this.held) {
         if (this.isSolid()) {
-          // solid(新对话):指尖局部光斑 — 径向光斑跟随触点,accent 透纱同范围,
-          // 只点亮按住地方的周围一圈,不整面发白
-          Image($r('app.media.radial_spot'))
+          // solid(新对话):本色提亮 — 同色径向光斑(更亮的 accent 本色,不含白),
+          // 媒体通道 HDR 加成;跟随触点、clip 裁进按钮剪影,灯只在按钮里亮
+          Image(this.spotImage())
             .width(this.spotSize())
             .height(this.spotSize())
             .position({ x: this.spotPosX(), y: this.spotPosY() })
             .borderRadius(this.spotSize() / 2)
             .foregroundFilter(this.heldFilter())
-            .hitTestBehavior(HitTestMode.None)
-          Row()
-            .width(this.spotSize())
-            .height(this.spotSize())
-            .position({ x: this.spotPosX(), y: this.spotPosY() })
-            .borderRadius(this.spotSize() / 2)
-            .backgroundColor(accentAlpha(this.accentColor, 0.3))
             .hitTestBehavior(HitTestMode.None)
         } else {
           // glass/plain(搜索/齿轮/头像):整面均匀亮起;
