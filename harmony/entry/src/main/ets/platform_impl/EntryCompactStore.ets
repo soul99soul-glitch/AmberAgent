@@ -6,7 +6,8 @@
 //   compacts/<conversationId>         — ConversationCompact[] JSON(我方 schema)
 //   compacts/<conversationId>.events  — 审计 jsonl(read-concat-write)
 // 偏差登记:Room 行级存储 → KV blob 整体读写(单页面使用无并发写者);
-//   search/expand(repository:97-134)未接(工具循环落地时一并接入)
+//   conversation_search/expand 工具已接(ChatPage → createConversationContextTools,
+//   检索走 domain searchConversationContext/expandConversationContext)。
 
 import type { CompactStore, ConversationCompact, KeyValueStore } from '@amber/chat-domain';
 

@@ -27,7 +27,7 @@ import {
   getChatKvStore, saveTaskModelId, loadTaskModelIds, TaskModelIds,
   resolveTaskChatModelChoice, saveTaskPrompt, loadTaskPrompts, TaskPrompts,
   ChatProviderChoice,
-  TASK_TITLE_MODEL_KEY, TASK_SUGGESTION_MODEL_KEY, TASK_COMPRESS_MODEL_KEY,
+  TASK_TITLE_MODEL_KEY, TASK_SUGGESTION_MODEL_KEY, TASK_COMPRESS_MODEL_KEY, TASK_IMAGE_MODEL_KEY,
   TASK_TITLE_PROMPT_KEY, TASK_SUGGESTION_PROMPT_KEY, TASK_COMPRESS_PROMPT_KEY,
 } from '../di/AppContainer.ets';
 import { findModelByIdInProviders } from '../platform_impl/OcrSupport.ets';
@@ -52,6 +52,8 @@ struct ChatTaskModelsPage {
   @State workerFollow: boolean = true;
   @State daydreamUuid: string = DEFAULT_AUTO_MODEL_ID;
   @State daydreamFollow: boolean = true;
+  // 生图模型槽(Android 图像生成模型;AUTO = 未配置,generate_image 工具不装配)
+  @State imageUuid: string = DEFAULT_AUTO_MODEL_ID;
   // 跟随时的回退名(Android fallbackModel?.displayName)
   @State titleFallback: string = '';
   @State suggestionFallback: string = '';
@@ -102,6 +104,7 @@ struct ChatTaskModelsPage {
     this.titleUuid = ids.titleModelId;
     this.suggestionUuid = ids.suggestionModelId;
     this.compressUuid = ids.compressModelId;
+    this.imageUuid = ids.imageModelId;
     this.workerUuid = snap.memoryWorker.modelId;
     this.workerFollow = snap.memoryWorker.followCompressModel;
     this.daydreamUuid = snap.memoryWorker.daydreamModelId;
@@ -155,6 +158,18 @@ struct ChatTaskModelsPage {
     return m.displayName.length > 0 ? m.displayName : m.modelId;
   }
 
+  // 生图槽解析(rawProviders 未过滤:image 模型可能挂在无 chat 模型的 provider 下)
+  private imageConfigured(): boolean {
+    const m: ProviderModel | null = findModelByIdInProviders(this.rawProviders, this.imageUuid);
+    return m !== null && m.type === 'image';
+  }
+
+  private selectedImageName(): string {
+    const m: ProviderModel | null = findModelByIdInProviders(this.rawProviders, this.imageUuid);
+    if (m === null || m.type !== 'image') return '';
+    return m.displayName.length > 0 ? m.displayName : m.modelId;
+  }
+
   private openPicker(task: string): void {
     router.pushUrl({ url: 'pages/ChatTaskModelPickerPage', params: { task: task } });
   }
@@ -162,7 +177,8 @@ struct ChatTaskModelsPage {
   // onClear → DEFAULT_AUTO_MODEL_ID(:451-453/:490-492/:573-575)
   private clearTaskModel(task: string): void {
     const key: string = task === 'title' ? TASK_TITLE_MODEL_KEY
-      : task === 'suggestion' ? TASK_SUGGESTION_MODEL_KEY : TASK_COMPRESS_MODEL_KEY;
+      : task === 'suggestion' ? TASK_SUGGESTION_MODEL_KEY
+      : task === 'image' ? TASK_IMAGE_MODEL_KEY : TASK_COMPRESS_MODEL_KEY;
     saveTaskModelId(key, DEFAULT_AUTO_MODEL_ID).then((): void => { this.refresh(); });
   }
 
@@ -356,6 +372,14 @@ struct ChatTaskModelsPage {
         ? (this.compressFallback.length > 0 ? `当前使用：${this.compressFallback}` : '暂无可用聊天模型')
         : '',
       !this.followsChat(this.compressUuid), '恢复为跟随当前聊天模型', 'compress', true, false, false)
+
+    // 生图模型(Android 图像生成模型槽;未配置 → generate_image 工具不装配;
+    //   清除 = 不生成图片,同 Android「清除」语义)
+    this.taskRow('生图模型',
+      '用于 generate_image 工具生成图片的模型', 'image',
+      this.imageConfigured() ? this.selectedImageName() : '未配置',
+      '',
+      this.imageConfigured(), '恢复为未配置', 'image', false, false, false)
 
     // 记忆提取模型(:594-645)— follows = followCompressModel && findById==null(:600)
     this.taskRow('记忆提取模型',

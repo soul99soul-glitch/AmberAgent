@@ -46,13 +46,20 @@ export interface InlineImageToken {
   url: string;
 }
 
+export interface InlineMathToken {
+  type: 'math';
+  latex: string;
+  display: boolean; // true = $$..$$(展示公式),false = $..$(行内)
+}
+
 export type InlineToken =
   | InlineTextToken
   | InlineBoldToken
   | InlineItalicToken
   | InlineCodeToken
   | InlineLinkToken
-  | InlineImageToken;
+  | InlineImageToken
+  | InlineMathToken;
 
 // ===== 块类型 =====
 
@@ -159,6 +166,30 @@ export const parseInline = (text: string): InlineToken[] => {
       start: m.index,
       end: m.index + m[0].length,
       token: { type: 'code', text: m[1] } as InlineCodeToken,
+    });
+  }
+
+  // 1b. 公式:$$..$$(展示)优先于 $..$(行内);$ 内容不跨行、不含 $
+  const mathDisplayRe = /\$\$([^$\n]+)\$\$/g;
+  while ((m = mathDisplayRe.exec(text)) !== null) {
+    const start: number = m.index;
+    const end: number = m.index + m[0].length;
+    if (overlaps(matches, start, end)) continue;
+    matches.push({
+      start,
+      end,
+      token: { type: 'math', latex: m[1], display: true } as InlineMathToken,
+    });
+  }
+  const mathInlineRe = /\$([^$\n]+)\$/g;
+  while ((m = mathInlineRe.exec(text)) !== null) {
+    const start: number = m.index;
+    const end: number = m.index + m[0].length;
+    if (overlaps(matches, start, end)) continue;
+    matches.push({
+      start,
+      end,
+      token: { type: 'math', latex: m[1], display: false } as InlineMathToken,
     });
   }
 

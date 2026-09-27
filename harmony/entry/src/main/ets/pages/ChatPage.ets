@@ -169,6 +169,7 @@ import {
 } from '../platform_impl/MemoryStore.ets';
 import { getMiniAppPlatform, getMiniAppRepositorySync } from '../platform_impl/MiniAppPlatform.ets';
 import type { MiniAppPlatform } from '../platform_impl/MiniAppPlatform.ets';
+import { createImageGenTool, imageGenToolAvailable, EditSourceImage } from '../platform_impl/ImageGenTool.ets';
 
 // D-122:沙盒 sheet 代码块底色(设置面 ROW 惯例同值)
 const ROW: string = SURFACE2;
@@ -233,6 +234,13 @@ const mimeByName = (name: string): string => {
   const mime: string | undefined = MIME_BY_EXT[ext];
   return mime !== undefined ? mime : 'application/octet-stream';
 };
+
+// generate_image edit 源格式白名单(gpt-image 编辑上传口径)
+const isAllowedEditMime = (mime: string): boolean =>
+  mime === 'image/png' || mime === 'image/jpeg' || mime === 'image/webp';
+
+const editMimeExt = (mime: string): string =>
+  mime === 'image/jpeg' ? 'jpg' : (mime === 'image/webp' ? 'webp' : 'png');
 
 // 1:1 原型空态 hero 轮换句(3.2s 淡入淡出)
 const GREETINGS: string[] = [
@@ -543,6 +551,8 @@ struct ChatPage {
 
   // D-072:agent_runtime 快照(transform 调用时读 = Android settingsFlow.value 语义)
   private agentRuntime: AgentRuntimeSnapshot = defaultAgentRuntimeSnapshot();
+  // generate_image 装配门(execute 仍实时解析;aboutToAppear/onPageShow 探测刷新)
+  @State imageGenConfigured: boolean = false;
   // MiniApp:miniapp setting 快照(enabled 门;aboutToAppear 加载,
   //   transform 调用时读 = Android ctx.settings.agentRuntime.miniApp 语义)
   private miniAppSetting: MiniAppSetting = makeMiniAppSetting();
@@ -775,6 +785,10 @@ struct ChatPage {
     this.attachKeyboardListener();
     // D-070 补:从搜索设置页返回后重载偏好,否则继续用旧工具组/旧开关
     this.refreshSearchSettings();
+    // 从任务模型页返回后重探生图槽(工具装配门)
+    imageGenToolAvailable().then((ok: boolean): void => {
+      if (this.pageAlive) this.imageGenConfigured = ok;
+    }).catch((): void => {});
     if (!this.hasShownOnce) {
       this.hasShownOnce = true;
       return;
@@ -993,6 +1007,10 @@ struct ChatPage {
       if (!this.pageAlive) return;
       this.agentRuntime = snap;
     });
+    // generate_image 装配门:生图槽解析到 OpenAI 兼容 image 模型才注册工具
+    imageGenToolAvailable().then((ok: boolean): void => {
+      if (this.pageAlive) this.imageGenConfigured = ok;
+    }).catch((): void => {});
     // MiniApp:miniapp setting 快照(enabled 门;transform 调用时读,
     //   Android ctx.settings.agentRuntime.miniApp 语义)
     loadMiniAppSetting(getChatKvStore()).then((setting: MiniAppSetting): void => {
@@ -2293,6 +2311,76 @@ struct ChatPage {
     promptAction.showToast({ message: `已作为文件附件(${text.length} 字符)`, duration: 1800 });
   }
 
+  // generate_image edit 源:用户最近一条带图消息(最新优先;data: 解码 / file:// 读文件;
+  //   http(s) 不下载 — 源解析边界限本会话附件,Android file:// 同口径)
+  private async resolveEditSourceImage(): Promise<EditSourceImage | null> {
+    const conv: Conversation | null = this.conversation;
+    if (conv === null) return null;
+    const msgs: UIMessage[] = currentMessages(conv);
+    for (let i: number = msgs.length - 1; i >= 0; i--) {
+      if (msgs[i].role !== 'user') continue;
+      for (const p of msgs[i].parts) {
+        if (p.type !== 'image') continue;
+        const url: string = (p as UIMessagePartImage).url;
+        const resolved: EditSourceImage | null = await this.loadEditSourceBytes(url);
+        if (resolved !== null) return resolved;
+      }
+    }
+    return null;
+  }
+
+  private async loadEditSourceBytes(url: string): Promise<EditSourceImage | null> {
+    try {
+      if (url.startsWith('data:')) {
+        const commaIdx: number = url.indexOf(',');
+        if (commaIdx < 0) return null;
+        const mime: string = url.substring(5, commaIdx).split(';')[0];
+        if (!isAllowedEditMime(mime)) return null;
+        const bytes: Uint8Array = new util.Base64Helper().decodeSync(url.substring(commaIdx + 1));
+        return { bytes, mime, name: `source.${editMimeExt(mime)}` };
+      }
+      if (url.startsWith('file://')) {
+        const mime: string = mimeByName(url);
+        if (!isAllowedEditMime(mime)) return null;
+        const bytes: Uint8Array = this.readUriBytes(url);
+        const name: string = url.substring(url.lastIndexOf('/') + 1);
+        return { bytes, mime, name: name.length > 0 ? name : `source.${editMimeExt(mime)}` };
+      }
+      return null;
+    } catch (_e) {
+      return null;
+    }
+  }
+
+  // 生成图「修改」(iOS/Android modify 流程):图入待发附件 + 预填修改指令;
+  //   之后模型调 generate_image(mode=edit) 时由 resolveEditSourceImage 取该图
+  private modifyGeneratedImage(url: string): void {
+    this.loadAttachDataUrl(url).then((dataUrl: string | null): void => {
+      if (!this.pageAlive) return;
+      if (dataUrl === null) {
+        promptAction.showToast({ message: '读取图片失败,无法修改', duration: 1800 });
+        return;
+      }
+      this.pendingImages = [...this.pendingImages, dataUrl];
+      this.inputText = '修改这张图片：';
+    }).catch((): void => {});
+  }
+
+  private async loadAttachDataUrl(url: string): Promise<string | null> {
+    try {
+      if (url.startsWith('data:')) return url;
+      if (url.startsWith('file://')) {
+        const mime: string = mimeByName(url);
+        const bytes: Uint8Array = this.readUriBytes(url);
+        const b64: string = new util.Base64Helper().encodeToStringSync(bytes);
+        return `data:${mime};base64,${b64}`;
+      }
+      return null;
+    } catch (_e) {
+      return null;
+    }
+  }
+
   // 产物架:从当前会话消息 part 派生(图片/文档/小应用),无需独立注册表
   private openArtifactShelf(): void {
     const images: string[] = [];
@@ -3339,6 +3427,14 @@ struct ChatPage {
               ? this.taskPromptsCache.compressPrompt : DEFAULT_COMPRESS_PROMPT,
           },
         }),
+        // generate_image(Android LocalTools.buildImageGenTool:生图槽解析到才装配;
+        //   execute 实时解析随用户换槽;edit 源 = 用户最近一条带图消息)
+        ...(this.imageGenConfigured
+          ? [createImageGenTool({
+            conversationId: conv.id,
+            sourceImageResolver: (): Promise<EditSourceImage | null> => this.resolveEditSourceImage(),
+          })]
+          : []),
         ...createConversationHistoryTools({
           repository: getChatRepository(),
           currentConversationProvider: conversationProvider,
@@ -4714,6 +4810,7 @@ struct ChatPage {
           codeBlockAutoCollapse: this.displaySettings.codeBlockAutoCollapse,
           showLineNumbers: this.displaySettings.showLineNumbers,
           chatFontFamily: this.displaySettings.chatFontFamily,
+          enableLatexRendering: this.displaySettings.enableLatexRendering,
           onOpenDocument: (part: UIMessagePartDocument): void => { this.openDocumentPreview(part); },
           hostHeader: (): void => {},
           hostFooter: (): void => {},
@@ -4739,6 +4836,7 @@ struct ChatPage {
           onCopy: (): void => { this.openCopySheet(row.message); },
           onFavorite: (text: string): void => { this.favoriteText(text); },
           onOpenToolPreview: (part: UIMessagePartTool): void => { this.openToolPreview(part); },
+          onModifyGeneratedImage: (url: string): void => { this.modifyGeneratedImage(url); },
           onTextGrow: (): void => { this.followStreamingUpdate(); },
           onRunMiniApp: (appId: string): void => {
             router.pushUrl({ url: 'pages/MiniAppRunnerPage', params: { appId: appId } });
@@ -4764,6 +4862,7 @@ struct ChatPage {
           codeBlockAutoCollapse: this.displaySettings.codeBlockAutoCollapse,
           showLineNumbers: this.displaySettings.showLineNumbers,
           chatFontFamily: this.displaySettings.chatFontFamily,
+          enableLatexRendering: this.displaySettings.enableLatexRendering,
           onOpenDocument: (part: UIMessagePartDocument): void => { this.openDocumentPreview(part); },
             hostHeader: (): void => {},
             hostFooter: (): void => {},
@@ -4782,6 +4881,7 @@ struct ChatPage {
               this.openSubAgentSheet(rid, tools);
             },
             onOpenToolPreview: (part: UIMessagePartTool): void => { this.openToolPreview(part); },
+          onModifyGeneratedImage: (url: string): void => { this.modifyGeneratedImage(url); },
             onTextGrow: (): void => { this.followStreamingUpdate(); },
             onRunMiniApp: (appId: string): void => {
               router.pushUrl({ url: 'pages/MiniAppRunnerPage', params: { appId: appId } });
@@ -4808,6 +4908,7 @@ struct ChatPage {
           codeBlockAutoCollapse: this.displaySettings.codeBlockAutoCollapse,
           showLineNumbers: this.displaySettings.showLineNumbers,
           chatFontFamily: this.displaySettings.chatFontFamily,
+          enableLatexRendering: this.displaySettings.enableLatexRendering,
           onOpenDocument: (part: UIMessagePartDocument): void => { this.openDocumentPreview(part); },
           hostHeader: (): void => {},
           hostFooter: (): void => {},
@@ -4825,6 +4926,7 @@ struct ChatPage {
             this.openSubAgentSheet(rid, tools);
           },
           onOpenToolPreview: (part: UIMessagePartTool): void => { this.openToolPreview(part); },
+          onModifyGeneratedImage: (url: string): void => { this.modifyGeneratedImage(url); },
           onTextGrow: (): void => { this.followStreamingUpdate(); },
           onRunMiniApp: (appId: string): void => {
             router.pushUrl({ url: 'pages/MiniAppRunnerPage', params: { appId: appId } });

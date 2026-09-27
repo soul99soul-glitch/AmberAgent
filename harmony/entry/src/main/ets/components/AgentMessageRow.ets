@@ -88,6 +88,8 @@ export struct AgentMessageRow {
   @Prop showLineNumbers: boolean = false;
   // 聊天字体族(DisplaySetting.chatFontFamily 三选,传递 MarkdownText)
   @Prop chatFontFamily: string = 'DEFAULT';
+  // LaTeX 渲染开关(DisplaySetting.enableLatexRendering,传递 MarkdownText)
+  @Prop enableLatexRendering: boolean = true;
   // 同一 message id 可同时出现在已提交行与工具续跑预览中；预览使用独立键命名空间。
   @Prop streamKeyTag: string = '';
   onSwitch: (idx: number) => void = (_idx: number): void => {};
@@ -108,6 +110,8 @@ export struct AgentMessageRow {
   onCopy: () => void = (): void => {};
   onFavorite: (text: string) => void = (_t: string): void => {};
   onOpenToolPreview: (part: UIMessagePartTool) => void = (_p: UIMessagePartTool): void => {};
+  // generate_image 修改回调(edit 流程,宿主 ChatPage 注入)
+  onModifyGeneratedImage: (url: string) => void = (_url: string): void => {};
   // F44:文档附件打开(宿主未提供路径时 capabilities.openDocument=false → 纯展示)
   onOpenDocument: (part: UIMessagePartDocument) => void = (_p: UIMessagePartDocument): void => {};
   // P3:可见文本增长回调(逐字 reveal / 终态 drain 推进时触发;冒泡到 ChatPage
@@ -372,6 +376,7 @@ export struct AgentMessageRow {
                   canDeny: this.capabilities.denyTool,
                   canOpenPreview: this.capabilities.openToolPreview,
                   streaming: this.streaming,
+                  onModifyImage: (url: string): void => { this.onModifyGeneratedImage(url); },
                   onApprove: (toolCallId: string): void => {
                     this.onApproveTool(toolCallId, this.locatorFor(step.tool));
                   },
@@ -395,6 +400,7 @@ export struct AgentMessageRow {
                 fontColor: USER_INK,
                 fillWidth: false,
                 chatFontFamily: this.chatFontFamily,
+                enableLatexRendering: this.enableLatexRendering,
                 codeBlockAutoCollapse: this.codeBlockAutoCollapse,
                 showLineNumbers: this.showLineNumbers,
                 streamKey: `${this.streamKeyTag}${this.message.id}#${block.index}`,
@@ -415,6 +421,7 @@ export struct AgentMessageRow {
                 streaming: this.streaming && this.textDeltasLive &&
                   this.isLastTextBlock(this.getBlocks(), bi),
                 chatFontFamily: this.chatFontFamily,
+                enableLatexRendering: this.enableLatexRendering,
                 codeBlockAutoCollapse: this.codeBlockAutoCollapse,
                 showLineNumbers: this.showLineNumbers,
                 streamKey: `${this.streamKeyTag}${this.message.id}#${block.index}`,

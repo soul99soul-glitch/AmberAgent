@@ -16,6 +16,9 @@ import { promptAction } from '@kit.ArkUI';
 export struct GeneratedImageCarousel {
   @Prop imageUrls: string[];
   @Prop showActions: boolean = true;
+  // 修改入口(generate_image edit 流程;仅 generate_image 工具结果开启)
+  @Prop showModify: boolean = false;
+  onModify: (url: string) => void = (_url: string): void => {};
   @State currentIndex: number = 0;
 
   private copyUrl(url: string): void {
@@ -52,6 +55,15 @@ export struct GeneratedImageCarousel {
             Text(`图片 ${this.currentIndex + 1}/${this.imageUrls.length}`)
               .fontSize(META).fontColor(INK3)
               .layoutWeight(1)
+            if (this.showModify) {
+              Text('修改').fontSize(META).fontColor(ACCENT)
+                .padding({ left: 8, right: 8, top: 4, bottom: 4 })
+                .onClick((): void => {
+                  if (this.currentIndex < this.imageUrls.length) {
+                    this.onModify(this.imageUrls[this.currentIndex]);
+                  }
+                })
+            }
             Text('复制链接').fontSize(META).fontColor(ACCENT)
               .padding({ left: 8, right: 8, top: 4, bottom: 4 })
               .onClick((): void => {

@@ -18,6 +18,7 @@ import {
   parseMarkdown,
   tokenizeCode,
   orderedListLabel,
+  composeLatex,
   StreamingDisplayState,
   MarkdownCache,
 } from '@amber/chat-domain';
@@ -25,6 +26,7 @@ import type {
   MarkdownBlock,
   MarkdownBlockTable,
   InlineToken,
+  InlineMathToken,
   HighlightToken,
   MarkdownCacheResult,
 } from '@amber/chat-domain';
@@ -119,6 +121,8 @@ export struct MarkdownText {
   @Prop readingMode: boolean = false;
   // 聊天字体族(DisplaySetting.chatFontFamily):'DEFAULT' | 'SERIF' | 'MONO'
   @Prop chatFontFamily: string = 'DEFAULT';
+  // LaTeX 渲染开关(DisplaySetting.enableLatexRendering);关闭时公式显示源码
+  @Prop enableLatexRendering: boolean = true;
   // 收缩包裹场景(用户气泡 maxWidth 82%)需 'auto',否则 100% 使测宽失效不换行
   @Prop fillWidth: boolean = true;
   // P3:是否活动流式尾(仅最后文本块传 true)→ 启动逐字 reveal
@@ -592,7 +596,9 @@ export struct MarkdownText {
     .fontColor(this.fontColor)
     .lineHeight(this.effLineHeight(this.fontSize))
     .fontFamily(this.bodyFamily())
-    .textAlign(this.readingMode ? TextAlign.JUSTIFY : TextAlign.Start)
+    .textAlign(this.isDisplayMathParagraph(block)
+      ? TextAlign.Center
+      : (this.readingMode ? TextAlign.JUSTIFY : TextAlign.Start))
     .margin({ top: this.readingMode ? 0 : 2, bottom: this.readingMode ? 12 : 4 })
   }
 
@@ -640,6 +646,14 @@ export struct MarkdownText {
   private effLineHeight(size: number): number {
     if (this.lineHeightScale > 0) return Math.round(size * this.lineHeightScale * 10) / 10;
     return lineHeightForSize(size);
+  }
+
+  // 整段仅为一个 $$..$$ 展示公式 → 段落居中
+  private isDisplayMathParagraph(block: MarkdownBlock): boolean {
+    if (block.kind !== 'paragraph') return false;
+    return block.inlines.length === 1
+      && block.inlines[0].type === 'math'
+      && (block.inlines[0] as InlineMathToken).display;
   }
 
   // 列表项嵌套深度(parser depths;每级缩进 12)
@@ -975,6 +989,22 @@ export struct MarkdownText {
         Span(`[图: ${tok.alt}]`)
           .fontSize(size)
           .fontColor(color)
+      }
+    } else if (tok.type === 'math') {
+      if (this.enableLatexRendering) {
+        // LaTeX 子集 → Unicode 合成(math_compose 纯逻辑);展示公式放大 2pt
+        Span(composeLatex(tok.latex))
+          .fontSize(tok.display ? size + 2 : size)
+          .fontColor(color)
+          .fontWeight(weight)
+          .fontStyle(FontStyle.Italic)
+          .fontFamily(FONT_SERIF)
+      } else {
+        // 设置关闭时原样展示 $..$ 源码(不静默吞掉公式内容)
+        Span(tok.display ? `$$${tok.latex}$$` : `$${tok.latex}$`)
+          .fontSize(size)
+          .fontColor(color)
+          .fontFamily(FONT_MONO)
       }
     }
   }

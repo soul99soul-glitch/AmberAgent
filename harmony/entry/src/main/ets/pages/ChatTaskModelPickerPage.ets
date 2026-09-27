@@ -14,7 +14,7 @@ import { loadProviders, hasUsableAuth, DEFAULT_AUTO_MODEL_ID } from '@amber/chat
 import type { ProviderModel } from '@amber/chat-domain';
 import {
   getChatKvStore, saveTaskModelId, loadTaskModelIds, TaskModelIds,
-  TASK_TITLE_MODEL_KEY, TASK_SUGGESTION_MODEL_KEY, TASK_COMPRESS_MODEL_KEY,
+  TASK_TITLE_MODEL_KEY, TASK_SUGGESTION_MODEL_KEY, TASK_COMPRESS_MODEL_KEY, TASK_IMAGE_MODEL_KEY,
 } from '../di/AppContainer.ets';
 import {
   loadAgentRuntimeSnapshot, updateMemoryWorkerModels, AgentRuntimeSnapshot,
@@ -38,6 +38,7 @@ const TASK_TITLES: Record<string, string> = {
   'worker': '记忆提取模型',
   'daydream': 'Daydream 模型',
   'ocr': '视觉识别模型',
+  'image': '生图模型',
 };
 
 @Entry
@@ -61,7 +62,10 @@ struct ChatTaskModelPickerPage {
         for (const p of providers) {
           if (hasUsableAuth(p)) {
             for (const m of p.models) {
-              if (m.type !== 'chat') continue;
+              // image 任务按 type==='image' 过滤(生图模型;Android type=image 槽位语义)
+              if (this.task === 'image') {
+                if (m.type !== 'image') continue;
+              } else if (m.type !== 'chat') continue;
               // D-098:ocr 任务按 preferredInputModality=IMAGE 过滤
               //   (SettingModelPage.kt:533;无 image 输入模态的模型不可做视觉识别)
               if (this.task === 'ocr' && m.inputModalities.indexOf('image') < 0) {
@@ -101,7 +105,8 @@ struct ChatTaskModelPickerPage {
       } else {
         loadTaskModelIds().then((ids: TaskModelIds): void => {
           const uuid: string = this.task === 'title' ? ids.titleModelId
-            : this.task === 'suggestion' ? ids.suggestionModelId : ids.compressModelId;
+            : this.task === 'suggestion' ? ids.suggestionModelId
+            : this.task === 'image' ? ids.imageModelId : ids.compressModelId;
           markSelected(uuid);
         });
       }
@@ -123,7 +128,8 @@ struct ChatTaskModelPickerPage {
       saveOcrModelId(getChatKvStore(), row.modelUuid).then((): void => { done(); });
     } else {
       const key: string = this.task === 'title' ? TASK_TITLE_MODEL_KEY
-        : this.task === 'suggestion' ? TASK_SUGGESTION_MODEL_KEY : TASK_COMPRESS_MODEL_KEY;
+        : this.task === 'suggestion' ? TASK_SUGGESTION_MODEL_KEY
+        : this.task === 'image' ? TASK_IMAGE_MODEL_KEY : TASK_COMPRESS_MODEL_KEY;
       saveTaskModelId(key, row.modelUuid).then((): void => { done(); });
     }
   }

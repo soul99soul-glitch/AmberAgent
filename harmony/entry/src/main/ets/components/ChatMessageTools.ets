@@ -30,6 +30,8 @@ export struct ChatMessageTools {
   @Prop canOpenPreview: boolean = true;
   // F15:结构化终态需要 loading(工具执行中 vs 已完成)
   @Prop streaming: boolean = false;
+  // generate_image 修改回调(edit 流程,回传宿主 ChatPage)
+  onModifyImage: (url: string) => void = (_url: string): void => {};
   @State outputExpanded: boolean = false;
 
   // F15:复用 chat-domain tool_activity 既有结构化判定
@@ -113,9 +115,14 @@ export struct ChatMessageTools {
           .margin({ top: 4, left: 32 })
       }
 
-      // generate_image:图片轮播
+      // generate_image:图片轮播(「修改」= edit 流程,回传宿主)
       if (this.part.toolName === 'generate_image' && this.hasImageOutput()) {
-        GeneratedImageCarousel({ imageUrls: this.getImageUrls(), showActions: true })
+        GeneratedImageCarousel({
+          imageUrls: this.getImageUrls(),
+          showActions: true,
+          showModify: true,
+          onModify: (url: string): void => { this.onModifyImage(url); },
+        })
           .margin({ top: 4, left: 32 })
       }
 

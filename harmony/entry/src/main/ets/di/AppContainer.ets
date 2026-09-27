@@ -1104,11 +1104,14 @@ export const resolveChatProviderChoice = async (
 export const TASK_TITLE_MODEL_KEY: string = 'title_model';
 export const TASK_SUGGESTION_MODEL_KEY: string = 'suggestion_model';
 export const TASK_COMPRESS_MODEL_KEY: string = 'compress_model';
+// 生图模型槽(Android imageGenerationModel 语义;AUTO/空 = 未配置,工具不装配)
+export const TASK_IMAGE_MODEL_KEY: string = 'image_generation_model';
 
 export interface TaskModelIds {
   titleModelId: string;
   suggestionModelId: string;
   compressModelId: string;
+  imageModelId: string;
 }
 
 const readTaskModelId = async (key: string): Promise<string> => {
@@ -1122,6 +1125,7 @@ export const loadTaskModelIds = async (): Promise<TaskModelIds> => ({
   titleModelId: await readTaskModelId(TASK_TITLE_MODEL_KEY),
   suggestionModelId: await readTaskModelId(TASK_SUGGESTION_MODEL_KEY),
   compressModelId: await readTaskModelId(TASK_COMPRESS_MODEL_KEY),
+  imageModelId: await readTaskModelId(TASK_IMAGE_MODEL_KEY),
 });
 
 // D-094:任务模型写路径(SettingModelPage.kt onSelect/onClear)—

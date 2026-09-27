@@ -1195,7 +1195,9 @@ export type {
   InlineCodeToken,
   InlineLinkToken,
   InlineImageToken,
+  InlineMathToken,
 } from './chat/markdown_blocks.ts';
+export { composeLatex } from './chat/math_compose.ts';
 
 // ===== Phase 1:消息流跟随底部(纯逻辑,零 SDK 依赖) =====
 export type { FollowMode } from './chat/timeline_follow.ts';
