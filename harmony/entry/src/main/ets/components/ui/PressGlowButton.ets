@@ -45,9 +45,6 @@ export struct PressGlowButton {
   @State private held: boolean = false;
   @State private glowW: number = 0;
   @State private glowH: number = 0;
-  // 触点(组件坐标系 vp):solid 模式光斑跟随指尖
-  @State private spotX: number = -1;
-  @State private spotY: number = -1;
   private holdTimer: number = -1;
 
   @Builder
@@ -68,16 +65,12 @@ export struct PressGlowButton {
     }
   }
 
-  private setPressed(down: boolean, touchX: number = -1, touchY: number = -1): void {
+  private setPressed(down: boolean): void {
     if (this.holdTimer >= 0) {
       clearTimeout(this.holdTimer);
       this.holdTimer = -1;
     }
     if (down) {
-      if (touchX >= 0 && touchY >= 0) {
-        this.spotX = touchX;
-        this.spotY = touchY;
-      }
       animateTo({ duration: 300, curve: curves.springCurve(0, 1, 200, 22) }, (): void => {
         this.pressScale = 1.06;
       });
@@ -96,33 +89,13 @@ export struct PressGlowButton {
     }
   }
 
-  // 本色光斑资源(accent 五色一一对应;核心 = 提亮 30% 的 accent 本色,不是白)
+  // 本色亮场资源(accent 五色一一对应;整面 = 提亮 30% 的 accent 本色,不是白)
   private spotImage(): Resource {
-    if (this.accentColor === '#5E9C6E') return $r('app.media.radial_spot_5e9c6e');
-    if (this.accentColor === '#4F86D6') return $r('app.media.radial_spot_4f86d6');
-    if (this.accentColor === '#9277C4') return $r('app.media.radial_spot_9277c4');
-    if (this.accentColor === '#C2607A') return $r('app.media.radial_spot_c2607a');
-    return $r('app.media.radial_spot_b8623a');
-  }
-
-  // solid 光斑尺寸:按钮高的 1.6 倍,只覆盖触点周围;
-  // Area 异常值(包内容 Stack 可能上报父约束)一律回退 btnHeight,防满屏
-  private spotSize(): number {
-    const h: number = (this.glowH > 0 && this.glowH <= 200) ? this.glowH
-      : (this.btnHeight > 0 ? this.btnHeight : 42);
-    return Math.min(h * 1.6, 96);
-  }
-
-  private spotPosX(): number {
-    const s: number = this.spotSize();
-    const cx: number = this.spotX >= 0 ? this.spotX : (this.glowW > 0 ? this.glowW / 2 : s);
-    return cx - s / 2;
-  }
-
-  private spotPosY(): number {
-    const s: number = this.spotSize();
-    const cy: number = this.spotY >= 0 ? this.spotY : (this.glowH > 0 ? this.glowH / 2 : s);
-    return cy - s / 2;
+    if (this.accentColor === '#5E9C6E') return $r('app.media.glow_flat_5e9c6e');
+    if (this.accentColor === '#4F86D6') return $r('app.media.glow_flat_4f86d6');
+    if (this.accentColor === '#9277C4') return $r('app.media.glow_flat_9277c4');
+    if (this.accentColor === '#C2607A') return $r('app.media.glow_flat_c2607a');
+    return $r('app.media.glow_flat_b8623a');
   }
 
   build(): void {
@@ -132,13 +105,12 @@ export struct PressGlowButton {
     Stack() {
       if (this.held) {
         if (this.isSolid()) {
-          // solid(新对话):本色提亮 — 同色径向光斑(更亮的 accent 本色,不含白),
-          // 媒体通道 HDR 加成;跟随触点、clip 裁进按钮剪影,灯只在按钮里亮
+          // solid(新对话):整面本色提亮 — 满幅「更亮的 accent 本色」光场贴合
+          // 按钮剪影,媒体通道 HDR 加成;整个按钮变成更亮的颜色,无斑无白
           Image(this.spotImage())
-            .width(this.spotSize())
-            .height(this.spotSize())
-            .position({ x: this.spotPosX(), y: this.spotPosY() })
-            .borderRadius(this.spotSize() / 2)
+            .width(this.glowW > 0 ? this.glowW : 1)
+            .height(this.glowH > 0 ? this.glowH : 1)
+            .borderRadius(this.radius)
             .foregroundFilter(this.heldFilter())
             .hitTestBehavior(HitTestMode.None)
         } else {
@@ -200,9 +172,7 @@ export struct PressGlowButton {
     .scale({ x: this.pressScale, y: this.pressScale })
     .onTouch((event: TouchEvent): void => {
       if (event.type === TouchType.Down) {
-        const tx: number = event.touches.length > 0 ? event.touches[0].x : -1;
-        const ty: number = event.touches.length > 0 ? event.touches[0].y : -1;
-        this.setPressed(true, tx, ty);
+        this.setPressed(true);
       } else if (event.type === TouchType.Up || event.type === TouchType.Cancel) {
         this.setPressed(false);
       }
