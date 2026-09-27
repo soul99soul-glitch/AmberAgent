@@ -15,7 +15,6 @@ import { curves } from '@kit.ArkUI';
 import { uiEffect } from '@kit.ArkGraphics2D';
 import { HOME_GLASS_BOTTOM, HOME_GLASS_EDGE, HOME_GLASS_SHADOW, HOME_GLASS_TOP } from '../../design/tokens.ets';
 
-const HOLD_DELAY_MS: number = 170;
 // 按住 HDR 提亮倍数(hdrBrightnessRatio24+,设备上限=峰值亮度/SDR 白,超出自动截断)
 const HDR_HOLD_RATIO: number = 1.8;
 
@@ -80,7 +79,6 @@ export struct PressGlowButton {
   @State private held: boolean = false;
   @State private glowW: number = 0;
   @State private glowH: number = 0;
-  private holdTimer: number = -1;
 
   @Builder
   emptyContent(): void {
@@ -101,19 +99,14 @@ export struct PressGlowButton {
   }
 
   private setPressed(down: boolean): void {
-    if (this.holdTimer >= 0) {
-      clearTimeout(this.holdTimer);
-      this.holdTimer = -1;
-    }
     if (down) {
       animateTo({ duration: 300, curve: curves.springCurve(0, 1, 200, 22) }, (): void => {
         this.pressScale = 1.06;
       });
-      this.holdTimer = setTimeout((): void => {
-        animateTo({ duration: 180, curve: Curve.EaseOut }, (): void => {
-          this.held = true;
-        });
-      }, HOLD_DELAY_MS);
+      // 指尖落下即亮:短按也有一次完整点亮,按住则持续
+      animateTo({ duration: 180, curve: Curve.EaseOut }, (): void => {
+        this.held = true;
+      });
     } else {
       animateTo({ duration: 320, curve: curves.springCurve(0, 1, 180, 24) }, (): void => {
         this.pressScale = 1;
