@@ -14,14 +14,20 @@
 //   - ModalBottomSheet → 全屏 overlay(同 ChatTaskModelsPage overlay 先例)
 //   - StepperNumberField 直输 → 仅 −/＋ 按钮(clamp 1..50 语义保留)
 //   - 每 provider Description() composable 未移植(P1 既有登记)
+// 视觉:2026-09-27 二级页 iOS 对齐(基准截图 IMG_1991)——居中标题「搜索服务」+
+//   accent 圆添加、PlainSection 组标、r18 发丝描边卡组、CardToggleRow、
+//   hero 状态行(绿点 + 文字)、已配置行序号胶囊 + 行内上移/下移 + 开关;
+//   逻辑(加载/启停/排序/key 编辑/删除)零改动,编辑器 overlay 原样保留。
 import {
   ACCENT, ACCENT_INK, BG, INK, INK3, INK4, LINE, LINE2, OVERLAY, RAISED, SURFACE, SURFACE2,
-  TEXT_STYLES,
+  SUCCESS_FG, TEXT_STYLES, lineHeightForSize, accentSoftBg,
 } from '../design/tokens.ets';
 import {
-  PageTitleBar, SectionHeader, ToggleRow, PaperSeparator, BtnFill, BtnGhost,
+  CenteredTitleBar, PlainSection, CardGroup, CardToggleRow, FooterNote, BtnFill, BtnGhost,
 } from '../components/PageTemplate.ets';
-import { FONT_MONO, FONT_MONO_MEDIUM, FONT_SANS_SEMIBOLD } from '../design/fonts.ets';
+import {
+  FONT_MONO, FONT_MONO_MEDIUM, FONT_SANS_MEDIUM, FONT_SANS_SEMIBOLD,
+} from '../design/fonts.ets';
 import { Icon } from '../components/ui/Icon.ets';
 import { router } from '@kit.ArkUI';
 import {
@@ -420,25 +426,39 @@ struct ChatSearchSettingsPage {
 
   // ===== UI =====
 
+  // iOS hero 状态行(IMG_1991):绿点 + 「N / M 个服务已启用 · 多源召回」
   @Builder
-  heroRow() {
-    ToggleRow({
-      label: 'Agent 网络搜索', desc: '允许聊天调用 search_web 和 scrape_web，使用已启用服务。',
-      checked: this.s.enableWebSearch, isLast: true,
-      onToggle: (): void => { this.setMaster(!this.s.enableWebSearch); },
-    })
-    Column() {
-      Row() {
-        Column().width(7).height(7).borderRadius(4).backgroundColor(this.accentColorStore)
-          .margin({ right: 8 })
-        Text(`${this.enabledCount()} / ${this.s.searchServices.length + 6} 个服务已启用 · 多源召回`)
-          .fontSize(TEXT_STYLES.meta.size).fontWeight(FontWeight.Medium)
-          .lineHeight(TEXT_STYLES.meta.lineHeight).fontFamily(FONT_MONO_MEDIUM).fontColor(INK3)
-      }
-      .width('100%').constraintSize({ minHeight: 48 }).padding({ left: 16, right: 16 })
-      PaperSeparator()
+  heroStatusRow() {
+    Row() {
+      Column()
+        .width(8).height(8).borderRadius(4)
+        .backgroundColor(SUCCESS_FG)
+      Text(`${this.enabledCount()} / ${this.s.searchServices.length + 6} 个服务已启用 · 多源召回`)
+        .fontSize(13)
+        .lineHeight(lineHeightForSize(13))
+        .fontFamily(FONT_SANS_MEDIUM)
+        .fontColor(INK3)
+        .margin({ left: 8 })
+        .maxLines(1)
+        .textOverflow({ overflow: TextOverflow.Ellipsis })
     }
     .width('100%')
+    .alignItems(VerticalAlign.Center)
+    .constraintSize({ minHeight: 44 })
+    .padding({ left: 14, right: 14 })
+  }
+
+  // hero 卡内容:总开关 + 状态行(同卡,iOS 基准)
+  @Builder
+  heroCardContent(): void {
+    CardToggleRow({
+      label: 'Agent 网络搜索',
+      desc: '允许聊天调用 search_web 和 scrape_web，使用已启用服务。',
+      checked: this.s.enableWebSearch,
+      isLast: false,
+      onToggle: (): void => { this.setMaster(!this.s.enableWebSearch); },
+    })
+    this.heroStatusRow()
   }
 
   @Builder
@@ -456,20 +476,49 @@ struct ChatSearchSettingsPage {
 
   @Builder
   builtinRow(title: string, desc: string, field: string, isLast: boolean) {
-    ToggleRow({
+    CardToggleRow({
       label: title, desc: desc, checked: this.builtinValue(field), isLast: isLast,
       onToggle: (): void => { this.setBuiltin(field, !this.builtinValue(field)); },
     })
+  }
+
+  // 内置免费源卡内容:六行开关(iOS 基准顺序)
+  @Builder
+  builtinCardContent(): void {
+    this.builtinRow('Jina Search / Reader',
+      '可无 Key 使用，尽量以 Markdown 搜索和读取网页。', 'jina', false)
+    this.builtinRow('DuckDuckGo Lite',
+      '无需 API Key 的免费公共召回源。', 'duckduckgo', false)
+    this.builtinRow('Bing HTML',
+      '免费公共兜底，遇到验证页会明确报错。', 'bing', false)
+    this.builtinRow('Wikipedia',
+      '实体和背景知识源，适合百科类问题。', 'wikipedia', false)
+    this.builtinRow('Hacker News',
+      '技术、开源和 AI 工具生态讨论源。', 'hackernews', false)
+    this.builtinRow('Google WebView 兜底',
+      '普通搜索弱或深度搜索时，打开可见搜索页兜底。', 'webview', true)
+  }
+
+  // 已配置卡内容(iOS:拖柄 + 序号胶囊 + 名称 + id + 开关;鸿蒙无拖拽 → 行内上移/下移)
+  @Builder
+  configuredCardContent(): void {
+    ForEach(this.s.searchServices, (svc: SearchServiceOptions, index: number) => {
+      this.serviceRow(svc, index)
+    }, (svc: SearchServiceOptions): string => svc.id)
   }
 
   @Builder
   serviceRow(svc: SearchServiceOptions, index: number) {
     Column() {
       Row() {
+        // 序号胶囊(iOS:软底 accent 圆)
         Text(`${index + 1}`)
           .fontSize(TEXT_STYLES.meta.size).fontWeight(FontWeight.Medium)
-          .lineHeight(TEXT_STYLES.meta.lineHeight).fontFamily(FONT_MONO_MEDIUM).fontColor(INK3)
-          .width(24).textAlign(TextAlign.Center)
+          .lineHeight(TEXT_STYLES.meta.lineHeight).fontFamily(FONT_MONO_MEDIUM)
+          .fontColor(this.accentColorStore)
+          .width(24).height(24).textAlign(TextAlign.Center)
+          .borderRadius(12)
+          .backgroundColor(accentSoftBg(this.accentColorStore))
         Column() {
           Text(SEARCH_SERVICE_TYPES[svc.type])
             .fontSize(TEXT_STYLES.body.size).fontWeight(600)
@@ -479,7 +528,7 @@ struct ChatSearchSettingsPage {
             .lineHeight(TEXT_STYLES.meta.lineHeight).fontFamily(FONT_MONO).fontColor(INK3)
             .margin({ top: 3 }).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
         }
-        .alignItems(HorizontalAlign.Start).layoutWeight(1).margin({ left: 8 })
+        .alignItems(HorizontalAlign.Start).layoutWeight(1).margin({ left: 10 })
         Text('上移').fontSize(TEXT_STYLES.meta.size).fontWeight(FontWeight.Medium)
           .lineHeight(TEXT_STYLES.meta.lineHeight).fontFamily(FONT_MONO_MEDIUM)
           .fontColor(index > 0 ? this.accentColorStore : INK4).padding({ left: 6, right: 6 })
@@ -495,13 +544,23 @@ struct ChatSearchSettingsPage {
           (): void => {
             this.toggleService(svc, this.s.searchEnabledServiceIds.indexOf(svc.id) < 0);
           })
-        Icon({ name: 'chevron_right', iconSize: 16, color: INK4 }).margin({ left: 8 })
+        Icon({ name: 'chevron_right', iconSize: 16, color: INK4 }).margin({ left: 4 })
       }
-      .width('100%').constraintSize({ minHeight: 64 })
-      .padding({ left: 16, right: 16, top: 12, bottom: 12 })
+      .width('100%')
+      .alignItems(VerticalAlign.Center)
+      .constraintSize({ minHeight: 56 })
+      .padding({ left: 14, right: 10, top: 8, bottom: 8 })
       .onClick((): void => { this.openEdit(svc, index); })
       if (index < this.s.searchServices.length - 1) {
-        PaperSeparator()
+        // 分隔线内缩对齐文字起点(行 padding 14 + 胶囊 24 + 间距 10)
+        Row() {
+          Row()
+            .width('100%')
+            .height(1)
+            .backgroundColor(LINE)
+        }
+        .width('100%')
+        .padding({ left: 48, right: 14 })
       }
     }
     .width('100%')
@@ -509,66 +568,76 @@ struct ChatSearchSettingsPage {
 
   @Builder
   commonOptionsRow() {
-    Column() {
-      Row() {
-        Column() {
-          Text('结果数量').fontSize(TEXT_STYLES.body.size).fontWeight(600)
-            .lineHeight(TEXT_STYLES.body.lineHeight).fontFamily(FONT_SANS_SEMIBOLD).fontColor(INK)
-          Text('每次搜索最多返回的结果条数').fontSize(TEXT_STYLES.secondary.size)
-            .lineHeight(TEXT_STYLES.secondary.lineHeight).fontFamily(TEXT_STYLES.secondary.family)
-            .fontColor(INK3).margin({ top: 4 }).maxLines(2)
-            .textOverflow({ overflow: TextOverflow.Ellipsis })
-        }
-        .alignItems(HorizontalAlign.Start).layoutWeight(1)
-        Row() {
-          Text('−').fontSize(TEXT_STYLES.meta.size).fontWeight(FontWeight.Medium)
-            .lineHeight(TEXT_STYLES.meta.lineHeight).fontFamily(FONT_MONO_MEDIUM)
-            .fontColor(this.s.searchCommonOptions.resultSize > 1 ? INK : INK4)
-            .width(32).height(32).textAlign(TextAlign.Center)
-            .onClick((): void => {
-              if (this.s.searchCommonOptions.resultSize > 1) {
-                this.setResultSize(this.s.searchCommonOptions.resultSize - 1);
-              }
-            })
-          Text(`${this.s.searchCommonOptions.resultSize}`)
-            .fontSize(TEXT_STYLES.meta.size).fontWeight(FontWeight.Medium)
-            .lineHeight(TEXT_STYLES.meta.lineHeight).fontFamily(FONT_MONO_MEDIUM)
-            .fontColor(INK).width(36).textAlign(TextAlign.Center)
-          Text('＋').fontSize(TEXT_STYLES.meta.size).fontWeight(FontWeight.Medium)
-            .lineHeight(TEXT_STYLES.meta.lineHeight).fontFamily(FONT_MONO_MEDIUM)
-            .fontColor(this.s.searchCommonOptions.resultSize < 50 ? INK : INK4)
-            .width(32).height(32).textAlign(TextAlign.Center)
-            .onClick((): void => {
-              if (this.s.searchCommonOptions.resultSize < 50) {
-                this.setResultSize(this.s.searchCommonOptions.resultSize + 1);
-              }
-            })
-        }
-        .backgroundColor(SURFACE2).borderRadius(8).border({ width: 1, color: LINE })
+    Row() {
+      Column() {
+        Text('结果数量').fontSize(TEXT_STYLES.body.size).fontWeight(600)
+          .lineHeight(TEXT_STYLES.body.lineHeight).fontFamily(FONT_SANS_SEMIBOLD).fontColor(INK)
+        Text('每次搜索最多返回的结果条数').fontSize(TEXT_STYLES.secondary.size)
+          .lineHeight(TEXT_STYLES.secondary.lineHeight).fontFamily(TEXT_STYLES.secondary.family)
+          .fontColor(INK3).margin({ top: 4 }).maxLines(2)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
       }
-      .width('100%').constraintSize({ minHeight: 64 })
-      .padding({ left: 16, right: 16, top: 12, bottom: 12 })
-      PaperSeparator()
+      .alignItems(HorizontalAlign.Start).layoutWeight(1)
+      Row() {
+        Text('−').fontSize(TEXT_STYLES.meta.size).fontWeight(FontWeight.Medium)
+          .lineHeight(TEXT_STYLES.meta.lineHeight).fontFamily(FONT_MONO_MEDIUM)
+          .fontColor(this.s.searchCommonOptions.resultSize > 1 ? INK : INK4)
+          .width(32).height(32).textAlign(TextAlign.Center)
+          .onClick((): void => {
+            if (this.s.searchCommonOptions.resultSize > 1) {
+              this.setResultSize(this.s.searchCommonOptions.resultSize - 1);
+            }
+          })
+        Text(`${this.s.searchCommonOptions.resultSize}`)
+          .fontSize(TEXT_STYLES.meta.size).fontWeight(FontWeight.Medium)
+          .lineHeight(TEXT_STYLES.meta.lineHeight).fontFamily(FONT_MONO_MEDIUM)
+          .fontColor(INK).width(36).textAlign(TextAlign.Center)
+        Text('＋').fontSize(TEXT_STYLES.meta.size).fontWeight(FontWeight.Medium)
+          .lineHeight(TEXT_STYLES.meta.lineHeight).fontFamily(FONT_MONO_MEDIUM)
+          .fontColor(this.s.searchCommonOptions.resultSize < 50 ? INK : INK4)
+          .width(32).height(32).textAlign(TextAlign.Center)
+          .onClick((): void => {
+            if (this.s.searchCommonOptions.resultSize < 50) {
+              this.setResultSize(this.s.searchCommonOptions.resultSize + 1);
+            }
+          })
+      }
+      .backgroundColor(SURFACE2).borderRadius(8).border({ width: 1, color: LINE })
     }
     .width('100%')
+    .alignItems(VerticalAlign.Center)
+    .constraintSize({ minHeight: 56 })
+    .padding({ left: 14, right: 14, top: 10, bottom: 10 })
   }
 
   @Builder
   recommendRow(title: string, detail: string, isLast: boolean) {
-    Row() {
-      Text(title).fontSize(TEXT_STYLES.body.size).fontWeight(600)
-        .lineHeight(TEXT_STYLES.body.lineHeight).fontFamily(FONT_SANS_SEMIBOLD)
-        .fontColor(this.accentColorStore)
-      Text(detail).fontSize(TEXT_STYLES.meta.size).fontWeight(FontWeight.Medium)
-        .lineHeight(TEXT_STYLES.meta.lineHeight).fontFamily(FONT_MONO_MEDIUM)
-        .fontColor(INK3).layoutWeight(1).textAlign(TextAlign.End)
-        .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+    Column() {
+      Row() {
+        Text(title).fontSize(TEXT_STYLES.body.size).fontWeight(600)
+          .lineHeight(TEXT_STYLES.body.lineHeight).fontFamily(FONT_SANS_SEMIBOLD)
+          .fontColor(this.accentColorStore)
+        Text(detail).fontSize(TEXT_STYLES.meta.size).fontWeight(FontWeight.Medium)
+          .lineHeight(TEXT_STYLES.meta.lineHeight).fontFamily(FONT_MONO_MEDIUM)
+          .fontColor(INK3).layoutWeight(1).textAlign(TextAlign.End)
+          .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+      }
+      .width('100%')
+      .alignItems(VerticalAlign.Center)
+      .constraintSize({ minHeight: 52 })
+      .padding({ left: 14, right: 14, top: 10, bottom: 10 })
+      if (!isLast) {
+        Row() {
+          Row()
+            .width('100%')
+            .height(1)
+            .backgroundColor(LINE)
+        }
+        .width('100%')
+        .padding({ left: 14, right: 14 })
+      }
     }
-    .width('100%').constraintSize({ minHeight: 56 })
-    .padding({ left: 16, right: 16, top: 10, bottom: 10 })
-    if (!isLast) {
-      PaperSeparator()
-    }
+    .width('100%')
   }
 
   @Builder
@@ -758,45 +827,62 @@ struct ChatSearchSettingsPage {
   build() {
     Stack() {
       Column() {
-        PageTitleBar({ title: '搜索设置', actionText: '＋', onAction: (): void => { this.openAdd(); } })
+        CenteredTitleBar({
+          title: '搜索服务',
+          actionIcon: 'plus',
+          onAction: (): void => { this.openAdd(); },
+        })
 
         if (!this.loaded) {
           Text('加载中…').fontSize(13).fontColor(INK3).margin({ top: 32 })
         } else {
           Scroll() {
             Column() {
-              this.heroRow()
+              // ── AGENT 网络搜索(IMG_1991:总开关 + 状态行同卡)──
+              PlainSection({ label: 'Agent 网络搜索' })
+              Column() {
+                CardGroup({ radius: 18, stroke: true, content: (): void => { this.heroCardContent(); } })
+              }
+              .width('100%').padding({ left: 16, right: 16 })
 
-              SectionHeader({ label: '内置免费源' })
-              this.builtinRow('Jina Search / Reader',
-                '可无 Key 使用，尽量以 Markdown 搜索和读取网页。', 'jina', false)
-              this.builtinRow('DuckDuckGo Lite',
-                '无需 API Key 的免费公共召回源。', 'duckduckgo', false)
-              this.builtinRow('Bing HTML',
-                '免费公共兜底，遇到验证页会明确报错。', 'bing', false)
-              this.builtinRow('Wikipedia',
-                '实体和背景知识源，适合百科类问题。', 'wikipedia', false)
-              this.builtinRow('Hacker News',
-                '技术、开源和 AI 工具生态讨论源。', 'hackernews', false)
-              this.builtinRow('Google WebView 兜底',
-                '普通搜索弱或深度搜索时，打开可见搜索页兜底。', 'webview', true)
+              // ── 内置免费源(六行开关)──
+              PlainSection({ label: '内置免费源' })
+              Column() {
+                CardGroup({ radius: 18, stroke: true, content: (): void => { this.builtinCardContent(); } })
+              }
+              .width('100%').padding({ left: 16, right: 16 })
 
-              SectionHeader({ label: '已配置' })
-              ForEach(this.s.searchServices, (svc: SearchServiceOptions, index: number) => {
-                this.serviceRow(svc, index)
-              }, (svc: SearchServiceOptions): string => svc.id)
+              // ── 已配置(序号胶囊 + 行内上移/下移 + 开关;鸿蒙无拖拽,保留既有排序交互)──
+              PlainSection({ label: '已配置' })
+              Column() {
+                CardGroup({ radius: 18, stroke: true, content: (): void => { this.configuredCardContent(); } })
+              }
+              .width('100%').padding({ left: 16, right: 16 })
+              FooterNote({ text: '使用行内「上移 / 下移」调整召回优先级，点按行编辑服务。' })
 
-              SectionHeader({ label: '通用选项' })
-              this.commonOptionsRow()
+              // ── 通用选项(鸿蒙保留,iOS 无此组,按规范排布)──
+              PlainSection({ label: '通用选项' })
+              Column() {
+                CardGroup({ radius: 18, stroke: true, content: (): void => { this.commonOptionsRow(); } })
+              }
+              .width('100%').padding({ left: 16, right: 16 })
 
-              SectionHeader({ label: '推荐组合' })
-              this.recommendRow('零成本', 'Jina + DuckDuckGo + Bing', false)
-              this.recommendRow('Google 结果', 'Serper / SerpAPI', false)
-              this.recommendRow('高质量多源', 'Tavily 或 Brave', true)
+              // ── 推荐组合(鸿蒙保留,iOS 无此组,按规范排布)──
+              PlainSection({ label: '推荐组合' })
+              Column() {
+                CardGroup({ radius: 18, stroke: true, content: (): void => {
+                  this.recommendRow('零成本', 'Jina + DuckDuckGo + Bing', false)
+                  this.recommendRow('Google 结果', 'Serper / SerpAPI', false)
+                  this.recommendRow('高质量多源', 'Tavily 或 Brave', true)
+                } })
+              }
+              .width('100%').padding({ left: 16, right: 16 })
+
+              Column().height(24)
             }
-            .width('100%').padding({ bottom: 24 })
+            .width('100%')
           }
-        .align(Alignment.TopStart)
+          .align(Alignment.TopStart)
           .width('100%').layoutWeight(1)
         }
       }

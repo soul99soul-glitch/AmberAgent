@@ -5,9 +5,15 @@
 //   - 站点 = 授权边界:wm_open 仅允许命中已注册站点(域/子域匹配,工具层校验)
 //   - Agent 亦可经 wm_site_add/wm_site_remove 提议增删(需逐次审批)
 //   - wm_eval 另有独立开关,且每次调用仍强制人工确认(工具层 mandatoryApproval)
+// 2026-09-27 二级页 iOS 对齐(基准 IMG_1992「站点」):仅换视觉骨架
+// (CenteredTitleBar/PlainSection/CardGroup r18+描边/CardToggleRow/FooterNote),逻辑零改动。
 
-import { BG, INK, INK2, INK3, ERROR, ACCENT, BODY, BODY2, META, LABEL, SURFACE, SURFACE2, LINE, RADIUS } from '../design/tokens.ets';
-import { PageTitleBar, SectionHeader, PaperSeparator, PageSpacer, BtnFill } from '../components/PageTemplate.ets';
+import { BG, INK, INK3, ERROR, ACCENT, LINE, SURFACE2, accentSoftBg, lineHeightForSize } from '../design/tokens.ets';
+import { FONT_SANS_MEDIUM } from '../design/fonts.ets';
+import {
+  CenteredTitleBar, PlainSection, CardGroup, CardToggleRow, FooterNote, BtnFill, PageSpacer,
+} from '../components/PageTemplate.ets';
+import { Icon } from '../components/ui/Icon.ets';
 import { common } from '@kit.AbilityKit';
 import { getChatKvStore, getAppContainer } from '../di/AppContainer.ets';
 import { loadWebMountSites, saveWebMountSites, makeUserSite, hostOf, isSeedSite, restoreMissingSeedSites, SEED_SITES } from '../platform_impl/WebMountSites.ets';
@@ -28,7 +34,7 @@ interface FeishuCodePaste {
 @Entry
 @Component
 struct SettingExperimentalWebMountPage {
-  @StorageProp('statusBarHeight') statusBarHeight: number = 44;
+  @StorageProp('accentColor') accentColorStore: string = ACCENT;
   @State loaded: boolean = false;
   @State globalEnabled: boolean = false;
   @State evalEnabled: boolean = false;
@@ -226,6 +232,13 @@ struct SettingExperimentalWebMountPage {
     });
   }
 
+  private cancelAdd(): void {
+    this.addOpen = false;
+    this.addName = '';
+    this.addUrl = '';
+    this.addError = '';
+  }
+
   private removeSite(id: string): void {
     const next: UserSiteEntry[] = this.sites.filter((s: UserSiteEntry): boolean => s.id !== id);
     saveWebMountSites(getChatKvStore(), next).then((): void => {
@@ -239,212 +252,361 @@ struct SettingExperimentalWebMountPage {
       (s: UserSiteEntry): boolean => !this.sites.some((c: UserSiteEntry): boolean => c.id === s.id)).length;
   }
 
+  // ── 卡片内容(@Builder:组件构造必须在 builder 上下文,裸 lambda 直接 new 组件会炸进程)──
+
+  @Builder
+  SwitchesCard(): void {
+    Column() {
+      CardToggleRow({
+        label: '启用 WebMount',
+        desc: '开启后 Agent 可在已授权站点上阅读与操作网页',
+        checked: this.globalEnabled,
+        onToggle: (): void => {
+          const v: boolean = !this.globalEnabled;
+          this.globalEnabled = v;
+          this.setToggle('webmount_global_enabled', v);
+          // 显式关闭立即终止当前会话(复位页面、阻止后续操作);
+          //   下次合法建 tools 重新按 OR(global||助手勾选)求值,非总禁用
+          if (!v) setWebMountGlobalEnabled(false);
+        },
+      })
+      CardToggleRow({
+        label: '允许任意脚本(wm_eval)',
+        desc: '在已授权站点页面内执行任意 JavaScript;每次调用仍需逐次确认',
+        checked: this.evalEnabled,
+        isLast: true,
+        onToggle: (): void => {
+          const v: boolean = !this.evalEnabled;
+          this.evalEnabled = v;
+          this.setToggle('webmount_eval_enabled', v);
+        },
+      })
+    }
+    .width('100%')
+  }
+
+  @Builder
+  FeishuCard(): void {
+    Column() {
+      Row() {
+        Text('登录状态')
+          .fontSize(16)
+          .fontWeight(FontWeight.Medium)
+          .lineHeight(lineHeightForSize(16))
+          .fontFamily(FONT_SANS_MEDIUM)
+          .fontColor(INK)
+        Blank()
+        Text(this.feishuStatus)
+          .fontSize(12)
+          .lineHeight(lineHeightForSize(12))
+          .fontFamily(FONT_SANS_MEDIUM)
+          .fontColor(INK3)
+          .maxLines(2)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+          .textAlign(TextAlign.End)
+          .margin({ left: 12 })
+      }
+      .width('100%')
+      .alignItems(VerticalAlign.Center)
+      .constraintSize({ minHeight: 52 })
+      .padding({ left: 14, right: 14, top: 10, bottom: 10 })
+
+      Row() {
+        Row().width('100%').height(1).backgroundColor(LINE)
+      }
+      .width('100%')
+      .padding({ left: 14, right: 14 })
+
+      TextInput({ text: this.feishuAppId, placeholder: 'App ID' })
+        .height(44).fontSize(15).fontColor(INK).placeholderColor(INK3)
+        .backgroundColor(SURFACE2).borderRadius(8)
+        .padding({ left: 12, right: 12 })
+        .margin({ left: 14, right: 14, top: 12, bottom: 8 })
+        .onChange((v: string): void => { this.feishuAppId = v; })
+      TextInput({ text: this.feishuAppSecret, placeholder: 'App Secret' })
+        .type(InputType.Password)
+        .height(44).fontSize(15).fontColor(INK).placeholderColor(INK3)
+        .backgroundColor(SURFACE2).borderRadius(8)
+        .padding({ left: 12, right: 12 })
+        .margin({ left: 14, right: 14, bottom: 8 })
+        .onChange((v: string): void => { this.feishuAppSecret = v; })
+      if (this.feishuAuthUrl.length > 0) {
+        Text(this.feishuAuthUrl)
+          .fontSize(11).fontColor(INK3)
+          .maxLines(3).textOverflow({ overflow: TextOverflow.Ellipsis })
+          .width('100%')
+          .padding({ left: 14, right: 14, bottom: 8 })
+      }
+      TextInput({ text: this.feishuAuthCode, placeholder: '粘贴授权 code 或回调 URL' })
+        .height(44).fontSize(15).fontColor(INK).placeholderColor(INK3)
+        .backgroundColor(SURFACE2).borderRadius(8)
+        .padding({ left: 12, right: 12 })
+        .margin({ left: 14, right: 14, bottom: 12 })
+        .onChange((v: string): void => { this.feishuAuthCode = v; })
+      Row({ space: 8 }) {
+        BtnFill({
+          label: '生成授权链接',
+          onTap: (): void => { this.startFeishuAuth(); },
+        })
+        BtnFill({
+          label: '兑换 Token',
+          onTap: (): void => { this.exchangeFeishu(); },
+        })
+        if (this.feishuToken !== null) {
+          BtnFill({
+            label: '退出',
+            onTap: (): void => { this.logoutFeishu(); },
+          })
+        }
+      }
+      .width('100%')
+      .padding({ left: 14, right: 14, bottom: 14 })
+      .justifyContent(FlexAlign.Start)
+    }
+    .width('100%')
+  }
+
+  @Builder
+  SiteRow(s: UserSiteEntry, isLast: boolean): void {
+    Column() {
+      Row() {
+        Row() {
+          Icon({ name: 'globe', iconSize: 15, color: this.accentColorStore })
+        }
+        .width(28).height(28)
+        .borderRadius(7)
+        .backgroundColor(accentSoftBg(this.accentColorStore))
+        .justifyContent(FlexAlign.Center)
+        .alignItems(VerticalAlign.Center)
+        .margin({ right: 12 })
+
+        Column() {
+          Row() {
+            Text(s.name.length > 0 ? s.name : '未命名站点')
+              .fontSize(16)
+              .fontWeight(FontWeight.Medium)
+              .lineHeight(lineHeightForSize(16))
+              .fontFamily(FONT_SANS_MEDIUM)
+              .fontColor(INK)
+              .maxLines(1)
+              .textOverflow({ overflow: TextOverflow.Ellipsis })
+            if (isSeedSite(s.id)) {
+              Text('内置')
+                .fontSize(10)
+                .fontWeight(FontWeight.Medium)
+                .fontFamily(FONT_SANS_MEDIUM)
+                .fontColor(INK3)
+                .padding({ left: 6, right: 6, top: 1, bottom: 1 })
+                .borderRadius(4)
+                .border({ width: 0.5, color: LINE })
+                .margin({ left: 8 })
+            }
+          }
+          .alignItems(VerticalAlign.Center)
+
+          Text(hostOf(s.url).length > 0 ? hostOf(s.url) : s.url)
+            .fontSize(12)
+            .lineHeight(lineHeightForSize(12))
+            .fontFamily(FONT_SANS_MEDIUM)
+            .fontColor(INK3)
+            .maxLines(2)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+            .margin({ top: 2 })
+        }
+        .alignItems(HorizontalAlign.Start)
+        .layoutWeight(1)
+
+        Row() {
+          Icon({ name: 'trash', iconSize: 18, color: ERROR })
+        }
+        .constraintSize({ minWidth: 44, minHeight: 44 })
+        .justifyContent(FlexAlign.Center)
+        .alignItems(VerticalAlign.Center)
+        .margin({ left: 8 })
+        .accessibilityText('移除站点')
+        .onClick((): void => { this.removeSite(s.id); })
+      }
+      .width('100%')
+      .alignItems(VerticalAlign.Center)
+      .constraintSize({ minHeight: 52 })
+      .padding({ left: 14, right: 14, top: 8, bottom: 8 })
+
+      if (!isLast) {
+        Row() {
+          Row().width('100%').height(1).backgroundColor(LINE)
+        }
+        .width('100%')
+        // 分隔线起点对齐标题文字(行 padding 14 + 图标座 28 + 间距 12)
+        .padding({ left: 54, right: 14 })
+      }
+    }
+    .width('100%')
+  }
+
+  @Builder
+  RestoreRow(): void {
+    Row() {
+      Row() {
+        Icon({ name: 'retry', iconSize: 15, color: this.accentColorStore })
+      }
+      .width(28).height(28)
+      .borderRadius(7)
+      .backgroundColor(accentSoftBg(this.accentColorStore))
+      .justifyContent(FlexAlign.Center)
+      .alignItems(VerticalAlign.Center)
+      .margin({ right: 12 })
+
+      Text(`恢复内置站点(${this.missingSeeds()})`)
+        .fontSize(16)
+        .fontWeight(FontWeight.Medium)
+        .lineHeight(lineHeightForSize(16))
+        .fontFamily(FONT_SANS_MEDIUM)
+        .fontColor(this.accentColorStore)
+        .layoutWeight(1)
+    }
+    .width('100%')
+    .alignItems(VerticalAlign.Center)
+    .constraintSize({ minHeight: 52 })
+    .padding({ left: 14, right: 14, top: 8, bottom: 8 })
+    .onClick((): void => {
+      restoreMissingSeedSites(getChatKvStore()).then((): void => { this.refresh(); });
+    })
+  }
+
+  @Builder
+  SitesCard(): void {
+    Column() {
+      if (this.sites.length === 0) {
+        // 空态:iOS 白卡内两行文案(标题 + 说明)
+        Column() {
+          Text('还没有授权任何网站')
+            .fontSize(16)
+            .fontWeight(FontWeight.Medium)
+            .lineHeight(lineHeightForSize(16))
+            .fontFamily(FONT_SANS_MEDIUM)
+            .fontColor(INK)
+          Text('Agent 只能打开列表中的网站;点右上角 + 添加一个站点(如 https://news.ycombinator.com)')
+            .fontSize(12)
+            .lineHeight(lineHeightForSize(12))
+            .fontFamily(FONT_SANS_MEDIUM)
+            .fontColor(INK3)
+            .margin({ top: 2 })
+        }
+        .alignItems(HorizontalAlign.Start)
+        .width('100%')
+        .padding({ left: 14, right: 14, top: 14, bottom: 14 })
+      } else {
+        ForEach(this.sites, (s: UserSiteEntry, i: number): void => {
+          this.SiteRow(s, i >= this.sites.length - 1);
+        }, (s: UserSiteEntry): string => s.id)
+      }
+      if (this.missingSeeds() > 0) {
+        if (this.sites.length > 0) {
+          Row() {
+            Row().width('100%').height(1).backgroundColor(LINE)
+          }
+          .width('100%')
+          .padding({ left: 54, right: 14 })
+        }
+        this.RestoreRow()
+      }
+    }
+    .width('100%')
+  }
+
+  @Builder
+  AddFormCard(): void {
+    Column() {
+      Text('站点名称')
+        .fontSize(12)
+        .lineHeight(lineHeightForSize(12))
+        .fontFamily(FONT_SANS_MEDIUM)
+        .fontColor(INK3)
+        .width('100%')
+        .padding({ left: 14, right: 14, top: 14 })
+      TextInput({ text: this.addName, placeholder: '如 Hacker News' })
+        .fontSize(15).height(44).fontColor(INK).placeholderColor(INK3)
+        .backgroundColor(SURFACE2).borderRadius(8)
+        .margin({ left: 14, right: 14, top: 6 })
+        .onChange((v: string): void => { this.addName = v; })
+      Text('网站地址')
+        .fontSize(12)
+        .lineHeight(lineHeightForSize(12))
+        .fontFamily(FONT_SANS_MEDIUM)
+        .fontColor(INK3)
+        .width('100%')
+        .padding({ left: 14, right: 14, top: 10 })
+      TextInput({ text: this.addUrl, placeholder: 'https://news.ycombinator.com' })
+        .fontSize(15).height(44).fontColor(INK).placeholderColor(INK3)
+        .backgroundColor(SURFACE2).borderRadius(8)
+        .margin({ left: 14, right: 14, top: 6 })
+        .onChange((v: string): void => { this.addUrl = v; })
+      if (this.addError.length > 0) {
+        Text(this.addError)
+          .fontSize(12)
+          .lineHeight(lineHeightForSize(12))
+          .fontFamily(FONT_SANS_MEDIUM)
+          .fontColor(ERROR)
+          .width('100%')
+          .padding({ left: 14, right: 14, top: 8 })
+      }
+      Row() {
+        Text('取消')
+          .fontSize(15)
+          .lineHeight(lineHeightForSize(15))
+          .fontFamily(FONT_SANS_MEDIUM)
+          .fontColor(INK3)
+          .constraintSize({ minWidth: 44, minHeight: 44 })
+          .onClick((): void => { this.cancelAdd(); })
+        Blank()
+        BtnFill({ label: '添加', onTap: (): void => { this.confirmAdd(); } })
+      }
+      .width('100%')
+      .alignItems(VerticalAlign.Center)
+      .padding({ left: 14, right: 14, top: 12, bottom: 14 })
+    }
+    .width('100%')
+  }
+
   build(): void {
     Column() {
-      PageTitleBar({ title: 'WebMount 站点' })
+      CenteredTitleBar({
+        title: '站点',
+        subtitle: this.loaded ? `${this.sites.length} 个站点` : '',
+        actionIcon: 'plus',
+        onAction: (): void => {
+          this.addOpen = true;
+          this.addError = '';
+        },
+      })
 
       if (!this.loaded) {
-        Text('加载中…').fontSize(META).fontColor(INK3).padding({ top: 40 })
+        Text('加载中…').fontSize(12).fontColor(INK3).padding({ top: 40 })
       } else {
         Scroll() {
           Column() {
-            SectionHeader({ label: '开关' })
+            PlainSection({ label: '开关' })
+            CardGroup({ radius: 18, stroke: true, content: (): void => { this.SwitchesCard(); } })
+              .margin({ left: 16, right: 16 })
+            FooterNote({
+              text: '关闭「启用 WebMount」会立即结束后台会话页面,但已单独勾选 WebMount 的助手仍可继续使用',
+            })
 
-            Row() {
-              Column() {
-                Text('启用 WebMount').fontSize(BODY).fontColor(INK)
-                Text('开启后 Agent 可在已授权站点上阅读与操作网页;'
-                  + '关闭会立即结束后台会话页面,但已单独勾选 WebMount 的助手仍可继续使用')
-                  .fontSize(LABEL).fontColor(INK3).margin({ top: 3 })
-              }
-              .alignItems(HorizontalAlign.Start).layoutWeight(1).margin({ right: 12 })
-              Toggle({ type: ToggleType.Switch, isOn: this.globalEnabled })
-                .selectedColor(ACCENT)
-                .onChange((v: boolean): void => {
-                  this.globalEnabled = v;
-                  this.setToggle('webmount_global_enabled', v);
-                  // 显式关闭立即终止当前会话(复位页面、阻止后续操作);
-                  //   下次合法建 tools 重新按 OR(global||助手勾选)求值,非总禁用
-                  if (!v) setWebMountGlobalEnabled(false);
-                })
+            PlainSection({ label: '飞书账号（OAuth）' })
+            CardGroup({ radius: 18, stroke: true, content: (): void => { this.FeishuCard(); } })
+              .margin({ left: 16, right: 16 })
+
+            PlainSection({ label: '站点' })
+            CardGroup({ radius: 18, stroke: true, content: (): void => { this.SitesCard(); } })
+              .margin({ left: 16, right: 16 })
+            if (this.addOpen) {
+              CardGroup({ radius: 18, stroke: true, content: (): void => { this.AddFormCard(); } })
+                .margin({ left: 16, right: 16, top: 12 })
             }
-            .width('100%').padding({ left: 16, right: 16, top: 14, bottom: 14 })
-            .backgroundColor(SURFACE)
-
-            PaperSeparator()
-
-            Row() {
-              Column() {
-                Text('允许执行任意脚本(wm_eval)').fontSize(BODY).fontColor(INK)
-                Text('在已授权站点页面内执行任意 JavaScript;每次调用仍需逐次确认')
-                  .fontSize(LABEL).fontColor(INK3).margin({ top: 3 })
-              }
-              .alignItems(HorizontalAlign.Start).layoutWeight(1).margin({ right: 12 })
-              Toggle({ type: ToggleType.Switch, isOn: this.evalEnabled })
-                .selectedColor(ACCENT)
-                .onChange((v: boolean): void => {
-                  this.evalEnabled = v;
-                  this.setToggle('webmount_eval_enabled', v);
-                })
-            }
-            .width('100%').padding({ left: 16, right: 16, top: 14, bottom: 14 })
-            .backgroundColor(SURFACE)
-
-            PaperSeparator()
-
-            SectionHeader({ label: '飞书账号（OAuth）' })
-            Text(this.feishuStatus).fontSize(LABEL).fontColor(INK3)
-              .width('100%').padding({ left: 16, right: 16, top: 8, bottom: 4 })
-            TextInput({ text: this.feishuAppId, placeholder: 'App ID' })
-              .height(44).fontSize(BODY).fontColor(INK).placeholderColor(INK3)
-              .backgroundColor(SURFACE2).borderRadius(RADIUS)
-              .padding({ left: 12, right: 12 })
-              .margin({ left: 16, right: 16, top: 8, bottom: 6 })
-              .onChange((v: string): void => { this.feishuAppId = v; })
-            TextInput({ text: this.feishuAppSecret, placeholder: 'App Secret' })
-              .type(InputType.Password)
-              .height(44).fontSize(BODY).fontColor(INK).placeholderColor(INK3)
-              .backgroundColor(SURFACE2).borderRadius(RADIUS)
-              .padding({ left: 12, right: 12 })
-              .margin({ left: 16, right: 16, bottom: 6 })
-              .onChange((v: string): void => { this.feishuAppSecret = v; })
-            if (this.feishuAuthUrl.length > 0) {
-              Text(this.feishuAuthUrl).fontSize(11).fontColor(INK3)
-                .maxLines(3).textOverflow({ overflow: TextOverflow.Ellipsis })
-                .width('100%').padding({ left: 16, right: 16, bottom: 6 })
-            }
-            TextInput({ text: this.feishuAuthCode, placeholder: '粘贴授权 code 或回调 URL' })
-              .height(44).fontSize(BODY).fontColor(INK).placeholderColor(INK3)
-              .backgroundColor(SURFACE2).borderRadius(RADIUS)
-              .padding({ left: 12, right: 12 })
-              .margin({ left: 16, right: 16, bottom: 8 })
-              .onChange((v: string): void => { this.feishuAuthCode = v; })
-            Row() {
-              BtnFill({
-                label: '生成授权链接',
-                onTap: (): void => { this.startFeishuAuth(); },
-              })
-              BtnFill({
-                label: '兑换 Token',
-                onTap: (): void => { this.exchangeFeishu(); },
-              })
-              if (this.feishuToken !== null) {
-                BtnFill({
-                  label: '退出',
-                  onTap: (): void => { this.logoutFeishu(); },
-                })
-              }
-            }
-            .width('100%').padding({ left: 16, right: 16, bottom: 12 })
-            .justifyContent(FlexAlign.Start)
-
-            PaperSeparator()
-
-            SectionHeader({ label: `已授权站点 · ${this.sites.length}` })
-
-            Column() {
-              if (this.sites.length === 0) {
-                Column() {
-                  Text('还没有授权任何网站').fontSize(BODY2).fontColor(INK3).margin({ top: 2 })
-                  Text('Agent 只能打开下方列表中的网站;先添加一个站点(如 https://news.ycombinator.com)')
-                    .fontSize(LABEL).fontColor(INK3).margin({ top: 6 })
-                    .textAlign(TextAlign.Center)
-                }
-                .alignItems(HorizontalAlign.Center)
-                .width('100%').padding({ left: 16, right: 16, top: 20, bottom: 20 })
-              }
-              ForEach(this.sites, (s: UserSiteEntry, i: number): void => {
-                Column() {
-                  Row() {
-                    Column() {
-                      Row() {
-                        Text(s.name.length > 0 ? s.name : '未命名站点')
-                          .fontSize(BODY).fontColor(INK)
-                          .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
-                        if (isSeedSite(s.id)) {
-                          Text('内置')
-                            .fontSize(LABEL).fontColor(INK3)
-                            .padding({ left: 6, right: 6, top: 1, bottom: 1 })
-                            .borderRadius(4)
-                            .border({ width: 0.5, color: LINE })
-                            .margin({ left: 8 })
-                        }
-                      }
-                      Text(hostOf(s.url).length > 0 ? hostOf(s.url) : s.url)
-                        .fontSize(META).fontColor(INK3).margin({ top: 3 })
-                        .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
-                    }
-                    .alignItems(HorizontalAlign.Start).layoutWeight(1).margin({ right: 10 })
-                    Text('移除').fontSize(META).fontColor(ERROR)
-                      .padding({ left: 10, right: 4, top: 10, bottom: 10 })
-                      .onClick((): void => { this.removeSite(s.id); })
-                  }
-                  .width('100%').alignItems(VerticalAlign.Center)
-                  .padding({ left: 16, right: 16, top: 12, bottom: 12 })
-                  if (i < this.sites.length - 1) {
-                    PaperSeparator()
-                  }
-                }.width('100%')
-              }, (s: UserSiteEntry): string => s.id)
-
-              // 添加站点(展开式表单)
-              if (!this.addOpen) {
-                Row() {
-                  if (this.missingSeeds() > 0) {
-                    Text('恢复内置站点').fontSize(BODY2).fontColor(INK3)
-                      .padding({ left: 14, right: 14, top: 12, bottom: 12 })
-                      .onClick((): void => {
-                        restoreMissingSeedSites(getChatKvStore()).then((): void => { this.refresh(); });
-                      })
-                  }
-                  Text('+ 添加网站').fontSize(BODY2).fontColor(ACCENT)
-                    .padding({ left: 16, right: 16, top: 12, bottom: 12 })
-                    .onClick((): void => {
-                      this.addOpen = true;
-                      this.addError = '';
-                    })
-                }.width('100%').justifyContent(FlexAlign.Center)
-              } else {
-                Column() {
-                  Text('站点名称').fontSize(LABEL).fontColor(INK3).margin({ bottom: 4 })
-                  TextInput({ text: this.addName, placeholder: '如 Hacker News' })
-                    .fontSize(BODY).height(44)
-                    .backgroundColor(SURFACE2).borderRadius(8)
-                    .onChange((v: string): void => { this.addName = v; })
-                  Text('网站地址').fontSize(LABEL).fontColor(INK3).margin({ top: 10, bottom: 4 })
-                  TextInput({ text: this.addUrl, placeholder: 'https://news.ycombinator.com' })
-                    .fontSize(BODY).height(44)
-                    .backgroundColor(SURFACE2).borderRadius(8)
-                    .onChange((v: string): void => { this.addUrl = v; })
-                  if (this.addError.length > 0) {
-                    Text(this.addError).fontSize(LABEL).fontColor(ERROR).margin({ top: 6 })
-                  }
-                  Row() {
-                    Text('取消').fontSize(BODY2).fontColor(INK3)
-                      .padding({ left: 14, right: 14, top: 10, bottom: 10 })
-                      .onClick((): void => {
-                        this.addOpen = false;
-                        this.addName = '';
-                        this.addUrl = '';
-                        this.addError = '';
-                      })
-                    Blank()
-                    BtnFill({ label: '添加', onTap: (): void => { this.confirmAdd(); } })
-                  }
-                  .width('100%').margin({ top: 10 })
-                }
-                .width('100%')
-                .padding({ left: 16, right: 16, top: 14, bottom: 16 })
-              }
-            }
-            .width('100%').backgroundColor(SURFACE).borderRadius(RADIUS)
-            .border({ width: 1, color: LINE })
-            .margin({ left: 16, right: 16, bottom: 8 })
-
-            Text('授权按域名匹配(含子域)。Agent 请求添加新站点时会在聊天中向你确认;'
-              + '点击类操作(wm_click)与站点增删均需逐次批准。')
-              .fontSize(LABEL).fontColor(INK3).width('100%')
-              .padding({ left: 16, right: 16, top: 4, bottom: 10 })
+            FooterNote({
+              text: '授权按域名匹配(含子域)。Agent 请求添加新站点时会在聊天中向你确认;'
+                + '点击类操作(wm_click)与站点增删均需逐次批准。',
+            })
 
             PageSpacer()
           }
