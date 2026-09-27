@@ -1,10 +1,14 @@
 // SettingAboutPage — 关于页(真实版本值,卡容器对齐设置体系)
 // Android 基准: SettingAboutPage.kt — 版本/构建/开源说明。
 //   版本号经 bundleManager 取真值(不写死);开源仓库无外链目标 → 纯说明行(无箭头)。
+// 2026-09-27 二级页 iOS 对齐:仅换视觉骨架(CenteredTitleBar/PlainSection/
+//   CardGroup r18+描边/CardRow/FooterNote),版本信息与展示逻辑零改动。
 import { bundleManager } from '@kit.AbilityKit';
-import { INK, INK3, BG, BODY, TITLE, LABEL, TEXT_STYLES, lineHeightForSize } from '../design/tokens.ets';
-import { FONT_MONO, FONT_SANS_MEDIUM, FONT_SANS_BOLD } from '../design/fonts.ets';
-import { PageTitleBar, SectionHeader, NavRow, PageSpacer } from '../components/PageTemplate.ets';
+import { INK, INK3, BG, BODY, TITLE, TEXT_STYLES } from '../design/tokens.ets';
+import { FONT_SANS_MEDIUM, FONT_SANS_BOLD } from '../design/fonts.ets';
+import {
+  CenteredTitleBar, PlainSection, CardGroup, CardRow, FooterNote, PageSpacer,
+} from '../components/PageTemplate.ets';
 
 @Entry
 @Component
@@ -22,7 +26,7 @@ struct SettingAboutPage {
 
   build(): void {
     Column() {
-      PageTitleBar({ title: '关于' })
+      CenteredTitleBar({ title: '关于' })
 
       Scroll() {
         Column() {
@@ -35,19 +39,14 @@ struct SettingAboutPage {
               .fontFamily(FONT_SANS_MEDIUM).fontColor(INK3).margin({ top: 4 })
           }
           .width('100%')
-          .padding({ top: 40, bottom: 24 })
+          .padding({ top: 24, bottom: 0 })
           .alignItems(HorizontalAlign.Center)
 
-          SectionHeader({ label: '应用信息' })
-          NavRow({ label: '版本', valueText: this.versionLabel, showChevron: false })
-          NavRow({ label: '构建', valueText: 'HarmonyOS NEXT / ArkTS', showChevron: false })
-          NavRow({ label: '开源社区项目', desc: '不收集任何用户数据', isLast: true, showChevron: false })
+          PlainSection({ label: '应用信息' })
+          CardGroup({ radius: 18, stroke: true, content: (): void => { this.InfoCard(); } })
+            .margin({ left: 16, right: 16 })
 
-          Text('Powered by multiple AI providers.')
-            .fontSize(LABEL).fontWeight(FontWeight.Normal).lineHeight(TEXT_STYLES.meta.lineHeight)
-            .fontFamily(FONT_MONO).fontColor(INK3)
-            .margin({ top: 24 })
-            .textAlign(TextAlign.Center).width('100%')
+          FooterNote({ text: 'Powered by multiple AI providers.' })
 
           PageSpacer()
         }
@@ -57,5 +56,17 @@ struct SettingAboutPage {
       .layoutWeight(1)
     }
     .width('100%').height('100%').backgroundColor(BG)
+  }
+
+  // ── 卡片内容(@Builder:组件构造必须在 builder 上下文,铁律 4b)──
+
+  @Builder
+  InfoCard(): void {
+    Column() {
+      CardRow({ label: '版本', valueText: this.versionLabel, showChevron: false })
+      CardRow({ label: '构建', valueText: 'HarmonyOS NEXT / ArkTS', showChevron: false })
+      CardRow({ label: '开源社区项目', desc: '不收集任何用户数据', isLast: true, showChevron: false })
+    }
+    .width('100%')
   }
 }

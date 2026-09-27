@@ -3,6 +3,10 @@
 // 原页误置为 DeepRead 配置(与 DeepReadArticlePage 内联设置重复,且热榜源
 //   配置已归位 SettingDeepReadPage),本页归位 Android 历史语义:
 //   全量会话按 updateAt 降序 + 日期分组,点击进对话;多选后导出文件。
+//
+// 2026-09-27 二级页 iOS 对齐(无截图,沿用规范):仅换视觉骨架
+//   CenteredTitleBar / PlainSection(日期组标)/ CardGroup r18+发丝描边 +
+//   CardRow(标题 + mono 时间)/ sans 空态;逻辑(列表/多选/导出/跳转)零改动。
 
 import { router } from '@kit.ArkUI';
 import { promptAction } from '@kit.ArkUI';
@@ -11,11 +15,12 @@ import type { ConversationSummary, Conversation, UIMessage } from '@amber/chat-d
 import { currentMessages, toText } from '@amber/chat-domain';
 import { getChatRepository } from '../di/AppContainer.ets';
 import {
-  BG, INK, INK3, INK4, SURFACE, LINE, ACCENT,
-  BODY, BODY2, META, TEXT_STYLES,
+  BG, INK3, ACCENT, LINE, SURFACE, BODY2, lineHeightForSize,
 } from '../design/tokens.ets';
-import { FONT_MONO_MEDIUM } from '../design/fonts.ets';
-import { PageTitleBar, PageSpacer, SectionHeader, NavRow } from '../components/PageTemplate.ets';
+import { FONT_SANS_MEDIUM, FONT_SANS_SEMIBOLD } from '../design/fonts.ets';
+import {
+  CenteredTitleBar, PlainSection, CardGroup, CardRow, PageSpacer,
+} from '../components/PageTemplate.ets';
 
 interface HistoryGroup {
   date: string;
@@ -176,9 +181,35 @@ struct HistoryPage {
     });
   }
 
+  // ── 卡片内容(@Builder:组件构造必须在 builder 上下文,铁律 4b)──
+
+  // 单日分组卡:组内会话行(CardRow,多选时标题带 ✓ 前缀)
+  @Builder
+  groupCard(g: HistoryGroup): void {
+    Column() {
+      ForEach(g.items, (s: ConversationSummary, index: number): void => {
+        CardRow({
+          label: `${this.selecting && this.selectedIds.indexOf(s.id) >= 0 ? '✓ ' : ''}${s.title.length > 0 ? s.title : '未命名对话'}`,
+          valueText: this.timeOf(s),
+          isLast: index === g.items.length - 1,
+          onRowClick: (): void => {
+            if (this.selecting) {
+              this.toggleSelect(s.id);
+              return;
+            }
+            const params: Record<string, string> = {};
+            params['conversationId'] = s.id;
+            router.pushUrl({ url: 'pages/ChatPage', params: params });
+          },
+        })
+      }, (s: ConversationSummary): string => s.id)
+    }
+    .width('100%')
+  }
+
   build(): void {
     Column() {
-      PageTitleBar({
+      CenteredTitleBar({
         title: '历史记录',
         actionText: this.selecting ? '取消' : '选择',
         onAction: (): void => { this.toggleSelecting(); },
@@ -186,9 +217,13 @@ struct HistoryPage {
 
       if (this.loaded && this.groups.length === 0) {
         Column() {
-          Text('// 暂无历史')
-            .fontSize(META).fontWeight(500).lineHeight(TEXT_STYLES.meta.lineHeight)
-            .fontFamily(FONT_MONO_MEDIUM).fontColor(INK3)
+          Text('暂无历史')
+            .fontSize(15).fontWeight(600).lineHeight(lineHeightForSize(15))
+            .fontFamily(FONT_SANS_SEMIBOLD).fontColor(INK3)
+          Text('对话记录会按日期归档在这里')
+            .fontSize(13).lineHeight(lineHeightForSize(13))
+            .fontFamily(FONT_SANS_MEDIUM).fontColor(INK3)
+            .margin({ top: 8 })
         }
         .width('100%').padding({ top: 80 }).alignItems(HorizontalAlign.Center)
       } else {
@@ -196,23 +231,11 @@ struct HistoryPage {
           ForEach(this.groups, (g: HistoryGroup): void => {
             ListItem() {
               Column() {
-                SectionHeader({ label: g.date })
-                ForEach(g.items, (s: ConversationSummary, index: number): void => {
-                  NavRow({
-                    label: `${this.selecting && this.selectedIds.indexOf(s.id) >= 0 ? '✓ ' : ''}${s.title.length > 0 ? s.title : '未命名对话'}`,
-                    valueText: this.timeOf(s),
-                    isLast: index === g.items.length - 1,
-                    onRowClick: (): void => {
-                      if (this.selecting) {
-                        this.toggleSelect(s.id);
-                        return;
-                      }
-                      const params: Record<string, string> = {};
-                      params['conversationId'] = s.id;
-                      router.pushUrl({ url: 'pages/ChatPage', params: params });
-                    },
-                  })
-                }, (s: ConversationSummary): string => s.id)
+                PlainSection({ label: g.date })
+                Column() {
+                  CardGroup({ radius: 18, stroke: true, content: (): void => { this.groupCard(g); } })
+                }
+                .width('100%').padding({ left: 16, right: 16 })
               }
               .width('100%')
             }

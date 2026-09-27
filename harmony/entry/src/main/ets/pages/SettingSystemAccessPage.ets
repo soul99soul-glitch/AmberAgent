@@ -3,22 +3,25 @@
 //   - 通讯录/日历:checkAccessToken 查真状态,未授权点击发起 requestPermissionsFromUser
 //   - 通知:isNotificationEnabled 查真状态,未授权点击发起 requestEnableNotification
 //   - 文件:鸿蒙文档访问走系统 picker,免权限 → 显示「无需授权」
+//
+// 2026-09-27 二级页 iOS 对齐(无截图,沿用规范):仅换视觉骨架
+//   CenteredTitleBar / PlainSection / CardGroup r18+发丝描边 / 权限行
+//   (accent 图标座 + StatusChip 软底状态药丸)+ FooterNote;逻辑零改动。
 import { router } from '@kit.ArkUI';
 import { abilityAccessCtrl, bundleManager, common, Permissions } from '@kit.AbilityKit';
 import { notificationManager } from '@kit.NotificationKit';
-import { FONT_MONO_MEDIUM, FONT_SANS, FONT_SANS_SEMIBOLD } from '../design/fonts.ets';
+import { ACCENT, BG, INK, INK3, LINE, accentSoftBg, lineHeightForSize } from '../design/tokens.ets';
+import { FONT_SANS_MEDIUM } from '../design/fonts.ets';
 import {
-  INK, INK3, INK4, SURFACE2, BG, SIGNAL, ERROR,
-  BODY, META, LABEL, TEXT_STYLES,
-} from '../design/tokens.ets';
-import { PageTitleBar, SectionHeader, IconSeat, PaperSeparator, PageSpacer } from '../components/PageTemplate.ets';
+  CenteredTitleBar, PlainSection, CardGroup, StatusChip, FooterNote, PageSpacer,
+} from '../components/PageTemplate.ets';
 import { Icon } from '../components/ui/Icon.ets';
 
 interface PermissionItem {
   key: string;
   name: string;
   desc: string;
-  status: string; // 'granted' | 'denied' | 'exempt'
+  status: string; // 'granted' | 'denied' | 'acl' | 'exempt'
 }
 
 function makePerm(key: string, name: string, desc: string, status: string): PermissionItem {
@@ -53,6 +56,7 @@ const checkPermGranted = async (perm: Permissions): Promise<boolean> => {
 @Entry
 @Component
 struct SettingSystemAccessPage {
+  @StorageProp('accentColor') accentColorStore: string = ACCENT;
   @State items: PermissionItem[] = [];
   @State loaded: boolean = false;
 
@@ -84,10 +88,18 @@ struct SettingSystemAccessPage {
     return '无需授权';
   }
 
-  private badgeColor(status: string): string {
-    if (status === 'granted') return SIGNAL;
-    if (status === 'denied') return ERROR;
-    return INK3;
+  // StatusChip 五档软底药丸:granted 绿 / denied 红 / 其余灰
+  private chipTone(status: string): string {
+    if (status === 'granted') return 'success';
+    if (status === 'denied') return 'error';
+    return 'muted';
+  }
+
+  private iconFor(key: string): string {
+    if (key === 'notifications') return 'bell';
+    if (key === 'calendar') return 'clock';
+    if (key === 'files') return 'folder';
+    return 'person';
   }
 
   // 未授权项点击 → 发起对应申请;申请回调后重查真状态
@@ -111,45 +123,63 @@ struct SettingSystemAccessPage {
     router.back();
   }
 
-  @Builder permissionRow(p: PermissionItem, isLast: boolean): void {
+  // ── 卡片内容(@Builder:组件构造必须在 builder 上下文,铁律 4b)──
+
+  @Builder
+  permCard(): void {
+    Column() {
+      ForEach(this.items, (p: PermissionItem, idx: number): void => {
+        this.permRow(p, idx === this.items.length - 1);
+      }, (p: PermissionItem): string => p.key)
+    }
+    .width('100%')
+  }
+
+  // 权限行:28 accent 图标座 + 名称/描述/申请提示 + StatusChip 状态药丸
+  @Builder
+  permRow(p: PermissionItem, isLast: boolean): void {
     Column() {
       Row() {
-        IconSeat({ iconName: p.key === 'notifications' ? 'bell' : p.key === 'calendar' ? 'clock' : p.key === 'files' ? 'folder' : 'person' })
-          .margin({ right: 12 })
+        Row() {
+          Icon({ name: this.iconFor(p.key), iconSize: 15, color: this.accentColorStore })
+        }
+        .width(28).height(28)
+        .borderRadius(7)
+        .backgroundColor(accentSoftBg(this.accentColorStore))
+        .justifyContent(FlexAlign.Center)
+        .alignItems(VerticalAlign.Center)
         Column() {
           Text(p.name)
-            .fontSize(BODY).fontWeight(600).lineHeight(TEXT_STYLES.body.lineHeight)
-            .fontFamily(FONT_SANS_SEMIBOLD).fontColor(INK)
+            .fontSize(16).fontWeight(FontWeight.Medium).lineHeight(lineHeightForSize(16))
+            .fontFamily(FONT_SANS_MEDIUM).fontColor(INK)
+            .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
           Text(p.desc)
-            .fontSize(TEXT_STYLES.secondary.size).fontWeight(TEXT_STYLES.secondary.weight)
-            .lineHeight(TEXT_STYLES.secondary.lineHeight).fontFamily(TEXT_STYLES.secondary.family)
-            .fontColor(p.status === 'denied' ? INK3 : INK4).margin({ top: 4 })
+            .fontSize(12).lineHeight(lineHeightForSize(12))
+            .fontFamily(FONT_SANS_MEDIUM).fontColor(INK3).margin({ top: 2 })
+            .maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis })
           if (p.status === 'denied') {
             Text('点击申请权限')
-              .fontSize(TEXT_STYLES.tinyTag.size).fontWeight(TEXT_STYLES.tinyTag.weight)
-              .lineHeight(TEXT_STYLES.tinyTag.lineHeight).fontFamily(FONT_MONO_MEDIUM)
-              .fontColor(INK3).margin({ top: 3 })
+              .fontSize(12).lineHeight(lineHeightForSize(12))
+              .fontFamily(FONT_SANS_MEDIUM).fontColor(INK3).margin({ top: 3 })
           }
         }
         .alignItems(HorizontalAlign.Start)
         .layoutWeight(1)
-        Row() {
-          Text('●').fontSize(8).fontWeight(FontWeight.Normal).lineHeight(TEXT_STYLES.tinyTag.lineHeight)
-            .fontFamily(FONT_MONO_MEDIUM).fontColor(this.badgeColor(p.status)).margin({ right: 4 })
-          Text(this.badgeText(p.status))
-            .fontSize(META).fontWeight(FontWeight.Medium).lineHeight(TEXT_STYLES.meta.lineHeight)
-            .fontFamily(FONT_MONO_MEDIUM).fontColor(this.badgeColor(p.status))
-        }
-        .padding({ left: 10, right: 10, top: 4, bottom: 4 })
-        .backgroundColor(SURFACE2).borderRadius(50)
+        .margin({ left: 12 })
+        StatusChip({ text: this.badgeText(p.status), tone: this.chipTone(p.status) })
       }
       .width('100%')
       .alignItems(VerticalAlign.Center)
-      .constraintSize({ minHeight: 64 })
-      .padding({ left: 16, right: 16, top: 12, bottom: 12 })
+      .constraintSize({ minHeight: 52 })
+      .padding({ left: 14, right: 14, top: 10, bottom: 10 })
       .onClick((): void => { this.requestPermission(p); })
       if (!isLast) {
-        PaperSeparator()
+        // 分隔线内缩对齐文字起点(行 padding 14 + 图标座 28 + 间距 12 = 54)
+        Row() {
+          Row().width('100%').height(1).backgroundColor(LINE)
+        }
+        .width('100%')
+        .padding({ left: 54, right: 14 })
       }
     }
     .width('100%')
@@ -157,31 +187,27 @@ struct SettingSystemAccessPage {
 
   build(): void {
     Column() {
-      PageTitleBar({ title: '系统访问', actionText: '完成', onAction: (): void => { this.done(); } })
+      CenteredTitleBar({
+        title: '系统访问',
+        actionText: '完成',
+        onAction: (): void => { this.done(); },
+      })
 
       if (!this.loaded) {
         Text('加载中…')
-          .fontSize(TEXT_STYLES.body.size)
-          .fontWeight(TEXT_STYLES.body.weight)
-          .lineHeight(TEXT_STYLES.body.lineHeight)
-          .fontFamily(TEXT_STYLES.body.family)
-          .fontColor(INK3)
-          .padding({ top: 40 })
+          .fontSize(13).lineHeight(lineHeightForSize(13))
+          .fontFamily(FONT_SANS_MEDIUM).fontColor(INK3)
+          .margin({ top: 32 })
       } else {
         Scroll() {
           Column() {
-            SectionHeader({ label: '权限状态' })
+            PlainSection({ label: '权限状态' })
+            Column() {
+              CardGroup({ radius: 18, stroke: true, content: (): void => { this.permCard(); } })
+            }
+            .width('100%').padding({ left: 16, right: 16 })
 
-            // 说明条
-            Text('点击未授权项可发起申请;文件访问由系统选择器提供,无需授权。')
-              .fontSize(LABEL).fontWeight(FontWeight.Normal).lineHeight(TEXT_STYLES.meta.lineHeight)
-              .fontFamily(FONT_SANS).fontColor(INK3)
-              .width('100%').padding({ left: 16, right: 16, bottom: 8 })
-
-            ForEach(this.items, (p: PermissionItem, idx: number): void => {
-              this.permissionRow(p, idx === this.items.length - 1);
-            }, (p: PermissionItem): string => p.key)
-
+            FooterNote({ text: '点击未授权项可发起申请;文件访问由系统选择器提供,无需授权。' })
             PageSpacer()
           }
           .width('100%')

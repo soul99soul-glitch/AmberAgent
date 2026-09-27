@@ -1,15 +1,19 @@
 // SettingBackupPage — 本地加密备份导出 / 恢复
 // 域层 sync_snapshot + entry SyncCryptoPort；无云上传（下一圈）。
+// 2026-09-27 二级页 iOS 对齐:仅换视觉骨架(CenteredTitleBar/PlainSection/
+//   CardGroup r18+描边/CardRow/CardToggleRow/FooterNote),导出/导入/加密/恢复逻辑零改动。
 
 import { promptAction } from '@kit.ArkUI';
 import { fileIo, picker } from '@kit.CoreFileKit';
 import { common } from '@kit.AbilityKit';
 import { util } from '@kit.ArkTS';
 import {
-  BG, INK, INK2, INK3, INK4, LINE, SURFACE, SURFACE2, ACCENT, ERROR,
-  BODY, LABEL, META, TITLE,
+  BG, INK, INK2, INK3, INK4, LINE, SURFACE2, ACCENT,
+  BODY, LABEL, META, GUTTER,
 } from '../design/tokens.ets';
-import { PageTitleBar, SectionHeader, NavRow, PageSpacer, ToggleRow } from '../components/PageTemplate.ets';
+import {
+  CenteredTitleBar, PlainSection, CardGroup, CardRow, CardToggleRow, FooterNote, PageSpacer,
+} from '../components/PageTemplate.ets';
 import { getChatRepository, getChatKvStore, getAppContainer } from '../di/AppContainer.ets';
 import { createEntrySyncCryptoPort } from '../platform_impl/SyncCryptoPort.ets';
 import {
@@ -322,106 +326,25 @@ struct SettingBackupPage {
 
   build(): void {
     Column() {
-      PageTitleBar({ title: '备份与恢复' })
+      CenteredTitleBar({ title: '备份与恢复' })
       Scroll() {
         Column() {
-          SectionHeader({ label: '导出' })
-          ToggleRow({
-            label: '使用密码加密',
-            checked: this.usePassphrase,
-            isLast: false,
-            onToggle: (): void => { this.usePassphrase = !this.usePassphrase; },
-          })
-          if (this.usePassphrase) {
-            TextInput({ text: this.passphrase, placeholder: '备份密码（至少 4 位）' })
-              .type(InputType.Password)
-              .height(44).fontSize(BODY).fontColor(INK).placeholderColor(INK4)
-              .backgroundColor(SURFACE2).borderRadius(10)
-              .padding({ left: 14, right: 14 })
-              .margin({ left: 16, right: 16, bottom: 12 })
-              .onChange((v: string): void => { this.passphrase = v; })
-          }
-          NavRow({
-            label: '导出全部会话',
-            desc: '打包为加密 .abin 文件',
-            iconName: 'folder',
-            onRowClick: (): void => { this.doExport(); },
-          })
+          PlainSection({ label: '导出' })
+          CardGroup({ radius: 18, stroke: true, content: (): void => { this.ExportCard(); } })
+            .margin({ left: GUTTER, right: GUTTER })
 
-          SectionHeader({ label: '恢复' })
-          NavRow({
-            label: '选择备份文件',
-            desc: '预览 manifest 后再恢复',
-            iconName: 'folder',
-            onRowClick: (): void => { this.doPickRestore(); },
-          })
-          if (this.preview !== null) {
-            Column() {
-              Text(this.statusMsg).fontSize(META).fontColor(INK3).lineHeight(18)
-              Text(`设备：${this.preview.manifest.deviceLabel.length > 0 ? this.preview.manifest.deviceLabel : this.preview.manifest.deviceId}`)
-                .fontSize(LABEL).fontColor(INK2).margin({ top: 6 })
-              Text(`创建：${new Date(this.preview.manifest.createdAt).toLocaleString()}`)
-                .fontSize(LABEL).fontColor(INK3).margin({ top: 4 })
-              Text('恢复').fontSize(BODY).fontColor(ACCENT)
-                .height(44).padding({ left: 12, right: 12 })
-                .margin({ top: 8 })
-                .onClick((): void => { this.doRestore(); })
-            }
-            .width('100%').alignItems(HorizontalAlign.Start)
-            .padding({ left: 16, right: 16, top: 8, bottom: 12 })
-            .backgroundColor(SURFACE).borderRadius(10)
-            .margin({ left: 16, right: 16, top: 8 })
-          }
+          PlainSection({ label: '恢复' })
+          CardGroup({ radius: 18, stroke: true, content: (): void => { this.RestoreCard(); } })
+            .margin({ left: GUTTER, right: GUTTER })
 
-          ToggleRow({
-            label: '恢复时覆盖设置',
-            desc: '助手与提供商将被备份内容替换',
-            checked: this.restoreSettings,
-            isLast: true,
-            onToggle: (): void => { this.restoreSettings = !this.restoreSettings; },
-          })
-
-          SectionHeader({ label: 'WebDAV 上传' })
-          TextInput({ text: this.davUrl, placeholder: 'https://dav.example.com/dav' })
-            .height(44).fontSize(BODY).fontColor(INK).placeholderColor(INK4)
-            .backgroundColor(SURFACE2).borderRadius(10)
-            .padding({ left: 14, right: 14 })
-            .margin({ left: 16, right: 16, bottom: 8 })
-            .onChange((v: string): void => { this.davUrl = v; })
-          TextInput({ text: this.davUser, placeholder: '用户名' })
-            .height(44).fontSize(BODY).fontColor(INK).placeholderColor(INK4)
-            .backgroundColor(SURFACE2).borderRadius(10)
-            .padding({ left: 14, right: 14 })
-            .margin({ left: 16, right: 16, bottom: 8 })
-            .onChange((v: string): void => { this.davUser = v; })
-          TextInput({ text: this.davPass, placeholder: '密码 / App Token' })
-            .type(InputType.Password)
-            .height(44).fontSize(BODY).fontColor(INK).placeholderColor(INK4)
-            .backgroundColor(SURFACE2).borderRadius(10)
-            .padding({ left: 14, right: 14 })
-            .margin({ left: 16, right: 16, bottom: 8 })
-            .onChange((v: string): void => { this.davPass = v; })
-          TextInput({ text: this.davPath, placeholder: '远程目录' })
-            .height(44).fontSize(BODY).fontColor(INK).placeholderColor(INK4)
-            .backgroundColor(SURFACE2).borderRadius(10)
-            .padding({ left: 14, right: 14 })
-            .margin({ left: 16, right: 16, bottom: 8 })
-            .onChange((v: string): void => { this.davPath = v; })
-          NavRow({
-            label: '打包并上传到 WebDAV',
-            desc: '与本地导出同一 .abin，PUT 到远程目录',
-            iconName: 'folder',
-            onRowClick: (): void => { this.doUploadWebDav(); },
-          })
+          PlainSection({ label: 'WebDAV 上传' })
+          CardGroup({ radius: 18, stroke: true, content: (): void => { this.WebDavCard(); } })
+            .margin({ left: GUTTER, right: GUTTER })
 
           if (this.statusMsg.length > 0 && this.preview === null) {
-            Text(this.statusMsg).fontSize(META).fontColor(INK3).lineHeight(18)
-              .width('100%').padding({ left: 20, right: 20, top: 12 })
+            FooterNote({ text: this.statusMsg })
           }
-
-          Text('说明：当前仅本地导出/恢复；云同步与跨端 KDF 互通待后续。')
-            .fontSize(11).fontColor(INK4).lineHeight(16)
-            .width('100%').padding({ left: 20, right: 20, top: 20 })
+          FooterNote({ text: '说明：当前仅本地导出/恢复；云同步与跨端 KDF 互通待后续。' })
           PageSpacer()
         }
         .width('100%')
@@ -429,5 +352,159 @@ struct SettingBackupPage {
       .layoutWeight(1).backgroundColor(BG)
     }
     .width('100%').height('100%').backgroundColor(BG)
+  }
+
+  // ── 卡片内容(@Builder:组件构造必须在 builder 上下文,铁律 4b)──
+
+  @Builder
+  ExportCard(): void {
+    Column() {
+      CardToggleRow({
+        label: '使用密码加密',
+        checked: this.usePassphrase,
+        onToggle: (): void => { this.usePassphrase = !this.usePassphrase; },
+      })
+      if (this.usePassphrase) {
+        Column() {
+          TextInput({ text: this.passphrase, placeholder: '备份密码（至少 4 位）' })
+            .type(InputType.Password)
+            .height(44).fontSize(BODY).fontColor(INK).placeholderColor(INK4)
+            .backgroundColor(SURFACE2).borderRadius(10)
+            .padding({ left: 14, right: 14 })
+            .onChange((v: string): void => { this.passphrase = v; })
+          Row() {
+            Row().width('100%').height(1).backgroundColor(LINE)
+          }
+          .width('100%')
+          .margin({ top: 12 })
+        }
+        .width('100%')
+        .padding({ left: 14, right: 14, top: 2 })
+      }
+      CardRow({
+        label: '导出全部会话',
+        desc: '打包为加密 .abin 文件',
+        iconName: 'folder',
+        plateStyle: 'accent',
+        isLast: true,
+        onRowClick: (): void => { this.doExport(); },
+      })
+    }
+    .width('100%')
+  }
+
+  @Builder
+  RestoreCard(): void {
+    Column() {
+      CardRow({
+        label: '选择备份文件',
+        desc: '预览 manifest 后再恢复',
+        iconName: 'folder',
+        plateStyle: 'accent',
+        onRowClick: (): void => { this.doPickRestore(); },
+      })
+      if (this.preview !== null) {
+        Column() {
+          Text(this.statusMsg).fontSize(META).fontColor(INK3).lineHeight(18)
+          Text(`设备：${this.preview.manifest.deviceLabel.length > 0 ? this.preview.manifest.deviceLabel : this.preview.manifest.deviceId}`)
+            .fontSize(LABEL).fontColor(INK2).margin({ top: 6 })
+          Text(`创建：${new Date(this.preview.manifest.createdAt).toLocaleString()}`)
+            .fontSize(LABEL).fontColor(INK3).margin({ top: 4 })
+          Text('恢复').fontSize(BODY).fontWeight(FontWeight.Medium)
+            .fontColor(this.accentColorStore)
+            .height(44).padding({ left: 12, right: 12 })
+            .margin({ top: 8 })
+            .onClick((): void => { this.doRestore(); })
+          Row() {
+            Row().width('100%').height(1).backgroundColor(LINE)
+          }
+          .width('100%')
+          .margin({ top: 12 })
+        }
+        .width('100%')
+        .alignItems(HorizontalAlign.Start)
+        .padding({ left: 14, right: 14, top: 2 })
+      }
+      CardToggleRow({
+        label: '恢复时覆盖设置',
+        desc: '助手与提供商将被备份内容替换',
+        checked: this.restoreSettings,
+        isLast: true,
+        onToggle: (): void => { this.restoreSettings = !this.restoreSettings; },
+      })
+    }
+    .width('100%')
+  }
+
+  @Builder
+  WebDavCard(): void {
+    Column() {
+      Column() {
+        TextInput({ text: this.davUrl, placeholder: 'https://dav.example.com/dav' })
+          .height(44).fontSize(BODY).fontColor(INK).placeholderColor(INK4)
+          .backgroundColor(SURFACE2).borderRadius(10)
+          .padding({ left: 14, right: 14 })
+          .onChange((v: string): void => { this.davUrl = v; })
+        Row() {
+          Row().width('100%').height(1).backgroundColor(LINE)
+        }
+        .width('100%')
+        .margin({ top: 12 })
+      }
+      .width('100%')
+      .padding({ left: 14, right: 14, top: 12 })
+      Column() {
+        TextInput({ text: this.davUser, placeholder: '用户名' })
+          .height(44).fontSize(BODY).fontColor(INK).placeholderColor(INK4)
+          .backgroundColor(SURFACE2).borderRadius(10)
+          .padding({ left: 14, right: 14 })
+          .onChange((v: string): void => { this.davUser = v; })
+        Row() {
+          Row().width('100%').height(1).backgroundColor(LINE)
+        }
+        .width('100%')
+        .margin({ top: 12 })
+      }
+      .width('100%')
+      .padding({ left: 14, right: 14 })
+      Column() {
+        TextInput({ text: this.davPass, placeholder: '密码 / App Token' })
+          .type(InputType.Password)
+          .height(44).fontSize(BODY).fontColor(INK).placeholderColor(INK4)
+          .backgroundColor(SURFACE2).borderRadius(10)
+          .padding({ left: 14, right: 14 })
+          .onChange((v: string): void => { this.davPass = v; })
+        Row() {
+          Row().width('100%').height(1).backgroundColor(LINE)
+        }
+        .width('100%')
+        .margin({ top: 12 })
+      }
+      .width('100%')
+      .padding({ left: 14, right: 14 })
+      Column() {
+        TextInput({ text: this.davPath, placeholder: '远程目录' })
+          .height(44).fontSize(BODY).fontColor(INK).placeholderColor(INK4)
+          .backgroundColor(SURFACE2).borderRadius(10)
+          .padding({ left: 14, right: 14 })
+          .onChange((v: string): void => { this.davPath = v; })
+        Row() {
+          Row().width('100%').height(1).backgroundColor(LINE)
+        }
+        .width('100%')
+        .margin({ top: 12 })
+      }
+      .width('100%')
+      .padding({ left: 14, right: 14 })
+      CardRow({
+        label: '打包并上传到 WebDAV',
+        desc: '与本地导出同一 .abin，PUT 到远程目录',
+        iconName: 'folder',
+        plateStyle: 'accent',
+        isLast: true,
+        onRowClick: (): void => { this.doUploadWebDav(); },
+      })
+    }
+    .width('100%')
   }
 }
