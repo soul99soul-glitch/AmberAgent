@@ -175,6 +175,15 @@ export class ModelCouncilManager {
     return run !== undefined ? this.copyRun(run) : null;
   }
 
+  // 首页「继续」卡:列出仍在运行的 run(内存态,进程存活期内有效)
+  listActive(): ModelCouncilRun[] {
+    const out: ModelCouncilRun[] = [];
+    this.runs.forEach((run: ModelCouncilRun): void => {
+      if (run.status === 'running') out.push(this.copyRun(run));
+    });
+    return out.sort((a, b): number => b.updatedAtMs - a.updatedAtMs);
+  }
+
   read(runId: string): ModelCouncilRun | null {
     return this.snapshot(runId);
   }

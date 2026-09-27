@@ -14,14 +14,15 @@ import { camera, cameraPicker } from '@kit.CameraKit';
 import { util } from '@kit.ArkTS';
 import type { common } from '@kit.AbilityKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
-import { FONT_MONO } from '../design/fonts.ets';
+import { FONT_MONO, FONT_SANS } from '../design/fonts.ets';
 import { inputMethod } from '@kit.IMEKit';
 import { photoAccessHelper } from '@kit.MediaLibraryKit';
 import { pasteboard } from '@kit.BasicServicesKit';
 import { systemShare } from '@kit.ShareKit';
 import { uniformTypeDescriptor as utd } from '@kit.ArkData';
 import type {
-  Conversation, MessageNode, UIMessage, UIMessagePart, UIMessagePartText, UIMessagePartDocument, Assistant,
+  Conversation, MessageNode, UIMessage, UIMessagePart, UIMessagePartText, UIMessagePartDocument,
+  UIMessagePartImage, UIMessagePartMiniApp, Assistant,
   PendingUserMessage, PendingUserMessageMode, DequeueNextResult,
   CompactPolicy, CompactResult, PreparedContext, DisplaySetting, MessageSearchHit,
   UIMessagePartTool, ToolLoopOptions, IdleToolBlockerResult, ChatToolDefinition,
@@ -358,6 +359,12 @@ struct ChatPage {
   @State documentPreviewTitle: string = '';
   @State documentPreviewText: string = '';
   private documentPreviewSeq: number = 0;
+  // 产物架(iOS artifact shelf 对齐:消息 part 派生的图片/文档/小应用陈列)
+  @State artifactShelfOpen: boolean = false;
+  @State artifactImagePreview: string = '';
+  @State shelfImages: string[] = [];
+  @State shelfDocs: UIMessagePartDocument[] = [];
+  @State shelfMiniApps: string[] = [];
   @State displaySettings: DisplaySetting = makeDisplaySetting();
   // Return-to-page forces rebuild, reads latest theme tokens (background pages in stack don't receive StorageProp updates)
   @State themeTick: number = 0;
@@ -1705,6 +1712,34 @@ struct ChatPage {
     return this.contextEstimateTokens;
   }
 
+  // 压缩边界标记(Android ContextCompactMarker 语义):
+  //   完成态压缩范围的末条消息之后在时间线插入「已压缩 N 条」
+  private compactBoundaryCount(messageId: string): number {
+    for (const c of this.contextCompacts) {
+      if (c.status !== 'completed' || c.sourceMessageIds.length === 0) continue;
+      if (c.sourceMessageIds[c.sourceMessageIds.length - 1] === messageId) {
+        return c.sourceMessageIds.length;
+      }
+    }
+    return 0;
+  }
+
+  @Builder
+  CompactMarkerRow(row: MsgRow): void {
+    if (this.compactBoundaryCount(row.message.id) > 0) {
+      Row() {
+        Column().layoutWeight(1).height(0.5).backgroundColor(LINE)
+        Text(`已压缩 ${this.compactBoundaryCount(row.message.id)} 条上下文`)
+          .fontSize(META).fontColor(INK3).fontFamily(FONT_SANS)
+          .margin({ left: 10, right: 10 })
+        Column().layoutWeight(1).height(0.5).backgroundColor(LINE)
+      }
+      .width('100%')
+      .alignItems(VerticalAlign.Center)
+      .padding({ top: 10, bottom: 6 })
+    }
+  }
+
   // :103-117 — estimate(消费活动 compacts,post-substitution 足迹)+ ratio clamp 0..1
   private contextUsageRatio(): number {
     const w: number | null = this.contextWindowTokens;
@@ -2245,6 +2280,135 @@ struct ChatPage {
       }
     } catch (_e) {
       // 用户取消选择
+    }
+  }
+
+  // 长文本粘贴为文件(Android pasteLongTextAsFile 对齐):转 text/plain 附件,不进输入框
+  private attachPastedText(text: string): void {
+    const bytes: Uint8Array = util.TextEncoder.create('utf-8').encodeInto(text);
+    const b64: string = new util.Base64Helper().encodeToStringSync(bytes);
+    const fileName: string = `paste-${Date.now()}.txt`;
+    this.pendingDocs = [...this.pendingDocs,
+      { url: `data:text/plain;base64,${b64}`, fileName: fileName, mime: 'text/plain' } as PendingDoc];
+    promptAction.showToast({ message: `已作为文件附件(${text.length} 字符)`, duration: 1800 });
+  }
+
+  // 产物架:从当前会话消息 part 派生(图片/文档/小应用),无需独立注册表
+  private openArtifactShelf(): void {
+    const images: string[] = [];
+    const docs: UIMessagePartDocument[] = [];
+    const minis: string[] = [];
+    const conv: Conversation | null = this.conversation;
+    if (conv !== null) {
+      const msgs: UIMessage[] = currentMessages(conv);
+      for (const m of msgs) {
+        for (const p of m.parts) {
+          if (p.type === 'image') {
+            const url: string = (p as UIMessagePartImage).url;
+            if (url.length > 0) images.push(url);
+          } else if (p.type === 'document') {
+            docs.push(p as UIMessagePartDocument);
+          } else if (p.type === 'mini_app') {
+            const appId: string = (p as UIMessagePartMiniApp).appId;
+            if (appId.length > 0 && minis.indexOf(appId) < 0) minis.push(appId);
+          }
+        }
+      }
+    }
+    this.shelfImages = images;
+    this.shelfDocs = docs;
+    this.shelfMiniApps = minis;
+    this.artifactShelfOpen = true;
+  }
+
+  @Builder
+  private artifactShelfSheet() {
+    Column() {
+      Row() {
+        Text('产物架').fontSize(18).fontColor(INK).layoutWeight(1)
+        Text('关闭').fontSize(14).fontColor(ACCENT).padding(12)
+          .onClick((): void => { this.artifactShelfOpen = false; })
+      }.width('100%')
+      Scroll() {
+        Column() {
+          if (this.shelfImages.length === 0 && this.shelfDocs.length === 0
+            && this.shelfMiniApps.length === 0) {
+            Text('本会话还没有图片、文件或小应用产物')
+              .fontSize(META).fontColor(INK3)
+              .width('100%').textAlign(TextAlign.Center)
+              .padding({ top: 48 })
+          }
+          if (this.shelfImages.length > 0) {
+            Text(`图片 · ${this.shelfImages.length}`)
+              .fontSize(LABEL).fontColor(INK3).width('100%')
+              .padding({ top: 8, bottom: 8 })
+            Flex({ wrap: FlexWrap.Wrap }) {
+              ForEach(this.shelfImages, (url: string): void => {
+                Image(url)
+                  .width(96).height(96)
+                  .objectFit(ImageFit.Cover)
+                  .borderRadius(8)
+                  .margin({ right: 8, bottom: 8 })
+                  .onClick((): void => { this.artifactImagePreview = url; })
+              }, (url: string): string => url)
+            }
+            .width('100%')
+          }
+          if (this.shelfDocs.length > 0) {
+            Text(`文件 · ${this.shelfDocs.length}`)
+              .fontSize(LABEL).fontColor(INK3).width('100%')
+              .padding({ top: 12, bottom: 8 })
+            ForEach(this.shelfDocs, (part: UIMessagePartDocument, idx: number): void => {
+              Row() {
+                Text(part.fileName.length > 0 ? part.fileName : `文档 ${idx + 1}`)
+                  .fontSize(BODY).fontColor(INK).layoutWeight(1)
+                  .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+                Text('预览').fontSize(META).fontColor(ACCENT)
+                  .padding({ left: 12, top: 8, bottom: 8 })
+              }
+              .width('100%')
+              .constraintSize({ minHeight: 44 })
+              .onClick((): void => {
+                this.artifactShelfOpen = false;
+                this.openDocumentPreview(part);
+              })
+            }, (part: UIMessagePartDocument, idx: number): string => `doc-${idx}-${part.fileName}`)
+          }
+          if (this.shelfMiniApps.length > 0) {
+            Text(`小应用 · ${this.shelfMiniApps.length}`)
+              .fontSize(LABEL).fontColor(INK3).width('100%')
+              .padding({ top: 12, bottom: 8 })
+            ForEach(this.shelfMiniApps, (appId: string): void => {
+              Row() {
+                Text(appId)
+                  .fontSize(BODY).fontColor(INK).layoutWeight(1)
+                  .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+                Text('运行').fontSize(META).fontColor(ACCENT)
+                  .padding({ left: 12, top: 8, bottom: 8 })
+              }
+              .width('100%')
+              .constraintSize({ minHeight: 44 })
+              .onClick((): void => {
+                this.artifactShelfOpen = false;
+                router.pushUrl({ url: 'pages/MiniAppRunnerPage', params: { appId: appId } });
+              })
+            }, (appId: string): string => appId)
+          }
+        }
+        .width('100%').alignItems(HorizontalAlign.Start)
+      }.layoutWeight(1).width('100%').align(Alignment.TopStart)
+    }.width('100%').height('100%').padding(20).backgroundColor(BG)
+
+    // 图片全屏预览叠层
+    if (this.artifactImagePreview.length > 0) {
+      Column() {
+        Image(this.artifactImagePreview)
+          .width('100%').height('100%')
+          .objectFit(ImageFit.Contain)
+      }
+      .width('100%').height('100%')
+      .backgroundColor('#CC000000')
+      .onClick((): void => { this.artifactImagePreview = ''; })
     }
   }
 
@@ -4549,10 +4713,12 @@ struct ChatPage {
           fontSizeRatio: this.displaySettings.fontSizeRatio,
           codeBlockAutoCollapse: this.displaySettings.codeBlockAutoCollapse,
           showLineNumbers: this.displaySettings.showLineNumbers,
+          chatFontFamily: this.displaySettings.chatFontFamily,
           onOpenDocument: (part: UIMessagePartDocument): void => { this.openDocumentPreview(part); },
           hostHeader: (): void => {},
           hostFooter: (): void => {},
           autoCloseThinking: this.autoCloseThinking,
+          showThinkingContent: this.displaySettings.showThinkingContent,
           branchCount: row.branchCount,
           selectIndex: row.selectIndex,
           isLastAssistant: row.isLastAssistant,
@@ -4581,6 +4747,11 @@ struct ChatPage {
           onOpenMiniAppList: (): void => { router.pushUrl({ url: 'pages/MiniAppListPage' }); },
         })
       }
+      if (this.compactBoundaryCount(row.message.id) > 0) {
+        ListItem() {
+          this.CompactMarkerRow(row)
+        }
+      }
       if (row.nodeId === this.regenNodeId && this.regenTail !== null) {
         ListItem() {
           AgentMessageRow({
@@ -4592,10 +4763,12 @@ struct ChatPage {
           fontSizeRatio: this.displaySettings.fontSizeRatio,
           codeBlockAutoCollapse: this.displaySettings.codeBlockAutoCollapse,
           showLineNumbers: this.displaySettings.showLineNumbers,
+          chatFontFamily: this.displaySettings.chatFontFamily,
           onOpenDocument: (part: UIMessagePartDocument): void => { this.openDocumentPreview(part); },
             hostHeader: (): void => {},
             hostFooter: (): void => {},
             autoCloseThinking: this.autoCloseThinking,
+          showThinkingContent: this.displaySettings.showThinkingContent,
             streaming: true,
             streamKeyTag: 'regen:',
             isLastAssistant: true,
@@ -4634,10 +4807,12 @@ struct ChatPage {
           fontSizeRatio: this.displaySettings.fontSizeRatio,
           codeBlockAutoCollapse: this.displaySettings.codeBlockAutoCollapse,
           showLineNumbers: this.displaySettings.showLineNumbers,
+          chatFontFamily: this.displaySettings.chatFontFamily,
           onOpenDocument: (part: UIMessagePartDocument): void => { this.openDocumentPreview(part); },
           hostHeader: (): void => {},
           hostFooter: (): void => {},
           autoCloseThinking: this.autoCloseThinking,
+          showThinkingContent: this.displaySettings.showThinkingContent,
           streaming: true,
           isLastAssistant: true,
           onApproveTool: (toolCallId: string, locator?: ToolApprovalPartLocator): void =>
@@ -4813,6 +4988,15 @@ struct ChatPage {
             .margin({ right: 10 })
             .onClick((): void => { this.contextMeterOpen = true; })
             .accessibilityText(this.contextUsageText())
+            // 产物架入口(图片/文件/小应用陈列;40 热区)
+            Row() {
+              Icon({ name: 'box', iconSize: 20, color: INK })
+            }
+            .width(40).height(40)
+            .justifyContent(FlexAlign.Center)
+            .alignItems(VerticalAlign.Center)
+            .onClick((): void => { this.openArtifactShelf(); })
+            .accessibilityText('产物架')
             // Right:「+」新对话(对齐参考图;40 热区)
             Row() {
               Icon({ name: 'plus', iconSize: 22, color: INK })
@@ -5035,10 +5219,13 @@ struct ChatPage {
           text: this.inputText,
           sending: this.sending,
           editing: this.editingNodeId.length > 0,
-          hasImages: this.pendingImages.length > 0,
+          hasImages: this.pendingImages.length > 0 || this.pendingDocs.length > 0,
           subAgentEnabled: this.subAgentEnabled,
           subAgentMode: this.subAgentMode,
           quickMessages: this.quickMessages,
+          sendOnEnter: this.displaySettings.sendOnEnter,
+          pasteLongTextAsFile: this.displaySettings.pasteLongTextAsFile,
+          pasteLongTextThreshold: this.displaySettings.pasteLongTextThreshold,
           // 1:1 原型 send 键 color/bg .18s ease:输入变化经 animateTo 驱动
           onTextChange: (v: string): void => {
             animateTo({ duration: 180, curve: Curve.EaseOut }, (): void => {
@@ -5055,6 +5242,7 @@ struct ChatPage {
           onPickImage: (): void => { this.pickImages(); },
           onTakePhoto: (): void => { this.takePhoto(); },
           onPickFile: (): void => { this.pickFiles(); },
+          onPasteAsFile: (t: string): void => { this.attachPastedText(t); },
           onCancelEdit: (): void => { this.cancelEdit(); },
           onClearInput: (): void => { this.inputText = ''; },
           onCompactContext: (): void => { this.compactCurrentConversation(); },
@@ -5173,6 +5361,9 @@ struct ChatPage {
     }
     .width('100%').height('100%')
     .bindSheet($$this.documentPreviewOpen, this.documentPreviewSheet(), {
+      height: '85%', showClose: false,
+    })
+    .bindSheet($$this.artifactShelfOpen, this.artifactShelfSheet(), {
       height: '85%', showClose: false,
     })
     // 1:1 原型 slideInR .28s ease-out:整页入场 translateX 20→0 + opacity 0→1

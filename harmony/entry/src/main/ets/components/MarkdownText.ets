@@ -117,6 +117,8 @@ export struct MarkdownText {
   @Prop lineHeightScale: number = 0;
   // 阅读模式:衬线正文 + 两端对齐 + 段落间距(深读长文用;聊天消息保持默认)
   @Prop readingMode: boolean = false;
+  // 聊天字体族(DisplaySetting.chatFontFamily):'DEFAULT' | 'SERIF' | 'MONO'
+  @Prop chatFontFamily: string = 'DEFAULT';
   // 收缩包裹场景(用户气泡 maxWidth 82%)需 'auto',否则 100% 使测宽失效不换行
   @Prop fillWidth: boolean = true;
   // P3:是否活动流式尾(仅最后文本块传 true)→ 启动逐字 reveal
@@ -619,12 +621,19 @@ export struct MarkdownText {
   }
 
   // 阅读模式字体族:正文/标题衬线(粗体经 fontWeight 合成)
+  // 聊天字体族(DisplaySetting.chatFontFamily):DEFAULT/SERIF/MONO 三选
   private bodyFamily(): string {
-    return this.readingMode ? FONT_SERIF : FONT_SANS;
+    if (this.readingMode) return FONT_SERIF;
+    if (this.chatFontFamily === 'SERIF') return FONT_SERIF;
+    if (this.chatFontFamily === 'MONO') return FONT_MONO;
+    return FONT_SANS;
   }
 
   private headFamily(): string {
-    return this.readingMode ? FONT_SERIF : FONT_SANS_BOLD;
+    if (this.readingMode) return FONT_SERIF;
+    if (this.chatFontFamily === 'SERIF') return FONT_SERIF;
+    if (this.chatFontFamily === 'MONO') return FONT_MONO;
+    return FONT_SANS_BOLD;
   }
 
   // 有效行高:lineHeightScale > 0 时按倍率,否则契约档

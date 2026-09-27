@@ -4,6 +4,9 @@
 // 模型 tab = 模型列表 + 参数入口 + 逗号编辑;保存显式按钮;删除置底。
 // 新增流:列表页模板选择后经 PENDING_PROVIDER 暂存对象进入本页,保存时插入。
 import { router, promptAction } from '@kit.ArkUI';
+import { picker, fileIo } from '@kit.CoreFileKit';
+import { common } from '@kit.AbilityKit';
+import { util } from '@kit.ArkTS';
 import type {
   ProviderSetting, ProviderSettingOpenAIVariant, ProviderSettingGoogle,
   ProviderSettingClaude, ProviderModel,
@@ -29,6 +32,27 @@ export let PENDING_PROVIDER: ProviderSetting | null = null;
 export const setPendingProvider = (p: ProviderSetting | null): void => {
   PENDING_PROVIDER = p;
 };
+
+// Provider 导出载荷(脱敏:不含 apiKey/OAuth 凭据;format 标记供导入方识别)
+interface ProviderExportModel {
+  modelId: string;
+  displayName: string;
+  type: string;
+}
+interface ProviderExportPayload {
+  format: string;
+  version: number;
+  type: string;
+  name: string;
+  baseUrl: string;
+  chatCompletionsPath?: string;
+  useResponseApi?: boolean;
+  vertexAI?: boolean;
+  location?: string;
+  projectId?: string;
+  promptCaching?: boolean;
+  models: ProviderExportModel[];
+}
 
 @Entry
 @Component
@@ -221,6 +245,87 @@ struct ChatProviderDetailPage {
     });
   }
 
+  // Provider 导出(脱敏 JSON,不含 apiKey;Android 导出分享对齐)
+  private exportProvider(): void {
+    const raw: ProviderSetting | null = this.provider;
+    if (raw === null) {
+      promptAction.showToast({ message: '请先保存后再导出', duration: 1600 });
+      return;
+    }
+    const payload: ProviderExportPayload = {
+      format: 'amber-provider',
+      version: 1,
+      type: raw.type,
+      name: raw.name,
+      baseUrl: raw.baseUrl,
+      models: raw.models.map((m: ProviderModel): ProviderExportModel => ({
+        modelId: m.modelId, displayName: m.displayName, type: m.type,
+      })),
+    };
+    if (raw.type === 'openai') {
+      const v: ProviderSettingOpenAIVariant = raw as ProviderSettingOpenAIVariant;
+      payload.chatCompletionsPath = v.chatCompletionsPath;
+      payload.useResponseApi = v.useResponseApi;
+    } else if (raw.type === 'google') {
+      const v: ProviderSettingGoogle = raw as ProviderSettingGoogle;
+      payload.vertexAI = v.vertexAI;
+      payload.location = v.location;
+      payload.projectId = v.projectId;
+    } else {
+      const v: ProviderSettingClaude = raw as ProviderSettingClaude;
+      payload.promptCaching = v.promptCaching;
+    }
+    const json: string = JSON.stringify(payload, null, 2);
+    const safeName: string = (raw.name.trim().length > 0 ? raw.name.trim() : 'provider')
+      .replace(/[\\/:*?"<>|]/g, '_');
+    const fileName: string = `provider-${safeName}.json`;
+    const ctx: common.Context = getContext(this) as common.Context;
+    const docPicker = new picker.DocumentViewPicker(ctx);
+    docPicker.save({ newFileNames: [fileName] }).then((uris: string[]): void => {
+      if (uris.length > 0) {
+        this.writeExportFile(uris[0], json, fileName);
+      } else {
+        this.exportToAppDir(json, fileName);
+      }
+    }).catch((): void => {
+      this.exportToAppDir(json, fileName);
+    });
+  }
+
+  private writeExportFile(uri: string, content: string, fileName: string): void {
+    try {
+      const file: fileIo.File = fileIo.openSync(
+        uri, fileIo.OpenMode.READ_WRITE | fileIo.OpenMode.CREATE | fileIo.OpenMode.TRUNC);
+      fileIo.writeSync(file.fd, util.TextEncoder.create('utf-8').encodeInto(content));
+      fileIo.closeSync(file.fd);
+      promptAction.showToast({ message: `已导出 ${fileName}`, duration: 2000 });
+    } catch (e) {
+      const msg: string = (e as Error).message;
+      promptAction.showToast({ message: `导出失败：${msg}`, duration: 2000 });
+    }
+  }
+
+  private exportToAppDir(content: string, fileName: string): void {
+    const ctx: common.Context = getContext(this) as common.Context;
+    const dir: string = `${ctx.filesDir}/exports`;
+    try {
+      fileIo.mkdirSync(dir, true);
+    } catch {
+      // 已存在
+    }
+    const path: string = `${dir}/${fileName}`;
+    try {
+      const file: fileIo.File = fileIo.openSync(
+        path, fileIo.OpenMode.READ_WRITE | fileIo.OpenMode.CREATE | fileIo.OpenMode.TRUNC);
+      fileIo.writeSync(file.fd, util.TextEncoder.create('utf-8').encodeInto(content));
+      fileIo.closeSync(file.fd);
+      promptAction.showToast({ message: `已保存到应用目录 ${fileName}`, duration: 2200 });
+    } catch (e) {
+      const msg: string = (e as Error).message;
+      promptAction.showToast({ message: `导出失败：${msg}`, duration: 2000 });
+    }
+  }
+
   private removeSelf(): void {
     const raw: ProviderSetting | null = this.provider;
     if (raw === null || this.ioBusy) return;
@@ -358,12 +463,10 @@ struct ChatProviderDetailPage {
         .layoutWeight(1)
         .margin({ left: 8 })
 
-        // 导出/分享为 Android 侧能力,鸿蒙暂无 ShareSheet — 占位保持布局对称
+        // 导出脱敏 JSON(不含 API Key)
         BtnGhost({
           label: '导出',
-          onTap: (): void => {
-            promptAction.showToast({ message: '鸿蒙版暂不支持导出分享', duration: 1800 });
-          },
+          onTap: (): void => { this.exportProvider(); },
         })
       }
       .width('100%')

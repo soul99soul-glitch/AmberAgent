@@ -38,6 +38,10 @@ export struct ChatInput {
   // G2-S4:动态 skill 斜杠命令(由 ChatPage 从 SkillManager 装配)
   @Prop skillCommands: SlashCommand[] = [];
   @Prop quickMessages: QuickMessage[] = [];
+  // 显示与字体设置:回车发送 / 长文本粘贴为文件(Android DisplaySetting 对齐)
+  @Prop sendOnEnter: boolean = false;
+  @Prop pasteLongTextAsFile: boolean = false;
+  @Prop pasteLongTextThreshold: number = 1000;
   onTextChange: (value: string) => void = (_v: string): void => {};
   onSend: () => void = (): void => {};
   onStop: () => void = (): void => {};
@@ -45,6 +49,7 @@ export struct ChatInput {
   onPickImage: () => void = (): void => {};
   onTakePhoto: () => void = (): void => {};
   onPickFile: () => void = (): void => {};
+  onPasteAsFile: (text: string) => void = (_t: string): void => {};
   @State attachExpanded: boolean = false;
   onCancelEdit: () => void = (): void => {};
   onClearInput: () => void = (): void => {};
@@ -209,6 +214,18 @@ export struct ChatInput {
             .lineHeight(lineHeightForSize(BODY))
             .enabled(!this.disabled)
             .onChange((v: string): void => { if (!this.disabled) this.onTextChange(v); })
+            // 回车发送:enterKeyType=Send 时 onSubmit 才触发(NEW_LINE 不触发,API 11+)
+            .enterKeyType(this.sendOnEnter ? EnterKeyType.Send : EnterKeyType.NEW_LINE)
+            .onSubmit((enterKey: EnterKeyType): void => {
+              if (enterKey === EnterKeyType.Send && this.sendOnEnter && this.canSend()) this.onSend();
+            })
+            // 长文本粘贴为文件:超阈值拦截系统默认粘贴,转附件(Android pasteLongTextAsFile)
+            .onPaste((value: string, event: PasteEvent): void => {
+              if (this.pasteLongTextAsFile && value.length >= this.pasteLongTextThreshold) {
+                if (event.preventDefault !== undefined) event.preventDefault();
+                this.onPasteAsFile(value);
+              }
+            })
         }
         .layoutWeight(1)
         .constraintSize({ minHeight: 44, maxHeight: this.attachExpanded ? 44 : 111 })

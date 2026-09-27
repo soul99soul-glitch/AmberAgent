@@ -15,9 +15,11 @@ import { util } from '@kit.ArkTS';
 import { fileIo } from '@kit.CoreFileKit';
 import type { Context } from '@kit.AbilityKit';
 import type { Conversation, ConversationSummary, DisplaySetting, ContinueCandidate, AgentCronTask } from '@amber/chat-domain';
+import type { ModelCouncilRun } from '@amber/deepread-domain';
 import { loadDisplaySetting, exportConversationMarkdown, exportFileNameFor, mergeContinueCandidates } from '@amber/chat-domain';
 import {
   getChatKvStore, getChatRepository, getNovelCreation, getAgentCronManager, getRepository,
+  getCouncilManager,
 } from '../di/AppContainer.ets';
 import { routePendingWant } from '../entryability/EntryAbility.ets';
 import { cleanupDeletedConversation } from '../platform_impl/ManagedFileStore.ets';
@@ -27,7 +29,7 @@ import { AmberWordmark } from '../components/ui/AmberWordmark.ets';
 import { PressGlowButton } from '../components/ui/PressGlowButton.ets';
 import { ACCENT, ACCENT_INK, ERROR, HOME_BG, HOME_CARD, HOME_CARD2, HOME_DOT, HOME_GLASS_BOTTOM,
   HOME_GLASS_EDGE, HOME_GLASS_SHADOW, HOME_GLASS_TOP, HOME_INK, HOME_INK2, HOME_MUTED, HOME_MUTED2,
-  HOME_PRESS, HOME_ROWLINE, HOME_SEP, HOME_SHADOW, MOTION_ENTER, MOTION_STAGGER } from '../design/tokens.ets';
+  HOME_PRESS, HOME_ROWLINE, HOME_SEP, HOME_SHADOW, MOTION_ENTER, MOTION_STAGGER, OVERLAY } from '../design/tokens.ets';
 import { FONT_SANS, FONT_SANS_MEDIUM, FONT_SANS_SEMIBOLD } from '../design/fonts.ets';
 
 interface ActionMenuResult {
@@ -200,6 +202,10 @@ struct ChatListPage {
   @State msgCounts: Record<string, number> = {};
   @State lastOpenedId: string = '';
   @State continueItem: ContinueCandidate | null = null;
+  // 列表级重命名(iOS/Android 均在列表出重命名)
+  @State renameOpen: boolean = false;
+  @State renameId: string = '';
+  @State renameInput: string = '';
   // 展开搜索(iOS homeSearch morph:胶囊 → 全宽玻璃条,实时过滤标题)
   @State searchExpanded: boolean = false;
   @State searchQuery: string = '';
@@ -417,7 +423,23 @@ struct ChatListPage {
         isRunning: false,
       })))
       .catch((_err: Error): ContinueCandidate[] => []);
-    Promise.all([novelList, cronList, deepList, miniList]).then((lists): void => {
+    // 议会:运行中的 run(内存态;无持久任务系统,进程存活期内可继续)
+    const councilList: Promise<ContinueCandidate[]> = Promise.resolve().then((): ContinueCandidate[] => {
+      const mgr = getCouncilManager();
+      if (mgr === null) return [];
+      return mgr.listActive().map((run: ModelCouncilRun): ContinueCandidate => ({
+        sourceKind: 'council',
+        sourceId: run.runId,
+        route: { kind: 'council', conversationId: '', runId: run.runId },
+        title: run.task.objective.length > 0 ? run.task.objective : '模型议会',
+        summary: '讨论进行中',
+        lastUpdatedAt: run.updatedAtMs,
+        status: 'running',
+        priority: 0,
+        isRunning: true,
+      }));
+    }).catch((_err: Error): ContinueCandidate[] => []);
+    Promise.all([novelList, cronList, deepList, miniList, councilList]).then((lists): void => {
       if (!this.pageAlive) return;
       const merged: ContinueCandidate[] = mergeContinueCandidates(lists, 6);
       this.continueItem = merged.length > 0 ? merged[0] : null;
@@ -445,6 +467,11 @@ struct ChatListPage {
         url: 'pages/DeepReadArticlePage',
         params: { topicId: item.route.topicId, title: item.route.title },
       });
+    } else if (item.route.kind === 'council') {
+      const runId: string = item.route.runId ?? '';
+      if (runId.length > 0) {
+        this.pushOnce({ url: 'pages/CouncilRunPage', params: { runId: runId } });
+      }
     }
   }
 
@@ -453,6 +480,7 @@ struct ChatListPage {
     if (item.sourceKind === 'novel') return 'ph_notebook';
     if (item.sourceKind === 'cron') return 'ph_clock';
     if (item.sourceKind === 'deepread') return 'ph_bookOpen';
+    if (item.sourceKind === 'council') return 'ph_users';
     return 'ph_squaresFour';
   }
 
@@ -466,6 +494,7 @@ struct ChatListPage {
     if (item.sourceKind === 'novel') return `小说创作 · ${relativeTimeMs(item.lastUpdatedAt)}`;
     if (item.sourceKind === 'cron') return `定时任务 · ${item.summary}`;
     if (item.sourceKind === 'deepread') return `深度阅读 · ${item.summary}`;
+    if (item.sourceKind === 'council') return `模型议会 · ${item.summary}`;
     return `「${item.title}」 · ${item.summary}`;
   }
 
@@ -473,6 +502,7 @@ struct ChatListPage {
     if (item.sourceKind === 'novel') return item.isRunning ? '查看' : '继续';
     if (item.sourceKind === 'cron') return item.isRunning ? '查看' : '继续';
     if (item.sourceKind === 'deepread') return '查看';
+    if (item.sourceKind === 'council') return '查看';
     return '打开';
   }
 
@@ -635,15 +665,38 @@ struct ChatListPage {
     promptAction.showActionMenu({
       buttons: [
         { text: item.isPinned ? '取消置顶' : '置顶', color: HOME_INK },
+        { text: '重命名', color: HOME_INK },
         { text: '复制 Markdown', color: HOME_INK },
         { text: '导出 Markdown 文件', color: HOME_INK },
         { text: '删除', color: ERROR },
       ],
     }).then((result: ActionMenuResult): void => {
       if (result.index === 0) this.togglePin(item);
-      else if (result.index === 1) this.exportMarkdown(item);
-      else if (result.index === 2) this.exportMarkdownFile(item);
-      else if (result.index === 3) this.onDelete(item);
+      else if (result.index === 1) this.openRename(item);
+      else if (result.index === 2) this.exportMarkdown(item);
+      else if (result.index === 3) this.exportMarkdownFile(item);
+      else if (result.index === 4) this.onDelete(item);
+    }).catch((): void => {});
+  }
+
+  private openRename(item: ConversationSummary): void {
+    this.renameId = item.id;
+    this.renameInput = item.title;
+    this.renameOpen = true;
+  }
+
+  private submitRename(): void {
+    const title: string = this.renameInput.trim();
+    const id: string = this.renameId;
+    this.renameOpen = false;
+    if (title.length === 0 || id.length === 0) return;
+    const repo = getChatRepository();
+    repo.getById(id).then((conv: Conversation | null): void => {
+      if (conv === null) return;
+      conv.title = title;
+      repo.save(conv).then((): void => {
+        if (this.pageAlive) this.refresh();
+      });
     }).catch((): void => {});
   }
 
@@ -1311,6 +1364,38 @@ struct ChatListPage {
         .transition(TransitionEffect.OPACITY
           .combine(TransitionEffect.translate({ y: 14 }))
           .animation({ duration: 220, curve: Curve.EaseOut }))
+      }
+
+      // 重命名对话框叠层(与小说项目库同名交互对齐)
+      if (this.renameOpen) {
+        Column() {
+          Column() {
+            Text('重命名会话')
+              .fontSize(17).fontWeight(600).fontFamily(FONT_SANS_SEMIBOLD)
+              .fontColor(HOME_INK).margin({ bottom: 16 })
+            TextInput({ text: this.renameInput, placeholder: '会话标题' })
+              .height(46).fontSize(15).fontFamily(FONT_SANS)
+              .fontColor(HOME_INK).placeholderColor(HOME_MUTED)
+              .backgroundColor(HOME_CARD2).borderRadius(10).padding({ left: 14, right: 14 })
+              .onChange((v: string): void => { this.renameInput = v; })
+            Row() {
+              Text('取消').fontSize(14).fontFamily(FONT_SANS)
+                .fontColor(HOME_MUTED).layoutWeight(1).textAlign(TextAlign.Center)
+                .onClick((): void => { this.renameOpen = false; })
+              Text('保存').fontSize(14).fontFamily(FONT_SANS_MEDIUM)
+                .fontColor(this.accentColorStore).layoutWeight(1).textAlign(TextAlign.Center)
+                .onClick((): void => { this.submitRename(); })
+            }
+            .width('100%').margin({ top: 20 })
+          }
+          .width('80%').padding(22).backgroundColor(HOME_CARD).borderRadius(16)
+          .shadow({ radius: 24, color: HOME_SHADOW, offsetY: 8 })
+        }
+        .width('100%').height('100%').backgroundColor(OVERLAY)
+        .justifyContent(FlexAlign.Center)
+        .transition(TransitionEffect.OPACITY
+          .animation({ duration: 220, curve: Curve.EaseOut }))
+        .onClick((): void => { this.renameOpen = false; })
       }
     }
     .width('100%')

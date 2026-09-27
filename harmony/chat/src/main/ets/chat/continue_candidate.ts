@@ -12,7 +12,7 @@ export type ContinueRoute =
   | { kind: 'chat'; conversationId: string; nodeId?: string }
   | { kind: 'novel'; projectId: string; branchId?: string; jobId?: string }
   | { kind: 'deepread'; topicId: string; title: string }
-  | { kind: 'council'; conversationId: string }
+  | { kind: 'council'; conversationId: string; runId?: string }
   | { kind: 'miniapp'; appId: string }
   | { kind: 'board' }
   | { kind: 'cron'; taskId?: string };

@@ -28,6 +28,7 @@ import {
   conversationFromSyncDto, settingsFromSyncPayload,
   ASSISTANTS_KEY, PROVIDERS_KEY,
   type SyncConversationDto, type SyncInspectPreview, type SyncRestoreResult, type SyncRestoreSettings, type WebDavConfig,
+  type WebDavRemoteFile, type WebDavClient,
 } from '@amber/chat-domain';
 
 @Entry
@@ -46,6 +47,8 @@ struct SettingBackupPage {
   @State davUser: string = '';
   @State davPass: string = '';
   @State davPath: string = 'amber_agent_backups';
+  @State davSnapshots: WebDavRemoteFile[] = [];
+  @State davListBusy: boolean = false;
   private pageAlive: boolean = false;
 
   aboutToAppear(): void {
@@ -173,6 +176,76 @@ struct SettingBackupPage {
       this.toast('上传成功');
     } catch (e) {
       this.statusMsg = `上传失败：${e instanceof Error ? e.message : String(e)}`;
+    } finally {
+      this.busy = false;
+    }
+  }
+
+  private davClientOrNull(): WebDavClient | null {
+    if (this.davUrl.trim().length === 0) {
+      this.toast('请填写 WebDAV URL');
+      return null;
+    }
+    const config: WebDavConfig = {
+      url: this.davUrl.trim(),
+      username: this.davUser.trim(),
+      password: this.davPass,
+      path: this.davPath.trim().length > 0 ? this.davPath.trim() : 'amber_agent_backups',
+    };
+    return createWebDavClient(getAppContainer().httpClient, config);
+  }
+
+  private formatSize(bytes: number): string {
+    if (bytes <= 0) return '';
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+  }
+
+  // WebDAV 快照列表(与上传同配置;.abin 过滤)
+  async doListWebDav(): Promise<void> {
+    if (this.davListBusy || this.busy) return;
+    const client = this.davClientOrNull();
+    if (client === null) return;
+    this.davListBusy = true;
+    this.statusMsg = '正在读取远程快照…';
+    try {
+      const files: WebDavRemoteFile[] = await client.list();
+      const abins: WebDavRemoteFile[] = files.filter(
+        (f: WebDavRemoteFile): boolean => f.name.endsWith('.abin'));
+      this.davSnapshots = abins;
+      this.statusMsg = abins.length > 0 ? `远程共 ${abins.length} 个快照` : '远程目录中没有 .abin 快照';
+    } catch (e) {
+      this.statusMsg = `读取失败：${e instanceof Error ? e.message : String(e)}`;
+    } finally {
+      this.davListBusy = false;
+    }
+  }
+
+  // 下载远程快照 → 落到缓存文件 → 走与本地文件相同的预览/恢复管线
+  async doDownloadWebDav(item: WebDavRemoteFile): Promise<void> {
+    if (this.busy) return;
+    const client = this.davClientOrNull();
+    if (client === null) return;
+    this.busy = true;
+    this.statusMsg = `正在下载 ${item.name}…`;
+    try {
+      const bytes: Uint8Array = await client.get(item.name);
+      const path: string = `${this.ctx().cacheDir}/webdav-restore.abin`;
+      const file = fileIo.openSync(
+        path, fileIo.OpenMode.READ_WRITE | fileIo.OpenMode.CREATE | fileIo.OpenMode.TRUNC);
+      fileIo.writeSync(file.fd, bytes.buffer as ArrayBuffer);
+      fileIo.closeSync(file.fd);
+      const preview = await inspectSyncArchive(bytes, path);
+      this.preview = preview;
+      this.pendingArchivePath = path;
+      this.statusMsg =
+        `预览：v${preview.manifest.archiveVersion} · ${preview.manifest.deviceLabel || preview.manifest.deviceId}` +
+        ` · ${preview.needsPassphrase ? '需密码' : '无密码'}`;
+      this.toast('已载入恢复预览');
+    } catch (e) {
+      this.preview = null;
+      this.statusMsg = `下载失败：${e instanceof Error ? e.message : String(e)}`;
     } finally {
       this.busy = false;
     }
@@ -337,14 +410,14 @@ struct SettingBackupPage {
           CardGroup({ radius: 18, stroke: true, content: (): void => { this.RestoreCard(); } })
             .margin({ left: GUTTER, right: GUTTER })
 
-          PlainSection({ label: 'WebDAV 上传' })
+          PlainSection({ label: 'WebDAV' })
           CardGroup({ radius: 18, stroke: true, content: (): void => { this.WebDavCard(); } })
             .margin({ left: GUTTER, right: GUTTER })
 
           if (this.statusMsg.length > 0 && this.preview === null) {
             FooterNote({ text: this.statusMsg })
           }
-          FooterNote({ text: '说明：当前仅本地导出/恢复；云同步与跨端 KDF 互通待后续。' })
+          FooterNote({ text: '说明：WebDAV 支持上传与快照下载恢复；跨端加密互通（KDF）待后续。' })
           PageSpacer()
         }
         .width('100%')
@@ -501,9 +574,26 @@ struct SettingBackupPage {
         desc: '与本地导出同一 .abin，PUT 到远程目录',
         iconName: 'folder',
         plateStyle: 'accent',
-        isLast: true,
+        isLast: false,
         onRowClick: (): void => { this.doUploadWebDav(); },
       })
+      CardRow({
+        label: this.davListBusy ? '正在读取…' : '列出远程快照',
+        desc: '读取远程目录中的 .abin 备份',
+        iconName: 'folder',
+        plateStyle: 'accent',
+        isLast: this.davSnapshots.length === 0,
+        onRowClick: (): void => { this.doListWebDav(); },
+      })
+      ForEach(this.davSnapshots, (item: WebDavRemoteFile, idx: number): void => {
+        CardRow({
+          label: item.name,
+          desc: this.formatSize(item.size).length > 0 ? this.formatSize(item.size) : '点击下载并预览恢复',
+          iconName: 'folder',
+          isLast: idx === this.davSnapshots.length - 1,
+          onRowClick: (): void => { this.doDownloadWebDav(item); },
+        })
+      }, (item: WebDavRemoteFile): string => item.name)
     }
     .width('100%')
   }

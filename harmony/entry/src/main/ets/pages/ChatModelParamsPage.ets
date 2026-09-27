@@ -17,7 +17,7 @@
 //   - 高级设置 tab 的 ProviderOverwriteSettings(:251-257)/内置工具 tab
 //     (:275-283)未移植(P1 已登),本页仅 customHeaders/customBodies 两节
 import {
-  BG, ERROR, INK, INK3, LINE, RAISED, TEXT_STYLES,
+  ACCENT, BG, ERROR, INK, INK3, LINE, RAISED, TEXT_STYLES,
 } from '../design/tokens.ets';
 import { PageTitleBar, SectionHeader, PaperSeparator, BtnFill, BtnGhost } from '../components/PageTemplate.ets';
 import { FONT_MONO, FONT_MONO_MEDIUM } from '../design/fonts.ets';
@@ -28,6 +28,14 @@ import type {
 import { loadProviders, saveProviders } from '@amber/chat-domain';
 import { getChatKvStore } from '../di/AppContainer.ets';
 
+
+// UA 伪装预设(iOS OpenAICompatUserAgents / Android SettingProviderModelSettingsForm 同源)
+const UA_PRESETS: string[][] = [
+  ['OpenCode', 'opencode/1.18.18'],
+  ['Claude Code', 'claude-cli/1.0.85'],
+  ['Cursor', 'Cursor/1.7.52'],
+  ['Cline', 'cline/3.18.0'],
+];
 
 interface RouterParams {
   providerId?: string;
@@ -83,6 +91,40 @@ struct ChatModelParamsPage {
   }
 
   // ===== Headers(:327-394) =====
+
+  // User-Agent 在 customHeaders 中的下标(大小写不敏感),-1 = 未设置
+  private uaIndex(): number {
+    for (let i = 0; i < this.headerNames.length; i++) {
+      if (this.headerNames[i].trim().toLowerCase() === 'user-agent') return i;
+    }
+    return -1;
+  }
+
+  private uaCurrent(): string {
+    const i: number = this.uaIndex();
+    return i >= 0 ? (this.headerValues[i] ?? '') : '';
+  }
+
+  // UA 预设 → 写入 User-Agent 头(已存在则覆盖值;草稿语义,确定后落库)
+  private applyUaPreset(value: string): void {
+    const i: number = this.uaIndex();
+    if (i >= 0) {
+      const names: string[] = [...this.headerNames];
+      const values: string[] = [...this.headerValues];
+      names[i] = 'User-Agent';
+      values[i] = value;
+      this.headerNames = names;
+      this.headerValues = values;
+    } else {
+      this.headerNames = [...this.headerNames, 'User-Agent'];
+      this.headerValues = [...this.headerValues, value];
+    }
+  }
+
+  private clearUa(): void {
+    const i: number = this.uaIndex();
+    if (i >= 0) this.removeHeader(i);
+  }
 
   private setHeaderName(i: number, v: string): void {
     const next: string[] = [...this.headerNames];
@@ -271,6 +313,42 @@ struct ChatModelParamsPage {
               .lineHeight(TEXT_STYLES.secondary.lineHeight).fontFamily(TEXT_STYLES.secondary.family)
               .fontColor(INK3).width('100%')
               .padding({ left: 16, right: 16, top: this.hasOverwrite ? 8 : 12, bottom: 8 })
+
+            // ── 请求伪装(UA 预设;iOS/Android 同源,写入下方自定义 Headers) ──
+            SectionHeader({ label: '请求伪装' })
+            Column() {
+              Text('User-Agent 预设(草稿语义,确定后生效)')
+                .fontSize(TEXT_STYLES.secondary.size)
+                .lineHeight(TEXT_STYLES.secondary.lineHeight).fontFamily(TEXT_STYLES.secondary.family)
+                .fontColor(INK3).width('100%')
+              Flex({ wrap: FlexWrap.Wrap }) {
+                ForEach(UA_PRESETS, (p: string[]): void => {
+                  Text(p[0])
+                    .fontSize(TEXT_STYLES.meta.size).fontWeight(FontWeight.Medium)
+                    .lineHeight(TEXT_STYLES.meta.lineHeight).fontFamily(FONT_MONO_MEDIUM)
+                    .fontColor(this.uaCurrent() === p[1] ? ACCENT : INK3)
+                    .padding({ left: 10, right: 10, top: 6, bottom: 6 })
+                    .backgroundColor(RAISED)
+                    .border({ width: 1, color: this.uaCurrent() === p[1] ? ACCENT : LINE, radius: 8 })
+                    .margin({ right: 8, top: 8 })
+                    .onClick((): void => { this.applyUaPreset(p[1]); })
+                }, (p: string[]): string => p[0])
+                if (this.uaIndex() >= 0) {
+                  Text('清除')
+                    .fontSize(TEXT_STYLES.meta.size).fontWeight(FontWeight.Medium)
+                    .lineHeight(TEXT_STYLES.meta.lineHeight).fontFamily(FONT_MONO_MEDIUM)
+                    .fontColor(ERROR)
+                    .padding({ left: 10, right: 10, top: 6, bottom: 6 })
+                    .backgroundColor(RAISED)
+                    .border({ width: 1, color: LINE, radius: 8 })
+                    .margin({ right: 8, top: 8 })
+                    .onClick((): void => { this.clearUa(); })
+                }
+              }
+              .width('100%')
+            }
+            .width('100%').alignItems(HorizontalAlign.Start)
+            .padding({ left: 16, right: 16, top: 12, bottom: 4 })
 
             // ── 自定义 Headers(:315-395) ──
             SectionHeader({ label: `自定义 Headers · ${this.headerNames.length}` })

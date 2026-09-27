@@ -77,6 +77,8 @@ export struct AgentMessageRow {
   // Markdown reveal 只在真实 live text delta 时启用，避免 one-shot 假流式。
   @Prop textDeltasLive: boolean = true;
   @Prop autoCloseThinking: boolean = true;
+  // 显示与字体设置:思考内容总开关(关闭时隐藏 reasoning 步骤)
+  @Prop showThinkingContent: boolean = true;
   // F16:显示设置消费(默认值 == 当前渲染行为,不改变既有外观)
   @Prop showAssistantBubble: boolean = false;
   @Prop showModelName: boolean = true;
@@ -84,6 +86,8 @@ export struct AgentMessageRow {
   @Prop fontSizeRatio: number = 1.0;
   @Prop codeBlockAutoCollapse: boolean = false;
   @Prop showLineNumbers: boolean = false;
+  // 聊天字体族(DisplaySetting.chatFontFamily 三选,传递 MarkdownText)
+  @Prop chatFontFamily: string = 'DEFAULT';
   // 同一 message id 可同时出现在已提交行与工具续跑预览中；预览使用独立键命名空间。
   @Prop streamKeyTag: string = '';
   onSwitch: (idx: number) => void = (_idx: number): void => {};
@@ -293,7 +297,9 @@ export struct AgentMessageRow {
     let reasoningCount: number = 0;
     let toolCount: number = 0;
     for (const step of steps) {
-      if (step.kind === 'reasoning') reasoningCount++;
+      if (step.kind === 'reasoning') {
+        if (this.showThinkingContent) reasoningCount++;
+      }
       else if (step.kind === 'tool') toolCount++;
     }
     if (reasoningCount > 0 && toolCount > 0) return `思考 ${reasoningCount} 段 · 工具 ${toolCount} 次`;
@@ -302,10 +308,20 @@ export struct AgentMessageRow {
     return '思考过程';
   }
 
+  // 思考内容开关关闭时:整块只剩 reasoning 则整块隐藏(工具步骤不受影响)
+  private hasVisibleThinkingSteps(block: MessagePartBlock): boolean {
+    if (this.showThinkingContent) return true;
+    const steps: ThinkingStep[] = (block as Record<string, Object>)['steps'] as ThinkingStep[];
+    for (const step of steps) {
+      if (step.kind !== 'reasoning') return true;
+    }
+    return false;
+  }
+
   @Builder
   private MessageBlocks(): void {
     ForEach(this.getBlocks(), (block: MessagePartBlock, bi: number): void => {
-      if (block.kind === 'thinking') {
+      if (block.kind === 'thinking' && this.hasVisibleThinkingSteps(block)) {
         Row() {
           Text(this.thinkingExpanded(bi) ? '▾' : '▸').fontSize(11).fontColor(INK3)
           Text(this.thinkingSummary(block.steps))
@@ -323,16 +339,18 @@ export struct AgentMessageRow {
         if (this.thinkingExpanded(bi)) {
           ForEach(block.steps, (step: ThinkingStep, si: number): void => {
             if (step.kind === 'reasoning') {
-              ChatMessageReasoning({
-                part: step.reasoning,
-                state: this.reasoningStateAt(`${bi}-${si}`),
-                loading: this.reasoningLoading(step.reasoning),
-                autoCloseThinking: this.autoCloseThinking,
-                onToggle: (): void => {
-                  this.toggleReasoning(`${bi}-${si}`, this.reasoningLoading(step.reasoning));
-                },
-                onAutoCollapse: (): void => { this.autoCollapseReasoning(`${bi}-${si}`); },
-              })
+              if (this.showThinkingContent) {
+                ChatMessageReasoning({
+                  part: step.reasoning,
+                  state: this.reasoningStateAt(`${bi}-${si}`),
+                  loading: this.reasoningLoading(step.reasoning),
+                  autoCloseThinking: this.autoCloseThinking,
+                  onToggle: (): void => {
+                    this.toggleReasoning(`${bi}-${si}`, this.reasoningLoading(step.reasoning));
+                  },
+                  onAutoCollapse: (): void => { this.autoCollapseReasoning(`${bi}-${si}`); },
+                })
+              }
             } else if (step.kind === 'tool') {
               if (step.tool.toolName === ASK_USER_TOOL_NAME) {
                 ChatMessageAskUserStep({
@@ -376,6 +394,7 @@ export struct AgentMessageRow {
                 fontSize: this.bodyFontSize(),
                 fontColor: USER_INK,
                 fillWidth: false,
+                chatFontFamily: this.chatFontFamily,
                 codeBlockAutoCollapse: this.codeBlockAutoCollapse,
                 showLineNumbers: this.showLineNumbers,
                 streamKey: `${this.streamKeyTag}${this.message.id}#${block.index}`,
@@ -395,6 +414,7 @@ export struct AgentMessageRow {
                 fontColor: INK,
                 streaming: this.streaming && this.textDeltasLive &&
                   this.isLastTextBlock(this.getBlocks(), bi),
+                chatFontFamily: this.chatFontFamily,
                 codeBlockAutoCollapse: this.codeBlockAutoCollapse,
                 showLineNumbers: this.showLineNumbers,
                 streamKey: `${this.streamKeyTag}${this.message.id}#${block.index}`,

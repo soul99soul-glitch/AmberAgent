@@ -10,12 +10,12 @@
 //   逻辑(四 folder 列表/删除 DB+磁盘/孤立文件清理/登记库错误态)零改动。
 
 import { promptAction } from '@kit.ArkUI';
-import type { FilesRepository, ManagedFileEntity } from '@amber/chat-domain';
+import type { FilesRepository, ManagedFileEntity, Conversation, ConversationSummary } from '@amber/chat-domain';
 import {
   getFilesRepository, getDeleteChatFilesDeps, MANAGED_FILE_FOLDERS,
-  scanManagedOrphans, deleteManagedOrphans, OrphanScanResult,
+  scanManagedOrphans, deleteManagedOrphans, OrphanScanResult, cleanupDeletedConversation,
 } from '../platform_impl/ManagedFileStore.ets';
-import { getChatRepository } from '../di/AppContainer.ets';
+import { getChatRepository, getChatKvStore } from '../di/AppContainer.ets';
 import {
   ACCENT, BG, ERROR, INK, INK3, LINE, accentSoftBg, lineHeightForSize,
 } from '../design/tokens.ets';
@@ -23,7 +23,7 @@ import {
   FONT_MONO_MEDIUM, FONT_SANS_MEDIUM, FONT_SANS_SEMIBOLD, FONT_SANS_BOLD,
 } from '../design/fonts.ets';
 import {
-  CenteredTitleBar, PlainSection, CardGroup, PageSpacer,
+  CenteredTitleBar, PlainSection, CardGroup, CardRow, PageSpacer,
 } from '../components/PageTemplate.ets';
 import { Icon } from '../components/ui/Icon.ets';
 
@@ -42,6 +42,8 @@ struct SettingFilesPage {
   // 非空 = 登记库读取/解析失败:禁用破坏性清理,并展示原因(不再伪装成「暂无托管文件」)
   @State registryError: string = '';
   @State pendingOrphans: string[] = [];
+  // 对话清理(对齐双端「对话存储」:30 天前未置顶,置顶豁免)
+  @State convCleaning: boolean = false;
   private repo: FilesRepository = getFilesRepository();
 
   aboutToAppear(): void {
@@ -167,6 +169,68 @@ struct SettingFilesPage {
     });
   }
 
+  // 30 天前未置顶对话清理:先列目标弹确认,再逐个删除并级联清理托管文件
+  private previewConversationCleanup(): void {
+    if (this.convCleaning) return;
+    const cutoff: number = Date.now() - 30 * 24 * 60 * 60 * 1000;
+    getChatRepository().list().then((list: ConversationSummary[]): void => {
+      const targets: ConversationSummary[] = list.filter((s: ConversationSummary): boolean =>
+        !s.isPinned && new Date(s.updateAt).getTime() < cutoff);
+      if (targets.length === 0) {
+        promptAction.showToast({ message: '没有可清理的对话', duration: 1800 });
+        return;
+      }
+      AlertDialog.show({
+        title: '清理旧对话',
+        message: `将永久删除 ${targets.length} 个 30 天前未置顶的对话(不可恢复),置顶对话不受影响。`,
+        primaryButton: { value: '取消', action: (): void => {} },
+        secondaryButton: {
+          value: '删除',
+          fontColor: ERROR,
+          action: (): void => { this.confirmConversationCleanup(targets); },
+        },
+      });
+    }).catch((e: Error): void => {
+      promptAction.showToast({ message: `读取失败:${e.message}`, duration: 2000 });
+    });
+  }
+
+  private confirmConversationCleanup(targets: ConversationSummary[]): void {
+    this.convCleaning = true;
+    const repo = getChatRepository();
+    let removed: number = 0;
+    const step = (i: number): void => {
+      if (i >= targets.length) {
+        this.convCleaning = false;
+        const msg: string = removed === targets.length
+          ? `已清理 ${removed} 个对话`
+          : `已清理 ${removed}/${targets.length} 个对话,部分删除失败`;
+        promptAction.showToast({ message: msg, duration: 2200 });
+        return;
+      }
+      repo.getById(targets[i].id).then((conv: Conversation | null): Promise<void> => {
+        if (conv === null) return Promise.resolve();
+        return repo.delete(conv.id).then((): Promise<void> =>
+          cleanupDeletedConversation(conv, repo, getChatKvStore()));
+      }).then((): void => {
+        removed++;
+        step(i + 1);
+      }).catch((): void => { step(i + 1); });
+    };
+    step(0);
+  }
+
+  @Builder
+  conversationCleanContent(): void {
+    CardRow({
+      label: this.convCleaning ? '正在清理对话…' : '清理 30 天前未置顶的对话',
+      desc: '不可恢复;置顶对话不受影响',
+      iconName: 'trash',
+      isLast: true,
+      onRowClick: (): void => { this.previewConversationCleanup(); },
+    })
+  }
+
   // ===== UI(iOS 二级页骨架) =====
 
   // 统计卡(IMG_1994:accent 图标座 + 大数字 + 标签;鸿蒙仅有文件数,单卡呈现)
@@ -290,6 +354,13 @@ struct SettingFilesPage {
         actionText: this.cleaning ? '清理中…' : (this.canClean() ? '清理' : ''),
         onAction: (): void => { this.cleanOrphans(); },
       })
+
+      // ── 对话清理(始终可见,不受文件登记库状态影响)──
+      PlainSection({ label: '对话' })
+      Column() {
+        CardGroup({ radius: 18, stroke: true, content: (): void => { this.conversationCleanContent(); } })
+      }
+      .width('100%').padding({ left: 16, right: 16 })
 
       if (this.loaded && this.registryError.length > 0) {
         // 登记库错误态:禁用破坏性清理,展示原因(逻辑零改动,仅去 Android '// ' 样式)

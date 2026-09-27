@@ -6,13 +6,18 @@ import { loadDisplaySetting, saveDisplaySetting, makeDisplaySetting } from '@amb
 import type { DisplaySetting } from '@amber/chat-domain';
 import { getChatKvStore } from '../di/AppContainer.ets';
 import {
-  CenteredTitleBar, PlainSection, CardGroup, CardRow, CardToggleRow, Seg,
+  CenteredTitleBar, PlainSection, CardGroup, CardToggleRow, Seg,
 } from '../components/PageTemplate.ets';
 import { INK, INK3, BG, ACCENT, GUTTER, TEXT_STYLES } from '../design/tokens.ets';
 import { FONT_MONO_MEDIUM, FONT_SANS_MEDIUM } from '../design/fonts.ets';
 
 const FONT_RATIO_OPTIONS: string[] = ['85%', '100%', '115%', '130%'];
 const ratios: number[] = [0.85, 1.0, 1.15, 1.3];
+const PASTE_THRESHOLD_OPTIONS: string[] = ['500', '1000', '2000', '5000'];
+const PASTE_THRESHOLDS: number[] = [500, 1000, 2000, 5000];
+// 聊天字体族(DisplaySetting.chatFontFamily;Android 默认/衬线/等宽三档)
+const FONT_FAMILY_OPTIONS: string[] = ['默认', '衬线', '等宽'];
+const FONT_FAMILY_VALUES: string[] = ['DEFAULT', 'SERIF', 'MONO'];
 
 @Entry
 @Component
@@ -80,6 +85,16 @@ struct SettingDisplayPage {
     return closest;
   }
 
+  private pasteThresholdIndex(): number {
+    const idx: number = PASTE_THRESHOLDS.indexOf(this.setting.pasteLongTextThreshold);
+    return idx >= 0 ? idx : 1;
+  }
+
+  private fontFamilyIndex(): number {
+    const idx: number = FONT_FAMILY_VALUES.indexOf(this.setting.chatFontFamily);
+    return idx >= 0 ? idx : 0;
+  }
+
   // ── 卡片内容(@Builder:组件构造必须在 builder 上下文,
   //    裸 lambda 直接 new 组件会炸 "class constructor cannot called without 'new'")──
 
@@ -110,6 +125,23 @@ struct SettingDisplayPage {
         onSelect: (idx: number): void => { this.update({ fontSizeRatio: ratios[idx] }); },
       })
         .margin({ top: 12 })
+      Row() {
+        Text('字体族')
+          .fontSize(16)
+          .fontWeight(FontWeight.Medium)
+          .lineHeight(TEXT_STYLES.body.lineHeight)
+          .fontFamily(FONT_SANS_MEDIUM)
+          .fontColor(INK)
+      }
+      .width('100%')
+      .alignItems(VerticalAlign.Center)
+      .margin({ top: 16 })
+      Seg({
+        options: FONT_FAMILY_OPTIONS,
+        selected: this.fontFamilyIndex(),
+        onSelect: (idx: number): void => { this.update({ chatFontFamily: FONT_FAMILY_VALUES[idx] }); },
+      })
+        .margin({ top: 12 })
     }
     .width('100%')
     .padding({ left: 14, right: 14, top: 12, bottom: 12 })
@@ -134,6 +166,16 @@ struct SettingDisplayPage {
       onToggle: (): void => { this.update({ showModelIcon: !this.setting.showModelIcon }); },
     })
     CardToggleRow({
+      label: '思考内容', desc: '在消息中显示模型的思考过程',
+      checked: this.setting.showThinkingContent,
+      onToggle: (): void => { this.update({ showThinkingContent: !this.setting.showThinkingContent }); },
+    })
+    CardToggleRow({
+      label: '自动收起思考', desc: '生成完成后自动折叠思考过程',
+      checked: this.setting.autoCloseThinking,
+      onToggle: (): void => { this.update({ autoCloseThinking: !this.setting.autoCloseThinking }); },
+    })
+    CardToggleRow({
       label: '自动滚动', desc: '新消息到达时自动滚动到底部',
       checked: this.setting.enableAutoScroll, isLast: true,
       onToggle: (): void => { this.update({ enableAutoScroll: !this.setting.enableAutoScroll }); },
@@ -142,16 +184,46 @@ struct SettingDisplayPage {
 
   @Builder
   InputCard(): void {
-    // F16:回车发送 / 长文本粘贴为文件 —— 鸿蒙输入层无对应管线,
-    //   显式标记「未支持」且不可编辑(不写盘、不制造已保存的错觉)。
-    CardRow({
-      label: '回车发送', desc: '当前版本未支持,输入层暂无此行为开关',
-      valueText: '未支持', showChevron: false,
+    CardToggleRow({
+      label: '回车发送', desc: '软键盘回车键直接发送消息',
+      checked: this.setting.sendOnEnter,
+      onToggle: (): void => { this.update({ sendOnEnter: !this.setting.sendOnEnter }); },
     })
-    CardRow({
-      label: '长文本粘贴为文件', desc: '当前版本未支持,输入层暂无此行为开关',
-      valueText: '未支持', showChevron: false, isLast: true,
+    CardToggleRow({
+      label: '长文本粘贴为文件', desc: '超过阈值的粘贴内容转为文件附件',
+      checked: this.setting.pasteLongTextAsFile,
+      isLast: !this.setting.pasteLongTextAsFile,
+      onToggle: (): void => { this.update({ pasteLongTextAsFile: !this.setting.pasteLongTextAsFile }); },
     })
+    if (this.setting.pasteLongTextAsFile) {
+      Column() {
+        Row() {
+          Text('粘贴阈值')
+            .fontSize(16)
+            .fontWeight(FontWeight.Medium)
+            .lineHeight(TEXT_STYLES.body.lineHeight)
+            .fontFamily(FONT_SANS_MEDIUM)
+            .fontColor(INK)
+          Blank()
+          Text(`${this.setting.pasteLongTextThreshold} 字符`)
+            .fontSize(TEXT_STYLES.meta.size)
+            .fontWeight(TEXT_STYLES.meta.weight)
+            .lineHeight(TEXT_STYLES.meta.lineHeight)
+            .fontFamily(FONT_MONO_MEDIUM)
+            .fontColor(INK3)
+        }
+        .width('100%')
+        .alignItems(VerticalAlign.Center)
+        Seg({
+          options: PASTE_THRESHOLD_OPTIONS,
+          selected: this.pasteThresholdIndex(),
+          onSelect: (idx: number): void => { this.update({ pasteLongTextThreshold: PASTE_THRESHOLDS[idx] }); },
+        })
+          .margin({ top: 12 })
+      }
+      .width('100%')
+      .padding({ left: 14, right: 14, top: 12, bottom: 12 })
+    }
   }
 
   @Builder
