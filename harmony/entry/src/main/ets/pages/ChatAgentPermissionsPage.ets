@@ -1,13 +1,17 @@
 // ChatAgentPermissionsPage — 权限与批准设置面(D-104)
 // 批准策略与实验性工具执行开关。
-import { ACCENT, BG, INK3, TEXT_STYLES } from '../design/tokens.ets';
-import { PageTitleBar, SectionHeader, ToggleRow, PageSpacer } from '../components/PageTemplate.ets';
+// 2026-09-27 二级页 iOS 对齐(基准 IMG_1988 风格):仅换视觉骨架
+// (CenteredTitleBar/PlainSection/CardGroup r18+描边/CardToggleRow),逻辑零改动。
+import { ACCENT, BG, INK3, GUTTER, TEXT_STYLES } from '../design/tokens.ets';
+import {
+  CenteredTitleBar, PlainSection, CardGroup, CardToggleRow, PageSpacer,
+} from '../components/PageTemplate.ets';
 import {
   loadAgentRuntimeSnapshot, updateAgentRuntimePermissions,
 } from '../platform_impl/AgentRuntimePrefs.ets';
 import type { AgentRuntimeSnapshot } from '../platform_impl/AgentRuntimePrefs.ets';
 import { getChatKvStore } from '../di/AppContainer.ets';
-import { FONT_MONO } from '../design/fonts.ets';
+import { FONT_SANS_MEDIUM } from '../design/fonts.ets';
 
 @Entry
 @Component
@@ -79,9 +83,41 @@ struct ChatAgentPermissionsPage {
       });
   }
 
+  // ── 卡片内容(@Builder:组件构造必须在 builder 上下文,铁律 4b)──
+
+  // 「批准策略」组:全局自动批准 + 高风险自动批准(确认弹窗逻辑原样)
+  @Builder
+  ApprovalGroup(): void {
+    CardToggleRow({
+      label: '全局自动批准',
+      desc: '自动批准常规工具调用。和高风险自动批准同时开启时，除需要你回答的 ask_user 外，审批工具会无人值守执行。',
+      checked: this.autoApproveAll,
+      onToggle: (): void => { this.setAutoApproveAll(!this.autoApproveAll); },
+    })
+    CardToggleRow({
+      label: '高风险自动批准',
+      desc: '配合全局自动批准，允许短信、拨号、文件写入、终端/屏幕动作、SubAgent 内部工具等审批工具无人值守执行。',
+      checked: this.autoApproveHighRisk,
+      isLast: true,
+      onToggle: (): void => { this.onHighRiskToggle(!this.autoApproveHighRisk); },
+    })
+  }
+
+  // 「实验」组:提前执行只读工具
+  @Builder
+  ExperimentalGroup(): void {
+    CardToggleRow({
+      label: '实验：提前执行只读工具',
+      desc: '仅对完整闭合且无需审批的只读工具生效，默认关闭。',
+      checked: this.speculativeEnabled,
+      isLast: true,
+      onToggle: (): void => { this.setSpeculative(!this.speculativeEnabled); },
+    })
+  }
+
   build(): void {
     Column() {
-      PageTitleBar({ title: '权限策略' })
+      CenteredTitleBar({ title: '权限与批准', subtitle: '管理 Agent 使用文件、记忆和网页会话前是否需要确认' })
       if (!this.loaded) {
         Text('加载中…')
           .fontSize(TEXT_STYLES.body.size)
@@ -94,37 +130,20 @@ struct ChatAgentPermissionsPage {
         Scroll() {
           Column() {
             if (this.loadError) {
-              Text('// 运行时配置加载失败，以下内容未读取真实配置')
-                .fontSize(TEXT_STYLES.meta.size)
-                .fontWeight(TEXT_STYLES.meta.weight)
-                .lineHeight(TEXT_STYLES.meta.lineHeight)
-                .fontFamily(FONT_MONO)
+              Text('运行时配置加载失败，以下内容未读取真实配置')
+                .fontSize(12)
+                .lineHeight(TEXT_STYLES.secondary.lineHeight)
+                .fontFamily(FONT_SANS_MEDIUM)
                 .fontColor(INK3)
                 .width('100%')
                 .padding({ left: 16, right: 16, top: 12, bottom: 4 })
             }
-            SectionHeader({ label: '批准策略' })
-            ToggleRow({
-              label: '全局自动批准',
-              desc: '自动批准常规工具调用。和高风险自动批准同时开启时，除需要你回答的 ask_user 外，审批工具会无人值守执行。',
-              checked: this.autoApproveAll,
-              onToggle: (): void => { this.setAutoApproveAll(!this.autoApproveAll); },
-            })
-            ToggleRow({
-              label: '高风险自动批准',
-              desc: '配合全局自动批准，允许短信、拨号、文件写入、终端/屏幕动作、SubAgent 内部工具等审批工具无人值守执行。',
-              checked: this.autoApproveHighRisk,
-              isLast: true,
-              onToggle: (): void => { this.onHighRiskToggle(!this.autoApproveHighRisk); },
-            })
-            SectionHeader({ label: '实验' })
-            ToggleRow({
-              label: '实验：提前执行只读工具',
-              desc: '仅对完整闭合且无需审批的只读工具生效，默认关闭。',
-              checked: this.speculativeEnabled,
-              isLast: true,
-              onToggle: (): void => { this.setSpeculative(!this.speculativeEnabled); },
-            })
+            PlainSection({ label: '批准策略' })
+            CardGroup({ radius: 18, stroke: true, content: (): void => { this.ApprovalGroup(); } })
+              .margin({ left: GUTTER, right: GUTTER })
+            PlainSection({ label: '实验' })
+            CardGroup({ radius: 18, stroke: true, content: (): void => { this.ExperimentalGroup(); } })
+              .margin({ left: GUTTER, right: GUTTER })
             PageSpacer()
           }
           .width('100%')
