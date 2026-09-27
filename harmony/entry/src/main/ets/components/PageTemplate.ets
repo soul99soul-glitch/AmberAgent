@@ -238,7 +238,7 @@ export struct BtnGhost {
   }
 }
 
-// youhua .seg:LINE 描边一体式分段控件(r8,段 minH44,激活 SURFACE2 底 + INK)
+// youhua .seg 分段控件(iOS segmented 化:灰轨 r10 无外框,选中白 pill r8 内缩 2)
 @Component
 export struct Seg {
   @Prop options: string[] = [];
@@ -257,15 +257,17 @@ export struct Seg {
           .maxLines(1)
           .textOverflow({ overflow: TextOverflow.Ellipsis })
           .layoutWeight(1)
-          .constraintSize({ minHeight: 44 })
-          .padding({ top: 10, bottom: 10, left: 8, right: 8 })
-          .backgroundColor(this.selected === idx ? SURFACE2 : Color.Transparent)
+          .constraintSize({ minHeight: 40 })
+          .padding({ top: 9, bottom: 9, left: 8, right: 8 })
+          .borderRadius(8)
+          .backgroundColor(this.selected === idx ? RAISED : Color.Transparent)
+          .margin(2)
           .onClick((): void => { this.onSelect(idx); })
       }, (opt: string, idx: number): string => `seg-${idx}-${opt}`)
     }
     .width('100%')
-    .border({ width: 1, color: LINE })
-    .borderRadius(8)
+    .borderRadius(10)
+    .backgroundColor(SURFACE2)
     .clip(true)
   }
 }
@@ -327,7 +329,7 @@ export struct NavRow {
             .maxLines(1)
             .textOverflow({ overflow: TextOverflow.Ellipsis })
             .textAlign(TextAlign.End)
-            .margin({ right: 8, left: 8 })
+            .margin({ right: this.showChevron ? 8 : 0, left: 8 })
         } else if (this.linkText.length > 0) {
           Text(this.linkText)
             .fontSize(META)
@@ -508,9 +510,9 @@ export struct CenteredTitleBar {
       // 整宽居中标题(不被左右钮挤偏)
       Column() {
         Text(this.title)
-          .fontSize(TEXT_STYLES.screenTitle.size)
+          .fontSize(22)
           .fontWeight(FontWeight.Bold)
-          .lineHeight(TEXT_STYLES.screenTitle.lineHeight)
+          .lineHeight(lineHeightForSize(22))
           .fontFamily(FONT_SANS_BOLD)
           .fontColor(INK)
           .maxLines(1)

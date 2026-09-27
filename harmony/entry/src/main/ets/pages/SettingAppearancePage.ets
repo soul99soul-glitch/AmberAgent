@@ -1,9 +1,9 @@
-// SettingAppearancePage — 外观(iOS AppearanceSettingsView 对位)
+// SettingAppearancePage — 外观(iOS AppearanceSettingsView 对位,iOS 二级页骨架)
 // 颜色模式(浅色/深色/跟随系统)+ 强调色五选一。自设置主页迁入。
 import {
   BG, INK, ACCENT, ACCENT_OPTIONS, setAccentColor, applyTheme, ERROR, TEXT_STYLES,
 } from '../design/tokens.ets';
-import { PageTitleBar, SectionHeader, PageSpacer, Seg } from '../components/PageTemplate.ets';
+import { CenteredTitleBar, PlainSection, PageSpacer, Seg } from '../components/PageTemplate.ets';
 import { getChatKvStore } from '../di/AppContainer.ets';
 import { applyWindowTheme } from '../entryability/EntryAbility.ets';
 import type { DisplaySetting } from '@amber/chat-domain';
@@ -89,18 +89,22 @@ struct SettingAppearancePage {
 
   build(): void {
     Column() {
-      PageTitleBar({ title: '外观' })
+      CenteredTitleBar({ title: '外观' })
       Scroll() {
         Column() {
-          SectionHeader({ label: '颜色模式' })
-          Seg({
-            options: THEME_MODE_OPTIONS,
-            selected: this.themeModeIndex(),
-            onSelect: (idx: number): void => {
-              this.setTheme(idx === 0 ? 'light' : idx === 1 ? 'dark' : 'system')
-                .catch((): void => {});
-            },
-          }).margin({ top: 12 })
+          PlainSection({ label: '外观模式' })
+          Column() {
+            Seg({
+              options: THEME_MODE_OPTIONS,
+              selected: this.themeModeIndex(),
+              onSelect: (idx: number): void => {
+                this.setTheme(idx === 0 ? 'light' : idx === 1 ? 'dark' : 'system')
+                  .catch((): void => {});
+              },
+            })
+          }
+          .width('100%')
+          .padding({ left: 16, right: 16 })
           if (this.themeError.length > 0) {
             // R26:失败可见反馈(与设置页错误条同款式)
             Text(this.themeError)
@@ -111,9 +115,10 @@ struct SettingAppearancePage {
               .fontColor(ERROR)
               .width('100%').maxLines(2)
               .textOverflow({ overflow: TextOverflow.Ellipsis })
+              .padding({ left: 16, right: 16 })
               .margin({ top: 8 })
           }
-          SectionHeader({ label: '强调色' })
+          PlainSection({ label: '强调色' })
           Row() {
             ForEach(ACCENT_OPTIONS, (color: string, idx: number): void => {
               Stack({ alignContent: Alignment.Center }) {
@@ -136,11 +141,10 @@ struct SettingAppearancePage {
             }, (color: string, idx: number): string => `swatch-${idx}-${color}`)
           }
           .width('100%')
-          .padding({ left: 0, top: 10, bottom: 4 })
+          .padding({ left: 16, right: 16, top: 10, bottom: 4 })
           PageSpacer()
         }
         .width('100%')
-        .padding({ left: 18, right: 18 })
       }
       .align(Alignment.TopStart)
       .layoutWeight(1)

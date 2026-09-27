@@ -1,13 +1,15 @@
-// SettingDisplayPage — 显示设置页(G3-S2)
-// 高频 DisplaySetting 字段的纸面列表编辑。
+// SettingDisplayPage — 显示与字体设置页(G3-S2)
+// 高频 DisplaySetting 字段的卡片分组编辑。
+// 2026-09-27 二级页 iOS 对齐(基准 IMG_1984):仅换视觉骨架
+// (CenteredTitleBar/PlainSection/CardGroup r18+描边/CardRow/CardToggleRow),逻辑零改动。
 import { loadDisplaySetting, saveDisplaySetting, makeDisplaySetting } from '@amber/chat-domain';
 import type { DisplaySetting } from '@amber/chat-domain';
 import { getChatKvStore } from '../di/AppContainer.ets';
 import {
-  PageTitleBar, SectionHeader, ToggleRow, NavRow, Seg,
+  CenteredTitleBar, PlainSection, CardGroup, CardRow, CardToggleRow, Seg,
 } from '../components/PageTemplate.ets';
-import { INK3, BG, ACCENT, GUTTER, TEXT_STYLES } from '../design/tokens.ets';
-import { FONT_MONO_MEDIUM } from '../design/fonts.ets';
+import { INK, INK3, BG, ACCENT, GUTTER, TEXT_STYLES } from '../design/tokens.ets';
+import { FONT_MONO_MEDIUM, FONT_SANS_MEDIUM } from '../design/fonts.ets';
 
 const FONT_RATIO_OPTIONS: string[] = ['85%', '100%', '115%', '130%'];
 const ratios: number[] = [0.85, 1.0, 1.15, 1.3];
@@ -78,9 +80,97 @@ struct SettingDisplayPage {
     return closest;
   }
 
+  // ── 卡片内容(@Builder:组件构造必须在 builder 上下文,
+  //    裸 lambda 直接 new 组件会炸 "class constructor cannot called without 'new'")──
+
+  // 字体组:字号比例 Seg(原有实现装入卡片容器,iOS 同位为聊天字体大小卡)
+  @Builder
+  FontCard(): void {
+    Column() {
+      Row() {
+        Text('字号比例')
+          .fontSize(16)
+          .fontWeight(FontWeight.Medium)
+          .lineHeight(TEXT_STYLES.body.lineHeight)
+          .fontFamily(FONT_SANS_MEDIUM)
+          .fontColor(INK)
+        Blank()
+        Text(`${Math.round(this.setting.fontSizeRatio * 100)}%`)
+          .fontSize(TEXT_STYLES.meta.size)
+          .fontWeight(TEXT_STYLES.meta.weight)
+          .lineHeight(TEXT_STYLES.meta.lineHeight)
+          .fontFamily(FONT_MONO_MEDIUM)
+          .fontColor(INK3)
+      }
+      .width('100%')
+      .alignItems(VerticalAlign.Center)
+      Seg({
+        options: FONT_RATIO_OPTIONS,
+        selected: this.fontSizeRatioIndex(),
+        onSelect: (idx: number): void => { this.update({ fontSizeRatio: ratios[idx] }); },
+      })
+        .margin({ top: 12 })
+    }
+    .width('100%')
+    .padding({ left: 14, right: 14, top: 12, bottom: 12 })
+  }
+
+  @Builder
+  MessageDisplayCard(): void {
+    CardToggleRow({
+      label: '助手气泡', desc: '为助手消息显示气泡背景',
+      checked: this.setting.showAssistantBubble,
+      onToggle: (): void => { this.update({ showAssistantBubble: !this.setting.showAssistantBubble }); },
+    })
+    CardToggleRow({
+      label: '显示模型名', desc: '在消息头部显示模型名称',
+      checked: this.setting.showModelName,
+      onToggle: (): void => { this.update({ showModelName: !this.setting.showModelName }); },
+    })
+    CardToggleRow({
+      // F16:原「显示用户头像」错绑 showModelIcon;该字段实际控制模型图标
+      label: '显示模型图标', desc: '在助手消息头部显示模型首字母标识',
+      checked: this.setting.showModelIcon,
+      onToggle: (): void => { this.update({ showModelIcon: !this.setting.showModelIcon }); },
+    })
+    CardToggleRow({
+      label: '自动滚动', desc: '新消息到达时自动滚动到底部',
+      checked: this.setting.enableAutoScroll, isLast: true,
+      onToggle: (): void => { this.update({ enableAutoScroll: !this.setting.enableAutoScroll }); },
+    })
+  }
+
+  @Builder
+  InputCard(): void {
+    // F16:回车发送 / 长文本粘贴为文件 —— 鸿蒙输入层无对应管线,
+    //   显式标记「未支持」且不可编辑(不写盘、不制造已保存的错觉)。
+    CardRow({
+      label: '回车发送', desc: '当前版本未支持,输入层暂无此行为开关',
+      valueText: '未支持', showChevron: false,
+    })
+    CardRow({
+      label: '长文本粘贴为文件', desc: '当前版本未支持,输入层暂无此行为开关',
+      valueText: '未支持', showChevron: false, isLast: true,
+    })
+  }
+
+  @Builder
+  CodeBlockCard(): void {
+    CardToggleRow({
+      label: '自动折叠长代码', desc: '超过 10 行的代码块自动折叠',
+      checked: this.setting.codeBlockAutoCollapse,
+      onToggle: (): void => { this.update({ codeBlockAutoCollapse: !this.setting.codeBlockAutoCollapse }); },
+    })
+    CardToggleRow({
+      label: '显示行号', desc: '在代码块中显示行号',
+      checked: this.setting.showLineNumbers, isLast: true,
+      onToggle: (): void => { this.update({ showLineNumbers: !this.setting.showLineNumbers }); },
+    })
+  }
+
   build(): void {
     Column() {
-      PageTitleBar({ title: '显示设置' })
+      CenteredTitleBar({ title: '显示与字体' })
       if (!this.loaded) {
         Text('加载中…')
           .fontSize(TEXT_STYLES.body.size)
@@ -92,80 +182,29 @@ struct SettingDisplayPage {
       } else {
         Scroll() {
           Column() {
-            SectionHeader({ label: '消息显示' })
-            ToggleRow({
-              label: '助手气泡', desc: '为助手消息显示气泡背景',
-              checked: this.setting.showAssistantBubble,
-              onToggle: (): void => { this.update({ showAssistantBubble: !this.setting.showAssistantBubble }); },
-            })
-            ToggleRow({
-              label: '显示模型名', desc: '在消息头部显示模型名称',
-              checked: this.setting.showModelName,
-              onToggle: (): void => { this.update({ showModelName: !this.setting.showModelName }); },
-            })
-            ToggleRow({
-              // F16:原「显示用户头像」错绑 showModelIcon;该字段实际控制模型图标
-              label: '显示模型图标', desc: '在助手消息头部显示模型首字母标识',
-              checked: this.setting.showModelIcon,
-              onToggle: (): void => { this.update({ showModelIcon: !this.setting.showModelIcon }); },
-            })
-            ToggleRow({
-              label: '自动滚动', desc: '新消息到达时自动滚动到底部',
-              checked: this.setting.enableAutoScroll, isLast: true,
-              onToggle: (): void => { this.update({ enableAutoScroll: !this.setting.enableAutoScroll }); },
-            })
+            // ── 字体(对齐 iOS「字体」组)──
+            PlainSection({ label: '字体' })
+            CardGroup({ radius: 18, stroke: true, content: (): void => { this.FontCard(); } })
+              .margin({ left: GUTTER, right: GUTTER })
 
-            SectionHeader({ label: '输入' })
-            // F16:回车发送 / 长文本粘贴为文件 —— 鸿蒙输入层无对应管线,
-            //   显式标记「未支持」且不可编辑(不写盘、不制造已保存的错觉)。
-            NavRow({
-              label: '回车发送', desc: '当前版本未支持,输入层暂无此行为开关',
-              valueText: '未支持', showChevron: false,
-            })
-            NavRow({
-              label: '长文本粘贴为文件', desc: '当前版本未支持,输入层暂无此行为开关',
-              valueText: '未支持', showChevron: false, isLast: true,
-            })
+            // ── 消息显示 ──
+            PlainSection({ label: '消息显示' })
+            CardGroup({ radius: 18, stroke: true, content: (): void => { this.MessageDisplayCard(); } })
+              .margin({ left: GUTTER, right: GUTTER })
 
-            SectionHeader({ label: '代码块' })
-            ToggleRow({
-              label: '自动折叠长代码', desc: '超过 10 行的代码块自动折叠',
-              checked: this.setting.codeBlockAutoCollapse,
-              onToggle: (): void => { this.update({ codeBlockAutoCollapse: !this.setting.codeBlockAutoCollapse }); },
-            })
-            ToggleRow({
-              label: '显示行号', desc: '在代码块中显示行号',
-              checked: this.setting.showLineNumbers, isLast: true,
-              onToggle: (): void => { this.update({ showLineNumbers: !this.setting.showLineNumbers }); },
-            })
+            // ── 输入 ──
+            PlainSection({ label: '输入' })
+            CardGroup({ radius: 18, stroke: true, content: (): void => { this.InputCard(); } })
+              .margin({ left: GUTTER, right: GUTTER })
 
-            SectionHeader({ label: '字号' })
-            Text('字号比例')
-              .fontSize(TEXT_STYLES.body.size)
-              .fontWeight(600)
-              .lineHeight(TEXT_STYLES.body.lineHeight)
-              .fontFamily(TEXT_STYLES.body.family)
-              .fontColor(INK3)
-              .margin({ left: 16, bottom: 8 })
-              .width('100%')
-            Seg({
-              options: FONT_RATIO_OPTIONS,
-              selected: this.fontSizeRatioIndex(),
-              onSelect: (idx: number): void => { this.update({ fontSizeRatio: ratios[idx] }); },
-            })
-            Text(`${Math.round(this.setting.fontSizeRatio * 100)}%`)
-              .fontSize(TEXT_STYLES.meta.size)
-              .fontWeight(TEXT_STYLES.meta.weight)
-              .lineHeight(TEXT_STYLES.meta.lineHeight)
-              .fontFamily(FONT_MONO_MEDIUM)
-              .fontColor(INK3)
-              .width('100%')
-              .textAlign(TextAlign.End)
-              .margin({ top: 8, right: 16 })
+            // ── 代码块 ──
+            PlainSection({ label: '代码块' })
+            CardGroup({ radius: 18, stroke: true, content: (): void => { this.CodeBlockCard(); } })
+              .margin({ left: GUTTER, right: GUTTER })
+
             Column() {}.height(40)
           }
           .width('100%')
-          .padding({ left: GUTTER, right: GUTTER })
         }
         .align(Alignment.TopStart)
         .layoutWeight(1)
