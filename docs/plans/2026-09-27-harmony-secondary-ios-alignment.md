@@ -1,5 +1,9 @@
 # 鸿蒙二级设置页 iOS 对齐计划(2026-09-27)
 
+> **状态:全部完成(2026-09-27)**。Phase 0 基建 `7fbf1a5ba`;P1 `712ad1648`;P2 `2ed9a8c2b`;P3 `a6daa4c59`;
+> P4 `43d7f321c`;P5 `f1209fd37`;P6 `54fbe4b3c`;P7 `ea91c3d60`;P8 `19c96b92d`。
+> 22 个二级页全部切 iOS 骨架,逻辑零改动;每 Phase 经构建+真机截图+审查子代理回路。
+
 基准:12 张 iOS 截图(/Users/arquiel/Downloads/Amber 截图/IMG_1983–1994)+ iOS 仓库组件规格
 (amberagent-ios PlaceholderViews.swift: AmberGlassCircleButton/AmberSectionLabel/AmberFormGroup/AmberFormRow)。
 根页保持已交付的 Android 风格(// 组标),二级页全面切 iOS 语言。
