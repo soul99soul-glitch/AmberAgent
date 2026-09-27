@@ -1199,6 +1199,21 @@ export type {
 } from './chat/markdown_blocks.ts';
 export { composeLatex } from './chat/math_compose.ts';
 
+// ===== Phase C5:Jev 判断服务 =====
+export {
+  makeJevSettings, loadJevSettings, saveJevSettings,
+  JEV_TYPESAFE_ENDPOINT, JEV_VERCEL_DEFAULT_BASE,
+} from './chat/jev_models.ts';
+export type {
+  JevMode, JevApiMode, JevSettings,
+  JevNoulQuestion, JevChoiceQuestion, JevQuestion,
+  JevNoulAnswer, JevChoiceAnswer, JevAnswer,
+  JevUsage, JevEvaluation, JevCallOutcome, JevCallOk, JevCallSkipped, JevCallFailed,
+} from './chat/jev_models.ts';
+export { buildJevRequest, decodeJevResponse } from './chat/jev_client.ts';
+export type { ToolSearchReranker, ScoredTool } from './chat/builtin_introspection_tools.ts';
+export type { JevRequestSpec } from './chat/jev_client.ts';
+
 // ===== Phase 1:消息流跟随底部(纯逻辑,零 SDK 依赖) =====
 export type { FollowMode } from './chat/timeline_follow.ts';
 export {

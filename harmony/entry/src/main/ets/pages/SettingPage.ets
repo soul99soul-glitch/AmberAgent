@@ -141,8 +141,10 @@ struct SettingPage {
       onRowClick: (): void => { this.go('pages/ChatTaskModelsPage'); } })
     CardRow({ label: '提示词', iconName: 'doc',
       onRowClick: (): void => { this.go('pages/ChatPromptsPage'); } })
-    CardRow({ label: '搜索服务', iconName: 'search', isLast: true,
+    CardRow({ label: '搜索服务', iconName: 'search',
       onRowClick: (): void => { this.go('pages/ChatSearchSettingsPage'); } })
+    CardRow({ label: 'Jev 快速判断', iconName: 'brain', isLast: true,
+      onRowClick: (): void => { this.go('pages/SettingJevPage'); } })
   }
 
   @Builder

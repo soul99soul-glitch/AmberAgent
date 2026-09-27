@@ -170,6 +170,10 @@ import {
 import { getMiniAppPlatform, getMiniAppRepositorySync } from '../platform_impl/MiniAppPlatform.ets';
 import type { MiniAppPlatform } from '../platform_impl/MiniAppPlatform.ets';
 import { createImageGenTool, imageGenToolAvailable, EditSourceImage } from '../platform_impl/ImageGenTool.ets';
+import { createSoulTools } from '../platform_impl/SoulTools.ets';
+import { jevToolSearchReranker, createJevStatusTool } from '../platform_impl/JevSupport.ets';
+import { createJavascriptExecuteTool, JsSandboxHost } from '../platform_impl/JsSandboxTool.ets';
+import { SubAgentActivityStrip } from '../components/SubAgentActivityStrip.ets';
 
 // D-122:沙盒 sheet 代码块底色(设置面 ROW 惯例同值)
 const ROW: string = SURFACE2;
@@ -1953,6 +1957,8 @@ struct ChatPage {
   @StorageProp('webmountReady') webmountReady: boolean = false;
   @StorageProp('webmountLease') webmountLease: string = 'bot';
   @State webmountSheetOpen: boolean = false;
+  // JS 沙箱宿主挂载门(assistant 勾选 javascript_engine 后置真;C5-3)
+  @State jsSandboxNeeded: boolean = false;
   private webmountHookBinding: WebMountHookBinding | null = null;
   private maybeGenerationDoneNotification(rt: ChatRuntime): void {
     if (!this.enableGenerationNotification) return;
@@ -3392,11 +3398,16 @@ struct ChatPage {
     //   screen_automation/system_access/webview/icloud_drive/webmount/
     //   webmount_eval)未移植 → 门为空转(登记)
     const localOpts: LocalToolOption[] = rt.assistant.localTools;
+    // JS 沙箱宿主按需挂载(首次注册工具时;evaluate 的 waitForMount 会等 attach)
+    if (localOpts.indexOf('javascript_engine') >= 0 && !this.jsSandboxNeeded) {
+      this.jsSandboxNeeded = true;
+    }
     const profiledTools: AgentTool[] =
       filterToolProfile([
         ...(localOpts.indexOf('time_info') >= 0 ? [createTimeTool()] : []),
         ...(localOpts.indexOf('ask_user') >= 0 ? [createAskUserTool()] : []),
-        // D-124:workspace 六件(LocalTools.kt:122-126 — workspace_files 门内
+        // JS 沙箱(隐藏隔离 Web;无网络无文件;assistant 勾选 javascript_engine 门)
+        ...(localOpts.indexOf('javascript_engine') >= 0 ? [createJavascriptExecuteTool()] : []),        // D-124:workspace 六件(LocalTools.kt:122-126 — workspace_files 门内
         //   workspaceTools.getTools(),位置 = ask_user 之后;同组
         //   externalFileTools 未移植 → P1 登记);
         //   activityStore = 全局单例(D-122)
@@ -3528,6 +3539,8 @@ struct ChatPage {
         // D-129:permissions_status(LocalTools.kt:180 无条件,位置 =
         //   agentCron(:181)/runPlanUpdate(:182)之前)
         getPermissionsStatusTool(),
+        // jev_status(只读;C5-1)
+        createJevStatusTool(),
         // D-130:agent_cron 四件(LocalTools.kt:181 无条件;aboutToAppear
         //   水合,完成前为空数组 = searchSettings 时序先例)
         ...this.agentCronToolsCache,
@@ -3535,6 +3548,8 @@ struct ChatPage {
         //   deepReadOpenTool);deep_read bus 收集器 = router 打开深读页
         //   (Index.startDeepRead:120-127 同路由;页面存活即有收集者)
         createRunPlanUpdateTool(), createHealthSummaryTool(createEntryHealthReadPort()),
+        // soul 三件套(P2-07;soul_preview 只读,soul_import/rollback 审批)
+        ...createSoulTools(),
         ...(localOpts.indexOf('clipboard') >= 0
           ? [createClipboardTool(createEntryClipboardPort())] : []),
         // D-128:agent_prompt_config(LocalTools.kt:183 无条件,
@@ -3580,7 +3595,7 @@ struct ChatPage {
       //   D-122:scopedToConversation(:2329 → :2332-2343)终表统一包覆
       tools: this.scopedToConversation([
         ...this.baseToolsCache,
-        createToolSearchTool(registry, rt.assistant.toolProfile),
+        createToolSearchTool(registry, rt.assistant.toolProfile, jevToolSearchReranker()),
         ...supervisorTools,
       ], conv),
       makeProviderForStep: (defs: ChatToolDefinition[]): ChatStreamProvider =>
@@ -5009,6 +5024,10 @@ struct ChatPage {
     Stack() {
     // WebMount 会话宿主(移出可视区的真实尺寸 Web;按需挂载)
     WebMountHost({ visible: this.webmountHostVisible })
+    // JS 沙箱宿主(隐藏 1x1;勾选 javascript_engine 时挂载)
+    if (this.jsSandboxNeeded) {
+      JsSandboxHost()
+    }
     Column() {
       // 1:1 原型:头部悬浮层(默认全透明,scrollTop>4 玻璃化+浮出发丝线),
       //   消息区 paddingTop 补偿头部高度
@@ -5374,6 +5393,8 @@ struct ChatPage {
               getChatRepository().list().catch((e: Error): void => { this.errorMsg = e.message; });
             })
         }
+        // 子代理跨会话活动条(C5-4;有运行中子代理时显示)
+        SubAgentActivityStrip()
         // WebMount 接管条(C4-2):会话有页面时显示;点开接管面板
         if (this.webmountUrl.length > 0 && this.webmountReady && !this.webmountSheetOpen) {
           Row() {

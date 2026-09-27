@@ -278,7 +278,7 @@ export const createToolPolicyExplainTool = (registry: ToolRegistry): AgentTool =
 
 // ===== tool_search(ToolSearch.kt:30-268) =====
 
-interface ScoredTool {
+export interface ScoredTool {
   metadata: ToolMetadata;
   tool: AgentTool;
   score: number;
@@ -328,6 +328,9 @@ const searchAliases = (metadata: ToolMetadata): string[] => {
   }
   return out;
 };
+
+// 语义重排钩子(Jev;entry 注入,失败回退词面序)
+export type ToolSearchReranker = (query: string, matches: ScoredTool[]) => Promise<ScoredTool[]>;
 
 // scoreTool(ToolSearch.kt:178-218 逐字)
 const scoreTool = (
@@ -440,17 +443,26 @@ const residentToolCount = (registry: ToolRegistry): number => {
 
 // searchPayload(ToolSearch.kt:92-149 键序逐字;profile 非 null → trace 出
 //   profile/profile_filtered 键(:115-118,位置在 query 之后 hit_tools 之前))
-const searchPayload = (
+const searchPayload = async (
   registry: ToolRegistry, query: string,
   category: string | null, limit: number,
   profile: MainAgentToolProfile | null = null,
-): JsonObject => {
+  reranker?: ToolSearchReranker,
+): Promise<JsonObject> => {
   const trimmed: string | null = category !== null ? category.trim().toLowerCase() : null;
   const normalizedCategory: string | null =
     trimmed !== null && trimmed.length > 0 ? trimmed : null;
   const boundedLimit: number = Math.min(Math.max(limit, 1), 20);
-  const matches: ScoredTool[] =
+  let matches: ScoredTool[] =
     searchIndex(registry, query, normalizedCategory, boundedLimit);
+  // Jev 语义重排(仅多候选时;失败/影子/不可用一律回退词面序)
+  if (reranker !== undefined && matches.length > 1) {
+    try {
+      matches = await reranker(query, matches);
+    } catch (_e) {
+      // 回退词面序
+    }
+  }
   const expandedTools: string[] =
     matches.map((s: ScoredTool): string => s.metadata.name);
   const fullSchemaChars: number = registry.tools()
@@ -506,7 +518,8 @@ const searchPayload = (
 
 // ToolSearch.kt:28-31 — profile 透传 ToolSearchIndex(trace 两键)
 export const createToolSearchTool = (
-  registry: ToolRegistry, profile: MainAgentToolProfile | null = null): AgentTool => makeAgentTool({
+  registry: ToolRegistry, profile: MainAgentToolProfile | null = null,
+  reranker?: ToolSearchReranker): AgentTool => makeAgentTool({
   name: TOOL_SEARCH_TOOL_NAME,
   description: "Search AmberAgent's full tool catalog by intent/category and expose the best matching tool schemas for the next step.",
   parameters: () => makeInputSchemaObj(
@@ -545,16 +558,16 @@ export const createToolSearchTool = (
       + `- If you used \`tools_list\` to identify a tool name, call \`${TOOL_SEARCH_TOOL_NAME}\` again with that exact tool name, then execute a name from \`expanded_tools\` on the next step.\n`
       + `- Resident tools currently stay visible without search: ${residentCount} core tools plus discovered tools.`;
   },
-  execute: (input: JsonValue): Promise<UIMessagePart[]> => {
+  execute: async (input: JsonValue): Promise<UIMessagePart[]> => {
     const query: string = inputString(input, 'query');
     const rawCategory: string = inputString(input, 'category');
     // contentOrNull?.ifBlank { null }
     const category: string | null = rawCategory.length === 0 ? null : rawCategory;
     const limit: number = inputIntOrNull(input, 'limit') ?? TOOL_SEARCH_DEFAULT_LIMIT;
-    const payload: JsonObject = searchPayload(registry, query, category, limit, profile);
-    return Promise.resolve([
+    const payload: JsonObject = await searchPayload(registry, query, category, limit, profile, reranker);
+    return [
       { type: 'text', text: JSON.stringify(payload), metadata: null },
-    ]);
+    ];
   },
 });
 

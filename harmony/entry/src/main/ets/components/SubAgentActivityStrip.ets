@@ -1,0 +1,91 @@
+// SubAgentActivityStrip — 子代理跨会话活动条(C5-4;iOS ChatSubAgentActivityBar 对齐)
+//
+// 数据源:SubAgentManager.listActive()(内存态运行表);1s 轮询刷新(计时语义),
+//   不往 domain 加响应式管道。点按 → 来源会话(parentConversationId)。
+// 无运行中子代理时自隐(空渲染)。
+
+import { router } from '@kit.ArkUI';
+import type { SubAgentManager, SubAgentRun } from '@amber/chat-domain';
+import { getSubAgentManager } from '../di/AppContainer.ets';
+import { ACCENT, INK2, INK3, LINE, META, SURFACE } from '../design/tokens.ets';
+import { Icon } from './ui/Icon.ets';
+
+@Component
+export struct SubAgentActivityStrip {
+  @StorageProp('accentColor') accentColorStore: string = ACCENT;
+  @State runs: SubAgentRun[] = [];
+  @State nowMs: number = Date.now();
+  private timer: number = -1;
+  private alive: boolean = false;
+
+  aboutToAppear(): void {
+    this.alive = true;
+    this.refresh();
+    this.timer = setInterval((): void => { this.refresh(); }, 1000);
+  }
+
+  aboutToDisappear(): void {
+    this.alive = false;
+    if (this.timer >= 0) {
+      clearInterval(this.timer);
+      this.timer = -1;
+    }
+  }
+
+  private refresh(): void {
+    getSubAgentManager().then((mgr: SubAgentManager): void => {
+      if (!this.alive) return;
+      this.runs = mgr.listActive();
+      this.nowMs = Date.now();
+    }).catch((): void => {});
+  }
+
+  private elapsed(run: SubAgentRun): string {
+    const s: number = Math.max(0, Math.floor((this.nowMs - run.startedAtMs) / 1000));
+    if (s < 60) return `${s}s`;
+    return `${Math.floor(s / 60)}m${s % 60}s`;
+  }
+
+  private topLabel(run: SubAgentRun): string {
+    const objective: string = run.task.objective.trim().replace(/\s+/g, ' ');
+    const head: string = objective.length > 24 ? `${objective.substring(0, 24)}…` : objective;
+    const name: string = run.definition.name.trim();
+    return name.length > 0 ? `${name} · ${head}` : head;
+  }
+
+  private openSource(run: SubAgentRun): void {
+    if (run.parentConversationId.length === 0) return;
+    const params: Record<string, string> = {};
+    params['conversationId'] = run.parentConversationId;
+    router.pushUrl({ url: 'pages/ChatPage', params: params });
+  }
+
+  build(): void {
+    if (this.runs.length > 0) {
+      Row() {
+        // 呼吸点(1s 轮询自然形成的脉动,不加动画框架)
+        Column()
+          .width(8).height(8).borderRadius(4)
+          .backgroundColor(this.accentColorStore)
+          .opacity(this.nowMs % 2000 < 1000 ? 1 : 0.35)
+        Text(this.runs.length === 1
+          ? `子代理运行中 · ${this.topLabel(this.runs[0])} · ${this.elapsed(this.runs[0])}`
+          : `子代理运行中 ${this.runs.length} 个 · ${this.elapsed(this.runs[0])}`)
+          .fontSize(META).fontColor(INK2)
+          .margin({ left: 8 })
+          .layoutWeight(1)
+          .maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+        Icon({ name: 'chevron_right', iconSize: 14, color: INK3 })
+      }
+      .width('100%')
+      .padding({ left: 14, right: 14, top: 8, bottom: 8 })
+      .margin({ left: 20, right: 20, bottom: 2 })
+      .backgroundColor(SURFACE)
+      .borderRadius(10)
+      .border({ width: 1, color: LINE })
+      .onClick((): void => { this.openSource(this.runs[0]); })
+      .accessibilityText('子代理运行状态,点击查看来源会话')
+    }
+  }
+}

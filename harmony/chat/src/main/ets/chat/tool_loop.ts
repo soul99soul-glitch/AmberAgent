@@ -46,6 +46,75 @@ import type { PermissionDecision } from './tool_permission.ts';
 import type { AgentToolDispatcher, ToolBatchResultPair } from './tool_dispatcher.ts';
 import { AgentToolDispatcher as DefaultDispatcher, defaultToolInvocationHooks } from './tool_dispatcher.ts';
 import { buildAgentLoopBudgetPrompt, agentLoopShouldHideTools } from './agent_loop_budget.ts';
+
+// ===== 环路守护(Android DefaultRunKernel duplicate_tool_call 对齐) =====
+// 签名 = toolName+args JSON;出现次数:1 执行,2 跳过(structured reminder,
+// 结果复用),≥3 停止本轮循环(写回 skipped 输出后 break,terminal 不伪装完成)。
+// 观察类工具(读态随页面/文件/任务变化)豁免跨步重复(Android REPEATABLE_OBSERVATION_TOOLS);
+// resume 路径(用户交互后重放)不经此守卫。
+const GUARD_REPEATABLE_TOOLS: Set<string> = new Set([
+  'file_read', 'file_list', 'file_search',
+  'terminal_job_wait', 'terminal_job_read', 'terminal_session_read',
+  'subagent_wait', 'subagent_read', 'model_council_wait', 'model_council_read',
+  'js_cell_wait', 'webview_wait_for_load', 'webview_read', 'webview_find_text', 'webview_links',
+  'wm_wait', 'wm_observe', 'wm_state', 'wm_extract', 'wm_get', 'wm_find', 'wm_network_inspect',
+  'wm_screenshot', 'wm_visual_snapshot', 'wm_zcode_read',
+]);
+
+interface ToolLoopGuardOutcome {
+  toExecute: UIMessagePartTool[];
+  skipped: UIMessagePartTool[];
+  stopping: UIMessagePartTool | null;
+}
+
+const withGuardOutput = (
+  tool: UIMessagePartTool, occurrence: number, sameBatch: boolean,
+): UIMessagePartTool => ({
+  ...tool,
+  output: [{
+    type: 'text',
+    text: JSON.stringify({
+      status: 'skipped',
+      reason: 'duplicate_tool_call',
+      occurrence,
+      message: sameBatch
+        ? 'Duplicate tool call in the same step; the first occurrence is already executing — do not repeat it.'
+        : 'This exact tool call already ran with identical arguments; the previous result is reused. Do not call it again with the same input.',
+    }),
+    metadata: null,
+  }],
+});
+
+const classifyToolCallDuplicates = (
+  tools: UIMessagePartTool[], executedSignatures: Map<string, number>,
+): ToolLoopGuardOutcome => {
+  const toExecute: UIMessagePartTool[] = [];
+  const skipped: UIMessagePartTool[] = [];
+  let stopping: UIMessagePartTool | null = null;
+  const batchSeen: Map<string, number> = new Map();
+  for (const tool of tools) {
+    const sig: string = `${tool.toolName}::${JSON.stringify(tool.input)}`;
+    const batchCount: number = batchSeen.get(sig) ?? 0;
+    const repeatable: boolean = GUARD_REPEATABLE_TOOLS.has(tool.toolName);
+    const prior: number = repeatable ? 0 : (executedSignatures.get(sig) ?? 0);
+    const occurrence: number = prior + batchCount + 1;
+    if (occurrence === 1) {
+      batchSeen.set(sig, batchCount + 1);
+      toExecute.push(tool);
+    } else if (occurrence === 2) {
+      batchSeen.set(sig, batchCount + 1);
+      skipped.push(withGuardOutput(tool, 2, batchCount > 0));
+    } else {
+      stopping = withGuardOutput(tool, occurrence, false);
+      break;
+    }
+  }
+  // 签名表合并:批内所有出现(含 skipped/stopping)都计入,防下一步重复泛滥
+  batchSeen.forEach((count: number, sig: string): void => {
+    executedSignatures.set(sig, (executedSignatures.get(sig) ?? 0) + count);
+  });
+  return { toExecute, skipped, stopping };
+};
 import type { ToolExposureState } from './tool_exposure.ts';
 import { createToolExposureState } from './tool_exposure.ts';
 import type { SpeculativeToolRunner } from './speculative_tool_runner.ts';
@@ -177,6 +246,9 @@ const runToolLoopCore = async (
 ): Promise<Conversation> => {
   let conv: Conversation = conversation;
   const rawSteps: number = loop.maxSteps ?? DEFAULT_AGENT_MAX_TOOL_LOOP_STEPS;
+  // 环路守护状态(本轮 run 级;签名表跨步累积)
+  const executedSignatures: Map<string, number> = new Map();
+  let guardStopped: boolean = false;
   const maxSteps: number = mainClamp
     ? Math.min(Math.max(rawSteps, MIN_AGENT_TOOL_LOOP_STEPS), MAX_AGENT_TOOL_LOOP_STEPS)
     : Math.max(rawSteps, 0);
@@ -194,6 +266,7 @@ const runToolLoopCore = async (
 
   for (let stepIndex = 0; stepIndex < maxSteps; stepIndex++) {
     if (deps.abortSignal !== undefined && deps.abortSignal.aborted) break;
+    if (guardStopped) break;
     const baseMessages: UIMessage[] = currentMessages(conv);
     const lastMsg: UIMessage | undefined = baseMessages.length > 0
       ? baseMessages[baseMessages.length - 1]
@@ -354,6 +427,23 @@ const runToolLoopCore = async (
         break;
       }
       toolsToProcess = updatedTools;
+      // 环路守护:分类本步工具调用(1 执行 / 2 跳过 / ≥3 停止);
+      //   跳过与停止项的结果已内嵌 skipped 输出,直接写回不执行
+      const guardOutcome: ToolLoopGuardOutcome =
+        classifyToolCallDuplicates(toolsToProcess, executedSignatures);
+      toolsToProcess = guardOutcome.toExecute;
+      if (guardOutcome.skipped.length > 0 || guardOutcome.stopping !== null) {
+        const guardPairs: ToolBatchResultPair[] = guardOutcome.skipped.map(
+          (t: UIMessagePartTool): ToolBatchResultPair => ({ input: t, result: t }));
+        if (guardOutcome.stopping !== null) {
+          const stopTool: UIMessagePartTool = guardOutcome.stopping;
+          guardPairs.push({ input: stopTool, result: stopTool });
+        }
+        conv = rewriteLastMessageTools(conv, guardPairs);
+        await deps.store.save(conv);
+        emitSnapshot(conv, deps, ctx);
+        if (guardOutcome.stopping !== null) guardStopped = true;
+      }
     } else {
       // resume 路径(:342-346):用户交互后用 resumable 工具直接执行
       toolsToProcess = pendingTools;

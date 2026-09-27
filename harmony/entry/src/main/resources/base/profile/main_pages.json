@@ -55,6 +55,7 @@
     "pages/SettingAppearancePage",
     "pages/SettingBackupPage",
     "pages/SettingCronTasksPage",
+    "pages/SettingJevPage",
     "pages/SettingDeepReadPage",
     "pages/SettingDisplayPage",
     "pages/SettingExperimentalModelCouncilPageFull",

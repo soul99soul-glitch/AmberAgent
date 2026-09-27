@@ -507,6 +507,15 @@ export class SubAgentManager {
     return runtimeRun !== undefined ? runtimeRun.snapshot : null;
   }
 
+  // 跨会话活动条:仍在运行的 run(内存态,按开始时间倒序;iOS activityBar 数据源)
+  listActive(): SubAgentRun[] {
+    const out: SubAgentRun[] = [];
+    this.runs.forEach((runtimeRun: RuntimeRun): void => {
+      if (subAgentRunStatusRunning(runtimeRun.snapshot.status)) out.push(runtimeRun.snapshot);
+    });
+    return out.sort((a: SubAgentRun, b: SubAgentRun): number => b.startedAtMs - a.startedAtMs);
+  }
+
   subscribeLiveText(
     runId: string, listener: (text: string) => void,
   ): (() => void) | null {

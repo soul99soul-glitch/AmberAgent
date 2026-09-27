@@ -27,6 +27,7 @@ import { getMiniAppRepositorySync } from '../platform_impl/MiniAppPlatform.ets';
 import { Icon } from '../components/ui/Icon.ets';
 import { AmberWordmark } from '../components/ui/AmberWordmark.ets';
 import { PressGlowButton } from '../components/ui/PressGlowButton.ets';
+import { SubAgentActivityStrip } from '../components/SubAgentActivityStrip.ets';
 import { ACCENT, ACCENT_INK, ERROR, HOME_BG, HOME_CARD, HOME_CARD2, HOME_DOT, HOME_GLASS_BOTTOM,
   HOME_GLASS_EDGE, HOME_GLASS_SHADOW, HOME_GLASS_TOP, HOME_INK, HOME_INK2, HOME_MUTED, HOME_MUTED2,
   HOME_PRESS, HOME_ROWLINE, HOME_SEP, HOME_SHADOW, MOTION_ENTER, MOTION_STAGGER, OVERLAY } from '../design/tokens.ets';
@@ -1253,6 +1254,11 @@ struct ChatListPage {
 
           ListItem() {
             this.ControlCard()
+          }
+
+          // 子代理跨会话活动条(C5-4;运行中才渲染)
+          ListItem() {
+            SubAgentActivityStrip()
           }
 
           ListItem() {
