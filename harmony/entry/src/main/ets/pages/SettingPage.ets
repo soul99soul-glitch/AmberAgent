@@ -1,15 +1,23 @@
-// SettingPage — 设置入口(youhua 纸面列表优化版)
+// SettingPage — 设置入口(2026-09-27 六组卡片重排)
 //
-// 结构(amber-youhua.html 四组制):通用设置 / AGENT 设置 / 模型与服务 / 数据设置 / 关于。
-//   纸面列表:无卡片分组,行间内缩发丝线,圆形图标座 + 标题/描述两段行。
-//   原「高级功能」组收编进实验功能页;MCP/定时任务收编进技能与扩展页。
+// 基准: iOS SettingsHomeView + Android 新版设置(六组卡片 IA):
+//   通用设置 / AGENT 设置 / 模型与服务 / 高级功能 / 数据设置 / AMBER。
+//   奶油画布 + 圆角卡片分组(CardGroup/CardRow)+ 顶栏右侧账户头像(→ProfilePage)。
+//   原实验功能页收编进「高级功能」组;历史/收藏/看板移出(首页与会话列表已可达)。
+//   鸿蒙现实取舍见 docs/plans/2026-09-27-harmony-settings-realign.md。
 
 import { router } from '@kit.ArkUI';
 import { bundleManager } from '@kit.AbilityKit';
-import { BG, ACCENT, INK3, LABEL, TEXT_STYLES } from '../design/tokens.ets';
-import { PageTitleBar, SectionHeader, NavRow, PageSpacer } from '../components/PageTemplate.ets';
-import { FONT_MONO } from '../design/fonts.ets';
+import type { DisplaySetting, ManagedFileEntity } from '@amber/chat-domain';
+import { loadDisplaySetting } from '@amber/chat-domain';
+import {
+  BG, ACCENT, INK, INK2, INK3, LINE, SURFACE2, LABEL, TEXT_STYLES, GUTTER,
+} from '../design/tokens.ets';
+import { SectionHeader, CardGroup, CardRow, PageSpacer } from '../components/PageTemplate.ets';
+import { FONT_MONO, FONT_SANS_SEMIBOLD } from '../design/fonts.ets';
 import { describeChatModel, getChatKvStore } from '../di/AppContainer.ets';
+import { getFilesRepository, MANAGED_FILE_FOLDERS } from '../platform_impl/ManagedFileStore.ets';
+import { Icon } from '../components/ui/Icon.ets';
 
 // 主题选择持久化键(外观页写入;根页只读回显 value)
 const UI_COLOR_MODE_KEY: string = 'ui_color_mode';
@@ -21,29 +29,41 @@ struct SettingPage {
   @StorageProp('darkMode') darkMode: boolean = false;
   @StorageProp('systemDarkMode') systemDarkMode: boolean = false;
   @StorageProp('accentColor') accentColorStore: string = ACCENT;
+  @StorageProp('statusBarHeight') statusBarHeight: number = 44;
   @State appearanceValue: string = '跟随系统';
-  // 真实值装配:默认模型标签 + 版本号(不写死占位)
+  // 真实值装配:默认模型标签 + 聊天记录存储统计 + 版本号(不写死占位)
   @State modelLabel: string = '';
+  @State storageLabel: string = '';
   @State versionLabel: string = '';
+  @State userNickname: string = '';
+  @State userAvatar: string = '';
 
   aboutToAppear(): void {
-    describeChatModel().then((label: string): void => { this.modelLabel = label; });
+    this.reloadValues();
     try {
       const info = bundleManager.getBundleInfoForSelfSync(bundleManager.BundleFlag.GET_BUNDLE_INFO_DEFAULT);
       this.versionLabel = `${info.versionName} (${info.versionCode})`;
     } catch (e) {
       this.versionLabel = '';
     }
-    this.refreshAppearanceValue();
   }
 
-  // 从外观页返回时回栈不重跑 aboutToAppear — onPageShow 重读回显值,
+  // 从子页返回时回栈不重跑 aboutToAppear — onPageShow 重读回显值,
   // 并借 darkMode 读取触发根页按新主题令牌重建
   onPageShow(): void {
+    this.reloadValues();
+  }
+
+  private reloadValues(): void {
     this.refreshAppearanceValue();
     describeChatModel().then((label: string): void => {
       this.modelLabel = label;
     }).catch((): void => {});
+    loadDisplaySetting(getChatKvStore()).then((setting: DisplaySetting): void => {
+      this.userNickname = setting.userNickname;
+      this.userAvatar = setting.userAvatar;
+    }).catch((): void => {});
+    this.refreshStorageLabel();
   }
 
   private refreshAppearanceValue(): void {
@@ -54,70 +74,202 @@ struct SettingPage {
     }).catch((): void => {});
   }
 
+  // 聊天记录存储统计:四个托管文件夹的文件数 + 总字节(对齐 Android countChatFiles 的「N · X.XX MB」)
+  private refreshStorageLabel(): void {
+    const repo = getFilesRepository();
+    const folders: string[] = [...MANAGED_FILE_FOLDERS];
+    let count: number = 0;
+    let bytes: number = 0;
+    let failed: boolean = false;
+    const step = (i: number): void => {
+      if (i >= folders.length) {
+        if (!failed) {
+          this.storageLabel = `${count} · ${(bytes / 1024 / 1024).toFixed(2)} MB`;
+        }
+        return;
+      }
+      repo.listByFolder(folders[i]).then((list: ManagedFileEntity[]): void => {
+        count += list.length;
+        list.forEach((f: ManagedFileEntity): void => { bytes += f.sizeBytes; });
+        step(i + 1);
+      }).catch((): void => {
+        failed = true;
+        step(i + 1);
+      });
+    };
+    step(0);
+  }
+
   private go(page: string): void {
     router.pushUrl({ url: page });
   }
 
+  // ── 六组卡片内容(@Builder:组件构造必须发生在 builder 上下文,
+  //    裸 lambda 直接 new 组件会炸 "class constructor cannot called without 'new'")──
+
+  @Builder
+  GeneralCard(): void {
+    CardRow({ label: '外观', valueText: this.appearanceValue, iconName: 'ph_sun',
+      onRowClick: (): void => { this.go('pages/SettingAppearancePage'); } })
+    CardRow({ label: '显示与字体', iconName: 'gear', isLast: true,
+      onRowClick: (): void => { this.go('pages/SettingDisplayPage'); } })
+  }
+
+  @Builder
+  AgentCard(): void {
+    CardRow({ label: '灵魂与记忆', iconName: 'brain',
+      onRowClick: (): void => { this.go('pages/SettingAgentMemoryPageFull'); } })
+    CardRow({ label: '运行环境', iconName: 'ph_code',
+      onRowClick: (): void => { this.go('pages/SettingSandboxPage'); } })
+    CardRow({ label: '运行与显示', iconName: 'eye',
+      onRowClick: (): void => { this.go('pages/ChatAgentExecutionPage'); } })
+    CardRow({ label: '技能', iconName: 'puzzle',
+      onRowClick: (): void => { this.go('pages/SkillsPage'); } })
+    CardRow({ label: '权限与批准', iconName: 'shield',
+      onRowClick: (): void => { this.go('pages/ChatAgentPermissionsPage'); } })
+    CardRow({ label: '系统权限', iconName: 'ph_lock', isLast: true,
+      onRowClick: (): void => { this.go('pages/SettingSystemAccessPage'); } })
+  }
+
+  @Builder
+  ModelCard(): void {
+    CardRow({ label: '服务商', iconName: 'key',
+      onRowClick: (): void => { this.go('pages/ChatProviderSettingsPage'); } })
+    CardRow({ label: '模型与提示词', valueText: this.modelLabel, iconName: 'spark',
+      onRowClick: (): void => { this.go('pages/ChatModelPickerPage'); } })
+    CardRow({ label: '任务模型', iconName: 'cpu',
+      onRowClick: (): void => { this.go('pages/ChatTaskModelsPage'); } })
+    CardRow({ label: '提示词', iconName: 'doc',
+      onRowClick: (): void => { this.go('pages/ChatPromptsPage'); } })
+    CardRow({ label: '搜索服务', iconName: 'search', isLast: true,
+      onRowClick: (): void => { this.go('pages/ChatSearchSettingsPage'); } })
+  }
+
+  @Builder
+  AdvancedCard(): void {
+    CardRow({ label: 'WebMount', iconName: 'globe',
+      onRowClick: (): void => { this.go('pages/SettingExperimentalWebMountPage'); } })
+    CardRow({ label: '子代理', iconName: 'ph_users',
+      onRowClick: (): void => { this.go('pages/SettingSubAgentPage'); } })
+    CardRow({ label: '模型议会', iconName: 'ph_quotes',
+      onRowClick: (): void => { this.go('pages/SettingModelCouncilPage'); } })
+    CardRow({ label: '小应用', iconName: 'box',
+      onRowClick: (): void => { this.go('pages/MiniAppSettingsPage'); } })
+    CardRow({ label: '小说创作', iconName: 'ph_pencil',
+      onRowClick: (): void => { this.go('pages/NovelProjectsPage'); } })
+    CardRow({ label: '深度阅读', iconName: 'book', isLast: true,
+      onRowClick: (): void => { this.go('pages/SettingDeepReadPage'); } })
+  }
+
+  @Builder
+  DataCard(): void {
+    CardRow({ label: '同步与备份', iconName: 'hi_app_archive',
+      onRowClick: (): void => { this.go('pages/SettingBackupPage'); } })
+    CardRow({ label: '聊天记录存储', valueText: this.storageLabel, iconName: 'hi_files',
+      onRowClick: (): void => { this.go('pages/SettingFilesPage'); } })
+    // 历史/收藏在别处无入口(基准截图虽无此两行,鸿蒙不能静默丢功能)
+    CardRow({ label: '历史记录', iconName: 'history',
+      onRowClick: (): void => { this.go('pages/HistoryPage'); } })
+    CardRow({ label: '收藏', iconName: 'star', isLast: true,
+      onRowClick: (): void => { this.go('pages/FavoritePage'); } })
+  }
+
+  @Builder
+  AmberCard(): void {
+    CardRow({ label: '关于', iconName: 'info', isLast: true,
+      onRowClick: (): void => { this.go('pages/SettingAboutPage'); } })
+  }
+
   build(): void {
     Column() {
-      PageTitleBar({ title: '设置' })
+      // ── 顶栏:返回 + 标题 + 账户头像(iOS SettingsHome header:头像 38,热区 44)──
+      Row() {
+        Row() {
+          Icon({ name: 'back', iconSize: 24, color: INK })
+        }
+        .width(48).height(48)
+        .justifyContent(FlexAlign.Center)
+        .alignItems(VerticalAlign.Center)
+        .accessibilityText('返回')
+        .onClick((): void => { router.back(); })
+        Text('设置')
+          .fontSize(TEXT_STYLES.screenTitle.size)
+          .fontWeight(TEXT_STYLES.screenTitle.weight)
+          .lineHeight(TEXT_STYLES.screenTitle.lineHeight)
+          .fontFamily(TEXT_STYLES.screenTitle.family)
+          .fontColor(INK)
+          .maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+          .margin({ left: 8 })
+          .layoutWeight(1)
+        Row() {
+          if (this.userAvatar.length > 0) {
+            Image(this.userAvatar.startsWith('http') || this.userAvatar.startsWith('data:')
+              || this.userAvatar.startsWith('file://') || this.userAvatar.startsWith('resource:')
+              ? this.userAvatar : `file://${this.userAvatar}`)
+              .width(38)
+              .height(38)
+              .borderRadius(19)
+              .objectFit(ImageFit.Cover)
+          } else {
+            Stack() {
+              Text((this.userNickname.length > 0 ? this.userNickname : 'A').charAt(0).toUpperCase())
+                .fontSize(14.5)
+                .fontWeight(FontWeight.Medium)
+                .fontFamily(FONT_SANS_SEMIBOLD)
+                .fontColor(INK2)
+            }
+            .width(38)
+            .height(38)
+            .borderRadius(19)
+            .backgroundColor(SURFACE2)
+          }
+        }
+        .width(44).height(44)
+        .justifyContent(FlexAlign.Center)
+        .alignItems(VerticalAlign.Center)
+        .accessibilityText('我的账户')
+        .onClick((): void => { router.pushUrl({ url: 'pages/ProfilePage' }); })
+      }
+      .width('100%')
+      .constraintSize({ minHeight: 64 })
+      .padding({ left: 4, right: GUTTER, top: this.statusBarHeight, bottom: 8 })
+      .border({ width: { bottom: 1 }, color: { bottom: LINE } })
+      .backgroundColor(BG)
 
       Scroll() {
         Column() {
-          // ── 通用设置(youhua 通用设置)──
+          // ── 通用设置 ──
           SectionHeader({ label: '通用设置' })
-          NavRow({ label: '颜色模式', desc: '浅色、深色或跟随系统', chipText: this.appearanceValue, iconName: 'palette',
-            onRowClick: (): void => { this.go('pages/SettingAppearancePage'); } })
-          NavRow({ label: '显示设置', desc: '管理显示设置', iconName: 'gear', isLast: true,
-            onRowClick: (): void => { this.go('pages/SettingDisplayPage'); } })
+          CardGroup({ content: (): void => { this.GeneralCard(); } })
+          .margin({ left: 16, right: 16 })
 
-          // ── AGENT 设置(youhua AGENT 设置)──
+          // ── AGENT 设置 ──
           SectionHeader({ label: 'AGENT 设置' })
-          NavRow({ label: '核心记忆', desc: '跨会话保留的 AmberAgent 持久知识', iconName: 'brain',
-            onRowClick: (): void => { this.go('pages/SettingAgentMemoryPageFull'); } })
-          NavRow({ label: '技能与扩展', desc: 'Skill、提示词和外部工具服务', iconName: 'puzzle',
-            onRowClick: (): void => { this.go('pages/SkillsPage'); } })
-          NavRow({ label: '运行与显示', desc: '工具循环、操作预览和实时状态', iconName: 'eye',
-            onRowClick: (): void => { this.go('pages/ChatAgentExecutionPage'); } })
-          NavRow({ label: '权限与批准', desc: '系统权限和工具批准策略', iconName: 'shield',
-            onRowClick: (): void => { this.go('pages/ChatAgentPermissionsPage'); } })
-          NavRow({ label: 'Agent 运行环境', desc: 'Workspace、Alpine/proot 和命令运行状态', iconName: 'box',
-            onRowClick: (): void => { this.go('pages/SettingSandboxPage'); } })
-          NavRow({ label: '实验性功能', desc: '管理仍需真机验证的 AmberAgent 预览能力', iconName: 'spark', isLast: true,
-            onRowClick: (): void => { this.go('pages/SettingExperimentalPage'); } })
+          CardGroup({ content: (): void => { this.AgentCard(); } })
+          .margin({ left: 16, right: 16 })
 
-          // ── 模型与服务(youhua 模型与服务)──
+          // ── 模型与服务 ──
           SectionHeader({ label: '模型与服务' })
-          NavRow({ label: '提供商', desc: '配置 AI 提供商', iconName: 'key',
-            onRowClick: (): void => { this.go('pages/ChatProviderSettingsPage'); } })
-          NavRow({ label: '模型与提示词', valueText: this.modelLabel, desc: '默认模型、辅助任务模型和提示词', iconName: 'cpu',
-            onRowClick: (): void => { this.go('pages/ChatModelPickerPage'); } })
-          NavRow({ label: '任务模型', desc: '标题、生图、视觉与压缩等辅助模型', iconName: 'spark',
-            onRowClick: (): void => { this.go('pages/ChatTaskModelsPage'); } })
-          NavRow({ label: '提示词', desc: '快捷消息与提示词模板', iconName: 'doc',
-            onRowClick: (): void => { this.go('pages/ChatPromptsPage'); } })
-          NavRow({ label: '搜索服务', desc: '设置搜索服务', iconName: 'search', isLast: true,
-            onRowClick: (): void => { this.go('pages/ChatSearchSettingsPage'); } })
+          CardGroup({ content: (): void => { this.ModelCard(); } })
+          .margin({ left: 16, right: 16 })
 
-          // ── 数据设置(youhua 数据设置)──
+          // ── 高级功能 ──
+          SectionHeader({ label: '高级功能' })
+          CardGroup({ content: (): void => { this.AdvancedCard(); } })
+          .margin({ left: 16, right: 16 })
+
+          // ── 数据设置 ──
           SectionHeader({ label: '数据设置' })
-          NavRow({ label: '文件管理', desc: '聊天文件与附件存储', iconName: 'folder',
-            onRowClick: (): void => { this.go('pages/SettingFilesPage'); } })
-          NavRow({ label: '历史记录', desc: '浏览全部会话历史', iconName: 'history',
-            onRowClick: (): void => { this.go('pages/HistoryPage'); } })
-          NavRow({ label: '收藏', desc: '收藏的消息与内容', iconName: 'star',
-            onRowClick: (): void => { this.go('pages/FavoritePage'); } })
-          NavRow({ label: '备份与恢复', desc: '本地加密导出与恢复会话', iconName: 'folder',
-            onRowClick: (): void => { this.go('pages/SettingBackupPage'); } })
-          NavRow({ label: '深度阅读', desc: '热点榜单与深度文章', iconName: 'book', isLast: true,
-            onRowClick: (): void => { this.go('pages/BoardPage'); } })
+          CardGroup({ content: (): void => { this.DataCard(); } })
+          .margin({ left: 16, right: 16 })
 
-          // ── 关于 ──
-          SectionHeader({ label: '关于' })
-          NavRow({ label: '版本', valueText: this.versionLabel, showChevron: false })
-          NavRow({ label: '关于', isLast: true, onRowClick: (): void => { this.go('pages/SettingAboutPage'); } })
+          // ── AMBER ──
+          SectionHeader({ label: 'AMBER' })
+          CardGroup({ content: (): void => { this.AmberCard(); } })
+          .margin({ left: 16, right: 16 })
 
-          // youhua 版本行:$ 提示符 accent 色
+          // 版本行:$ 提示符 accent 色
           Row() {
             Text('$')
               .fontSize(LABEL).fontWeight(FontWeight.Medium)

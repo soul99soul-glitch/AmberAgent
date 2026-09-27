@@ -58,7 +58,6 @@
     "pages/SettingDeepReadPage",
     "pages/SettingDisplayPage",
     "pages/SettingExperimentalModelCouncilPageFull",
-    "pages/SettingExperimentalPage",
     "pages/SettingExperimentalSubAgentPageFull",
     "pages/SettingExperimentalWebMountPage",
     "pages/SettingFilesPage",

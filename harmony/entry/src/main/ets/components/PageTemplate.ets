@@ -362,6 +362,101 @@ export struct NavRow {
   }
 }
 
+// ===== 卡片分组(2026-09-27 设置重排:对齐 iOS SettingsHome / Android 新版六组卡片 IA)=====
+// 奶油画布上的圆角卡片:SURFACE 底 r16 clip;行间发丝线内缩至文字起点
+@Component
+export struct CardGroup {
+  @BuilderParam content: () => void;
+  build(): void {
+    Column() {
+      this.content();
+    }
+    .width('100%')
+    .borderRadius(16)
+    .backgroundColor(SURFACE)
+    .clip(true)
+  }
+}
+
+// 卡片行:32 着色图标座(SURFACE2 r9)+ 单行标题 16/500 + 值(mono)+ 箭头;按压 SURFACE2
+@Component
+export struct CardRow {
+  @Prop label: string = '';
+  @Prop valueText: string = '';
+  @Prop iconName: string = '';
+  @Prop isLast: boolean = false;
+  // 纯展示行(版本等)不绘箭头,避免"看似可点"的死控件感
+  @Prop showChevron: boolean = true;
+  onRowClick: () => void = (): void => {};
+  @State private pressed: boolean = false;
+
+  build(): void {
+    Column() {
+      Row() {
+        if (this.iconName.length > 0) {
+          Row() {
+            Icon({ name: this.iconName, iconSize: 19, color: INK2 })
+          }
+          .width(32).height(32).borderRadius(9)
+          .backgroundColor(SURFACE2)
+          .justifyContent(FlexAlign.Center)
+          .alignItems(VerticalAlign.Center)
+          .margin({ right: 12 })
+        }
+        Text(this.label)
+          .fontSize(16)
+          .fontWeight(FontWeight.Medium)
+          .lineHeight(lineHeightForSize(16))
+          .fontFamily(FONT_SANS_MEDIUM)
+          .fontColor(INK)
+          .maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+          .layoutWeight(1)
+        if (this.valueText.length > 0) {
+          Text(this.valueText)
+            .fontSize(TEXT_STYLES.meta.size)
+            .fontWeight(FontWeight.Medium)
+            .lineHeight(TEXT_STYLES.meta.lineHeight)
+            .fontFamily(FONT_MONO_MEDIUM)
+            .fontColor(INK3)
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+            .textAlign(TextAlign.End)
+            .margin({ left: 8, right: 6 })
+        }
+        if (this.showChevron) {
+          Icon({ name: 'chevron_right', iconSize: 16, color: INK4 })
+        }
+      }
+      .width('100%')
+      .alignItems(VerticalAlign.Center)
+      .constraintSize({ minHeight: 52 })
+      .padding({ left: 14, right: 14, top: 10, bottom: 10 })
+      .backgroundColor(this.pressed ? SURFACE2 : Color.Transparent)
+      .onTouch((e: TouchEvent): void => {
+        const down: boolean = e.type === TouchType.Down;
+        animateTo({ duration: 140, curve: Curve.EaseOut }, (): void => {
+          this.pressed = down;
+        });
+      })
+      .onClick((): void => { this.onRowClick(); })
+      if (!this.isLast) {
+        // 分隔线起点对齐标题文字(行 padding 14 + 图标座 32 + 间距 12);
+        // 横向内缩走外层 padding:width('100%') + margin 在本布局下不生效
+        Row() {
+          Row()
+            .width('100%')
+            .height(1)
+            .backgroundColor(LINE)
+        }
+        .width('100%')
+        .padding({ left: 58, right: 14 })
+      }
+    }
+    .width('100%')
+  }
+}
+
 // youhua .set-row 开关行:标题/描述 + 42×24 自绘药丸开关(150ms)
 @Component
 export struct ToggleRow {
