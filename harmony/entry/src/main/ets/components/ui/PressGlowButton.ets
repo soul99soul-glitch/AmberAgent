@@ -11,9 +11,8 @@
 //   尺寸: btnWidth/btnHeight prop(0 = 包内容,如 FAB);别在调用点挂 .width/.height
 //   底: bgMode 'glass' 玻璃渐变+细边(默认) | 'solid' accent 实底 | 'plain' 无底(内容自带)
 
-import { curves, window } from '@kit.ArkUI';
+import { curves } from '@kit.ArkUI';
 import { uiEffect } from '@kit.ArkGraphics2D';
-import type { Context } from '@kit.AbilityKit';
 import { HOME_GLASS_BOTTOM, HOME_GLASS_EDGE, HOME_GLASS_SHADOW, HOME_GLASS_TOP } from '../../design/tokens.ets';
 
 const HOLD_DELAY_MS: number = 170;
@@ -52,6 +51,8 @@ export struct PressGlowButton {
   @BuilderParam content: () => void = this.emptyContent;
   @State private pressScale: number = 1;
   @State private held: boolean = false;
+  @State private glowW: number = 0;
+  @State private glowH: number = 0;
   private holdTimer: number = -1;
 
   @Builder
@@ -72,16 +73,6 @@ export struct PressGlowButton {
     }
   }
 
-  // 按住时的“HDR 时刻”:窗口亮度顶到 1.0(面板满亮度,与系统当前值无关),
-  // 松开回 -1 恢复系统亮度;这是真机面板上唯一必然可感的提亮手段
-  private boostWindowBrightness(on: boolean): void {
-    const ctx: Context | undefined = this.getUIContext().getHostContext();
-    if (ctx === undefined) return;
-    window.getLastWindow(ctx).then((win: window.Window): void => {
-      win.setWindowBrightness(on ? 1.0 : -1);
-    }).catch((): void => {});
-  }
-
   private setPressed(down: boolean): void {
     if (this.holdTimer >= 0) {
       clearTimeout(this.holdTimer);
@@ -95,22 +86,15 @@ export struct PressGlowButton {
         animateTo({ duration: 180, curve: Curve.EaseOut }, (): void => {
           this.held = true;
         });
-        this.boostWindowBrightness(true);
       }, HOLD_DELAY_MS);
     } else {
-      const wasHeld: boolean = this.held;
       animateTo({ duration: 320, curve: curves.springCurve(0, 1, 180, 24) }, (): void => {
         this.pressScale = 1;
       });
       animateTo({ duration: 200, curve: Curve.EaseIn }, (): void => {
         this.held = false;
       });
-      if (wasHeld) this.boostWindowBrightness(false);
     }
-  }
-
-  aboutToDisappear(): void {
-    if (this.held) this.boostWindowBrightness(false);
   }
 
   build(): void {
@@ -118,11 +102,25 @@ export struct PressGlowButton {
     // 内部禁止任何 100% 子层——包内容尺寸下 100% 会把父级撑到满屏(两次实测);
     // “白炽芯”不做覆盖层,直接换底:实底→accent 向白提亮,玻璃/无底→更白的渐变。
     Stack() {
+      // HDR 辉光层(按住):白色光盘 Image 走媒体通道 + foregroundFilter HDR 4×,
+      // 官方文档示例的 media 场景,比给容器渐变上滤镜更接近 HDR 管线受理路径;
+      // 尺寸贴合按钮(onAreaChange 实测),外溢光晕仍由 shadow 承担
+      if (this.held) {
+        Image($r('app.media.glow_disc'))
+          .width(this.glowW > 0 ? this.glowW : 1)
+          .height(this.glowH > 0 ? this.glowH : 1)
+          .foregroundFilter(this.heldFilter())
+          .hitTestBehavior(HitTestMode.None)
+      }
       Row() {
         this.content()
       }
     }
     .constraintSize({ minWidth: this.btnWidth, minHeight: this.btnHeight })
+    .onAreaChange((_old: Area, value: Area): void => {
+      this.glowW = Number(value.width);
+      this.glowH = Number(value.height);
+    })
     .borderRadius(this.radius)
     .linearGradient({
       direction: GradientDirection.Bottom,
