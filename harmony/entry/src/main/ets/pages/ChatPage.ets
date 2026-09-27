@@ -173,6 +173,7 @@ import { createImageGenTool, imageGenToolAvailable, EditSourceImage } from '../p
 import { createSoulTools } from '../platform_impl/SoulTools.ets';
 import { jevToolSearchReranker, createJevStatusTool } from '../platform_impl/JevSupport.ets';
 import { createJavascriptExecuteTool, JsSandboxHost } from '../platform_impl/JsSandboxTool.ets';
+import { stopGenerationKeepAlive } from '../platform_impl/BackgroundGenerationKeepAlive.ets';
 import { SubAgentActivityStrip } from '../components/SubAgentActivityStrip.ets';
 
 // D-122:沙盒 sheet 代码块底色(设置面 ROW 惯例同值)
@@ -655,6 +656,18 @@ struct ChatPage {
     return tail;
   }
 
+  // 后台生成保活(C6-1):生成态发布 AppStorage(EntryAbility.onBackground 读);
+  //   生成结束(含后台中结束)→ 释放长时任务(幂等)
+  private setGeneratingFlag(v: boolean): void {
+    AppStorage.setOrCreate<boolean>('chatGenerating', v);
+    if (!v) {
+      const ctx: Context | undefined = this.getUIContext().getHostContext();
+      if (ctx !== undefined) {
+        stopGenerationKeepAlive(ctx).catch((): void => {});
+      }
+    }
+  }
+
   // checkpoint 投影在入队前同步完成，锁定当轮 conversation 与 regenerate 目标；
   // 后续页面切换或下一轮生成不会改变已排队快照的结构。
   private persistCheckpoint(snapshot: UIMessage[]): Promise<void> {
@@ -715,6 +728,7 @@ struct ChatPage {
       });
     } else {
       this.sending = false;
+      this.setGeneratingFlag(false);
       this.streamingTail = [];
       this.regenTail = null;
     }
@@ -1248,6 +1262,7 @@ struct ChatPage {
     requestedNodeId: string = '',
   ): void {
     this.sending = false;
+      this.setGeneratingFlag(false);
     this.abortController = null;
     this.streamingTail = [];
     this.regenTail = null;
@@ -1825,6 +1840,7 @@ struct ChatPage {
     const releaseRun: (() => void) | null = this.reserveConversationRun(this.conversation.id);
     if (releaseRun === null) return;
     this.sending = true;
+      this.setGeneratingFlag(true);
     this.errorMsg = '';
     const operationAbort: EntryAbortController = new EntryAbortController();
     this.abortController = operationAbort;
@@ -1923,6 +1939,7 @@ struct ChatPage {
         if (!this.isGenerationOperationActive(operationToken)) return;
         this.errorMsg = this.compactErrorText(e);
         this.sending = false;
+      this.setGeneratingFlag(false);
         this.refreshContextCompacts(); // D-110:压缩可能已写新摘要,刷新足迹
         this.abortController = null;
         this.regenTail = null;
@@ -2767,17 +2784,20 @@ struct ChatPage {
     this.editingNodeId = '';
     this.editingMessageId = '';
     this.sending = true;
+      this.setGeneratingFlag(true);
     this.errorMsg = '';
     this.invalidateConvCompacts(updated.id, 'message_edited')
       .then((): Promise<void> => getChatRepository().save(updated))
       .then((): void => {
         if (!this.isGenerationOperationActive(operationToken)) return;
         this.sending = false;
+      this.setGeneratingFlag(false);
         this.regenerate(nodeId);
       })
       .catch((e: Error): void => {
         if (!this.isGenerationOperationActive(operationToken)) return;
         this.sending = false;
+      this.setGeneratingFlag(false);
         this.errorMsg = this.compactErrorText(e);
       }).finally(releaseRun);
   }
@@ -3906,6 +3926,7 @@ struct ChatPage {
     const releaseRun: (() => void) | null = this.reserveConversationRun(conv.id);
     if (releaseRun === null) return;
     this.sending = true;
+      this.setGeneratingFlag(true);
     this.errorMsg = '';
     const operationAbort: EntryAbortController = new EntryAbortController();
     this.abortController = operationAbort;
@@ -3994,6 +4015,7 @@ struct ChatPage {
         if (!this.isGenerationOperationActive(operationToken)) return;
         this.errorMsg = this.compactErrorText(e);
         this.sending = false;
+      this.setGeneratingFlag(false);
         this.refreshContextCompacts(); // D-110:压缩可能已写新摘要,刷新足迹
         this.abortController = null;
         this.regenTail = null;
@@ -4367,16 +4389,19 @@ struct ChatPage {
     // 双双基于同一旧快照开跑并互相覆盖保存(此处占位后 runSendParts 里的赋值幂等)
     if (this.sending) return;
     this.sending = true;
+      this.setGeneratingFlag(true);
     // Phase 5 全量 invariant:生成必须基于完整会话(窗口未全量时先补全再开跑)
     this.ensureFullConversationForMutation().then((): void => {
       if (this.conversation === null) {
         this.sending = false;
+      this.setGeneratingFlag(false);
         if (onPrepareFailed !== undefined) onPrepareFailed();
         return;
       }
       this.runSendParts(inputParts, dispatchMessageId);
     }).catch((e: Error): void => {
       this.sending = false;
+      this.setGeneratingFlag(false);
       this.errorMsg = e.message;
       if (onPrepareFailed !== undefined) onPrepareFailed();
     });
@@ -4387,6 +4412,7 @@ struct ChatPage {
     const releaseRun: (() => void) | null = this.reserveConversationRun(this.conversation.id);
     if (releaseRun === null) {
       this.sending = false;
+      this.setGeneratingFlag(false);
       return;
     }
     // 单文本 part → 退化为 string(与既有 send 路径行为一致)
@@ -4395,6 +4421,7 @@ struct ChatPage {
       userInput = (inputParts[0] as UIMessagePartText).text;
     }
     this.sending = true;
+      this.setGeneratingFlag(true);
     this.errorMsg = '';
     const operationAbort: EntryAbortController = new EntryAbortController();
     this.abortController = operationAbort;
@@ -4536,6 +4563,7 @@ struct ChatPage {
         if (!this.isGenerationOperationActive(operationToken)) return;
         this.errorMsg = this.compactErrorText(e);
         this.sending = false;
+      this.setGeneratingFlag(false);
         this.refreshContextCompacts(); // D-110:压缩可能已写新摘要,刷新足迹
         this.abortController = null;
         this.streamingTail = [];

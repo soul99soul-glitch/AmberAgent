@@ -15,6 +15,7 @@ import { ACCENT, applyTheme, setAccentColor, BG } from '../design/tokens.ets';
 import { themePackStore, applyCurrentTheme } from '../design/theme_packs.ets';
 import { registerAmberFonts, registerAmberFontsFor } from '../design/fonts.ets';
 import { syncMacGatewayPushTokenOnLaunch } from '../platform_impl/MacGatewayClient.ets';
+import { startGenerationKeepAlive, stopGenerationKeepAlive } from '../platform_impl/BackgroundGenerationKeepAlive.ets';
 
 const DOMAIN: number = 0x0001;
 const TAG: string = 'DeepRead.EntryAbility';
@@ -334,10 +335,19 @@ export default class EntryAbility extends UIAbility {
   onForeground(): void {
     hilog.info(DOMAIN, TAG, 'onForeground — 回前台续跑');
     AppStorage.setOrCreate<boolean>('appBackgrounded', false);
+    // 后台生成保活对称释放(回到前台即不需要长时任务)
+    stopGenerationKeepAlive(this.context).catch((): void => {});
   }
 
   onBackground(): void {
     hilog.info(DOMAIN, TAG, 'onBackground — 切后台暂停');
     AppStorage.setOrCreate<boolean>('appBackgrounded', true);
+    // 生成中切后台:DATA_TRANSFER 长时任务保活,流式继续(C6-1)
+    const generating: boolean = AppStorage.get<boolean>('chatGenerating') ?? false;
+    if (generating) {
+      startGenerationKeepAlive(this.context).then((ok: boolean): void => {
+        if (!ok) hilog.warn(DOMAIN, TAG, 'generation keep-alive unavailable, stream may suspend');
+      }).catch((): void => {});
+    }
   }
 }

@@ -82,9 +82,26 @@
 | C6-1 | 后台继续生成 | 调研 `backgroundTaskManager` 长时任务类型(查官方文档)→ 选定方案实现:切后台挂起续跑,完成走 NotificationNotifier(进度+完成);回前台无缝接管 | 切后台生成完成并通知,无重复追加 |
 | C6-2 | 终端运行时 | 先出调研结论(纯 TS SSH 选型 / NAPI libssh2 / HiSH 本机沙盒)→ Remote SSH 优先落地:profile 管理、指纹信任、`terminal_execute`(自动转后台)/job/session | SSH 执行真机调通,输出回流 |
 
+## 收尾记录(2026-09-27 执行完毕)
+
+**C0–C6 全部完成**:C0 4515362ec / C1 5fa00912f / C2 51645d367 / C3 db9baeead / C4 74dd085f2 / C5 c33f23678 / C6 见下。
+
+**C6-1 已落地**:`BackgroundGenerationKeepAlive`(DATA_TRANSFER 长时任务,API 12,KEEP_BACKGROUND_RUNNING normal 声明)——生成中切后台 `EntryAbility.onBackground` 起任务保活,回前台/生成结束对称释放;实况窗进度通知与 >10 分钟任务续约 = 后续梯队(登记)。
+
+**C6-2 调研结论(转独立原生批次)**:
+1. 纯 ArkTS SSH 客户端不可行(完整协议栈=握手/KEX/加密/信道,数千行加密代码,风险不可控)。
+2. ohpm 三方仓无 SSH 客户端库(2026-09-27 检索 ssh/ssh client/sftp 全空)。
+3. 落地路线 = 借仓库既有 `harmony/native/rust-napi` 评估轨道:先以小 API 面(tokenizer)打通 ohos 交叉编译+NAPI 管线 → libssh2(依赖 OpenSSL/mbedTLS)交叉编译 + NAPI 绑定 → `terminal_execute`/job/session。SettingSandboxPage 的「鸿蒙当前不提供 shell 运行时」诚实声明保持不动,无虚假入口。
+
+**登记缓办(诚实声明,不造假入口)**:
+- Antigravity(Google OAuth):需 Gemini Code Assist v1internal 包装 + onboarding 流(google_chat_api.ts:81 已显式抛错登记)。
+- WebMount 高级子系统:tap(≈click)、signed_fetch、network_inspect、oauth_connect/refresh、site_adapter/site_memory、profile_synthesize、recipe_candidates、fetch_replay、run_goal、observe。
+- DATA_TRANSFER 实况窗进度通知(C6-1 深化)。
+- Jev 其余用途:记忆召回/上下文选择/模型路由/审批分诊/Web 自动化(仅 TOOL_DISCOVERY 已接)。
+
 ## 里程碑
 
-- M1 = C0+C1 提交 → 体感 parity 九成
-- M2 = C2+C3 → 设置面 parity
-- M3 = C4+C5 → 功能面 parity
-- M4 = C6 → 共通功能闭环
+- M1 = C0+C1 提交 → 体感 parity 九成 ✅
+- M2 = C2+C3 → 设置面 parity ✅
+- M3 = C4+C5 → 功能面 parity ✅
+- M4 = C6 → 共通功能闭环(C6-1 落地;C6-2 转原生批次)✅
