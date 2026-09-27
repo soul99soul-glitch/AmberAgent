@@ -17,7 +17,7 @@ import { HOME_GLASS_BOTTOM, HOME_GLASS_EDGE, HOME_GLASS_SHADOW, HOME_GLASS_TOP }
 
 const HOLD_DELAY_MS: number = 170;
 // 按住 HDR 提亮倍数(hdrBrightnessRatio24+,设备上限=峰值亮度/SDR 白,超出自动截断)
-const HDR_HOLD_RATIO: number = 4;
+const HDR_HOLD_RATIO: number = 2.5;
 
 const accentAlpha = (hex: string, alpha: number): string => {
   const value: string = hex.replace('#', '');
@@ -26,16 +26,6 @@ const accentAlpha = (hex: string, alpha: number): string => {
   const g: number = parseInt(value.substring(2, 4), 16);
   const b: number = parseInt(value.substring(4, 6), 16);
   return `rgba(${r}, ${g}, ${b}, ${alpha})`;
-};
-
-// accent 向白提亮(f=0..1):按住时实底按钮的“高光”色
-const lightenHex = (hex: string, f: number): string => {
-  const value: string = hex.replace('#', '');
-  if (value.length !== 6) return hex;
-  const r: number = Math.round(parseInt(value.substring(0, 2), 16) + (255 - parseInt(value.substring(0, 2), 16)) * f);
-  const g: number = Math.round(parseInt(value.substring(2, 4), 16) + (255 - parseInt(value.substring(2, 4), 16)) * f);
-  const b: number = Math.round(parseInt(value.substring(4, 6), 16) + (255 - parseInt(value.substring(4, 6), 16)) * f);
-  return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
 };
 
 @Component
@@ -47,6 +37,8 @@ export struct PressGlowButton {
   @Prop btnHeight: number = 0;
   // 按住时的光晕颜色(中性白系;浅色 0.9 / 深色由调用点传 0.3,勿用 accent)
   @Prop haloColor: string = 'rgba(255, 255, 255, 0.9)';
+  // 光晕半径(FAB 需更大辐射范围时由调用点加大)
+  @Prop haloRadius: number = 26;
   onTap: () => void = (): void => {};
   @BuilderParam content: () => void = this.emptyContent;
   @State private pressScale: number = 1;
@@ -102,15 +94,25 @@ export struct PressGlowButton {
     // 内部禁止任何 100% 子层——包内容尺寸下 100% 会把父级撑到满屏(两次实测);
     // “白炽芯”不做覆盖层,直接换底:实底→accent 向白提亮,玻璃/无底→更白的渐变。
     Stack() {
-      // HDR 辉光层(按住):白色光盘 Image 走媒体通道 + foregroundFilter HDR 4×,
-      // 官方文档示例的 media 场景,比给容器渐变上滤镜更接近 HDR 管线受理路径;
-      // 尺寸贴合按钮(onAreaChange 实测),外溢光晕仍由 shadow 承担
+      // HDR 辉光层(按住):平坦光场 Image 走媒体通道 + foregroundFilter HDR,
+      // 整面均匀亮起;尺寸 onAreaChange 实测贴合按钮
       if (this.held) {
         Image($r('app.media.glow_disc'))
           .width(this.glowW > 0 ? this.glowW : 1)
           .height(this.glowH > 0 ? this.glowH : 1)
+          .borderRadius(this.radius)
           .foregroundFilter(this.heldFilter())
           .hitTestBehavior(HitTestMode.None)
+        // solid 专属:accent 透纱罩在光场上 — 白热核透过 accent 呈高亮通透,
+        // 而非发白;同色 veil 尺寸与光场一致(避开 100% 子层撑满屏的坑)
+        if (this.isSolid()) {
+          Row()
+            .width(this.glowW > 0 ? this.glowW : 1)
+            .height(this.glowH > 0 ? this.glowH : 1)
+            .borderRadius(this.radius)
+            .backgroundColor(accentAlpha(this.accentColor, 0.55))
+            .hitTestBehavior(HitTestMode.None)
+        }
       }
       Row() {
         this.content()
@@ -126,7 +128,7 @@ export struct PressGlowButton {
       direction: GradientDirection.Bottom,
       colors: this.held
         ? (this.isSolid()
-          ? [[lightenHex(this.accentColor, 0.38), 0], [lightenHex(this.accentColor, 0.38), 1]]
+          ? [[this.accentColor, 0], [this.accentColor, 1]]
           : [['rgba(255, 255, 255, 0.95)', 0], ['rgba(255, 255, 255, 0.85)', 1]])
         : (this.bgMode === 'solid'
           ? [[this.accentColor, 0], [this.accentColor, 1]]
@@ -137,10 +139,10 @@ export struct PressGlowButton {
     .border(this.bgMode === 'glass' && !this.held
       ? { width: 0.5, color: HOME_GLASS_EDGE }
       : { width: 0, color: Color.Transparent })
-    // 真 HDR 提亮(API 24+,4×):叠加在底色提升之上;SDR 兜底=底色提升+白光晕
+    // 真 HDR 提亮(API 24+):媒体光场主通道,容器滤镜作叠底
     .backgroundFilter(this.held ? this.heldFilter() : uiEffect.createFilter().blur(0))
     .shadow(this.held
-      ? { radius: 26, color: this.haloColor, offsetY: 0 }
+      ? { radius: this.haloRadius, color: this.haloColor, offsetY: 0 }
       : (this.isSolid()
         ? { radius: 14, color: accentAlpha(this.accentColor, 0.38), offsetY: 5 }
         : { radius: 10, color: HOME_GLASS_SHADOW, offsetY: 4 }))

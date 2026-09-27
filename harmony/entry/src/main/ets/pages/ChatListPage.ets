@@ -1272,11 +1272,14 @@ struct ChatListPage {
         .onClick((): void => { this.collapseSearch(); })
 
         // 右下拇指区:新对话胶囊(accent 底 + on-accent 墨;iOS amberProminentGlass 语义)
+        // 按住光晕随 accent(同色透亮,非白按钮绿边情形),辐射半径加大
         PressGlowButton({
           accentColor: this.accentColorStore,
           radius: 21,
           bgMode: 'solid',
           btnHeight: 42,
+          haloColor: accentAlpha(this.accentColorStore, 0.8),
+          haloRadius: 48,
           onTap: (): void => { this.newConversation(); },
           content: (): void => { this.FabContent(); },
         })
