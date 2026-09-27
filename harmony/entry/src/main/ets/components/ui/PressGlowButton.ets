@@ -17,7 +17,7 @@ import { HOME_GLASS_BOTTOM, HOME_GLASS_EDGE, HOME_GLASS_SHADOW, HOME_GLASS_TOP }
 
 const HOLD_DELAY_MS: number = 170;
 // 按住 HDR 提亮倍数(hdrBrightnessRatio24+,设备上限=峰值亮度/SDR 白,超出自动截断)
-const HDR_HOLD_RATIO: number = 2.5;
+const HDR_HOLD_RATIO: number = 1.8;
 
 const accentAlpha = (hex: string, alpha: number): string => {
   const value: string = hex.replace('#', '');
@@ -45,6 +45,9 @@ export struct PressGlowButton {
   @State private held: boolean = false;
   @State private glowW: number = 0;
   @State private glowH: number = 0;
+  // 触点(组件坐标系 vp):solid 模式光斑跟随指尖
+  @State private spotX: number = -1;
+  @State private spotY: number = -1;
   private holdTimer: number = -1;
 
   @Builder
@@ -65,12 +68,16 @@ export struct PressGlowButton {
     }
   }
 
-  private setPressed(down: boolean): void {
+  private setPressed(down: boolean, touchX: number = -1, touchY: number = -1): void {
     if (this.holdTimer >= 0) {
       clearTimeout(this.holdTimer);
       this.holdTimer = -1;
     }
     if (down) {
+      if (touchX >= 0 && touchY >= 0) {
+        this.spotX = touchX;
+        this.spotY = touchY;
+      }
       animateTo({ duration: 300, curve: curves.springCurve(0, 1, 200, 22) }, (): void => {
         this.pressScale = 1.06;
       });
@@ -89,28 +96,57 @@ export struct PressGlowButton {
     }
   }
 
+  // solid 光斑尺寸:按钮高的 1.6 倍,只覆盖触点周围;
+  // Area 异常值(包内容 Stack 可能上报父约束)一律回退 btnHeight,防满屏
+  private spotSize(): number {
+    const h: number = (this.glowH > 0 && this.glowH <= 200) ? this.glowH
+      : (this.btnHeight > 0 ? this.btnHeight : 42);
+    return Math.min(h * 1.6, 96);
+  }
+
+  private spotPosX(): number {
+    const s: number = this.spotSize();
+    const cx: number = this.spotX >= 0 ? this.spotX : (this.glowW > 0 ? this.glowW / 2 : s);
+    return cx - s / 2;
+  }
+
+  private spotPosY(): number {
+    const s: number = this.spotSize();
+    const cy: number = this.spotY >= 0 ? this.spotY : (this.glowH > 0 ? this.glowH / 2 : s);
+    return cy - s / 2;
+  }
+
   build(): void {
     // 单 Stack(尺寸 = btnWidth/btnHeight 或内容):底/边/影全挂容器自身。
     // 内部禁止任何 100% 子层——包内容尺寸下 100% 会把父级撑到满屏(两次实测);
     // “白炽芯”不做覆盖层,直接换底:实底→accent 向白提亮,玻璃/无底→更白的渐变。
     Stack() {
-      // HDR 辉光层(按住):平坦光场 Image 走媒体通道 + foregroundFilter HDR,
-      // 整面均匀亮起;尺寸 onAreaChange 实测贴合按钮
       if (this.held) {
-        Image($r('app.media.glow_disc'))
-          .width(this.glowW > 0 ? this.glowW : 1)
-          .height(this.glowH > 0 ? this.glowH : 1)
-          .borderRadius(this.radius)
-          .foregroundFilter(this.heldFilter())
-          .hitTestBehavior(HitTestMode.None)
-        // solid 专属:accent 透纱罩在光场上 — 白热核透过 accent 呈高亮通透,
-        // 而非发白;同色 veil 尺寸与光场一致(避开 100% 子层撑满屏的坑)
         if (this.isSolid()) {
+          // solid(新对话):指尖局部光斑 — 径向光斑跟随触点,accent 透纱同范围,
+          // 只点亮按住地方的周围一圈,不整面发白
+          Image($r('app.media.radial_spot'))
+            .width(this.spotSize())
+            .height(this.spotSize())
+            .position({ x: this.spotPosX(), y: this.spotPosY() })
+            .borderRadius(this.spotSize() / 2)
+            .foregroundFilter(this.heldFilter())
+            .hitTestBehavior(HitTestMode.None)
           Row()
+            .width(this.spotSize())
+            .height(this.spotSize())
+            .position({ x: this.spotPosX(), y: this.spotPosY() })
+            .borderRadius(this.spotSize() / 2)
+            .backgroundColor(accentAlpha(this.accentColor, 0.55))
+            .hitTestBehavior(HitTestMode.None)
+        } else {
+          // glass/plain(搜索/齿轮/头像):整面均匀亮起;
+          // 光场满幅白,形状交 borderRadius 裁切 = 按钮本体形状
+          Image($r('app.media.glow_disc'))
             .width(this.glowW > 0 ? this.glowW : 1)
             .height(this.glowH > 0 ? this.glowH : 1)
             .borderRadius(this.radius)
-            .backgroundColor(accentAlpha(this.accentColor, 0.55))
+            .foregroundFilter(this.heldFilter())
             .hitTestBehavior(HitTestMode.None)
         }
       }
@@ -118,10 +154,20 @@ export struct PressGlowButton {
         this.content()
       }
     }
-    .constraintSize({ minWidth: this.btnWidth, minHeight: this.btnHeight })
+    .constraintSize({
+      minWidth: this.btnWidth,
+      minHeight: this.btnHeight,
+      // position 子层(指尖光斑)参与固有尺寸会把按钮撑大;封顶后光斑盒外
+      // 自然溢出(默认不裁切),不再反向 inflate;prop 有精确尺寸先吃 prop
+      maxWidth: this.btnWidth > 0 ? this.btnWidth : (this.glowW > 0 ? this.glowW : 300),
+      maxHeight: this.btnHeight > 0 ? this.btnHeight : (this.glowH > 0 ? this.glowH : 300),
+    })
     .onAreaChange((_old: Area, value: Area): void => {
-      this.glowW = Number(value.width);
-      this.glowH = Number(value.height);
+      // 包内容 Stack 可能上报父约束区(曾把 FAB 光斑撑到满屏):超界值回退 prop 尺寸
+      const w: number = Number(value.width);
+      const h: number = Number(value.height);
+      this.glowW = (w > 0 && w < 400) ? w : this.btnWidth;
+      this.glowH = (h > 0 && h < 400) ? h : this.btnHeight;
     })
     .borderRadius(this.radius)
     .linearGradient({
@@ -148,8 +194,13 @@ export struct PressGlowButton {
         : { radius: 10, color: HOME_GLASS_SHADOW, offsetY: 4 }))
     .scale({ x: this.pressScale, y: this.pressScale })
     .onTouch((event: TouchEvent): void => {
-      if (event.type === TouchType.Down) this.setPressed(true);
-      else if (event.type === TouchType.Up || event.type === TouchType.Cancel) this.setPressed(false);
+      if (event.type === TouchType.Down) {
+        const tx: number = event.touches.length > 0 ? event.touches[0].x : -1;
+        const ty: number = event.touches.length > 0 ? event.touches[0].y : -1;
+        this.setPressed(true, tx, ty);
+      } else if (event.type === TouchType.Up || event.type === TouchType.Cancel) {
+        this.setPressed(false);
+      }
     })
     .onClick((): void => { this.onTap(); })
   }
