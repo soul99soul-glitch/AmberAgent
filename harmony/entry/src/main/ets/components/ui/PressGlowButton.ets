@@ -185,6 +185,9 @@ export struct PressGlowButton {
     .border(this.bgMode === 'glass' && !this.held
       ? { width: 0.5, color: HOME_GLASS_EDGE }
       : { width: 0, color: Color.Transparent })
+    // 光斑/内容裁进按钮轮廓:灯只在按钮里亮,外部不出“圆圈”;
+    // clip 只管子层,shadow 光晕在边界外渲染不受影响
+    .clip(true)
     // 真 HDR 提亮(API 24+):媒体光场主通道,容器滤镜作叠底
     .backgroundFilter(this.held ? this.heldFilter() : uiEffect.createFilter().blur(0))
     .shadow(this.held
