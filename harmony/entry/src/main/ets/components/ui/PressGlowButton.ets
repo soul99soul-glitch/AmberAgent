@@ -28,6 +28,41 @@ const accentAlpha = (hex: string, alpha: number): string => {
   return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 };
 
+// HSV 高明度化(色相不动,只拉明度/微增饱和):光晕专用 —
+// 原生 accent 高透明度读起来是阴影,同色高明度才是发光
+const hsvBoost = (hex: string, vFactor: number, sFactor: number): string => {
+  const value: string = hex.replace('#', '');
+  if (value.length !== 6) return hex;
+  const r: number = parseInt(value.substring(0, 2), 16) / 255;
+  const g: number = parseInt(value.substring(2, 4), 16) / 255;
+  const b: number = parseInt(value.substring(4, 6), 16) / 255;
+  const max: number = Math.max(r, g, b);
+  const min: number = Math.min(r, g, b);
+  const delta: number = max - min;
+  let h: number = 0;
+  if (delta > 0) {
+    if (max === r) h = 60 * (((g - b) / delta) % 6);
+    else if (max === g) h = 60 * ((b - r) / delta + 2);
+    else h = 60 * ((r - g) / delta + 4);
+  }
+  if (h < 0) h += 360;
+  const s: number = max === 0 ? 0 : delta / max;
+  const v2: number = Math.min(1, max * vFactor);
+  const s2: number = Math.min(1, s * sFactor);
+  const c: number = v2 * s2;
+  const x: number = c * (1 - Math.abs(((h / 60) % 2) - 1));
+  const m: number = v2 - c;
+  let rr: number = 0, gg: number = 0, bb: number = 0;
+  if (h < 60) { rr = c; gg = x; }
+  else if (h < 120) { rr = x; gg = c; }
+  else if (h < 180) { gg = c; bb = x; }
+  else if (h < 240) { gg = x; bb = c; }
+  else if (h < 300) { rr = x; bb = c; }
+  else { rr = c; bb = x; }
+  const to255 = (v: number): string => Math.round((v + m) * 255).toString(16).padStart(2, '0');
+  return `#${to255(rr)}${to255(gg)}${to255(bb)}`;
+};
+
 @Component
 export struct PressGlowButton {
   @Prop accentColor: string = '#B8623A';
@@ -165,7 +200,10 @@ export struct PressGlowButton {
     // 真 HDR 提亮(API 24+):媒体光场主通道,容器滤镜作叠底
     .backgroundFilter(this.held ? this.heldFilter() : uiEffect.createFilter().blur(0))
     .shadow(this.held
-      ? { radius: this.haloRadius, color: this.haloColor, offsetY: 0 }
+      ? (this.isSolid()
+        // solid 光晕 = 同色高明度(HSV 拉明度)中透明,大扩散 — 发光而非阴影
+        ? { radius: 38, color: accentAlpha(hsvBoost(this.accentColor, 1.5, 1.05), 0.55), offsetY: 0 }
+        : { radius: this.haloRadius, color: this.haloColor, offsetY: 0 })
       : (this.isSolid()
         ? { radius: 14, color: accentAlpha(this.accentColor, 0.38), offsetY: 5 }
         : { radius: 10, color: HOME_GLASS_SHADOW, offsetY: 4 }))
