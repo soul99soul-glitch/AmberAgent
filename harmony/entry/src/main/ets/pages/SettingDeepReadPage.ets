@@ -15,8 +15,9 @@ import {
   BtnFill, BtnGhost, PageSpacer,
 } from '../components/PageTemplate.ets';
 import { PillSelect } from '../components/ui/Select.ets';
-import { BUILTIN_TEMPLATES } from '../platform_impl/DeepReadTemplate.ets';
-import type { DeepReadTemplateDef } from '../platform_impl/DeepReadTemplate.ets';
+import { BUILTIN_TEMPLATES, loadCustomTemplates } from '../platform_impl/DeepReadTemplate.ets';
+import type { DeepReadTemplateDef, CustomTemplateDef } from '../platform_impl/DeepReadTemplate.ets';
+import { router } from '@kit.ArkUI';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { getAppContainer, getModelRegistry } from '../di/AppContainer.ets';
 import type { Storage, ModelConfig } from '@amber/deepread-domain';
@@ -70,6 +71,7 @@ struct SettingDeepReadPage {
   @State fontModeIndex: number = 0;
   @State fontScalePercent: number = 100;
   @State templateId: string = 'none';
+  @State customTemplates: CustomTemplateDef[] = [];
   @State boardModelId: string = '';
   private focusModes: string[] = ['全部', '关注优先', '仅关注'];
   private fontModes: string[] = ['默认', '衬线'];
@@ -95,6 +97,15 @@ struct SettingDeepReadPage {
   aboutToDisappear(): void {
     this.pageAlive = false;
     this.loadToken++;
+  }
+
+  // 从模板工作台返回时刷新自定义模板列表(aboutToAppear 在栈内返回不重跑)
+  onPageShow(): void {
+    const storage: Storage | null = this.storage;
+    if (storage === null) return;
+    loadCustomTemplates(storage).then((list: CustomTemplateDef[]): void => {
+      if (this.pageAlive) this.customTemplates = list;
+    }).catch((): void => {});
   }
 
   private async loadPage(token: number): Promise<void> {
@@ -136,6 +147,17 @@ struct SettingDeepReadPage {
     this.fontScalePercent = fontScale;
     this.boardModelId = boardModelId;
     this.templateId = tplId;
+    this.customTemplates = await loadCustomTemplates(storage);
+  }
+
+  // 模板 chips:内置 + 自定义(自定义无 description,chips 只用 id/name)
+  private allTemplateChips(): DeepReadTemplateDef[] {
+    const out: DeepReadTemplateDef[] = [];
+    for (const t of BUILTIN_TEMPLATES) out.push(t);
+    for (const c of this.customTemplates) {
+      out.push({ id: c.id, name: c.name, description: '' });
+    }
+    return out;
   }
 
   private async saveTemplate(id: string): Promise<void> {
@@ -456,7 +478,7 @@ struct SettingDeepReadPage {
           .fontFamily(FONT_SANS_MEDIUM).fontColor(INK)
           .width('100%')
         Row() {
-          ForEach(BUILTIN_TEMPLATES, (t: DeepReadTemplateDef): void => {
+          ForEach(this.allTemplateChips(), (t: DeepReadTemplateDef): void => {
             Text(t.name)
               .fontSize(13).fontWeight(FontWeight.Medium).lineHeight(lineHeightForSize(13))
               .fontFamily(FONT_SANS_MEDIUM)
@@ -469,6 +491,14 @@ struct SettingDeepReadPage {
           }, (t: DeepReadTemplateDef): string => t.id)
         }
         .margin({ top: 6 })
+        Text('管理自定义模板')
+          .fontSize(13).fontWeight(FontWeight.Medium).lineHeight(lineHeightForSize(13))
+          .fontFamily(FONT_SANS_MEDIUM).fontColor(this.accentColorStore)
+          .margin({ top: 10 })
+          .constraintSize({ minHeight: 36 })
+          .onClick((): void => {
+            router.pushUrl({ url: 'pages/DeepReadTemplateWorkbenchPage' });
+          })
       }
       .width('100%').padding({ left: 14, right: 14, top: 8, bottom: 12 })
     }

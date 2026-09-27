@@ -23,7 +23,9 @@ export struct AmberTextArea {
   @Prop placeholderColor: string = INK4;
   @Prop minLines: number = 5;
   @Prop maxLines: number = 10;
-  @Prop enabled: boolean = true;
+  // inputEnabled:原 prop 名 enabled 与 CommonAttribute.enabled 方法冲突
+  //   (组件被实例化时才触发 ArkTS 基类兼容检查),改名规避
+  @Prop inputEnabled: boolean = true;
   @Prop enableFullscreen: boolean = true;
   // G6-S5 新增 —— maxLength > 0 启用字数上限 + 计数
   @Prop maxLength: number = 0;
@@ -44,8 +46,8 @@ export struct AmberTextArea {
     return v;
   }
 
-  // 当前边框色:错误态 > 聚焦态 > 默认
-  private borderColor(): string {
+  // 当前边框色:错误态 > 聚焦态 > 默认(命名规避 CommonAttribute.borderColor)
+  private fieldBorderColor(): string {
     if (this.showError) return ERROR;
     if (this.focused) return ACCENT;
     return LINE;
@@ -71,16 +73,16 @@ export struct AmberTextArea {
       }
 
       TextArea({ text: this.value, placeholder: this.placeholder })
-        .fontSize(BODY).fontColor(this.enabled ? INK : INK3)
+        .fontSize(BODY).fontColor(this.inputEnabled ? INK : INK3)
         .placeholderColor(this.placeholderColor)
         .backgroundColor(SURFACE)
         .borderRadius(12)
-        .border({ width: 1, color: this.borderColor() })
+        .border({ width: 1, color: this.fieldBorderColor() })
         .padding({ left: 14, right: 14, top: 12, bottom: 12 })
         .width('100%')
         .constraintSize({ minHeight: this.minLines * 24 })
         .maxLines(this.maxLines)
-        .enabled(this.enabled)
+        .enabled(this.inputEnabled)
         .onFocus((): void => { this.focused = true; })
         .onBlur((): void => { this.focused = false; })
         .onChange((v: string): void => { this.onChange(this.clampLength(v)); })

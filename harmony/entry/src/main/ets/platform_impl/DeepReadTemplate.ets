@@ -3,9 +3,13 @@
 // DeepReadTemplateModels.kt(29 行)/ DeepReadTemplateRenderer.kt(683 行 editorial_slant)
 // 的鸿蒙等价:editorial_slant 内置模板 = DeepReadOutput → HTML(杂志风)。
 // 安全区:图片/链接 URL 白名单(http/https/data:image),文本全部 HTML 转义。
-// 自定义模板(Agent 生成/工作台)后续梯队;当前提供内置模板选择与渲染。
+// 自定义模板(Agent 生成/工作台,D1-1):见文件下方「自定义模板」节;
+//   当前提供内置模板选择与渲染 + 自定义模板存储/安检/渲染。
 
-import type { DeepReadOutput } from '@amber/deepread-domain';
+import type { DeepReadOutput, Storage } from '@amber/deepread-domain';
+import {
+  makeEmptyDeepReadOutput, TimelineEvent, Perspective, Quote, ReadingLink,
+} from '@amber/deepread-domain';
 
 export const DEEPREAD_TEMPLATE_NONE: string = 'none';
 export const DEEPREAD_TEMPLATE_EDITORIAL_SLANT: string = 'editorial_slant';
@@ -191,4 +195,131 @@ export const renderEditorialSlantHtml = (
     + `<h1 class="title">${safeTitle}</h1>`
     + body
     + `</body></html>`;
+};
+
+// ================= 自定义模板(D1-1;双端 🔵「自定义 HTML 模板(严格安检)」) =================
+//
+// 模型:用户 HTML 壳 + 占位符 {{title}}/{{kicker}}/{{summary}}/{{timeline}}/{{analysis}}/{{reading}},
+//   占位区复用上方内置渲染器(文本全转义、URL 白名单),用户静态部分过严格安检。
+// 安检(严格,宁可误杀):整元素剔除 script/iframe/object/embed/form/表单控件/link/meta/base/
+//   audio/video/svg/math;剥离 on* 事件属性;封 javascript:/vbscript: 协议;
+//   CSS 剥离 @import / url() / expression()(外部资源与旧式注入全断)。
+// 存储:KV deepread_custom_templates(JSON 数组);选中模板 id 仍走 deepread_template_id。
+
+export interface CustomTemplateDef {
+  id: string;        // custom_{timestamp}
+  name: string;
+  html: string;
+  createdAt: number;
+}
+
+const CUSTOM_TEMPLATES_KEY: string = 'deepread_custom_templates';
+
+interface CustomTemplateDoc {
+  id?: string;
+  name?: string;
+  html?: string;
+  createdAt?: number;
+}
+
+export const loadCustomTemplates = async (storage: Storage): Promise<CustomTemplateDef[]> => {
+  const raw: string = await storage.get<string>(CUSTOM_TEMPLATES_KEY, '[]');
+  try {
+    const arr = JSON.parse(raw) as CustomTemplateDoc[];
+    const out: CustomTemplateDef[] = [];
+    for (const d of arr) {
+      if (d.id === undefined || d.name === undefined || d.html === undefined) continue;
+      out.push({ id: d.id, name: d.name, html: d.html, createdAt: d.createdAt ?? 0 });
+    }
+    return out;
+  } catch (_e) {
+    return [];
+  }
+};
+
+export const saveCustomTemplates = async (
+  storage: Storage, list: CustomTemplateDef[],
+): Promise<void> => {
+  await storage.set<string>(CUSTOM_TEMPLATES_KEY, JSON.stringify(list));
+};
+
+export const sanitizeTemplateHtml = (raw: string): string => {
+  // fixpoint 循环:单遍替换可被嵌套重组绕过(<scr<script>ipt> → <script>),
+  //   反复执行直到输出不再变化(每次迭代必然变短或收敛,不会死循环)
+  let s: string = raw;
+  let prev: string = '';
+  while (prev !== s) {
+    prev = s;
+    s = s.replace(/<\s*(script|iframe|object|embed|form|input|button|textarea|select|link|meta|base|audio|video|svg|math)\b[^>]*>[\s\S]*?<\s*\/\s*\1\s*>/gis, '');
+    s = s.replace(/<\s*(script|iframe|object|embed|form|input|button|textarea|select|link|meta|base|audio|video|svg|math)\b[^>]*\/?\s*>/gis, '');
+    s = s.replace(/\son[a-zA-Z]+\s*=\s*"[^"]*"/g, '');
+    s = s.replace(/\son[a-zA-Z]+\s*=\s*'[^']*'/g, '');
+    s = s.replace(/\son[a-zA-Z]+\s*=\s*[^\s>]+/g, '');
+    // href/src scheme 白名单(javascript:/vbscript: 黑名单可被 HTML 实体绕过;
+    //   仅放行 http(s)/data:image/页内锚)
+    s = s.replace(/(href|src)\s*=\s*"([^"]*)"/gis, (_m: string, attr: string, val: string): string =>
+      /^(https?:|data:image|#)/i.test(val.trim()) ? `${attr}="${val}"` : `${attr}=""`);
+    s = s.replace(/(href|src)\s*=\s*'([^']*)'/gis, (_m: string, attr: string, val: string): string =>
+      /^(https?:|data:image|#)/i.test(val.trim()) ? `${attr}='${val}'` : `${attr}=''`);
+    s = s.replace(/@import\b[^;]*/gis, '');
+    s = s.replace(/url\s*\([^)]*\)/gis, '');
+    s = s.replace(/expression\s*\([^)]*\)/gis, '');
+  }
+  return s.trim();
+};
+
+export const hasTemplatePlaceholders = (raw: string): boolean =>
+  /\{\{\s*(title|kicker|summary|timeline|analysis|reading)\s*\}\}/.test(raw);
+
+// 自定义模板渲染:先安检,再占位符替换(章节先于 title/kicker — 标题里若巧合
+//   含 {{analysis}} 字样不会被二次替换污染);无 <html> 骨架则补最小骨架。
+//   output 为 null(生成中/失败)时内容占位区清空,仅留用户静态壳与标题。
+export const renderCustomTemplateHtml = (
+  templateHtml: string, title: string, o: DeepReadOutput | null,
+): string => {
+  let out: string = sanitizeTemplateHtml(templateHtml);
+  if (o !== null) {
+    out = out.replace(/\{\{\s*summary\s*\}\}/g, renderOverview(o));
+    out = out.replace(/\{\{\s*timeline\s*\}\}/g, renderNarrative(o));
+    out = out.replace(/\{\{\s*analysis\s*\}\}/g, renderAnalysis(o));
+    out = out.replace(/\{\{\s*reading\s*\}\}/g, renderExtendedReading(o));
+  } else {
+    out = out.replace(/\{\{\s*(summary|timeline|analysis|reading)\s*\}\}/g, '');
+  }
+  out = out.replace(/\{\{\s*title\s*\}\}/g, esc(title));
+  out = out.replace(/\{\{\s*kicker\s*\}\}/g, 'DEEP READ · 深度阅读');
+  if (!/<\s*html/i.test(out)) {
+    out = `<!DOCTYPE html><html><head><meta charset="utf-8" />`
+      + `<meta name="viewport" content="width=device-width, initial-scale=1" />`
+      + `</head><body>${out}</body></html>`;
+  }
+  return out;
+};
+
+// 工作台预览用示例输出(静态;复用 makeEmptyDeepReadOutput 保证字段完整)
+export const buildSampleTemplateOutput = (): DeepReadOutput => {
+  const o: DeepReadOutput = makeEmptyDeepReadOutput();
+  o.summary = '这是一段示例导语,用于预览自定义模板的真实渲染效果。占位符会被替换为对应章节的安全 HTML。';
+  o.keyEntities = ['示例实体', 'Amber', '深度阅读'];
+  const tl: TimelineEvent[] = [
+    { date: '2026-09-27', event: '示例事件:模板系统上线', isHighlight: false, imageUrl: null, imageCaption: null },
+    { date: '2026-09-28', event: '示例事件:支持自定义 HTML 模板', isHighlight: true, imageUrl: null, imageCaption: null },
+  ];
+  o.timeline = tl;
+  const perspectives: Perspective[] = [
+    { holder: '支持者', viewpoint: '占位符足以覆盖常见版式,且没有注入面。' },
+    { holder: '谨慎者', viewpoint: '必须严格安检,宁可少放能力。' },
+  ];
+  const quotes: Quote[] = [{ text: '模板是内容的骨架。', attribution: '示例引语' }];
+  o.analysis = {
+    coreDispute: '示例核心争议:自定义模板应该支持多大的自由度?',
+    perspectives: perspectives,
+    quotes: quotes,
+    implications: '示例影响:自定义模板让深读版式脱离发版节奏。',
+  };
+  const links: ReadingLink[] = [
+    { title: '示例延伸阅读', url: 'https://example.com', source: 'example.com', publishedAt: null },
+  ];
+  o.extendedReading = links;
+  return o;
 };

@@ -23,8 +23,9 @@ import type { DeepReadProgressSnapshot } from '@amber/deepread-domain';
 import { MarkdownText } from '../components/MarkdownText.ets';
 import { FONT_SERIF, FONT_MONO_SEMIBOLD, FONT_SANS_MEDIUM } from '../design/fonts.ets';
 import { DeepReadConfirmationDialog } from '../components/DeepReadConfirmationDialog.ets';
-import { getDeepReadScheduler, getRepository, getChatKvStore } from '../di/AppContainer.ets';
+import { getDeepReadScheduler, getRepository, getChatKvStore, getAppContainer } from '../di/AppContainer.ets';
 import { renderEditorialSlantHtml, DEEPREAD_TEMPLATE_EDITORIAL_SLANT } from '../platform_impl/DeepReadTemplate.ets';
+import { renderCustomTemplateHtml, loadCustomTemplates, CustomTemplateDef } from '../platform_impl/DeepReadTemplate.ets';
 import { webview } from '@kit.ArkWeb';
 import {
   BG, INK, INK2, INK3, INK4, SURFACE, SURFACE2, LINE, LINE2, ACCENT, ACCENT_LIGHT,
@@ -68,7 +69,8 @@ struct DeepReadArticlePage {
   @State progress: DeepReadProgressSnapshot = { percent: 0, label: '未开始' };
   @State fromHistory: boolean = false;
   @State historyExpired: boolean = false;
-  @State templateId: string = 'none';   // 模板选择(editorial_slant → WebView 渲染)
+  @State templateId: string = 'none';   // 模板选择(editorial_slant/custom_* → WebView 渲染)
+  @State customTemplates: CustomTemplateDef[] = [];
   private webController: webview.WebviewController = new webview.WebviewController();
   // Web 组件是否已 attach:未 attach 时 loadData 会失败,zoom 刷新需门控
   private webAttached: boolean = false;
@@ -200,6 +202,17 @@ struct DeepReadArticlePage {
     this.fontSerif = fontMode === 'serif';
     const tpl: string | null = await getChatKvStore().get('deepread_template_id');
     this.templateId = tpl !== null ? tpl : 'none';
+    this.customTemplates = await loadCustomTemplates(getAppContainer().storage);
+  }
+
+  // D1-1:WebView 模板判定(editorial_slant 或存在的自定义模板;自定义被删回退 false)
+  private isWebTemplate(): boolean {
+    if (this.templateId === 'editorial_slant') return true;
+    if (this.templateId.startsWith('custom_')) {
+      return this.customTemplates.findIndex(
+        (t: CustomTemplateDef): boolean => t.id === this.templateId) >= 0;
+    }
+    return false;
   }
 
   // 订阅 output/running(重复调用先退订,避免叠加)
@@ -380,8 +393,16 @@ struct DeepReadArticlePage {
     this.refreshTemplateWeb();
   }
 
-  // F29:editorial_slant 模板按当前字号/字体模式重渲染(纯 CSS,不开 JS)
+  // F29:模板按当前字号/字体模式重渲染(editorial 纯 CSS,不开 JS;
+  //   自定义模板为静态壳,fontScale/serif 不生效 — 编辑器页脚已注明)
   private editorialHtml(): string {
+    if (this.templateId.startsWith('custom_')) {
+      const tpl: CustomTemplateDef | undefined = this.customTemplates.find(
+        (t: CustomTemplateDef): boolean => t.id === this.templateId);
+      if (tpl !== undefined) {
+        return renderCustomTemplateHtml(tpl.html, this.title, this.output);
+      }
+    }
     return renderEditorialSlantHtml(this.title, this.output, {
       fontScale: this.fontScale,
       fontSerif: this.fontSerif,
@@ -397,7 +418,7 @@ struct DeepReadArticlePage {
   }
 
   private refreshTemplateWeb(): void {
-    if (this.templateId !== 'editorial_slant') return;
+    if (!this.isWebTemplate()) return;
     this.loadTemplateHtml();
   }
 
@@ -565,8 +586,8 @@ struct DeepReadArticlePage {
             Text('重试').fontSize(BODY).fontColor(ACCENT).margin({ top: 16 })
               .onClick((): void => { this.generateArticle(); })
           }.width('100%').layoutWeight(1).justifyContent(FlexAlign.Center)
-        } else if (this.output !== null && this.templateId === 'editorial_slant') {
-          // P8:模板渲染路径(editorial_slant → WebView;Web 组件 full-size)
+        } else if (this.output !== null && this.isWebTemplate()) {
+          // P8:模板渲染路径(editorial_slant/custom_* → WebView;Web 组件 full-size)
           Column() {
             Web({ src: 'about:blank', controller: this.webController })
               .width('100%').layoutWeight(1)

@@ -6,10 +6,17 @@ import { loadDisplaySetting, saveDisplaySetting, makeDisplaySetting } from '@amb
 import type { DisplaySetting } from '@amber/chat-domain';
 import { getChatKvStore } from '../di/AppContainer.ets';
 import {
-  CenteredTitleBar, PlainSection, CardGroup, CardToggleRow, Seg,
+  CenteredTitleBar, PlainSection, CardGroup, CardToggleRow, Seg, BtnFill,
 } from '../components/PageTemplate.ets';
 import { INK, INK3, BG, ACCENT, GUTTER, TEXT_STYLES } from '../design/tokens.ets';
 import { FONT_MONO_MEDIUM, FONT_SANS_MEDIUM } from '../design/fonts.ets';
+import { textToSpeech } from '@kit.CoreSpeechKit';
+import { promptAction } from '@kit.ArkUI';
+
+const TTS_SPEED_OPTIONS: string[] = ['0.75×', '1.0×', '1.25×', '1.5×'];
+const TTS_SPEED_VALUES: number[] = [0.75, 1.0, 1.25, 1.5];
+const TTS_SAMPLE_TEXT: string = '你好,我是 Amber。这是一段系统语音引擎试听。';
+const TTS_SPEED_KEY: string = 'tts_speed';
 
 const FONT_RATIO_OPTIONS: string[] = ['85%', '100%', '115%', '130%'];
 const ratios: number[] = [0.85, 1.0, 1.15, 1.3];
@@ -25,12 +32,67 @@ struct SettingDisplayPage {
   @StorageProp('accentColor') accentColorStore: string = ACCENT;
   @State setting: DisplaySetting = makeDisplaySetting();
   @State loaded: boolean = false;
+  // D1-3:TTS 系统引擎试听(CoreSpeechKit;语速档位持久化)
+  @State ttsSpeed: number = 1.0;
+  @State ttsSpeaking: boolean = false;
+  private ttsEngine: textToSpeech.TextToSpeechEngine | null = null;
 
   aboutToAppear(): void {
     loadDisplaySetting(getChatKvStore()).then((s: DisplaySetting): void => {
       this.setting = s;
       this.loaded = true;
     }).catch((): void => { this.loaded = true; });
+    getChatKvStore().get(TTS_SPEED_KEY).then((raw: string | null): void => {
+      if (raw === null) return;
+      const v: number = parseFloat(raw);
+      if (!Number.isNaN(v) && TTS_SPEED_VALUES.indexOf(v) >= 0) this.ttsSpeed = v;
+    }).catch((): void => {});
+  }
+
+  aboutToDisappear(): void {
+    if (this.ttsEngine !== null) {
+      try { this.ttsEngine.stop(); } catch (_e) { /* 已停止 */ }
+    }
+  }
+
+  // D1-3:试听 — canIUse 包裹;引擎懒建,requestId 每次唯一(同实例不可复用)
+  private async speakTtsSample(): Promise<void> {
+    if (this.ttsSpeaking) return;
+    if (!canIUse('SystemCapability.AI.TextToSpeech')) {
+      promptAction.showToast({ message: '当前系统不支持语音合成', duration: 2000 });
+      return;
+    }
+    this.ttsSpeaking = true;
+    try {
+      if (this.ttsEngine === null) {
+        const extraParam: Record<string, Object> = {
+          'style': 'interaction-broadcast', 'locate': 'CN', 'name': 'amber_tts',
+        };
+        const initParams: textToSpeech.CreateEngineParams = {
+          language: 'zh-CN', person: 0, online: 1, extraParams: extraParam,
+        };
+        this.ttsEngine = await textToSpeech.createEngine(initParams);
+      }
+      const speakExtra: Record<string, Object> = {
+        'speed': this.ttsSpeed, 'volume': 2, 'pitch': 1,
+        'languageContext': 'zh-CN', 'audioType': 'pcm',
+      };
+      const params: textToSpeech.SpeakParams = {
+        requestId: `tts_${Date.now()}`,
+        extraParams: speakExtra,
+      };
+      this.ttsEngine.speak(TTS_SAMPLE_TEXT, params);
+    } catch (e) {
+      const msg: string = e instanceof Error ? e.message : String(e);
+      promptAction.showToast({ message: `试听失败:${msg}`, duration: 2000 });
+    } finally {
+      this.ttsSpeaking = false;
+    }
+  }
+
+  private setTtsSpeed(idx: number): void {
+    this.ttsSpeed = TTS_SPEED_VALUES[idx];
+    getChatKvStore().put(TTS_SPEED_KEY, `${this.ttsSpeed}`).catch((): void => {});
   }
 
   private update(patch: Partial<DisplaySetting>): void {
@@ -261,6 +323,50 @@ struct SettingDisplayPage {
     })
   }
 
+  @Builder
+  TtsCard(): void {
+    Column() {
+      Row() {
+        Text('语速')
+          .fontSize(16)
+          .fontWeight(FontWeight.Medium)
+          .lineHeight(TEXT_STYLES.body.lineHeight)
+          .fontFamily(FONT_SANS_MEDIUM)
+          .fontColor(INK)
+        Blank()
+        Text(`${this.ttsSpeed}×`)
+          .fontSize(TEXT_STYLES.meta.size)
+          .fontWeight(TEXT_STYLES.meta.weight)
+          .lineHeight(TEXT_STYLES.meta.lineHeight)
+          .fontFamily(FONT_MONO_MEDIUM)
+          .fontColor(INK3)
+      }
+      .width('100%')
+      .alignItems(VerticalAlign.Center)
+      Seg({
+        options: TTS_SPEED_OPTIONS,
+        selected: TTS_SPEED_VALUES.indexOf(this.ttsSpeed),
+        onSelect: (idx: number): void => { this.setTtsSpeed(idx); },
+      })
+        .margin({ top: 12 })
+      Row() {
+        Text('系统引擎试听,朗读固定示例句')
+          .fontSize(TEXT_STYLES.meta.size)
+          .fontColor(INK3)
+          .layoutWeight(1)
+        BtnFill({
+          label: this.ttsSpeaking ? '播报中…' : '试听',
+          onTap: (): void => { this.speakTtsSample().catch((): void => {}); },
+        })
+      }
+      .width('100%')
+      .alignItems(VerticalAlign.Center)
+      .margin({ top: 12 })
+    }
+    .width('100%')
+    .padding({ left: 14, right: 14, top: 12, bottom: 12 })
+  }
+
   build(): void {
     Column() {
       CenteredTitleBar({ title: '显示与字体' })
@@ -293,6 +399,11 @@ struct SettingDisplayPage {
             // ── 代码块 ──
             PlainSection({ label: '代码块' })
             CardGroup({ radius: 18, stroke: true, content: (): void => { this.CodeBlockCard(); } })
+              .margin({ left: GUTTER, right: GUTTER })
+
+            // ── 语音试听(D1-3) ──
+            PlainSection({ label: '语音试听' })
+            CardGroup({ radius: 18, stroke: true, content: (): void => { this.TtsCard(); } })
               .margin({ left: GUTTER, right: GUTTER })
 
             Column() {}.height(40)
