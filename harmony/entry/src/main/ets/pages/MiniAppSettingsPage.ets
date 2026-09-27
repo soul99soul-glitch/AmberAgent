@@ -4,13 +4,17 @@
 // 顶部「启用小应用」总开关;Android MiniAppSettingsPage.kt 语义逐字。
 // 持久化:MiniAppSetting KV('mini_app_setting')读-改-写;enabled=false 时
 // 其余开关禁用(Android enabled = miniApp.enabled 语义)。
+//
+// 2026-09-27 二级页 iOS 对齐(无截图,沿用规范):仅换视觉骨架
+// (CenteredTitleBar/PlainSection/CardGroup r18+描边/CardRow/CardToggleRow),
+// 配置读写与方法逻辑零改动。
 
 import { router } from '@kit.ArkUI';
 import { promptAction } from '@kit.ArkUI';
 import type { MiniAppSetting } from '@amber/chat-domain';
 import { makeMiniAppSetting } from '@amber/chat-domain';
-import { ACCENT, BG } from '../design/tokens.ets';
-import { PageTitleBar, SectionHeader, NavRow, ToggleRow, PageSpacer } from '../components/PageTemplate.ets';
+import { ACCENT, BG, GUTTER } from '../design/tokens.ets';
+import { CenteredTitleBar, PlainSection, CardGroup, CardRow, CardToggleRow, PageSpacer } from '../components/PageTemplate.ets';
 import { getMiniAppPlatform } from '../platform_impl/MiniAppPlatform.ets';
 import type { MiniAppPlatform } from '../platform_impl/MiniAppPlatform.ets';
 
@@ -178,12 +182,14 @@ struct MiniAppSettingsPage {
 
   // ===== UI =====
 
+  // ── 卡片内容(@Builder:组件构造必须在 builder 上下文,铁律 4b)──
+
   @Builder
-  groupRow(kind: MiniAppGroupKind): void {
-    NavRow({
+  groupRow(kind: MiniAppGroupKind, isLast: boolean): void {
+    CardRow({
       label: groupTitle(kind),
       desc: groupDescription(kind),
-      isLast: kind === 'advanced',
+      isLast: isLast,
       onRowClick: (): void => {
         router.pushUrl({ url: 'pages/MiniAppSettingsPage', params: { group: kind } });
       },
@@ -193,7 +199,7 @@ struct MiniAppSettingsPage {
   @Builder
   switchRow(row: SwitchRowData, enabled: boolean, isLast: boolean): void {
     Column() {
-      ToggleRow({
+      CardToggleRow({
         label: row.title,
         desc: row.description,
         checked: this.valueForKey(this.setting, row.key),
@@ -215,35 +221,63 @@ struct MiniAppSettingsPage {
     .width('100%')
   }
 
+  @Builder
+  EnableCard(): void {
+    Column() {
+      CardToggleRow({
+        label: '启用小应用',
+        desc: '允许 Amber 生成、保存并运行轻量 HTML 工具',
+        checked: this.setting.enabled,
+        isLast: true,
+        onToggle: (): void => { this.toggle('enabled'); },
+      })
+    }
+    .width('100%')
+  }
+
+  @Builder
+  GroupsCard(): void {
+    Column() {
+      this.groupRow('common', false)
+      this.groupRow('host_ai', false)
+      this.groupRow('advanced', true)
+    }
+    .width('100%')
+  }
+
+  // 分组页行卡:按当前 group 派发到对应行集
+  @Builder
+  GroupRowsCard(): void {
+    Column() {
+      if (this.group === 'common') {
+        this.groupContent(COMMON_ROWS)
+      } else if (this.group === 'host_ai') {
+        this.groupContent(HOST_AI_ROWS)
+      } else {
+        this.groupContent(ADVANCED_ROWS)
+      }
+    }
+    .width('100%')
+  }
+
   build(): void {
     Column() {
-      PageTitleBar({ title: this.group !== null ? groupTitle(this.group) : '小应用设置' })
+      CenteredTitleBar({ title: this.group !== null ? groupTitle(this.group) : '小应用设置' })
 
       Scroll() {
         Column() {
           if (this.group === null) {
-            SectionHeader({ label: '启用' })
-            ToggleRow({
-              label: '启用小应用',
-              desc: '允许 Amber 生成、保存并运行轻量 HTML 工具',
-              checked: this.setting.enabled,
-              isLast: true,
-              onToggle: (): void => { this.toggle('enabled'); },
-            })
+            PlainSection({ label: '启用' })
+            CardGroup({ radius: 18, stroke: true, content: (): void => { this.EnableCard(); } })
+              .margin({ left: GUTTER, right: GUTTER })
 
-            SectionHeader({ label: '分组' })
-            this.groupRow('common')
-            this.groupRow('host_ai')
-            this.groupRow('advanced')
+            PlainSection({ label: '分组' })
+            CardGroup({ radius: 18, stroke: true, content: (): void => { this.GroupsCard(); } })
+              .margin({ left: GUTTER, right: GUTTER })
           } else {
-            SectionHeader({ label: this.group === 'common' ? '网络与搜索' : (this.group === 'host_ai' ? '权限与写回' : '存储与调试') })
-            if (this.group === 'common') {
-              this.groupContent(COMMON_ROWS)
-            } else if (this.group === 'host_ai') {
-              this.groupContent(HOST_AI_ROWS)
-            } else {
-              this.groupContent(ADVANCED_ROWS)
-            }
+            PlainSection({ label: this.group === 'common' ? '网络与搜索' : (this.group === 'host_ai' ? '权限与写回' : '存储与调试') })
+            CardGroup({ radius: 18, stroke: true, content: (): void => { this.GroupRowsCard(); } })
+              .margin({ left: GUTTER, right: GUTTER })
           }
 
           PageSpacer()

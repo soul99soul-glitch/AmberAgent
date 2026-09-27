@@ -13,19 +13,26 @@
 //     新增 = 默认构造(ModeInjection()/Lorebook()/RegexInjection())
 //   values-zh/strings.xml:417-459(全部 label 逐字)
 // 偏差登记:
-//   - HorizontalPager+bottomNavigationBar → 底部二 tab 行(语义等价)
+//   - HorizontalPager+bottomNavigationBar → Seg 分段控件(2026-09-27 iOS 对齐)
 //   - 长按拖拽排序 → 上移/下移 按钮(D-099 先例)
 //   - SwipeToDismiss 删除 → 卡内'删除'按钮(语义等价)
 //   - ModalBottomSheet/AlertDialog → 全屏 overlay(D-094 先例;条目编辑为二级 overlay)
 //   - 导入/导出文件 picker + ExportDialog 未移植(外部目录 picker 未移植先例,P1 登记)
 //   - int 输入:toIntOrNull()?.let 语义 = 草稿串 + 确认时解析失败回退最后有效值
+//
+// 2026-09-27 二级页 iOS 对齐:仅换视觉骨架(CenteredTitleBar + Seg 分段 +
+// PlainSection + CardGroup r18+描边 + CardRow + StatusChip + FooterNote),
+// 逻辑零改动;编辑 overlay 保持原 D-094 形态。
 import { promptAction } from '@kit.ArkUI';
 import { fileIo, picker } from '@kit.CoreFileKit';
 import {
-  ACCENT, BG, INK, INK3, INK4, LINE, LINE2, OVERLAY, SURFACE, ERROR, META, BODY, BODY2, TEXT_STYLES,
+  ACCENT, BG, INK, INK3, INK4, LINE, LINE2, OVERLAY, SURFACE, ERROR, GUTTER, TEXT_STYLES,
   lineHeightForSize,
 } from '../design/tokens.ets';
-import { PageTitleBar, SectionHeader, PaperSeparator, BtnFill, Chip } from '../components/PageTemplate.ets';
+import { FONT_SANS_MEDIUM } from '../design/fonts.ets';
+import {
+  CenteredTitleBar, PlainSection, CardGroup, CardRow, StatusChip, FooterNote, Seg, PageSpacer,
+} from '../components/PageTemplate.ets';
 import { makeLorebook, makeModeInjection, makeRegexInjection } from '@amber/chat-domain';
 import {
   decodeLorebooks, decodeModeInjections, encodeLorebooks, encodeModeInjections,
@@ -374,9 +381,25 @@ struct ChatPromptsPage {
 
   // ===== UI 构件 =====
 
+  // 标签 chip:iOS 软底药丸(StatusChip 替换原 mono Chip;warn = 红浅底)
   @Builder
   tagText(text: string, warn: boolean) {
-    Chip({ text: text, danger: warn }).margin({ right: 4 })
+    StatusChip({ text: text, tone: warn ? 'error' : 'muted' }).margin({ right: 4 })
+  }
+
+  // 列表行动作:上移/下移/编辑/删除(disabled 灰;danger 红;44 热区)
+  @Builder
+  rowAction(label: string, enabled: boolean, danger: boolean, onTap: () => void) {
+    Row() {
+      Text(label)
+        .fontSize(13).fontWeight(FontWeight.Medium).lineHeight(lineHeightForSize(13))
+        .fontFamily(FONT_SANS_MEDIUM)
+        .fontColor(!enabled ? INK4 : (danger ? ERROR : this.accentColorStore))
+    }
+    .justifyContent(FlexAlign.Center)
+    .alignItems(VerticalAlign.Center)
+    .constraintSize({ minWidth: 44, minHeight: 40 })
+    .onClick((): void => { if (enabled) onTap(); })
   }
 
   @Builder
@@ -499,15 +522,16 @@ struct ChatPromptsPage {
     .width('100%').alignItems(HorizontalAlign.Start).margin({ bottom: 12 })
   }
 
-  // ===== 列表卡 =====
+  // ===== 列表卡(iOS 行骨架:标题 + 软底标签;动作行右对齐 44 热区)=====
 
   @Builder
-  modeInjectionCard(mi: PromptInjection, index: number) {
+  modeInjectionRow(mi: PromptInjection, index: number) {
     Column() {
       Row() {
         Column() {
           Text(mi.name.length > 0 ? mi.name : '未命名')
-            .fontSize(14).fontWeight(FontWeight.Medium).fontColor(INK)
+            .fontSize(16).fontWeight(FontWeight.Medium).lineHeight(lineHeightForSize(16))
+            .fontFamily(FONT_SANS_MEDIUM).fontColor(INK)
             .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
           Row() {
             this.tagText(positionLabel(mi.position), false)
@@ -516,53 +540,52 @@ struct ChatPromptsPage {
               this.tagText('已禁用', true)
             }
           }
-          .margin({ top: 4 })
+          .margin({ top: 6 })
         }
-        .alignItems(HorizontalAlign.Start).layoutWeight(1).margin({ right: 8 })
-        Text('上移')
-          .fontSize(12).fontColor(index > 0 ? ACCENT : LINE)
-          .padding({ left: 6, right: 6, top: 4, bottom: 4 })
-          .onClick((): void => {
-            if (index > 0) this.moveModeInjection(index, index - 1);
-          })
-        Text('下移')
-          .fontSize(12)
-          .fontColor(index < this.modeInjections.length - 1 ? ACCENT : LINE)
-          .padding({ left: 6, right: 6, top: 4, bottom: 4 })
-          .onClick((): void => {
-            if (index < this.modeInjections.length - 1) {
-              this.moveModeInjection(index, index + 1);
-            }
-          })
-        Text('编辑')
-          .fontSize(12).fontColor(ACCENT)
-          .padding({ left: 6, right: 6, top: 4, bottom: 4 })
-          .onClick((): void => { this.openModeInjectionEditor(mi); })
-        Text('删除')
-          .fontSize(12).fontColor(ERROR)
-          .padding({ left: 6, right: 6, top: 4, bottom: 4 })
-          .onClick((): void => { this.deleteModeInjection(mi); })
+        .alignItems(HorizontalAlign.Start).layoutWeight(1)
       }
-      .width('100%').constraintSize({ minHeight: 64 })
-        .padding({ left: 16, right: 16, top: 12, bottom: 12 })
+      .width('100%').alignItems(VerticalAlign.Center)
+      .constraintSize({ minHeight: 52 })
+      .padding({ left: 14, right: 14, top: 10, bottom: 2 })
+      .onClick((): void => { this.openModeInjectionEditor(mi); })
+
+      Row() {
+        this.rowAction('上移', index > 0, false,
+          (): void => { this.moveModeInjection(index, index - 1); })
+        this.rowAction('下移', index < this.modeInjections.length - 1, false,
+          (): void => { this.moveModeInjection(index, index + 1); })
+        this.rowAction('编辑', true, false,
+          (): void => { this.openModeInjectionEditor(mi); })
+        this.rowAction('删除', true, true,
+          (): void => { this.deleteModeInjection(mi); })
+      }
+      .width('100%').justifyContent(FlexAlign.End)
+      .padding({ left: 14, right: 8, bottom: 4 })
+
+      if (index < this.modeInjections.length - 1) {
+        Row() {
+          Row().width('100%').height(1).backgroundColor(LINE)
+        }
+        .width('100%')
+        .padding({ left: 14, right: 14 })
+      }
     }
     .width('100%')
-    if (index < this.modeInjections.length - 1) {
-      PaperSeparator()
-    }
   }
 
   @Builder
-  lorebookCard(lb: Lorebook, index: number) {
+  lorebookRow(lb: Lorebook, index: number) {
     Column() {
       Row() {
         Column() {
           Text(lb.name.length > 0 ? lb.name : '未命名Lorebook')
-            .fontSize(14).fontWeight(FontWeight.Medium).fontColor(INK)
+            .fontSize(16).fontWeight(FontWeight.Medium).lineHeight(lineHeightForSize(16))
+            .fontFamily(FONT_SANS_MEDIUM).fontColor(INK)
             .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
           if (lb.description.length > 0) {
             Text(lb.description)
-              .fontSize(11).fontWeight(FontWeight.Normal).lineHeight(lineHeightForSize(11)).fontFamily(TEXT_STYLES.meta.family).fontColor(INK3).margin({ top: 2 })
+              .fontSize(12).lineHeight(lineHeightForSize(12))
+              .fontFamily(FONT_SANS_MEDIUM).fontColor(INK3).margin({ top: 2 })
               .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
           }
           Row() {
@@ -571,38 +594,85 @@ struct ChatPromptsPage {
               this.tagText('已禁用', true)
             }
           }
-          .margin({ top: 4 })
+          .margin({ top: 6 })
         }
-        .alignItems(HorizontalAlign.Start).layoutWeight(1).margin({ right: 8 })
-        Text('上移')
-          .fontSize(12).fontColor(index > 0 ? ACCENT : LINE)
-          .padding({ left: 6, right: 6, top: 4, bottom: 4 })
-          .onClick((): void => {
-            if (index > 0) this.moveLorebook(index, index - 1);
-          })
-        Text('下移')
-          .fontSize(12)
-          .fontColor(index < this.lorebooks.length - 1 ? ACCENT : LINE)
-          .padding({ left: 6, right: 6, top: 4, bottom: 4 })
-          .onClick((): void => {
-            if (index < this.lorebooks.length - 1) this.moveLorebook(index, index + 1);
-          })
-        Text('编辑')
-          .fontSize(12).fontColor(ACCENT)
-          .padding({ left: 6, right: 6, top: 4, bottom: 4 })
-          .onClick((): void => { this.openLorebookEditor(lb); })
-        Text('删除')
-          .fontSize(12).fontColor(ERROR)
-          .padding({ left: 6, right: 6, top: 4, bottom: 4 })
-          .onClick((): void => { this.deleteLorebook(lb); })
+        .alignItems(HorizontalAlign.Start).layoutWeight(1)
       }
-      .width('100%').constraintSize({ minHeight: 64 })
-        .padding({ left: 16, right: 16, top: 12, bottom: 12 })
+      .width('100%').alignItems(VerticalAlign.Center)
+      .constraintSize({ minHeight: 52 })
+      .padding({ left: 14, right: 14, top: 10, bottom: 2 })
+      .onClick((): void => { this.openLorebookEditor(lb); })
+
+      Row() {
+        this.rowAction('上移', index > 0, false,
+          (): void => { this.moveLorebook(index, index - 1); })
+        this.rowAction('下移', index < this.lorebooks.length - 1, false,
+          (): void => { this.moveLorebook(index, index + 1); })
+        this.rowAction('编辑', true, false,
+          (): void => { this.openLorebookEditor(lb); })
+        this.rowAction('删除', true, true,
+          (): void => { this.deleteLorebook(lb); })
+      }
+      .width('100%').justifyContent(FlexAlign.End)
+      .padding({ left: 14, right: 8, bottom: 4 })
+
+      if (index < this.lorebooks.length - 1) {
+        Row() {
+          Row().width('100%').height(1).backgroundColor(LINE)
+        }
+        .width('100%')
+        .padding({ left: 14, right: 14 })
+      }
     }
     .width('100%')
-    if (index < this.lorebooks.length - 1) {
-      PaperSeparator()
+  }
+
+  // 卡片内容聚合(@Builder:组件构造必须在 builder 上下文,铁律 4b)
+  @Builder
+  ModeInjectionList(): void {
+    ForEach(this.modeInjections, (mi: PromptInjection, index: number): void => {
+      this.modeInjectionRow(mi, index)
+    }, (mi: PromptInjection): string => mi.id)
+  }
+
+  @Builder
+  LorebookList(): void {
+    ForEach(this.lorebooks, (lb: Lorebook, index: number): void => {
+      this.lorebookRow(lb, index)
+    }, (lb: Lorebook): string => lb.id)
+  }
+
+  @Builder
+  ImportExportCard(): void {
+    Column() {
+      CardRow({
+        label: '导入提示词',
+        desc: '从 JSON 文件追加合并，同名条目跳过',
+        onRowClick: (): void => { this.importPrompts(); },
+      })
+      CardRow({
+        label: '导出提示词',
+        desc: '导出全部模式注入与世界书为 amber-prompts.json',
+        isLast: true,
+        onRowClick: (): void => { this.exportPrompts(); },
+      })
     }
+    .width('100%')
+  }
+
+  @Builder
+  EmptyHint(text: string): void {
+    Column() {
+      Text(text)
+        .fontSize(16).fontWeight(FontWeight.Medium).lineHeight(lineHeightForSize(16))
+        .fontFamily(FONT_SANS_MEDIUM).fontColor(INK3)
+      Text('点击右上角 ＋ 添加')
+        .fontSize(12).lineHeight(lineHeightForSize(12))
+        .fontFamily(FONT_SANS_MEDIUM).fontColor(INK4)
+        .margin({ top: 6 })
+    }
+    .width('100%').alignItems(HorizontalAlign.Center)
+    .padding({ top: 64, bottom: 16 })
   }
 
   // ===== overlay:模式注入编辑(:408-505) =====
@@ -884,89 +954,67 @@ struct ChatPromptsPage {
     .width('100%').height('100%').backgroundColor(OVERLAY)
   }
 
-  build() {
+  build(): void {
     Stack() {
       Column() {
-        PageTitleBar({ title: '提示词' })
+        CenteredTitleBar({
+          title: '提示词',
+          actionIcon: 'plus',
+          onAction: (): void => {
+            // 添加动作跟随当前分段(原底部 floating toolbar 适配)
+            if (this.tab === 0) this.openModeInjectionEditor(null);
+            else this.openLorebookEditor(null);
+          },
+        })
 
+        // 双 tab:底部二 tab 行 → Seg 分段控件(iOS 化,沿用组件)
         Row() {
-          Text('导入').fontSize(BODY2).fontColor(INK3)
-            .padding({ left: 12, right: 12, top: 6, bottom: 6 })
-            .onClick((): void => { this.importPrompts(); })
-          Text('导出').fontSize(BODY2).fontColor(INK3)
-            .padding({ left: 12, right: 12, top: 6, bottom: 6 })
-            .onClick((): void => { this.exportPrompts(); })
+          Seg({ options: ['模式注入', '世界书'], selected: this.tab,
+            onSelect: (idx: number): void => { this.tab = idx; } })
         }
-        .width('100%').justifyContent(FlexAlign.End)
-        .padding({ left: 16, right: 16, top: 2, bottom: 2 })
+        .width('100%')
+        .padding({ left: GUTTER, right: GUTTER, top: 4, bottom: 4 })
 
         if (!this.loaded) {
-          Text('加载中…').fontSize(13).fontColor(INK3).margin({ top: 32 })
+          Text('加载中…')
+            .fontSize(TEXT_STYLES.body.size).fontWeight(TEXT_STYLES.body.weight)
+            .lineHeight(TEXT_STYLES.body.lineHeight).fontFamily(TEXT_STYLES.body.family)
+            .fontColor(INK3)
+            .width('100%').textAlign(TextAlign.Center).padding({ top: 40 })
         } else {
           Scroll() {
             Column() {
-              SectionHeader({ label: this.tab === 0 ? '模式注入' : '世界书' })
               if (this.tab === 0) {
+                PlainSection({ label: '模式注入' })
                 if (this.modeInjections.length === 0) {
-                  Column() {
-                    Text('暂无模式注入').fontSize(14).fontColor(INK3)
-                    Text('点击下方按钮添加').fontSize(12).fontColor(INK3)
-                      .margin({ top: 8 })
-                  }
-                  .width('100%').margin({ top: 80 })
+                  this.EmptyHint('暂无模式注入')
                 } else {
-                  ForEach(this.modeInjections, (mi: PromptInjection, index: number) => {
-                    this.modeInjectionCard(mi, index)
-                  }, (mi: PromptInjection): string => mi.id)
+                  CardGroup({ radius: 18, stroke: true, content: (): void => { this.ModeInjectionList(); } })
+                    .margin({ left: GUTTER, right: GUTTER })
+                  FooterNote({ text: '按优先级注入;点按行编辑,行尾按钮调整顺序或删除' })
                 }
               } else {
+                PlainSection({ label: '世界书' })
                 if (this.lorebooks.length === 0) {
-                  Column() {
-                    Text('暂无世界书').fontSize(14).fontColor(INK3)
-                    Text('点击下方按钮添加').fontSize(12).fontColor(INK3)
-                      .margin({ top: 8 })
-                  }
-                  .width('100%').margin({ top: 80 })
+                  this.EmptyHint('暂无世界书')
                 } else {
-                  ForEach(this.lorebooks, (lb: Lorebook, index: number) => {
-                    this.lorebookCard(lb, index)
-                  }, (lb: Lorebook): string => lb.id)
+                  CardGroup({ radius: 18, stroke: true, content: (): void => { this.LorebookList(); } })
+                    .margin({ left: GUTTER, right: GUTTER })
+                  FooterNote({ text: '点按行编辑;条目在世界书编辑页内管理' })
                 }
               }
+
+              PlainSection({ label: '导入导出' })
+              CardGroup({ radius: 18, stroke: true, content: (): void => { this.ImportExportCard(); } })
+                .margin({ left: GUTTER, right: GUTTER })
+              FooterNote({ text: '导出文件可重新导入,追加合并、同名跳过' })
+              PageSpacer()
             }
-            .width('100%').padding({ bottom: 16 })
+            .width('100%')
+            .padding({ bottom: 20 })
           }
-        .align(Alignment.TopStart)
+          .align(Alignment.TopStart)
           .width('100%').layoutWeight(1)
-
-          // 添加按钮(floating toolbar 适配;import 未移植)
-          Row() {
-            BtnFill({
-              label: this.tab === 0 ? '＋ 添加模式注入' : '＋ 添加世界书',
-              onTap: (): void => {
-                if (this.tab === 0) this.openModeInjectionEditor(null);
-                else this.openLorebookEditor(null);
-              },
-            })
-          }
-          .width('100%').justifyContent(FlexAlign.Center)
-          .padding({ top: 8, bottom: 8 })
-
-          // 底部二 tab(NavigationBar 适配)
-          Row() {
-            Text('模式注入')
-              .fontSize(13).fontColor(this.tab === 0 ? ACCENT : INK3)
-              .textAlign(TextAlign.Center)
-              .layoutWeight(1).padding({ top: 10, bottom: 10 })
-              .onClick((): void => { this.tab = 0; })
-            Text('世界书')
-              .fontSize(13).fontColor(this.tab === 1 ? ACCENT : INK3)
-              .textAlign(TextAlign.Center)
-              .layoutWeight(1).padding({ top: 10, bottom: 10 })
-              .onClick((): void => { this.tab = 1; })
-          }
-          .width('100%').backgroundColor(SURFACE)
-          .border({ width: { top: 1 }, color: LINE })
         }
       }
       .width('100%').height('100%').backgroundColor(BG)

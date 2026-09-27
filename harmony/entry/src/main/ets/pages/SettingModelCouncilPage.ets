@@ -5,6 +5,10 @@
 // Harmony 后端: deepread HAR ModelCouncilRuntimeSetting
 //   + PromptConfigStore.ets(createEntryAgentPromptSettingsPort getCouncilSetting)
 //
+// 2026-09-27 二级页 iOS 对齐(无 iOS 截图,沿用规范):仅换视觉骨架
+//   (CenteredTitleBar/PlainSection/CardGroup r18+描边/CardRow/CardToggleRow/
+//    FooterNote;滑杆保留装卡片容器),逻辑零改动。
+//
 // 功能(MVP):
 //   ✅ enabled 开关
 //   ✅ maxSeats/defaultRounds/maxRounds 滑块
@@ -18,14 +22,17 @@ import type { ModelCouncilRuntimeSetting, ModelCouncilSeat, ModelCouncilRolePres
 import {
   LENS_PRESETS, findRolePreset, isCoreRole, makeSeat,
 } from '@amber/deepread-domain';
-import { INK, INK3, ACCENT, SURFACE2, BG, ERROR, TEXT_STYLES } from '../design/tokens.ets';
-import { FONT_SANS_SEMIBOLD, FONT_MONO_MEDIUM } from '../design/fonts.ets';
-import { PageTitleBar, SectionHeader, ToggleRow, SelectRow, PaperSeparator, PageSpacer, BtnGhost } from '../components/PageTemplate.ets';
+import { INK, INK3, ACCENT, SURFACE2, BG, ERROR, LINE, LINE2, GUTTER, TEXT_STYLES, lineHeightForSize } from '../design/tokens.ets';
+import { FONT_SANS_MEDIUM, FONT_SANS_SEMIBOLD, FONT_MONO_MEDIUM } from '../design/fonts.ets';
+import {
+  CenteredTitleBar, PlainSection, CardGroup, CardRow, CardToggleRow, FooterNote, PageSpacer,
+} from '../components/PageTemplate.ets';
 
 @Entry
 @Component
 struct SettingModelCouncilPage {
   @StorageProp('statusBarHeight') statusBarHeight: number = 44;
+  @StorageProp('accentColor') accentColorStore: string = ACCENT;
   @State councilEnabled: boolean = true;
   @State maxSeats: number = 5;
   @State defaultRounds: number = 1;
@@ -152,7 +159,7 @@ struct SettingModelCouncilPage {
 
   build(): void {
     Column() {
-      PageTitleBar({
+      CenteredTitleBar({
         title: 'Model Council 设置',
         actionText: this.saving ? '保存中…' : '保存',
         onAction: (): void => { this.saveAndBack(); },
@@ -164,8 +171,7 @@ struct SettingModelCouncilPage {
           .fontSize(TEXT_STYLES.secondary.size).fontWeight(TEXT_STYLES.secondary.weight)
           .lineHeight(TEXT_STYLES.secondary.lineHeight).fontFamily(TEXT_STYLES.secondary.family)
           .fontColor(ERROR)
-          .width('100%').padding({ left: 16, right: 16, top: 8, bottom: 8 })
-          .backgroundColor(SURFACE2)
+          .width('100%').padding({ left: 16, right: 16, top: 8, bottom: 4 })
       }
 
       if (!this.loaded) {
@@ -176,99 +182,25 @@ struct SettingModelCouncilPage {
       } else {
         Scroll() {
           Column() {
-            SectionHeader({ label: '运行参数' })
-            this.toggleRow('启用 Model Council', '多模型合议:对关键决策获取多视角对比', this.councilEnabled, ((): void => {
-              this.councilEnabled = !this.councilEnabled;
-              this.saveSetting();
-            }), false)
+            PlainSection({ label: '运行参数' })
+            CardGroup({ radius: 18, stroke: true, content: (): void => { this.ParamsCard(); } })
+              .margin({ left: GUTTER, right: GUTTER })
 
-            this.sliderRow('最大席位数', `${this.maxSeats}`, 2, 8, this.maxSeats, (v: number): void => {
-              this.maxSeats = Math.round(v);
-              this.saveSetting();
-            }, false)
-
-            this.sliderRow('默认轮次', `${this.defaultRounds}`, 1, 5, this.defaultRounds, (v: number): void => {
-              this.defaultRounds = Math.round(v);
-              this.saveSetting();
-            }, false)
-
-            this.sliderRow('最大轮次', `${this.maxRounds}`, 1, 10, this.maxRounds, (v: number): void => {
-              this.maxRounds = Math.round(v);
-              this.saveSetting();
-            }, false)
-
-            this.selectRow('席位超时', this.timeoutLabel(this.seatTimeoutMs), ((): void => {
-              const opts: number[] = [60000, 120000, 180000, 300000];
-              const idx: number = opts.indexOf(this.seatTimeoutMs);
-              this.seatTimeoutMs = opts[(idx + 1) % opts.length];
-              this.saveSetting();
-            }), false)
-
-            this.selectRow('总超时', this.timeoutLabel(this.totalTimeoutMs), ((): void => {
-              const opts: number[] = [180000, 300000, 600000, 900000];
-              const idx: number = opts.indexOf(this.totalTimeoutMs);
-              this.totalTimeoutMs = opts[(idx + 1) % opts.length];
-              this.saveSetting();
-            }), false)
-
-            this.toggleRow('显示席位输出', '在结果中展示各席位的独立输出', this.showSeatOutputs, ((): void => {
-              this.showSeatOutputs = !this.showSeatOutputs;
-              this.saveSetting();
-            }), true)
-
-            // M3.3:席位编辑
-            SectionHeader({ label: '席位编辑' })
-
-            ForEach(this.seats, (seat: ModelCouncilSeat, idx: number): void => {
-              this.seatEditorRow(seat, idx === this.seats.length - 1)
-            }, (seat: ModelCouncilSeat): string => seat.seatId)
-
-            // 添加席位
+            PlainSection({ label: '席位编辑' })
+            if (this.seats.length > 0) {
+              CardGroup({ radius: 18, stroke: true, content: (): void => { this.SeatsCard(); } })
+                .margin({ left: GUTTER, right: GUTTER })
+            }
             if (this.seats.length < this.maxSeats) {
-              Row() {
-                Text('+ 添加视角席')
-                  .fontSize(TEXT_STYLES.body.size).fontWeight(600).lineHeight(TEXT_STYLES.body.lineHeight)
-                  .fontFamily(FONT_SANS_SEMIBOLD).fontColor(ACCENT).layoutWeight(1)
-                Text(this.showAddSeatMenu ? '▾' : '▸')
-                  .fontSize(TEXT_STYLES.meta.size).fontWeight(TEXT_STYLES.meta.weight)
-                  .lineHeight(TEXT_STYLES.meta.lineHeight).fontFamily(FONT_MONO_MEDIUM).fontColor(INK3)
-              }
-              .width('100%').constraintSize({ minHeight: 64 })
-              .padding({ left: 16, right: 16, top: 12, bottom: 12 })
-              .onClick((): void => { this.showAddSeatMenu = !this.showAddSeatMenu; })
-
-              if (this.showAddSeatMenu) {
-                PaperSeparator()
-                Column() {
-                  ForEach(LENS_PRESETS, (preset: ModelCouncilRolePreset, idx: number): void => {
-                    Row() {
-                      Text(preset.name)
-                        .fontSize(TEXT_STYLES.body.size).fontWeight(TEXT_STYLES.body.weight)
-                        .lineHeight(TEXT_STYLES.body.lineHeight).fontFamily(TEXT_STYLES.body.family)
-                        .fontColor(INK).layoutWeight(1)
-                      Text('添加')
-                        .fontSize(TEXT_STYLES.meta.size).fontWeight(TEXT_STYLES.meta.weight)
-                        .lineHeight(TEXT_STYLES.meta.lineHeight).fontFamily(FONT_MONO_MEDIUM).fontColor(ACCENT)
-                    }
-                    .width('100%').constraintSize({ minHeight: 64 })
-                    .padding({ left: 32, right: 16, top: 10, bottom: 10 })
-                    .onClick((): void => { this.addLensSeat(preset.id); })
-                    if (idx < LENS_PRESETS.length - 1) {
-                      PaperSeparator()
-                    }
-                  }, (preset: ModelCouncilRolePreset): string => preset.id)
-                }
-                .width('100%').backgroundColor(SURFACE2)
-              }
+              CardGroup({ radius: 18, stroke: true, content: (): void => { this.AddSeatCard(); } })
+                .margin({ left: GUTTER, right: GUTTER, top: this.seats.length > 0 ? 12 : 0 })
             } else {
-              Text(`已达最大席位数 ${this.maxSeats}`)
-                .fontSize(TEXT_STYLES.meta.size).fontWeight(TEXT_STYLES.meta.weight)
-                .lineHeight(TEXT_STYLES.meta.lineHeight).fontFamily(FONT_MONO_MEDIUM).fontColor(INK3)
-                .padding({ left: 16, top: 8, bottom: 8 })
+              FooterNote({ text: `已达最大席位数 ${this.maxSeats}` })
             }
             PageSpacer()
           }
-          .width('100%').padding({ bottom: 20 })
+          .width('100%')
+          .padding({ bottom: 20 })
         }
         .align(Alignment.TopStart)
         .layoutWeight(1)
@@ -277,49 +209,183 @@ struct SettingModelCouncilPage {
     .width('100%').height('100%').backgroundColor(BG)
   }
 
-  @Builder toggleRow(label: string, desc: string, checked: boolean, onToggle: () => void, isLast: boolean): void {
-    ToggleRow({ label: label, desc: desc, checked: checked, isLast: isLast, onToggle: onToggle })
+  // ── 卡片内容(@Builder:组件构造必须在 builder 上下文,铁律 4b)──
+
+  // 卡片行内分隔线(内缩 14,对齐 iOS AmberFormGroup)
+  @Builder
+  CardSep(): void {
+    Row() {
+      Row().width('100%').height(1).backgroundColor(LINE)
+    }
+    .width('100%')
+    .padding({ left: 14, right: 14 })
   }
 
-  @Builder sliderRow(label: string, valueText: string, min: number, max: number, value: number,
-    onChange: (v: number) => void, isLast: boolean): void {
+  @Builder
+  ParamsCard(): void {
     Column() {
-      Row() {
-        Text(label)
-          .fontSize(TEXT_STYLES.body.size).fontWeight(600).lineHeight(TEXT_STYLES.body.lineHeight)
-          .fontFamily(FONT_SANS_SEMIBOLD).fontColor(INK).layoutWeight(1)
-        Text(valueText)
-          .fontSize(TEXT_STYLES.meta.size).fontWeight(TEXT_STYLES.meta.weight).lineHeight(TEXT_STYLES.meta.lineHeight)
-          .fontFamily(FONT_MONO_MEDIUM).fontColor(INK3)
+      CardToggleRow({
+        label: '启用 Model Council',
+        desc: '多模型合议:对关键决策获取多视角对比',
+        checked: this.councilEnabled,
+        onToggle: (): void => {
+          this.councilEnabled = !this.councilEnabled;
+          this.saveSetting();
+        },
+      })
+      this.SeatCountRow()
+      this.DefaultRoundsRow()
+      this.MaxRoundsRow()
+      CardRow({
+        label: '席位超时',
+        valueText: this.timeoutLabel(this.seatTimeoutMs),
+        onRowClick: (): void => {
+          const opts: number[] = [60000, 120000, 180000, 300000];
+          const idx: number = opts.indexOf(this.seatTimeoutMs);
+          this.seatTimeoutMs = opts[(idx + 1) % opts.length];
+          this.saveSetting();
+        },
+      })
+      CardRow({
+        label: '总超时',
+        valueText: this.timeoutLabel(this.totalTimeoutMs),
+        onRowClick: (): void => {
+          const opts: number[] = [180000, 300000, 600000, 900000];
+          const idx: number = opts.indexOf(this.totalTimeoutMs);
+          this.totalTimeoutMs = opts[(idx + 1) % opts.length];
+          this.saveSetting();
+        },
+      })
+      CardToggleRow({
+        label: '显示席位输出',
+        desc: '在结果中展示各席位的独立输出',
+        checked: this.showSeatOutputs,
+        isLast: true,
+        onToggle: (): void => {
+          this.showSeatOutputs = !this.showSeatOutputs;
+          this.saveSetting();
+        },
+      })
+    }
+    .width('100%')
+  }
+
+  // 滑杆行(装卡片容器:标题 + accent 数值 + Slider;范围/落盘逻辑与原 sliderRow 一致)
+  @Builder
+  SeatCountRow(): void {
+    Column() {
+      Column() {
+        Row() {
+          Text('最大席位数')
+            .fontSize(16).fontWeight(FontWeight.Medium).lineHeight(lineHeightForSize(16))
+            .fontFamily(FONT_SANS_MEDIUM).fontColor(INK)
+            .layoutWeight(1)
+          Text(`${this.maxSeats}`)
+            .fontSize(TEXT_STYLES.meta.size).fontWeight(TEXT_STYLES.meta.weight)
+            .lineHeight(TEXT_STYLES.meta.lineHeight).fontFamily(FONT_MONO_MEDIUM)
+            .fontColor(this.accentColorStore)
+        }
+        .width('100%').alignItems(VerticalAlign.Center)
+        Slider({ value: this.maxSeats, min: 2, max: 8, step: 1 })
+          .selectedColor(this.accentColorStore)
+          .trackColor(LINE2)
+          .width('100%').margin({ top: 4 })
+          .onChange((v: number): void => {
+            this.maxSeats = Math.round(v);
+            this.saveSetting();
+          })
       }
       .width('100%')
-      Slider({ value: value, min: min, max: max, step: 1 })
-        .width('100%').margin({ top: 4 })
-        .onChange((v: number): void => { onChange(v); })
+      .padding({ left: 14, right: 14, top: 10, bottom: 10 })
+      this.CardSep()
     }
-    .width('100%').constraintSize({ minHeight: 64 })
-    .padding({ left: 16, right: 16, top: 12, bottom: 12 })
-    if (!isLast) {
-      PaperSeparator()
-    }
+    .width('100%')
   }
 
-  @Builder selectRow(label: string, valueText: string, onClick: () => void, isLast: boolean): void {
-    SelectRow({ label: label, valueText: valueText, isLast: isLast, onRowClick: onClick })
+  @Builder
+  DefaultRoundsRow(): void {
+    Column() {
+      Column() {
+        Row() {
+          Text('默认轮次')
+            .fontSize(16).fontWeight(FontWeight.Medium).lineHeight(lineHeightForSize(16))
+            .fontFamily(FONT_SANS_MEDIUM).fontColor(INK)
+            .layoutWeight(1)
+          Text(`${this.defaultRounds}`)
+            .fontSize(TEXT_STYLES.meta.size).fontWeight(TEXT_STYLES.meta.weight)
+            .lineHeight(TEXT_STYLES.meta.lineHeight).fontFamily(FONT_MONO_MEDIUM)
+            .fontColor(this.accentColorStore)
+        }
+        .width('100%').alignItems(VerticalAlign.Center)
+        Slider({ value: this.defaultRounds, min: 1, max: 5, step: 1 })
+          .selectedColor(this.accentColorStore)
+          .trackColor(LINE2)
+          .width('100%').margin({ top: 4 })
+          .onChange((v: number): void => {
+            this.defaultRounds = Math.round(v);
+            this.saveSetting();
+          })
+      }
+      .width('100%')
+      .padding({ left: 14, right: 14, top: 10, bottom: 10 })
+      this.CardSep()
+    }
+    .width('100%')
+  }
+
+  @Builder
+  MaxRoundsRow(): void {
+    Column() {
+      Column() {
+        Row() {
+          Text('最大轮次')
+            .fontSize(16).fontWeight(FontWeight.Medium).lineHeight(lineHeightForSize(16))
+            .fontFamily(FONT_SANS_MEDIUM).fontColor(INK)
+            .layoutWeight(1)
+          Text(`${this.maxRounds}`)
+            .fontSize(TEXT_STYLES.meta.size).fontWeight(TEXT_STYLES.meta.weight)
+            .lineHeight(TEXT_STYLES.meta.lineHeight).fontFamily(FONT_MONO_MEDIUM)
+            .fontColor(this.accentColorStore)
+        }
+        .width('100%').alignItems(VerticalAlign.Center)
+        Slider({ value: this.maxRounds, min: 1, max: 10, step: 1 })
+          .selectedColor(this.accentColorStore)
+          .trackColor(LINE2)
+          .width('100%').margin({ top: 4 })
+          .onChange((v: number): void => {
+            this.maxRounds = Math.round(v);
+            this.saveSetting();
+          })
+      }
+      .width('100%')
+      .padding({ left: 14, right: 14, top: 10, bottom: 10 })
+      this.CardSep()
+    }
+    .width('100%')
+  }
+
+  @Builder
+  SeatsCard(): void {
+    Column() {
+      ForEach(this.seats, (seat: ModelCouncilSeat, idx: number): void => {
+        this.SeatEditorRow(seat, idx === this.seats.length - 1)
+      }, (seat: ModelCouncilSeat): string => seat.seatId)
+    }
+    .width('100%')
   }
 
   // M3.3:单个席位编辑行(展开 → name + systemPrompt + 删除)
-  @Builder seatEditorRow(seat: ModelCouncilSeat, isLast: boolean): void {
+  @Builder
+  SeatEditorRow(seat: ModelCouncilSeat, isLast: boolean): void {
     Column() {
       Row() {
         Column() {
           Text(seat.name.length > 0 ? seat.name : '(未命名席位)')
-            .fontSize(TEXT_STYLES.body.size).fontWeight(600).lineHeight(TEXT_STYLES.body.lineHeight)
-            .fontFamily(FONT_SANS_SEMIBOLD).fontColor(INK)
+            .fontSize(16).fontWeight(FontWeight.Medium).lineHeight(lineHeightForSize(16))
+            .fontFamily(FONT_SANS_MEDIUM).fontColor(INK)
             .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
           Text(isCoreRole(seat.role) ? '核心席' : `视角席 · ${seat.role}`)
-            .fontSize(TEXT_STYLES.meta.size).fontWeight(TEXT_STYLES.meta.weight)
-            .lineHeight(TEXT_STYLES.meta.lineHeight).fontFamily(FONT_MONO_MEDIUM)
+            .fontSize(12).lineHeight(lineHeightForSize(12)).fontFamily(FONT_SANS_MEDIUM)
             .fontColor(INK3).margin({ top: 2 })
             .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
         }
@@ -328,9 +394,9 @@ struct SettingModelCouncilPage {
           .fontSize(TEXT_STYLES.meta.size).fontWeight(TEXT_STYLES.meta.weight)
           .lineHeight(TEXT_STYLES.meta.lineHeight).fontFamily(FONT_MONO_MEDIUM).fontColor(INK3)
       }
-      .width('100%')
-      .constraintSize({ minHeight: 64 })
-      .padding({ left: 16, right: 16, top: 12, bottom: 12 })
+      .width('100%').alignItems(VerticalAlign.Center)
+      .constraintSize({ minHeight: 52 })
+      .padding({ left: 14, right: 14, top: 10, bottom: 10 })
       .onClick((): void => {
         if (this.expandedSeatId === seat.seatId) {
           this.saveSetting();
@@ -364,17 +430,60 @@ struct SettingModelCouncilPage {
 
           if (!isCoreRole(seat.role)) {
             Text('删除席位')
-              .fontSize(TEXT_STYLES.meta.size).fontWeight(TEXT_STYLES.meta.weight)
-              .lineHeight(TEXT_STYLES.meta.lineHeight).fontFamily(FONT_MONO_MEDIUM)
+              .fontSize(14).fontWeight(FontWeight.Medium).lineHeight(lineHeightForSize(14))
+              .fontFamily(FONT_SANS_MEDIUM)
               .fontColor(ERROR).margin({ top: 10 })
               .onClick((): void => { this.deleteSeat(seat.seatId); })
           }
         }
         .width('100%')
-        .padding({ left: 16, right: 16, bottom: 12 })
+        .padding({ left: 14, right: 14, bottom: 12 })
       }
       if (!isLast) {
-        PaperSeparator()
+        this.CardSep()
+      }
+    }
+    .width('100%')
+  }
+
+  // M3.3:添加视角席(从 LENS_PRESETS 选)
+  @Builder
+  AddSeatCard(): void {
+    Column() {
+      Row() {
+        Text('添加视角席')
+          .fontSize(16).fontWeight(FontWeight.Medium).lineHeight(lineHeightForSize(16))
+          .fontFamily(FONT_SANS_MEDIUM).fontColor(this.accentColorStore)
+          .layoutWeight(1)
+        Text(this.showAddSeatMenu ? '▾' : '▸')
+          .fontSize(TEXT_STYLES.meta.size).fontWeight(TEXT_STYLES.meta.weight)
+          .lineHeight(TEXT_STYLES.meta.lineHeight).fontFamily(FONT_MONO_MEDIUM).fontColor(INK3)
+      }
+      .width('100%').alignItems(VerticalAlign.Center)
+      .constraintSize({ minHeight: 52 })
+      .padding({ left: 14, right: 14, top: 10, bottom: 10 })
+      .onClick((): void => { this.showAddSeatMenu = !this.showAddSeatMenu; })
+
+      if (this.showAddSeatMenu) {
+        this.CardSep()
+        ForEach(LENS_PRESETS, (preset: ModelCouncilRolePreset, idx: number): void => {
+          Row() {
+            Text(preset.name)
+              .fontSize(TEXT_STYLES.body.size).fontWeight(TEXT_STYLES.body.weight)
+              .lineHeight(TEXT_STYLES.body.lineHeight).fontFamily(TEXT_STYLES.body.family)
+              .fontColor(INK).layoutWeight(1)
+            Text('添加')
+              .fontSize(15).fontWeight(FontWeight.Medium).lineHeight(lineHeightForSize(15))
+              .fontFamily(FONT_SANS_MEDIUM).fontColor(this.accentColorStore)
+          }
+          .width('100%').alignItems(VerticalAlign.Center)
+          .constraintSize({ minHeight: 44 })
+          .padding({ left: 32, right: 14, top: 8, bottom: 8 })
+          .onClick((): void => { this.addLensSeat(preset.id); })
+          if (idx < LENS_PRESETS.length - 1) {
+            this.CardSep()
+          }
+        }, (preset: ModelCouncilRolePreset): string => preset.id)
       }
     }
     .width('100%')
