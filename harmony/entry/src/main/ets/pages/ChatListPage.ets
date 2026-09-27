@@ -1278,7 +1278,7 @@ struct ChatListPage {
           radius: 21,
           bgMode: 'solid',
           btnHeight: 42,
-          haloColor: accentAlpha(this.accentColorStore, 0.8),
+          haloColor: accentAlpha(this.accentColorStore, 0.9),
           haloRadius: 32,
           onTap: (): void => { this.newConversation(); },
           content: (): void => { this.FabContent(); },

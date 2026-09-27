@@ -137,7 +137,7 @@ export struct PressGlowButton {
             .height(this.spotSize())
             .position({ x: this.spotPosX(), y: this.spotPosY() })
             .borderRadius(this.spotSize() / 2)
-            .backgroundColor(accentAlpha(this.accentColor, 0.55))
+            .backgroundColor(accentAlpha(this.accentColor, 0.3))
             .hitTestBehavior(HitTestMode.None)
         } else {
           // glass/plain(搜索/齿轮/头像):整面均匀亮起;
