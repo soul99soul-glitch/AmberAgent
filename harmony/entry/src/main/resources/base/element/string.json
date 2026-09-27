@@ -11,6 +11,7 @@
     { "name": "reason_microphone", "value": "Agent 在获得授权后录制短音频作为工具产物" },
     { "name": "reason_location", "value": "Agent 在获得授权后读取最近一次定位结果" },
     { "name": "reason_bluetooth", "value": "Agent 在获得授权后扫描或连接附近蓝牙设备" },
-    { "name": "reason_activity_motion", "value": "Agent 在获得授权后读取步行、跑步等活动识别结果" }
+    { "name": "reason_activity_motion", "value": "Agent 在获得授权后读取步行、跑步等活动识别结果" },
+    { "name": "reason_hdr_brightness", "value": "用于按钮按压时呈现 HDR 高光反馈" }
   ]
 }

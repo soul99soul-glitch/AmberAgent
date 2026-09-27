@@ -24,6 +24,7 @@ import { cleanupDeletedConversation } from '../platform_impl/ManagedFileStore.et
 import { getMiniAppRepositorySync } from '../platform_impl/MiniAppPlatform.ets';
 import { Icon } from '../components/ui/Icon.ets';
 import { AmberWordmark } from '../components/ui/AmberWordmark.ets';
+import { PressGlowButton } from '../components/ui/PressGlowButton.ets';
 import { ACCENT, ACCENT_INK, ERROR, HOME_BG, HOME_CARD, HOME_CARD2, HOME_DOT, HOME_GLASS_BOTTOM,
   HOME_GLASS_EDGE, HOME_GLASS_SHADOW, HOME_GLASS_TOP, HOME_INK, HOME_INK2, HOME_MUTED, HOME_MUTED2,
   HOME_PRESS, HOME_ROWLINE, HOME_SEP, HOME_SHADOW, MOTION_ENTER, MOTION_STAGGER } from '../design/tokens.ets';
@@ -739,89 +740,112 @@ struct ChatListPage {
   }
 
   @Builder
+  SearchCapsuleContent(): void {
+    Row() {
+      Icon({ name: 'ph_magnifyingGlass', iconSize: 14, color: HOME_MUTED })
+      Text('搜索')
+        .fontSize(13)
+        .fontWeight(FontWeight.Medium)
+        .letterSpacing(0.26)
+        .fontFamily(FONT_SANS_SEMIBOLD)
+        .fontColor(HOME_MUTED)
+        .margin({ left: 6 })
+    }
+  }
+
+  @Builder
+  GearContent(): void {
+    Icon({ name: 'ph_gear', iconSize: 20, color: this.accentColorStore })
+  }
+
+  @Builder
+  AvatarContent(): void {
+    if (this.userAvatar.length > 0) {
+      Image(this.userAvatar.startsWith('http') || this.userAvatar.startsWith('data:')
+        || this.userAvatar.startsWith('file://') || this.userAvatar.startsWith('resource:')
+        ? this.userAvatar : `file://${this.userAvatar}`)
+        .width(38)
+        .height(38)
+        .borderRadius(19)
+        .objectFit(ImageFit.Cover)
+    } else {
+      Stack() {
+        Text((this.userNickname.length > 0 ? this.userNickname : 'A').charAt(0).toUpperCase())
+          .fontSize(14.5)
+          .fontWeight(FontWeight.Medium)
+          .fontFamily(FONT_SANS_SEMIBOLD)
+          .fontColor(HOME_MUTED2)
+      }
+      .width(38)
+      .height(38)
+      .borderRadius(19)
+      .backgroundColor(HOME_CARD2)
+    }
+  }
+
+  @Builder
+  FabContent(): void {
+    Row() {
+      Icon({ name: 'ph_pencil', iconSize: 14, color: ACCENT_INK })
+      Text('新对话')
+        .fontSize(14)
+        .fontWeight(FontWeight.Medium)
+        .letterSpacing(0.2)
+        .fontFamily(FONT_SANS_SEMIBOLD)
+        .fontColor(ACCENT_INK)
+        .margin({ left: 6 })
+    }
+    .padding({ left: 14, right: 14 })
+  }
+
+  @Builder
   HeaderBlock(): void {
     Column() {
       Row() {
         AmberWordmark({ color: HOME_INK })
         Blank()
         if (!this.searchExpanded) {
-          Row() {
-            Icon({ name: 'ph_magnifyingGlass', iconSize: 14, color: HOME_MUTED })
-            Text('搜索')
-              .fontSize(13)
-              .fontWeight(FontWeight.Medium)
-              .letterSpacing(0.26)
-              .fontFamily(FONT_SANS_SEMIBOLD)
-              .fontColor(HOME_MUTED)
-              .margin({ left: 6 })
-          }
-          .width(78)
-          .height(38)
-          .justifyContent(FlexAlign.Center)
-          .alignItems(VerticalAlign.Center)
-          .borderRadius(19)
-          .linearGradient({
-            direction: GradientDirection.Bottom,
-            colors: [[HOME_GLASS_TOP, 0], [HOME_GLASS_BOTTOM, 1]],
+          PressGlowButton({
+            accentColor: this.accentColorStore,
+            radius: 19,
+            btnWidth: 78,
+            btnHeight: 38,
+            onTap: (): void => { this.expandSearch(); },
+            content: (): void => { this.SearchCapsuleContent(); },
           })
-          .border({ width: 0.5, color: HOME_GLASS_EDGE })
-          .shadow({ radius: 10, color: HOME_GLASS_SHADOW, offsetY: 4 })
-          .margin({ right: 8 })
-          .onClick((): void => { this.expandSearch(); })
-          .accessibilityText('搜索')
+            .margin({ right: 8 })
+            .accessibilityText('搜索')
         }
 
         // 齿轮(iOS: glyph 随 accent)
-        Row() {
-          Icon({ name: 'ph_gear', iconSize: 20, color: this.accentColorStore })
-        }
-        .width(38)
-        .height(38)
-        .justifyContent(FlexAlign.Center)
-        .alignItems(VerticalAlign.Center)
-        .borderRadius(19)
-        .linearGradient({
-          direction: GradientDirection.Bottom,
-          colors: [[HOME_GLASS_TOP, 0], [HOME_GLASS_BOTTOM, 1]],
+        PressGlowButton({
+          accentColor: this.accentColorStore,
+          radius: 19,
+          btnWidth: 38,
+          btnHeight: 38,
+          onTap: (): void => {
+            this.collapseSearch();
+            router.pushUrl({ url: 'pages/SettingPage' });
+          },
+          content: (): void => { this.GearContent(); },
         })
-        .border({ width: 0.5, color: HOME_GLASS_EDGE })
-        .shadow({ radius: 10, color: HOME_GLASS_SHADOW, offsetY: 4 })
-        .onClick((): void => {
-          this.collapseSearch();
-          router.pushUrl({ url: 'pages/SettingPage' });
-        })
-        .accessibilityText('设置')
+          .accessibilityText('设置')
 
         // 账户头像 38(iOS: 图或昵称首字,avatarIdle 底)
-        Row() {
-          if (this.userAvatar.length > 0) {
-            Image(this.userAvatar.startsWith('http') || this.userAvatar.startsWith('data:')
-              || this.userAvatar.startsWith('file://') || this.userAvatar.startsWith('resource:')
-              ? this.userAvatar : `file://${this.userAvatar}`)
-              .width(38)
-              .height(38)
-              .borderRadius(19)
-              .objectFit(ImageFit.Cover)
-          } else {
-            Stack() {
-              Text((this.userNickname.length > 0 ? this.userNickname : 'A').charAt(0).toUpperCase())
-                .fontSize(14.5)
-                .fontWeight(FontWeight.Medium)
-                .fontFamily(FONT_SANS_SEMIBOLD)
-                .fontColor(HOME_MUTED2)
-            }
-            .width(38)
-            .height(38)
-            .borderRadius(19)
-            .backgroundColor(HOME_CARD2)
-          }
-        }
-        .margin({ left: 10 })
-        .onClick((): void => {
-          this.collapseSearch();
-          router.pushUrl({ url: 'pages/ProfilePage' });
+        PressGlowButton({
+          accentColor: this.accentColorStore,
+          radius: 19,
+          bgMode: 'plain',
+          btnWidth: 38,
+          btnHeight: 38,
+          onTap: (): void => {
+            this.collapseSearch();
+            router.pushUrl({ url: 'pages/ProfilePage' });
+          },
+          content: (): void => { this.AvatarContent(); },
         })
-        .accessibilityText('我的账户')
+          .margin({ left: 10 })
+          .accessibilityText('我的账户')
       }
       .width('100%')
       .constraintSize({ minHeight: 38 })
@@ -967,8 +991,8 @@ struct ChatListPage {
     .height('100%')
     .justifyContent(FlexAlign.Center)
     .alignItems(HorizontalAlign.Center)
-    .scale({ x: this.pressedFeature === id ? 0.92 : 1, y: this.pressedFeature === id ? 0.92 : 1 })
-    .animation({ duration: 140, curve: Curve.EaseOut })
+    .scale({ x: this.pressedFeature === id ? 1.06 : 1, y: this.pressedFeature === id ? 1.06 : 1 })
+    .animation({ duration: 300, curve: curves.springCurve(0, 1, 200, 22) })
     .onTouch((event: TouchEvent): void => {
       if (event.type === TouchType.Down) this.pressedFeature = id;
       else if (event.type === TouchType.Up || event.type === TouchType.Cancel) this.pressedFeature = '';
@@ -1226,26 +1250,18 @@ struct ChatListPage {
         .onClick((): void => { this.collapseSearch(); })
 
         // 右下拇指区:新对话胶囊(accent 底 + on-accent 墨;iOS amberProminentGlass 语义)
-        Row() {
-          Icon({ name: 'ph_pencil', iconSize: 14, color: ACCENT_INK })
-          Text('新对话')
-            .fontSize(14)
-            .fontWeight(FontWeight.Medium)
-            .letterSpacing(0.2)
-            .fontFamily(FONT_SANS_SEMIBOLD)
-            .fontColor(ACCENT_INK)
-            .margin({ left: 6 })
-        }
-        .height(42)
-        .padding({ left: 14, right: 14 })
-        .borderRadius(21)
-        .backgroundColor(this.accentColorStore)
-        .shadow({ radius: 14, color: accentAlpha(this.accentColorStore, 0.38), offsetY: 5 })
-        .margin({ right: 28, bottom: 52 })
-        .opacity(this.cascadeFab ? 1 : 0)
-        .translate({ y: this.cascadeFab ? 0 : 8 })
-        .onClick((): void => { this.newConversation(); })
-        .accessibilityText('新建聊天')
+        PressGlowButton({
+          accentColor: this.accentColorStore,
+          radius: 21,
+          bgMode: 'solid',
+          btnHeight: 42,
+          onTap: (): void => { this.newConversation(); },
+          content: (): void => { this.FabContent(); },
+        })
+          .margin({ right: 28, bottom: 52 })
+          .opacity(this.cascadeFab ? 1 : 0)
+          .translate({ y: this.cascadeFab ? 0 : 8 })
+          .accessibilityText('新建聊天')
       }
       .width('100%')
       .height('100%')
