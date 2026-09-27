@@ -51,6 +51,8 @@
       //   "usedScene": { "abilities": ["EntryAbility"], "when": "inuse" } },
       { "name": "ohos.permission.READ_CALENDAR", "reason": "$string:reason_calendar",
         "usedScene": { "abilities": ["EntryAbility"], "when": "inuse" } },
+      // HDR 提亮(uiEffect hdrBrightnessRatio,API 24+;normal 档,声明即授权)
+      { "name": "ohos.permission.HDR_BRIGHTNESS", "reason": "$string:reason_hdr_brightness" },
       // { "name": "ohos.permission.WRITE_CALENDAR", "reason": "$string:reason_calendar",
       //   "usedScene": { "abilities": ["EntryAbility"], "when": "inuse" } },
       // { "name": "ohos.permission.APPROXIMATELY_LOCATION", "reason": "$string:reason_location",

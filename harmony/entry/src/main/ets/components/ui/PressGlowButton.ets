@@ -12,9 +12,12 @@
 //   底: bgMode 'glass' 玻璃渐变+细边(默认) | 'solid' accent 实底 | 'plain' 无底(内容自带)
 
 import { curves } from '@kit.ArkUI';
+import { uiEffect } from '@kit.ArkGraphics2D';
 import { HOME_GLASS_BOTTOM, HOME_GLASS_EDGE, HOME_GLASS_SHADOW, HOME_GLASS_TOP } from '../../design/tokens.ets';
 
 const HOLD_DELAY_MS: number = 170;
+// 按住 HDR 提亮倍数(hdrBrightnessRatio24+,设备上限=峰值亮度/SDR 白,超出自动截断)
+const HDR_HOLD_RATIO: number = 4;
 
 const accentAlpha = (hex: string, alpha: number): string => {
   const value: string = hex.replace('#', '');
@@ -56,6 +59,16 @@ export struct PressGlowButton {
 
   private isSolid(): boolean {
     return this.bgMode === 'solid';
+  }
+
+  // HDR 提亮滤镜(held 时):hdrBrightnessRatio 起始于 API 24,低版本静默/异常;
+  // try/catch 兜底退回 blur(0) 空滤镜,保持属性常量挂载、按 held 换内容
+  private heldFilter(): uiEffect.Filter {
+    try {
+      return uiEffect.createFilter().hdrBrightnessRatio(HDR_HOLD_RATIO);
+    } catch (_e) {
+      return uiEffect.createFilter().blur(0);
+    }
   }
 
   private setPressed(down: boolean): void {
@@ -108,6 +121,8 @@ export struct PressGlowButton {
     .border(this.bgMode === 'glass' && !this.held
       ? { width: 0.5, color: HOME_GLASS_EDGE }
       : { width: 0, color: Color.Transparent })
+    // 真 HDR 提亮(API 24+,4×):叠加在底色提升之上;SDR 兜底=底色提升+白光晕
+    .backgroundFilter(this.held ? this.heldFilter() : uiEffect.createFilter().blur(0))
     .shadow(this.held
       ? { radius: 26, color: this.haloColor, offsetY: 0 }
       : (this.isSolid()
