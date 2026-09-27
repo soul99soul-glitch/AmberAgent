@@ -191,6 +191,9 @@ struct ChatListPage {
   @StorageProp('navBarHeight') navBarHeight: number = 0;
   @StorageProp('darkMode') darkMode: boolean = false;
   @StorageProp('accentColor') accentColorStore: string = ACCENT;
+  // 主题包(C2):包切换 → 本页重建重读 HOME_* 令牌;homeDotGrid 控制画布点阵
+  @StorageProp('themePackId') themePackId: string = '';
+  @StorageProp('homeDotGrid') @Watch('redrawDots') homeDotGrid: boolean = true;
   @State items: ConversationSummary[] = [];
   @State loaded: boolean = false;
   @State snackVisible: boolean = false;
@@ -779,9 +782,10 @@ struct ChatListPage {
     }
   }
 
-  // 画布点阵(iOS AmberDotGridOverlay:间距 18,点径 1.3)
+  // 画布点阵(iOS AmberDotGridOverlay:间距 18,点径 1.3);主题包 dotGrid=false → 平涂
   private drawDots(width: number, height: number): void {
     this.dotContext.clearRect(0, 0, width, height);
+    if (!this.homeDotGrid) return;
     this.dotContext.fillStyle = HOME_DOT;
     for (let y = 9; y < height; y += 18) {
       for (let x = 9; x < width; x += 18) {
@@ -790,6 +794,12 @@ struct ChatListPage {
         this.dotContext.fill();
       }
     }
+  }
+
+  // dotGrid 运行时切换:onReady/onAreaChange 不会重触发,需手动重绘
+  private redrawDots(): void {
+    if (!this.pageAlive) return;
+    this.drawDots(this.dotContext.width, this.dotContext.height);
   }
 
   @Builder

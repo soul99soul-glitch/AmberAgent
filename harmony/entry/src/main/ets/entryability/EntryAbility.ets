@@ -12,6 +12,7 @@ import { getSkillManager, rescheduleCronTasksOnStartup, getChatKvStore } from '.
 import { loadDisplaySetting } from '@amber/chat-domain';
 import type { DisplaySetting } from '@amber/chat-domain';
 import { ACCENT, applyTheme, setAccentColor, BG } from '../design/tokens.ets';
+import { themePackStore, applyCurrentTheme } from '../design/theme_packs.ets';
 import { registerAmberFonts, registerAmberFontsFor } from '../design/fonts.ets';
 import { syncMacGatewayPushTokenOnLaunch } from '../platform_impl/MacGatewayClient.ets';
 
@@ -288,7 +289,16 @@ export default class EntryAbility extends UIAbility {
     };
     getChatKvStore().get('ui_color_mode').then((mode: string | null): Promise<DisplaySetting> => {
       const resolvedDark: boolean = mode === 'dark' || (mode !== 'light' && this.systemDarkMode);
-      applyTheme(resolvedDark);
+      // 主题包:先 hydrate(KV 选中包/导入库),再按包应用;applyCurrentTheme 内含 applyTheme 全套
+      themePackStore.hydrate(getChatKvStore()).then((): void => {
+        applyCurrentTheme(resolvedDark);
+        AppStorage.setOrCreate<string>('themePackId', themePackStore.current().id);
+        AppStorage.setOrCreate<boolean>('homeDotGrid', themePackStore.current().dotGrid);
+        // 包可能换 BG:窗口底色按包再落一次(同步那次仍是默认纸色)
+        applyWindowTheme(resolvedDark);
+      }).catch((): void => {
+        applyTheme(resolvedDark);
+      });
       AppStorage.setOrCreate<string>('uiColorMode', mode === 'dark' || mode === 'light' || mode === 'system' ? mode : 'system');
       AppStorage.setOrCreate<boolean>('darkMode', resolvedDark);
       applyWindowTheme(resolvedDark);
@@ -307,7 +317,7 @@ export default class EntryAbility extends UIAbility {
     AppStorage.setOrCreate<boolean>('systemDarkMode', isDark);
     const mode: string = AppStorage.get<string>('uiColorMode') ?? 'system';
     if (mode === 'system') {
-      applyTheme(isDark);
+      applyCurrentTheme(isDark);
       AppStorage.setOrCreate<boolean>('darkMode', isDark);
       applyWindowTheme(isDark);
     }

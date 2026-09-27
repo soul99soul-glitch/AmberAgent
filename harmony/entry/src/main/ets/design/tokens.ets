@@ -139,6 +139,53 @@ export const setAccentColor = (hex: string): void => {
   ACCENT_INK = accentInkFor(hex);
 };
 
+// ── 主题包覆写钩子(design/theme_packs.ets 调用) ──
+// 纸色组整体覆写;状态色/玻璃/HOME alpha 默认由 applyTheme 先落,本函数只管 pack 纸色。
+export interface PaperPaletteOverrides {
+  bg: string;
+  surface: string;
+  surface2: string;
+  raised: string;
+  ink: string;
+  ink2: string;
+  muted: string;
+  muted2: string;
+  borderSoft: string;
+  border: string;
+  userBg: string;
+  userInk: string;
+  codeBg: string;
+  bgFadeStart: string;
+  bgFadeEnd: string;
+  bgGlass: string;
+}
+
+export const applyPaperPalette = (o: PaperPaletteOverrides): void => {
+  BG = o.bg;
+  SURFACE = o.surface;
+  SURFACE2 = o.surface2;
+  RAISED = o.raised;
+  INK = o.ink;
+  INK2 = o.ink2;
+  INK3 = o.muted;
+  INK4 = o.muted2;
+  LINE = o.borderSoft;
+  LINE2 = o.border;
+  USER_BG = o.userBg;
+  USER_INK = o.userInk;
+  CODE_BG = o.codeBg;
+  BG_FADE_START = o.bgFadeStart;
+  BG_FADE_END = o.bgFadeEnd;
+  BG_GLASS = o.bgGlass;
+  HOME_BG = o.bg;
+  HOME_CARD = o.surface;
+  HOME_CARD2 = o.surface2;
+  HOME_INK = o.ink;
+  HOME_INK2 = o.ink2;
+  HOME_MUTED = o.muted;
+  HOME_MUTED2 = o.muted2;
+};
+
 // ── 字号(对齐设计稿 px 值) ──
 export const TITLE: number = 19;             // 页面标题(19/700)
 export const HEADER: number = 16;            // 聊天头标题(16/700)
