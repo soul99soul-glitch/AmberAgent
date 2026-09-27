@@ -910,55 +910,59 @@ struct ChatListPage {
 
   @Builder
   ContinueRow(item: ContinueCandidate): void {
-    Row() {
-      // 功能图标座:44 圆角方,accent 浅染底 + accent 墨
+    // 内缩走外层 Column padding:Row 直接 width('100%')+padding 会溢出卡片右缘
+    Column() {
       Row() {
-        Icon({ name: this.continueIcon(item), iconSize: 22, color: this.accentColorStore })
-      }
-      .width(44)
-      .height(44)
-      .borderRadius(15)
-      .backgroundColor(accentAlpha(this.accentColorStore, this.darkMode ? 0.32 : 0.18))
-      .justifyContent(FlexAlign.Center)
-      .alignItems(VerticalAlign.Center)
+        // 功能图标座:44 圆角方,accent 浅染底 + accent 墨
+        Row() {
+          Icon({ name: this.continueIcon(item), iconSize: 22, color: this.accentColorStore })
+        }
+        .width(44)
+        .height(44)
+        .borderRadius(15)
+        .backgroundColor(accentAlpha(this.accentColorStore, this.darkMode ? 0.32 : 0.18))
+        .justifyContent(FlexAlign.Center)
+        .alignItems(VerticalAlign.Center)
 
-      Column() {
-        Text(this.continueTitle(item))
-          .fontSize(15)
+        Column() {
+          Text(this.continueTitle(item))
+            .fontSize(15)
+            .fontWeight(FontWeight.Medium)
+            .lineHeight(20)
+            .fontFamily(FONT_SANS_SEMIBOLD)
+            .fontColor(HOME_INK)
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+          Text(this.continueMeta(item))
+            .fontSize(11)
+            .lineHeight(14)
+            .letterSpacing(0.11)
+            .fontFamily(FONT_SANS)
+            .fontColor(HOME_MUTED)
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+            .margin({ top: 7 })
+        }
+        .layoutWeight(1)
+        .alignItems(HorizontalAlign.Start)
+        .margin({ left: 14, right: 12 })
+
+        // 续接 CTA:浅强调底 + 主墨字(次级动作;主强调留给右下新对话)
+        Text(this.continueCta(item))
+          .fontSize(13)
           .fontWeight(FontWeight.Medium)
-          .lineHeight(20)
+          .letterSpacing(0.26)
           .fontFamily(FONT_SANS_SEMIBOLD)
           .fontColor(HOME_INK)
-          .maxLines(1)
-          .textOverflow({ overflow: TextOverflow.Ellipsis })
-        Text(this.continueMeta(item))
-          .fontSize(11)
-          .lineHeight(14)
-          .letterSpacing(0.11)
-          .fontFamily(FONT_SANS)
-          .fontColor(HOME_MUTED)
-          .maxLines(1)
-          .textOverflow({ overflow: TextOverflow.Ellipsis })
-          .margin({ top: 7 })
+          .padding({ left: 18, right: 18, top: 7, bottom: 7 })
+          .constraintSize({ minHeight: 32 })
+          .borderRadius(999)
+          .backgroundColor(accentAlpha(this.accentColorStore, 0.12))
       }
-      .layoutWeight(1)
-      .alignItems(HorizontalAlign.Start)
-      .margin({ left: 14, right: 12 })
-
-      // 续接 CTA:浅强调底 + 主墨字(次级动作;主强调留给右下新对话)
-      Text(this.continueCta(item))
-        .fontSize(13)
-        .fontWeight(FontWeight.Medium)
-        .letterSpacing(0.26)
-        .fontFamily(FONT_SANS_SEMIBOLD)
-        .fontColor(HOME_INK)
-        .padding({ left: 18, right: 18, top: 7, bottom: 7 })
-        .constraintSize({ minHeight: 32 })
-        .borderRadius(999)
-        .backgroundColor(accentAlpha(this.accentColorStore, 0.12))
+      .width('100%')
+      .alignItems(VerticalAlign.Center)
     }
     .width('100%')
-    .alignItems(VerticalAlign.Center)
     .padding({ left: 16, right: 16, top: 18, bottom: 18 })
     .backgroundColor(this.pressedContinue ? HOME_PRESS : Color.Transparent)
     .onTouch((event: TouchEvent): void => {
@@ -1002,31 +1006,37 @@ struct ChatListPage {
 
   @Builder
   ControlCard(): void {
+    // 关键:卡片自身禁 margin — ArkUI 的 margin 只缩视觉盒,子级 100% 仍按
+    // margin 前宽度解析(继续 CTA 溢出右缘根因);内缩一律走外层 Column padding
     Column() {
-      if (this.continueItem !== null) {
-        this.ContinueRow(this.continueItem)
-        Row()
-          .height(0.5)
-          .backgroundColor(HOME_SEP)
-          .margin({ left: 16, right: 16 })
-      }
-      Row() {
-        Column() { this.ShortcutItem('reader', '深度阅读', 'ph_bookOpen') }.height('100%').layoutWeight(1)
-        Column() { this.ShortcutItem('novel', '小说创作', 'ph_notebook') }.height('100%').layoutWeight(1)
-        Column() { this.ShortcutItem('council', '模型议会', 'ph_chatCircleDots') }.height('100%').layoutWeight(1)
-        Column() { this.ShortcutItem('apps', '小应用', 'ph_squaresFour') }.height('100%').layoutWeight(1)
-        Column() { this.ShortcutItem('webmount', '站点', 'ph_globe') }.height('100%').layoutWeight(1)
+      Column() {
+        if (this.continueItem !== null) {
+          this.ContinueRow(this.continueItem)
+          Row()
+            .width('100%')
+            .height(0.5)
+            .backgroundColor(HOME_SEP)
+            .margin({ left: 16, right: 16 })
+        }
+        Row() {
+          Column() { this.ShortcutItem('reader', '深度阅读', 'ph_bookOpen') }.height('100%').layoutWeight(1)
+          Column() { this.ShortcutItem('novel', '小说创作', 'ph_notebook') }.height('100%').layoutWeight(1)
+          Column() { this.ShortcutItem('council', '模型议会', 'ph_chatCircleDots') }.height('100%').layoutWeight(1)
+          Column() { this.ShortcutItem('apps', '小应用', 'ph_squaresFour') }.height('100%').layoutWeight(1)
+          Column() { this.ShortcutItem('webmount', '站点', 'ph_globe') }.height('100%').layoutWeight(1)
+        }
+        .width('100%')
+        .height(64)
+        .padding({ top: 9, bottom: 11 })
+        .alignItems(VerticalAlign.Center)
       }
       .width('100%')
-      .height(64)
-      .padding({ top: 9, bottom: 11 })
-      .alignItems(VerticalAlign.Center)
+      .backgroundColor(HOME_CARD)
+      .borderRadius(HOME_RADIUS)
+      .shadow({ radius: 7, color: HOME_SHADOW, offsetY: 5 })
     }
     .width('100%')
-    .backgroundColor(HOME_CARD)
-    .borderRadius(HOME_RADIUS)
-    .shadow({ radius: 7, color: HOME_SHADOW, offsetY: 5 })
-    .margin({ left: 16, right: 16, top: 20 })
+    .padding({ left: 16, right: 16, top: 20 })
     .opacity(this.cascadeCard ? 1 : 0)
     .translate({ y: this.cascadeCard ? 0 : 8 })
   }
@@ -1034,65 +1044,70 @@ struct ChatListPage {
   @Builder
   ConversationRow(item: ConversationSummary, isFirst: boolean, isLast: boolean, hideLine: boolean): void {
     Column() {
-      Row() {
-        // 图标座:40 圆,置顶 = 图钉(iOS: pin 替换主题图标,不另挂角标)
-        Stack() {
-          Icon({
-            name: item.isPinned ? 'ph_pushPin' : conversationIcon(item.title.length > 0 ? item.title : '新对话'),
-            iconSize: 20,
-            color: this.isActive(item.id) ? this.accentColorStore : HOME_MUTED2,
-          })
-        }
-        .width(40)
-        .height(40)
-        .borderRadius(20)
-        .backgroundColor(this.isActive(item.id)
-          ? accentAlpha(this.accentColorStore, this.darkMode ? 0.32 : 0.18)
-          : HOME_CARD2)
-
-        Column() {
-          Text(item.title.length > 0 ? item.title : '新对话')
-            .fontSize(16)
-            .fontWeight(FontWeight.Medium)
-            .lineHeight(21)
-            .letterSpacing(-0.08)
-            .fontFamily(FONT_SANS_SEMIBOLD)
-            .fontColor(HOME_INK)
-            .maxLines(1)
-            .textOverflow({ overflow: TextOverflow.Ellipsis })
-          Row() {
-            Text(relativeTimeIso(item.updateAt))
-              .fontSize(11)
-              .letterSpacing(0.11)
-              .fontFamily(FONT_SANS)
-              .fontColor(HOME_MUTED)
-              .maxLines(1)
-            Text('·')
-              .fontSize(11)
-              .fontFamily(FONT_SANS)
-              .fontColor(HOME_MUTED2)
-              .margin({ left: 6, right: 6 })
-            Text(`${this.messageCount(item.id)} 条`)
-              .fontSize(11)
-              .letterSpacing(0.11)
-              .fontFamily(FONT_SANS)
-              .fontColor(HOME_MUTED)
-              .maxLines(1)
+      // 内容内缩走外层 Column padding(width('100%')+padding 会溢出卡片右缘)
+      Column() {
+        Row() {
+          // 图标座:40 圆,置顶 = 图钉(iOS: pin 替换主题图标,不另挂角标)
+          Stack() {
+            Icon({
+              name: item.isPinned ? 'ph_pushPin' : conversationIcon(item.title.length > 0 ? item.title : '新对话'),
+              iconSize: 20,
+              color: this.isActive(item.id) ? this.accentColorStore : HOME_MUTED2,
+            })
           }
-          .margin({ top: 7 })
+          .width(40)
+          .height(40)
+          .borderRadius(20)
+          .backgroundColor(this.isActive(item.id)
+            ? accentAlpha(this.accentColorStore, this.darkMode ? 0.32 : 0.18)
+            : HOME_CARD2)
+
+          Column() {
+            Text(item.title.length > 0 ? item.title : '新对话')
+              .fontSize(16)
+              .fontWeight(FontWeight.Medium)
+              .lineHeight(21)
+              .letterSpacing(-0.08)
+              .fontFamily(FONT_SANS_SEMIBOLD)
+              .fontColor(HOME_INK)
+              .maxLines(1)
+              .textOverflow({ overflow: TextOverflow.Ellipsis })
+            Row() {
+              Text(relativeTimeIso(item.updateAt))
+                .fontSize(11)
+                .letterSpacing(0.11)
+                .fontFamily(FONT_SANS)
+                .fontColor(HOME_MUTED)
+                .maxLines(1)
+              Text('·')
+                .fontSize(11)
+                .fontFamily(FONT_SANS)
+                .fontColor(HOME_MUTED2)
+                .margin({ left: 6, right: 6 })
+              Text(`${this.messageCount(item.id)} 条`)
+                .fontSize(11)
+                .letterSpacing(0.11)
+                .fontFamily(FONT_SANS)
+                .fontColor(HOME_MUTED)
+                .maxLines(1)
+            }
+            .margin({ top: 7 })
+          }
+          .layoutWeight(1)
+          .alignItems(HorizontalAlign.Start)
+          .margin({ left: 13 })
         }
-        .layoutWeight(1)
-        .alignItems(HorizontalAlign.Start)
-        .margin({ left: 13 })
+        .width('100%')
+        .alignItems(VerticalAlign.Center)
       }
       .width('100%')
-      .alignItems(VerticalAlign.Center)
       .padding({ left: 17, right: 16, top: 12, bottom: 12 })
       .constraintSize({ minHeight: 72 })
 
       // 卡内 hairline:左缩进 70 对齐标题(iOS 同款)
       if (!hideLine) {
         Row()
+          .width('100%')
           .height(0.5)
           .backgroundColor(HOME_ROWLINE)
           .margin({ left: 70, right: 16 })
@@ -1204,27 +1219,34 @@ struct ChatListPage {
             }
           } else if (this.previewFilter(this.items).length === 0) {
             ListItem() {
-              Text(this.searchQuery.trim().length > 0 ? '没有匹配的会话' : '还没有会话')
-                .fontSize(15)
-                .fontFamily(FONT_SANS)
-                .fontColor(HOME_MUTED)
-                .width('100%')
-                .textAlign(TextAlign.Center)
-                .padding({ left: 24, right: 24, top: 20, bottom: 20 })
-                .constraintSize({ minHeight: 120 })
-                .backgroundColor(HOME_CARD)
-                .borderRadius(HOME_RADIUS)
-                .shadow({ radius: 7, color: HOME_SHADOW, offsetY: 5 })
-                .margin({ left: 16, right: 16 })
-                .opacity(this.cascadeRows ? 1 : 0)
-                .translate({ y: this.cascadeRows ? 0 : 8 })
+              Column() {
+                Text(this.searchQuery.trim().length > 0 ? '没有匹配的会话' : '还没有会话')
+                  .fontSize(15)
+                  .fontFamily(FONT_SANS)
+                  .fontColor(HOME_MUTED)
+                  .width('100%')
+                  .textAlign(TextAlign.Center)
+                  .padding({ left: 24, right: 24, top: 20, bottom: 20 })
+                  .constraintSize({ minHeight: 120 })
+                  .backgroundColor(HOME_CARD)
+                  .borderRadius(HOME_RADIUS)
+                  .shadow({ radius: 7, color: HOME_SHADOW, offsetY: 5 })
+              }
+              .width('100%')
+              .padding({ left: 16, right: 16 })
+              .opacity(this.cascadeRows ? 1 : 0)
+              .translate({ y: this.cascadeRows ? 0 : 8 })
             }
           } else {
             ForEach(this.previewFilter(this.items), (item: ConversationSummary, idx: number): void => {
               ListItem() {
-                this.ConversationRow(
-                  item, idx === 0, idx === this.previewFilter(this.items).length - 1,
-                  this.hideRowLine(idx))
+                Column() {
+                  this.ConversationRow(
+                    item, idx === 0, idx === this.previewFilter(this.items).length - 1,
+                    this.hideRowLine(idx))
+                }
+                .width('100%')
+                .padding({ left: 16, right: 16 })
               }
               .swipeAction({
                 start: (): void => { this.SwipePin(item); },
