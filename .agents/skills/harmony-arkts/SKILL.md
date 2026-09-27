@@ -53,6 +53,16 @@ ArkTS 模块级 `export let` 是可变绑定,重新赋值**不触发任何 UI �
 完整踩坑清单(含 RDB `ValuesBucket`、RCP `createSession` 签名、通知枚举等):
 `harmony/entry/TODO-compile-guide.md`。
 
+### 4b. @BuilderParam:裸 lambda 禁止直接构造组件(运行期进程崩溃,编译不拦)
+
+- 已踩真 bug(2026-09-27 设置重排):`CardGroup({ content: (): void => { CardRow(...) } })` — 组件构造发生在
+  普通 lambda(非 builder 上下文),真机一打开页面即 `TypeError: class constructor cannot called without 'new'`,
+  **RuntimeError 直接杀进程**。hilog 抓 `AppKit: ... about to exit due to RuntimeError`。
+- 正确做法(仓库先例 = PressGlowButton):行内容写成组件的 `@Builder XxxCard(): void { CardRow(...) }` 方法,
+  lambda 里只调 `this.XxxCard()`:`CardGroup({ content: (): void => { this.XxxCard(); } })`。
+- 关联坑:自定义组件**尾随闭包后不能链通用属性**(`CardGroup() { ... } .margin(...)` 被当成新语句,
+  编译报 "Cannot find name 'margin'")——要么显式参数传 content 再链属性,要么用外层容器吃边距。
+
 ### 5. 新 API 不凭记忆写
 
 模型语料对 API 12–26 鸿蒙 API 的覆盖极差,猜字段名/枚举名是主要翻车源:
