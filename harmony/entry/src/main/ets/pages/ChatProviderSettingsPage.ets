@@ -16,17 +16,44 @@ import {
   ACCENT, BG, INK, INK2, INK3, INK4, SURFACE, SURFACE2, LINE, TEXT_STYLES, lineHeightForSize,
 } from '../design/tokens.ets';
 import {
-  CenteredTitleBar, PlainSection, CardGroup, StatusChip, FooterNote, PageSpacer,
+  CenteredTitleBar, PlainSection, CardGroup, StatusChip, FooterNote, PageSpacer, CardRow,
 } from '../components/PageTemplate.ets';
 import { FONT_MONO, FONT_SANS_SEMIBOLD } from '../design/fonts.ets';
 import { Icon } from '../components/ui/Icon.ets';
 import { router, promptAction } from '@kit.ArkUI';
-import type { ProviderSetting } from '@amber/chat-domain';
+import type { ProviderSetting, ProviderModel, ModelType } from '@amber/chat-domain';
 import { setPendingProvider } from './ChatProviderDetailPage.ets';
-import { loadProviders, saveProviders } from '@amber/chat-domain';
+import {
+  loadProviders, saveProviders, makeProviderModel,
+  makeProviderSettingOpenAIVariant, makeProviderSettingGoogle, makeProviderSettingClaude,
+} from '@amber/chat-domain';
 import { getChatKvStore } from '../di/AppContainer.ets';
 import { DEFAULT_PROVIDERS, toProviderMonogram, providerSlug, providerAuthLabel } from '../di/ProviderDefaults.ets';
 import { ProviderTemplatePickerSheet } from '../components/ProviderTemplatePickerSheet.ets';
+import { ProviderBalanceText } from '../components/ui/ProviderBalanceText.ets';
+import { picker, fileIo } from '@kit.CoreFileKit';
+import { common } from '@kit.AbilityKit';
+
+// D3-2:导入 payload 文档(与详情页 ProviderExportPayload 同构)
+interface ProviderImportModelDoc {
+  modelId?: string;
+  displayName?: string;
+  type?: string;
+}
+interface ProviderImportDoc {
+  format?: string;
+  version?: number;
+  type?: string;
+  name?: string;
+  baseUrl?: string;
+  chatCompletionsPath?: string;
+  useResponseApi?: boolean;
+  vertexAI?: boolean;
+  location?: string;
+  projectId?: string;
+  promptCaching?: boolean;
+  models?: ProviderImportModelDoc[];
+}
 
 
 interface ProviderRow {
@@ -103,6 +130,64 @@ struct ChatProviderSettingsPage {
     }));
   }
 
+  private settingFor(id: string): ProviderSetting | null {
+    const found: ProviderSetting | undefined = this.all.find(
+      (p: ProviderSetting): boolean => p.id === id);
+    return found === undefined ? null : found;
+  }
+
+  // D3-2:从文件导入 provider(详情页导出 JSON 的逆通道;新 id + 空 apiKey)
+  private async importProvider(): Promise<void> {
+    try {
+      const ctx: common.UIAbilityContext =
+        AppStorage.get<common.UIAbilityContext>('abilityContext') as common.UIAbilityContext;
+      const options: picker.DocumentSelectOptions = new picker.DocumentSelectOptions();
+      options.maxSelectNumber = 1;
+      options.fileSuffixFilters = ['.json'];
+      const uris: string[] = await new picker.DocumentViewPicker(ctx).select(options);
+      if (uris.length === 0) return;
+      const doc: ProviderImportDoc = JSON.parse(fileIo.readTextSync(uris[0])) as ProviderImportDoc;
+      if (doc.format !== 'amber-provider' || doc.type === undefined
+        || doc.name === undefined || doc.baseUrl === undefined) {
+        promptAction.showToast({ message: '文件不是有效的 Provider 导出', duration: 2000 });
+        return;
+      }
+      const models: ProviderModel[] = (doc.models ?? []).map(
+        (m: ProviderImportModelDoc): ProviderModel => makeProviderModel({
+          modelId: m.modelId ?? '',
+          displayName: (m.displayName ?? '').length > 0 ? m.displayName : (m.modelId ?? ''),
+          type: (m.type ?? 'chat') as ModelType,
+        }));
+      let p: ProviderSetting;
+      if (doc.type === 'google') {
+        p = makeProviderSettingGoogle({
+          name: doc.name, baseUrl: doc.baseUrl, models: models,
+          vertexAI: doc.vertexAI ?? false,
+          location: doc.location ?? 'us-central1',
+          projectId: doc.projectId ?? '',
+        });
+      } else if (doc.type === 'claude') {
+        p = makeProviderSettingClaude({
+          name: doc.name, baseUrl: doc.baseUrl, models: models,
+          promptCaching: doc.promptCaching ?? false,
+        });
+      } else {
+        p = makeProviderSettingOpenAIVariant({
+          name: doc.name, baseUrl: doc.baseUrl, models: models,
+          chatCompletionsPath: doc.chatCompletionsPath ?? '/chat/completions',
+          useResponseApi: doc.useResponseApi ?? false,
+        });
+      }
+      this.all = [...this.all, p];
+      await saveProviders(getChatKvStore(), this.all);
+      this.rebuildRows();
+      promptAction.showToast({ message: '已导入,请在详情页补填 API Key', duration: 2000 });
+    } catch (e) {
+      const msg: string = e instanceof Error ? e.message : String(e);
+      promptAction.showToast({ message: `导入失败:${msg}`, duration: 2000 });
+    }
+  }
+
   private filteredRows(): ProviderRow[] {
     const q: string = this.filterQuery.trim().toLowerCase();
     if (q.length === 0) return this.rows;
@@ -168,6 +253,8 @@ struct ChatProviderSettingsPage {
             .fontFamily(FONT_MONO).fontColor(INK3)
             .margin({ top: 3 })
             .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+          ProviderBalanceText({ setting: this.settingFor(row.id) })
+            .margin({ top: 3 })
         }
         .alignItems(HorizontalAlign.Start)
         .layoutWeight(1)
@@ -296,6 +383,21 @@ struct ChatProviderSettingsPage {
               .width('100%')
               .padding({ left: 16, right: 16 })
             }
+
+            // ── D3-2:从文件导入(与详情页导出 JSON 互通)──
+            PlainSection({ label: '其他' })
+            Column() {
+              CardGroup({ radius: 18, stroke: true, content: (): void => {
+                CardRow({
+                  label: '从文件导入',
+                  desc: '导入导出的 provider JSON(不含 API Key,导入后请补填)',
+                  iconName: 'upload', plateSize: 28, isLast: true,
+                  onRowClick: (): void => { this.importProvider().catch((): void => {}); },
+                })
+              } })
+            }
+            .width('100%')
+            .padding({ left: 16, right: 16 })
 
             if (this.filteredRows().length === 0) {
               Text('没有匹配的服务商')

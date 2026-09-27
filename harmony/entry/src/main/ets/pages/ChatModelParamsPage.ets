@@ -24,7 +24,7 @@ import { FONT_MONO, FONT_MONO_MEDIUM } from '../design/fonts.ets';
 import { router } from '@kit.ArkUI';
 import type {
   CustomBody, CustomHeader, JsonValue, ProviderModel, ProviderSetting,
-  ModelType, ModalityFull,
+  ModelType, ModalityFull, BuiltInTools,
 } from '@amber/chat-domain';
 import { loadProviders, saveProviders } from '@amber/chat-domain';
 import { getChatKvStore } from '../di/AppContainer.ets';
@@ -70,6 +70,9 @@ struct ChatModelParamsPage {
   @State inputImage: boolean = false;
   @State inputAudio: boolean = false;
   @State contextWindowText: string = '';
+  // D3-3:内置工具草稿(model.tools;search/image_generation 经 OpenAI Responses 消费)
+  @State toolSearch: boolean = false;
+  @State toolImageGen: boolean = false;
 
   aboutToAppear(): void {
     const params = router.getParams() as RouterParams;
@@ -103,6 +106,8 @@ struct ChatModelParamsPage {
         this.inputAudio = model.inputModalities.indexOf('audio') >= 0;
         this.contextWindowText = model.contextWindowTokens !== null
           ? `${model.contextWindowTokens}` : '';
+        this.toolSearch = model.tools.indexOf('search') >= 0;
+        this.toolImageGen = model.tools.indexOf('image_generation') >= 0;
       }
       this.loaded = true;
     });
@@ -245,6 +250,9 @@ struct ChatModelParamsPage {
     const inputModalities: ModalityFull[] = this.draftInputModalities();
     const contextWindow: number | null = this.draftContextWindow();
     const modelType: string = this.modelType;
+    const tools: BuiltInTools[] = [];
+    if (this.toolSearch) tools.push('search');
+    if (this.toolImageGen) tools.push('image_generation');
     const models: ProviderModel[] = provider.models.map((m: ProviderModel): ProviderModel => {
       if (m.id !== this.modelRowId) return m;
       // arkts-no-spread:显式字段拷贝
@@ -253,7 +261,7 @@ struct ChatModelParamsPage {
         type: modelType as ModelType,
         customHeaders: headers, customBodies: bodies,
         inputModalities: inputModalities, outputModalities: m.outputModalities,
-        abilities: m.abilities, tools: m.tools,
+        abilities: m.abilities, tools: tools,
         contextWindowTokens: contextWindow, providerOverwrite: m.providerOverwrite,
       };
     });
@@ -389,6 +397,25 @@ struct ChatModelParamsPage {
               Column().height(12)
               this.textField('上下文窗口(tokens)', this.contextWindowText, '留空 = 未知',
                 (v: string): void => { this.contextWindowText = v; })
+            }
+            .width('100%').alignItems(HorizontalAlign.Start)
+            .padding({ left: 16, right: 16, top: 12, bottom: 4 })
+
+            // ── 内置工具(D3-3;OpenAI Responses 消费:url_context/Google 侧 P1 登记) ──
+            SectionHeader({ label: '内置工具' })
+            Column() {
+              Text('由服务商侧执行的模型自带工具(仅 OpenAI Responses 协议生效)')
+                .fontSize(TEXT_STYLES.secondary.size)
+                .lineHeight(TEXT_STYLES.secondary.lineHeight).fontFamily(TEXT_STYLES.secondary.family)
+                .fontColor(INK3).width('100%').margin({ bottom: 4 })
+              ToggleRow({
+                label: '联网搜索(web_search)', checked: this.toolSearch, isLast: false,
+                onToggle: (): void => { this.toolSearch = !this.toolSearch; },
+              })
+              ToggleRow({
+                label: '生成图片(image_generation)', checked: this.toolImageGen, isLast: true,
+                onToggle: (): void => { this.toolImageGen = !this.toolImageGen; },
+              })
             }
             .width('100%').alignItems(HorizontalAlign.Start)
             .padding({ left: 16, right: 16, top: 12, bottom: 4 })

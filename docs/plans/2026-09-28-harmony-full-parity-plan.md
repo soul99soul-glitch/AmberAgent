@@ -34,6 +34,10 @@
 | 个人上下文注入 | READ_CONTACTS 被 profile ACL 卡(9568289),照片/日记无数据源 |
 | 设备绑定加密 | 与跨设备恢复冲突,产品层面需先定语义 |
 | WebMount 远程桌面(Moli/Playwright/Steel) | 依赖外部桌面服务 |
+| 按用途 Provider Override(D3-4) | 任务槽数据模型(uuid → (providerId,modelId) 对)+ 全链路解析改造,独立批次 |
+| Vertex AI 服务账号(D3-5) | RS256 JWT 签名 + onboarding 流,独立批次(保持 google_chat_api.ts:53 抛错登记) |
+| Antigravity OAuth(D3-6) | Gemini Code Assist v1internal 包装 + onboarding,独立批次(保持 :79 抛错登记) |
+| Provider 内置工具 url_context / Google 侧(D3-3 余量) | OpenAI Responses 无此工具;Google 侧需 ChatModel.tools 管线改造,P1 登记 |
 
 ---
 
