@@ -11,10 +11,11 @@ import { router } from '@kit.ArkUI';
 import {
   INK, INK2, INK3, INK4, SURFACE, SURFACE2, RAISED, LINE, LINE2, BG,
   ACCENT, ACCENT_INK, ACCENT_LIGHT, SIGNAL, ERROR, CODE_BG,
+  WARNING_FG, WARNING_BG, ERROR_BG, SUCCESS_BG, SUCCESS_FG,
   TITLE, HEADER, BODY, BODY2, META, MONO_SMALL, LABEL, TINY, TEXT_STYLES,
   PAD_CARD, PAD_ITEM, RADIUS, RADIUS_PILL, GUTTER, lineHeightForSize,
 } from '../design/tokens.ets';
-import { FONT_SANS_MEDIUM, FONT_SANS_SEMIBOLD, FONT_MONO, FONT_MONO_MEDIUM } from '../design/fonts.ets';
+import { FONT_SANS_MEDIUM, FONT_SANS_SEMIBOLD, FONT_SANS_BOLD, FONT_MONO, FONT_MONO_MEDIUM } from '../design/fonts.ets';
 import { Icon } from './ui/Icon.ets';
 
 // ===== Page Header (对齐 PageHeader / SettingsHeader) =====
@@ -363,31 +364,41 @@ export struct NavRow {
 }
 
 // ===== 卡片分组(2026-09-27 设置重排:对齐 iOS SettingsHome / Android 新版六组卡片 IA)=====
-// 奶油画布上的圆角卡片:SURFACE 底 r16 clip;行间发丝线内缩至文字起点
+// 奶油画布上的圆角卡片:SURFACE 底 clip;行间发丝线内缩至文字起点
+// radius/stroke 可选:设置根页 r16 无描边(Android);二级页 r18+0.5 发丝描边(iOS AmberFormGroup)
 @Component
 export struct CardGroup {
+  @Prop radius: number = 16;
+  @Prop stroke: boolean = false;
   @BuilderParam content: () => void;
   build(): void {
     Column() {
       this.content();
     }
     .width('100%')
-    .borderRadius(16)
+    .borderRadius(this.radius)
     .backgroundColor(SURFACE)
+    .border({ width: this.stroke ? 0.5 : 0, color: LINE })
     .clip(true)
   }
 }
 
-// 卡片行:32 着色图标座(SURFACE2 r9)+ 单行标题 16/500 + 值(mono)+ 箭头;按压 SURFACE2
+// 卡片行:着色图标座 + 标题/可选副标题 + 值(mono)+ 箭头;按压 SURFACE2
+// plateStyle: 'neutral' SURFACE2 座 INK2 图标(默认,根页)| 'accent' ACCENT_LIGHT 座 accent 图标(iOS 二级页)
+// plateSize: 32(根页)| 28(iOS AmberFormRow)
 @Component
 export struct CardRow {
   @Prop label: string = '';
+  @Prop desc: string = '';
   @Prop valueText: string = '';
   @Prop iconName: string = '';
+  @Prop plateStyle: string = 'neutral';
+  @Prop plateSize: number = 32;
   @Prop isLast: boolean = false;
   // 纯展示行(版本等)不绘箭头,避免"看似可点"的死控件感
   @Prop showChevron: boolean = true;
   onRowClick: () => void = (): void => {};
+  @StorageProp('accentColor') accentColorStore: string = ACCENT;
   @State private pressed: boolean = false;
 
   build(): void {
@@ -395,23 +406,41 @@ export struct CardRow {
       Row() {
         if (this.iconName.length > 0) {
           Row() {
-            Icon({ name: this.iconName, iconSize: 19, color: INK2 })
+            Icon({
+              name: this.iconName,
+              iconSize: this.plateSize >= 32 ? 19 : 15,
+              color: this.plateStyle === 'accent' ? this.accentColorStore : INK2
+            })
           }
-          .width(32).height(32).borderRadius(9)
-          .backgroundColor(SURFACE2)
+          .width(this.plateSize).height(this.plateSize)
+          .borderRadius(this.plateSize >= 32 ? 9 : 7)
+          .backgroundColor(this.plateStyle === 'accent' ? ACCENT_LIGHT : SURFACE2)
           .justifyContent(FlexAlign.Center)
           .alignItems(VerticalAlign.Center)
           .margin({ right: 12 })
         }
-        Text(this.label)
-          .fontSize(16)
-          .fontWeight(FontWeight.Medium)
-          .lineHeight(lineHeightForSize(16))
-          .fontFamily(FONT_SANS_MEDIUM)
-          .fontColor(INK)
-          .maxLines(1)
-          .textOverflow({ overflow: TextOverflow.Ellipsis })
-          .layoutWeight(1)
+        Column() {
+          Text(this.label)
+            .fontSize(16)
+            .fontWeight(FontWeight.Medium)
+            .lineHeight(lineHeightForSize(16))
+            .fontFamily(FONT_SANS_MEDIUM)
+            .fontColor(INK)
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+          if (this.desc.length > 0) {
+            Text(this.desc)
+              .fontSize(12)
+              .lineHeight(lineHeightForSize(12))
+              .fontFamily(FONT_SANS_MEDIUM)
+              .fontColor(INK3)
+              .maxLines(2)
+              .textOverflow({ overflow: TextOverflow.Ellipsis })
+              .margin({ top: 2 })
+          }
+        }
+        .alignItems(HorizontalAlign.Start)
+        .layoutWeight(1)
         if (this.valueText.length > 0) {
           Text(this.valueText)
             .fontSize(TEXT_STYLES.meta.size)
@@ -441,7 +470,7 @@ export struct CardRow {
       })
       .onClick((): void => { this.onRowClick(); })
       if (!this.isLast) {
-        // 分隔线起点对齐标题文字(行 padding 14 + 图标座 32 + 间距 12);
+        // 分隔线起点对齐标题文字(行 padding 14 + 图标座 + 间距 12);
         // 横向内缩走外层 padding:width('100%') + margin 在本布局下不生效
         Row() {
           Row()
@@ -450,10 +479,247 @@ export struct CardRow {
             .backgroundColor(LINE)
         }
         .width('100%')
-        .padding({ left: 58, right: 14 })
+        .padding({ left: 14 + this.plateSize + 12, right: 14 })
       }
     }
     .width('100%')
+  }
+}
+
+// ===== iOS 二级页骨架(2026-09-27 二级页 iOS 对齐;规格:amberagent-ios PlaceholderViews.swift)=====
+
+// iOS 顶栏:44 玻璃圆返回钮 + 整宽居中标题/副标题 + 可选右侧动作(文本 或 accent 圆图标)
+//   规格: AmberGlassCircleButton(44,symbol 17 semibold,ink)+ .title2 bold 居中;无底部发丝线
+@Component
+export struct CenteredTitleBar {
+  @Prop title: string = '';
+  @Prop subtitle: string = '';
+  // 右侧文本动作(如「管理」),accent 色
+  @Prop actionText: string = '';
+  // 右侧 accent 圆图标动作(如 'plus');与 actionText 互斥,actionText 优先
+  @Prop actionIcon: string = '';
+  @StorageProp('accentColor') accentColorStore: string = ACCENT;
+  @StorageProp('statusBarHeight') statusBarHeight: number = 44;
+  onAction: () => void = (): void => {};
+  onBack: () => void = (): void => { router.back(); };
+
+  build(): void {
+    Stack({ alignContent: Alignment.Center }) {
+      // 整宽居中标题(不被左右钮挤偏)
+      Column() {
+        Text(this.title)
+          .fontSize(TEXT_STYLES.screenTitle.size)
+          .fontWeight(FontWeight.Bold)
+          .lineHeight(TEXT_STYLES.screenTitle.lineHeight)
+          .fontFamily(FONT_SANS_BOLD)
+          .fontColor(INK)
+          .maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+        if (this.subtitle.length > 0) {
+          Text(this.subtitle)
+            .fontSize(13)
+            .lineHeight(lineHeightForSize(13))
+            .fontFamily(FONT_SANS_MEDIUM)
+            .fontColor(INK3)
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+            .margin({ top: 2 })
+        }
+      }
+      .alignItems(HorizontalAlign.Center)
+      .padding({ left: 56, right: 56 })
+      .width('100%')
+
+      Row() {
+        Row() {
+          Icon({ name: 'back', iconSize: 18, color: INK })
+        }
+        .width(44).height(44)
+        .borderRadius(22)
+        .backgroundColor(SURFACE)
+        .border({ width: 0.5, color: LINE })
+        .justifyContent(FlexAlign.Center)
+        .alignItems(VerticalAlign.Center)
+        .accessibilityText('返回')
+        .onClick((): void => { this.onBack(); })
+        Blank()
+        if (this.actionText.length > 0) {
+          Row() {
+            Text(this.actionText)
+              .fontSize(15)
+              .fontWeight(FontWeight.Medium)
+              .lineHeight(lineHeightForSize(15))
+              .fontFamily(FONT_SANS_MEDIUM)
+              .fontColor(this.accentColorStore)
+              .maxLines(1)
+          }
+          .constraintSize({ minWidth: 44, minHeight: 44 })
+          .justifyContent(FlexAlign.Center)
+          .alignItems(VerticalAlign.Center)
+          .accessibilityText(this.actionText)
+          .onClick((): void => { this.onAction(); })
+        } else if (this.actionIcon.length > 0) {
+          Row() {
+            Icon({ name: this.actionIcon, iconSize: 20, color: ACCENT_INK })
+          }
+          .width(44).height(44)
+          .borderRadius(22)
+          .backgroundColor(this.accentColorStore)
+          .justifyContent(FlexAlign.Center)
+          .alignItems(VerticalAlign.Center)
+          .onClick((): void => { this.onAction(); })
+        }
+      }
+      .width('100%')
+    }
+    .width('100%')
+    .padding({ left: 16, right: 16, top: this.statusBarHeight + 10, bottom: 14 })
+    .backgroundColor(BG)
+  }
+}
+
+// iOS 组标(AmberSectionLabel):caption 12 semibold muted,拉丁大写,tracking 0.4;无 // 无发丝线
+@Component
+export struct PlainSection {
+  @Prop label: string = '';
+  build(): void {
+    Text(this.label.toUpperCase())
+      .fontSize(12)
+      .fontWeight(600)
+      .lineHeight(lineHeightForSize(12))
+      .fontFamily(FONT_SANS_SEMIBOLD)
+      .letterSpacing(0.4)
+      .fontColor(INK3)
+      .width('100%')
+      .padding({ left: 16, right: 16, top: 20, bottom: 7 })
+  }
+}
+
+// iOS 卡片开关行:标题/副标题 + accent 药丸开关(开时 accent 底);无图标
+@Component
+export struct CardToggleRow {
+  @Prop label: string = '';
+  @Prop desc: string = '';
+  @Prop checked: boolean = false;
+  @Prop isLast: boolean = false;
+  @StorageProp('accentColor') accentColorStore: string = ACCENT;
+  onToggle: () => void = (): void => {};
+
+  build(): void {
+    Column() {
+      Row() {
+        Column() {
+          Text(this.label)
+            .fontSize(16)
+            .fontWeight(FontWeight.Medium)
+            .lineHeight(lineHeightForSize(16))
+            .fontFamily(FONT_SANS_MEDIUM)
+            .fontColor(INK)
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+          if (this.desc.length > 0) {
+            Text(this.desc)
+              .fontSize(12)
+              .lineHeight(lineHeightForSize(12))
+              .fontFamily(FONT_SANS_MEDIUM)
+              .fontColor(INK3)
+              .maxLines(2)
+              .textOverflow({ overflow: TextOverflow.Ellipsis })
+              .margin({ top: 2 })
+          }
+        }
+        .alignItems(HorizontalAlign.Start)
+        .layoutWeight(1)
+
+        Row() {
+          Stack({ alignContent: Alignment.Start }) {
+            Column()
+              .width(42).height(24).borderRadius(99)
+              .backgroundColor(this.checked ? this.accentColorStore : LINE2)
+            Column()
+              .width(20).height(20).borderRadius(10)
+              .backgroundColor(Color.White) // 滑块固定纯白:off 轨上仍需对比
+              .margin({ left: this.checked ? 22 : 2 })
+              .animation({ duration: 150, curve: Curve.EaseOut })
+          }
+          .clip(true)
+        }
+        .constraintSize({ minWidth: 44, minHeight: 44 })
+        .justifyContent(FlexAlign.End)
+        .alignItems(VerticalAlign.Center)
+        .margin({ left: 12 })
+        .onClick((): void => { this.onToggle(); })
+        .accessibilityText(this.checked ? '已开启' : '已关闭')
+      }
+      .width('100%')
+      .alignItems(VerticalAlign.Center)
+      .constraintSize({ minHeight: 52 })
+      .padding({ left: 14, right: 14, top: 10, bottom: 10 })
+      if (!this.isLast) {
+        Row() {
+          Row()
+            .width('100%')
+            .height(1)
+            .backgroundColor(LINE)
+        }
+        .width('100%')
+        .padding({ left: 14, right: 14 })
+      }
+    }
+    .width('100%')
+  }
+}
+
+// 状态 chip:软底小药丸(已配置/已登录/自动批准/高风险/未填写)
+// tone: success(SUCCESS_BG/FG 绿)| accent(ACCENT_LIGHT 浅底)| warn(高风险)| error | muted(SURFACE2 灰)
+@Component
+export struct StatusChip {
+  @Prop text: string = '';
+  @Prop tone: string = 'muted';
+  @StorageProp('accentColor') accentColorStore: string = ACCENT;
+
+  private fg(): string {
+    if (this.tone === 'success') return SUCCESS_FG;
+    if (this.tone === 'accent') return this.accentColorStore;
+    if (this.tone === 'warn') return WARNING_FG;
+    if (this.tone === 'error') return ERROR;
+    return INK3;
+  }
+
+  private bg(): string {
+    if (this.tone === 'success') return SUCCESS_BG;
+    if (this.tone === 'accent') return ACCENT_LIGHT;
+    if (this.tone === 'warn') return WARNING_BG;
+    if (this.tone === 'error') return ERROR_BG;
+    return SURFACE2;
+  }
+
+  build(): void {
+    Text(this.text)
+      .fontSize(12)
+      .fontWeight(FontWeight.Medium)
+      .lineHeight(lineHeightForSize(12))
+      .fontFamily(FONT_SANS_MEDIUM)
+      .fontColor(this.fg())
+      .maxLines(1)
+      .padding({ left: 10, right: 10, top: 4, bottom: 4 })
+      .backgroundColor(this.bg())
+      .borderRadius(999)
+  }
+}
+
+// iOS 组下脚注:caption 12 muted(解释行为/回退规则)
+@Component
+export struct FooterNote {
+  @Prop text: string = '';
+  build(): void {
+    Text(this.text)
+      .fontSize(12)
+      .lineHeight(17)
+      .fontFamily(FONT_SANS_MEDIUM)
+      .fontColor(INK3)
+      .width('100%')
+      .padding({ left: 16, right: 16, top: 6 })
   }
 }
 
