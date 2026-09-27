@@ -10,7 +10,7 @@
 import { FONT_SANS, FONT_SANS_SEMIBOLD, FONT_SANS_BOLD, FONT_MONO, FONT_MONO_SEMIBOLD } from './fonts.ets';
 
 // ── 基础色(Light base, Graphite) ──
-export let BG: string = '#F4F2EC';         // 页面背景(暖奶油)
+export let BG: string = '#EFE7D6';         // 页面背景(暖奶油,iOS paper 0xEFE7D6 = HOME_BG,全站唯一画布)
 export let SURFACE: string = '#FAF9F5';    // 卡片/托盘(浅奶油)
 export let SURFACE2: string = '#EFECE4';   // 内嵌面(药丸/chip/开关off)
 export let RAISED: string = '#FFFFFF';     // 聚焦字段/分段激活
@@ -56,9 +56,9 @@ export let STATUS_BLUE_LIGHT: string = '#E8F0FE'; // 蓝色 chip 淡底(随主�
 export const OVERLAY: string = '#66000000';
 
 // ── 派生 alpha 色(BG 的渐隐/玻璃变体,随主题切换) ──
-export let BG_FADE_START: string = '#00F4F2EC'; // 底部渐隐起点(全透)
-export let BG_FADE_END: string = '#F4F2EC';     // 底部渐隐终点(=BG)
-export let BG_GLASS: string = '#CCF4F2EC';      // 头部毛玻璃底(80% BG)
+export let BG_FADE_START: string = '#00EFE7D6'; // 底部渐隐起点(全透)
+export let BG_FADE_END: string = '#EFE7D6';     // 底部渐隐终点(=BG)
+export let BG_GLASS: string = '#CCEFE7D6';      // 头部毛玻璃底(80% BG)
 
 // applyTheme — 浅/深双主题(session-home.html 令牌逐值)
 let darkTheme: boolean = false;
@@ -81,11 +81,11 @@ const accentLightFor = (hex: string, dark: boolean): string => {
 export const applyTheme = (dark: boolean): void => {
   darkTheme = dark;
   if (dark) {
-    BG = '#161512'; SURFACE = '#1C1B17'; SURFACE2 = '#211F1A'; RAISED = '#23211C';
+    BG = '#14110E'; SURFACE = '#1C1B17'; SURFACE2 = '#211F1A'; RAISED = '#23211C';
     INK = '#ECE8DF'; INK2 = '#A8A298'; INK3 = '#756F64'; INK4 = '#564F45';
     LINE = '#2E2B25'; LINE2 = '#3A362E';
     USER_BG = '#ECE8DF'; USER_INK = '#1B1A17'; CODE_BG = '#211F1A';
-    BG_FADE_START = '#00161512'; BG_FADE_END = '#161512'; BG_GLASS = '#CC161512';
+    BG_FADE_START = '#0014110E'; BG_FADE_END = '#14110E'; BG_GLASS = '#CC14110E';
     STATUS_BLUE_LIGHT = '#1B2638';
     SHADOW_KEY = '#99000000'; SHADOW_OVERLAY = '#B3000000';
     ERROR = '#FF8F86'; // Material dark error(原固定 #C2553F 在深色下过暗)
@@ -101,11 +101,11 @@ export const applyTheme = (dark: boolean): void => {
     HOME_GLASS_EDGE = 'rgba(255, 255, 255, 0.16)'; HOME_GLASS_SHADOW = 'rgba(0, 0, 0, 0.30)';
     HOME_DOT = 'rgba(244, 241, 237, 0.08)';
   } else {
-    BG = '#F4F2EC'; SURFACE = '#FAF9F5'; SURFACE2 = '#EFECE4'; RAISED = '#FFFFFF';
+    BG = '#EFE7D6'; SURFACE = '#FAF9F5'; SURFACE2 = '#EFECE4'; RAISED = '#FFFFFF';
     INK = '#1B1A17'; INK2 = '#57544C'; INK3 = '#8F8B80'; INK4 = '#B6B1A4';
     LINE = '#E4E0D6'; LINE2 = '#D6D1C4';
     USER_BG = '#1B1A17'; USER_INK = '#F6F4EE'; CODE_BG = '#EDEAE1';
-    BG_FADE_START = '#00F4F2EC'; BG_FADE_END = '#F4F2EC'; BG_GLASS = '#CCF4F2EC';
+    BG_FADE_START = '#00EFE7D6'; BG_FADE_END = '#EFE7D6'; BG_GLASS = '#CCEFE7D6';
     STATUS_BLUE_LIGHT = '#E8F0FE';
     SHADOW_KEY = '#261B1A17'; SHADOW_OVERLAY = '#381B1A17';
     ERROR = '#C93A2F'; // Material light error
