@@ -69,6 +69,8 @@ const val MEMORY_NOTIFICATION_CHANNEL_ID = "memory_tasks"
 const val BOARD_NOTIFICATION_CHANNEL_ID = "today_board"
 const val DEEP_READ_NOTIFICATION_CHANNEL_ID = "deep_read"
 const val NOVEL_GHOSTWRITE_FAILURE_NOTIFICATION_CHANNEL_ID = "novel_ghostwrite_failure"
+// Must match `channel_id` sent by amber-gateway's FCM sender.
+const val MAC_GATEWAY_NOTIFICATION_CHANNEL_ID = "mac_gateway"
 
 class AmberAgentApp : Application() {
     override fun onCreate() {
@@ -457,6 +459,13 @@ class AmberAgentApp : Application() {
             .setVibrationEnabled(true)
             .build()
         notificationManager.createNotificationChannel(novelGhostwriteFailureChannel)
+
+        val macGatewayChannel = NotificationChannelCompat
+            .Builder(MAC_GATEWAY_NOTIFICATION_CHANNEL_ID, NotificationManagerCompat.IMPORTANCE_HIGH)
+            .setName(getString(R.string.notification_channel_mac_gateway))
+            .setVibrationEnabled(true)
+            .build()
+        notificationManager.createNotificationChannel(macGatewayChannel)
     }
 
     override fun onTerminate() {

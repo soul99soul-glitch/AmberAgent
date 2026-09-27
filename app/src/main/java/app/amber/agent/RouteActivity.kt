@@ -137,6 +137,7 @@ import app.amber.feature.ui.pages.setting.SettingCronTasksPage
 import app.amber.feature.ui.pages.setting.SettingAppearancePage
 import app.amber.feature.ui.pages.setting.SettingDisplayPage
 import app.amber.feature.ui.pages.setting.SettingExperimentalICloudPage
+import app.amber.feature.ui.pages.setting.SettingExperimentalMacGatewayPage
 import app.amber.feature.ui.pages.setting.SettingExperimentalModelCouncilPage
 import app.amber.feature.ui.pages.setting.SettingExperimentalPage
 import app.amber.feature.ui.pages.setting.SettingExperimentalSubAgentPage
@@ -862,6 +863,10 @@ class RouteActivity : ComponentActivity() {
                                 SettingExperimentalICloudPage()
                             }
 
+                            entry<Screen.SettingExperimentalMacGateway> {
+                                SettingExperimentalMacGatewayPage()
+                            }
+
                             entry<Screen.SettingExperimentalSubAgent> {
                                 SettingExperimentalSubAgentPage()
                             }
@@ -1205,6 +1210,9 @@ sealed interface Screen : NavKey {
 
     @Serializable
     data object SettingExperimentalICloud : Screen
+
+    @Serializable
+    data object SettingExperimentalMacGateway : Screen
 
     @Serializable
     data object SettingExperimentalSubAgent : Screen

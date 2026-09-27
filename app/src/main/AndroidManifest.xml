@@ -279,6 +279,16 @@
         <action android:name="android.service.notification.NotificationListenerService" />
       </intent-filter>
     </service>
+    <service
+      android:name="app.amber.feature.macgateway.MacGatewayMessagingService"
+      android:exported="false">
+      <intent-filter>
+        <action android:name="com.google.firebase.MESSAGING_EVENT" />
+      </intent-filter>
+    </service>
+    <meta-data
+      android:name="com.google.firebase.messaging.default_notification_icon"
+      android:resource="@drawable/amberagent_live_status_icon" />
 
     <provider
       android:name="androidx.core.content.FileProvider"

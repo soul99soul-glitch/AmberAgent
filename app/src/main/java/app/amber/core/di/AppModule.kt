@@ -13,6 +13,7 @@ import app.amber.core.event.AppEventBus
 import app.amber.core.utils.EmojiData
 import app.amber.core.utils.EmojiUtils
 import app.amber.core.utils.JsonInstant
+import app.amber.feature.macgateway.MacGatewayRepository
 import org.koin.dsl.module
 
 val appModule = module {
@@ -39,6 +40,8 @@ val appModule = module {
     // CoroutineScope. Anything asking for a bare CoroutineScope needs this alias (previously
     // it was satisfied by a stray CoroutineScope binding in the novel module).
     single<kotlinx.coroutines.CoroutineScope> { get<AppScope>() }
+
+    single { MacGatewayRepository(get(), get<AppScope>()) }
 
     single<EmojiData> {
         EmojiUtils.loadEmoji(get())

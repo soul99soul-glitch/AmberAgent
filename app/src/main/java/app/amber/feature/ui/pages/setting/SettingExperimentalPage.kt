@@ -41,6 +41,7 @@ import com.composables.icons.lucide.Lucide
 import com.composables.icons.lucide.CodeXml
 import com.composables.icons.lucide.LayoutDashboard
 import com.composables.icons.lucide.Globe
+import com.composables.icons.lucide.Laptop
 import com.composables.icons.lucide.Newspaper
 import com.composables.icons.lucide.Server
 import com.composables.icons.lucide.Users
@@ -112,6 +113,13 @@ fun SettingExperimentalPage() {
                         icon = { Icon(Lucide.Server, contentDescription = null) },
                         title = "Synara",
                         description = stringResource(R.string.setting_experimental_synara_desc),
+                    )
+                    ExperimentDivider()
+                    ExperimentFeatureRow(
+                        onClick = { navController.navigate(Screen.SettingExperimentalMacGateway) },
+                        icon = { Icon(Lucide.Laptop, contentDescription = null) },
+                        title = "Mac Gateway",
+                        description = stringResource(R.string.mac_gateway_desc_short),
                     )
                     ExperimentDivider()
                     ExperimentFeatureRow(

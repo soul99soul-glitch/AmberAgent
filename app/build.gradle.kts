@@ -670,6 +670,7 @@ dependencies {
     implementation(libs.firebase.analytics)
     implementation(libs.firebase.crashlytics)
     implementation(libs.firebase.config)
+    implementation(libs.firebase.messaging)
 
     // DataStore
     implementation(libs.androidx.datastore.preferences)
