@@ -1,7 +1,7 @@
 // AgentMessageRow — chat/novel 共用的完整 agent 消息行。
 // host 通过静态 capabilities 决定可交互入口，并用具名 hostFooter slot 注入宿主尾部。
 
-import { INK, INK3, META, SURFACE2, USER_BG, USER_INK } from '../design/tokens.ets';
+import { INK, INK3, META, SURFACE2, USER_BG, USER_INK, ACCENT } from '../design/tokens.ets';
 import type {
   AskUserQuestion, MessagePartBlock, ReasoningCardState, ThinkingStep, UIMessage,
   UIMessagePartDocument, UIMessagePartReasoning, UIMessagePartTool,
@@ -22,6 +22,7 @@ import { ChatMessageCouncilStep } from './ChatMessageCouncilStep.ets';
 import { ChatMessageActionFooter, resolveActionFooterMode } from './ChatMessageActionFooter.ets';
 import { ContentAttachmentChip, urlBasename } from './ContentAttachmentChip.ets';
 import { MiniAppChatCard } from './MiniAppChatCard.ets';
+import { UIAvatar } from './UIAvatar.ets';
 
 export interface AgentMessageRowHostCapabilities {
   copy: boolean;
@@ -83,6 +84,10 @@ export struct AgentMessageRow {
   @Prop showAssistantBubble: boolean = false;
   @Prop showModelName: boolean = true;
   @Prop showModelIcon: boolean = false;
+  // D0-4:用户头像(DisplaySetting.showUserAvatar;默认 false = 1:1 原型无抬头)
+  @Prop showUserAvatar: boolean = false;
+  @Prop userAvatar: string = '';
+  @Prop userNickname: string = '';
   @Prop fontSizeRatio: number = 1.0;
   @Prop codeBlockAutoCollapse: boolean = false;
   @Prop showLineNumbers: boolean = false;
@@ -393,25 +398,39 @@ export struct AgentMessageRow {
       } else if (block.kind === 'content') {
         if (block.part.type === 'text') {
           if (this.message.role === 'user') {
-            Column() {
-              MarkdownText({
-                content: block.part.text,
-                fontSize: this.bodyFontSize(),
-                fontColor: USER_INK,
-                fillWidth: false,
-                chatFontFamily: this.chatFontFamily,
-                enableLatexRendering: this.enableLatexRendering,
-                codeBlockAutoCollapse: this.codeBlockAutoCollapse,
-                showLineNumbers: this.showLineNumbers,
-                streamKey: `${this.streamKeyTag}${this.message.id}#${block.index}`,
-              })
+            Row() {
+              Column() {
+                MarkdownText({
+                  content: block.part.text,
+                  fontSize: this.bodyFontSize(),
+                  fontColor: USER_INK,
+                  fillWidth: false,
+                  chatFontFamily: this.chatFontFamily,
+                  enableLatexRendering: this.enableLatexRendering,
+                  codeBlockAutoCollapse: this.codeBlockAutoCollapse,
+                  showLineNumbers: this.showLineNumbers,
+                  streamKey: `${this.streamKeyTag}${this.message.id}#${block.index}`,
+                })
+              }
+              .alignItems(HorizontalAlign.Start)
+              .padding({ left: 15, right: 15, top: 11, bottom: 11 })
+              .backgroundColor(USER_BG)
+              .borderRadius({ topLeft: 16, topRight: 16, bottomRight: 5, bottomLeft: 16 })
+              .constraintSize({ maxWidth: this.showUserAvatar ? '74%' : '82%' })
+              .margin({ bottom: 4 })
+              if (this.showUserAvatar) {
+                UIAvatar({
+                  name: this.userNickname,
+                  imageUrl: this.userAvatar,
+                  avatarSize: 28,
+                  accentColor: ACCENT,
+                })
+                  .margin({ left: 8, bottom: 4 })
+              }
             }
-            .alignItems(HorizontalAlign.Start)
-            .padding({ left: 15, right: 15, top: 11, bottom: 11 })
-            .backgroundColor(USER_BG)
-            .borderRadius({ topLeft: 16, topRight: 16, bottomRight: 5, bottomLeft: 16 })
-            .constraintSize({ maxWidth: '82%' })
-            .margin({ bottom: 4 })
+            .width('100%')
+            .justifyContent(FlexAlign.End)
+            .alignItems(VerticalAlign.Bottom)
           } else {
             Column() {
               MarkdownText({

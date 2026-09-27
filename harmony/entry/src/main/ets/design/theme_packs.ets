@@ -9,9 +9,21 @@
 //   启动时 EntryAbility hydrate 后用 applyCurrentTheme 替代裸 applyTheme。
 
 import {
-  applyTheme, setAccentColor, applyPaperPalette,
+  applyTheme, setAccentColor, applyPaperPalette, applyAmoledBlack,
 } from './tokens.ets';
 import type { KeyValueStore } from '@amber/chat-domain';
+
+// D0-11:AMOLED 纯黑(深色模式画布纯黑;持久化 KV theme_amoled_black)
+const THEME_AMOLED_KEY: string = 'theme_amoled_black';
+let amoledBlack: boolean = false;
+export const isAmoledBlack = (): boolean => amoledBlack;
+
+// 应用 + 持久化;调用方负责 AppStorage 刷新(与模式切换同机制)
+export const setAmoledBlack = async (kv: KeyValueStore, enabled: boolean, dark: boolean): Promise<void> => {
+  amoledBlack = enabled;
+  await kv.put(THEME_AMOLED_KEY, enabled ? 'true' : 'false');
+  applyCurrentTheme(dark);
+};
 
 export interface ThemePalette {
   bg: string;
@@ -118,6 +130,10 @@ export const applyThemePack = (pack: ThemePack, dark: boolean): void => {
     bgGlass: `#CC${p.bg.substring(1)}`,
   });
   setAccentColor(pack.accent);
+  // D0-11:AMOLED 纯黑覆写(仅深色;画布/渐隐/玻璃改纯黑,卡片面保持原色分层)
+  if (dark && amoledBlack) {
+    applyAmoledBlack();
+  }
 };
 
 // ── JSON 编解码(导入/导出;schema 校验,不合法返回 null 由调用方诚实报错) ──
@@ -240,6 +256,12 @@ class ThemePackStore {
       }
     } catch (_e) {
       // 缺失 → 默认包
+    }
+    try {
+      const rawAmoled: string | null = await kv.get(THEME_AMOLED_KEY);
+      amoledBlack = rawAmoled === 'true';
+    } catch (_e) {
+      // 缺失 → 非纯黑
     }
   }
 

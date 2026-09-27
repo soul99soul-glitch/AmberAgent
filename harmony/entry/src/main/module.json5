@@ -44,6 +44,8 @@
       // 后台生成保活(C6-1;DATA_TRANSFER 长时任务,normal 档声明即授权)
       { "name": "ohos.permission.KEEP_BACKGROUND_RUNNING", "reason": "$string:reason_internet" },
       { "name": "ohos.permission.GET_NETWORK_INFO", "reason": "$string:reason_network" },
+      // 生成完成触觉反馈(D0-6;normal 档,声明即授权)
+      { "name": "ohos.permission.VIBRATE", "reason": "$string:reason_vibrate" },
       // user_grant 权限(debug profile 需含 ACL;WRITE 系/定位/蓝牙随工具实装再解注释):
       // READ_CONTACTS 需 debug profile ACL 含该权限(当前 AGC 自动 profile 不含,
       // install 报 9568289);AGC 后台加 ACL 后解注释:

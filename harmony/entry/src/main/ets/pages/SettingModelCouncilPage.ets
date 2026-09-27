@@ -16,13 +16,13 @@
 //   ✅ outputBudgetChars 选择
 //   ❌ 席位编辑(后续迭代)
 
-import { getAgentPromptSettingsPort } from '../di/AppContainer.ets';
+import { getAgentPromptSettingsPort, getCouncilRunner, getModelRegistry } from '../di/AppContainer.ets';
 import { router } from '@kit.ArkUI';
-import type { ModelCouncilRuntimeSetting, ModelCouncilSeat, ModelCouncilRolePreset } from '@amber/deepread-domain';
+import type { ModelCouncilRuntimeSetting, ModelCouncilSeat, ModelCouncilRolePreset, ModelConfig } from '@amber/deepread-domain';
 import {
   LENS_PRESETS, findRolePreset, isCoreRole, makeSeat,
 } from '@amber/deepread-domain';
-import { INK, INK3, ACCENT, SURFACE2, BG, ERROR, LINE, LINE2, GUTTER, TEXT_STYLES, lineHeightForSize } from '../design/tokens.ets';
+import { INK, INK3, ACCENT, SURFACE2, BG, ERROR, LINE, LINE2, GUTTER, TEXT_STYLES, lineHeightForSize, SUCCESS_FG } from '../design/tokens.ets';
 import { FONT_SANS_MEDIUM, FONT_SANS_SEMIBOLD, FONT_MONO_MEDIUM } from '../design/fonts.ets';
 import {
   CenteredTitleBar, PlainSection, CardGroup, CardRow, CardToggleRow, FooterNote, PageSpacer,
@@ -50,6 +50,9 @@ struct SettingModelCouncilPage {
   @State dirty: boolean = false;
   @State saving: boolean = false;
   @State saveError: string = '';
+  // D0-3:连通性测试(逐席位最小请求;lines 元素 = 'seatName|ok|detail')
+  @State testing: boolean = false;
+  @State testLines: string[] = [];
 
   aboutToAppear(): void {
     this.loadSetting();
@@ -86,6 +89,43 @@ struct SettingModelCouncilPage {
     } catch (_e) {
       this.loaded = true;
     }
+  }
+
+  // D0-3:连通性测试 — 逐席位解析模型库配置,发最小生成请求,报成功延迟/失败原因
+  private async runConnectivityTest(): Promise<void> {
+    if (this.testing || this.seats.length === 0) return;
+    this.testing = true;
+    this.testLines = [];
+    const pool: ModelConfig[] = await getModelRegistry().list().catch((): ModelConfig[] => []);
+    const lines: string[] = [];
+    for (const seat of this.seats) {
+      const name: string = seat.name.length > 0 ? seat.name : '(未命名席位)';
+      const model: ModelConfig | undefined = pool.find((m: ModelConfig): boolean => m.id === seat.modelId);
+      if (model === undefined) {
+        lines.push(`${name}|fail|模型未在模型库配置`);
+        continue;
+      }
+      const started: number = Date.now();
+      try {
+        await getCouncilRunner().generate({
+          model: model,
+          systemPrompt: 'Reply with the single word: pong.',
+          userPrompt: 'ping',
+          outputBudgetChars: 32,
+          reasoningLevel: null,
+          temperature: null,
+          onChunk: (): void => {},
+          signal: null,
+        });
+        const secs: string = ((Date.now() - started) / 1000).toFixed(1);
+        lines.push(`${name}|ok|${secs}s`);
+      } catch (e) {
+        const msg: string = e instanceof Error ? e.message : String(e);
+        lines.push(`${name}|fail|${msg.length > 40 ? msg.substring(0, 40) + '…' : msg}`);
+      }
+      this.testLines = [...lines];
+    }
+    this.testing = false;
   }
 
   // F21:返回是否成功,供「保存并返回」在落盘成功后才 back,失败留草稿在页
@@ -197,6 +237,10 @@ struct SettingModelCouncilPage {
             } else {
               FooterNote({ text: `已达最大席位数 ${this.maxSeats}` })
             }
+
+            PlainSection({ label: '连通性' })
+            CardGroup({ radius: 18, stroke: true, content: (): void => { this.TestCard(); } })
+              .margin({ left: GUTTER, right: GUTTER })
             PageSpacer()
           }
           .width('100%')
@@ -219,6 +263,42 @@ struct SettingModelCouncilPage {
     }
     .width('100%')
     .padding({ left: 14, right: 14 })
+  }
+
+  @Builder
+  TestCard(): void {
+    CardRow({
+      label: '连通性测试',
+      desc: '逐席位发送最小请求验证模型可用性',
+      valueText: this.testing ? '测试中…' : '开始',
+      isLast: this.testLines.length === 0,
+      onRowClick: (): void => { this.runConnectivityTest(); },
+    })
+    ForEach(this.testLines, (line: string, idx: number): void => {
+      Column() {
+        Row() {
+          Row().width('100%').height(0.5).backgroundColor(LINE)
+        }
+        .width('100%').padding({ left: 14, right: 14 })
+        Row() {
+          Text(this.testField(line, 0))
+            .fontSize(15).fontColor(INK).layoutWeight(1)
+            .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+          Text((this.testField(line, 1) === 'ok' ? '✓ ' : '✗ ') + this.testField(line, 2))
+            .fontSize(13)
+            .fontColor(this.testField(line, 1) === 'ok' ? SUCCESS_FG : ERROR)
+            .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+        }
+        .width('100%').constraintSize({ minHeight: 44 })
+        .padding({ left: 14, right: 14, top: 4, bottom: 4 })
+      }
+      .width('100%')
+    }, (line: string, idx: number): string => `${idx}-${line}`)
+  }
+
+  private testField(line: string, index: number): string {
+    const parts: string[] = line.split('|');
+    return index < parts.length ? parts[index] : '';
   }
 
   @Builder

@@ -39,6 +39,7 @@ struct SettingDisplayPage {
       showAssistantBubble: patch.showAssistantBubble ?? this.setting.showAssistantBubble,
       showModelIcon: patch.showModelIcon ?? this.setting.showModelIcon,
       showModelName: patch.showModelName ?? this.setting.showModelName,
+      showUserAvatar: patch.showUserAvatar ?? this.setting.showUserAvatar,
       showDateBelowName: patch.showDateBelowName ?? this.setting.showDateBelowName,
       showThinkingContent: patch.showThinkingContent ?? this.setting.showThinkingContent,
       autoCloseThinking: patch.autoCloseThinking ?? this.setting.autoCloseThinking,
@@ -166,6 +167,11 @@ struct SettingDisplayPage {
       onToggle: (): void => { this.update({ showModelIcon: !this.setting.showModelIcon }); },
     })
     CardToggleRow({
+      label: '显示用户头像', desc: '在用户消息气泡旁显示个人头像',
+      checked: this.setting.showUserAvatar,
+      onToggle: (): void => { this.update({ showUserAvatar: !this.setting.showUserAvatar }); },
+    })
+    CardToggleRow({
       label: '思考内容', desc: '在消息中显示模型的思考过程',
       checked: this.setting.showThinkingContent,
       onToggle: (): void => { this.update({ showThinkingContent: !this.setting.showThinkingContent }); },
@@ -177,8 +183,23 @@ struct SettingDisplayPage {
     })
     CardToggleRow({
       label: '自动滚动', desc: '新消息到达时自动滚动到底部',
-      checked: this.setting.enableAutoScroll, isLast: true,
+      checked: this.setting.enableAutoScroll,
       onToggle: (): void => { this.update({ enableAutoScroll: !this.setting.enableAutoScroll }); },
+    })
+    CardToggleRow({
+      label: '消息跳转按钮', desc: '长会话显示回到底部/顶部悬浮按钮',
+      checked: this.setting.showMessageJumper,
+      onToggle: (): void => { this.update({ showMessageJumper: !this.setting.showMessageJumper }); },
+    })
+    CardToggleRow({
+      label: '跳转按钮靠左', desc: '跳转按钮显示在屏幕左下角',
+      checked: this.setting.messageJumperOnLeft,
+      onToggle: (): void => { this.update({ messageJumperOnLeft: !this.setting.messageJumperOnLeft }); },
+    })
+    CardToggleRow({
+      label: '生成完成触觉反馈', desc: '生成结束时震动提醒',
+      checked: this.setting.enableMessageGenerationHapticEffect, isLast: true,
+      onToggle: (): void => { this.update({ enableMessageGenerationHapticEffect: !this.setting.enableMessageGenerationHapticEffect }); },
     })
   }
 

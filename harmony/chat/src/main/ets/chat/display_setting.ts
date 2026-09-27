@@ -9,6 +9,7 @@ export interface DisplaySetting {
   showAssistantBubble: boolean;
   showModelIcon: boolean;
   showModelName: boolean;
+  showUserAvatar: boolean;
   showDateBelowName: boolean;
   showThinkingContent: boolean;
   autoCloseThinking: boolean;
@@ -46,6 +47,8 @@ export const makeDisplaySetting = (opts: Partial<DisplaySetting> = {}): DisplayS
   showAssistantBubble: opts.showAssistantBubble ?? false,
   showModelIcon: opts.showModelIcon ?? true,
   showModelName: opts.showModelName ?? true,
+  // 默认 false:1:1 原型用户消息无抬头,开关为 opt-in(Android showUserAvatar 对齐)
+  showUserAvatar: opts.showUserAvatar ?? false,
   showDateBelowName: opts.showDateBelowName ?? false,
   showThinkingContent: opts.showThinkingContent ?? true,
   autoCloseThinking: opts.autoCloseThinking ?? true,

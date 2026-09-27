@@ -61,7 +61,8 @@ import {
   applyToolApprovalToConversation, conversationHasPendingTools,
   conversationHasPendingOrUnexecutedTools, resolveIdleToolBlocker,
   estimateConversationInputTokens, formatNumberInt, formatContextTokens,
-  loadSearchPrefs, SearchSettings, createSearchTools,
+  loadSearchPrefs, updateSearchPrefs, SearchSettings, createSearchTools,
+  buildMentionRoleItems, MentionRoleItem,
   createTimeReminderTransformer, javaLocalDateTimeString, dayOfWeekFullName,
   createPlaceholderTransformer, createDocumentTransformer,
   createPromptInjectionTransformer, PromptInjection, Lorebook,
@@ -104,7 +105,7 @@ import {
   getSkillWorkspacePort, getDeepReadPlaybookRepository, getAgentPromptConfigTool,
   getPermissionsStatusTool, getAgentTaskTools, getAgentCronTools,
   hydrateSubAgentSetting, getSubAgentTools, SubAgentToolsContext,
-  getSubAgentManager,
+  getSubAgentManager, isModelCouncilEnabled,
 } from '../di/AppContainer.ets';
 import type { SubAgentRun } from '@amber/chat-domain';
 // Phase 1:消息流跟随底部(纯逻辑 helper,零 SDK 依赖;ChatPage 侧只做状态接线)
@@ -137,6 +138,7 @@ import { Icon } from '../components/ui/Icon.ets';
 import { DotText, DotGround } from '../components/ui/DotMatrix.ets';
 import { addFavorite } from '../platform_impl/FavoriteStore.ets';
 import { notifyGenerationDone } from '../platform_impl/NotificationNotifier.ets';
+import { vibrator } from '@kit.SensorServiceKit';
 import { WebMountHost, getWebMountSession, WebMountSurface } from '../platform_impl/WebMountSession.ets';
 import type { WebMountHookBinding } from '../platform_impl/WebMountSession.ets';
 import { createWebMountTools } from '../platform_impl/WebMountTools.ets';
@@ -374,6 +376,11 @@ struct ChatPage {
   private documentPreviewSeq: number = 0;
   // 产物架(iOS artifact shelf 对齐:消息 part 派生的图片/文档/小应用陈列)
   @State artifactShelfOpen: boolean = false;
+  // D0-12:同名文档版本对比(soul diff 同款诚实行级摘要)
+  @State shelfDupDocNames: string[] = [];
+  @State artifactDiffOpen: boolean = false;
+  @State artifactDiffTitle: string = '';
+  @State artifactDiffText: string = '';
   @State artifactImagePreview: string = '';
   @State shelfImages: string[] = [];
   @State shelfDocs: UIMessagePartDocument[] = [];
@@ -409,7 +416,9 @@ struct ChatPage {
   // 最近一次历史页前插计数(锚点补偿已在加载回调内就地执行,无需持久读)
   @State streamingTail: UIMessage[] = [];
   @State suggestions: string[] = [];
-  @State inputText: string = '';
+  // D0-10:@Watch 驱动草稿持久化(任何赋值点 — 发送清空/手动输入 — 都落 KV)
+  @State @Watch('onInputTextDraftChange') inputText: string = '';
+  private draftSaveTimer: number = -1;
   @State quickMessages: QuickMessage[] = [];
   @State sending: boolean = false;
   // D-087:任务模型选择快照(compress/title/suggestion;aboutToAppear 异步加载,
@@ -420,7 +429,8 @@ struct ChatPage {
   //   与 compressChoice/ocrSeed 同档;title/suggestion 走调用时新取)
   private taskPromptsCache: TaskPrompts | null = null;
   // D-070:搜索偏好(aboutToAppear 异步加载;SearchTools 工具组输入)
-  searchSettings: SearchSettings | null = null;
+  // D0-9:@State 化(输入区搜索开关图标态需随 toggle 重绘)
+  @State searchSettings: SearchSettings | null = null;
   // D-130:cron 四工具(aboutToAppear 异步水合,与 searchSettings 同档;
   //   水合完成前的极早轮次不带 cron 工具 — 异步加载时序等价先例)
   private agentCronToolsCache: AgentTool[] = [];
@@ -430,6 +440,8 @@ struct ChatPage {
   //   读 baseToolsCache(在 buildToolLoop 内 step-4 设置),保证只暴露已 profile
   //   的 parent base tools,不含 subagent_* 自身。subagentEnabled + 会话存在才挂载。
   private subAgentEnabled: boolean = false;
+  // D0-8:@提及候选角色(aboutToAppear/onPageShow 装配;空数组 = 输入区不启用面板)
+  @State mentionRoles: MentionRoleItem[] = [];
   private subAgentMode: string = 'roster';
   // M2.1:ReasoningPicker 段集 + 当前档位(模型感知;aboutToAppear 装配,选档位时刷新)
   @State reasoningLevels: ReasoningLevelOption[] = [];
@@ -528,7 +540,8 @@ struct ChatPage {
   //   故用「最近一次程序化贴底且用户未再离开」做 isAtEnd 近似(true = 贴底)。
   private atBottomApprox: boolean = true;
   private listViewportHeight: number = 0;
-  private firstVisibleListIndex: number = -1;
+  // D0-5:@State 化(回到顶部按钮显隐需随滚动重绘)
+  @State firstVisibleListIndex: number = -1;
   private lastVisibleListIndex: number = -1;
   private userTouchActive: boolean = false;
   // 首次构建 List 前 scroller 未绑定(先于 aboutToAppear 装配 rows),首帧滚底延迟到 List 挂载后
@@ -703,6 +716,7 @@ struct ChatPage {
   //   不虚假后台继续,也不在 checkpoint 完成前清 tail(计划 §3.6)。
   aboutToDisappear(): void {
     this.pageAlive = false;
+    this.flushInputDraft();
     this.webmountHookBinding?.unbind();
     this.webmountHookBinding = null;
     this.pageVisible = false;
@@ -767,6 +781,74 @@ struct ChatPage {
     loadSearchPrefs(getChatKvStore()).then((s: SearchSettings): void => {
       if (!this.pageAlive || seq !== this.searchSettingsSeq) return;
       this.searchSettings = s;
+    }).catch((): void => {});
+  }
+
+  // D0-10:输入草稿跨会话保留 — 已持久化会话键 chat_input_draft/{conversationId};
+  //   未发送过消息的新会话用稳定键 __unsaved__(fresh.id 每次进页都变,不可作键)。
+  //   600ms 尾随去抖;空串即清除(读侧按空串判无草稿);清空时同步清 __unsaved__。
+  private inputDraftKey(): string {
+    const conv: Conversation | null = this.conversation;
+    if (conv === null || conv.messageNodes.length === 0) return 'chat_input_draft/__unsaved__';
+    return `chat_input_draft/${conv.id}`;
+  }
+
+  private onInputTextDraftChange(): void {
+    if (this.draftSaveTimer !== -1) clearTimeout(this.draftSaveTimer);
+    this.draftSaveTimer = setTimeout((): void => {
+      this.draftSaveTimer = -1;
+      this.persistInputDraft();
+    }, 600);
+  }
+
+  private persistInputDraft(): void {
+    if (this.conversation === null) return;
+    getChatKvStore().put(this.inputDraftKey(), this.inputText).catch((): void => {});
+    if (this.inputText.length === 0) {
+      getChatKvStore().put('chat_input_draft/__unsaved__', '').catch((): void => {});
+    }
+  }
+
+  // 离页兜底:去抖窗口内返回会丢草稿(pageAlive 守卫),onPageHide 同步 flush
+  private flushInputDraft(): void {
+    if (this.draftSaveTimer === -1) return;
+    clearTimeout(this.draftSaveTimer);
+    this.draftSaveTimer = -1;
+    this.persistInputDraft();
+  }
+
+  private restoreInputDraft(key: string): void {
+    getChatKvStore().get(key)
+      .then((raw: string | null): void => {
+        if (!this.pageAlive || raw === null || raw.length === 0) return;
+        // 页面已有更新的输入(如 initialText 直达发送)时不覆盖
+        if (this.inputText.length > 0) return;
+        this.inputText = raw;
+      })
+      .catch((): void => {});
+  }
+
+  // D0-8:@提及候选装配(subagent 内置/自定义角色 + 议会入口;
+  //   嵌套 then 规避 ArkTS Promise.all 异构元组推断)
+  private refreshMentionRoles(): void {
+    hydrateSubAgentSetting()
+      .then((s): Promise<void> =>
+        isModelCouncilEnabled().then((councilOn: boolean): void => {
+          if (!this.pageAlive) return;
+          this.mentionRoles = buildMentionRoleItems(s.enabled, councilOn, s.mode, s.customDefinitions);
+        }))
+      .catch((): void => {});
+  }
+
+  // D0-9:输入区联网搜索开关(与搜索设置页同一 KV 源;JSON 往返克隆只翻顶层字段,
+  //   updateSearchPrefs 自带 JSON 相等短路)
+  private toggleWebSearch(): void {
+    updateSearchPrefs(getChatKvStore(), (current: SearchSettings): SearchSettings => {
+      const next: SearchSettings = JSON.parse(JSON.stringify(current)) as SearchSettings;
+      next.enableWebSearch = !current.enableWebSearch;
+      return next;
+    }).then((): void => {
+      this.refreshSearchSettings();
     }).catch((): void => {});
   }
 
@@ -840,6 +922,7 @@ struct ChatPage {
     });
     // D-110:压缩/会话可能已变更,刷新足迹(生成中仅更新展示,不打断)
     this.refreshContextCompacts();
+    this.refreshMentionRoles();
   }
 
   onPageHide(): void {
@@ -1069,6 +1152,7 @@ struct ChatPage {
       if (!this.pageAlive) return;
       this.lorebooks = list;
     });
+    this.refreshMentionRoles();
     const params = router.getParams() as Record<string, string>;
     const convId: string = params ? (params['conversationId'] ?? '') : '';
     this.loadedRestoreVersion = conversationRestoreVersion(convId);
@@ -1100,6 +1184,7 @@ struct ChatPage {
             return;
           }
           this.conversation = full;
+          this.restoreInputDraft(`chat_input_draft/${full.id}`);
           this.refreshEffectiveModelState();
           if (this.rows.length === 0 && full.messageNodes.length > 0) {
             this.rows = buildRows(full);
@@ -1160,6 +1245,8 @@ struct ChatPage {
         const fresh = makeConversation(newId(), [], { assistantId: picked.id });
         this.conversation = seedConversationWithPresets(fresh, picked);
         this.conversationLoaded = true;
+        // 未发送新会话:恢复 __unsaved__ 稳定键草稿(fresh.id 每次进页都变,不可作键)
+        this.restoreInputDraft('chat_input_draft/__unsaved__');
         this.refreshEffectiveModelState();
         // Phase 5:新会话空窗口 = fullyLoaded(rows 直接全量展示)
         this.rows = buildRows(this.conversation);
@@ -1932,6 +2019,7 @@ struct ChatPage {
           this.maybeSuggestions(this.conversation as Conversation, holder.rt);
           this.maybeMemoryExtraction(this.conversation as Conversation, holder.rt);
           this.maybeGenerationDoneNotification(holder.rt);
+          this.fireGenerationHaptic();
         }
         this.drainPendingQueue();
       })
@@ -1987,6 +2075,29 @@ struct ChatPage {
     const last: UIMessage | null = msgs.length > 0 ? msgs[msgs.length - 1] : null;
     const contentText: string = last === null ? '' : toText(last).slice(0, 50).trim();
     notifyGenerationDone(rt.assistant.name, contentText);
+  }
+
+  // D0-6:生成完成触觉反馈(DisplaySetting.enableMessageGenerationHapticEffect;
+  //   canIUse 包裹马达能力 + isSupportEffect 预检,不支持预置降级时长振动;
+  //   失败静默 — 触觉是增强不是阻断)
+  private fireGenerationHaptic(): void {
+    if (!this.displaySettings.enableMessageGenerationHapticEffect) return;
+    if (!canIUse('SystemCapability.Sensors.MiscDevice')) return;
+    vibrator.isSupportEffect('haptic.notice.success')
+      .then((supported: boolean): void => {
+        if (supported) {
+          vibrator.startVibration(
+            { type: 'preset', effectId: 'haptic.notice.success', count: 1 },
+            { usage: 'notification' },
+          ).catch((): void => {});
+        } else {
+          vibrator.startVibration(
+            { type: 'time', duration: 60 },
+            { usage: 'notification' },
+          ).catch((): void => {});
+        }
+      })
+      .catch((): void => {});
   }
 
   // WebMount 全局开关快照(设置页 KV;发送前同步读会打断注册表构造,故预载)
@@ -2487,7 +2598,80 @@ struct ChatPage {
     this.shelfImages = images;
     this.shelfDocs = docs;
     this.shelfMiniApps = minis;
+    // D0-12:同名文档 → 可对比版本组
+    const nameCount: Map<string, number> = new Map<string, number>();
+    for (const d of docs) {
+      const n: string = d.fileName.length > 0 ? d.fileName : '(未命名)';
+      nameCount.set(n, (nameCount.get(n) ?? 0) + 1);
+    }
+    const dups: string[] = [];
+    nameCount.forEach((count: number, name: string): void => {
+      if (count >= 2) dups.push(name);
+    });
+    this.shelfDupDocNames = dups;
     this.artifactShelfOpen = true;
+  }
+
+  // D0-12:同名文档两最新版本对比(readDocumentPreview 取文本;失败诚实展示)
+  private async openArtifactDiff(fileName: string): Promise<void> {
+    const matches: UIMessagePartDocument[] = this.shelfDocs.filter(
+      (d: UIMessagePartDocument): boolean =>
+        (d.fileName.length > 0 ? d.fileName : '(未命名)') === fileName);
+    if (matches.length < 2) return;
+    this.artifactDiffTitle = `版本对比:${fileName}`;
+    this.artifactDiffText = '正在读取两个版本…';
+    this.artifactDiffOpen = true;
+    try {
+      const older: string = await readDocumentPreview(matches[matches.length - 2]);
+      const newer: string = await readDocumentPreview(matches[matches.length - 1]);
+      this.artifactDiffText = this.diffTextSummary(older, newer);
+    } catch (e) {
+      const msg: string = e instanceof Error ? e.message : String(e);
+      this.artifactDiffText = `无法对比:${msg}`;
+    }
+  }
+
+  // soul diff 同款诚实行级摘要:行多重集增减统计 + 首个位置差异上下文(非 LCS)
+  private diffTextSummary(older: string, newer: string): string {
+    const la: string[] = older.split('\n');
+    const lb: string[] = newer.split('\n');
+    const counts: Map<string, number> = new Map<string, number>();
+    for (const l of la) counts.set(l, (counts.get(l) ?? 0) + 1);
+    let added: number = 0;
+    for (const l of lb) {
+      const c: number = counts.get(l) ?? 0;
+      if (c > 0) counts.set(l, c - 1); else added++;
+    }
+    let removed: number = 0;
+    counts.forEach((c: number): void => { removed += c; });
+    let firstDiff: number = -1;
+    const minLen: number = Math.min(la.length, lb.length);
+    for (let i = 0; i < minLen; i++) {
+      if (la[i] !== lb[i]) { firstDiff = i; break; }
+    }
+    if (firstDiff < 0 && la.length !== lb.length) firstDiff = minLen;
+    let out: string = `旧版本 ${la.length} 行 · 新版本 ${lb.length} 行\n` +
+      `+${added} 行新增 · −${removed} 行移除(按行统计,非逐字 diff)\n`;
+    if (added === 0 && removed === 0) {
+      out += '\n两个版本内容一致。';
+      return out;
+    }
+    if (firstDiff >= 0) {
+      const lo: number = Math.max(0, firstDiff - 2);
+      const hi: number = Math.min(Math.max(la.length, lb.length), firstDiff + 3);
+      out += `\n首处差异(第 ${firstDiff + 1} 行附近):\n`;
+      for (let i = lo; i < hi; i++) {
+        const a: string = i < la.length ? la[i] : '';
+        const b: string = i < lb.length ? lb[i] : '';
+        if (a === b) {
+          out += `  ${i + 1}  ${a}\n`;
+        } else {
+          if (a.length > 0) out += `− ${i + 1}  ${a}\n`;
+          if (b.length > 0) out += `+ ${i + 1}  ${b}\n`;
+        }
+      }
+    }
+    return out;
   }
 
   @Builder
@@ -2527,6 +2711,18 @@ struct ChatPage {
             Text(`文件 · ${this.shelfDocs.length}`)
               .fontSize(LABEL).fontColor(INK3).width('100%')
               .padding({ top: 12, bottom: 8 })
+            ForEach(this.shelfDupDocNames, (name: string): void => {
+              Row() {
+                Text(`「${name}」有多个版本`)
+                  .fontSize(META).fontColor(INK3).layoutWeight(1)
+                  .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+                Text('对比').fontSize(META).fontColor(ACCENT)
+                  .padding({ left: 12, top: 8, bottom: 8 })
+              }
+              .width('100%')
+              .constraintSize({ minHeight: 44 })
+              .onClick((): void => { this.openArtifactDiff(name); })
+            }, (name: string): string => `dup-${name}`)
             ForEach(this.shelfDocs, (part: UIMessagePartDocument, idx: number): void => {
               Row() {
                 Text(part.fileName.length > 0 ? part.fileName : `文档 ${idx + 1}`)
@@ -2607,6 +2803,21 @@ struct ChatPage {
       }.width('100%')
       Scroll() {
         Text(this.documentPreviewText).fontSize(15).fontColor(INK)
+          .copyOption(CopyOptions.InApp).width('100%')
+      }.layoutWeight(1).width('100%').align(Alignment.TopStart)
+    }.width('100%').height('100%').padding(20).backgroundColor(BG)
+  }
+
+  @Builder
+  private artifactDiffSheet() {
+    Column() {
+      Row() {
+        Text(this.artifactDiffTitle).fontSize(18).fontColor(INK).layoutWeight(1).maxLines(2)
+        Text('关闭').fontSize(14).fontColor(ACCENT).padding(12)
+          .onClick((): void => { this.artifactDiffOpen = false; })
+      }.width('100%')
+      Scroll() {
+        Text(this.artifactDiffText).fontSize(14).fontColor(INK)
           .copyOption(CopyOptions.InApp).width('100%')
       }.layoutWeight(1).width('100%').align(Alignment.TopStart)
     }.width('100%').height('100%').padding(20).backgroundColor(BG)
@@ -4008,6 +4219,7 @@ struct ChatPage {
           this.maybeSuggestions(this.conversation as Conversation, holder.rt);
           this.maybeMemoryExtraction(this.conversation as Conversation, holder.rt);
           this.maybeGenerationDoneNotification(holder.rt);
+          this.fireGenerationHaptic();
         }
         this.drainPendingQueue();
       })
@@ -4555,6 +4767,7 @@ struct ChatPage {
           this.maybeSuggestions(this.conversation as Conversation, holder.rt);
           this.maybeMemoryExtraction(this.conversation as Conversation, holder.rt);
           this.maybeGenerationDoneNotification(holder.rt);
+          this.fireGenerationHaptic();
         }
         // D-048:出队下一条(Android 循环:成功 → dequeueNext)
         this.drainPendingQueue();
@@ -4907,6 +5120,9 @@ struct ChatPage {
           showAssistantBubble: this.displaySettings.showAssistantBubble,
           showModelName: this.displaySettings.showModelName,
           showModelIcon: this.displaySettings.showModelIcon,
+          showUserAvatar: this.displaySettings.showUserAvatar,
+          userAvatar: this.userAvatar,
+          userNickname: this.userNickname,
           fontSizeRatio: this.displaySettings.fontSizeRatio,
           codeBlockAutoCollapse: this.displaySettings.codeBlockAutoCollapse,
           showLineNumbers: this.displaySettings.showLineNumbers,
@@ -4959,6 +5175,9 @@ struct ChatPage {
           showAssistantBubble: this.displaySettings.showAssistantBubble,
           showModelName: this.displaySettings.showModelName,
           showModelIcon: this.displaySettings.showModelIcon,
+          showUserAvatar: this.displaySettings.showUserAvatar,
+          userAvatar: this.userAvatar,
+          userNickname: this.userNickname,
           fontSizeRatio: this.displaySettings.fontSizeRatio,
           codeBlockAutoCollapse: this.displaySettings.codeBlockAutoCollapse,
           showLineNumbers: this.displaySettings.showLineNumbers,
@@ -5005,6 +5224,9 @@ struct ChatPage {
           showAssistantBubble: this.displaySettings.showAssistantBubble,
           showModelName: this.displaySettings.showModelName,
           showModelIcon: this.displaySettings.showModelIcon,
+          showUserAvatar: this.displaySettings.showUserAvatar,
+          userAvatar: this.userAvatar,
+          userNickname: this.userNickname,
           fontSizeRatio: this.displaySettings.fontSizeRatio,
           codeBlockAutoCollapse: this.displaySettings.codeBlockAutoCollapse,
           showLineNumbers: this.displaySettings.showLineNumbers,
@@ -5228,7 +5450,7 @@ struct ChatPage {
           Icon({ name: 'arrow_down_to_line', iconSize: 20, color: INK })
         }
         .width(40).height(40)
-        .position({ right: 20, bottom: 16 })
+        .position(this.displaySettings.messageJumperOnLeft ? { left: 20, bottom: 16 } : { right: 20, bottom: 16 })
         .backgroundColor(SURFACE2)
         .borderRadius(20)
         .border({ width: 1, color: LINE })
@@ -5236,6 +5458,27 @@ struct ChatPage {
         .alignContent(Alignment.Center)
         .onClick((): void => { this.jumpToBottom(); })
         .accessibilityText('回到消息底部')
+      }
+
+      // D0-5:回到顶部(离开首屏后出现;跳底按钮可见时上移避让)
+      if (this.showMessageJumper && this.firstVisibleListIndex > 1) {
+        Stack() {
+          Icon({ name: 'arrow_up', iconSize: 20, color: INK })
+        }
+        .width(40).height(40)
+        .position(this.displaySettings.messageJumperOnLeft
+          ? { left: 20, bottom: this.jumpButtonVisible ? 64 : 16 }
+          : { right: 20, bottom: this.jumpButtonVisible ? 64 : 16 })
+        .backgroundColor(SURFACE2)
+        .borderRadius(20)
+        .border({ width: 1, color: LINE })
+        .shadow({ radius: 8, color: '#33000000', offsetY: 2 })
+        .alignContent(Alignment.Center)
+        .onClick((): void => {
+          this.beginProgrammaticScroll();
+          this.scroller.scrollEdge(Edge.Top);
+        })
+        .accessibilityText('回到消息顶部')
       }
 
       // ContextUsagePanel(Android ContextRing.kt ContextUsagePopup):指示器下方右锚定
@@ -5453,6 +5696,9 @@ struct ChatPage {
           subAgentEnabled: this.subAgentEnabled,
           subAgentMode: this.subAgentMode,
           quickMessages: this.quickMessages,
+          mentionRoles: this.mentionRoles,
+          webSearchOn: this.searchSettings !== null && this.searchSettings.enableWebSearch,
+          onToggleWebSearch: (): void => { this.toggleWebSearch(); },
           sendOnEnter: this.displaySettings.sendOnEnter,
           pasteLongTextAsFile: this.displaySettings.pasteLongTextAsFile,
           pasteLongTextThreshold: this.displaySettings.pasteLongTextThreshold,
@@ -5594,6 +5840,9 @@ struct ChatPage {
       height: '85%', showClose: false,
     })
     .bindSheet($$this.artifactShelfOpen, this.artifactShelfSheet(), {
+      height: '85%', showClose: false,
+    })
+    .bindSheet($$this.artifactDiffOpen, this.artifactDiffSheet(), {
       height: '85%', showClose: false,
     })
     .bindSheet($$this.webmountSheetOpen, this.webmountSheet(), {

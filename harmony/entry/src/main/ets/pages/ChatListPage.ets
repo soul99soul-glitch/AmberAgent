@@ -22,7 +22,7 @@ import {
   getCouncilManager,
 } from '../di/AppContainer.ets';
 import { routePendingWant } from '../entryability/EntryAbility.ets';
-import { cleanupDeletedConversation } from '../platform_impl/ManagedFileStore.ets';
+import { cleanupDeletedConversation, getFilesRepository } from '../platform_impl/ManagedFileStore.ets';
 import { getMiniAppRepositorySync } from '../platform_impl/MiniAppPlatform.ets';
 import { Icon } from '../components/ui/Icon.ets';
 import { AmberWordmark } from '../components/ui/AmberWordmark.ets';
@@ -443,7 +443,27 @@ struct ChatListPage {
         isRunning: true,
       }));
     }).catch((_err: Error): ContinueCandidate[] => []);
-    Promise.all([novelList, cronList, deepList, miniList, councilList]).then((lists): void => {
+    // 生图:最近一条 chat_images 产物 → 直达来源会话(产物即任务实体;
+    //   鸿蒙生图无独立任务注册表,诚实以产物为源)
+    const imageList: Promise<ContinueCandidate[]> = getFilesRepository().listByFolder('chat_images')
+      .then((rows): ContinueCandidate[] => {
+        if (rows.length === 0) return [];
+        const parts: string[] = rows[0].relativePath.split('/');
+        if (parts.length < 3) return [];
+        return [{
+          sourceKind: 'image',
+          sourceId: rows[0].relativePath,
+          route: { kind: 'chat', conversationId: parts[1] },
+          title: '生成的图片',
+          summary: '已生成，可查看或继续修改',
+          lastUpdatedAt: rows[0].createdAt,
+          status: 'draft',
+          priority: 0,
+          isRunning: false,
+        }];
+      })
+      .catch((_err: Error): ContinueCandidate[] => []);
+    Promise.all([novelList, cronList, deepList, miniList, councilList, imageList]).then((lists): void => {
       if (!this.pageAlive) return;
       const merged: ContinueCandidate[] = mergeContinueCandidates(lists, 6);
       this.continueItem = merged.length > 0 ? merged[0] : null;
@@ -476,6 +496,8 @@ struct ChatListPage {
       if (runId.length > 0) {
         this.pushOnce({ url: 'pages/CouncilRunPage', params: { runId: runId } });
       }
+    } else if (item.route.kind === 'chat') {
+      this.openConversation(item.route.conversationId);
     }
   }
 
@@ -485,6 +507,7 @@ struct ChatListPage {
     if (item.sourceKind === 'cron') return 'ph_clock';
     if (item.sourceKind === 'deepread') return 'ph_bookOpen';
     if (item.sourceKind === 'council') return 'ph_users';
+    if (item.sourceKind === 'image') return 'ph_imageSquare';
     return 'ph_squaresFour';
   }
 
@@ -499,6 +522,7 @@ struct ChatListPage {
     if (item.sourceKind === 'cron') return `定时任务 · ${item.summary}`;
     if (item.sourceKind === 'deepread') return `深度阅读 · ${item.summary}`;
     if (item.sourceKind === 'council') return `模型议会 · ${item.summary}`;
+    if (item.sourceKind === 'image') return `图片生成 · ${item.summary}`;
     return `「${item.title}」 · ${item.summary}`;
   }
 
@@ -507,6 +531,7 @@ struct ChatListPage {
     if (item.sourceKind === 'cron') return item.isRunning ? '查看' : '继续';
     if (item.sourceKind === 'deepread') return '查看';
     if (item.sourceKind === 'council') return '查看';
+    if (item.sourceKind === 'image') return '查看';
     return '打开';
   }
 

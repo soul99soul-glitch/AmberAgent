@@ -16,10 +16,14 @@
 //   ❌ +→× 形变动画(后续迭代)
 //   ❌ 用量面板(后续迭代)
 
-import { ACCENT, ACCENT_INK, BODY, INK, INK2, INK3, INK4, LABEL, LINE, META, SURFACE, SURFACE2, lineHeightForSize } from '../design/tokens.ets';
+import { ACCENT, ACCENT_INK, BODY, INK, INK2, INK3, INK4, LABEL, LINE, META, SURFACE, SURFACE2, lineHeightForSize, accentSoftBg } from '../design/tokens.ets';
 import { FONT_SANS, FONT_MONO } from '../design/fonts.ets';
 import { SlashCommandPanel, SlashCommand, QuickMessage, buildSlashCommands } from './SlashCommandPanel.ets';
 import { Icon } from './ui/Icon.ets';
+import { MentionPanel } from './ui/MentionPanel.ets';
+import type { MentionRoleItem } from '@amber/chat-domain';
+import { detectMentionContext, replaceMention, filterMentionRoleItems } from '@amber/chat-domain';
+import type { MentionContext } from '@amber/chat-domain';
 
 @Component
 export struct ChatInput {
@@ -42,6 +46,11 @@ export struct ChatInput {
   @Prop sendOnEnter: boolean = false;
   @Prop pasteLongTextAsFile: boolean = false;
   @Prop pasteLongTextThreshold: number = 1000;
+  // D0-8:@提及角色候选(ChatPage 装配;空数组 = 不启用面板)
+  @Prop mentionRoles: MentionRoleItem[] = [];
+  // D0-9:输入区联网搜索开关(与设置页同一 KV,双向同步)
+  @Prop webSearchOn: boolean = false;
+  onToggleWebSearch: () => void = (): void => {};
   onTextChange: (value: string) => void = (_v: string): void => {};
   onSend: () => void = (): void => {};
   onStop: () => void = (): void => {};
@@ -59,6 +68,9 @@ export struct ChatInput {
   // 1:1 原型 .pressable:active scale(.975) .14s ease-out
   @State attachScale: number = 1;
   @State sendScale: number = 1;
+  // D0-7:全屏编辑(AmberTextArea.FullScreenEditor 同款 sheet 模式)
+  @State fullScreenOpen: boolean = false;
+  @State fullScreenText: string = '';
 
   private pressTouch(which: boolean, e: TouchEvent): void {
     const down: boolean = e.type === TouchType.Down;
@@ -93,6 +105,20 @@ export struct ChatInput {
     if (query.length === 0) return all;
     return all.filter((cmd: SlashCommand): boolean =>
       cmd.title.toLowerCase().startsWith(query));
+  }
+
+  // D0-8:@提及上下文(光标近似 = 文本末尾,覆盖正向输入 @query 场景;
+  //   slash 面板优先,二者不并存)
+  private mentionContext(): MentionContext | null {
+    if (this.disabled || this.editing || this.mentionRoles.length === 0) return null;
+    if (this.isSlashVisible()) return null;
+    return detectMentionContext(this.text, this.text.length);
+  }
+
+  private mentionMatches(): MentionRoleItem[] {
+    const ctx: MentionContext | null = this.mentionContext();
+    if (ctx === null) return [];
+    return filterMentionRoleItems(this.mentionRoles, ctx.query);
   }
 
   private handleSlashCommand(cmd: SlashCommand): void {
@@ -132,6 +158,19 @@ export struct ChatInput {
         .width('100%')
         .height(44).padding({ left: 20, right: 20 })
         .onClick((): void => { this.onCancelEdit(); })
+      }
+
+      // D0-8:@提及面板(inline 于输入区上方,与 composer 左右对齐)
+      if (this.mentionContext() !== null) {
+        MentionPanel({
+          roles: this.mentionMatches(),
+          onSelect: (roleId: string): void => {
+            const ctx: MentionContext | null = this.mentionContext();
+            if (ctx === null) return;
+            this.onTextChange(replaceMention(this.text, ctx, roleId));
+          },
+        })
+          .padding({ left: 20, right: 20 })
       }
 
       // Composer 沉浸式(原型验收规格):无底盘底色、无顶部分隔线,
@@ -178,8 +217,19 @@ export struct ChatInput {
               .justifyContent(FlexAlign.Center)
               .onClick((): void => { this.attachExpanded = false; this.onPickFile(); })
               .accessibilityText('选择文件')
+
+              // D0-9:联网搜索开关(与设置页同一状态源;开 = accent 浅底 + accent 图标)
+              Row() {
+                Icon({ name: 'hi_global', iconSize: 23,
+                  color: this.webSearchOn ? this.accentColorStore : INK2 })
+              }
+              .width(44).height(44).borderRadius(999)
+              .justifyContent(FlexAlign.Center)
+              .backgroundColor(this.webSearchOn ? accentSoftBg(this.accentColorStore) : Color.Transparent)
+              .onClick((): void => { this.onToggleWebSearch(); })
+              .accessibilityText(this.webSearchOn ? '关闭联网搜索' : '开启联网搜索')
             }
-            .width(this.attachExpanded ? 136 : 0)
+            .width(this.attachExpanded ? 182 : 0)
             .opacity(this.attachExpanded ? 1 : 0)
             .clip(true)
             .alignItems(VerticalAlign.Center)
@@ -226,6 +276,19 @@ export struct ChatInput {
                 this.onPasteAsFile(value);
               }
             })
+          // D0-7:全屏编辑入口(有内容时胶囊内右侧 ⛶)
+          if (this.text.length > 0 && !this.attachExpanded && !this.disabled) {
+            Text('⛶')
+              .fontSize(15).fontColor(INK3)
+              .padding(6)
+              .constraintSize({ minWidth: 32, minHeight: 32 })
+              .textAlign(TextAlign.Center)
+              .onClick((): void => {
+                this.fullScreenText = this.text;
+                this.fullScreenOpen = true;
+              })
+              .accessibilityText('全屏编辑')
+          }
         }
         .layoutWeight(1)
         .constraintSize({ minHeight: 44, maxHeight: this.attachExpanded ? 44 : 111 })
@@ -294,6 +357,43 @@ export struct ChatInput {
       }
     }
     .width('100%')
+    .bindSheet(this.fullScreenOpen, this.FullScreenEditor(), {
+      height: SheetSize.LARGE,
+      onDisappear: (): void => { this.fullScreenOpen = false; },
+    })
+  }
+
+  // D0-7:全屏编辑器(AmberTextArea.FullScreenEditor 同款:取消/保存 + 通栏 TextArea)
+  @Builder FullScreenEditor(): void {
+    Column() {
+      Row() {
+        Text('取消').fontSize(BODY).fontColor(INK3)
+          .constraintSize({ minWidth: 44, minHeight: 44 })
+          .onClick((): void => { this.fullScreenOpen = false; })
+        Blank()
+        Text('完成').fontSize(BODY).fontColor(ACCENT)
+          .constraintSize({ minWidth: 44, minHeight: 44 })
+          .onClick((): void => {
+            this.onTextChange(this.fullScreenText);
+            this.fullScreenOpen = false;
+          })
+      }
+      .width('100%')
+      .padding({ left: 16, right: 16, top: 12, bottom: 8 })
+
+      TextArea({ text: this.fullScreenText, placeholder: this.placeholder })
+        .fontSize(BODY).fontColor(INK)
+        .fontFamily(FONT_SANS)
+        .placeholderColor(INK4)
+        .backgroundColor(SURFACE2)
+        .borderRadius(12)
+        .padding(16)
+        .width('100%')
+        .layoutWeight(1)
+        .onChange((v: string): void => { this.fullScreenText = v; })
+    }
+    .width('100%').height('100%')
+    .backgroundColor(SURFACE2)
   }
 
   private canSend(): boolean {

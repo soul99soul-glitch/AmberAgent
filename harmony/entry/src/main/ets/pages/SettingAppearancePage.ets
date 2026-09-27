@@ -5,11 +5,12 @@ import {
   BG, INK, INK3, ACCENT, ACCENT_OPTIONS, setAccentColor, ERROR, TEXT_STYLES,
   SURFACE, LINE, LINE2, OVERLAY,
 } from '../design/tokens.ets';
-import { CenteredTitleBar, PlainSection, PageSpacer, Seg } from '../components/PageTemplate.ets';
+import { CenteredTitleBar, PlainSection, PageSpacer, Seg, CardGroup, CardToggleRow } from '../components/PageTemplate.ets';
 import { getChatKvStore } from '../di/AppContainer.ets';
 import { applyWindowTheme } from '../entryability/EntryAbility.ets';
 import {
   ThemePack, themePackStore, applyThemePack, parseThemePackJson, themePackToJson,
+  isAmoledBlack, setAmoledBlack,
 } from '../design/theme_packs.ets';
 import { generateVisionText } from '../platform_impl/OcrSupport.ets';
 import { resolveEffectiveChatChoice } from '../platform_impl/ChatModelSelectionSupport.ets';
@@ -54,6 +55,8 @@ struct SettingAppearancePage {
   // 主题包(C2)
   @State packs: ThemePack[] = [];
   @State selectedPackId: string = '';
+  // D0-11:AMOLED 纯黑(深色画布;hydrate 后取自 theme_packs 模块态)
+  @State amoledOn: boolean = false;
   @State tryOnPack: ThemePack | null = null;
   @State aiPrompt: string = '';
   @State generating: boolean = false;
@@ -79,7 +82,19 @@ struct SettingAppearancePage {
     themePackStore.hydrate(getChatKvStore()).then((): void => {
       this.packs = themePackStore.all();
       this.selectedPackId = themePackStore.current().id;
+      this.amoledOn = isAmoledBlack();
     }).catch((): void => {});
+  }
+
+  // D0-11:AMOLED 纯黑开关 — 落 KV + 重应用主题;darkMode 同值重设触发订阅者重建
+  //   (与主题模式切换同一刷新机制,不引入新通道)
+  private setAmoled(enabled: boolean): void {
+    this.amoledOn = enabled;
+    setAmoledBlack(getChatKvStore(), enabled, this.darkMode)
+      .then((): void => {
+        AppStorage.setOrCreate<boolean>('darkMode', this.darkMode);
+      })
+      .catch((): void => {});
   }
 
   private resolvedDark(): boolean {
@@ -292,6 +307,16 @@ struct SettingAppearancePage {
     return 2;
   }
 
+  @Builder
+  AmoledCard(): void {
+    CardToggleRow({
+      label: 'AMOLED 纯黑',
+      desc: '深色模式下页面背景使用纯黑,更省电',
+      checked: this.amoledOn, isLast: true,
+      onToggle: (): void => { this.setAmoled(!this.amoledOn); },
+    })
+  }
+
   build(): void {
     Stack({ alignContent: Alignment.Bottom }) {
       Column() {
@@ -324,6 +349,10 @@ struct SettingAppearancePage {
                 .padding({ left: 16, right: 16 })
                 .margin({ top: 8 })
             }
+
+            // D0-11:AMOLED 纯黑(深色模式画布)
+            CardGroup({ radius: 18, stroke: true, content: (): void => { this.AmoledCard(); } })
+              .margin({ left: 16, right: 16, top: 12 })
 
             // ── 主题包(内置 + 导入;iOS 主题库对齐) ──
             PlainSection({ label: '主题包' })

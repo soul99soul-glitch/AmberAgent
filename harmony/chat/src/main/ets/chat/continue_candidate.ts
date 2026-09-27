@@ -3,7 +3,7 @@
 // 纯逻辑：候选模型 + 排序 + 合并；数据源由 entry 注入投影（会话/小说/深读/看板）。
 
 export type ContinueSourceKind =
-  | 'chat' | 'novel' | 'deepread' | 'council' | 'miniapp' | 'board' | 'cron';
+  | 'chat' | 'novel' | 'deepread' | 'council' | 'miniapp' | 'board' | 'cron' | 'image';
 
 export type ContinueStatus =
   | 'draft' | 'paused' | 'waiting_user' | 'failed_resumable' | 'running';
@@ -45,6 +45,7 @@ export const SOURCE_LABEL: Record<ContinueSourceKind, string> = {
   miniapp: '小应用',
   board: '看板',
   cron: '定时',
+  image: '生图',
 };
 
 export const mergeContinueCandidates = (

@@ -186,6 +186,16 @@ export const applyPaperPalette = (o: PaperPaletteOverrides): void => {
   HOME_MUTED2 = o.muted2;
 };
 
+// D0-11:AMOLED 纯黑覆写(仅深色;画布/渐隐/玻璃纯黑,卡片面保持原色分层)。
+//   可变令牌只能在本模块内赋值(ArkTS import 绑定只读),故覆写收口在这里。
+export const applyAmoledBlack = (): void => {
+  BG = '#000000';
+  HOME_BG = '#000000';
+  BG_FADE_START = '#00000000';
+  BG_FADE_END = '#000000';
+  BG_GLASS = '#CC000000';
+};
+
 // ── 字号(对齐设计稿 px 值) ──
 export const TITLE: number = 19;             // 页面标题(19/700)
 export const HEADER: number = 16;            // 聊天头标题(16/700)
