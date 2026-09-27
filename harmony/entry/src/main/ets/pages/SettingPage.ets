@@ -157,8 +157,10 @@ struct SettingPage {
       onRowClick: (): void => { this.go('pages/MiniAppSettingsPage'); } })
     CardRow({ label: '小说创作', iconName: 'ph_pencil',
       onRowClick: (): void => { this.go('pages/NovelProjectsPage'); } })
-    CardRow({ label: '深度阅读', iconName: 'book', isLast: true,
+    CardRow({ label: '深度阅读', iconName: 'book',
       onRowClick: (): void => { this.go('pages/SettingDeepReadPage'); } })
+    CardRow({ label: 'Mac Gateway', iconName: 'link', isLast: true,
+      onRowClick: (): void => { this.go('pages/SettingMacGatewayPage'); } })
   }
 
   @Builder

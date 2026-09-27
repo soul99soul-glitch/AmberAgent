@@ -13,6 +13,7 @@ import { loadDisplaySetting } from '@amber/chat-domain';
 import type { DisplaySetting } from '@amber/chat-domain';
 import { ACCENT, applyTheme, setAccentColor, BG } from '../design/tokens.ets';
 import { registerAmberFonts, registerAmberFontsFor } from '../design/fonts.ets';
+import { syncMacGatewayPushTokenOnLaunch } from '../platform_impl/MacGatewayClient.ets';
 
 const DOMAIN: number = 0x0001;
 const TAG: string = 'DeepRead.EntryAbility';
@@ -278,6 +279,7 @@ export default class EntryAbility extends UIAbility {
           notificationManager.requestEnableNotification(this.context).catch((): void => {
             hilog.warn(DOMAIN, TAG, 'requestEnableNotification rejected');
           });
+          syncMacGatewayPushTokenOnLaunch();
           // R23:窗口内容就绪 = 全局 router 可用;此时补跳冷启动挂起的 Want
           //   (onCreate 已写待处理槽,但那时 router 尚未就绪,不能发跳)。
           markWantRoutingReady();

@@ -61,6 +61,7 @@
     "pages/SettingExperimentalSubAgentPageFull",
     "pages/SettingExperimentalWebMountPage",
     "pages/SettingFilesPage",
+    "pages/SettingMacGatewayPage",
     "pages/SettingMcpPageFull",
     "pages/SettingModelCouncilPage",
     "pages/SettingModelPage",
