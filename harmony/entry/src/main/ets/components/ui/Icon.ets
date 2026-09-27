@@ -8,6 +8,10 @@
 // 系统符号字形与 hugeicons 差异大(如 模型议会: 系统原子 vs Android 气泡),
 // 首页宫格等对形要求高的位置用 hi_ 系列。
 //
+// ph_ 前缀 = phosphor-icons fill 路径(iOS HomePhosphor 同源,256×256 视窗实心;
+// 路径表 phosphor_paths.ets 由 harmony/scripts/gen-phosphor-icons.mjs 生成)。
+// 首页头部/快捷入口/会话行图标与 iOS 对齐时用 ph_ 系列。
+//
 // 用法: Icon({ name: 'search', iconSize: 20, color: INK2 })
 //
 // 注意: 属性名用 iconSize 而非 size —— CustomComponent 基类已占用 size
@@ -16,25 +20,40 @@
 
 import { display } from '@kit.ArkUI';
 import { INK2 } from '../../design/tokens.ets';
+import { phosphorPath } from './phosphor_paths.ets';
 
-// Path.commands 坐标单位是 px(非 vp):按 density 把 24×24 视窗缩放到 iconSize
+// Path.commands 坐标单位是 px(非 vp):按 density 把视窗缩放到 iconSize
 function scalePathData(d: string, f: number): string {
-  const tokens: string[] = d.match(/[MLHVCSQTAZmlhvcstqz]|-?\d*\.?\d+(?:e[-+]?\d+)?/g) ?? [];
+  const tokens: string[] = d.match(/[MLHVCSQTAZmlhvcstqza]|-?\d*\.?\d+(?:e[-+]?\d+)?/g) ?? [];
+  // 每类命令的固定参数个数;隐式重复段按组循环(phosphor 圆角弧 A 命令重灾区:
+  // 一段 7 参,后续重复段不重复字母,rot/laf/sf 仍需按段内位置豁免缩放)
+  const groupSize = (cmd: string): number => {
+    const u: string = cmd.toUpperCase();
+    if (u === 'M' || u === 'L' || u === 'T') return 2;
+    if (u === 'H' || u === 'V') return 1;
+    if (u === 'C') return 6;
+    if (u === 'S' || u === 'Q') return 4;
+    if (u === 'A') return 7;
+    return 0;
+  };
   let out: string = '';
   let cmd: string = '';
+  let group: number = 0;
   let argIdx: number = 0;
   for (const tok of tokens) {
-    const isLetter: boolean = tok.charCodeAt(0) < 48 || tok.charCodeAt(0) > 57;
-    if (isLetter && tok.length === 1 && tok !== '-' && tok !== '.') {
+    const code: number = tok.charCodeAt(0);
+    const isLetter: boolean = (code >= 65 && code <= 90) || (code >= 97 && code <= 122);
+    if (isLetter) {
       cmd = tok;
+      group = groupSize(cmd);
       argIdx = 0;
       out += ' ' + tok;
       continue;
     }
     const v: number = parseFloat(tok);
-    // A 命令: rx ry rot laf sf x y —— rot/laf/sf 不缩放
-    const upper: string = cmd.toUpperCase();
-    const noScale: boolean = (upper === 'A' && (argIdx === 2 || argIdx === 3 || argIdx === 4));
+    // A 命令: rx ry rot laf sf x y —— 段内 rot/laf/sf(第 3/4/5 参)不缩放
+    const within: number = group > 0 ? argIdx % group : 0;
+    const noScale: boolean = cmd.toUpperCase() === 'A' && (within === 2 || within === 3 || within === 4);
     out += ' ' + (noScale ? fmtNum(v) : fmtNum(v * f));
     argIdx++;
   }
@@ -148,6 +167,17 @@ export struct Icon {
     return this.iconSize * density / 24;
   }
 
+  private phScaleFactor(): number {
+    // phosphor 视窗 256×256,同上按密度缩放
+    let density: number = 3;
+    try {
+      density = display.getDefaultDisplaySync().densityPixels;
+    } catch (_e) {
+      density = 3;
+    }
+    return this.iconSize * density / 256;
+  }
+
   build(): void {
     if (this.hiPath() !== '') {
       Path()
@@ -159,6 +189,13 @@ export struct Icon {
         .strokeWidth(1.5 * this.iconSize / 24)
         .strokeLineCap(LineCapStyle.Round)
         .strokeLineJoin(LineJoinStyle.Round)
+    } else if (this.name.startsWith('ph_') && phosphorPath(this.name) !== '') {
+      Path()
+        .commands(scalePathData(phosphorPath(this.name), this.phScaleFactor()))
+        .width(this.iconSize)
+        .height(this.iconSize)
+        .fill(this.color)
+        .strokeWidth(0)
     } else {
       SymbolGlyph(this.symbol())
         .fontSize(this.iconSize)

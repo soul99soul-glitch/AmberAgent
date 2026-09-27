@@ -1,28 +1,46 @@
-// ChatListPage — Android 风格会话首页
-// 保留真实数据逻辑: repo.list/search/删除/撤销/置顶/删除全部
+// ChatListPage — iOS ConversationsView 1:1 复刻(点阵·陶土主题)
+//
+// 对齐 iOS PlaceholderViews.swift ConversationsView:
+//   头部: 点阵 AMBER + 搜索胶囊(点击展开全宽玻璃条) + 齿轮(accent) + 头像
+//   控制卡: 继续(单候选) + 五快捷入口, 白卡 22 圆角 + 暖棕投影
+//   会话: 一体卡(顶/中/底切片), 圆形图标座(语义映射 + 稳定哈希), meta = 相对时间 · N 条
+//   右下: 新对话胶囊(accent, 铅笔 + 文案)
+// 数据逻辑保留: repo.list/删除/撤销/置顶/导出/深链消费; 继续候选复用 Index 聚合管线取第 1 条
+//   (iOS HomeContinueCardModel.resolve 同样只取最优一卡)。
 
-import { router, promptAction } from '@kit.ArkUI';
+import { router, promptAction, curves } from '@kit.ArkUI';
 import { picker } from '@kit.CoreFileKit';
 import { pasteboard } from '@kit.BasicServicesKit';
 import { util } from '@kit.ArkTS';
 import { fileIo } from '@kit.CoreFileKit';
 import type { Context } from '@kit.AbilityKit';
-import type { Conversation, ConversationSummary, UIMessage, DisplaySetting } from '@amber/chat-domain';
-import { loadDisplaySetting, exportConversationMarkdown, exportFileNameFor } from '@amber/chat-domain';
-import { getChatKvStore, getChatRepository } from '../di/AppContainer.ets';
+import type { Conversation, ConversationSummary, DisplaySetting, ContinueCandidate, AgentCronTask } from '@amber/chat-domain';
+import { loadDisplaySetting, exportConversationMarkdown, exportFileNameFor, mergeContinueCandidates } from '@amber/chat-domain';
+import {
+  getChatKvStore, getChatRepository, getNovelCreation, getAgentCronManager, getRepository,
+} from '../di/AppContainer.ets';
 import { routePendingWant } from '../entryability/EntryAbility.ets';
 import { cleanupDeletedConversation } from '../platform_impl/ManagedFileStore.ets';
+import { getMiniAppRepositorySync } from '../platform_impl/MiniAppPlatform.ets';
 import { Icon } from '../components/ui/Icon.ets';
-import { UIAvatar } from '../components/UIAvatar.ets';
-import { ACCENT, ACCENT_INK, BG, BG_FADE_END, BG_FADE_START, BODY, ERROR, INK, INK2, INK3, INK4, LINE, META, MOTION_ENTER, MOTION_STAGGER, SURFACE, SURFACE2, TEXT_STYLES } from '../design/tokens.ets';
-import { FONT_SANS, FONT_SANS_BOLD, FONT_SANS_MEDIUM, FONT_SANS_SEMIBOLD, FONT_MONO, FONT_MONO_BOLD } from '../design/fonts.ets';
-import { BlinkingCursor } from '../design/components.ets';
+import { AmberWordmark } from '../components/ui/AmberWordmark.ets';
+import { ACCENT, ACCENT_INK, ERROR, HOME_BG, HOME_CARD, HOME_CARD2, HOME_DOT, HOME_GLASS_BOTTOM,
+  HOME_GLASS_EDGE, HOME_GLASS_SHADOW, HOME_GLASS_TOP, HOME_INK, HOME_INK2, HOME_MUTED, HOME_MUTED2,
+  HOME_PRESS, HOME_ROWLINE, HOME_SEP, HOME_SHADOW, MOTION_ENTER, MOTION_STAGGER } from '../design/tokens.ets';
+import { FONT_SANS, FONT_SANS_MEDIUM, FONT_SANS_SEMIBOLD } from '../design/fonts.ets';
 
 interface ActionMenuResult {
   index: number;
 }
 
 const SNACK_BG: string = '#32302B';
+const SNACK_DURATION_MS: number = 4000;
+// F08:会话预览 getById 并发上限,避免 N 个无界并发
+const PREVIEW_CONCURRENCY: number = 8;
+// 最后打开会话(KV):复刻 iOS currentConversation 激活行染色
+const LAST_OPEN_KEY: string = 'home_last_open_conversation';
+// iOS homeCardRadius 默认 22
+const HOME_RADIUS: number = 22;
 
 // accent 透明度混色(iOS rgba 语法;ArkUI 直接收 '#AARRGGBB' 也受支持但令牌是 #RRGGBB)
 const accentAlpha = (hex: string, alpha: number): string => {
@@ -33,9 +51,135 @@ const accentAlpha = (hex: string, alpha: number): string => {
   const b: number = parseInt(value.substring(4, 6), 16);
   return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 };
-const SNACK_DURATION_MS: number = 4000;
-// F08:会话预览 getById 并发上限,避免 N 个无界并发
-const PREVIEW_CONCURRENCY: number = 8;
+
+// ── 会话行图标:iOS HomeConversationIcon 移植 ──
+// 哈希池 = iOS llmCatalog 顺序(稳定英文 slug → ph_ 字形);关键词表顺序即优先级。
+const ICON_POOL: string[] = [
+  'ph_moon', 'ph_sun', 'ph_wine', 'ph_coffee', 'ph_sword', 'ph_crown', 'ph_castleTurret',
+  'ph_list', 'ph_listChecks', 'ph_musicNotes', 'ph_headphones', 'ph_mapPin', 'ph_globe',
+  'ph_airplane', 'ph_car', 'ph_train', 'ph_pill', 'ph_heartbeat', 'ph_scales', 'ph_gavel',
+  'ph_bookOpen', 'ph_books', 'ph_notebook', 'ph_pencil', 'ph_code', 'ph_robot', 'ph_brain',
+  'ph_lightbulb', 'ph_flask', 'ph_gameController', 'ph_trophy', 'ph_football', 'ph_basketball',
+  'ph_heart', 'ph_smiley', 'ph_fire', 'ph_lightning', 'ph_drop', 'ph_snowflake', 'ph_mountains',
+  'ph_tree', 'ph_flower', 'ph_dog', 'ph_cat', 'ph_fish', 'ph_forkKnife', 'ph_pizza',
+  'ph_hamburger', 'ph_cake', 'ph_house', 'ph_buildings', 'ph_wallet', 'ph_currencyCny',
+  'ph_chartLineUp', 'ph_shoppingCart', 'ph_gift', 'ph_calendar', 'ph_clock', 'ph_graduationCap',
+  'ph_student', 'ph_camera', 'ph_filmSlate', 'ph_videoCamera', 'ph_phone', 'ph_envelope',
+  'ph_bell', 'ph_lock', 'ph_key', 'ph_translate', 'ph_quotes', 'ph_users', 'ph_baby',
+  'ph_rocket', 'ph_briefcase', 'ph_handshake', 'ph_yinYang', 'ph_ghost', 'ph_alien',
+  'ph_maskHappy', 'ph_palette', 'ph_paintBrush', 'ph_magnifyingGlass', 'ph_gear', 'ph_chatCircle',
+];
+
+interface SemanticIconEntry {
+  icon: string;
+  keywords: string[];
+}
+
+// iOS semanticIcon 关键词表逐字移植(顺序即优先级)
+const SEMANTIC_ICONS: SemanticIconEntry[] = [
+  { icon: 'ph_moon', keywords: ['月光', '月亮', '夜色', '夜晚', '晚安', '晚上', '星空', '半夜', '晚年', '梦', '失眠'] },
+  { icon: 'ph_sun', keywords: ['白天', '阳光', '日出', '日落', '晴天', '夏天', '夏日'] },
+  { icon: 'ph_wine', keywords: ['酒', '酿', '醉', '干杯', '白酒', '红酒', '啤酒', '威士忌'] },
+  { icon: 'ph_coffee', keywords: ['咖啡', '拿铁', '美式', 'espresso', 'café'] },
+  { icon: 'ph_sword', keywords: ['剑', '武侠', '江湖', '打仗', '战争', '战役', '战术', '兵法', '武将', '将军', '军队', '项羽', '吕布', '关羽'] },
+  { icon: 'ph_crown', keywords: ['皇帝', '帝王', '王冠', '君主', '国王', '女王', '皇后', '皇室', '王位', '登基', '在位', '宋太祖', '赵匡胤', '天子'] },
+  { icon: 'ph_castleTurret', keywords: ['宫殿', '城堡', '王朝', '帝国', '朝廷'] },
+  { icon: 'ph_list', keywords: ['顺序', '排行', '清单', '列表', '目录', '步骤', '流程', '时间表', '年表'] },
+  { icon: 'ph_listChecks', keywords: ['todo', '待办', 'checklist', '勾选', '任务列表'] },
+  { icon: 'ph_musicNotes', keywords: ['音乐', '歌曲', '歌单', 'bgm', '配乐', '旋律', '专辑', '歌手', '歌词', '钢琴', '吉他', 'rap'] },
+  { icon: 'ph_headphones', keywords: ['耳机', '播客', 'podcast', '听歌'] },
+  { icon: 'ph_mapPin', keywords: ['在哪', '哪里', '哪儿', '地址', '地图', '路线', '都城', '城市', '旅行', '旅游', '景点', '定位'] },
+  { icon: 'ph_globe', keywords: ['世界', '国际', '全球', '地球', '国家', '海外', '跨国'] },
+  { icon: 'ph_airplane', keywords: ['飞机', '航班', '机场', '航空', '出差', '飞去'] },
+  { icon: 'ph_car', keywords: ['开车', '汽车', '驾车', '高速', '路况', '停车'] },
+  { icon: 'ph_train', keywords: ['火车', '高铁', '地铁', '动车', '站台'] },
+  { icon: 'ph_pill', keywords: ['药', '症状', '治疗', '医院', '看病', '疾病', '感冒', '发烧', '痛风', '健康', '养生'] },
+  { icon: 'ph_heartbeat', keywords: ['心脏', '血压', '体检', '心率'] },
+  { icon: 'ph_scales', keywords: ['谁', '对比', '比较', '哪个好', '排名', '评价', '厉害', '更强', '哪个厉害'] },
+  { icon: 'ph_gavel', keywords: ['法律', '法院', '律师', '判决', '合同', '合规'] },
+  { icon: 'ph_bookOpen', keywords: ['小说', '读书', '阅读', '章节', '写书', '连载', '故事', '剧本', '剧情'] },
+  { icon: 'ph_books', keywords: ['历史', '史料', '文献', '典籍', '通史'] },
+  { icon: 'ph_notebook', keywords: ['笔记', '备忘', '日记', '手账'] },
+  { icon: 'ph_pencil', keywords: ['写作', '作文', '改写', '润色', '文案', '起草'] },
+  { icon: 'ph_code', keywords: ['代码', '编程', '程序', 'bug', 'api', 'swift', 'python', '前端', '后端', '算法', '模型', '训练', 'llm', 'gpt'] },
+  { icon: 'ph_robot', keywords: ['机器人', 'ai', '人工智能', '智能体', 'agent'] },
+  { icon: 'ph_brain', keywords: ['思考', '推理', '认知', '心理', '脑'] },
+  { icon: 'ph_lightbulb', keywords: ['想法', '创意', '灵感', '点子', '方案'] },
+  { icon: 'ph_flask', keywords: ['化学', '实验', '科学', '物理', '公式'] },
+  { icon: 'ph_gameController', keywords: ['游戏', '电玩', '通关', '副本', 'rpg', 'steam'] },
+  { icon: 'ph_trophy', keywords: ['冠军', '夺冠', '奖杯', '比赛', '胜负'] },
+  { icon: 'ph_football', keywords: ['足球', '世界杯', '联赛'] },
+  { icon: 'ph_basketball', keywords: ['篮球', 'nba', '扣篮'] },
+  { icon: 'ph_heart', keywords: ['爱情', '恋爱', '喜欢', '表白', '女朋友', '男朋友', '结婚', '暗恋'] },
+  { icon: 'ph_smiley', keywords: ['开心', '搞笑', '笑话', '幽默', '段子'] },
+  { icon: 'ph_fire', keywords: ['火', '热门', '爆', '燃', '热情'] },
+  { icon: 'ph_lightning', keywords: ['闪电', '速度', '性能', '加速'] },
+  { icon: 'ph_drop', keywords: ['水', '下雨', '喝水', '饮水', '海洋'] },
+  { icon: 'ph_snowflake', keywords: ['雪', '冬天', '冰冷', '霜'] },
+  { icon: 'ph_mountains', keywords: ['山', '登山', '爬山', '高原'] },
+  { icon: 'ph_tree', keywords: ['树', '森林', '植物', '环保'] },
+  { icon: 'ph_flower', keywords: ['花', '玫瑰', '花园'] },
+  { icon: 'ph_dog', keywords: ['狗', '犬', '汪'] },
+  { icon: 'ph_cat', keywords: ['猫', '喵'] },
+  { icon: 'ph_fish', keywords: ['鱼', '海鲜', '钓鱼', '三文鱼', '帝王鲑'] },
+  { icon: 'ph_pizza', keywords: ['披萨', 'pizza'] },
+  { icon: 'ph_hamburger', keywords: ['汉堡', '快餐'] },
+  { icon: 'ph_cake', keywords: ['蛋糕', '生日', '甜品'] },
+  { icon: 'ph_forkKnife', keywords: ['美食', '餐厅', '做饭', '菜谱', '吃什么', '下厨'] },
+  { icon: 'ph_house', keywords: ['家', '房子', '居住', '装修', '租房'] },
+  { icon: 'ph_buildings', keywords: ['公司', '办公', '写字楼', '都市'] },
+  { icon: 'ph_wallet', keywords: ['钱', '理财', '存款', '消费', '省钱'] },
+  { icon: 'ph_currencyCny', keywords: ['人民币', '汇率', '日元', '美元', '炒股', '股票', '基金'] },
+  { icon: 'ph_chartLineUp', keywords: ['增长', '趋势', '数据', '分析', '报表', 'kpi'] },
+  { icon: 'ph_shoppingCart', keywords: ['购物', '网购', '下单', '淘宝', '买东西'] },
+  { icon: 'ph_gift', keywords: ['礼物', '送礼', '红包'] },
+  { icon: 'ph_calendar', keywords: ['日程', '日历', '约会', '会议', '安排'] },
+  { icon: 'ph_clock', keywords: ['时间', '几点', '迟到', '闹钟', '倒计时'] },
+  { icon: 'ph_graduationCap', keywords: ['考试', '高考', '考研', '留学', '大学', '学习', '课程', '作业'] },
+  { icon: 'ph_student', keywords: ['学生', '同学', '老师', '上课'] },
+  { icon: 'ph_camera', keywords: ['拍照', '摄影', '相机', '照片'] },
+  { icon: 'ph_filmSlate', keywords: ['电影', '影视', '剧集', '追剧', '导演'] },
+  { icon: 'ph_videoCamera', keywords: ['视频', '直播', '剪辑'] },
+  { icon: 'ph_phone', keywords: ['电话', '手机', '通话'] },
+];
+
+const conversationIcon = (title: string): string => {
+  const normalized: string = title.toLowerCase();
+  for (const entry of SEMANTIC_ICONS) {
+    for (const keyword of entry.keywords) {
+      if (normalized.includes(keyword)) return entry.icon;
+    }
+  }
+  // 稳定哈希(iOS djb2 变体;ArkTS 无双精度 UInt64,模 2^31 逐步约减保持确定性)
+  let hash: number = 5381;
+  const bytes: Uint8Array = util.TextEncoder.create('utf-8').encodeInto(title);
+  for (let i = 0; i < bytes.length; i++) {
+    hash = (127 * hash + bytes[i]) % 2147483648;
+  }
+  return ICON_POOL[hash % ICON_POOL.length];
+};
+
+// 相对时间(iOS RelativeDateTimeFormatter abbreviated zh 口径)
+const relativeTimeMs = (ms: number): string => {
+  if (isNaN(ms) || ms <= 0) return '';
+  const diff: number = Date.now() - ms;
+  if (diff < 60 * 1000) return '刚刚';
+  const minutes: number = Math.floor(diff / 60000);
+  if (minutes < 60) return `${minutes}分钟前`;
+  const hours: number = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}小时前`;
+  const days: number = Math.floor(hours / 24);
+  if (days < 30) return `${days}天前`;
+  const months: number = Math.floor(days / 30);
+  if (months < 12) return `${months}个月前`;
+  return `${Math.floor(months / 12)}年前`;
+};
+
+const relativeTimeIso = (iso: string): string => {
+  const ms: number = new Date(iso).getTime();
+  if (isNaN(ms)) return iso.length > 10 ? iso.substring(0, 10) : iso;
+  return relativeTimeMs(ms);
+};
 
 @Entry
 @Component
@@ -47,25 +191,40 @@ struct ChatListPage {
   @State items: ConversationSummary[] = [];
   @State loaded: boolean = false;
   @State snackVisible: boolean = false;
-  @State fabScale: number = 1;
   @State pressedId: string = '';
   @State pressedFeature: string = '';
+  @State pressedContinue: boolean = false;
   @State userNickname: string = '';
   @State userAvatar: string = '';
-  @State previews: Record<string, string> = {};
   @State msgCounts: Record<string, number> = {};
+  @State lastOpenedId: string = '';
+  @State continueItem: ContinueCandidate | null = null;
+  // 展开搜索(iOS homeSearch morph:胶囊 → 全宽玻璃条,实时过滤标题)
+  @State searchExpanded: boolean = false;
+  @State searchQuery: string = '';
+  @State searchFocused: boolean = false;
+  // 入场级联(iOS homeCascade:opacity + y8,60/100/140/180/220ms,0.48s cubic(0.2,.8,.2,1))
+  @State cascadeHeader: boolean = false;
+  @State cascadeCard: boolean = false;
+  @State cascadeSection: boolean = false;
+  @State cascadeRows: boolean = false;
+  @State cascadeFab: boolean = false;
   private pendingDeleted: Conversation | null = null;
   private snackTimer: number = -1;
   private pageAlive: boolean = false;
-  // refresh 请求序号:慢的旧搜索结果不得覆盖新输入的结果
   private refreshSeq: number = 0;
-  // F08:aboutToAppear 与首次 onPageShow 都会触发,首屏只加载一次
   private firstShowDone: boolean = false;
+  private cascadeDone: boolean = false;
+  private navCooldownUntil: number = 0;
+  // 画布点阵
+  private dotSettings: RenderingContextSettings = new RenderingContextSettings(true);
+  private dotContext: CanvasRenderingContext2D = new CanvasRenderingContext2D(this.dotSettings);
 
   onPageShow(): void {
-    // F08:首次 onPageShow 紧随 aboutToAppear,跳过以避免双刷新;返回本页时才刷新
     if (this.firstShowDone) {
       this.refresh();
+      this.loadContinue();
+      this.loadLastOpened();
     } else {
       this.firstShowDone = true;
     }
@@ -81,6 +240,8 @@ struct ChatListPage {
   aboutToAppear(): void {
     this.pageAlive = true;
     this.refresh();
+    this.loadContinue();
+    this.loadLastOpened();
     loadDisplaySetting(getChatKvStore()).then((setting: DisplaySetting): void => {
       if (!this.pageAlive) return;
       this.userNickname = setting.userNickname;
@@ -89,12 +250,35 @@ struct ChatListPage {
 
     // EntryAbility 写入的通知/分享深链在根页消费，避免改变返回栈语义。
     this.consumeDeepLink();
+    this.playCascade();
+  }
+
+  // 级联只播一次:组件实例存活期间返回本页不重播(iOS cascadeComplete 同语义)
+  private playCascade(): void {
+    if (this.cascadeDone) {
+      this.cascadeHeader = true;
+      this.cascadeCard = true;
+      this.cascadeSection = true;
+      this.cascadeRows = true;
+      this.cascadeFab = true;
+      return;
+    }
+    this.cascadeDone = true;
+    const curve: ICurve = curves.cubicBezierCurve(0.2, 0.8, 0.2, 1);
+    const run = (delay: number, apply: () => void): void => {
+      setTimeout((): void => {
+        if (!this.pageAlive) return;
+        animateTo({ duration: 480, curve: curve }, apply);
+      }, delay);
+    };
+    run(60, (): void => { this.cascadeHeader = true; });
+    run(100, (): void => { this.cascadeCard = true; });
+    run(140, (): void => { this.cascadeSection = true; });
+    run(180, (): void => { this.cascadeRows = true; });
+    run(220, (): void => { this.cascadeFab = true; });
   }
 
   // 深链消费(R23):不再在本页自行 push,统一委托 EntryAbility.routePendingWant。
-  // 唯一派发点避免「EntryAbility onNewWant + 本页 onPageShow」双导航,也覆盖栈顶
-  // 非本页时的前台 Want(只有 EntryAbility 能收到 onNewWant)。本页在 aboutToAppear/
-  // onPageShow 各触发一次,仅作冷启动 ready 前的兜底重试;无 pending 时为空操作。
   private consumeDeepLink(): void {
     routePendingWant();
   }
@@ -124,18 +308,15 @@ struct ChatListPage {
         this.loaded = true;
       }
 
-      // 会话行预览: 使用末条选中消息的第一行，并去除常见 Markdown 行内标记。
-      // F08:限并发 getById(8) + 聚合后一次批量提交,避免 N 次 setState 复制全部键(O(N²))。
-      this.loadPreviews(visible, seq);
+      // 会话行条数: F08 限并发 getById(8) + 聚合后一次批量提交。
+      this.loadCounts(visible, seq);
     });
   }
 
-  // F08:受限并发拉取预览;结果先聚合到局部 Record,全部完成后按 seq 校验一次提交。
-  private loadPreviews(list: ConversationSummary[], seq: number): void {
+  // F08:受限并发拉取条数;结果先聚合到局部 Record,全部完成后按 seq 校验一次提交。
+  private loadCounts(list: ConversationSummary[], seq: number): void {
     const repo = getChatRepository();
-    const nextPreviews: Record<string, string> = {};
     const nextCounts: Record<string, number> = {};
-    for (const key of Object.keys(this.previews)) nextPreviews[key] = this.previews[key];
     for (const key of Object.keys(this.msgCounts)) nextCounts[key] = this.msgCounts[key];
     let cursor: number = 0;
     const worker = async (): Promise<void> => {
@@ -151,20 +332,10 @@ struct ChatListPage {
         }
         if (conversation === null || seq !== this.refreshSeq) continue;
         let count: number = 0;
-        let lastText: string = '';
         for (const node of conversation.messageNodes) {
           if (node.messages.length === 0) continue;
-          const index: number =
-            node.selectIndex >= 0 && node.selectIndex < node.messages.length ? node.selectIndex : 0;
-          const message: UIMessage = node.messages[index];
           count++;
-          for (const part of message.parts) {
-            if (part.type === 'text') lastText = part.text;
-          }
         }
-        nextPreviews[summary.id] = lastText.split('\n')[0]
-          .replace(/\*\*([^*]+)\*\*/g, '$1')
-          .replace(/`([^`]+)`/g, '$1');
         nextCounts[summary.id] = count;
       }
     };
@@ -173,27 +344,185 @@ struct ChatListPage {
     for (let w = 0; w < workerCount; w++) workers.push(worker());
     Promise.all(workers).then((): void => {
       if (seq !== this.refreshSeq || !this.pageAlive) return;
-      this.previews = nextPreviews;
       this.msgCounts = nextCounts;
     }).catch((): void => {});
   }
 
+  // 首页「继续」:小说项目 + 到期/运行中 cron + 深读 + 小应用,合并后取第 1 条
+  // (iOS HomeContinueCardModel.resolve 单卡语义;聚合管线与 Index 首页一致)
+  private loadContinue(): void {
+    const novelList: Promise<ContinueCandidate[]> = getNovelCreation().listProjects()
+      .then((projects): ContinueCandidate[] => projects.slice(0, 3).map((p): ContinueCandidate => ({
+        sourceKind: 'novel',
+        sourceId: p.id,
+        route: { kind: 'novel', projectId: p.id },
+        title: p.name.length > 0 ? p.name : '未命名小说',
+        summary: `${p.chapters.length} 章 · ${p.messages.length} 条讨论`,
+        lastUpdatedAt: p.updatedAt,
+        status: p.chapters.length > 0 ? 'draft' : 'waiting_user',
+        priority: 0,
+        isRunning: false,
+      })))
+      .catch((_err: Error): ContinueCandidate[] => []);
+    const cronList: Promise<ContinueCandidate[]> = getAgentCronManager()
+      .then((m): Promise<AgentCronTask[]> => m.listTasksSnapshot())
+      .then((tasks: AgentCronTask[]): ContinueCandidate[] => {
+        const out: ContinueCandidate[] = [];
+        for (const t of tasks) {
+          if (!t.enabled) continue;
+          if (t.lastStatus !== 'Failed' && t.lastStatus !== 'Running') continue;
+          if (out.length >= 3) break;
+          out.push({
+            sourceKind: 'cron',
+            sourceId: t.id,
+            route: { kind: 'cron', taskId: t.id },
+            title: t.title,
+            summary: t.lastStatus === 'Failed' ? '上次失败，可重试' : '运行中',
+            lastUpdatedAt: t.updatedAtMs,
+            status: t.lastStatus === 'Failed' ? 'failed_resumable' : 'running',
+            priority: 0,
+            isRunning: t.lastStatus === 'Running',
+          });
+        }
+        return out;
+      })
+      .catch((_err: Error): ContinueCandidate[] => []);
+    const deepList: Promise<ContinueCandidate[]> = getRepository().listHistory(3)
+      .then((entries): ContinueCandidate[] => entries
+        .filter((e): boolean => e.phase !== 'COMPLETE')
+        .slice(0, 3)
+        .map((e): ContinueCandidate => ({
+          sourceKind: 'deepread',
+          sourceId: e.topicId,
+          route: { kind: 'deepread', topicId: e.topicId, title: e.title },
+          title: e.title.length > 0 ? e.title : '深度阅读',
+          summary: '生成中',
+          lastUpdatedAt: e.updatedAt,
+          status: 'waiting_user',
+          priority: 0,
+          isRunning: e.phase !== 'COMPLETE',
+        })))
+      .catch((_err: Error): ContinueCandidate[] => []);
+    const miniList: Promise<ContinueCandidate[]> = getMiniAppRepositorySync().listAll()
+      .then((apps): ContinueCandidate[] => apps.slice(0, 2).map((app): ContinueCandidate => ({
+        sourceKind: 'miniapp',
+        sourceId: app.id,
+        route: { kind: 'miniapp', appId: app.id },
+        title: app.title,
+        summary: '已生成，尚未打开',
+        lastUpdatedAt: app.updatedAt,
+        status: 'draft',
+        priority: 0,
+        isRunning: false,
+      })))
+      .catch((_err: Error): ContinueCandidate[] => []);
+    Promise.all([novelList, cronList, deepList, miniList]).then((lists): void => {
+      if (!this.pageAlive) return;
+      const merged: ContinueCandidate[] = mergeContinueCandidates(lists, 6);
+      this.continueItem = merged.length > 0 ? merged[0] : null;
+    }).catch((): void => {
+      if (!this.pageAlive) return;
+      this.continueItem = null;
+    });
+  }
+
+  private openContinue(item: ContinueCandidate): void {
+    if (item.route.kind === 'novel') {
+      this.pushOnce({
+        url: 'pages/NovelWorkspacePage',
+        params: { projectId: item.route.projectId },
+      });
+    } else if (item.route.kind === 'cron') {
+      this.pushOnce({ url: 'pages/SettingCronTasksPage' });
+    } else if (item.route.kind === 'miniapp') {
+      this.pushOnce({
+        url: 'pages/MiniAppRunnerPage',
+        params: { appId: item.route.appId },
+      });
+    } else if (item.route.kind === 'deepread') {
+      this.pushOnce({
+        url: 'pages/DeepReadArticlePage',
+        params: { topicId: item.route.topicId, title: item.route.title },
+      });
+    }
+  }
+
+  // 继续卡展示模型(iOS: 主行实体名,次行 功能 · 状态/相对时间)
+  private continueIcon(item: ContinueCandidate): string {
+    if (item.sourceKind === 'novel') return 'ph_notebook';
+    if (item.sourceKind === 'cron') return 'ph_clock';
+    if (item.sourceKind === 'deepread') return 'ph_bookOpen';
+    return 'ph_squaresFour';
+  }
+
+  private continueTitle(item: ContinueCandidate): string {
+    if (item.sourceKind === 'novel') return `《${item.title}》`;
+    if (item.sourceKind === 'miniapp') return '小应用';
+    return item.title;
+  }
+
+  private continueMeta(item: ContinueCandidate): string {
+    if (item.sourceKind === 'novel') return `小说创作 · ${relativeTimeMs(item.lastUpdatedAt)}`;
+    if (item.sourceKind === 'cron') return `定时任务 · ${item.summary}`;
+    if (item.sourceKind === 'deepread') return `深度阅读 · ${item.summary}`;
+    return `「${item.title}」 · ${item.summary}`;
+  }
+
+  private continueCta(item: ContinueCandidate): string {
+    if (item.sourceKind === 'novel') return item.isRunning ? '查看' : '继续';
+    if (item.sourceKind === 'cron') return item.isRunning ? '查看' : '继续';
+    if (item.sourceKind === 'deepread') return '查看';
+    return '打开';
+  }
+
+  private loadLastOpened(): void {
+    getChatKvStore().get(LAST_OPEN_KEY).then((value: string | null): void => {
+      if (!this.pageAlive) return;
+      this.lastOpenedId = value === null ? '' : value;
+    }).catch((): void => {});
+  }
+
   private openConversation(id: string): void {
+    this.lastOpenedId = id;
+    getChatKvStore().put(LAST_OPEN_KEY, id).catch((): void => {});
     const params: Record<string, string> = {};
     params['conversationId'] = id;
     this.pushOnce({ url: 'pages/ChatPage', params: params });
   }
 
-  private openSearch(): void {
-    this.pushOnce({ url: 'pages/SearchPage' });
+  private expandSearch(): void {
+    animateTo({ duration: 320, curve: curves.cubicBezierCurve(0.2, 0.8, 0.2, 1) }, (): void => {
+      this.searchExpanded = true;
+    });
+    // iOS 展开后 170ms 聚焦;离场/收起前取消由状态守卫兜底
+    setTimeout((): void => {
+      if (!this.pageAlive || !this.searchExpanded) return;
+      this.getUIContext().getFocusController().requestFocus('homeSearch');
+    }, 170);
+  }
+
+  private collapseSearch(): void {
+    if (!this.searchExpanded) return;
+    animateTo({ duration: 320, curve: curves.cubicBezierCurve(0.2, 0.8, 0.2, 1) }, (): void => {
+      this.searchExpanded = false;
+      this.searchQuery = '';
+    });
+  }
+
+  private submitSearch(): void {
+    const query: string = this.searchQuery.trim();
+    this.collapseSearch();
+    const params: Record<string, string> = {};
+    if (query.length > 0) params['query'] = query;
+    this.pushOnce({ url: 'pages/SearchPage', params: params });
   }
 
   private newConversation(): void {
+    this.collapseSearch();
     this.pushOnce({ url: 'pages/ChatPage' });
   }
 
   // 防连点叠页:300ms 冷却
-  private navCooldownUntil: number = 0;
   private pushOnce(options: router.RouterOptions): void {
     const now: number = Date.now();
     if (now < this.navCooldownUntil) return;
@@ -266,47 +595,13 @@ struct ChatListPage {
       });
   }
 
-  private deleteAllConversations(): void {
-    const repo = getChatRepository();
-    repo.list().then((all: ConversationSummary[]): void => {
-      let chain: Promise<void> = Promise.resolve();
-      for (const item of all) {
-        chain = chain.then((): Promise<void> =>
-          repo.getById(item.id).then((fullConversation: Conversation | null): Promise<void> => {
-            if (fullConversation === null) return Promise.resolve();
-            return repo.delete(item.id).then((): Promise<void> =>
-              cleanupDeletedConversation(fullConversation, repo, getChatKvStore()));
-          }));
-      }
-      chain.then((): void => {
-        if (this.pageAlive) this.refresh();
-      }).catch((error: Error): void => {
-        if (!this.pageAlive) return;
-        promptAction.showToast({ message: `删除全部对话失败：${error.message}`, duration: 2000 });
-        this.refresh();
-      });
-    }).catch((error: Error): void => {
-      if (!this.pageAlive) return;
-      promptAction.showToast({ message: `删除全部对话失败：${error.message}`, duration: 2000 });
+  private previewFilter(list: ConversationSummary[]): ConversationSummary[] {
+    const query: string = this.searchQuery.trim().toLowerCase();
+    if (query.length === 0) return list;
+    return list.filter((item: ConversationSummary): boolean => {
+      const title: string = item.title.length > 0 ? item.title : '新对话';
+      return title.toLowerCase().includes(query);
     });
-  }
-
-  private showDeleteAllConfirm(): void {
-    AlertDialog.show({
-      title: '删除全部对话',
-      message: '确定要删除所有对话吗？此操作无法撤销。',
-      primaryButton: { value: '取消', action: (): void => {} },
-      secondaryButton: {
-        value: '删除',
-        fontColor: ERROR,
-        action: (): void => { this.deleteAllConversations(); },
-      },
-    });
-  }
-
-  private previewOf(id: string): string {
-    const preview: string | undefined = this.previews[id];
-    return preview === undefined || preview.length === 0 ? '暂无消息' : preview;
   }
 
   private messageCount(id: string): number {
@@ -314,18 +609,16 @@ struct ChatListPage {
     return count === undefined ? 0 : count;
   }
 
-  private formatConversationDate(updateAt: string): string {
-    const date: Date = new Date(updateAt);
-    if (isNaN(date.getTime())) return updateAt.length > 10 ? updateAt.substring(0, 10) : updateAt;
-    const now: Date = new Date();
-    const monthDay: string = `${date.getMonth() + 1}月${date.getDate()}日`;
-    return date.getFullYear() === now.getFullYear() ? monthDay : `${date.getFullYear()}年${monthDay}`;
+  private isActive(id: string): boolean {
+    return this.lastOpenedId.length > 0 && this.lastOpenedId === id;
   }
 
-  private todayLabel(): string {
-    const date: Date = new Date();
-    const weekday: string = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'][date.getDay()];
-    return `今天 · ${date.getMonth() + 1}月${date.getDate()}日 ${weekday}`;
+  // 行间 hairline:末行不画;当前行与下一行若为激活行也让位(iOS:避免与 accent 色带打架)
+  private hideRowLine(idx: number): boolean {
+    const list: ConversationSummary[] = this.previewFilter(this.items);
+    if (idx >= list.length - 1) return true;
+    if (this.isActive(list[idx].id)) return true;
+    return this.isActive(list[idx + 1].id);
   }
 
   private onFeature(id: string): void {
@@ -337,116 +630,12 @@ struct ChatListPage {
     else promptAction.showToast({ message: '该功能即将上线', duration: 1500 });
   }
 
-  @Builder
-  ConversationRow(item: ConversationSummary): void {
-    Column() {
-      Row() {
-        Text(item.title.length > 0 ? item.title : '未命名对话')
-          .fontSize(16)
-          .fontWeight(FontWeight.Bold)
-          .lineHeight(21)
-          .fontFamily(FONT_SANS_BOLD)
-          .fontColor(INK)
-          .maxLines(1)
-          .textOverflow({ overflow: TextOverflow.Ellipsis })
-          .layoutWeight(1)
-        if (item.isPinned) {
-          Icon({ name: 'pin', iconSize: 15, color: this.accentColorStore })
-            .margin({ left: 10, right: 8 })
-        }
-        Text(this.formatConversationDate(item.updateAt))
-          .fontSize(11)
-          .lineHeight(14)
-          .fontFamily(FONT_MONO)
-          .fontColor(INK4)
-          .maxLines(1)
-      }
-      .width('100%')
-      .alignItems(VerticalAlign.Center)
-
-      Row() {
-        Text(this.previewOf(item.id))
-          .fontSize(13)
-          .lineHeight(18)
-          .fontColor(INK3)
-          .maxLines(1)
-          .textOverflow({ overflow: TextOverflow.Ellipsis })
-          .layoutWeight(1)
-          .margin({ right: 14 })
-        if (this.messageCount(item.id) > 0) {
-          Text(`${this.messageCount(item.id)}`)
-            .fontSize(10)
-            .fontFamily(FONT_MONO)
-            .fontColor(this.accentColorStore)
-            .constraintSize({ minWidth: 18 })
-            .height(18)
-            .padding({ left: 5, right: 5 })
-            .textAlign(TextAlign.Center)
-            .maxLines(1)
-            .border({ width: 1, color: accentAlpha(this.accentColorStore, 0.45) })
-            .borderRadius(99)
-        }
-      }
-      .width('100%')
-      .alignItems(VerticalAlign.Center)
-      .margin({ top: 5 })
-    }
-    .width('100%')
-    .alignItems(HorizontalAlign.Start)
-    .padding({ left: 20, right: 20, top: 12, bottom: 12 })
-    .backgroundColor(this.pressedId === item.id ? SURFACE2 : BG)
-    .border({ width: { bottom: 1 }, color: { bottom: LINE } })
-    .onTouch((event: TouchEvent): void => {
-      if (event.type === TouchType.Down) this.pressedId = item.id;
-      else if (event.type === TouchType.Up || event.type === TouchType.Cancel) this.pressedId = '';
-    })
-    .onClick((): void => { this.openConversation(item.id); })
-    .gesture(
-      LongPressGesture()
-        .onAction((): void => { this.showRowMenu(item); })
-    )
-  }
-
-  @Builder
-  SwipePin(item: ConversationSummary): void {
-    Column() {
-      Icon({ name: 'pin', iconSize: 20, color: this.accentColorStore })
-      Text(item.isPinned ? '取消置顶' : '置顶')
-        .fontSize(12)
-        .fontColor(this.accentColorStore)
-        .margin({ top: 6 })
-    }
-    .width(88)
-    .height('100%')
-    .backgroundColor(SURFACE2)
-    .justifyContent(FlexAlign.Center)
-    .alignItems(HorizontalAlign.Center)
-    .onClick((): void => { this.togglePin(item); })
-  }
-
-  @Builder
-  SwipeDelete(item: ConversationSummary): void {
-    Column() {
-      Icon({ name: 'trash', iconSize: 20, color: ACCENT_INK })
-      Text('删除')
-        .fontSize(12)
-        .fontColor(ACCENT_INK)
-        .margin({ top: 6 })
-    }
-    .width(88)
-    .height('100%')
-    .backgroundColor(this.accentColorStore)
-    .justifyContent(FlexAlign.Center)
-    .alignItems(HorizontalAlign.Center)
-    .onClick((): void => { this.onDelete(item); })
-  }
-
   private showRowMenu(item: ConversationSummary): void {
     promptAction.showActionMenu({
       buttons: [
-        { text: item.isPinned ? '取消置顶' : '置顶', color: INK },
-        { text: '复制 Markdown', color: INK },
-        { text: '导出 Markdown 文件', color: INK },
+        { text: item.isPinned ? '取消置顶' : '置顶', color: HOME_INK },
+        { text: '复制 Markdown', color: HOME_INK },
+        { text: '导出 Markdown 文件', color: HOME_INK },
         { text: '删除', color: ERROR },
       ],
     }).then((result: ActionMenuResult): void => {
@@ -536,35 +725,249 @@ struct ChatListPage {
     }
   }
 
+  // 画布点阵(iOS AmberDotGridOverlay:间距 18,点径 1.3)
+  private drawDots(width: number, height: number): void {
+    this.dotContext.clearRect(0, 0, width, height);
+    this.dotContext.fillStyle = HOME_DOT;
+    for (let y = 9; y < height; y += 18) {
+      for (let x = 9; x < width; x += 18) {
+        this.dotContext.beginPath();
+        this.dotContext.arc(x, y, 0.65, 0, Math.PI * 2);
+        this.dotContext.fill();
+      }
+    }
+  }
+
   @Builder
-  FeatureItem(id: string, label: string, icon: string): void {
+  HeaderBlock(): void {
     Column() {
-      // 图标座:accent 淡底圆角座,入口从裸图标升级为可识别「按钮」
       Row() {
-        Icon({ name: icon, iconSize: 22, color: this.accentColorStore })
+        AmberWordmark({ color: HOME_INK })
+        Blank()
+        if (!this.searchExpanded) {
+          Row() {
+            Icon({ name: 'ph_magnifyingGlass', iconSize: 14, color: HOME_MUTED })
+            Text('搜索')
+              .fontSize(13)
+              .fontWeight(FontWeight.Medium)
+              .letterSpacing(0.26)
+              .fontFamily(FONT_SANS_SEMIBOLD)
+              .fontColor(HOME_MUTED)
+              .margin({ left: 6 })
+          }
+          .width(78)
+          .height(38)
+          .justifyContent(FlexAlign.Center)
+          .alignItems(VerticalAlign.Center)
+          .borderRadius(19)
+          .linearGradient({
+            direction: GradientDirection.Bottom,
+            colors: [[HOME_GLASS_TOP, 0], [HOME_GLASS_BOTTOM, 1]],
+          })
+          .border({ width: 0.5, color: HOME_GLASS_EDGE })
+          .shadow({ radius: 10, color: HOME_GLASS_SHADOW, offsetY: 4 })
+          .margin({ right: 8 })
+          .onClick((): void => { this.expandSearch(); })
+          .accessibilityText('搜索')
+        }
+
+        // 齿轮(iOS: glyph 随 accent)
+        Row() {
+          Icon({ name: 'ph_gear', iconSize: 20, color: this.accentColorStore })
+        }
+        .width(38)
+        .height(38)
+        .justifyContent(FlexAlign.Center)
+        .alignItems(VerticalAlign.Center)
+        .borderRadius(19)
+        .linearGradient({
+          direction: GradientDirection.Bottom,
+          colors: [[HOME_GLASS_TOP, 0], [HOME_GLASS_BOTTOM, 1]],
+        })
+        .border({ width: 0.5, color: HOME_GLASS_EDGE })
+        .shadow({ radius: 10, color: HOME_GLASS_SHADOW, offsetY: 4 })
+        .onClick((): void => {
+          this.collapseSearch();
+          router.pushUrl({ url: 'pages/SettingPage' });
+        })
+        .accessibilityText('设置')
+
+        // 账户头像 38(iOS: 图或昵称首字,avatarIdle 底)
+        Row() {
+          if (this.userAvatar.length > 0) {
+            Image(this.userAvatar.startsWith('http') || this.userAvatar.startsWith('data:')
+              || this.userAvatar.startsWith('file://') || this.userAvatar.startsWith('resource:')
+              ? this.userAvatar : `file://${this.userAvatar}`)
+              .width(38)
+              .height(38)
+              .borderRadius(19)
+              .objectFit(ImageFit.Cover)
+          } else {
+            Stack() {
+              Text((this.userNickname.length > 0 ? this.userNickname : 'A').charAt(0).toUpperCase())
+                .fontSize(14.5)
+                .fontWeight(FontWeight.Medium)
+                .fontFamily(FONT_SANS_SEMIBOLD)
+                .fontColor(HOME_MUTED2)
+            }
+            .width(38)
+            .height(38)
+            .borderRadius(19)
+            .backgroundColor(HOME_CARD2)
+          }
+        }
+        .margin({ left: 10 })
+        .onClick((): void => {
+          this.collapseSearch();
+          router.pushUrl({ url: 'pages/ProfilePage' });
+        })
+        .accessibilityText('我的账户')
+      }
+      .width('100%')
+      .constraintSize({ minHeight: 38 })
+      .alignItems(VerticalAlign.Center)
+      .padding({ left: 16, right: 16 })
+
+      // 展开的全宽搜索条(高 41,圆角 14,聚焦环 accent)
+      // 横向内缩走外层 Column padding:width('100%') + margin 在本布局下会溢出右缘
+      if (this.searchExpanded) {
+        Column() {
+        Row() {
+          Icon({ name: 'ph_magnifyingGlass', iconSize: 14, color: HOME_MUTED2 })
+          TextInput({ text: this.searchQuery, placeholder: '搜索会话' })
+            .id('homeSearch')
+            .layoutWeight(1)
+            .fontSize(17)
+            .fontFamily(FONT_SANS)
+            .fontColor(HOME_INK)
+            .placeholderColor(HOME_MUTED2)
+            .backgroundColor(Color.Transparent)
+            .padding({ left: 14 })
+            .onChange((value: string): void => { this.searchQuery = value; })
+            .onFocus((): void => { this.searchFocused = true; })
+            .onBlur((): void => { this.searchFocused = false; })
+            .onSubmit((): void => { this.submitSearch(); })
+          Text('取消')
+            .fontSize(13)
+            .fontWeight(FontWeight.Medium)
+            .letterSpacing(0.26)
+            .fontFamily(FONT_SANS_SEMIBOLD)
+            .fontColor(HOME_MUTED)
+            .padding({ left: 12, right: 2, top: 6, bottom: 6 })
+            .onClick((): void => { this.collapseSearch(); })
+        }
+        .width('100%')
+        .height(41)
+        .alignItems(VerticalAlign.Center)
+        .padding({ left: 16, right: 16 })
+        .borderRadius(14)
+        .linearGradient({
+          direction: GradientDirection.Bottom,
+          colors: [[HOME_GLASS_TOP, 0], [HOME_GLASS_BOTTOM, 1]],
+        })
+        .border({
+          width: this.searchFocused ? 1.5 : 0.5,
+          color: this.searchFocused ? accentAlpha(this.accentColorStore, 0.55) : HOME_GLASS_EDGE,
+        })
+        .shadow({ radius: 10, color: HOME_GLASS_SHADOW, offsetY: 4 })
+      }
+      .width('100%')
+      .padding({ left: 16, right: 16, top: 15 })
+      .transition(TransitionEffect.OPACITY
+        .combine(TransitionEffect.translate({ y: -8 }))
+        .animation({ duration: 320, curve: curves.cubicBezierCurve(0.2, 0.8, 0.2, 1) }))
+      }
+    }
+    .width('100%')
+    .padding({ top: 10, bottom: 4 })
+    .opacity(this.cascadeHeader ? 1 : 0)
+    .translate({ y: this.cascadeHeader ? 0 : 8 })
+  }
+
+  @Builder
+  ContinueRow(item: ContinueCandidate): void {
+    Row() {
+      // 功能图标座:44 圆角方,accent 浅染底 + accent 墨
+      Row() {
+        Icon({ name: this.continueIcon(item), iconSize: 22, color: this.accentColorStore })
       }
       .width(44)
       .height(44)
-      .borderRadius(14)
-      .backgroundColor(accentAlpha(this.accentColorStore, 0.10))
+      .borderRadius(15)
+      .backgroundColor(accentAlpha(this.accentColorStore, this.darkMode ? 0.32 : 0.18))
       .justifyContent(FlexAlign.Center)
       .alignItems(VerticalAlign.Center)
-      Text(label)
-        .fontSize(12.5)
+
+      Column() {
+        Text(this.continueTitle(item))
+          .fontSize(15)
+          .fontWeight(FontWeight.Medium)
+          .lineHeight(20)
+          .fontFamily(FONT_SANS_SEMIBOLD)
+          .fontColor(HOME_INK)
+          .maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+        Text(this.continueMeta(item))
+          .fontSize(11)
+          .lineHeight(14)
+          .letterSpacing(0.11)
+          .fontFamily(FONT_SANS)
+          .fontColor(HOME_MUTED)
+          .maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+          .margin({ top: 7 })
+      }
+      .layoutWeight(1)
+      .alignItems(HorizontalAlign.Start)
+      .margin({ left: 14, right: 12 })
+
+      // 续接 CTA:浅强调底 + 主墨字(次级动作;主强调留给右下新对话)
+      Text(this.continueCta(item))
+        .fontSize(13)
         .fontWeight(FontWeight.Medium)
-        .lineHeight(17)
-        .letterSpacing(0.2)
-        .fontFamily(FONT_SANS_MEDIUM)
-        .fontColor(INK2)
+        .letterSpacing(0.26)
+        .fontFamily(FONT_SANS_SEMIBOLD)
+        .fontColor(HOME_INK)
+        .padding({ left: 18, right: 18, top: 7, bottom: 7 })
+        .constraintSize({ minHeight: 32 })
+        .borderRadius(999)
+        .backgroundColor(accentAlpha(this.accentColorStore, 0.12))
+    }
+    .width('100%')
+    .alignItems(VerticalAlign.Center)
+    .padding({ left: 16, right: 16, top: 18, bottom: 18 })
+    .backgroundColor(this.pressedContinue ? HOME_PRESS : Color.Transparent)
+    .onTouch((event: TouchEvent): void => {
+      if (event.type === TouchType.Down) this.pressedContinue = true;
+      else if (event.type === TouchType.Up || event.type === TouchType.Cancel) this.pressedContinue = false;
+    })
+    .onClick((): void => { this.openContinue(item); })
+  }
+
+  @Builder
+  ShortcutItem(id: string, label: string, icon: string): void {
+    Column() {
+      Icon({
+        name: icon,
+        iconSize: 20,
+        color: this.pressedFeature === id ? HOME_INK : HOME_MUTED,
+      })
+      Text(label)
+        .fontSize(11)
+        .fontWeight(FontWeight.Medium)
+        .lineHeight(14)
+        .letterSpacing(0.11)
+        .fontFamily(FONT_SANS_SEMIBOLD)
+        .fontColor(this.pressedFeature === id ? HOME_INK : HOME_MUTED)
         .maxLines(1)
         .textOverflow({ overflow: TextOverflow.Ellipsis })
-        .margin({ top: 8 })
+        .margin({ top: 6 })
     }
     .width('100%')
     .height('100%')
     .justifyContent(FlexAlign.Center)
     .alignItems(HorizontalAlign.Center)
-    .scale({ x: this.pressedFeature === id ? 0.94 : 1, y: this.pressedFeature === id ? 0.94 : 1 })
+    .scale({ x: this.pressedFeature === id ? 0.92 : 1, y: this.pressedFeature === id ? 0.92 : 1 })
     .animation({ duration: 140, curve: Curve.EaseOut })
     .onTouch((event: TouchEvent): void => {
       if (event.type === TouchType.Down) this.pressedFeature = id;
@@ -574,223 +977,287 @@ struct ChatListPage {
   }
 
   @Builder
-  FeatureDivider(): void {
-    Column()
-      .width(1)
-      .height(26)
-      .backgroundColor(LINE)
+  ControlCard(): void {
+    Column() {
+      if (this.continueItem !== null) {
+        this.ContinueRow(this.continueItem)
+        Row()
+          .height(0.5)
+          .backgroundColor(HOME_SEP)
+          .margin({ left: 16, right: 16 })
+      }
+      Row() {
+        Column() { this.ShortcutItem('reader', '深度阅读', 'ph_bookOpen') }.height('100%').layoutWeight(1)
+        Column() { this.ShortcutItem('novel', '小说创作', 'ph_notebook') }.height('100%').layoutWeight(1)
+        Column() { this.ShortcutItem('council', '模型议会', 'ph_chatCircleDots') }.height('100%').layoutWeight(1)
+        Column() { this.ShortcutItem('apps', '小应用', 'ph_squaresFour') }.height('100%').layoutWeight(1)
+        Column() { this.ShortcutItem('webmount', '站点', 'ph_globe') }.height('100%').layoutWeight(1)
+      }
+      .width('100%')
+      .height(64)
+      .padding({ top: 9, bottom: 11 })
+      .alignItems(VerticalAlign.Center)
+    }
+    .width('100%')
+    .backgroundColor(HOME_CARD)
+    .borderRadius(HOME_RADIUS)
+    .shadow({ radius: 7, color: HOME_SHADOW, offsetY: 5 })
+    .margin({ left: 16, right: 16, top: 20 })
+    .opacity(this.cascadeCard ? 1 : 0)
+    .translate({ y: this.cascadeCard ? 0 : 8 })
+  }
+
+  @Builder
+  ConversationRow(item: ConversationSummary, isFirst: boolean, isLast: boolean, hideLine: boolean): void {
+    Column() {
+      Row() {
+        // 图标座:40 圆,置顶 = 图钉(iOS: pin 替换主题图标,不另挂角标)
+        Stack() {
+          Icon({
+            name: item.isPinned ? 'ph_pushPin' : conversationIcon(item.title.length > 0 ? item.title : '新对话'),
+            iconSize: 20,
+            color: this.isActive(item.id) ? this.accentColorStore : HOME_MUTED2,
+          })
+        }
+        .width(40)
+        .height(40)
+        .borderRadius(20)
+        .backgroundColor(this.isActive(item.id)
+          ? accentAlpha(this.accentColorStore, this.darkMode ? 0.32 : 0.18)
+          : HOME_CARD2)
+
+        Column() {
+          Text(item.title.length > 0 ? item.title : '新对话')
+            .fontSize(16)
+            .fontWeight(FontWeight.Medium)
+            .lineHeight(21)
+            .letterSpacing(-0.08)
+            .fontFamily(FONT_SANS_SEMIBOLD)
+            .fontColor(HOME_INK)
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+          Row() {
+            Text(relativeTimeIso(item.updateAt))
+              .fontSize(11)
+              .letterSpacing(0.11)
+              .fontFamily(FONT_SANS)
+              .fontColor(HOME_MUTED)
+              .maxLines(1)
+            Text('·')
+              .fontSize(11)
+              .fontFamily(FONT_SANS)
+              .fontColor(HOME_MUTED2)
+              .margin({ left: 6, right: 6 })
+            Text(`${this.messageCount(item.id)} 条`)
+              .fontSize(11)
+              .letterSpacing(0.11)
+              .fontFamily(FONT_SANS)
+              .fontColor(HOME_MUTED)
+              .maxLines(1)
+          }
+          .margin({ top: 7 })
+        }
+        .layoutWeight(1)
+        .alignItems(HorizontalAlign.Start)
+        .margin({ left: 13 })
+      }
+      .width('100%')
+      .alignItems(VerticalAlign.Center)
+      .padding({ left: 17, right: 16, top: 12, bottom: 12 })
+      .constraintSize({ minHeight: 72 })
+
+      // 卡内 hairline:左缩进 70 对齐标题(iOS 同款)
+      if (!hideLine) {
+        Row()
+          .height(0.5)
+          .backgroundColor(HOME_ROWLINE)
+          .margin({ left: 70, right: 16 })
+      }
+    }
+    .width('100%')
+    .backgroundColor(this.pressedId === item.id
+      ? HOME_PRESS
+      : (this.isActive(item.id) ? accentAlpha(this.accentColorStore, this.darkMode ? 0.16 : 0.09) : HOME_CARD))
+    .borderRadius({
+      topLeft: isFirst ? HOME_RADIUS : 0,
+      topRight: isFirst ? HOME_RADIUS : 0,
+      bottomLeft: isLast ? HOME_RADIUS : 0,
+      bottomRight: isLast ? HOME_RADIUS : 0,
+    })
+    .shadow((isFirst || isLast) ? { radius: 7, color: HOME_SHADOW, offsetY: 5 } : { radius: 0, color: Color.Transparent })
+    .onTouch((event: TouchEvent): void => {
+      if (event.type === TouchType.Down) this.pressedId = item.id;
+      else if (event.type === TouchType.Up || event.type === TouchType.Cancel) this.pressedId = '';
+    })
+    .onClick((): void => { this.openConversation(item.id); })
+    .gesture(
+      LongPressGesture()
+        .onAction((): void => { this.showRowMenu(item); })
+    )
+  }
+
+  @Builder
+  SwipePin(item: ConversationSummary): void {
+    Column() {
+      Icon({ name: 'ph_pushPin', iconSize: 20, color: this.accentColorStore })
+      Text(item.isPinned ? '取消置顶' : '置顶')
+        .fontSize(12)
+        .fontColor(this.accentColorStore)
+        .margin({ top: 6 })
+    }
+    .width(88)
+    .height('100%')
+    .backgroundColor(HOME_CARD2)
+    .justifyContent(FlexAlign.Center)
+    .alignItems(HorizontalAlign.Center)
+    .onClick((): void => { this.togglePin(item); })
+  }
+
+  @Builder
+  SwipeDelete(item: ConversationSummary): void {
+    Column() {
+      Icon({ name: 'trash', iconSize: 20, color: ACCENT_INK })
+      Text('删除')
+        .fontSize(12)
+        .fontColor(ACCENT_INK)
+        .margin({ top: 6 })
+    }
+    .width(88)
+    .height('100%')
+    .backgroundColor(this.accentColorStore)
+    .justifyContent(FlexAlign.Center)
+    .alignItems(HorizontalAlign.Center)
+    .onClick((): void => { this.onDelete(item); })
   }
 
   build(): void {
     Stack({ alignContent: Alignment.Bottom }) {
-      Column() {
-        Row() {
-          Row() {
-            Text('Amber')
-              .fontSize(23)
-              .fontWeight(FontWeight.Bold)
-              .lineHeight(28)
-              .letterSpacing(-0.5)
-              .fontFamily(FONT_MONO_BOLD)
-              .fontColor(INK)
-            BlinkingCursor({ color: this.accentColorStore, cursorWidth: 9, cursorHeight: 20 })
-              .margin({ left: 4, bottom: 2 })
-          }
-          .alignItems(VerticalAlign.Center)
-
-          Text(this.todayLabel())
-            .fontSize(11.5)
-            .fontFamily(FONT_MONO)
-            .letterSpacing(0.2)
-            .fontColor(INK3)
-            .maxLines(1)
-            .textOverflow({ overflow: TextOverflow.Ellipsis })
-            .layoutWeight(1)
-            .margin({ left: 14 })
-
-          Row() {
-            Icon({ name: 'gear', iconSize: 20, color: INK2 })
-          }
-          .width(48)
-          .height(48)
-          .justifyContent(FlexAlign.Center)
-          .alignItems(VerticalAlign.Center)
-          .onClick((): void => { router.pushUrl({ url: 'pages/SettingPage' }); })
-
-          Row() {
-            UIAvatar({
-              name: this.userNickname,
-              imageUrl: this.userAvatar,
-              avatarSize: 34,
-              accentColor: this.accentColorStore,
-            })
-          }
-          .width(48)
-          .height(48)
-          .justifyContent(FlexAlign.Center)
-          .alignItems(VerticalAlign.Center)
-          .margin({ left: 6 })
-          .onClick((): void => { router.pushUrl({ url: 'pages/ProfilePage' }); })
-        }
-        .width('100%')
-        .alignItems(VerticalAlign.Center)
-        .padding({ left: 20, right: 20, top: this.statusBarHeight + 10, bottom: 10 })
-
-        Row() {
-          Icon({ name: 'search', iconSize: 17, color: INK3 })
-          Text('搜索会话')
-            .fontSize(14.5)
-            .fontFamily(FONT_SANS)
-            .fontColor(INK4)
-            .margin({ left: 9 })
-          Blank()
-        }
-        .width('100%')
-        .padding({ top: 9, bottom: 10, left: 20, right: 20 })
-        .border({ width: { bottom: 1 }, color: { bottom: LINE } })
-        .alignItems(VerticalAlign.Center)
-        .onClick((): void => { this.openSearch(); })
-
-        Row() {
-          Column() { this.FeatureItem('reader', '深度阅读', 'hi_book_open') }.height('100%').layoutWeight(1)
-          this.FeatureDivider()
-          Column() { this.FeatureItem('apps', '小应用', 'hi_app_archive') }.height('100%').layoutWeight(1)
-          this.FeatureDivider()
-          Column() { this.FeatureItem('novel', '小说创作', 'hi_pencil') }.height('100%').layoutWeight(1)
-          this.FeatureDivider()
-          Column() { this.FeatureItem('webmount', '站点', 'hi_global') }.height('100%').layoutWeight(1)
-          this.FeatureDivider()
-          Column() { this.FeatureItem('council', '模型议会', 'hi_message') }.height('100%').layoutWeight(1)
-        }
-        .width('100%')
-        .height(92)
-        .padding({ left: 20, right: 20, top: 8 })
-        .alignItems(VerticalAlign.Center)
-        .border({ width: { bottom: 1 }, color: { bottom: LINE } })
-
-        Stack({ alignContent: Alignment.BottomEnd }) {
-          if (!this.loaded) {
-            // 首载:居中文案,避免顶部孤立一行
-            Column() {
-              Text('加载会话中…')
-                .fontSize(BODY)
-                .fontColor(INK3)
-            }
-            .width('100%')
-            .height('100%')
-            .justifyContent(FlexAlign.Center)
-            .alignItems(HorizontalAlign.Center)
-          } else if (this.items.length === 0) {
-            // 空态精装:accent 淡底图标座 + 文案 + 主 CTA,填充整屏而非顶部两行
-            Column() {
-              Row() {
-                Icon({ name: 'hi_message', iconSize: 30, color: this.accentColorStore })
-              }
-              .width(76)
-              .height(76)
-              .borderRadius(38)
-              .backgroundColor(accentAlpha(this.accentColorStore, 0.10))
-              .justifyContent(FlexAlign.Center)
-              .alignItems(VerticalAlign.Center)
-
-              Text('还没有会话')
-                .fontSize(17)
-                .fontWeight(FontWeight.Bold)
-                .lineHeight(23)
-                .fontFamily(FONT_SANS_SEMIBOLD)
-                .fontColor(INK)
-                .margin({ top: 18 })
-              Text('从一句问候开始，和 Amber 聊聊\n今天想做的事。')
-                .fontSize(13.5)
-                .lineHeight(20)
-                .fontFamily(FONT_SANS)
-                .fontColor(INK3)
-                .textAlign(TextAlign.Center)
-                .margin({ top: 8 })
-              Text('开始新对话')
-                .fontSize(14)
-                .fontWeight(FontWeight.Medium)
-                .fontFamily(FONT_SANS_MEDIUM)
-                .fontColor(this.accentColorStore)
-                .padding({ left: 20, right: 20, top: 10, bottom: 10 })
-                .borderRadius(999)
-                .border({ width: 1, color: accentAlpha(this.accentColorStore, 0.5) })
-                .backgroundColor(accentAlpha(this.accentColorStore, 0.06))
-                .margin({ top: 22 })
-                .onClick((): void => { this.newConversation(); })
-            }
-            .width('100%')
-            .height('100%')
-            .justifyContent(FlexAlign.Center)
-            .alignItems(HorizontalAlign.Center)
-            .padding({ bottom: 96 }) // 视觉重心略上移,避开 FAB
-          } else {
-            List() {
-              ForEach(this.items, (item: ConversationSummary, idx: number): void => {
-                ListItem() {
-                  this.ConversationRow(item)
-                }
-                .swipeAction({
-                  start: (): void => { this.SwipePin(item); },
-                  end: (): void => { this.SwipeDelete(item); },
-                })
-                .transition(TransitionEffect.OPACITY
-                  .combine(TransitionEffect.translate({ y: 16 }))
-                  .animation({ duration: MOTION_ENTER, curve: Curve.EaseOut,
-                    delay: Math.min(idx * MOTION_STAGGER, 240) }))
-              }, (item: ConversationSummary): string => item.id + (this.darkMode ? '-dark' : '-light'))
-            }
-            .width('100%')
-            .height('100%')
-            .padding({ bottom: this.snackVisible ? 168 : 108 })
-            .backgroundColor(BG)
-            .divider({ strokeWidth: 0, color: Color.Transparent })
-          }
-
-          if (this.items.length > 0) {
-            Column()
-              .width('100%')
-              .height(52)
-              .linearGradient({
-                direction: GradientDirection.Bottom,
-                colors: [[BG_FADE_START, 0], [BG_FADE_END, 1]],
-              })
-              .hitTestBehavior(HitTestMode.None)
-          }
-
-          Column() {
-            Icon({ name: 'hi_message', iconSize: 24, color: ACCENT_INK })
-          }
-          .width(56)
-          .height(56)
-          .borderRadius(28)
-          .backgroundColor(this.accentColorStore)
-          .shadow({ radius: 14, color: accentAlpha(this.accentColorStore, 0.38), offsetY: 5 })
-          .justifyContent(FlexAlign.Center)
-          .alignItems(HorizontalAlign.Center)
-          .scale({ x: this.fabScale, y: this.fabScale })
-          .onTouch((event: TouchEvent): void => {
-            const down: boolean = event.type === TouchType.Down;
-            animateTo({ duration: 180, curve: Curve.EaseOut }, (): void => {
-              this.fabScale = down ? 0.96 : 1;
-            });
+      Stack({ alignContent: Alignment.BottomEnd }) {
+        // 画布点阵(点阵主题皮,压在 HOME_BG 上、内容下)
+        Canvas(this.dotContext)
+          .width('100%')
+          .height('100%')
+          .onReady((): void => {
+            this.drawDots(this.dotContext.width, this.dotContext.height);
           })
-          .margin({ right: 24, bottom: (this.snackVisible ? 80 : 26) + this.navBarHeight })
-          .onClick((): void => { this.newConversation(); })
+          .onAreaChange((_old: Area, value: Area): void => {
+            this.drawDots(Number(value.width), Number(value.height));
+          })
+
+        List() {
+          ListItem() {
+            this.HeaderBlock()
+          }
+
+          ListItem() {
+            this.ControlCard()
+          }
+
+          ListItem() {
+            Text('会话')
+              .fontSize(11)
+              .fontWeight(FontWeight.Medium)
+              .letterSpacing(0.11)
+              .fontFamily(FONT_SANS_SEMIBOLD)
+              .fontColor(HOME_INK2)
+              .width('100%')
+              .textAlign(TextAlign.Start)
+              .padding({ left: 16, right: 16, top: 26, bottom: 12 })
+              .opacity(this.cascadeSection ? 1 : 0)
+              .translate({ y: this.cascadeSection ? 0 : 8 })
+              .onClick((): void => { this.collapseSearch(); })
+          }
+
+          if (!this.loaded) {
+            ListItem() {
+              Text('加载会话中…')
+                .fontSize(13)
+                .fontFamily(FONT_SANS)
+                .fontColor(HOME_MUTED)
+                .width('100%')
+                .textAlign(TextAlign.Center)
+                .padding({ top: 48, bottom: 48 })
+            }
+          } else if (this.previewFilter(this.items).length === 0) {
+            ListItem() {
+              Text(this.searchQuery.trim().length > 0 ? '没有匹配的会话' : '还没有会话')
+                .fontSize(15)
+                .fontFamily(FONT_SANS)
+                .fontColor(HOME_MUTED)
+                .width('100%')
+                .textAlign(TextAlign.Center)
+                .padding({ left: 24, right: 24, top: 20, bottom: 20 })
+                .constraintSize({ minHeight: 120 })
+                .backgroundColor(HOME_CARD)
+                .borderRadius(HOME_RADIUS)
+                .shadow({ radius: 7, color: HOME_SHADOW, offsetY: 5 })
+                .margin({ left: 16, right: 16 })
+                .opacity(this.cascadeRows ? 1 : 0)
+                .translate({ y: this.cascadeRows ? 0 : 8 })
+            }
+          } else {
+            ForEach(this.previewFilter(this.items), (item: ConversationSummary, idx: number): void => {
+              ListItem() {
+                this.ConversationRow(
+                  item, idx === 0, idx === this.previewFilter(this.items).length - 1,
+                  this.hideRowLine(idx))
+              }
+              .swipeAction({
+                start: (): void => { this.SwipePin(item); },
+                end: (): void => { this.SwipeDelete(item); },
+              })
+              .transition(TransitionEffect.OPACITY
+                .combine(TransitionEffect.translate({ y: 16 }))
+                .animation({ duration: MOTION_ENTER, curve: Curve.EaseOut,
+                  delay: Math.min(idx * MOTION_STAGGER, 240) }))
+            }, (item: ConversationSummary): string => item.id + (this.darkMode ? '-dark' : '-light'))
+          }
+
+          // 末行让过右下胶囊(高 42 + 余量 36;iOS homeNewChatCapsuleListClearance)
+          ListItem() {
+            Column().width('100%').height(78 + (this.snackVisible ? 60 : 0))
+          }
         }
-        .layoutWeight(1)
         .width('100%')
+        .height('100%')
+        .padding({ top: this.statusBarHeight })
+        .scrollBar(BarState.Off)
+        .divider({ strokeWidth: 0, color: Color.Transparent })
+        .onClick((): void => { this.collapseSearch(); })
+
+        // 右下拇指区:新对话胶囊(accent 底 + on-accent 墨;iOS amberProminentGlass 语义)
+        Row() {
+          Icon({ name: 'ph_pencil', iconSize: 14, color: ACCENT_INK })
+          Text('新对话')
+            .fontSize(14)
+            .fontWeight(FontWeight.Medium)
+            .letterSpacing(0.2)
+            .fontFamily(FONT_SANS_SEMIBOLD)
+            .fontColor(ACCENT_INK)
+            .margin({ left: 6 })
+        }
+        .height(42)
+        .padding({ left: 14, right: 14 })
+        .borderRadius(21)
+        .backgroundColor(this.accentColorStore)
+        .shadow({ radius: 14, color: accentAlpha(this.accentColorStore, 0.38), offsetY: 5 })
+        .margin({ right: 28, bottom: 52 })
+        .opacity(this.cascadeFab ? 1 : 0)
+        .translate({ y: this.cascadeFab ? 0 : 8 })
+        .onClick((): void => { this.newConversation(); })
+        .accessibilityText('新建聊天')
       }
       .width('100%')
       .height('100%')
 
       if (this.snackVisible) {
         Row() {
-          Text('对话已删除').fontSize(META).fontColor(Color.White)
+          Text('对话已删除').fontSize(12).fontColor(Color.White).fontFamily(FONT_SANS)
           Blank()
           Text('撤销')
-            .fontSize(META)
+            .fontSize(12)
             .fontColor(this.accentColorStore)
+            .fontFamily(FONT_SANS_MEDIUM)
             .padding({ left: 16, top: 6, bottom: 6 })
             .onClick((): void => { this.undoDelete(); })
         }
@@ -807,6 +1274,6 @@ struct ChatListPage {
     }
     .width('100%')
     .height('100%')
-    .backgroundColor(BG)
+    .backgroundColor(HOME_BG)
   }
 }

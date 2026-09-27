@@ -92,6 +92,14 @@ export const applyTheme = (dark: boolean): void => {
     ERROR_BG = '#2A1F1D'; SUCCESS_BG = '#1D2B22'; SUCCESS_FG = '#8FCC9A';
     WARNING_BG = '#2A2418'; WARNING_FG = '#D19A66';
     INFO_BG = '#1B2638'; INFO_FG = '#8BB4E8';
+    // iOS paperDark + homeDark 逐值
+    HOME_BG = '#14110E'; HOME_CARD = '#221E19'; HOME_CARD2 = '#2E2822';
+    HOME_INK = '#F5F0E8'; HOME_INK2 = '#C8BDB0'; HOME_MUTED = '#A89888'; HOME_MUTED2 = '#6E6258';
+    HOME_SEP = 'rgba(255, 255, 255, 0.055)'; HOME_ROWLINE = 'rgba(255, 255, 255, 0.08)';
+    HOME_PRESS = 'rgba(255, 255, 255, 0.055)'; HOME_SHADOW = 'rgba(0, 0, 0, 0.40)';
+    HOME_GLASS_TOP = 'rgba(255, 255, 255, 0.14)'; HOME_GLASS_BOTTOM = 'rgba(255, 255, 255, 0.08)';
+    HOME_GLASS_EDGE = 'rgba(255, 255, 255, 0.16)'; HOME_GLASS_SHADOW = 'rgba(0, 0, 0, 0.30)';
+    HOME_DOT = 'rgba(244, 241, 237, 0.08)';
   } else {
     BG = '#F4F2EC'; SURFACE = '#FAF9F5'; SURFACE2 = '#EFECE4'; RAISED = '#FFFFFF';
     INK = '#1B1A17'; INK2 = '#57544C'; INK3 = '#8F8B80'; INK4 = '#B6B1A4';
@@ -104,6 +112,14 @@ export const applyTheme = (dark: boolean): void => {
     ERROR_BG = '#FFF0EE'; SUCCESS_BG = '#E8F5E9'; SUCCESS_FG = '#2E7D32';
     WARNING_BG = '#FFF8E1'; WARNING_FG = '#A64500';
     INFO_BG = '#E8F0FE'; INFO_FG = '#114BA3';
+    // iOS paperLight + homePaper 逐值
+    HOME_BG = '#EFE7D6'; HOME_CARD = '#FFFDF7'; HOME_CARD2 = '#F0EBE2';
+    HOME_INK = '#1B1813'; HOME_INK2 = '#5B5449'; HOME_MUTED = '#746D62'; HOME_MUTED2 = '#918A80';
+    HOME_SEP = 'rgba(38, 30, 20, 0.05)'; HOME_ROWLINE = 'rgba(27, 24, 19, 0.08)';
+    HOME_PRESS = 'rgba(89, 66, 35, 0.055)'; HOME_SHADOW = 'rgba(76, 59, 34, 0.10)';
+    HOME_GLASS_TOP = 'rgba(255, 255, 255, 0.78)'; HOME_GLASS_BOTTOM = 'rgba(255, 255, 255, 0.58)';
+    HOME_GLASS_EDGE = 'rgba(255, 255, 255, 0.50)'; HOME_GLASS_SHADOW = 'rgba(40, 36, 28, 0.10)';
+    HOME_DOT = 'rgba(40, 31, 20, 0.08)';
   }
   ACCENT_LIGHT = accentLightFor(ACCENT, darkTheme);
   // signal 随 accent(Android 别名决策);accentInk 按 accent 亮度
@@ -198,3 +214,25 @@ export const MOTION_OVERLAY: number = 240;   // 对话框/弹层
 // ── 阴影(浮层专用,随主题;flat & hairline 仍是基底) ──
 export let SHADOW_KEY: string = '#261B1A17';     // FAB/发送键等浮键
 export let SHADOW_OVERLAY: string = '#381B1A17'; // 对话框/底部弹层
+
+// ── 首页纸面令牌(iOS AmberTheme paper + homePaper/homeDark 逐值移植) ──
+// 作用域: ChatListPage 首页。值随 applyTheme 切换;accent 相关仍在消费点
+// 经 accentAlpha(accentColorStore, a) 派生(iOS 同样读 runtime accent)。
+export let HOME_BG: string = '#EFE7D6';        // 暖纸画布
+export let HOME_CARD: string = '#FFFDF7';      // 一体卡面
+export let HOME_CARD2: string = '#F0EBE2';     // 卡内嵌面/图标座
+export let HOME_INK: string = '#1B1813';       // 主墨
+export let HOME_INK2: string = '#5B5449';      // 次墨/节标题(section)
+export let HOME_MUTED: string = '#746D62';     // 元数据墨
+export let HOME_MUTED2: string = '#918A80';    // 图标座墨/占位
+export let HOME_SEP: string = 'rgba(38, 30, 20, 0.05)';    // 卡内 hairline(continue↔快捷行)
+export let HOME_ROWLINE: string = 'rgba(27, 24, 19, 0.08)'; // 会话行间 hairline
+export let HOME_PRESS: string = 'rgba(89, 66, 35, 0.055)'; // 按压垫底
+export let HOME_SHADOW: string = 'rgba(76, 59, 34, 0.10)'; // 卡投影(暖棕)
+// 控制层玻璃(搜索胶囊/展开条/齿轮): 白渐变 + 白描边
+export let HOME_GLASS_TOP: string = 'rgba(255, 255, 255, 0.78)';
+export let HOME_GLASS_BOTTOM: string = 'rgba(255, 255, 255, 0.58)';
+export let HOME_GLASS_EDGE: string = 'rgba(255, 255, 255, 0.50)';
+export let HOME_GLASS_SHADOW: string = 'rgba(40, 36, 28, 0.10)';
+// 画布点阵(点阵·陶土主题皮)
+export let HOME_DOT: string = 'rgba(40, 31, 20, 0.08)';
