@@ -481,7 +481,8 @@ export struct CardRow {
             .backgroundColor(LINE)
         }
         .width('100%')
-        .padding({ left: 14 + this.plateSize + 12, right: 14 })
+        // 分隔线起点对齐标题文字:有图标座时 = 14+座+12,无图标时 = 行 padding 14
+        .padding({ left: this.iconName.length > 0 ? 14 + this.plateSize + 12 : 14, right: 14 })
       }
     }
     .width('100%')

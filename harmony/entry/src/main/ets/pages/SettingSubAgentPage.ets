@@ -7,10 +7,14 @@
 //   + PromptConfigStore.ets(createEntryAgentPromptSettingsPort RMW)
 //   + AppContainer getAgentPromptSettingsPort/refreshSubAgentSetting
 //
+// 2026-09-27 二级页 iOS 对齐(基准 IMG_1993「子代理」):仅换视觉骨架
+// (CenteredTitleBar/PlainSection/CardGroup r18+描边/CardRow/CardToggleRow/
+//  步进器:accent 数值 + −/+ 44 热区),逻辑零改动。
+//
 // 功能(MVP):
 //   ✅ enabled 开关
 //   ✅ mode 选择(roster/smart_dynamic)
-//   ✅ maxConcurrentRuns/maxTurns 滑块
+//   ✅ maxConcurrentRuns/maxTurns 步进
 //   ✅ timeout/outputBudget 选择
 //   ❌ per-role override 编辑(后续迭代)
 //   ❌ custom definition 编辑(后续迭代)
@@ -23,14 +27,17 @@ import {
   DEFAULT_SUB_AGENT_MAX_CONCURRENT_RUNS, DEFAULT_SUB_AGENT_OUTPUT_BUDGET_CHARS,
   SUB_AGENT_BUILT_INS,
 } from '@amber/chat-domain';
-import { INK, INK3, SURFACE2, BG, ERROR, TEXT_STYLES } from '../design/tokens.ets';
-import { FONT_SANS_SEMIBOLD, FONT_MONO_MEDIUM } from '../design/fonts.ets';
-import { PageTitleBar, SectionHeader, ToggleRow, SelectRow, Seg, PaperSeparator, PageSpacer, BtnGhost } from '../components/PageTemplate.ets';
+import { ACCENT, BG, ERROR, GUTTER, INK, INK3, LINE, SURFACE2, TEXT_STYLES, lineHeightForSize } from '../design/tokens.ets';
+import { FONT_MONO_MEDIUM, FONT_SANS_MEDIUM } from '../design/fonts.ets';
+import {
+  CenteredTitleBar, PlainSection, CardGroup, CardRow, CardToggleRow, Seg, PageSpacer, BtnGhost,
+} from '../components/PageTemplate.ets';
 
 @Entry
 @Component
 struct SettingSubAgentPage {
   @StorageProp('statusBarHeight') statusBarHeight: number = 44;
+  @StorageProp('accentColor') accentColorStore: string = ACCENT;
   @State subAgentEnabled: boolean = false;
   @State mode: string = 'roster';
   @State allowDynamic: boolean = true;
@@ -154,10 +161,25 @@ struct SettingSubAgentPage {
     });
   }
 
+  // 步进(原 slider 1..5 / 2..8,边界逻辑不变;每步落盘同 slider onChange)
+  private adjustMaxConcurrent(delta: number): void {
+    const next: number = Math.min(Math.max(this.maxConcurrentRuns + delta, 1), 5);
+    if (next === this.maxConcurrentRuns) return;
+    this.maxConcurrentRuns = next;
+    this.saveSetting();
+  }
+
+  private adjustMaxTurns(delta: number): void {
+    const next: number = Math.min(Math.max(this.maxTurns + delta, 2), 8);
+    if (next === this.maxTurns) return;
+    this.maxTurns = next;
+    this.saveSetting();
+  }
+
   build(): void {
     Column() {
-      PageTitleBar({
-        title: '子代理设置',
+      CenteredTitleBar({
+        title: '子代理',
         actionText: this.saving ? '保存中…' : '保存',
         onAction: (): void => { this.saveAndBack(); },
         onBack: (): void => { this.requestBack(); },
@@ -168,8 +190,7 @@ struct SettingSubAgentPage {
           .fontSize(TEXT_STYLES.secondary.size).fontWeight(TEXT_STYLES.secondary.weight)
           .lineHeight(TEXT_STYLES.secondary.lineHeight).fontFamily(TEXT_STYLES.secondary.family)
           .fontColor(ERROR)
-          .width('100%').padding({ left: 16, right: 16, top: 8, bottom: 8 })
-          .backgroundColor(SURFACE2)
+          .width('100%').padding({ left: 16, right: 16, top: 8, bottom: 4 })
       }
 
       if (!this.loaded) {
@@ -180,50 +201,22 @@ struct SettingSubAgentPage {
       } else {
         Scroll() {
           Column() {
-            SectionHeader({ label: '运行参数' })
-            this.settingRow('启用子代理', '允许主 Agent 委派子任务给隔离的子代理', (): void => {
-              this.subAgentEnabled = !this.subAgentEnabled;
-              this.saveSetting();
-            }, this.subAgentEnabled, false)
+            Text('把独立任务交给子代理,在当前聊天中继续沟通。任务进度和结果会回到原会话。')
+              .fontSize(13).lineHeight(lineHeightForSize(13)).fontFamily(FONT_SANS_MEDIUM)
+              .fontColor(INK3)
+              .width('100%').padding({ left: 16, right: 16, top: 2, bottom: 6 })
 
-            this.modeRow(false)
+            PlainSection({ label: '编排' })
+            CardGroup({ radius: 18, stroke: true, content: (): void => { this.OrchestrationCard(); } })
+              .margin({ left: GUTTER, right: GUTTER })
 
-            if (this.mode !== 'smart_dynamic') {
-              this.settingRow('允许动态子代理', '允许创建临时自定义子代理角色', (): void => {
-                this.allowDynamic = !this.allowDynamic;
-                this.saveSetting();
-              }, this.allowDynamic, false)
-            }
+            PlainSection({ label: '执行' })
+            CardGroup({ radius: 18, stroke: true, content: (): void => { this.ExecutionCard(); } })
+              .margin({ left: GUTTER, right: GUTTER })
 
-            this.sliderRow('最大并发数', `${this.maxConcurrentRuns}`, 1, 5, this.maxConcurrentRuns, (v: number): void => {
-              this.maxConcurrentRuns = Math.round(v);
-              this.saveSetting();
-            }, false)
-
-            this.sliderRow('最大轮次', `${this.maxTurns}`, 2, 8, this.maxTurns, (v: number): void => {
-              this.maxTurns = Math.round(v);
-              this.saveSetting();
-            }, false)
-
-            this.selectRow('超时时间', this.timeoutLabel(), ((): void => {
-              const options: number[] = [60000, 180000, 300000, 600000];
-              const idx: number = options.indexOf(this.timeoutMs);
-              this.timeoutMs = options[(idx + 1) % options.length];
-              this.saveSetting();
-            }), false)
-
-            this.selectRow('输出预算', this.outputBudgetLabel(), ((): void => {
-              const options: number[] = [8000, 12000, 24000, 48000];
-              const idx: number = options.indexOf(this.outputBudgetChars);
-              this.outputBudgetChars = options[(idx + 1) % options.length];
-              this.saveSetting();
-            }), true)
-
-            SectionHeader({ label: '角色提示词覆盖' })
-
-            ForEach(SUB_AGENT_BUILT_INS, (def: SubAgentDefinition, idx: number): void => {
-              this.roleOverrideRow(def, idx === SUB_AGENT_BUILT_INS.length - 1)
-            }, (def: SubAgentDefinition): string => def.id)
+            PlainSection({ label: '角色' })
+            CardGroup({ radius: 18, stroke: true, content: (): void => { this.RolesCard(); } })
+              .margin({ left: GUTTER, right: GUTTER })
             PageSpacer()
           }
           .width('100%')
@@ -236,20 +229,49 @@ struct SettingSubAgentPage {
     .width('100%').height('100%').backgroundColor(BG)
   }
 
-  @Builder settingRow(label: string, desc: string, onToggle: () => void, checked: boolean, isLast: boolean): void {
-    ToggleRow({ label: label, desc: desc, checked: checked, isLast: isLast, onToggle: onToggle })
+  // ── 卡片内容(@Builder:组件构造必须在 builder 上下文,铁律 4b)──
+
+  @Builder
+  OrchestrationCard(): void {
+    Column() {
+      CardToggleRow({
+        label: '启用子代理',
+        desc: '允许主 Agent 委派子任务给隔离的子代理',
+        checked: this.subAgentEnabled,
+        onToggle: (): void => {
+          this.subAgentEnabled = !this.subAgentEnabled;
+          this.saveSetting();
+        },
+      })
+      this.ModeRow()
+      if (this.mode !== 'smart_dynamic') {
+        CardToggleRow({
+          label: '允许动态子代理',
+          desc: '允许创建临时自定义子代理角色',
+          checked: this.allowDynamic,
+          isLast: true,
+          onToggle: (): void => {
+            this.allowDynamic = !this.allowDynamic;
+            this.saveSetting();
+          },
+        })
+      }
+    }
+    .width('100%')
   }
 
-  @Builder modeRow(isLast: boolean): void {
+  @Builder
+  ModeRow(): void {
     Column() {
       Row() {
         Column() {
-          Text('模式').fontSize(TEXT_STYLES.body.size).fontWeight(600).lineHeight(TEXT_STYLES.body.lineHeight)
-            .fontFamily(FONT_SANS_SEMIBOLD).fontColor(INK)
+          Text('模式')
+            .fontSize(16).fontWeight(FontWeight.Medium).lineHeight(lineHeightForSize(16))
+            .fontFamily(FONT_SANS_MEDIUM).fontColor(INK)
           Text(this.mode === 'smart_dynamic' ? '智能动态:隐藏内置角色,按需创建临时子代理' : '名册:使用预设的内置子代理角色')
-            .fontSize(TEXT_STYLES.secondary.size).fontWeight(TEXT_STYLES.secondary.weight)
-            .lineHeight(TEXT_STYLES.secondary.lineHeight).fontFamily(TEXT_STYLES.secondary.family)
-            .fontColor(INK3).margin({ top: 4 }).maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis })
+            .fontSize(12).lineHeight(lineHeightForSize(12)).fontFamily(FONT_SANS_MEDIUM)
+            .fontColor(INK3).margin({ top: 2 })
+            .maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis })
         }
         .alignItems(HorizontalAlign.Start).layoutWeight(1)
         Seg({ options: ['名册', '智能动态'], selected: this.mode === 'smart_dynamic' ? 1 : 0,
@@ -258,50 +280,172 @@ struct SettingSubAgentPage {
             this.saveSetting();
           } })
       }
-      .width('100%').constraintSize({ minHeight: 64 })
-      .padding({ left: 16, right: 16, top: 12, bottom: 12 })
-      if (!isLast) {
-        PaperSeparator()
+      .width('100%').alignItems(VerticalAlign.Center)
+      .constraintSize({ minHeight: 52 })
+      .padding({ left: 14, right: 14, top: 10, bottom: 10 })
+      // 分隔线按状态内绘:smart_dynamic 时本行即组末行,不发丝线
+      if (this.mode !== 'smart_dynamic') {
+        Row() {
+          Row().width('100%').height(1).backgroundColor(LINE)
+        }
+        .width('100%')
+        .padding({ left: 14, right: 14 })
       }
     }
     .width('100%')
   }
 
-  @Builder sliderRow(label: string, valueText: string, min: number, max: number, value: number,
-    onChange: (v: number) => void, isLast: boolean): void {
+  @Builder
+  ExecutionCard(): void {
     Column() {
-      Row() {
-        Text(label).fontSize(TEXT_STYLES.body.size).fontWeight(600).lineHeight(TEXT_STYLES.body.lineHeight)
-          .fontFamily(FONT_SANS_SEMIBOLD).fontColor(INK).layoutWeight(1)
-        Text(valueText).fontSize(TEXT_STYLES.meta.size).fontWeight(TEXT_STYLES.meta.weight)
-          .lineHeight(TEXT_STYLES.meta.lineHeight).fontFamily(FONT_MONO_MEDIUM).fontColor(INK3)
-      }
-      .width('100%')
-      Slider({ value: value, min: min, max: max, step: 1 }).width('100%').margin({ top: 4 })
-        .onChange((v: number): void => { onChange(v); })
+      this.ConcurrentStepperRow()
+      this.TurnsStepperRow()
+      CardRow({
+        label: '超时时间',
+        valueText: this.timeoutLabel(),
+        onRowClick: (): void => {
+          const options: number[] = [60000, 180000, 300000, 600000];
+          const idx: number = options.indexOf(this.timeoutMs);
+          this.timeoutMs = options[(idx + 1) % options.length];
+          this.saveSetting();
+        },
+      })
+      CardRow({
+        label: '输出预算',
+        valueText: this.outputBudgetLabel(),
+        isLast: true,
+        onRowClick: (): void => {
+          const options: number[] = [8000, 12000, 24000, 48000];
+          const idx: number = options.indexOf(this.outputBudgetChars);
+          this.outputBudgetChars = options[(idx + 1) % options.length];
+          this.saveSetting();
+        },
+      })
     }
-    .width('100%').padding({ left: 16, right: 16, top: 12, bottom: 12 })
-    if (!isLast) {
-      PaperSeparator()
-    }
+    .width('100%')
   }
 
-  @Builder selectRow(label: string, valueText: string, onClick: () => void, isLast: boolean): void {
-    SelectRow({ label: label, valueText: valueText, isLast: isLast, onRowClick: onClick })
+  // iOS 步进行:标题 + accent 数值 + −/+ 44 热区(基准 IMG_1993 最大并发)
+  @Builder
+  ConcurrentStepperRow(): void {
+    Column() {
+      Row() {
+        Text('最大并发数')
+          .fontSize(16).fontWeight(FontWeight.Medium).lineHeight(lineHeightForSize(16))
+          .fontFamily(FONT_SANS_MEDIUM).fontColor(INK)
+          .layoutWeight(1)
+        Row() {
+          Row() {
+            Text('−')
+              .fontSize(TEXT_STYLES.body.size).fontWeight(TEXT_STYLES.body.weight)
+              .lineHeight(TEXT_STYLES.body.lineHeight).fontFamily(TEXT_STYLES.body.family)
+              .fontColor(INK3)
+          }
+          .justifyContent(FlexAlign.Center)
+          .alignItems(VerticalAlign.Center)
+          .constraintSize({ minWidth: 44, minHeight: 44 })
+          .onClick((): void => { this.adjustMaxConcurrent(-1); })
+          Text(`${this.maxConcurrentRuns}`)
+            .fontSize(TEXT_STYLES.meta.size).fontWeight(TEXT_STYLES.meta.weight)
+            .lineHeight(TEXT_STYLES.meta.lineHeight).fontFamily(FONT_MONO_MEDIUM)
+            .fontColor(this.accentColorStore)
+            .width(28).textAlign(TextAlign.Center)
+          Row() {
+            Text('+')
+              .fontSize(TEXT_STYLES.body.size).fontWeight(TEXT_STYLES.body.weight)
+              .lineHeight(TEXT_STYLES.body.lineHeight).fontFamily(TEXT_STYLES.body.family)
+              .fontColor(INK3)
+          }
+          .justifyContent(FlexAlign.Center)
+          .alignItems(VerticalAlign.Center)
+          .constraintSize({ minWidth: 44, minHeight: 44 })
+          .onClick((): void => { this.adjustMaxConcurrent(1); })
+        }
+        .alignItems(VerticalAlign.Center)
+      }
+      .width('100%').alignItems(VerticalAlign.Center)
+      .constraintSize({ minHeight: 52 })
+      .padding({ left: 14, right: 14, top: 10, bottom: 10 })
+      Row() {
+        Row().width('100%').height(1).backgroundColor(LINE)
+      }
+      .width('100%')
+      .padding({ left: 14, right: 14 })
+    }
+    .width('100%')
+  }
+
+  @Builder
+  TurnsStepperRow(): void {
+    Column() {
+      Row() {
+        Text('最大轮次')
+          .fontSize(16).fontWeight(FontWeight.Medium).lineHeight(lineHeightForSize(16))
+          .fontFamily(FONT_SANS_MEDIUM).fontColor(INK)
+          .layoutWeight(1)
+        Row() {
+          Row() {
+            Text('−')
+              .fontSize(TEXT_STYLES.body.size).fontWeight(TEXT_STYLES.body.weight)
+              .lineHeight(TEXT_STYLES.body.lineHeight).fontFamily(TEXT_STYLES.body.family)
+              .fontColor(INK3)
+          }
+          .justifyContent(FlexAlign.Center)
+          .alignItems(VerticalAlign.Center)
+          .constraintSize({ minWidth: 44, minHeight: 44 })
+          .onClick((): void => { this.adjustMaxTurns(-1); })
+          Text(`${this.maxTurns}`)
+            .fontSize(TEXT_STYLES.meta.size).fontWeight(TEXT_STYLES.meta.weight)
+            .lineHeight(TEXT_STYLES.meta.lineHeight).fontFamily(FONT_MONO_MEDIUM)
+            .fontColor(this.accentColorStore)
+            .width(28).textAlign(TextAlign.Center)
+          Row() {
+            Text('+')
+              .fontSize(TEXT_STYLES.body.size).fontWeight(TEXT_STYLES.body.weight)
+              .lineHeight(TEXT_STYLES.body.lineHeight).fontFamily(TEXT_STYLES.body.family)
+              .fontColor(INK3)
+          }
+          .justifyContent(FlexAlign.Center)
+          .alignItems(VerticalAlign.Center)
+          .constraintSize({ minWidth: 44, minHeight: 44 })
+          .onClick((): void => { this.adjustMaxTurns(1); })
+        }
+        .alignItems(VerticalAlign.Center)
+      }
+      .width('100%').alignItems(VerticalAlign.Center)
+      .constraintSize({ minHeight: 52 })
+      .padding({ left: 14, right: 14, top: 10, bottom: 10 })
+      Row() {
+        Row().width('100%').height(1).backgroundColor(LINE)
+      }
+      .width('100%')
+      .padding({ left: 14, right: 14 })
+    }
+    .width('100%')
+  }
+
+  @Builder
+  RolesCard(): void {
+    Column() {
+      ForEach(SUB_AGENT_BUILT_INS, (def: SubAgentDefinition, idx: number): void => {
+        this.roleOverrideRow(def, idx === SUB_AGENT_BUILT_INS.length - 1)
+      }, (def: SubAgentDefinition): string => def.id)
+    }
+    .width('100%')
   }
 
   // M3.2:单个内置角色的 override 编辑行(展开 → systemPrompt textarea + 重置)
-  @Builder roleOverrideRow(def: SubAgentDefinition, isLast: boolean): void {
+  @Builder
+  roleOverrideRow(def: SubAgentDefinition, isLast: boolean): void {
     Column() {
       Row() {
         Column() {
           Text(def.name)
-            .fontSize(TEXT_STYLES.body.size).fontWeight(600).lineHeight(TEXT_STYLES.body.lineHeight)
-            .fontFamily(FONT_SANS_SEMIBOLD).fontColor(INK)
+            .fontSize(16).fontWeight(FontWeight.Medium).lineHeight(lineHeightForSize(16))
+            .fontFamily(FONT_SANS_MEDIUM).fontColor(INK)
           Text(def.description)
-            .fontSize(TEXT_STYLES.secondary.size).fontWeight(TEXT_STYLES.secondary.weight)
-            .lineHeight(TEXT_STYLES.secondary.lineHeight).fontFamily(TEXT_STYLES.secondary.family)
-            .fontColor(INK3).margin({ top: 4 })
+            .fontSize(12).lineHeight(lineHeightForSize(12)).fontFamily(FONT_SANS_MEDIUM)
+            .fontColor(INK3).margin({ top: 2 })
             .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
         }
         .alignItems(HorizontalAlign.Start).layoutWeight(1)
@@ -309,9 +453,9 @@ struct SettingSubAgentPage {
           .fontSize(TEXT_STYLES.meta.size).fontWeight(TEXT_STYLES.meta.weight)
           .lineHeight(TEXT_STYLES.meta.lineHeight).fontFamily(FONT_MONO_MEDIUM).fontColor(INK3)
       }
-      .width('100%')
-      .constraintSize({ minHeight: 64 })
-      .padding({ left: 16, right: 16, top: 12, bottom: 12 })
+      .width('100%').alignItems(VerticalAlign.Center)
+      .constraintSize({ minHeight: 52 })
+      .padding({ left: 14, right: 14, top: 10, bottom: 10 })
       .onClick((): void => {
         // M3.2:折叠时保存(展开 → 折叠 = 提交编辑)
         if (this.expandedRoleId === def.id) {
@@ -343,10 +487,14 @@ struct SettingSubAgentPage {
           .width('100%').margin({ top: 8 })
         }
         .width('100%')
-        .padding({ left: 16, right: 16, bottom: 12 })
+        .padding({ left: 14, right: 14, bottom: 12 })
       }
       if (!isLast) {
-        PaperSeparator()
+        Row() {
+          Row().width('100%').height(1).backgroundColor(LINE)
+        }
+        .width('100%')
+        .padding({ left: 14, right: 14 })
       }
     }
     .width('100%')

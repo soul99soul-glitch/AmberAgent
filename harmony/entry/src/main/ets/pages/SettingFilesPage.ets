@@ -4,6 +4,10 @@
 //   鸿蒙接 chat-domain FilesRepository(entry ManagedFileStore.ets):
 //   四个 folder(upload/skills/chat_images/images)列表 + 删除(DB+磁盘)
 //   + 孤立文件清理(磁盘有、DB 无 → unlink)。
+// 视觉:2026-09-27 二级页 iOS 对齐(基准截图 IMG_1994「Workspace」)——
+//   居中标题 + caption 副标题 + 右侧 accent 文本动作(清理)、iOS 样式统计卡、
+//   PlainSection 组标、r18 发丝描边卡组、文件行(图标座/名称/mono 副标题/删除);
+//   逻辑(四 folder 列表/删除 DB+磁盘/孤立文件清理/登记库错误态)零改动。
 
 import { promptAction } from '@kit.ArkUI';
 import type { FilesRepository, ManagedFileEntity } from '@amber/chat-domain';
@@ -13,11 +17,14 @@ import {
 } from '../platform_impl/ManagedFileStore.ets';
 import { getChatRepository } from '../di/AppContainer.ets';
 import {
-  BG, SURFACE2, INK, INK3, INK4, ACCENT, ERROR,
-  BODY2, META, TEXT_STYLES,
+  ACCENT, BG, ERROR, INK, INK3, LINE, accentSoftBg, lineHeightForSize,
 } from '../design/tokens.ets';
-import { FONT_MONO_MEDIUM, FONT_SANS_SEMIBOLD } from '../design/fonts.ets';
-import { PageTitleBar, PageSpacer, PaperSeparator, IconSeat } from '../components/PageTemplate.ets';
+import {
+  FONT_MONO_MEDIUM, FONT_SANS_MEDIUM, FONT_SANS_SEMIBOLD, FONT_SANS_BOLD,
+} from '../design/fonts.ets';
+import {
+  CenteredTitleBar, PlainSection, CardGroup, PageSpacer,
+} from '../components/PageTemplate.ets';
 import { Icon } from '../components/ui/Icon.ets';
 
 interface FileRow {
@@ -25,80 +32,10 @@ interface FileRow {
   file: ManagedFileEntity;
 }
 
-@Component
-struct FilePaperRow {
-  @Prop displayName: string = '';
-  @Prop folderText: string = '';
-  @Prop sizeText: string = '';
-  @Prop mimeType: string = '';
-  @Prop isLast: boolean = false;
-  @State private pressed: boolean = false;
-  onDelete: () => void = (): void => {};
-
-  build(): void {
-    Column() {
-      Row() {
-        IconSeat({ iconName: this.mimeType.toLowerCase().indexOf('image') >= 0 ? 'image' : 'doc' })
-        Column() {
-          Text(this.displayName)
-            .fontSize(15)
-            .fontWeight(600)
-            .lineHeight(TEXT_STYLES.body.lineHeight)
-            .fontFamily(FONT_SANS_SEMIBOLD)
-            .fontColor(INK)
-            .maxLines(2)
-            .textOverflow({ overflow: TextOverflow.Ellipsis })
-            .width('100%')
-          Text(`${this.folderText} · ${this.sizeText}`)
-            .fontSize(TEXT_STYLES.meta.size)
-            .fontWeight(500)
-            .lineHeight(TEXT_STYLES.meta.lineHeight)
-            .fontFamily(FONT_MONO_MEDIUM)
-            .fontColor(INK3)
-            .maxLines(1)
-            .textOverflow({ overflow: TextOverflow.Ellipsis })
-            .margin({ top: 4 })
-          Text(this.mimeType)
-            .fontSize(TEXT_STYLES.meta.size)
-            .fontWeight(500)
-            .lineHeight(TEXT_STYLES.meta.lineHeight)
-            .fontFamily(FONT_MONO_MEDIUM)
-            .fontColor(INK3)
-            .maxLines(1)
-            .textOverflow({ overflow: TextOverflow.Ellipsis })
-            .margin({ top: 2 })
-        }
-        .alignItems(HorizontalAlign.Start)
-        .layoutWeight(1)
-        .margin({ left: 12 })
-        Row() {
-          Icon({ name: 'trash', iconSize: 15, color: ERROR })
-        }
-        .width(44)
-        .height(44)
-        .justifyContent(FlexAlign.Center)
-        .alignItems(VerticalAlign.Center)
-        .onClick((): void => { this.onDelete(); })
-      }
-      .width('100%')
-      .constraintSize({ minHeight: 64 })
-      .padding({ left: 16, right: 16, top: 12, bottom: 12 })
-      .backgroundColor(this.pressed ? SURFACE2 : Color.Transparent)
-      .onTouch((event: TouchEvent): void => {
-        if (event.type === TouchType.Down) this.pressed = true;
-        else if (event.type === TouchType.Up || event.type === TouchType.Cancel) this.pressed = false;
-      })
-      if (!this.isLast) {
-        PaperSeparator()
-      }
-    }
-    .width('100%')
-  }
-}
-
 @Entry
 @Component
 struct SettingFilesPage {
+  @StorageProp('accentColor') accentColorStore: string = ACCENT;
   @State rows: FileRow[] = [];
   @State loaded: boolean = false;
   @State cleaning: boolean = false;
@@ -230,63 +167,198 @@ struct SettingFilesPage {
     });
   }
 
+  // ===== UI(iOS 二级页骨架) =====
+
+  // 统计卡(IMG_1994:accent 图标座 + 大数字 + 标签;鸿蒙仅有文件数,单卡呈现)
+  @Builder
+  statCardContent(): void {
+    Row() {
+      Row() {
+        Icon({ name: 'doc', iconSize: 19, color: this.accentColorStore })
+      }
+      .width(44).height(44)
+      .borderRadius(12)
+      .backgroundColor(accentSoftBg(this.accentColorStore))
+      .justifyContent(FlexAlign.Center)
+      .alignItems(VerticalAlign.Center)
+      Column() {
+        Text(`${this.rows.length}`)
+          .fontSize(22)
+          .fontWeight(FontWeight.Bold)
+          .lineHeight(lineHeightForSize(22))
+          .fontFamily(FONT_SANS_BOLD)
+          .fontColor(INK)
+        Text('托管文件')
+          .fontSize(12)
+          .lineHeight(lineHeightForSize(12))
+          .fontFamily(FONT_SANS_MEDIUM)
+          .fontColor(INK3)
+          .margin({ top: 1 })
+      }
+      .alignItems(HorizontalAlign.Start)
+      .margin({ left: 12 })
+    }
+    .width('100%')
+    .alignItems(VerticalAlign.Center)
+    .padding({ left: 14, right: 14, top: 12, bottom: 12 })
+  }
+
+  // 文件行(IMG_1994 行解剖:图标座 / 名称 / mono「folder · 大小 · 类型」/ 右侧动作)
+  // 右侧保留删除钮(iOS 截图的箭头位);删除语义(DB+磁盘)零改动
+  @Builder
+  fileRow(row: FileRow, index: number) {
+    Column() {
+      Row() {
+        Row() {
+          Icon({
+            name: row.file.mimeType.toLowerCase().indexOf('image') >= 0 ? 'image' : 'doc',
+            iconSize: 15,
+            color: this.accentColorStore,
+          })
+        }
+        .width(28).height(28)
+        .borderRadius(7)
+        .backgroundColor(accentSoftBg(this.accentColorStore))
+        .justifyContent(FlexAlign.Center)
+        .alignItems(VerticalAlign.Center)
+        Column() {
+          Text(row.file.displayName)
+            .fontSize(16)
+            .fontWeight(FontWeight.Medium)
+            .lineHeight(lineHeightForSize(16))
+            .fontFamily(FONT_SANS_MEDIUM)
+            .fontColor(INK)
+            .maxLines(2)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+            .width('100%')
+          Text(`${row.folder} · ${this.fmtSize(row.file.sizeBytes)} · ${row.file.mimeType}`)
+            .fontSize(12)
+            .lineHeight(lineHeightForSize(12))
+            .fontFamily(FONT_MONO_MEDIUM)
+            .fontColor(INK3)
+            .maxLines(2)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+            .margin({ top: 2 })
+            .width('100%')
+        }
+        .alignItems(HorizontalAlign.Start)
+        .layoutWeight(1)
+        .margin({ left: 12 })
+        Row() {
+          Icon({ name: 'trash', iconSize: 15, color: ERROR })
+        }
+        .width(44)
+        .height(44)
+        .justifyContent(FlexAlign.Center)
+        .alignItems(VerticalAlign.Center)
+        .margin({ right: -8 })
+        .accessibilityText('删除文件')
+        .onClick((): void => { this.deleteRow(row); })
+      }
+      .width('100%')
+      .alignItems(VerticalAlign.Center)
+      .constraintSize({ minHeight: 52 })
+      .padding({ left: 14, right: 14, top: 8, bottom: 8 })
+      if (index < this.rows.length - 1) {
+        // 分隔线内缩对齐文字起点(行 padding 14 + 图标座 28 + 间距 12 = 54)
+        Row() {
+          Row()
+            .width('100%')
+            .height(1)
+            .backgroundColor(LINE)
+        }
+        .width('100%')
+        .padding({ left: 54, right: 14 })
+      }
+    }
+    .width('100%')
+  }
+
+  @Builder
+  fileRowsContent(): void {
+    ForEach(this.rows, (row: FileRow, index: number): void => {
+      this.fileRow(row, index)
+    }, (row: FileRow): string => row.file.relativePath)
+  }
+
   build(): void {
     Column() {
-      PageTitleBar({ title: '文件管理' })
-
-      Row() {
-        Text(`${this.rows.length} 个托管文件`)
-          .fontSize(META).fontWeight(500).lineHeight(TEXT_STYLES.meta.lineHeight)
-          .fontFamily(FONT_MONO_MEDIUM).fontColor(INK3).layoutWeight(1)
-        Text(this.cleaning ? '清理中…' : '清理孤立文件')
-          .fontSize(BODY2).fontWeight(500).lineHeight(TEXT_STYLES.secondary.lineHeight)
-          .fontFamily(TEXT_STYLES.secondary.family)
-          .fontColor(this.canClean() ? ACCENT : INK4)
-          .onClick((): void => { this.cleanOrphans(); })
-      }
-      .width('100%').padding({ left: 16, right: 16, top: 10, bottom: 4 })
+      CenteredTitleBar({
+        title: '文件管理',
+        subtitle: '文件上下文与生成结果',
+        // 登记库错误态禁用清理入口(canClean 语义;错误分支在下方独立展示原因)
+        actionText: this.cleaning ? '清理中…' : (this.canClean() ? '清理' : ''),
+        onAction: (): void => { this.cleanOrphans(); },
+      })
 
       if (this.loaded && this.registryError.length > 0) {
+        // 登记库错误态:禁用破坏性清理,展示原因(逻辑零改动,仅去 Android '// ' 样式)
         Column() {
-          Text('// 登记库不可用')
-            .fontSize(META).fontWeight(500).lineHeight(TEXT_STYLES.meta.lineHeight)
-            .fontFamily(FONT_MONO_MEDIUM).fontColor(ERROR)
+          Text('登记库不可用')
+            .fontSize(15)
+            .fontWeight(600)
+            .lineHeight(lineHeightForSize(15))
+            .fontFamily(FONT_SANS_SEMIBOLD)
+            .fontColor(ERROR)
           Text(this.registryError)
-            .fontSize(BODY2).fontWeight(400).lineHeight(TEXT_STYLES.secondary.lineHeight)
-            .fontFamily(TEXT_STYLES.secondary.family).fontColor(INK3)
+            .fontSize(13)
+            .lineHeight(lineHeightForSize(13))
+            .fontFamily(FONT_SANS_MEDIUM)
+            .fontColor(INK3)
             .margin({ top: 8 }).textAlign(TextAlign.Center)
           Text('已禁用「清理孤立文件」,以免误删仍被引用的附件')
-            .fontSize(BODY2).fontWeight(400).lineHeight(TEXT_STYLES.secondary.lineHeight)
-            .fontFamily(TEXT_STYLES.secondary.family).fontColor(INK4).margin({ top: 8 })
+            .fontSize(13)
+            .lineHeight(lineHeightForSize(13))
+            .fontFamily(FONT_SANS_MEDIUM)
+            .fontColor(INK3)
+            .margin({ top: 8 })
         }
         .width('100%').padding({ top: 60, left: 24, right: 24 }).alignItems(HorizontalAlign.Center)
       } else if (this.loaded && this.rows.length === 0) {
         Column() {
-          Text('// 暂无托管文件')
-            .fontSize(META).fontWeight(500).lineHeight(TEXT_STYLES.meta.lineHeight)
-            .fontFamily(FONT_MONO_MEDIUM).fontColor(INK3)
+          Text('暂无托管文件')
+            .fontSize(15)
+            .fontWeight(600)
+            .lineHeight(lineHeightForSize(15))
+            .fontFamily(FONT_SANS_SEMIBOLD)
+            .fontColor(INK3)
           Text('对话中的图片/附件会登记在这里')
-            .fontSize(BODY2).fontWeight(400).lineHeight(TEXT_STYLES.secondary.lineHeight)
-            .fontFamily(TEXT_STYLES.secondary.family).fontColor(INK4).margin({ top: 8 })
+            .fontSize(13)
+            .lineHeight(lineHeightForSize(13))
+            .fontFamily(FONT_SANS_MEDIUM)
+            .fontColor(INK3)
+            .margin({ top: 8 })
         }
         .width('100%').padding({ top: 60 }).alignItems(HorizontalAlign.Center)
+      } else if (!this.loaded) {
+        Text('加载中…')
+          .fontSize(13)
+          .lineHeight(lineHeightForSize(13))
+          .fontFamily(FONT_SANS_MEDIUM)
+          .fontColor(INK3)
+          .margin({ top: 32 })
       } else {
-        List() {
-          ForEach(this.rows, (row: FileRow, index: number): void => {
-            ListItem() {
-              FilePaperRow({
-                displayName: row.file.displayName,
-                folderText: row.folder,
-                sizeText: this.fmtSize(row.file.sizeBytes),
-                mimeType: row.file.mimeType,
-                isLast: index === this.rows.length - 1,
-                onDelete: (): void => { this.deleteRow(row); },
-              })
+        Scroll() {
+          Column() {
+            // ── 统计卡(IMG_1994 顶部统计;鸿蒙仅有文件数 → 单卡)──
+            Column() {
+              CardGroup({ radius: 18, stroke: true, content: (): void => { this.statCardContent(); } })
             }
-          }, (row: FileRow): string => row.file.relativePath)
+            .width('100%').padding({ left: 16, right: 16 })
+
+            // ── 文件组 ──
+            PlainSection({ label: '文件' })
+            Column() {
+              CardGroup({ radius: 18, stroke: true, content: (): void => { this.fileRowsContent(); } })
+            }
+            .width('100%').padding({ left: 16, right: 16 })
+
+            Column().height(24)
+          }
+          .width('100%')
         }
-        .width('100%').layoutWeight(1).padding({ top: 6 })
-        .divider({ strokeWidth: 0, color: Color.Transparent })
+        .align(Alignment.TopStart)
+        .width('100%').layoutWeight(1)
       }
       PageSpacer()
     }
