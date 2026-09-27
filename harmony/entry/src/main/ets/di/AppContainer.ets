@@ -1003,6 +1003,11 @@ export const getWorkspaceManager = (): PosixWorkspaceManager => {
   return workspaceManager;
 };
 
+// D2-1:自选工作区目录变更后重建管理器(rootAbs 在构造时注入)
+export const resetWorkspaceManager = (): void => {
+  workspaceManager = null;
+};
+
 export const getChatAssistants = async (): Promise<Assistant[]> => {
   const kv = getChatKvStore();
   const loaded = await loadAssistants(kv);

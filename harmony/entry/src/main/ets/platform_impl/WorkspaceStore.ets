@@ -13,7 +13,7 @@
 //   - SAF ↔ mirror 双向同步/withMirrorSync/copyUriToUploads → P1 登记
 //     (随文件 sheet/terminal 切片)
 
-import { fileIo } from '@kit.CoreFileKit';
+import { fileIo, fileShare } from '@kit.CoreFileKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { util } from '@kit.ArkTS';
 import type { Context } from '@kit.AbilityKit';
@@ -21,7 +21,7 @@ import {
   PosixWorkspaceManager,
 } from '@amber/chat-domain';
 import type {
-  WorkspaceFsPort, WorkspaceFsEntry,
+  WorkspaceFsPort, WorkspaceFsEntry, KeyValueStore,
 } from '@amber/chat-domain';
 
 const TAG: string = 'WorkspaceStore';
@@ -29,8 +29,54 @@ const DOMAIN: number = 0xA124;
 
 const WORKSPACE_MIRROR: string = 'amberagent/workspace-mirror';
 
+// D2-1:用户自选工作区目录(KV workspace_custom_dir;'' = 默认镜像目录)。
+//   目录经 DocumentViewPicker FOLDER 模式授权获得;授权持久化走
+//   fileshare.persistPermission(FILE_ACCESS_PERSIST),不可持久化时
+//   进程重启后需重新选择(UI 诚实注明)。
+const WORKSPACE_CUSTOM_DIR_KEY: string = 'workspace_custom_dir';
+// picker 原始 URI 另存(activatePermission 要用;路径不可反推 URI authority)
+const WORKSPACE_CUSTOM_URI_KEY: string = 'workspace_custom_dir_uri';
+let customWorkspaceDir: string = '';
+
+export const hydrateWorkspaceCustomDir = async (kv: KeyValueStore): Promise<void> => {
+  try {
+    const raw: string | null = await kv.get(WORKSPACE_CUSTOM_DIR_KEY);
+    customWorkspaceDir = raw !== null ? raw : '';
+  } catch (_e) {
+    customWorkspaceDir = '';
+  }
+};
+
+export const setWorkspaceCustomDir = async (
+  kv: KeyValueStore, dir: string, uri: string,
+): Promise<void> => {
+  customWorkspaceDir = dir;
+  await kv.put(WORKSPACE_CUSTOM_DIR_KEY, dir);
+  await kv.put(WORKSPACE_CUSTOM_URI_KEY, uri);
+};
+
+// 重启后持久化授权默认非激活,须 activate 才能访问(尽力而为;失败则
+//   workspace 工具自然报错,UI 有重新选择入口)
+export const activateWorkspaceCustomDir = async (kv: KeyValueStore): Promise<void> => {
+  if (customWorkspaceDir.length === 0) return;
+  try {
+    const uri: string | null = await kv.get(WORKSPACE_CUSTOM_URI_KEY);
+    if (uri === null || uri.length === 0) return;
+    const policy: fileShare.PolicyInfo = {
+      uri: uri,
+      operationMode: fileShare.OperationMode.READ_MODE | fileShare.OperationMode.WRITE_MODE,
+    };
+    await fileShare.activatePermission([policy]);
+  } catch (_e) {
+    // 尽力而为
+  }
+};
+
+export const currentWorkspaceCustomDir = (): string => customWorkspaceDir;
+
 export const workspaceRootAbs = (): string => {
   const ctx: Context = AppStorage.get<Context>('abilityContext') as Context;
+  if (customWorkspaceDir.length > 0) return customWorkspaceDir;
   return `${ctx.filesDir}/${WORKSPACE_MIRROR}`;
 };
 

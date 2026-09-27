@@ -7,7 +7,14 @@
 //   onInterceptRequest → https 图片(externalImages 权限 + grant 过 → 代理字节流)
 //   onPageEnd 后可 runJavaScript(回传 _handleNativeResponse)
 // shell = HAR injectMiniAppShell(html, BRIDGE_JS, 每次运行随机 token)
-// 顶部返回栏 + 菜单(查看源码[showSourceButton 门控]/导出)
+// 顶部返回栏 + 菜单(源码编辑[showSourceButton 门控]/导出)
+//
+// 源码编辑器(D2-2):编辑(mono TextArea + 行数指示)/ 预览(Web 直渲,无桥
+//   即无原生能力)/ 保存(saveRevision 走既有 validateMiniAppHtml 校验管线,
+//   成功后 loadApp 重新装配运行)。
+// 偏差登记:行号/语法高亮未做 — TextArea 无滚动同步 API(官方 FAQ 确认),
+//   富文本高亮编辑亦不可行,降级为行数指示 + mono 字体(检查面板语义由
+//   保存时校验错误提示承担)。
 //
 // 图片代理实现说明:onInterceptRequest 为同步回调(component/web.d.ts
 //   Callback<OnInterceptRequestEvent, WebResourceResponse>,不支持 Promise)。
@@ -26,7 +33,7 @@ import {
   BRIDGE_JS, injectMiniAppShell, MINI_APP_SHELL_BASE_URL, MiniAppUrlGuard,
   MINI_APP_MAX_IMAGE_BYTES, MINI_APP_IMAGE_ACCEPT_HEADER,
 } from '@amber/chat-domain';
-import type { MiniAppRecord } from '@amber/chat-domain';
+import type { MiniAppRecord, MiniAppGeneratedOutput } from '@amber/chat-domain';
 import { ACCENT, BG, BODY, ERROR, INK, INK2, INK3, LINE, OVERLAY, SURFACE, TITLE } from '../design/tokens.ets';
 import { FONT_MONO } from '../design/fonts.ets';
 import { getMiniAppPlatform } from '../platform_impl/MiniAppPlatform.ets';
@@ -101,6 +108,13 @@ struct MiniAppRunnerPage {
   @State state: MiniAppRunnerState = loadingState();
   @State shellHtml: string = '';
   @State sourceDialogOpen: boolean = false;
+  // D2-2:源码编辑器状态
+  @State sourceEdit: string = '';
+  @State sourceTabPreview: boolean = false;
+  @State sourceError: string = '';
+  @State sourceSaving: boolean = false;
+  @State sourcePreviewKey: number = 0;
+  private sourcePreviewController: webview.WebviewController = new webview.WebviewController();
   @StorageProp('statusBarHeight') statusBarHeight: number = 44;
   @StorageProp('darkMode') darkMode: boolean = false;
   @StorageProp('accentColor') accentColorStore: string = ACCENT;
@@ -109,7 +123,6 @@ struct MiniAppRunnerPage {
   private bridge: MiniAppBridgeImpl | null = null;
   private controller: webview.WebviewController = new webview.WebviewController();
   private sessionToken: string = '';
-  private sourceTarget: string = '';
   // 图片代理缓存(url → WebResourceResponse;同步 onInterceptRequest 消费)
   private imageCache: Map<string, WebResourceResponse> = new Map<string, WebResourceResponse>();
   private imageGuard: MiniAppUrlGuard = new MiniAppUrlGuard(miniAppDnsResolve);
@@ -384,12 +397,54 @@ struct MiniAppRunnerPage {
     }).then((res: promptAction.ActionMenuSuccessResponse): void => {
       const index: number = res.index;
       if (showSource && index === 0) {
-        this.sourceTarget = app.htmlContent;
+        this.sourceEdit = app.htmlContent;
+        this.sourceError = '';
+        this.sourceTabPreview = false;
         this.sourceDialogOpen = true;
       } else if ((showSource && index === 1) || (!showSource && index === 0)) {
         this.exportHtml(app);
       }
     }).catch((): void => {});
+  }
+
+  // D2-2:保存源码编辑 — 走 saveRevision 既有校验管线(validateMiniAppHtml
+  //   在仓储内执行,失败抛错入 sourceError),成功后 loadApp 重新装配运行
+  private async saveSourceEdit(): Promise<void> {
+    const app: MiniAppRecord | null = this.state.app;
+    if (app === null || this.sourceSaving) return;
+    const platform: MiniAppPlatform | null = this.platform;
+    if (platform === null) {
+      this.sourceError = '平台未就绪';
+      return;
+    }
+    this.sourceSaving = true;
+    this.sourceError = '';
+    try {
+      const output: MiniAppGeneratedOutput = {
+        title: app.title,
+        description: app.description,
+        icon: app.iconEmoji,
+        category: app.category ?? '',
+        permissions: app.permissions,
+        html: this.sourceEdit,
+      };
+      const updated: MiniAppRecord | null =
+        await platform.repository.saveRevision(app.id, output, null, null, '手动编辑源码');
+      if (updated === null) throw new Error('保存失败(记录不存在)');
+      this.sourceDialogOpen = false;
+      this.loadApp();
+      promptAction.showToast({ message: '已保存并重新运行', duration: 1500 });
+    } catch (e) {
+      const msg: string = e instanceof Error ? e.message : String(e);
+      this.sourceError = msg;
+    } finally {
+      this.sourceSaving = false;
+    }
+  }
+
+  private sourceLineCount(): number {
+    if (this.sourceEdit.length === 0) return 0;
+    return this.sourceEdit.split('\n').length;
   }
 
   private exportHtml(app: MiniAppRecord): void {
@@ -566,24 +621,59 @@ struct MiniAppRunnerPage {
       Stack() {
         Column() {
           Row() {
-            Text('源码').fontSize(15).fontWeight(FontWeight.Medium).fontColor(INK).layoutWeight(1)
+            Text('源码编辑').fontSize(15).fontWeight(FontWeight.Medium).fontColor(INK).layoutWeight(1)
+            Text(this.sourceTabPreview ? '编辑' : '预览')
+              .fontSize(14).fontColor(this.accentColorStore)
+              .padding({ left: 12, right: 12, top: 8, bottom: 8 })
+              .onClick((): void => {
+                this.sourceTabPreview = !this.sourceTabPreview;
+                if (this.sourceTabPreview) this.sourcePreviewKey++;
+              })
+            Text('保存')
+              .fontSize(14).fontColor(this.sourceSaving ? INK3 : this.accentColorStore)
+              .padding({ left: 12, right: 12, top: 8, bottom: 8 })
+              .onClick((): void => { this.saveSourceEdit().catch((): void => {}); })
             Text('关闭')
               .fontSize(14).fontColor(this.accentColorStore)
-              .padding({ left: 16, right: 16, top: 8, bottom: 8 })
+              .padding({ left: 12, right: 4, top: 8, bottom: 8 })
               .onClick((): void => { this.sourceDialogOpen = false; })
           }
           .width('100%')
-          Scroll() {
-            Text(this.sourceTarget)
-              .fontSize(11)
-              .fontColor(INK2)
-              .fontFamily(FONT_MONO)
+          if (this.sourceError.length > 0) {
+            Text(this.sourceError)
+              .fontSize(11).fontColor(ERROR)
               .width('100%')
+              .maxLines(3).textOverflow({ overflow: TextOverflow.Ellipsis })
+              .padding({ top: 4, bottom: 4 })
           }
-          .layoutWeight(1)
-          .align(Alignment.Top)
+          if (this.sourceTabPreview) {
+            // 预览:无桥 Web 直渲(无原生能力;JS 放行 — 与运行同级信任,
+            //   保存时仍经 validateMiniAppHtml 校验)
+            Web({ src: 'about:blank', controller: this.sourcePreviewController })
+              .key(`source-preview-${this.sourcePreviewKey}`)
+              .width('100%').layoutWeight(1)
+              .backgroundColor(SURFACE)
+              .javaScriptAccess(true)
+              .onControllerAttached((): void => {
+                this.sourcePreviewController.loadData(
+                  this.sourceEdit, 'text/html', 'utf-8', MINI_APP_SHELL_BASE_URL);
+              })
+          } else {
+            Text(`共 ${this.sourceLineCount()} 行`)
+              .fontSize(11).fontColor(INK3)
+              .width('100%')
+              .padding({ top: 2, bottom: 4 })
+            TextArea({ text: this.sourceEdit, placeholder: '' })
+              .fontSize(11)
+              .fontColor(INK)
+              .fontFamily(FONT_MONO)
+              .backgroundColor(Color.Transparent)
+              .width('100%')
+              .layoutWeight(1)
+              .onChange((v: string): void => { this.sourceEdit = v; })
+          }
         }
-        .width('88%').height('70%')
+        .width('94%').height('86%')
         .padding(16)
         .backgroundColor(SURFACE)
         .borderRadius(14)

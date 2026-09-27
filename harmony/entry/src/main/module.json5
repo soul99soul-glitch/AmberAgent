@@ -46,6 +46,9 @@
       { "name": "ohos.permission.GET_NETWORK_INFO", "reason": "$string:reason_network" },
       // 生成完成触觉反馈(D0-6;normal 档,声明即授权)
       { "name": "ohos.permission.VIBRATE", "reason": "$string:reason_vibrate" },
+      // 自选工作区目录授权持久化(D2-1;若 debug profile 不含 ACL 将回退降级,见
+      //   SettingSandboxPage 诚实注明)
+      { "name": "ohos.permission.FILE_ACCESS_PERSIST", "reason": "$string:reason_file_persist" },
       // user_grant 权限(debug profile 需含 ACL;WRITE 系/定位/蓝牙随工具实装再解注释):
       // READ_CONTACTS 需 debug profile ACL 含该权限(当前 AGC 自动 profile 不含,
       // install 报 9568289);AGC 后台加 ACL 后解注释:

@@ -8,7 +8,7 @@ import { window, display, router } from '@kit.ArkUI';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { notificationManager } from '@kit.NotificationKit';
 import { BusinessError } from '@kit.BasicServicesKit';
-import { getSkillManager, rescheduleCronTasksOnStartup, getChatKvStore } from '../di/AppContainer.ets';
+import { getSkillManager, rescheduleCronTasksOnStartup, getChatKvStore, resetWorkspaceManager } from '../di/AppContainer.ets';
 import { loadDisplaySetting } from '@amber/chat-domain';
 import type { DisplaySetting } from '@amber/chat-domain';
 import { ACCENT, applyTheme, setAccentColor, BG } from '../design/tokens.ets';
@@ -16,6 +16,7 @@ import { themePackStore, applyCurrentTheme } from '../design/theme_packs.ets';
 import { registerAmberFonts, registerAmberFontsFor } from '../design/fonts.ets';
 import { syncMacGatewayPushTokenOnLaunch } from '../platform_impl/MacGatewayClient.ets';
 import { startGenerationKeepAlive, stopGenerationKeepAlive } from '../platform_impl/BackgroundGenerationKeepAlive.ets';
+import { hydrateWorkspaceCustomDir, activateWorkspaceCustomDir, currentWorkspaceCustomDir } from '../platform_impl/WorkspaceStore.ets';
 
 const DOMAIN: number = 0x0001;
 const TAG: string = 'DeepRead.EntryAbility';
@@ -290,6 +291,14 @@ export default class EntryAbility extends UIAbility {
     };
     getChatKvStore().get('ui_color_mode').then((mode: string | null): Promise<DisplaySetting> => {
       const resolvedDark: boolean = mode === 'dark' || (mode !== 'light' && this.systemDarkMode);
+      // D2-1:自选工作区目录 hydrate + 授权激活;完成后若目录非空,
+      //   reset 可能已被竞态(cron 启动)用默认根创建的管理器单例
+      hydrateWorkspaceCustomDir(getChatKvStore())
+        .then((): Promise<void> => activateWorkspaceCustomDir(getChatKvStore()))
+        .then((): void => {
+          if (currentWorkspaceCustomDir().length > 0) resetWorkspaceManager();
+        })
+        .catch((): void => {});
       // 主题包:先 hydrate(KV 选中包/导入库),再按包应用;applyCurrentTheme 内含 applyTheme 全套
       themePackStore.hydrate(getChatKvStore()).then((): void => {
         applyCurrentTheme(resolvedDark);

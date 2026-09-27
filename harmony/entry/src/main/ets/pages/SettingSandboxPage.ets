@@ -1,5 +1,5 @@
 // SettingSandboxPage — 沙盒执行设置(接真实运行时偏好)
-// 工作区根 = filesDir(真值)；终端运行时 = builtin(鸿蒙无 shell 运行时)。
+// 工作区根 = filesDir 镜像或用户自选目录(D2-1);终端运行时 = builtin(鸿蒙无 shell 运行时)。
 // 2026-09-27 二级页 iOS 对齐(基准 IMG_1986「运行环境」):仅换视觉骨架
 // (CenteredTitleBar/PlainSection/CardGroup r18+描边/CardRow/CardToggleRow/FooterNote),逻辑零改动。
 import type { AgentRuntimeSnapshot } from '../platform_impl/AgentRuntimePrefs.ets';
@@ -7,7 +7,14 @@ import {
   loadAgentRuntimeSnapshot, updateSpeculativeToolExecution, updateAgentRuntimeExecution,
 } from '../platform_impl/AgentRuntimePrefs.ets';
 import type { AgentOperationPreviewMode } from '../platform_impl/AgentRuntimePrefs.ets';
-import { getChatKvStore } from '../di/AppContainer.ets';
+import { getChatKvStore, resetWorkspaceManager } from '../di/AppContainer.ets';
+import {
+  workspaceRootAbs, setWorkspaceCustomDir, currentWorkspaceCustomDir,
+  hydrateWorkspaceCustomDir, activateWorkspaceCustomDir,
+} from '../platform_impl/WorkspaceStore.ets';
+import { picker, fileShare } from '@kit.CoreFileKit';
+import { promptAction } from '@kit.ArkUI';
+import { common } from '@kit.AbilityKit';
 import {
   BG, INK, INK3, LINE, TEXT_STYLES, GUTTER, lineHeightForSize,
 } from '../design/tokens.ets';
@@ -31,11 +38,61 @@ struct SettingSandboxPage {
   @State snap: AgentRuntimeSnapshot | null = null;
   @State loadError: boolean = false;
   @State workspaceRoot: string = '';
+  @State workspaceCustom: boolean = false;
+  @State workspaceNote: string = '';
 
   aboutToAppear(): void {
-    const ctx = AppStorage.get<Context>('abilityContext') as Context;
-    this.workspaceRoot = ctx.filesDir;
+    hydrateWorkspaceCustomDir(getChatKvStore()).then((): Promise<void> => {
+      this.workspaceRoot = workspaceRootAbs();
+      this.workspaceCustom = currentWorkspaceCustomDir().length > 0;
+      return activateWorkspaceCustomDir(getChatKvStore());
+    }).catch((): void => {});
+    this.workspaceRoot = workspaceRootAbs();
+    this.workspaceCustom = currentWorkspaceCustomDir().length > 0;
     this.loadSnapshot();
+  }
+
+  // D2-1:自选工作区目录(FOLDER picker;授权持久化尽力而为,失败诚实注明)
+  private async pickWorkspaceDir(): Promise<void> {
+    try {
+      const ctx: common.UIAbilityContext =
+        AppStorage.get<common.UIAbilityContext>('abilityContext') as common.UIAbilityContext;
+      const options: picker.DocumentSelectOptions = new picker.DocumentSelectOptions();
+      options.selectMode = picker.DocumentSelectMode.FOLDER;
+      options.maxSelectNumber = 1;
+      const uris: string[] = await new picker.DocumentViewPicker(ctx).select(options);
+      if (uris.length === 0) return;
+      const uri: string = uris[0];
+      // 尽力持久化授权(失败 = 进程重启后需重新选择;不阻断本次使用)
+      let persisted: boolean = true;
+      try {
+        const policy: fileShare.PolicyInfo = {
+          uri: uri,
+          operationMode: fileShare.OperationMode.READ_MODE | fileShare.OperationMode.WRITE_MODE,
+        };
+        await fileShare.persistPermission([policy]);
+      } catch (_e) {
+        persisted = false;
+      }
+      // URI 形如 file://docs/storage/Users/... — 剥协议+authority 得真实路径
+      const dir: string = uri.replace(/^file:\/\/(docs)?/, '');
+      await setWorkspaceCustomDir(getChatKvStore(), dir, uri);
+      resetWorkspaceManager();
+      this.workspaceRoot = workspaceRootAbs();
+      this.workspaceCustom = true;
+      this.workspaceNote = persisted ? '' : '当前系统未允许授权持久化,重启后需重新选择目录';
+    } catch (e) {
+      const msg: string = e instanceof Error ? e.message : String(e);
+      promptAction.showToast({ message: `选择目录失败:${msg}`, duration: 2000 });
+    }
+  }
+
+  private async resetWorkspaceDir(): Promise<void> {
+    await setWorkspaceCustomDir(getChatKvStore(), '', '');
+    resetWorkspaceManager();
+    this.workspaceRoot = workspaceRootAbs();
+    this.workspaceCustom = false;
+    this.workspaceNote = '';
   }
 
   private loadSnapshot(): void {
@@ -94,7 +151,9 @@ struct SettingSandboxPage {
     Column() {
       CardRow({
         label: 'Workspace',
-        desc: 'AmberAgent 将应用沙箱目录作为文件工具和命令运行的 /workspace。',
+        desc: this.workspaceCustom
+          ? 'AmberAgent 将你选择的目录作为文件工具和命令运行的 /workspace。'
+          : 'AmberAgent 将应用沙箱目录作为文件工具和命令运行的 /workspace。',
         iconName: 'folder', plateSize: 28,
         showChevron: false, isLast: true,
       })
@@ -108,7 +167,25 @@ struct SettingSandboxPage {
         .textOverflow({ overflow: TextOverflow.Ellipsis })
         .width('100%')
         // 与行标题对齐:行 padding 14 + 图标座 28 + 间距 12
-        .padding({ left: 54, right: 14, bottom: 12 })
+        .padding({ left: 54, right: 14, bottom: 4 })
+      if (this.workspaceNote.length > 0) {
+        Text(this.workspaceNote)
+          .fontSize(TEXT_STYLES.meta.size)
+          .fontColor(INK3)
+          .width('100%')
+          .padding({ left: 54, right: 14, bottom: 4 })
+      }
+      Row() {
+        BtnGhost({ label: this.workspaceCustom ? '更改目录' : '选择目录',
+          onTap: (): void => { this.pickWorkspaceDir().catch((): void => {}); } })
+        if (this.workspaceCustom) {
+          BtnGhost({ label: '恢复默认',
+            onTap: (): void => { this.resetWorkspaceDir().catch((): void => {}); } })
+            .margin({ left: 8 })
+        }
+      }
+      .width('100%')
+      .padding({ left: 54, right: 14, bottom: 12, top: 4 })
     }
     .width('100%')
   }
