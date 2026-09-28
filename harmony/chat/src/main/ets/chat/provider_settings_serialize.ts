@@ -45,7 +45,7 @@ const abilityFromWire = (s: string): ModelAbility => {
 };
 
 const BUILT_IN_TOOLS: ReadonlyArray<string> = ['search', 'url_context', 'image_generation'];
-const GOOGLE_AUTH_MODES: ReadonlyArray<string> = ['api_key', 'gemini_code_assist_oauth'];
+const GOOGLE_AUTH_MODES: ReadonlyArray<string> = ['api_key', 'gemini_code_assist_oauth', 'antigravity_oauth'];
 const OPENAI_AUTH_MODES: ReadonlyArray<string> = [
   'api_key', 'codex_oauth', 'grok_oauth', 'zhipu_coding_plan', 'kimi_coding_plan',
   'mimo_coding_plan', 'minimax_token_plan',
@@ -171,10 +171,14 @@ export const serializeProviderSetting = (s: ProviderSetting): string => {
     parts.push(`"vertexAI":${s.vertexAI}`);
     parts.push(`"useServiceAccount":${s.useServiceAccount}`);
     parts.push(`"privateKey":${esc(s.privateKey)}`);
+    parts.push(`"privateKeyRef":${esc(s.privateKeyRef)}`);
     parts.push(`"serviceAccountEmail":${esc(s.serviceAccountEmail)}`);
     parts.push(`"location":${esc(s.location)}`);
     parts.push(`"projectId":${esc(s.projectId)}`);
     parts.push(`"authMode":${esc(s.authMode)}`);
+    parts.push(`"oauthClientId":${esc(s.oauthClientId)}`);
+    parts.push(`"oauthRedirectUri":${esc(s.oauthRedirectUri)}`);
+    parts.push(`"oauthClientSecretRef":${esc(s.oauthClientSecretRef)}`);
   } else {
     parts.push(`"apiKey":${esc(s.apiKey)}`);
     parts.push(`"baseUrl":${esc(s.baseUrl)}`);
@@ -212,11 +216,15 @@ const parseProviderSettingFromObject = (o: JsonObject): ProviderSetting => {
       vertexAI: boolOr(o, 'vertexAI', false),
       useServiceAccount: boolOr(o, 'useServiceAccount', false),
       privateKey: strOr(o, 'privateKey', ''),
+      privateKeyRef: strOr(o, 'privateKeyRef', ''),
       serviceAccountEmail: strOr(o, 'serviceAccountEmail', ''),
       location: strOr(o, 'location', 'us-central1'),
       projectId: strOr(o, 'projectId', ''),
       authMode: enumOr<GoogleAuthMode>(
         strOr(o, 'authMode', 'api_key'), GOOGLE_AUTH_MODES, 'api_key'),
+      oauthClientId: strOr(o, 'oauthClientId', ''),
+      oauthRedirectUri: strOr(o, 'oauthRedirectUri', ''),
+      oauthClientSecretRef: strOr(o, 'oauthClientSecretRef', ''),
     });
   }
   if (type === 'claude') {

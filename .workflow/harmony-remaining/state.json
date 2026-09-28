@@ -2,7 +2,7 @@
   "objective": "完成所有纳入范围的剩余功能并逐阶段独立审查与验证",
   "baseline": "6840fa551",
   "status": "active",
-  "currentPhase": "E9",
+  "currentPhase": "E10",
   "authorization": "用户授权持续实施、subagent审查、分阶段推进",
   "phases": {
     "E0": "complete",
@@ -15,7 +15,7 @@
     "E7": "in_progress",
     "E8": "in_progress",
     "E9": "in_progress",
-    "E10": "pending",
+    "E10": "in_progress",
     "E11": "pending",
     "E12": "pending",
     "E13": "pending",
@@ -45,7 +45,10 @@
     "E7SourceCommit": "1bbd1dc43",
     "E8Contract": "frozen: packets/E8-contract.md; results/E8-task-provider-design.md actual seven slots/provider UUID identity/consumer/setup evidence",
     "E8": "Source independent A/B PASS; only selection and actual consumer groups with concrete legacy/cache red-green PASS; affected types/lint0error/final Release9.256s PASS; local sign Digest/verify-app PASS. C device/real provider/UI/install pending; see E8-gate.md",
-    "E9Contract": "frozen: packets/E9-contract.md; separate Antigravity/CodeAssist/SA identity, secure references and per-request auth"
+    "E9Contract": "frozen: packets/E9-contract.md; separate Antigravity/CodeAssist/SA identity, secure references and per-request auth",
+    "E8SourceCommit": "189eec7bd",
+    "E9": "Source independent A/B PASS; only domain HTTP10, Entry lifecycle1 with concrete stale-binding red/green, temporary RSA1 and native TCP1/SDK syntax groups PASS; narrow types/lint0error/final Release10.586s/local sign verify PASS. C actual Google account/API12 store/crypto/browser/UI/install pending; see E9-gate.md",
+    "E10Contract": "frozen: packets/E10-contract.md; explicit Google builtin request mode, complete metadata-only tail/source-status/HTML persistence and actual UI consumers"
   },
   "blockers": [
     {
@@ -82,6 +85,11 @@
       "phase": "E8",
       "kind": "device_connection",
       "details": "Latest recorded HDC Empty; no repeated device recovery or matrix. Seven-slot/save-return/UI/OCR/image real provider/platform/install/launch acceptance pending. Independent E9 source follows checkpoint."
+    },
+    {
+      "phase": "E9",
+      "kind": "device_account_acceptance",
+      "details": "Latest recorded HDC Empty; no repeated recovery or account requests. Registered client/redirect, API12 Asset/Crypto/native browser callback, Code Assist/Antigravity eligibility and Vertex inference, streaming/nonstream, UI/install/launch pending. Source Release and local sign verified; continue E10."
     }
   ]
 }

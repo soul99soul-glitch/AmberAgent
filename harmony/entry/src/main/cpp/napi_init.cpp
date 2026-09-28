@@ -4,6 +4,7 @@
 #include "python_napi.h"
 #include "plugin_js_napi.h"
 #include "mosh_napi.h"
+#include "google_loopback_napi.h"
 
 #include <memory>
 #include <string>
@@ -180,7 +181,8 @@ napi_value Init(napi_env env, napi_value exports)
     if (RegisterSSH(env, exports) == nullptr) return nullptr;
     if (RegisterPython(env, exports) == nullptr) return nullptr;
     if (RegisterMosh(env, exports) == nullptr) return nullptr;
-    return RegisterPluginJs(env, exports);
+    if (RegisterPluginJs(env, exports) == nullptr) return nullptr;
+    return RegisterGoogleLoopback(env, exports);
 }
 
 napi_module module = {1, 0, nullptr, Init, "amber_native", nullptr, {0}};

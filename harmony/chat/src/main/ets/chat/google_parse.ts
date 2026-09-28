@@ -157,7 +157,11 @@ export const parseGoogleUsageMeta = (obj: JsonObject | null): TokenUsage | null 
 
 // ===== generateText 响应提取(:246-280) =====
 
-export const parseGoogleResponseBody = (bodyJson: JsonObject, modelId: string): MessageChunk => {
+export const unwrapGoogleResponse = (bodyJson: JsonObject): JsonObject =>
+  isObj(bodyJson['response']) ? bodyJson['response'] : bodyJson;
+
+export const parseGoogleResponseBody = (rawJson: JsonObject, modelId: string): MessageChunk => {
+  const bodyJson: JsonObject = unwrapGoogleResponse(rawJson);
   const feedback: JsonValue | undefined = bodyJson['promptFeedback'];
   const blockReason: string | null = isObj(feedback) ? strOrNull(feedback['blockReason']) : null;
   if (blockReason !== null) {
@@ -222,9 +226,7 @@ export const parseGoogleStreamEventData = (
   data: string, modelId: string, allocator: GoogleToolIdAllocator,
 ): MessageChunk | null => {
   const rawJson: JsonObject = JSON.parse(data) as JsonObject;
-  const jsonData: JsonObject = isObj(rawJson['response'])
-    ? (rawJson['response'] as JsonObject)
-    : rawJson;
+  const jsonData: JsonObject = unwrapGoogleResponse(rawJson);
 
   const feedback: JsonValue | undefined = jsonData['promptFeedback'];
   const reason: string | null = isObj(feedback) ? strOrNull(feedback['blockReason']) : null;

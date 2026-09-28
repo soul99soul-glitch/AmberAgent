@@ -57,9 +57,18 @@ export const providerFromImportJson = (json: string): ProviderSetting => {
     });
   });
   if (providerType === 'google') {
+    const authMode = importString(doc, 'authMode', 'api_key');
+    if (authMode !== 'api_key' && authMode !== 'gemini_code_assist_oauth' && authMode !== 'antigravity_oauth') {
+      throw new Error('Google 授权模式不支持');
+    }
     return makeProviderSettingGoogle({
       name, baseUrl, models,
       vertexAI: importBoolean(doc, 'vertexAI'),
+      useServiceAccount: importBoolean(doc, 'useServiceAccount'),
+      authMode,
+      serviceAccountEmail: importString(doc, 'serviceAccountEmail', ''),
+      oauthClientId: importString(doc, 'oauthClientId', ''),
+      oauthRedirectUri: importString(doc, 'oauthRedirectUri', ''),
       location: importString(doc, 'location', 'us-central1'),
       projectId: importString(doc, 'projectId', ''),
     });

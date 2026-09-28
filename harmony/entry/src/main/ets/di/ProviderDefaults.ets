@@ -184,7 +184,11 @@ const nameSlug = (name: string): string => {
   return out;
 };
 
-// auth 徽标:鸿蒙仅支持 API Key — 有 key 即 key,否则 —(OAuth/token 不撒谎)
+// Auth labels describe configuration only; Google account state is resolved by Entry.
 export function providerAuthLabel(p: ProviderSetting): string {
+  if (p.type === 'google') {
+    if (p.useServiceAccount) return 'service_account';
+    if (p.authMode !== 'api_key') return 'google_oauth';
+  }
   return p.apiKey.length > 0 ? 'key' : '—';
 }

@@ -130,3 +130,18 @@ export const moshResize: (handle: MoshHandle, columns: number, rows: number) => 
 export const moshClose: (
   handle: MoshHandle, reason: 'cancelled' | 'disconnected' | 'release'
 ) => Promise<MoshPacket>;
+
+/** Bounded loopback OAuth callback transport; no credentials are persisted. */
+export interface GoogleLoopbackHandle { handleId: string; port: number; }
+export interface GoogleLoopbackRequest {
+  connectionId: string;
+  requestTarget: string;
+  errorCode: string | null;
+}
+export const startGoogleLoopback: (
+  port: number, callback: (request: GoogleLoopbackRequest) => void
+) => Promise<GoogleLoopbackHandle>;
+export const replyGoogleLoopback: (
+  handleId: string, connectionId: string, status: number
+) => Promise<void>;
+export const closeGoogleLoopback: (handleId: string) => Promise<void>;

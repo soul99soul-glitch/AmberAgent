@@ -82,6 +82,7 @@
     "pages/TerminalPage",
     "pages/PythonPage",
     "pages/RecipesPage",
-    "pages/PluginsPage"
+    "pages/PluginsPage",
+    "pages/GoogleProviderAuthPage"
   ]
 }

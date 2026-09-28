@@ -66,7 +66,7 @@ export const makeBalanceOption = (opts: Partial<BalanceOption> = {}): BalanceOpt
 
 // ===== GoogleAuthMode =====
 
-export type GoogleAuthMode = 'api_key' | 'gemini_code_assist_oauth';
+export type GoogleAuthMode = 'api_key' | 'gemini_code_assist_oauth' | 'antigravity_oauth';
 
 // ===== ProviderSetting(sealed 3 变体) =====
 
@@ -95,10 +95,14 @@ export interface ProviderSettingGoogle extends ProviderSettingBase {
   vertexAI: boolean;
   useServiceAccount: boolean;
   privateKey: string;
+  privateKeyRef: string;
   serviceAccountEmail: string;
   location: string;
   projectId: string;
   authMode: GoogleAuthMode;
+  oauthClientId: string;
+  oauthRedirectUri: string;
+  oauthClientSecretRef: string;
 }
 
 export interface ProviderSettingClaude extends ProviderSettingBase {
@@ -146,10 +150,14 @@ export const makeProviderSettingGoogle = (
   vertexAI: opts.vertexAI ?? false,
   useServiceAccount: opts.useServiceAccount ?? false,
   privateKey: opts.privateKey ?? '',
+  privateKeyRef: opts.privateKeyRef ?? '',
   serviceAccountEmail: opts.serviceAccountEmail ?? '',
   location: opts.location ?? 'us-central1',
   projectId: opts.projectId ?? '',
   authMode: opts.authMode ?? 'api_key',
+  oauthClientId: opts.oauthClientId ?? '',
+  oauthRedirectUri: opts.oauthRedirectUri ?? '',
+  oauthClientSecretRef: opts.oauthClientSecretRef ?? '',
 });
 
 export const makeProviderSettingClaude = (
@@ -196,6 +204,7 @@ export const googleAuthModeFixedBaseUrl = (mode: GoogleAuthMode): string | null 
   switch (mode) {
     case 'api_key': return null;
     case 'gemini_code_assist_oauth': return 'https://cloudcode-pa.googleapis.com';
+    case 'antigravity_oauth': return 'https://daily-cloudcode-pa.googleapis.com';
   }
 };
 
@@ -207,9 +216,15 @@ export const hasUsableAuth = (setting: ProviderSetting): boolean => {
     return setting.authMode === 'api_key' && setting.apiKey.trim().length > 0;
   }
   if (setting.type === 'google') {
-    // Service-account JWT and Gemini Code Assist OAuth are not implemented.
-    return !setting.useServiceAccount && setting.authMode === 'api_key'
-      && setting.apiKey.trim().length > 0;
+    if (setting.authMode !== 'api_key') {
+      return setting.oauthClientId.trim().length > 0 && setting.oauthRedirectUri.trim().length > 0;
+    }
+    if (setting.useServiceAccount) {
+      return setting.vertexAI && setting.serviceAccountEmail.trim().length > 0
+        && setting.projectId.trim().length > 0 && setting.location.trim().length > 0
+        && (setting.privateKey.length > 0 || setting.privateKeyRef.length > 0);
+    }
+    return setting.apiKey.trim().length > 0;
   }
   return setting.apiKey.trim().length > 0;
 };
@@ -239,7 +254,10 @@ export const copyProviderSettingWithModels = (
         balanceOption: s.balanceOption, apiKey: s.apiKey, baseUrl: s.baseUrl,
         vertexAI: s.vertexAI, useServiceAccount: s.useServiceAccount,
         privateKey: s.privateKey, serviceAccountEmail: s.serviceAccountEmail,
+        privateKeyRef: s.privateKeyRef,
         location: s.location, projectId: s.projectId, authMode: s.authMode,
+        oauthClientId: s.oauthClientId, oauthRedirectUri: s.oauthRedirectUri,
+        oauthClientSecretRef: s.oauthClientSecretRef,
       };
     }
     case 'claude': {

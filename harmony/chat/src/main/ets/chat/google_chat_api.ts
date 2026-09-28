@@ -4,13 +4,9 @@
 //   buildUrl(:111-119) / transformRequest(:121-145)
 //   generateText(:194-281) / streamText(:283-463) / onFailure(:416-448)
 //
-// 裁剪(登记):
-//   - Vertex AI service account(JWT 换 token)= P1;命中即抛错(非静默)
-//   - Gemini Code Assist OAuth(v1internal 包装/解包 + Bearer)= P1;
-//     纯逻辑层的 isCodeAssistOAuth/response 解包已保留
-//   - configureReferHeaders/customHeaders 由 adapter 经 headers() 注入
+// Token resolution is injected by Entry; this layer keeps the existing body/SSE engine.
 
-import type { HttpClient, HttpRequest } from '@amber/deepread-domain';
+import type { AbortSignalLike, HttpClient, HttpRequest } from '@amber/deepread-domain';
 import { SseAssembler } from '@amber/deepread-domain';
 import type { SseEvent } from '@amber/deepread-domain';
 
@@ -22,7 +18,7 @@ import { buildGoogleCompletionRequestBody } from './google_request.ts';
 import type { GoogleImageEncoder } from './google_request.ts';
 import {
   createGoogleStreamToolIdAllocator, parseGoogleResponseBody,
-  parseGoogleStreamEventData,
+  parseGoogleStreamEventData, unwrapGoogleResponse,
 } from './google_parse.ts';
 import { parseOpenAiErrorDetail } from './openai_parse.ts';
 import type { JsonValue } from './json.ts';
@@ -30,6 +26,9 @@ import type { ChatStreamProvider, StreamOpts } from './chat_turn.ts';
 import type { CallOpts, OpenAIChatApi } from './openai_chat_api.ts';
 import { createDefaultKeyRoulette } from '../search/search_service.ts';
 import type { KeyRoulette } from '../search/search_service.ts';
+import { newId } from './ids.ts';
+import { GoogleAuthError, googleCloudCodeHeaders, googleCloudCodeMethodUrl } from './google_auth.ts';
+import type { GoogleAuthResolver, GoogleRequestAuth } from './google_auth.ts';
 
 // KeyRoulette.default()(KeyRoulette.kt:12;deps 未注入时兜底)
 const DEFAULT_ROULETTE: KeyRoulette = createDefaultKeyRoulette();
@@ -43,16 +42,13 @@ export interface GoogleChatApiDeps {
   // D-078:多 key 轮换(GoogleProvider.kt:77/:134 — 每请求 next(apiKey, id));
   //   未提供 → DefaultKeyRoulette(random)
   keyRoulette?: KeyRoulette;
+  resolveAuth?: GoogleAuthResolver;
 }
 
 // buildUrl(:111-119)
 const buildGoogleUrl = (setting: ProviderSettingGoogle, path: string): string => {
   if (!setting.vertexAI) {
     return `${setting.baseUrl}/${path}`;
-  }
-  if (setting.useServiceAccount) {
-    // service account JWT 换 token = P1(登记);抛错而非静默降级
-    throw new Error('vertex service account 未落地(P1)');
   }
   return `https://aiplatform.googleapis.com/v1/${path}`;
 };
@@ -72,31 +68,81 @@ const applyGoogleAuth = (
   return url;
 };
 
-const buildRequest = (
+const throwIfCancelled = (signal: AbortSignalLike | undefined): void => {
+  if (signal?.aborted === true) {
+    const error: Error = new Error('Google request aborted');
+    error.name = 'AbortError';
+    throw error;
+  }
+};
+
+const buildRequest = async (
   deps: GoogleChatApiDeps,
   messages: UIMessage[],
   params: TextGenerationParams,
   stream: boolean,
-): HttpRequest => {
-  if (deps.setting.authMode === 'gemini_code_assist_oauth') {
-    // v1internal 包装 + Bearer + onboarding = P1(登记);抛错而非静默发错端点
-    throw new Error('Gemini Code Assist OAuth 未落地(P1)');
+  signal?: AbortSignalLike,
+): Promise<HttpRequest> => {
+  throwIfCancelled(signal);
+  const setting: ProviderSettingGoogle = deps.setting;
+  const oauth: boolean = setting.authMode !== 'api_key';
+  const bearer: boolean = oauth || setting.useServiceAccount;
+  let auth: GoogleRequestAuth | null = null;
+  if (bearer) {
+    if (!oauth && !setting.vertexAI) throw new GoogleAuthError('auth_configuration', '服务账号需要 Vertex AI 模式。');
+    if (deps.resolveAuth === undefined) throw new GoogleAuthError('auth_unavailable', 'Google 认证 resolver 未配置。');
+    auth = await deps.resolveAuth(setting, signal);
+    throwIfCancelled(signal);
+    const expected: GoogleRequestAuth['kind'] = setting.authMode === 'antigravity_oauth' ? 'antigravity'
+      : setting.authMode === 'gemini_code_assist_oauth' ? 'code_assist' : 'service_account';
+    if (auth.kind !== expected) throw new GoogleAuthError('auth_identity', 'Google 认证身份与当前模式不一致。');
+    if (auth.accessToken.trim().length === 0 || auth.projectId.trim().length === 0
+      || (auth.kind === 'service_account' && auth.location.trim().length === 0)) {
+      throw new GoogleAuthError('auth_incomplete', 'Google 认证缺少有效 token、项目或区域。');
+    }
   }
   const body = buildGoogleCompletionRequestBody({
     messages, params,
-    isCodeAssistOAuth: false,
+    isCodeAssistOAuth: oauth,
     encodeImage: deps.encodeImage,
   });
-  const modelPath: string = deps.setting.vertexAI
+  const method: string = stream ? 'streamGenerateContent' : 'generateContent';
+  const modelPath: string = setting.vertexAI
     ? `publishers/google/models/${params.model.modelId}:${stream ? 'streamGenerateContent' : 'generateContent'}`
     : `models/${params.model.modelId}:${stream ? 'streamGenerateContent' : 'generateContent'}`;
-  let url: string = buildGoogleUrl(deps.setting, modelPath);
+  let url: string;
+  let requestBody: JsonObject = body;
+  if (auth !== null && auth.kind === 'service_account') {
+    url = 'https://aiplatform.googleapis.com/v1/projects/' + encodeURIComponent(auth.projectId)
+      + '/locations/' + encodeURIComponent(auth.location) + '/publishers/google/models/'
+      + encodeURIComponent(params.model.modelId) + ':' + method;
+  } else if (auth !== null && setting.authMode !== 'api_key') {
+    url = googleCloudCodeMethodUrl(setting.authMode, method);
+    requestBody = auth.kind === 'antigravity'
+      ? { model: params.model.modelId, project: auth.projectId, userAgent: 'antigravity',
+        requestType: 'agent', requestId: `agent-${newId()}`, request: body }
+      : { model: params.model.modelId, project: auth.projectId, user_prompt_id: newId(), request: body };
+  } else {
+    url = buildGoogleUrl(setting, modelPath);
+  }
   if (stream) {
     url += `${url.indexOf('?') >= 0 ? '&' : '?'}alt=sse`;
   }
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   const extra = deps.headers !== undefined ? deps.headers() : {};
   for (const k of Object.keys(extra)) headers[k] = extra[k];
+  if (auth !== null) {
+    for (const key of Object.keys(headers)) {
+      if (key.toLowerCase() === 'authorization' || key.toLowerCase() === 'x-goog-api-key') delete headers[key];
+    }
+    if (setting.authMode !== 'api_key') {
+      const authHeaders: Record<string, string> = googleCloudCodeHeaders(setting.authMode, auth.accessToken);
+      for (const key of Object.keys(authHeaders)) headers[key] = authHeaders[key];
+    } else {
+      headers['Authorization'] = `Bearer ${auth.accessToken}`;
+    }
+    return { url, method: 'POST', headers, body: JSON.stringify(requestBody) };
+  }
   // GoogleProvider.kt:134 — 每请求 keyRoulette.next(apiKey, id)
   const roulette: KeyRoulette = deps.keyRoulette ?? DEFAULT_ROULETTE;
   url = applyGoogleAuth(deps.setting, url, headers,
@@ -111,7 +157,8 @@ const googleEventError = (data: string): Error | null => {
   try {
     const parsed: unknown = JSON.parse(data);
     if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return null;
-    const errValue: unknown = (parsed as Record<string, unknown>)['error'];
+    const root: JsonObject = parsed as JsonObject;
+    const errValue: unknown = root['error'] ?? unwrapGoogleResponse(root)['error'];
     if (errValue === undefined || errValue === null) return null;
     return parseOpenAiErrorDetail(errValue as JsonValue);
   } catch {
@@ -124,7 +171,7 @@ const errorFromFailureBody = (status: number, bodyRaw: string): Error => {
   if (bodyRaw.trim().length > 0) {
     try {
       const parsed = JSON.parse(bodyRaw) as JsonObject;
-      const errRaw = parsed['error'];
+      const errRaw = parsed['error'] ?? unwrapGoogleResponse(parsed)['error'];
       if (typeof errRaw === 'object' && errRaw !== null && !Array.isArray(errRaw)) {
         const msg = (errRaw as JsonObject)['message'];
         return new Error(typeof msg === 'string' ? msg : 'unknown');
@@ -144,7 +191,7 @@ export const createGoogleChatApi = (deps: GoogleChatApiDeps): OpenAIChatApi => {
     onChunk: (chunk: MessageChunk) => void,
     opts?: CallOpts,
   ): Promise<void> => {
-    const req = buildRequest(deps, messages, params, true);
+    const req = await buildRequest(deps, messages, params, true, opts?.signal);
     const assembler = new SseAssembler();
     // 流 scope tool id 稳定分配(Android :334)
     const allocator = createGoogleStreamToolIdAllocator();
@@ -190,11 +237,13 @@ export const createGoogleChatApi = (deps: GoogleChatApiDeps): OpenAIChatApi => {
     params: TextGenerationParams,
     opts?: CallOpts,
   ): Promise<MessageChunk> => {
-    const req = buildRequest(deps, messages, params, false);
+    const req = await buildRequest(deps, messages, params, false, opts?.signal);
     const resp = await deps.http.fetch(req, { signal: opts?.signal });
     if (resp.status < 200 || resp.status >= 300) {
-      throw new Error(`Failed to get response: ${resp.status} ${resp.body}`);
+      throw errorFromFailureBody(resp.status, resp.body);
     }
+    const eventError: Error | null = googleEventError(resp.body);
+    if (eventError !== null) throw eventError;
     return parseGoogleResponseBody(JSON.parse(resp.body) as JsonObject, params.model.modelId);
   };
 

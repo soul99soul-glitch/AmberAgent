@@ -1432,3 +1432,6 @@ export { createPluginRun, createPluginLoopAdapter, recoverInterruptedPlugins } f
 export type { PluginLoopAdapterDeps } from './chat/plugins/runner.ts';
 export { createPluginTools, getPluginSDK } from './chat/plugins/tools.ts';
 export type { PluginToolDeps } from './chat/plugins/tools.ts';
+
+// E9 separate Google authentication identities and protocol ports.
+export * from './chat/google_auth.ts';

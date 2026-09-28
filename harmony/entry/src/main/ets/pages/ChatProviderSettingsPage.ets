@@ -3,12 +3,7 @@
 //   OpenAIEndpointFields(:531-561) / GoogleAuthConsole(:436-487)
 //   GoogleEndpointFields(:563-623) / ClaudeEndpointFields(:625-642)
 // 持久化:saveProviders → Preferences KV(chat-domain D-016/D-017 线格式)
-// 裁剪(登记 D-047):
-//   - Harmony 仅支持 API Key;历史 OAuth/token-plan 配置明确提示迁移,
-//     不把旧 token 当 API Key 展示或继续执行
-//   - Responses API、Google Service Account 当前不支持;保存时迁移到已支持边界
-//   - brand 编辑及 openai account 区(余额等)= P1
-//   - 编辑中切换选中会丢弃未保存修改(MVP 草稿语义)
+// Google账号与服务账号认证由独立配置页和安全仓承载；列表从真实状态读取徽标。
 // 视觉:2026-09-27 二级页 iOS 对齐(基准截图 IMG_1989)——居中标题 + accent 圆添加、
 //   搜索胶囊、PlainSection 组标、r18 发丝描边卡组、圆形字母头像 + StatusChip;
 //   逻辑(加载/筛选/跳转/添加)零改动。
@@ -27,6 +22,7 @@ import {
   loadProviders, saveProviders, providerFromImportJson,
 } from '@amber/chat-domain';
 import { getChatKvStore } from '../di/AppContainer.ets';
+import { loadGoogleAuthStatus } from '../platform_impl/GoogleAuthSupport.ets';
 import { DEFAULT_PROVIDERS, toProviderMonogram, providerSlug, providerAuthLabel } from '../di/ProviderDefaults.ets';
 import { ProviderTemplatePickerSheet } from '../components/ProviderTemplatePickerSheet.ets';
 import { ProviderBalanceText } from '../components/ui/ProviderBalanceText.ets';
@@ -42,6 +38,7 @@ interface ProviderRow {
   slug: string;
   auth: string;
   modelsCount: number;
+  viewVersion: number;
 }
 
 @Entry
@@ -97,14 +94,32 @@ struct ChatProviderSettingsPage {
     });
   }
 
-  private rebuildRows(): void {
-    this.rows = this.all.map((p: ProviderSetting): ProviderRow => ({
+  private rowsSeq: number = 0;
+  private providerRow(p: ProviderSetting, auth: string, viewVersion: number): ProviderRow {
+    return {
       id: p.id, name: p.name, ptype: p.type, enabled: p.enabled,
-      mono: toProviderMonogram(p.name),
-      slug: providerSlug(p),
-      auth: providerAuthLabel(p),
-      modelsCount: p.models.length,
-    }));
+      mono: toProviderMonogram(p.name), slug: providerSlug(p), auth,
+      modelsCount: p.models.length, viewVersion,
+    };
+  }
+  private rebuildRows(): void {
+    const seq: number = ++this.rowsSeq;
+    const providers: ProviderSetting[] = this.all;
+    this.rows = providers.map((p: ProviderSetting): ProviderRow => this.providerRow(p, providerAuthLabel(p), seq * 2));
+    if (!providers.some((p: ProviderSetting): boolean =>
+      p.type === 'google' && (p.useServiceAccount || p.authMode !== 'api_key'))) return;
+    Promise.all(providers.map(async (p: ProviderSetting): Promise<ProviderRow> => {
+      let auth: string = providerAuthLabel(p);
+      if (p.type === 'google' && (p.useServiceAccount || p.authMode !== 'api_key')) {
+        try {
+          const status = await loadGoogleAuthStatus(p);
+          auth = status.phase === 'configured' && status.mode === 'service_account'
+            ? 'google_service_account_configured' : `google_${status.phase}`;
+        }
+        catch (_) { auth = 'google_error'; }
+      }
+      return this.providerRow(p, auth, seq * 2 + 1);
+    })).then((rows: ProviderRow[]): void => { if (seq === this.rowsSeq) this.rows = rows; });
   }
 
   private settingFor(id: string): ProviderSetting | null {
@@ -128,7 +143,7 @@ struct ChatProviderSettingsPage {
       await saveProviders(getChatKvStore(), next);
       this.all = next;
       this.rebuildRows();
-      promptAction.showToast({ message: '已导入,请在详情页补填 API Key', duration: 2000 });
+      promptAction.showToast({ message: '已导入，请在详情页重新配置凭据或账号授权。', duration: 2000 });
     } catch (e) {
       const msg: string = e instanceof Error ? e.message : String(e);
       promptAction.showToast({ message: `导入失败:${msg}`, duration: 2000 });
@@ -156,13 +171,26 @@ struct ChatProviderSettingsPage {
     return n;
   }
 
-  // 状态 chip 文案/色调:鸿蒙仅 API Key — 有 key 即已配置(绿),否则未填写(灰)
+  // 配置与授权状态分开，不把安全仓引用或客户端配置当作成功授权。
   private chipLabel(auth: string): string {
-    return auth === 'key' ? '已配置' : '未填写';
+    if (auth === 'key') return '已配置';
+    if (auth === 'google_ready') return '已授权';
+    if (auth === 'google_service_account_configured') return 'SA 已配置';
+    if (auth === 'google_configured') return '待刷新';
+    if (auth === 'google_authorizing') return '授权中';
+    if (auth === 'google_onboarding_required') return '待接入';
+    if (auth === 'google_error') return '读取失败';
+    if (auth === 'google_signed_out') return '待登录';
+    if (auth === 'service_account' || auth === 'google_oauth') return '读取中';
+    return '未配置';
   }
-
   private chipTone(auth: string): string {
-    return auth === 'key' ? 'success' : 'muted';
+    if (auth === 'key' || auth === 'google_ready') return 'success';
+    if (auth === 'google_error') return 'error';
+    if (auth === 'google_service_account_configured' || auth === 'google_configured'
+      || auth === 'google_authorizing') return 'accent';
+    if (auth === 'google_onboarding_required') return 'warn';
+    return 'muted';
   }
 
   // iOS 圆形字母头像:40 圆 SURFACE2 底 + 名称首字(单字符,对齐 iOS)+ 右下 8 状态点(启用=accent,否则灰)
@@ -239,7 +267,7 @@ struct ChatProviderSettingsPage {
       (row: ProviderRow, idx: number): void => {
         this.providerCardRow(row,
           idx === this.filteredRows().filter((r: ProviderRow): boolean => r.enabled).length - 1)
-      }, (row: ProviderRow): string => `on-${row.id}`)
+      }, (row: ProviderRow): string => `on-${row.id}-${row.viewVersion}`)
   }
 
   @Builder
@@ -251,7 +279,7 @@ struct ChatProviderSettingsPage {
             idx === this.filteredRows().filter((r: ProviderRow): boolean => !r.enabled).length - 1)
         }
         .opacity(0.42)
-      }, (row: ProviderRow): string => `off-${row.id}`)
+      }, (row: ProviderRow): string => `off-${row.id}-${row.viewVersion}`)
   }
 
   @Builder

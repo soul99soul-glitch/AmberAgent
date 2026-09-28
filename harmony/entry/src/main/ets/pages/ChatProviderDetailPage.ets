@@ -10,6 +10,7 @@ import { util } from '@kit.ArkTS';
 import type {
   ProviderSetting, ProviderSettingOpenAIVariant, ProviderSettingGoogle,
   ProviderSettingClaude, ProviderModel, OpenAIAuthMode,
+  GoogleModelCatalog, GoogleCatalogModel,
 } from '@amber/chat-domain';
 import {
   loadProviders, saveProviders, makeProviderSettingOpenAIVariant,
@@ -17,6 +18,9 @@ import {
   openAIBrandAvailableAuthModes, openAIAuthModeFixedBaseUrl,
 } from '@amber/chat-domain';
 import { getChatKvStore, getAppContainer } from '../di/AppContainer.ets';
+import { loadGoogleModelCatalog } from '../platform_impl/GoogleAuthSupport.ets';
+import { cleanupDeletedGoogleProvider } from '../platform_impl/GoogleProviderConfigSupport.ets';
+import { EntryAbortController } from '../platform_impl/EntryAbortController.ets';
 import { toProviderMonogram, providerSlug, providerAuthLabel } from '../di/ProviderDefaults.ets';
 import {
   requestCodexDeviceCode, pollCodexDeviceCode, fetchCodexModels,
@@ -62,6 +66,11 @@ interface ProviderExportPayload {
   vertexAI?: boolean;
   location?: string;
   projectId?: string;
+  authMode?: string;
+  useServiceAccount?: boolean;
+  serviceAccountEmail?: string;
+  oauthClientId?: string;
+  oauthRedirectUri?: string;
   promptCaching?: boolean;
   models: ProviderExportModel[];
 }
@@ -111,6 +120,8 @@ struct ChatProviderDetailPage {
   @State grokAccount: string = '';
   private grokAuth: GrokAuthorization | null = null;
   private isNew: boolean = false;
+  private googleCatalogController: EntryAbortController | null = null;
+  private googleFetchedModels: GoogleCatalogModel[] = [];
 
   aboutToAppear(): void {
     const params: Record<string, string> | undefined =
@@ -144,8 +155,46 @@ struct ChatProviderDetailPage {
       const hit = (list ?? []).find((p: ProviderSetting): boolean => p.id === raw.id);
       if (hit !== undefined && this.provider !== null && this.provider.id === hit.id) {
         this.provider = hit;
+        if (hit.type === 'google') {
+          const current: ProviderSettingGoogle = hit as ProviderSettingGoogle;
+          this.authMode = current.authMode;
+          this.useServiceAccount = current.useServiceAccount;
+          if (raw.type === 'google') {
+            const prior: ProviderSettingGoogle = raw as ProviderSettingGoogle;
+            if (prior.authMode !== current.authMode || prior.useServiceAccount !== current.useServiceAccount
+              || prior.privateKeyRef !== current.privateKeyRef || prior.oauthClientId !== current.oauthClientId
+              || prior.projectId !== current.projectId || prior.location !== current.location) {
+              this.apiKey = current.apiKey;
+              this.vertexAI = current.vertexAI;
+              this.projectId = current.projectId;
+              this.location = current.location;
+            }
+          }
+        }
       }
     }).catch((): void => {});
+  }
+
+  aboutToDisappear(): void {
+    if (this.googleCatalogController !== null) this.googleCatalogController.abort();
+    this.googleCatalogController = null;
+  }
+
+  private isGoogleApiKey(): boolean {
+    return this.provider !== null && this.provider.type === 'google'
+      && this.authMode === 'api_key' && !this.useServiceAccount;
+  }
+
+  private openGoogleAuth(): void {
+    const raw: ProviderSetting | null = this.provider;
+    if (raw === null || raw.type !== 'google' || this.ioBusy) return;
+    loadProviders(getChatKvStore()).then((all: ProviderSetting[] | null): void => {
+      if (!(all ?? []).some((item: ProviderSetting): boolean => item.id === raw.id)) {
+        this.savedMsg = '请先点击保存，建立服务商配置后再设置 Google 认证。';
+        return;
+      }
+      router.pushUrl({ url: 'pages/GoogleProviderAuthPage', params: { providerId: raw.id } });
+    }).catch((): void => { this.savedMsg = '无法读取已保存的服务商配置。'; });
   }
 
   private applyProvider(p: ProviderSetting): void {
@@ -181,12 +230,9 @@ struct ChatProviderDetailPage {
       const v: ProviderSettingGoogle = p as ProviderSettingGoogle;
       this.vertexAI = v.vertexAI;
       this.useServiceAccount = v.useServiceAccount;
-      this.serviceAccountEmail = '';
+      this.authMode = v.authMode;
+      this.serviceAccountEmail = v.serviceAccountEmail;
       this.privateKey = '';
-      if (v.authMode !== 'api_key' || v.useServiceAccount) {
-        this.apiKey = '';
-        this.unsupportedAuthMsg = '历史 Google OAuth/Service Account 当前 Harmony 版本不支持。填写 API Key 并保存可迁移。';
-      }
       this.location = v.location;
       this.projectId = v.projectId;
     } else {
@@ -203,7 +249,9 @@ struct ChatProviderDetailPage {
       .map((id: string): ProviderModel => {
         const hit: ProviderModel | undefined = existing.find(
           (m: ProviderModel): boolean => m.modelId === id);
-        return hit !== undefined ? hit : makeProviderModel({ modelId: id, displayName: id });
+        const catalog: GoogleCatalogModel | undefined = this.googleFetchedModels.find(
+          (model: GoogleCatalogModel): boolean => model.modelId === id);
+        return hit !== undefined ? hit : makeProviderModel({ modelId: id, displayName: catalog !== undefined ? catalog.displayName : id });
       });
   }
 
@@ -214,6 +262,26 @@ struct ChatProviderDetailPage {
     if (raw === null || this.fetchBusy) return;
     this.fetchBusy = true;
     this.fetchMsg = '正在拉取…';
+    if (raw.type === 'google' && (raw.authMode !== 'api_key' || raw.useServiceAccount)) {
+      const controller: EntryAbortController = new EntryAbortController();
+      this.googleCatalogController = controller;
+      loadGoogleModelCatalog(raw as ProviderSettingGoogle, controller.signal).then((catalog: GoogleModelCatalog): void => {
+        if (controller.signal.aborted) return;
+        this.googleFetchedModels = catalog.models;
+        const existing: string[] = this.modelsText.split(',').map((id: string): string => id.trim());
+        this.fetchedIds = catalog.models.map((model): string => model.modelId)
+          .filter((id: string): boolean => existing.indexOf(id) < 0);
+        this.fetchMsg = !catalog.supported ? catalog.message
+          : (this.fetchedIds.length > 0 ? `发现 ${catalog.models.length} 个模型，${this.fetchedIds.length} 个可添加`
+            : `发现 ${catalog.models.length} 个模型，全部已在列表中`);
+      }).catch((error: Error): void => {
+        if (!controller.signal.aborted) this.fetchMsg = error instanceof Error ? `拉取失败：${error.message}` : '拉取失败';
+      }).finally((): void => {
+        if (this.googleCatalogController === controller) this.googleCatalogController = null;
+        this.fetchBusy = false;
+      });
+      return;
+    }
     const headers: Record<string, string> = {};
     if (raw.type === 'claude') {
       headers['x-api-key'] = (raw as ProviderSettingClaude).apiKey;
@@ -330,15 +398,19 @@ struct ChatProviderDetailPage {
         enabled: this.providerEnabled,
         name: trimmedName.length > 0 ? trimmedName : 'Google',
         baseUrl: this.baseUrl.trim(),
-        apiKey: this.apiKey.trim(),
+        apiKey: this.isGoogleApiKey() ? this.apiKey.trim() : g.apiKey,
         models,
-        vertexAI: this.vertexAI,
-        useServiceAccount: false,
-        serviceAccountEmail: '',
-        privateKey: '',
-        location: this.location.trim(),
-        projectId: this.projectId.trim(),
-        authMode: 'api_key',
+        vertexAI: this.isGoogleApiKey() ? this.vertexAI : g.vertexAI,
+        useServiceAccount: g.useServiceAccount,
+        serviceAccountEmail: g.serviceAccountEmail,
+        privateKey: g.privateKey,
+        privateKeyRef: g.privateKeyRef,
+        location: this.isGoogleApiKey() ? this.location.trim() : g.location,
+        projectId: this.isGoogleApiKey() ? this.projectId.trim() : g.projectId,
+        authMode: g.authMode,
+        oauthClientId: g.oauthClientId,
+        oauthRedirectUri: g.oauthRedirectUri,
+        oauthClientSecretRef: g.oauthClientSecretRef,
         balanceOption: g.balanceOption,
       });
     } else if (raw.type === 'claude') {
@@ -687,6 +759,11 @@ struct ChatProviderDetailPage {
       payload.vertexAI = v.vertexAI;
       payload.location = v.location;
       payload.projectId = v.projectId;
+      payload.authMode = v.authMode;
+      payload.useServiceAccount = v.useServiceAccount;
+      payload.serviceAccountEmail = v.serviceAccountEmail;
+      payload.oauthClientId = v.oauthClientId;
+      payload.oauthRedirectUri = v.oauthRedirectUri;
     } else {
       const v: ProviderSettingClaude = raw as ProviderSettingClaude;
       payload.promptCaching = v.promptCaching;
@@ -754,11 +831,20 @@ struct ChatProviderDetailPage {
         value: '删除',
         fontColor: ERROR,
         action: (): void => {
+          let deletedGoogle: ProviderSettingGoogle | null = null;
           loadProviders(getChatKvStore()).then((list: ProviderSetting[] | null): Promise<void> => {
+            const current: ProviderSetting | undefined = (list ?? []).find((item: ProviderSetting): boolean => item.id === raw.id);
+            if (current !== undefined && current.type === 'google') deletedGoogle = current as ProviderSettingGoogle;
             const next: ProviderSetting[] = (list ?? []).filter(
               (p: ProviderSetting): boolean => p.id !== raw.id);
             return saveProviders(getChatKvStore(), next);
-          }).then((): void => {
+          }).then(async (): Promise<void> => {
+            if (deletedGoogle !== null) {
+              try { await cleanupDeletedGoogleProvider(deletedGoogle); }
+              catch (error) {
+                promptAction.showToast({ message: error instanceof Error ? error.message : '服务商已删除，但 Google 凭据清理失败。', duration: 2400 });
+              }
+            }
             this.ioBusy = false;
             router.back();
           }).catch((e: Error): void => {
@@ -976,9 +1062,11 @@ struct ChatProviderDetailPage {
               .margin({ bottom: 12 })
             }
 
-            this.field('API Key',
-              this.provider !== null && this.provider.type === 'claude' ? 'sk-ant-…' : 'sk-…',
-              this.apiKey, (v: string): void => { this.apiKey = v; }, true, true)
+            if (this.provider === null || this.provider.type !== 'google' || this.isGoogleApiKey()) {
+              this.field('API Key',
+                this.provider !== null && this.provider.type === 'claude' ? 'sk-ant-…' : 'sk-…',
+                this.apiKey, (v: string): void => { this.apiKey = v; }, true, true)
+            }
 
             if (this.provider !== null && this.provider.type === 'openai') {
               if (this.pinnedBaseUrl().length > 0) {
@@ -1012,13 +1100,17 @@ struct ChatProviderDetailPage {
               this.field('API Path', '/chat/completions', this.chatPath,
                 (v: string): void => { this.chatPath = v; }, false, true)
             } else if (this.provider !== null && this.provider.type === 'google') {
-              ToggleRow({
+              BtnGhost({ label: 'Google 认证与服务账号', onTap: (): void => { this.openGoogleAuth(); } })
+                .width('100%').margin({ bottom: 12 })
+              if (this.isGoogleApiKey()) {
+                ToggleRow({
                 label: 'Vertex AI', checked: this.vertexAI, isLast: this.vertexAI,
                 onToggle: (): void => { this.vertexAI = !this.vertexAI; },
-              })
-              if (!this.vertexAI) {
-                this.field('Base URL', 'https://generativelanguage.googleapis.com/v1beta',
-                  this.baseUrl, (v: string): void => { this.baseUrl = v; }, false, true)
+                })
+                if (!this.vertexAI) {
+                  this.field('Base URL', 'https://generativelanguage.googleapis.com/v1beta',
+                    this.baseUrl, (v: string): void => { this.baseUrl = v; }, false, true)
+                }
               }
             } else if (this.provider !== null && this.provider.type === 'claude') {
               this.field('Base URL', 'https://api.anthropic.com/v1', this.baseUrl,

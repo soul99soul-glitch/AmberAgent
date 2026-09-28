@@ -84,6 +84,7 @@ import {
 import { findModelByIdInProviders } from '../platform_impl/OcrSupport.ets';
 import { loadTaskModelReference, storeTaskModelPair } from '../platform_impl/TaskModelSelectionSupport.ets';
 import { createChatKvStore } from '../platform_impl/ChatKvStore.ets';
+import { initializeEntryGoogleAuth, resolveEntryGoogleAuth } from '../platform_impl/GoogleAuthSupport.ets';
 import { SSHProfileStore, TerminalRuntime, SSHTargetResolver, PythonRuntime, MoshRuntime } from '@amber/chat-domain';
 import type { SSHCredentialStorePort, PythonTransportPort } from '@amber/chat-domain';
 import { createEntrySSHCredentialStore } from '../platform_impl/SSHCredentialStore.ets';
@@ -157,6 +158,7 @@ let cached: Container | null = null;
 
 const buildContainer = (): Container => {
   const httpClient: HttpClient = createRcpHttpClient();
+  initializeEntryGoogleAuth(httpClient);
   const storage: Storage = createPreferencesStorage();
   const repository: DeepReadRepository = createRdbRepository();
   const searchRegistry: SearchProviderRegistry = createTavilyAndFallbackRegistry(httpClient, storage);
@@ -1637,6 +1639,7 @@ export const buildProviderApi = (
       setting: googleSetting,
       headers: (): Record<string, string> => customHeaderRecord,
       encodeImage: encodeImageDetailed,
+      resolveAuth: resolveEntryGoogleAuth,
       // D-078:每请求 LRU 轮换(GoogleProvider.kt:77/:134)
       keyRoulette: getChatKeyRoulette(),
     });
