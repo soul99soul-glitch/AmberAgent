@@ -42,7 +42,13 @@ struct SettingBackupPage {
   @State statusMsg: string = '';
   @State preview: SyncInspectPreview | null = null;
   @State pendingArchivePath: string = '';
-  @State restoreSettings: boolean = false;
+  // D4:按类别导出/恢复(默认 = 现状语义:导出全选;恢复仅会话,settings 默认不覆盖)
+  @State exportConversations: boolean = true;
+  @State exportAssistants: boolean = true;
+  @State exportProviders: boolean = true;
+  @State restoreConversations: boolean = true;
+  @State restoreAssistants: boolean = false;
+  @State restoreProviders: boolean = false;
   @State davUrl: string = '';
   @State davUser: string = '';
   @State davPass: string = '';
@@ -76,36 +82,51 @@ struct SettingBackupPage {
     return getContext(this);
   }
 
-  async doExport(): Promise<void> {
-    if (this.busy) return;
-    const pass = this.passOrNull();
-    if (this.usePassphrase && pass === null) return;
-    this.busy = true;
-    this.statusMsg = '正在打包…';
-    try {
-      const repo = getChatRepository();
+  // D4:打包(导出/上传共用):按类别组装 conversations 与 settings blob
+  private async packBackupBytes(pass: string | null): Promise<Uint8Array> {
+    const repo = getChatRepository();
+    const conversations: Conversation[] = [];
+    if (this.exportConversations) {
       const summaries: ConversationSummary[] = await repo.list();
-      const conversations: Conversation[] = [];
       for (const s of summaries) {
         const c: Conversation | null = await repo.getById(s.id);
         if (c !== null) conversations.push(c);
       }
-      const kv = getChatKvStore();
+    }
+    const kv = getChatKvStore();
+    const settingsBlob: Record<string, object> = {};
+    if (this.exportAssistants) {
       const assistants = await loadAssistants(kv);
-      const providers = await loadProviders(kv);
-      const settingsBlob: Record<string, object> = {};
       if (assistants !== null) { settingsBlob['assistants'] = assistants as object; }
+    }
+    if (this.exportProviders) {
+      const providers = await loadProviders(kv);
       if (providers !== null) { settingsBlob['providers'] = providers as object; }
-      const crypto = createEntrySyncCryptoPort();
-      const bytes = await createSyncBackup(crypto, {
-        conversations,
-        settings: settingsBlob as JsonObject,
-        appVersionName: 'harmony-preview',
-        appVersionCode: 1,
-        deviceId: 'harmony',
-        deviceLabel: 'HarmonyOS',
-        passphrase: pass,
-      }, Date.now());
+    }
+    const crypto = createEntrySyncCryptoPort();
+    return createSyncBackup(crypto, {
+      conversations,
+      settings: settingsBlob as JsonObject,
+      appVersionName: 'harmony-preview',
+      appVersionCode: 1,
+      deviceId: 'harmony',
+      deviceLabel: 'HarmonyOS',
+      passphrase: pass,
+    }, Date.now());
+  }
+
+  async doExport(): Promise<void> {
+    if (this.busy) return;
+    const pass = this.passOrNull();
+    if (this.usePassphrase && pass === null) return;
+    if (!this.exportConversations && !this.exportAssistants && !this.exportProviders) {
+      this.toast('请至少勾选一个导出类别');
+      return;
+    }
+    this.busy = true;
+    this.statusMsg = '正在打包…';
+    try {
+      const bytes = await this.packBackupBytes(pass);
       const fileName = `amber-backup-${new Date().toISOString().replace(/[:.]/g, '-').substring(0, 19)}.abin`;
       const docPicker = new picker.DocumentViewPicker(this.ctx());
       const uris: string[] = await docPicker.save({ newFileNames: [fileName] });
@@ -120,7 +141,7 @@ struct SettingBackupPage {
         target, fileIo.OpenMode.READ_WRITE | fileIo.OpenMode.CREATE | fileIo.OpenMode.TRUNC);
       fileIo.writeSync(file.fd, bytes.buffer as ArrayBuffer);
       fileIo.closeSync(file.fd);
-      this.statusMsg = `已导出 ${conversations.length} 个会话 → ${fileName}`;
+      this.statusMsg = `已导出 → ${fileName}`;
       this.toast('备份已导出');
     } catch (e) {
       this.statusMsg = `导出失败：${e instanceof Error ? e.message : String(e)}`;
@@ -137,32 +158,14 @@ struct SettingBackupPage {
     }
     const pass = this.passOrNull();
     if (this.usePassphrase && pass === null) return;
+    if (!this.exportConversations && !this.exportAssistants && !this.exportProviders) {
+      this.toast('请至少勾选一个导出类别');
+      return;
+    }
     this.busy = true;
     this.statusMsg = '打包并上传…';
     try {
-      const repo = getChatRepository();
-      const summaries: ConversationSummary[] = await repo.list();
-      const conversations: Conversation[] = [];
-      for (const s of summaries) {
-        const c: Conversation | null = await repo.getById(s.id);
-        if (c !== null) conversations.push(c);
-      }
-      const kv = getChatKvStore();
-      const assistants = await loadAssistants(kv);
-      const providers = await loadProviders(kv);
-      const settingsBlob: Record<string, object> = {};
-      if (assistants !== null) { settingsBlob['assistants'] = assistants as object; }
-      if (providers !== null) { settingsBlob['providers'] = providers as object; }
-      const crypto = createEntrySyncCryptoPort();
-      const bytes = await createSyncBackup(crypto, {
-        conversations,
-        settings: settingsBlob as JsonObject,
-        appVersionName: 'harmony-preview',
-        appVersionCode: 1,
-        deviceId: 'harmony',
-        deviceLabel: 'HarmonyOS',
-        passphrase: pass,
-      }, Date.now());
+      const bytes = await this.packBackupBytes(pass);
       const config: WebDavConfig = {
         url: this.davUrl.trim(),
         username: this.davUser.trim(),
@@ -172,7 +175,7 @@ struct SettingBackupPage {
       const client = createWebDavClient(getAppContainer().httpClient, config);
       const name = webDavBackupFileName();
       await client.put(name, bytes);
-      this.statusMsg = `已上传 ${name}（${conversations.length} 会话）`;
+      this.statusMsg = `已上传 ${name}`;
       this.toast('上传成功');
     } catch (e) {
       this.statusMsg = `上传失败：${e instanceof Error ? e.message : String(e)}`;
@@ -322,6 +325,10 @@ struct SettingBackupPage {
 
   async doRestore(): Promise<void> {
     if (this.busy || this.pendingArchivePath.length === 0) return;
+    if (!this.restoreConversations && !this.restoreAssistants && !this.restoreProviders) {
+      this.toast('请至少勾选一个恢复类别');
+      return;
+    }
     const needPass = this.preview !== null && this.preview.needsPassphrase;
     let pass: string | null = null;
     if (needPass) {
@@ -341,50 +348,59 @@ struct SettingBackupPage {
       // restoreSyncBackup 内部已用真实序列化器整体校验结构/ID/时间/selectIndex(R03)；
       // 校验失败在此抛出，尚未写任何会话。
       const result: SyncRestoreResult = await restoreSyncBackup(crypto, new Uint8Array(buf), pass);
-      const dtos: SyncConversationDto[] = result.payload.conversations;
-      const ids: string[] = dtos.map((d: SyncConversationDto): string => d.id);
-      // 活跃生成检查:目标会话正在生成时拒绝，避免恢复与生成尾写互相覆盖
-      if (hasActiveConversationRuns(ids)) {
-        this.statusMsg = '恢复失败：目标会话正在生成，请先停止该会话的生成后再恢复';
-        this.toast('目标会话正在生成');
-        return;
-      }
-      // 同步占用恢复代际(覆盖预检后的新 run 竞态)；beginRun 在此期间会被拒
-      release = beginConversationRestore(ids);
-      // settings 第二阶段所需的解析在写会话前完成(预校验失败则整体不写)
       const settings: SyncRestoreSettings = settingsFromSyncPayload(result.payload);
       const kv = getChatKvStore();
-      const convs: Conversation[] = dtos.map(
-        (d: SyncConversationDto): Conversation => conversationFromSyncDto(d));
-      // 会话:单事务批量恢复(全有或全无)
-      await getChatRepository().restoreConversations(convs);
-      markConversationsRestored(ids);
-      // R09:恢复成功 → 清除 compact 删除标记(仅压缩状态标记；绝不触碰
-      // memory/managedfiles 的损坏隔离保护——恢复不携带这些 store 的数据)。
-      // 会话已落库，故此处失败不得泛报「恢复失败」隐去已写。
+      // D4-1:会话类别(勾选才恢复;未勾选跳过活跃检查/事务/标记清理)
+      let convNote: string = '';
       let compactFailed: boolean = false;
       let compactErr: string = '';
-      try {
-        for (const id of ids) {
-          await clearConversationDeletedMarker(kv, id);
+      if (this.restoreConversations) {
+        const dtos: SyncConversationDto[] = result.payload.conversations;
+        const ids: string[] = dtos.map((d: SyncConversationDto): string => d.id);
+        // 活跃生成检查:目标会话正在生成时拒绝，避免恢复与生成尾写互相覆盖
+        if (hasActiveConversationRuns(ids)) {
+          this.statusMsg = '恢复失败：目标会话正在生成，请先停止该会话的生成后再恢复';
+          this.toast('目标会话正在生成');
+          return;
         }
-      } catch (e) {
-        compactFailed = true;
-        compactErr = e instanceof Error ? e.message : String(e);
+        // 同步占用恢复代际(覆盖预检后的新 run 竞态)；beginRun 在此期间会被拒
+        release = beginConversationRestore(ids);
+        const convs: Conversation[] = dtos.map(
+          (d: SyncConversationDto): Conversation => conversationFromSyncDto(d));
+        // 会话:单事务批量恢复(全有或全无)
+        await getChatRepository().restoreConversations(convs);
+        markConversationsRestored(ids);
+        // R09:恢复成功 → 清除 compact 删除标记(仅压缩状态标记；绝不触碰
+        // memory/managedfiles 的损坏隔离保护——恢复不携带这些 store 的数据)。
+        // 会话已落库，故此处失败不得泛报「恢复失败」隐去已写。
+        try {
+          for (const id of ids) {
+            await clearConversationDeletedMarker(kv, id);
+          }
+        } catch (e) {
+          compactFailed = true;
+          compactErr = e instanceof Error ? e.message : String(e);
+        }
+        convNote = `已恢复 ${convs.length} 个会话`;
       }
-      let settingsNote: string = '（未勾选，settings 未覆盖）';
-      if (this.restoreSettings) {
-        const note: string | null = await this.applyRestoreSettings(settings, kv);
-        if (note !== null) settingsNote = note;
+      // D4-1:settings 类别(按勾选过滤后走既有覆盖/回滚管线)
+      let settingsNote: string = '';
+      if (this.restoreAssistants || this.restoreProviders) {
+        const filtered: SyncRestoreSettings = {
+          assistants: this.restoreAssistants ? settings.assistants : null,
+          providers: this.restoreProviders ? settings.providers : null,
+        };
+        const note: string | null = await this.applyRestoreSettings(filtered, kv);
+        settingsNote = note !== null ? note : '（备份不含所选 settings 类别）';
       }
       if (compactFailed) {
-        this.statusMsg = `已恢复 ${convs.length} 个会话，但压缩状态恢复失败：${compactErr}${settingsNote}`;
+        this.statusMsg = `${convNote}，但压缩状态恢复失败：${compactErr}${settingsNote}`;
         this.toast('会话已恢复，压缩状态恢复失败');
       } else if (settingsNote.indexOf('失败') >= 0) {
-        this.statusMsg = `已恢复 ${convs.length} 个会话${settingsNote}`;
-        this.toast('会话已恢复，settings 覆盖失败');
+        this.statusMsg = `${convNote}${settingsNote}`;
+        this.toast('settings 覆盖失败');
       } else {
-        this.statusMsg = `已恢复 ${convs.length} 个会话${settingsNote}`;
+        this.statusMsg = `${convNote}${settingsNote}`;
         this.toast('恢复完成');
       }
       this.preview = null;
@@ -454,9 +470,24 @@ struct SettingBackupPage {
         .width('100%')
         .padding({ left: 14, right: 14, top: 2 })
       }
+      CardToggleRow({
+        label: '会话', desc: '打包全部会话内容',
+        checked: this.exportConversations,
+        onToggle: (): void => { this.exportConversations = !this.exportConversations; },
+      })
+      CardToggleRow({
+        label: '助手', desc: '打包助手配置',
+        checked: this.exportAssistants,
+        onToggle: (): void => { this.exportAssistants = !this.exportAssistants; },
+      })
+      CardToggleRow({
+        label: '服务商', desc: '打包服务商配置(不含 API Key)',
+        checked: this.exportProviders,
+        onToggle: (): void => { this.exportProviders = !this.exportProviders; },
+      })
       CardRow({
-        label: '导出全部会话',
-        desc: '打包为加密 .abin 文件',
+        label: '导出备份',
+        desc: '所选类别打包为加密 .abin 文件',
         iconName: 'folder',
         plateStyle: 'accent',
         isLast: true,
@@ -499,11 +530,20 @@ struct SettingBackupPage {
         .padding({ left: 14, right: 14, top: 2 })
       }
       CardToggleRow({
-        label: '恢复时覆盖设置',
-        desc: '助手与提供商将被备份内容替换',
-        checked: this.restoreSettings,
+        label: '会话', desc: '恢复全部会话内容',
+        checked: this.restoreConversations,
+        onToggle: (): void => { this.restoreConversations = !this.restoreConversations; },
+      })
+      CardToggleRow({
+        label: '助手', desc: '以备份内容覆盖助手配置',
+        checked: this.restoreAssistants,
+        onToggle: (): void => { this.restoreAssistants = !this.restoreAssistants; },
+      })
+      CardToggleRow({
+        label: '服务商', desc: '以备份内容覆盖服务商配置',
+        checked: this.restoreProviders,
         isLast: true,
-        onToggle: (): void => { this.restoreSettings = !this.restoreSettings; },
+        onToggle: (): void => { this.restoreProviders = !this.restoreProviders; },
       })
     }
     .width('100%')
