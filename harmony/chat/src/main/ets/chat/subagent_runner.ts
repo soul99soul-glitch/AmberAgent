@@ -47,13 +47,14 @@ export interface SubAgentGenerationRequest {
 }
 
 export interface SubAgentGenerationPort {
-  resolveModel(modelSettingId: string | null): Promise<ProviderModel | null>;
+  // D5-1:taskHint = 角色名/任务提示(Jev 模型路由上下文;无 override 时才消费)
+  resolveModel(modelSettingId: string | null, taskHint?: string): Promise<ProviderModel | null>;
   resolveAssistant(): Promise<SubAgentAssistantResolution | null>;
   run(request: SubAgentGenerationRequest): Promise<UIMessage[]>;
 }
 
 export interface ChatStreamSubAgentGenerationPortDeps {
-  resolveModel: (modelSettingId: string | null) => Promise<ProviderModel | null>;
+  resolveModel: (modelSettingId: string | null, taskHint?: string) => Promise<ProviderModel | null>;
   resolveAssistant: () => Promise<SubAgentAssistantResolution | null>;
   makeProvider: (
     model: ProviderModel, params: TextGenerationParams, headers: CustomHeader[],
@@ -75,8 +76,8 @@ export class ChatStreamSubAgentGenerationPort implements SubAgentGenerationPort 
     this.deps = deps;
   }
 
-  resolveModel(modelSettingId: string | null): Promise<ProviderModel | null> {
-    return this.deps.resolveModel(modelSettingId);
+  resolveModel(modelSettingId: string | null, taskHint?: string): Promise<ProviderModel | null> {
+    return this.deps.resolveModel(modelSettingId, taskHint);
   }
 
   resolveAssistant(): Promise<SubAgentAssistantResolution | null> {
@@ -306,7 +307,7 @@ export class GenerationSubAgentRunner implements SubAgentRunner {
   ): Promise<SubAgentResult> {
     let model: ProviderModel | null = null;
     if (definition.modelId !== null) model = await this.generation.resolveModel(definition.modelId);
-    if (model === null) model = await this.generation.resolveModel(null);
+    if (model === null) model = await this.generation.resolveModel(null, definition.name);
     if (model === null) throw new Error('Current chat model is not configured');
     const assistantResolution: SubAgentAssistantResolution | null =
       await this.generation.resolveAssistant();

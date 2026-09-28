@@ -20,6 +20,7 @@ import {
 } from '@amber/deepread-domain';
 // 真实平台实现 import
 import { createRcpHttpClient } from '../platform_impl/RcpHttpClient.ets';
+import { jevChoiceSelect } from '../platform_impl/JevSupport.ets';
 import { createPreferencesStorage } from '../platform_impl/PreferencesStorage.ets';
 import { createRdbRepository } from '../platform_impl/RdbRepository.ets';
 import { createOpenAiCompatibleAiClient } from '../platform_impl/OpenAiCompatibleAiClient.ets';
@@ -636,11 +637,41 @@ const buildSubAgentGenerationPort = (): SubAgentGenerationPort => {
   // model.id → 已解析 provider(resolveModel 异步解析后缓存;makeProvider 同步取)
   //   并行子代理按各自 model.id 取 provider,不互相干扰;同 model → 同 provider(正确)
   const providerByModelId: Map<string, ProviderSetting> = new Map<string, ProviderSetting>();
-  const resolveModel = async (modelSettingId: string | null): Promise<ProviderModel | null> => {
-    // Per-role override → fallback current chat model(SubAgentRunner.kt:52-54)
+  // D5-1:Jev 模型路由(无 override 且有任务上下文时):候选 = 当前聊天模型 +
+  //   各启用服务商首个 chat 模型(≤6);ACTIVE 用选中,SHADOW/失败/无路由空间 → null
+  const jevRouteModel = async (taskHint: string): Promise<ChatProviderChoice | null> => {
+    const current: ChatProviderChoice | null = await resolveChatProviderChoice();
+    const providers: ProviderSetting[] = (await loadProviders(getChatKvStore())) ?? [];
+    const candidates: Record<string, string> = {};
+    const choices: Map<string, ChatProviderChoice> = new Map<string, ChatProviderChoice>();
+    if (current !== null) {
+      candidates[current.model.id] = `当前聊天模型 ${current.provider.name}/${current.model.modelId}`;
+      choices.set(current.model.id, current);
+    }
+    for (const p of providers) {
+      if (choices.size >= 6) break;
+      if (!p.enabled) continue;
+      const m: ProviderModel | undefined = p.models.find(
+        (mm: ProviderModel): boolean => mm.type === 'chat');
+      if (m !== undefined && !choices.has(m.id)) {
+        candidates[m.id] = `${p.name}/${m.modelId}`;
+        choices.set(m.id, { provider: p, model: m });
+      }
+    }
+    if (choices.size <= 1) return null;
+    const r = await jevChoiceSelect('model_routing', taskHint.substring(0, 300), candidates);
+    if (r === null || r.shadow) return null;
+    return choices.get(r.selected) ?? null;
+  };
+  const resolveModel = async (modelSettingId: string | null, taskHint?: string): Promise<ProviderModel | null> => {
+    // Per-role override → Jev 路由(有上下文时)→ fallback current chat model
+    //   (SubAgentRunner.kt:52-54 语义的 Jev 增强,失败/未配置回退链不变)
     let choice: ChatProviderChoice | null = null;
     if (modelSettingId !== null && modelSettingId.length > 0) {
       choice = await resolveTaskChatModelChoice(modelSettingId);
+    }
+    if (choice === null && taskHint !== undefined && taskHint.length > 0) {
+      choice = await jevRouteModel(taskHint);
     }
     if (choice === null) choice = await resolveChatProviderChoice();
     if (choice === null) return null;

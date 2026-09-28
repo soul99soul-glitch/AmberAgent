@@ -177,6 +177,71 @@ export const jevToolSearchReranker = (): ToolSearchReranker =>
     return reordered.length > 0 ? reordered : matches;
   };
 
+// ── D5-1:通用 noul 批量评估 / choice 单选(记忆召回/上下文选择/模型路由共用) ──
+
+export interface JevNoulBatchResult {
+  // 候选 id → 相关概率(仅含 Jev 实际回答的项)
+  probabilities: Record<string, number>;
+  shadow: boolean;
+}
+
+// 一次调用,每候选一道 noul 题(keys 显式保序;off/shadow/失败 → null 或 shadow 标记)
+export const jevNoulBatch = async (
+  purpose: string, query: string, keys: string[], candidates: Record<string, string>,
+): Promise<JevNoulBatchResult | null> => {
+  if (keys.length === 0) return null;
+  const questions: Record<string, JevQuestion> = {};
+  for (let idx = 0; idx < keys.length; idx++) {
+    questions[`c${idx}`] = {
+      kind: 'noul',
+      instructions: `判断该项是否与用户意图相关(用途:${purpose})。`,
+      trueCriteria: '与意图直接相关,或有助于完成意图',
+      falseCriteria: '与意图无关,或会干扰完成意图',
+    };
+  }
+  const stateCandidates: JsonObject = {};
+  for (const k of keys) stateCandidates[k] = candidates[k];
+  const state: JsonObject = { query: query.substring(0, 500), candidates: stateCandidates };
+  const result: JevEvaluateResult = await jevEvaluate(state, questions);
+  if (!result.ok || result.evaluation === null) return null;
+  const probs: Record<string, number> = {};
+  for (let idx = 0; idx < keys.length; idx++) {
+    const answer = result.evaluation.answers[`c${idx}`];
+    if (answer !== undefined && answer.kind === 'noul') {
+      probs[keys[idx]] = answer.probability;
+    }
+  }
+  return { probabilities: probs, shadow: result.shadow };
+};
+
+export interface JevChoiceResult {
+  selected: string;
+  shadow: boolean;
+}
+
+// 单选(选项 id → 说明);off/shadow/失败 → null 或 shadow 标记
+export const jevChoiceSelect = async (
+  purpose: string, query: string, options: Record<string, string>,
+): Promise<JevChoiceResult | null> => {
+  const questions: Record<string, JevQuestion> = {};
+  questions['best'] = {
+    kind: 'choice',
+    instructions: `选出最能完成该意图的一项(用途:${purpose})。`,
+    options,
+  };
+  const state: JsonObject = { query: query.substring(0, 500) };
+  const result: JevEvaluateResult = await jevEvaluate(state, questions);
+  if (!result.ok || result.evaluation === null) return null;
+  const answer = result.evaluation.answers['best'];
+  if (answer === undefined || answer.kind !== 'choice') return null;
+  return { selected: answer.selected, shadow: result.shadow };
+};
+
+// 用途标识(设置页/jev_status 如实展示)
+export const JEV_WIRED_PURPOSES: string[] = [
+  'tool_discovery', 'memory_recall', 'context_selection', 'model_routing',
+];
+
 // jev_status 工具(只读;Android JevStatusTool 对齐)
 export const createJevStatusTool = (): AgentTool =>
   makeAgentTool({
@@ -193,7 +258,7 @@ export const createJevStatusTool = (): AgentTool =>
         budget: st.budget,
         cooldown_active: st.cooldownUntil > Date.now(),
         last_error: st.lastError,
-        wired_purposes: ['tool_discovery'],
+        wired_purposes: JEV_WIRED_PURPOSES.join(','),
       };
       return [{ type: 'text', text: JSON.stringify(payload), metadata: null }];
     },

@@ -4,11 +4,18 @@ import { FONT_SERIF } from '../design/fonts.ets';
 import { Icon } from '../components/ui/Icon.ets';
 import { router } from '@kit.ArkUI';
 import { hilog } from '@kit.PerformanceAnalysisKit';
-import { getModelRegistry, prepareCouncilManager } from '../di/AppContainer.ets';
-import { LENS_PRESETS, CORE_SEATS, makeRuntimeSetting } from '@amber/deepread-domain';
+import { getModelRegistry, prepareCouncilManager, getCouncilRunner } from '../di/AppContainer.ets';
+import { LENS_PRESETS, CORE_SEATS, makeRuntimeSetting, makeSeat } from '@amber/deepread-domain';
 import type { ModelCouncilRuntimeSetting } from '@amber/deepread-domain';
 import { getAgentPromptSettingsPort } from '../di/AppContainer.ets';
-import type { ModelConfig, ModelCouncilRolePreset, CouncilTaskInput, ModelCouncilMode } from '@amber/deepread-domain';
+import type { ModelConfig, ModelCouncilRolePreset, CouncilTaskInput, ModelCouncilMode, ModelCouncilSeat } from '@amber/deepread-domain';
+
+// D5-3:动态席位 LLM 返回文档
+interface DynamicSeatDoc {
+  name?: string;
+  role?: string;
+  systemPrompt?: string;
+}
 
 const DOMAIN: number = 0x0001;
 const TAG: string = 'DeepRead.Council';
@@ -45,6 +52,10 @@ struct CouncilPage {
   @State starting: boolean = false;
   // F42:区分「尚未加载」与「已加载且为空」,加载前不再误报模型库为空
   @State modelsLoaded: boolean = false;
+  // D5-3:动态席位(AI 生成,仅本轮;modelId 留空由 assignModels 分发)
+  @State generatedSeats: ModelCouncilSeat[] = [];
+  @State generatingSeats: boolean = false;
+  @State dynamicSeatError: string = '';
   private pageAlive: boolean = false;
   private loadToken: number = 0;
 
@@ -85,6 +96,56 @@ struct CouncilPage {
     this.selectedLens = next;
   }
 
+  // D5-3:生成动态席位(单 LLM 调用,JSON 数组解析;role 去重追加)
+  private async generateDynamicSeats(): Promise<void> {
+    const objective: string = this.objective.trim();
+    if (objective.length === 0 || this.models.length === 0 || this.generatingSeats) return;
+    this.generatingSeats = true;
+    this.dynamicSeatError = '';
+    try {
+      const model: ModelConfig = this.models[0];
+      const result = await getCouncilRunner().generate({
+        model: model,
+        systemPrompt: '你是多模型议会的组委。根据用户议题生成 2-3 个互补的评审视角席位,'
+          + '只输出 JSON 数组:[{"name":"不超过6字","role":"不超过12字",'
+          + '"systemPrompt":"该视角的评审指令(不超过80字)"}],不要输出任何解释。'
+          + '视角之间必须有明显差异(如 成本/风险/用户/技术/伦理/市场)。',
+        userPrompt: objective,
+        outputBudgetChars: 900,
+        reasoningLevel: null,
+        temperature: null,
+        onChunk: (): void => {},
+        signal: null,
+      });
+      const text: string = result.text;
+      const start: number = text.indexOf('[');
+      const end: number = text.lastIndexOf(']');
+      if (start < 0 || end <= start) throw new Error('模型未返回席位 JSON');
+      const arr = JSON.parse(text.substring(start, end + 1)) as DynamicSeatDoc[];
+      const next: ModelCouncilSeat[] = [...this.generatedSeats];
+      let added: number = 0;
+      for (const d of arr) {
+        if (d.name === undefined || d.role === undefined || d.systemPrompt === undefined) continue;
+        if (next.findIndex((s: ModelCouncilSeat): boolean => s.role === d.role) >= 0) continue;
+        next.push(makeSeat({
+          name: (d.name as string).substring(0, 12),
+          role: (d.role as string).substring(0, 16),
+          modelId: '',
+          systemPrompt: (d.systemPrompt as string).substring(0, 200),
+        }));
+        added++;
+        if (added >= 3) break;
+      }
+      if (added === 0) throw new Error('未解析出可用席位');
+      this.generatedSeats = next;
+    } catch (e) {
+      const msg: string = e instanceof Error ? e.message : String(e);
+      this.dynamicSeatError = `生成失败:${msg}`;
+    } finally {
+      this.generatingSeats = false;
+    }
+  }
+
   async startCouncil(): Promise<void> {
     if (this.starting) return;
     if (this.objective.trim().length === 0) {
@@ -121,6 +182,7 @@ struct CouncilPage {
         objective: this.objective,
         rounds: this.rounds,
         extraLens: this.selectedLens,
+        extraSeats: this.generatedSeats,
       };
       const run = mgr.start(input);
       hilog.info(DOMAIN, TAG, 'council started runId=%{public}s', run.runId);
@@ -234,6 +296,42 @@ struct CouncilPage {
               }, (p: ModelCouncilRolePreset) => p.id)
             }
             .width('100%')
+
+            // D5-3:动态席位(AI 按议题生成自定义视角席,仅本轮)
+            Row() {
+              Text('动态席位').fontSize(12).fontColor(INK3).layoutWeight(1)
+              if (this.generatingSeats) {
+                LoadingProgress().width(14).height(14).color(ACCENT).margin({ right: 6 })
+              }
+              Text(this.generatingSeats ? '生成中…' : 'AI 生成')
+                .fontSize(13).fontColor(this.objective.trim().length === 0 || this.models.length === 0
+                  ? INK4 : ACCENT)
+                .padding({ left: 12, right: 4, top: 6, bottom: 6 })
+                .onClick((): void => { this.generateDynamicSeats(); })
+            }
+            .width('100%').margin({ top: 14 })
+            if (this.generatedSeats.length > 0) {
+              Flex({ wrap: FlexWrap.Wrap }) {
+                ForEach(this.generatedSeats, (s: ModelCouncilSeat) => {
+                  Row() {
+                    Text(`${s.name} · ${s.role}`)
+                      .fontSize(12).fontColor(ACCENT)
+                    Text(' ×').fontSize(12).fontColor(INK3)
+                  }
+                  .padding({ left: 12, right: 10, top: 6, bottom: 6 })
+                  .backgroundColor('#FFF5F0').borderRadius(14)
+                  .margin({ right: 8, bottom: 8 })
+                  .onClick((): void => {
+                    this.generatedSeats = this.generatedSeats.filter(
+                      (x: ModelCouncilSeat): boolean => x.seatId !== s.seatId);
+                  })
+                }, (s: ModelCouncilSeat) => s.seatId)
+              }
+              .width('100%')
+            }
+            if (this.dynamicSeatError.length > 0) {
+              Text(this.dynamicSeatError).fontSize(11).fontColor('#E53935').width('100%')
+            }
           }
           .width('100%').padding(18).backgroundColor(SURFACE).borderRadius(14)
           .border({ width: 1, color: LINE }).margin({ bottom: 20 })

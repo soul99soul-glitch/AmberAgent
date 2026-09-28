@@ -270,7 +270,7 @@ struct SettingJevPage {
             PlainSection({ label: '状态' })
             CardGroup({ radius: 18, stroke: true, content: (): void => { this.StatusCard(); } })
               .margin({ left: GUTTER, right: GUTTER })
-            FooterNote({ text: '预算:每日 200 次评估;连续错误进入 5 分钟冷却。其余用途(记忆召回/上下文选择/模型路由/自动化)暂未接入。' })
+            FooterNote({ text: '预算:每日 200 次评估;连续错误进入 5 分钟冷却。已接用途:工具发现/记忆召回/上下文选择/模型路由(SHADOW 只记录,ACTIVE 影响选择);审批分诊/Web 自动化暂未接入。' })
             PageSpacer()
           }
           .width('100%')

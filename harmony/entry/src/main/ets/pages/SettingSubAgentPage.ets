@@ -19,16 +19,17 @@
 //   ❌ per-role override 编辑(后续迭代)
 //   ❌ custom definition 编辑(后续迭代)
 
-import { getAgentPromptSettingsPort, refreshSubAgentSetting } from '../di/AppContainer.ets';
+import { getAgentPromptSettingsPort, refreshSubAgentSetting, getChatKvStore } from '../di/AppContainer.ets';
 import { router } from '@kit.ArkUI';
-import type { SubAgentRuntimeSetting, SubAgentMode, SubAgentOverride, SubAgentDefinition } from '@amber/chat-domain';
+import type { SubAgentRuntimeSetting, SubAgentMode, SubAgentOverride, SubAgentDefinition, ProviderSetting } from '@amber/chat-domain';
 import {
   DEFAULT_SUB_AGENT_TIMEOUT_MS, DEFAULT_SUB_AGENT_MAX_TURNS,
   DEFAULT_SUB_AGENT_MAX_CONCURRENT_RUNS, DEFAULT_SUB_AGENT_OUTPUT_BUDGET_CHARS,
-  SUB_AGENT_BUILT_INS,
+  SUB_AGENT_BUILT_INS, loadProviders,
 } from '@amber/chat-domain';
 import { ACCENT, BG, ERROR, GUTTER, INK, INK3, LINE, SURFACE2, TEXT_STYLES, lineHeightForSize } from '../design/tokens.ets';
 import { FONT_MONO_MEDIUM, FONT_SANS_MEDIUM } from '../design/fonts.ets';
+import { Icon } from '../components/ui/Icon.ets';
 import {
   CenteredTitleBar, PlainSection, CardGroup, CardRow, CardToggleRow, Seg, PageSpacer, BtnGhost,
 } from '../components/PageTemplate.ets';
@@ -48,6 +49,9 @@ struct SettingSubAgentPage {
   // M3.2:per-role overrides(built-in role id → override)
   @State overrides: Record<string, SubAgentOverride> = {};
   @State expandedRoleId: string = '';
+  // D5-2:模型池(全部启用服务商的 chat 模型;'' = 跟随默认)+ 展开中的模型选择
+  @State modelPool: string[][] = [];   // [modelUuid, 'provider/modelId']
+  @State expandedModelFor: string = '';
   @State loaded: boolean = false;
   // F21:文本编辑未落盘标记 + 显式保存状态(唯一机制:显式保存 + 脏返回确认;
   //   不加 aboutToDisappear flush,也不每键自动保存)
@@ -83,6 +87,16 @@ struct SettingSubAgentPage {
       const ov: Record<string, SubAgentOverride> = {};
       setting.overrides.forEach((v: SubAgentOverride, k: string): void => { ov[k] = v; });
       this.overrides = ov;
+      // D5-2:模型池(全部启用服务商的 chat 模型)
+      const providers: ProviderSetting[] = (await loadProviders(getChatKvStore())) ?? [];
+      const pool: string[][] = [];
+      for (const p of providers) {
+        if (!p.enabled) continue;
+        for (const m of p.models) {
+          if (m.type === 'chat') pool.push([m.id, `${p.name}/${m.modelId}`]);
+        }
+      }
+      this.modelPool = pool;
       this.loaded = true;
     } catch (_e) {
       this.loaded = true;
@@ -482,6 +496,33 @@ struct SettingSubAgentPage {
             .backgroundColor(SURFACE2).borderRadius(8)
             .onChange((v: string): void => { this.updateRolePrompt(def.id, v); })
           Row() {
+            Text('模型(跟随默认 = 当前聊天模型)')
+              .fontSize(TEXT_STYLES.meta.size).fontWeight(TEXT_STYLES.meta.weight)
+              .lineHeight(TEXT_STYLES.meta.lineHeight).fontFamily(FONT_MONO_MEDIUM)
+              .fontColor(INK3).layoutWeight(1)
+            Text(this.modelLabel(this.getOverride(def.id).modelId))
+              .fontSize(TEXT_STYLES.meta.size).fontColor(this.accentColorStore)
+              .padding({ left: 8, top: 4, bottom: 4 })
+          }
+          .width('100%').alignItems(VerticalAlign.Center)
+          .margin({ top: 10 })
+          .onClick((): void => {
+            this.expandedModelFor = this.expandedModelFor === def.id ? '' : def.id;
+          })
+          if (this.expandedModelFor === def.id) {
+            Column() {
+              this.modelOptionRow(def.id, null, '跟随默认')
+              ForEach(this.modelPool, (entry: string[]): void => {
+                this.modelOptionRow(def.id, entry[0], entry[1])
+              }, (entry: string[]): string => entry[0])
+            }
+            .width('100%')
+            .backgroundColor(SURFACE2)
+            .borderRadius(8)
+            .padding({ left: 10, right: 10, top: 4, bottom: 4 })
+            .margin({ top: 4 })
+          }
+          Row() {
             BtnGhost({ label: '恢复默认', onTap: (): void => { this.resetRole(def.id); } })
           }
           .width('100%').margin({ top: 8 })
@@ -516,14 +557,56 @@ struct SettingSubAgentPage {
   }
 
   // M3.2:获取某 role 的 override(无则空 override)
-  private getOverride(roleId: string): SubAgentOverride {
-    const o: SubAgentOverride | undefined = this.overrides[roleId];
+  private getOverride(roleId: string): SubAgentOverride {    const o: SubAgentOverride | undefined = this.overrides[roleId];
     if (o !== undefined) return o;
     return {
       systemPrompt: null, modelId: null, temperature: null,
       reasoningLevel: null, maxTurnsOverride: null,
       timeoutMsOverride: null, outputBudgetOverride: null,
     };
+  }
+
+  // D5-2:模型选项行(单选语义,选中高亮)
+  @Builder
+  modelOptionRow(roleId: string, modelUuid: string | null, label: string): void {
+    Row() {
+      Text(label)
+        .fontSize(13).fontFamily(FONT_SANS_MEDIUM)
+        .fontColor(this.getOverride(roleId).modelId === modelUuid ? this.accentColorStore : INK)
+        .layoutWeight(1)
+        .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+      if (this.getOverride(roleId).modelId === modelUuid) {
+        Icon({ name: 'check', iconSize: 14, color: this.accentColorStore })
+      }
+    }
+    .width('100%').alignItems(VerticalAlign.Center)
+    .constraintSize({ minHeight: 36 })
+    .onClick((): void => { this.updateRoleModel(roleId, modelUuid); })
+  }
+
+  private modelLabel(modelUuid: string | null): string {
+    if (modelUuid === null) return '跟随默认';
+    for (const entry of this.modelPool) {
+      if (entry[0] === modelUuid) return entry[1];
+    }
+    return modelUuid;
+  }
+
+  // D5-2:更新某 role 的 modelId override(null = 跟随默认)
+  private updateRoleModel(roleId: string, modelUuid: string | null): void {
+    const o: SubAgentOverride = this.getOverride(roleId);
+    const next: SubAgentOverride = {
+      systemPrompt: o.systemPrompt, modelId: modelUuid, temperature: o.temperature,
+      reasoningLevel: o.reasoningLevel, maxTurnsOverride: o.maxTurnsOverride,
+      timeoutMsOverride: o.timeoutMsOverride, outputBudgetOverride: o.outputBudgetOverride,
+    };
+    const ov: Record<string, SubAgentOverride> = {};
+    const keys: string[] = Object.keys(this.overrides);
+    for (const k of keys) ov[k] = this.overrides[k];
+    ov[roleId] = next;
+    this.overrides = ov;
+    this.expandedModelFor = '';
+    this.dirty = true;
   }
 
   // M3.2:更新某 role 的 systemPrompt override

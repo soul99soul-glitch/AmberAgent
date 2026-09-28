@@ -22,7 +22,7 @@
 
 import type { Conversation } from './conversation.ts';
 import { currentMessages } from './conversation.ts';
-import type { UIMessage } from './message.ts';
+import type { UIMessage, UIMessagePartTool } from './message.ts';
 import { toText } from './message.ts';
 import type {
   MemoryCandidate, MemoryEvent, MemoryEventType, MemoryKind, MemoryRecord, MemoryScope,
@@ -284,6 +284,29 @@ const runMemoryExtractionGuarded = async (
   if (runsToday >= Math.max(1, deps.worker.maxDailyRuns)) {
     await logEvent(deps, 'extraction_skipped', {
       conversationId, message: 'Daily memory worker limit reached.', messageCount,
+    });
+    return;
+  }
+  // D5-4:污染检测(iOS 对齐:联网/MCP 触碰过的会话暂停提炼 —
+  //   外部内容(搜索结果/MCP 数据)不应沉淀为长期记忆,防污染)
+  let contaminated: boolean = false;
+  for (const m of messages) {
+    if (contaminated) break;
+    for (const part of m.parts) {
+      if (part.type !== 'tool') continue;
+      const toolName: string = (part as UIMessagePartTool).toolName;
+      if (toolName === 'search_web' || toolName === 'scrape_web'
+        || toolName.startsWith('mcp__') || toolName === 'mcp_call_tool') {
+        contaminated = true;
+        break;
+      }
+    }
+  }
+  if (contaminated) {
+    await logEvent(deps, 'extraction_skipped', {
+      conversationId,
+      message: 'Conversation touched web search or MCP tools; extraction paused (contamination guard).',
+      messageCount,
     });
     return;
   }

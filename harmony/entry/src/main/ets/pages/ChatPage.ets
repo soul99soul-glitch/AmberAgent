@@ -67,7 +67,7 @@ import {
   createPlaceholderTransformer, createDocumentTransformer,
   createPromptInjectionTransformer, PromptInjection, Lorebook,
   RECENT_CHATS_PROMPT_LIMIT, buildRecentChatsPrompt, RecentChatItem, ConversationSummary,
-  buildMemoryRecallPrompt, MemoryRecallRuntimeGate, createMemoryTools,
+  buildMemoryRecallPrompt, MemoryRecallRuntimeGate, createMemoryTools, MemoryRecallSelection,
   runMemoryExtraction, MemoryWorkerModelResolution, memoryWorkerModelCandidates,
   buildAgentSoulPrompt,
   toChatModel, DEFAULT_COMPRESS_PROMPT,
@@ -173,7 +173,7 @@ import { getMiniAppPlatform, getMiniAppRepositorySync } from '../platform_impl/M
 import type { MiniAppPlatform } from '../platform_impl/MiniAppPlatform.ets';
 import { createImageGenTool, imageGenToolAvailable, EditSourceImage } from '../platform_impl/ImageGenTool.ets';
 import { createSoulTools } from '../platform_impl/SoulTools.ets';
-import { jevToolSearchReranker, createJevStatusTool } from '../platform_impl/JevSupport.ets';
+import { jevToolSearchReranker, createJevStatusTool, jevNoulBatch, JevNoulBatchResult } from '../platform_impl/JevSupport.ets';
 import { createJavascriptExecuteTool, JsSandboxHost } from '../platform_impl/JsSandboxTool.ets';
 import { stopGenerationKeepAlive } from '../platform_impl/BackgroundGenerationKeepAlive.ets';
 import { SubAgentActivityStrip } from '../components/SubAgentActivityStrip.ets';
@@ -628,19 +628,61 @@ struct ChatPage {
   // D-077b:动态 system 块供给(recentChats 子集,GenerationHandler.kt:736);
   //   每次组装调用时重取(Android 每次 generateInternal 重算语义);
   //   enableRecentChatsReference 默认 true(PreferencesStore.kt:155)
-  private loadExtraSystemBlocks(): Promise<string[]> {
-    if (!this.agentRuntime.enableRecentChatsReference) return Promise.resolve([]);
-    return getChatRepository().listRecent(RECENT_CHATS_PROMPT_LIMIT)
-      .then((recent: ConversationSummary[]): string[] => {
-        const items: RecentChatItem[] = recent.map(
-          (s: ConversationSummary): RecentChatItem => ({
-            title: s.title,
-            lastChat: new Intl.DateTimeFormat(systemLanguage(), { dateStyle: 'medium' })
-              .format(new Date(s.updateAt)),
-          }));
-        const prompt: string = buildRecentChatsPrompt(items);
-        return prompt.length > 0 ? [prompt] : [];
-      });
+  // D5-1:Jev 上下文选择 — 近 12 会话逐题 noul,ACTIVE 滤相关子集(全滤空回退全集)
+  private async loadExtraSystemBlocks(): Promise<string[]> {
+    if (!this.agentRuntime.enableRecentChatsReference) return [];
+    let recent: ConversationSummary[] = await getChatRepository().listRecent(RECENT_CHATS_PROMPT_LIMIT);
+    if (recent.length > 1) {
+      let query: string = this.title;
+      const convMsgs: UIMessage[] = this.conversation !== null ? currentMessages(this.conversation) : [];
+      for (let i: number = convMsgs.length - 1; i >= 0; i--) {
+        if (convMsgs[i].role === 'user') {
+          query = toText(convMsgs[i]).substring(0, 300);
+          break;
+        }
+      }
+      const keys: string[] = [];
+      const candidates: Record<string, string> = {};
+      for (const s of recent.slice(0, 12)) {
+        keys.push(s.id);
+        candidates[s.id] = s.title.substring(0, 120);
+      }
+      const batch: JevNoulBatchResult | null = await jevNoulBatch('context_selection', query, keys, candidates);
+      if (batch !== null && !batch.shadow) {
+        const filtered: ConversationSummary[] = recent.filter(
+          (s: ConversationSummary): boolean => (batch.probabilities[s.id] ?? 1) >= 0.5);
+        if (filtered.length > 0) recent = filtered;
+      }
+    }
+    const items: RecentChatItem[] = recent.map(
+      (s: ConversationSummary): RecentChatItem => ({
+        title: s.title,
+        lastChat: new Intl.DateTimeFormat(systemLanguage(), { dateStyle: 'medium' })
+          .format(new Date(s.updateAt)),
+      }));
+    const prompt: string = buildRecentChatsPrompt(items);
+    return prompt.length > 0 ? [prompt] : [];
+  }
+
+  // D5-1:Jev 记忆召回 — 本地排序后每候选一道 noul(≤8,单次调用);
+  //   ACTIVE 滤掉 <0.5(全滤空则回退原序);SHADOW/off/失败 → 原序
+  private jevMemoryRerank(query: string): (sels: MemoryRecallSelection[]) => Promise<MemoryRecallSelection[]> {
+    return async (sels: MemoryRecallSelection[]): Promise<MemoryRecallSelection[]> => {
+      if (sels.length === 0) return sels;
+      const top: MemoryRecallSelection[] = sels.slice(0, 8);
+      const keys: string[] = [];
+      const candidates: Record<string, string> = {};
+      for (const s of top) {
+        const key: string = `${s.record.id}`;
+        keys.push(key);
+        candidates[key] = s.record.content.substring(0, 120);
+      }
+      const batch: JevNoulBatchResult | null = await jevNoulBatch('memory_recall', query, keys, candidates);
+      if (batch === null || batch.shadow) return sels;
+      const kept: MemoryRecallSelection[] = sels.filter(
+        (s: MemoryRecallSelection): boolean => (batch.probabilities[`${s.record.id}`] ?? 1) >= 0.5);
+      return kept.length > 0 ? kept : sels;
+    };
   }
 
   // D-085b:记忆召回块(GenerationHandler.kt:414 → :727,动态序最前);
@@ -655,7 +697,16 @@ struct ChatPage {
       enableLongTermMemory: this.agentRuntime.enableLongTermMemory,
       memoryRecall: this.agentRuntime.memoryRecall,
     };
-    return buildMemoryRecallPrompt(gate, currentMessages(conv), getMemoryReadRepository())
+    const msgs: UIMessage[] = currentMessages(conv);
+    let query: string = '';
+    for (let i: number = msgs.length - 1; i >= 0; i--) {
+      if (msgs[i].role === 'user') {
+        query = toText(msgs[i]).substring(0, 300);
+        break;
+      }
+    }
+    return buildMemoryRecallPrompt(gate, msgs, getMemoryReadRepository(),
+      Date.now(), this.jevMemoryRerank(query))
       .then((prompt: string): string[] => prompt.length > 0 ? [prompt] : []);
   }
 

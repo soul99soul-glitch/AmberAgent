@@ -2,12 +2,12 @@
 //
 // 数据源:SubAgentManager.listActive()(内存态运行表);1s 轮询刷新(计时语义),
 //   不往 domain 加响应式管道。点按 → 来源会话(parentConversationId)。
-// 无运行中子代理时自隐(空渲染)。
+// 无运行中子代理时自隐(空渲染);D5-2:全部完成后保留 4s「已完成」再自隐。
 
 import { router } from '@kit.ArkUI';
 import type { SubAgentManager, SubAgentRun } from '@amber/chat-domain';
 import { getSubAgentManager } from '../di/AppContainer.ets';
-import { ACCENT, INK2, INK3, LINE, META, SURFACE } from '../design/tokens.ets';
+import { ACCENT, INK2, INK3, LINE, META, SURFACE, SUCCESS_FG } from '../design/tokens.ets';
 import { Icon } from './ui/Icon.ets';
 
 @Component
@@ -15,6 +15,8 @@ export struct SubAgentActivityStrip {
   @StorageProp('accentColor') accentColorStore: string = ACCENT;
   @State runs: SubAgentRun[] = [];
   @State nowMs: number = Date.now();
+  // D5-2:完成时刻(>0 时 runs 冻结展示「已完成」,4s 后清空)
+  @State completedAtMs: number = 0;
   private timer: number = -1;
   private alive: boolean = false;
 
@@ -35,7 +37,16 @@ export struct SubAgentActivityStrip {
   private refresh(): void {
     getSubAgentManager().then((mgr: SubAgentManager): void => {
       if (!this.alive) return;
-      this.runs = mgr.listActive();
+      const next: SubAgentRun[] = mgr.listActive();
+      if (next.length > 0) {
+        this.completedAtMs = 0;
+        this.runs = next;
+      } else if (this.runs.length > 0 && this.completedAtMs === 0) {
+        this.completedAtMs = Date.now();
+      } else if (this.completedAtMs > 0 && Date.now() - this.completedAtMs >= 4000) {
+        this.runs = [];
+        this.completedAtMs = 0;
+      }
       this.nowMs = Date.now();
     }).catch((): void => {});
   }
@@ -63,14 +74,22 @@ export struct SubAgentActivityStrip {
   build(): void {
     if (this.runs.length > 0) {
       Row() {
-        // 呼吸点(1s 轮询自然形成的脉动,不加动画框架)
-        Column()
-          .width(8).height(8).borderRadius(4)
-          .backgroundColor(this.accentColorStore)
-          .opacity(this.nowMs % 2000 < 1000 ? 1 : 0.35)
-        Text(this.runs.length === 1
-          ? `子代理运行中 · ${this.topLabel(this.runs[0])} · ${this.elapsed(this.runs[0])}`
-          : `子代理运行中 ${this.runs.length} 个 · ${this.elapsed(this.runs[0])}`)
+        if (this.completedAtMs > 0) {
+          Icon({ name: 'check', iconSize: 12, color: SUCCESS_FG })
+        } else {
+          // 呼吸点(1s 轮询自然形成的脉动,不加动画框架)
+          Column()
+            .width(8).height(8).borderRadius(4)
+            .backgroundColor(this.accentColorStore)
+            .opacity(this.nowMs % 2000 < 1000 ? 1 : 0.35)
+        }
+        Text(this.completedAtMs > 0
+          ? (this.runs.length === 1
+            ? `子代理已完成 · ${this.topLabel(this.runs[0])}`
+            : `子代理已完成 ${this.runs.length} 个`)
+          : (this.runs.length === 1
+            ? `子代理运行中 · ${this.topLabel(this.runs[0])} · ${this.elapsed(this.runs[0])}`
+            : `子代理运行中 ${this.runs.length} 个 · ${this.elapsed(this.runs[0])}`))
           .fontSize(META).fontColor(INK2)
           .margin({ left: 8 })
           .layoutWeight(1)

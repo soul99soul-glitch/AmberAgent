@@ -59,9 +59,18 @@ export const buildMemoryRecallPrompt = async (
   messages: UIMessage[],
   repository: MemoryReadRepository,
   now: number = Date.now(),
+  // D5-1:Jev 记忆召回后置钩子(entry 注入;对本地排序结果二次筛选,失败回退原序)
+  afterRank?: (selections: MemoryRecallSelection[]) => Promise<MemoryRecallSelection[]>,
 ): Promise<string> => {
-  const selections: MemoryRecallSelection[] =
+  let selections: MemoryRecallSelection[] =
     await recallMemorySelections(gate, messages, repository, now);
+  if (afterRank !== undefined) {
+    try {
+      selections = await afterRank(selections);
+    } catch (_e) {
+      // 钩子失败回退本地排序
+    }
+  }
   const records: MemoryRecord[] = selections.map(
     (s: MemoryRecallSelection): MemoryRecord => s.record);
   await repository.touchMemories(records.map((r: MemoryRecord): number => r.id));

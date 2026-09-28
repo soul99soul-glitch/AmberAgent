@@ -38,6 +38,9 @@
 | Vertex AI 服务账号(D3-5) | RS256 JWT 签名 + onboarding 流,独立批次(保持 google_chat_api.ts:53 抛错登记) |
 | Antigravity OAuth(D3-6) | Gemini Code Assist v1internal 包装 + onboarding,独立批次(保持 :79 抛错登记) |
 | Provider 内置工具 url_context / Google 侧(D3-3 余量) | OpenAI Responses 无此工具;Google 侧需 ChatModel.tools 管线改造,P1 登记 |
+| Jev 审批分诊 / Web 自动化(D5-1 余量) | 分诊需审批卡协议改造、Web 自动化依赖 WebMount 远程能力,独立批次 |
+| 议会席位联网搜索 / FULL 功率(D5-3 余量) | 需席位级工具循环(runner 现为纯文本流式),独立批次 |
+| 记忆主题聚合派生文档(D5-4 余量) | iOS 独占大型子系统(聚类+派生文档+查看 UI),独立批次 |
 
 ---
 

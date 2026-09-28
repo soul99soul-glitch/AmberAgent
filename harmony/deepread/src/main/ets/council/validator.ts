@@ -24,6 +24,8 @@ export interface CouncilTaskInput {
   seats?: ModelCouncilSeat[];
   // 默认策略下额外加入的视角席 id(product/marketing/...)
   extraLens?: string[];
+  // D5-3:动态席位(AI 按议题生成的自定义视角席;追加于 extraLens 之后,同去重/上限)
+  extraSeats?: ModelCouncilSeat[];
 }
 
 const clamp = (v: number, lo: number, hi: number): number => {
@@ -63,6 +65,7 @@ export const buildDefaultSeats = (
   setting: ModelCouncilRuntimeSetting,
   extraLens: string[],
   pool: ModelConfig[],
+  extraSeats: ModelCouncilSeat[] = [],
 ): ModelCouncilSeat[] => {
   const byRole = new Map<string, ModelCouncilSeat>();
   const add = (seat: ModelCouncilSeat): void => {
@@ -79,6 +82,12 @@ export const buildDefaultSeats = (
   for (let i = 0; i < extraLens.length; i++) {
     const preset: ModelCouncilRolePreset | null = findRolePreset(extraLens[i]);
     if (preset !== null && !isCoreRole(preset.id)) add(presetToSeat(preset));
+  }
+
+  // D5-3:动态席位(AI 生成;核心角色席位不得注入)
+  for (let i = 0; i < extraSeats.length; i++) {
+    const s: ModelCouncilSeat = extraSeats[i];
+    if (!isCoreRole(s.role)) add(s);
   }
 
   let seats: ModelCouncilSeat[] = [];
@@ -162,7 +171,7 @@ export const parseTask = (
   if (input.seats !== undefined && input.seats.length > 0) {
     seats = assignModels(input.seats, pool);
   } else {
-    seats = buildDefaultSeats(setting, input.extraLens ?? [], pool);
+    seats = buildDefaultSeats(setting, input.extraLens ?? [], pool, input.extraSeats ?? []);
   }
 
   validateSeats(setting, seats, pool);
