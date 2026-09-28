@@ -16,13 +16,17 @@
 // 说明:本模块只含纯 id 选择链;id → Model 的解析(findModelById ?: 当前 chat 模型)
 //   属平台侧(providers 存储),由 entry 实现。
 
+import type { TaskModelReference } from './task_model_reference.ts';
+
 export const DEFAULT_AUTO_MODEL_ID: string = 'b7055fb4-39f9-4042-a88a-0d80ed76cf08';
 
 // MemoryWorkerSetting 任务模型字段子集(MemoryModels.kt:138-141)
 export interface TaskModelWorkerGate {
   modelId: string;
+  providerId?: string | null;
   followCompressModel: boolean;
   daydreamModelId: string;
+  daydreamProviderId?: string | null;
   daydreamFollowCompressModel: boolean;
 }
 
@@ -69,3 +73,30 @@ export const daydreamModelCandidates = (
   compressModelId,
   chatModelId,
 ];
+
+const configuredWorkerReference = (modelId: string, providerId: string | null): TaskModelReference =>
+  providerId === null ? { kind: 'legacy', modelId } : { kind: 'fixed', pair: { providerId, modelId } };
+
+// Preserve the original fallback order without losing each candidate's provider identity.
+export const memoryWorkerModelReferences = (
+  worker: TaskModelWorkerGate, compressRef: TaskModelReference, chatRef: TaskModelReference,
+): TaskModelReference[] => {
+  let selected: TaskModelReference = chatRef;
+  if (worker.modelId !== DEFAULT_AUTO_MODEL_ID) {
+    selected = configuredWorkerReference(worker.modelId, worker.providerId ?? null);
+  } else if (worker.followCompressModel) selected = compressRef;
+  return [selected, chatRef];
+};
+
+export const daydreamModelReferences = (
+  worker: TaskModelWorkerGate, compressRef: TaskModelReference, chatRef: TaskModelReference,
+): TaskModelReference[] => {
+  let selected: TaskModelReference = chatRef;
+  if (worker.daydreamModelId !== DEFAULT_AUTO_MODEL_ID) {
+    selected = configuredWorkerReference(worker.daydreamModelId, worker.daydreamProviderId ?? null);
+  } else if (worker.daydreamFollowCompressModel) selected = compressRef;
+  else if (worker.modelId !== DEFAULT_AUTO_MODEL_ID) {
+    selected = configuredWorkerReference(worker.modelId, worker.providerId ?? null);
+  } else if (worker.followCompressModel) selected = compressRef;
+  return [selected, compressRef, chatRef];
+};

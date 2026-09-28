@@ -1,11 +1,12 @@
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { conversationHasPendingOrUnexecutedTools, currentMessages, makeTextGenerationParams,
-  makeUserMessage, memoryWorkerModelCandidates, patchConversation, runAutoTitle, runMemoryExtraction,
+  makeUserMessage, memoryWorkerModelReferences, patchConversation, runAutoTitle, runMemoryExtraction,
   runSuggestion, toChatModel, toText } from '@amber/chat-domain';
 import type { AutoTitleDeps, Conversation, ConversationStore, MemoryExtractionDeps,
-  MemoryWorkerModelResolution, MessageChunk, OpenAIChatApi, SuggestionDeps, UIMessage } from '@amber/chat-domain';
-import { buildProviderApi, loadTaskModelIds, loadTaskPrompts, resolveTaskChatModelChoice,
-  resolveTaskModelChain } from '../di/AppContainer.ets';
+  MemoryWorkerModelResolution, MessageChunk, OpenAIChatApi, ReasoningLevel, SuggestionDeps, UIMessage } from '@amber/chat-domain';
+import { buildProviderApi, readTaskModelReference, TASK_TITLE_MODEL_KEY, TASK_SUGGESTION_MODEL_KEY,
+  TASK_COMPRESS_MODEL_KEY, loadTaskPrompts, resolveTaskModelReference,
+  resolveTaskModelReferenceChain, taskModelReferenceForChoice } from '../di/AppContainer.ets';
 import type { ChatProviderChoice, TaskPrompts } from '../di/AppContainer.ets';
 import type { DetachedConversationContext } from './ConversationRunService.ets';
 import { systemLanguage } from './AgentRuntimePrefs.ets';
@@ -29,7 +30,9 @@ const chunkText = (chunk: MessageChunk): string => {
   const message = chunk.choices.length > 0 ? chunk.choices[0].message : null;
   return message === null ? '' : toText(message);
 };
-const generateAuxiliaryText = async (choice: ChatProviderChoice, prompt: string): Promise<string> => {
+const generateAuxiliaryText = async (
+  choice: ChatProviderChoice, prompt: string, reasoningLevel: ReasoningLevel = 'auto',
+): Promise<string> => {
   const headers: Record<string, string> = {};
   for (const header of choice.model.customHeaders) {
     const name: string = header.name.trim();
@@ -37,7 +40,7 @@ const generateAuxiliaryText = async (choice: ChatProviderChoice, prompt: string)
   }
   const api: OpenAIChatApi = buildProviderApi(choice.provider, headers);
   return chunkText(await api.generateText([makeUserMessage(prompt)], makeTextGenerationParams({
-    model: toChatModel(choice.model), reasoningLevel: 'off', customBody: choice.model.customBodies,
+    model: toChatModel(choice.model), reasoningLevel, customBody: choice.model.customBodies,
   })));
 };
 
@@ -49,11 +52,11 @@ const maybeAutoTitle = async (ctx: DetachedConversationContext, snapshot: Conver
     const prompts: TaskPrompts = await loadTaskPrompts();
     const deps: AutoTitleDeps = {
       generateText: async (prompt: string): Promise<string> => {
-        const ids = await loadTaskModelIds();
-        const choice: ChatProviderChoice | null = await resolveTaskChatModelChoice(
-          ids.titleModelId, ctx.seed.runtime.resolvedChoice);
+        const reference = await readTaskModelReference(TASK_TITLE_MODEL_KEY);
+        const choice: ChatProviderChoice | null = await resolveTaskModelReference(
+          reference, ctx.seed.runtime.resolvedChoice);
         if (choice === null) throw new Error('no title model');
-        return generateAuxiliaryText(choice, prompt);
+        return generateAuxiliaryText(choice, prompt, 'off');
       },
       store: auxiliaryCandidateStore, locale: '简体中文', template: prompts.titlePrompt,
     };
@@ -76,11 +79,11 @@ const maybeSuggestions = async (ctx: DetachedConversationContext, snapshot: Conv
     const prompts: TaskPrompts = await loadTaskPrompts();
     const deps: SuggestionDeps = {
       generateText: async (prompt: string): Promise<string> => {
-        const ids = await loadTaskModelIds();
-        const choice: ChatProviderChoice | null = await resolveTaskChatModelChoice(
-          ids.suggestionModelId, ctx.seed.runtime.resolvedChoice);
+        const reference = await readTaskModelReference(TASK_SUGGESTION_MODEL_KEY);
+        const choice: ChatProviderChoice | null = await resolveTaskModelReference(
+          reference, ctx.seed.runtime.resolvedChoice);
         if (choice === null) throw new Error('no suggestion model');
-        return generateAuxiliaryText(choice, prompt);
+        return generateAuxiliaryText(choice, prompt, 'off');
       },
       store: auxiliaryCandidateStore, locale: '简体中文', template: prompts.suggestionPrompt,
     };
@@ -102,10 +105,10 @@ const maybeMemoryExtraction = (ctx: DetachedConversationContext, finalized: Conv
   const resolveExtractionChoice = (): Promise<ChatProviderChoice | null> => {
     if (choicePromise === null) {
       choicePromise = (async (): Promise<ChatProviderChoice | null> => {
-        const ids = await loadTaskModelIds();
+        const compressReference = await readTaskModelReference(TASK_COMPRESS_MODEL_KEY);
         const fallback: ChatProviderChoice = ctx.seed.runtime.resolvedChoice;
-        return resolveTaskModelChain(memoryWorkerModelCandidates(
-          ctx.seed.agentRuntime.memoryWorker, ids.compressModelId, fallback.model.id), fallback);
+        return resolveTaskModelReferenceChain(memoryWorkerModelReferences(
+          ctx.seed.agentRuntime.memoryWorker, compressReference, taskModelReferenceForChoice(fallback)), fallback);
       })();
     }
     return choicePromise;
@@ -119,9 +122,7 @@ const maybeMemoryExtraction = (ctx: DetachedConversationContext, finalized: Conv
     generateText: async (prompt: string): Promise<string> => {
       const choice: ChatProviderChoice | null = await resolveExtractionChoice();
       if (choice === null) throw new Error('no model');
-      const api: OpenAIChatApi = buildProviderApi(choice.provider, {});
-      return chunkText(await api.generateText([makeUserMessage(prompt)],
-        makeTextGenerationParams({ model: toChatModel(choice.model) })));
+      return generateAuxiliaryText(choice, prompt);
     },
     getAllActiveRecords: ops.getAllActiveRecords, addCandidates: ops.addCandidates,
     addCandidate: ops.addCandidate, addMemory: ops.addMemory, addEvent: ops.addEvent,

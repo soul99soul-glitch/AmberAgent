@@ -1056,8 +1056,17 @@ export type {
 
 // ===== D-087:任务模型解析链(worker/daydream/title/suggestion/compress) =====
 export {
+  decodeTaskModelReference, encodeTaskModelReference, taskModelReferenceId,
+  taskModelReferenceFromId, findTaskProviderModel,
+} from './chat/task_model_reference.ts';
+export type {
+  TaskModelPair, TaskModelAutoReference, TaskModelLegacyReference,
+  TaskModelFixedReference, TaskModelReference, TaskProviderModel,
+} from './chat/task_model_reference.ts';
+export {
   daydreamModelCandidates, memoryWorkerModelCandidates, pickDaydreamModelId,
   pickMemoryWorkerModelId, DEFAULT_AUTO_MODEL_ID, DEFAULT_TASK_MODEL_WORKER_GATE,
+  daydreamModelReferences, memoryWorkerModelReferences,
 } from './chat/task_model.ts';
 export type { TaskModelWorkerGate } from './chat/task_model.ts';
 

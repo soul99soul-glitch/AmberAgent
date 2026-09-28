@@ -13,21 +13,17 @@ import { util } from '@kit.ArkTS';
 import type { Context } from '@kit.AbilityKit';
 import type {
   AgentTool, JsonObject, JsonValue, ProviderModel, ProviderSetting, UIMessagePart,
-  UIMessagePartImage, ProviderSettingOpenAIVariant, ProviderSettingGoogle, ProviderSettingClaude,
+  UIMessagePartImage, ProviderSettingOpenAIVariant, ProviderSettingGoogle, ProviderSettingClaude, TaskModelReference,
 } from '@amber/chat-domain';
 import {
-  makeAgentTool, makeInputSchemaObj, hasUsableAuth, loadProviders, inputStringValue,
+  makeAgentTool, makeInputSchemaObj, hasUsableAuth, inputStringValue, loadProviders, taskModelReferenceFromId,
 } from '@amber/chat-domain';
-import { getAppContainer, getChatKvStore, TASK_IMAGE_MODEL_KEY } from '../di/AppContainer.ets';
+import type { ChatProviderChoice } from '../di/AppContainer.ets';
+import { getAppContainer, getChatKvStore, readTaskModelReference, resolveConfiguredTaskModel, TASK_IMAGE_MODEL_KEY } from '../di/AppContainer.ets';
 import { getFilesRepository } from './ManagedFileStore.ets';
 
 const IMAGE_EDIT_MAX_SOURCE_BYTES: number = 5 * 1024 * 1024;
 const CREATE_TIMEOUT_MS: number = 120000;
-
-interface ImageGenChoice {
-  provider: ProviderSetting;
-  model: ProviderModel;
-}
 
 interface GeneratedItem {
   bytes: Uint8Array;
@@ -48,19 +44,26 @@ const inputInt = (input: JsonValue, key: string): number | null => {
 };
 
 // 生图模型解析(execute 时实时解析,跟随用户中途换槽;Android getCurrentImageGenerationModel)
-const resolveImageGenChoice = async (): Promise<ImageGenChoice | null> => {
-  const kv = getChatKvStore();
-  const slot: string = await getAppContainer().storage.get<string>(TASK_IMAGE_MODEL_KEY, '');
-  if (slot.length === 0) return null;
-  const providers: ProviderSetting[] | null = await loadProviders(kv);
-  if (providers === null) return null;
-  for (const p of providers) {
-    if (p.type !== 'openai' || !hasUsableAuth(p)) continue;
-    for (const m of p.models) {
-      if (m.id === slot && m.type === 'image') return { provider: p, model: m };
+export const resolveImageGenChoice = async (): Promise<ChatProviderChoice | null> => {
+  let reference: TaskModelReference = await readTaskModelReference(TASK_IMAGE_MODEL_KEY);
+  if (reference.kind === 'legacy') {
+    // 保留旧 scalar 搜索顺序:先排除非 OpenAI/无鉴权容器,再匹配 UUID+image。
+    const providers: ProviderSetting[] = (await loadProviders(getChatKvStore())) ?? [];
+    const modelId: string = reference.modelId;
+    let matched: boolean = false;
+    for (const provider of providers) {
+      if (provider.type !== 'openai' || !hasUsableAuth(provider)) continue;
+      const model: ProviderModel | undefined = provider.models.find((candidate: ProviderModel): boolean =>
+        candidate.id === modelId && candidate.type === 'image');
+      if (model === undefined) continue;
+      reference = taskModelReferenceFromId(model.id, provider.id);
+      matched = true;
+      break;
     }
+    if (!matched) return null;
   }
-  return null;
+  const choice: ChatProviderChoice | null = await resolveConfiguredTaskModel(reference, 'image');
+  return choice !== null && choice.provider.type === 'openai' && hasUsableAuth(choice.provider) ? choice : null;
 };
 
 // 工具是否装配(同步门;execute 内仍实时解析)
@@ -90,7 +93,7 @@ const customHeadersOf = (m: ProviderModel): Record<string, string> => {
 
 // create:POST {baseUrl}/images/generations {model, prompt, n, size}
 const requestImagesCreate = async (
-  choice: ImageGenChoice, prompt: string, size: string, count: number,
+  choice: ChatProviderChoice, prompt: string, size: string, count: number,
 ): Promise<GeneratedItem[]> => {
   const body: JsonObject = {
     model: choice.model.modelId,
@@ -125,7 +128,7 @@ interface MultipartTextField {
 
 // edit:POST {baseUrl}/images/edits multipart(model/prompt/n/size + image 文件)
 const requestImagesEdit = async (
-  choice: ImageGenChoice, prompt: string, size: string, count: number,
+  choice: ChatProviderChoice, prompt: string, size: string, count: number,
   source: EditSourceImage,
 ): Promise<GeneratedItem[]> => {
   const boundary: string = `----AmberImageGen${Date.now()}`;
@@ -307,7 +310,7 @@ export const createImageGenTool = (deps: ImageGenToolDeps): AgentTool =>
       const count: number = Math.min(Math.max(countRaw, 1), 4);
       const isEdit: boolean = (inputStringValue(input, 'mode') ?? 'create') === 'edit';
 
-      const choice: ImageGenChoice | null = await resolveImageGenChoice();
+      const choice: ChatProviderChoice | null = await resolveImageGenChoice();
       if (choice === null) {
         throw new Error('未配置生图模型,请用户在 设置 > 任务模型 > 生图模型 中配置');
       }

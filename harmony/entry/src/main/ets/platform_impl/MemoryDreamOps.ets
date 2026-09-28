@@ -4,9 +4,9 @@
 //     acceptCandidate/ignoreCandidate/ignoreLowConfidenceCandidates)
 //   MemoryDreamPlanner.kt:74-100(planWithModel:generateText = model +
 //     reasoningLevel=worker.daydreamReasoningLevel)/:102-120(resolveDaydreamModel
-//     五分支链 → D-087 task_model.daydreamModelCandidates 已移植)
+//     五分支链 → D-087 task_model.daydreamModelReferences 已移植)
 // 存储面 = MemoryStore.ets getMemoryDreamStoreOps/getMemoryDreamPlanStore;
-// 模型面 = AppContainer 任务模型链(daydreamModelCandidates → resolveTaskModelChain)。
+// 模型面 = AppContainer 任务模型链(daydreamModelReferences → resolveTaskModelReferenceChain)。
 // 偏差(延续 D-087 登记):resolveDaydreamModel 的 findProvider 失败支在 entry
 //   不可达(choice 捆绑 provider+model,choice null ⇔ Android 任一 ?: return null)。
 // D-103:daydreamReasoningLevel 已接线(快照解析默认 HIGH;Android 无设置 UI,
@@ -18,13 +18,13 @@ import type {
   MessageChunk, OpenAIChatApi, TaskModelWorkerGate,
 } from '@amber/chat-domain';
 import {
-  daydreamModelCandidates, makeTextGenerationParams, makeUserMessage, toChatModel,
+  daydreamModelReferences, makeTextGenerationParams, makeUserMessage, toChatModel,
   toText,
 } from '@amber/chat-domain';
-import type { ChatProviderChoice, TaskModelIds } from '../di/AppContainer.ets';
+import type { ChatProviderChoice } from '../di/AppContainer.ets';
 import {
-  buildProviderApi, currentChatModelUuid, getChatKvStore, loadTaskModelIds,
-  resolveTaskModelChain,
+  buildProviderApi, currentChatModelReference, getChatKvStore, readTaskModelReference, TASK_COMPRESS_MODEL_KEY,
+  resolveTaskModelReferenceChain,
 } from '../di/AppContainer.ets';
 import type { AgentRuntimeSnapshot, MemoryWorkerGateSnapshot } from './AgentRuntimePrefs.ets';
 import { loadAgentRuntimeSnapshot } from './AgentRuntimePrefs.ets';
@@ -37,15 +37,17 @@ const TAG: string = 'Chat.MemoryDreamOps';
 // 快照 → task_model.TaskModelWorkerGate(D-087 链入参四字段)
 const toTaskGate = (w: MemoryWorkerGateSnapshot): TaskModelWorkerGate => ({
   modelId: w.modelId,
+  providerId: w.providerId,
   followCompressModel: w.followCompressModel,
   daydreamModelId: w.daydreamModelId,
+  daydreamProviderId: w.daydreamProviderId,
   daydreamFollowCompressModel: w.daydreamFollowCompressModel,
 });
 
 export const resolveMemoryDaydreamChoice = async (worker: MemoryWorkerGateSnapshot): Promise<ChatProviderChoice | null> => {
-  const ids: TaskModelIds = await loadTaskModelIds();
-  const chatUuid: string = await currentChatModelUuid();
-  return resolveTaskModelChain(daydreamModelCandidates(toTaskGate(worker), ids.compressModelId, chatUuid));
+  const compressReference = await readTaskModelReference(TASK_COMPRESS_MODEL_KEY);
+  const chatRef = await currentChatModelReference();
+  return resolveTaskModelReferenceChain(daydreamModelReferences(toTaskGate(worker), compressReference, chatRef));
 };
 
 // planDream 编排 deps(VM :143-168 + Planner.kt:74-100)
@@ -81,7 +83,12 @@ export const loadMemoryDreamPlanOpDeps = async (): Promise<MemoryDreamPlanOpDeps
     generateText: async (prompt: string): Promise<string> => {
       const choice: ChatProviderChoice | null = await resolveChoice();
       if (choice === null) throw new Error('no daydream model');
-      const api: OpenAIChatApi = buildProviderApi(choice.provider, {});
+      const headers: Record<string, string> = {};
+      for (const header of choice.model.customHeaders) {
+        const name: string = header.name.trim();
+        if (name.length > 0) headers[name] = header.value.trim();
+      }
+      const api: OpenAIChatApi = buildProviderApi(choice.provider, headers);
       // TextGenerationParams(model, reasoningLevel=daydreamReasoningLevel)
       //   (Planner.kt:94-97)— D-103 接线(MemoryModels.kt:142 默认 HIGH)
       const chunk: MessageChunk = await api.generateText(
@@ -89,6 +96,7 @@ export const loadMemoryDreamPlanOpDeps = async (): Promise<MemoryDreamPlanOpDeps
         makeTextGenerationParams({
           model: toChatModel(choice.model),
           reasoningLevel: worker.daydreamReasoningLevel,
+          customBody: choice.model.customBodies,
         }),
       );
       // :98 response.choices.firstOrNull()?.message?.toText().orEmpty()

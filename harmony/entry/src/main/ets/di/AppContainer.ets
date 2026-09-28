@@ -46,6 +46,7 @@ import type {
   ConversationRepository, KeyValueStore, Assistant, OpenAIChatApi, TextGenerationParams,
   ProviderSetting, ProviderSettingOpenAIVariant, ProviderSettingClaude, ProviderSettingGoogle,
   ProviderModel, CompactStore, ModelAbility, SkillMetadata, SkillWorkspacePort,
+  ModelType, TaskModelPair, TaskModelReference,
   AgentTool, ChatStreamProvider, ChatToolDefinition, CustomHeader,
   SubAgentRuntimeSetting, SubAgentOverride, SubAgentManagerDeps, SubAgentRunner,
   SubAgentAssistantResolution, SubAgentGenerationPort,
@@ -56,6 +57,7 @@ import {
   loadAssistants, loadProviders, makeAssistant, saveAssistants, patchAssistant,
   makeProviderSettingOpenAI, createOpenAIChatApi, createClaudeChatApi, createGoogleChatApi,
   hasUsableAuth, openAIAuthHeaders, copyProviderSettingWithModels,
+  taskModelReferenceId, taskModelReferenceFromId, findTaskProviderModel,
   makeTextGenerationParams, toChatModel, defaultReasoningLevelForModel,
   resolveSessionDefaults, mergeCustomParams,
   SessionAccessGrantStore, DEFAULT_AUTO_MODEL_ID,
@@ -80,6 +82,7 @@ import {
   type ChatTurnDeps,
 } from '@amber/chat-domain';
 import { findModelByIdInProviders } from '../platform_impl/OcrSupport.ets';
+import { loadTaskModelReference, storeTaskModelPair } from '../platform_impl/TaskModelSelectionSupport.ets';
 import { createChatKvStore } from '../platform_impl/ChatKvStore.ets';
 import { SSHProfileStore, TerminalRuntime, SSHTargetResolver, PythonRuntime, MoshRuntime } from '@amber/chat-domain';
 import type { SSHCredentialStorePort, PythonTransportPort } from '@amber/chat-domain';
@@ -759,7 +762,7 @@ const buildSubAgentGenerationPort = (
         (mm: ProviderModel): boolean => mm.type === 'chat');
       if (m !== undefined && !choices.has(m.id)) {
         candidates[m.id] = `${p.name}/${m.modelId}`;
-        choices.set(m.id, { provider: p, model: m });
+        choices.set(m.id, { provider: p, model: m, providerContainerId: p.id });
       }
     }
     if (choices.size <= 1) return null;
@@ -1300,6 +1303,7 @@ export interface ChatRuntime {
 }
 
 export interface ChatProviderChoice {
+  providerContainerId: string;
   // D-046:三变体(openai/google/claude)统一解析;api 层均为结构 OpenAIChatApi
   provider: ProviderSetting;
   model: ProviderModel;
@@ -1316,7 +1320,7 @@ const makeProviderChoice = (
   p: ProviderSetting, m: ProviderModel,
 ): ChatProviderChoice | null => {
   const provider: ProviderSetting = effectiveProvider(p, m);
-  return hasUsableAuth(provider) ? { provider, model: m } : null;
+  return hasUsableAuth(provider) ? { provider, model: m, providerContainerId: p.id } : null;
 };
 
 // D-080:导出供 ChatPage 发送门(canSendWithoutChatModel 等价物)使用
@@ -1383,11 +1387,28 @@ export interface TaskModelIds {
   imageModelId: string;
 }
 
+export interface TaskModelReferences {
+  titleModel: TaskModelReference;
+  suggestionModel: TaskModelReference;
+  compressModel: TaskModelReference;
+  imageModel: TaskModelReference;
+}
+
+export const readTaskModelReference = (key: string): Promise<TaskModelReference> =>
+  loadTaskModelReference(getChatKvStore(), key);
+
+export const saveTaskModelPair = (key: string, pair: TaskModelPair): Promise<void> =>
+  storeTaskModelPair(getChatKvStore(), key, pair);
+
+export const loadTaskModelReferences = async (): Promise<TaskModelReferences> => ({
+  titleModel: await readTaskModelReference(TASK_TITLE_MODEL_KEY),
+  suggestionModel: await readTaskModelReference(TASK_SUGGESTION_MODEL_KEY),
+  compressModel: await readTaskModelReference(TASK_COMPRESS_MODEL_KEY),
+  imageModel: await readTaskModelReference(TASK_IMAGE_MODEL_KEY),
+});
+
 const readTaskModelId = async (key: string): Promise<string> => {
-  const storage = getAppContainer().storage;
-  const value: string = await storage.get<string>(key, '');
-  // parseUuidOrNull 无效 → AUTO(ChatPrefs.kt:71-77 等价:空/缺失 → AUTO)
-  return value.length > 0 ? value : DEFAULT_AUTO_MODEL_ID;
+  return taskModelReferenceId(await readTaskModelReference(key));
 };
 
 export const loadTaskModelIds = async (): Promise<TaskModelIds> => ({
@@ -1527,6 +1548,41 @@ export const resolveTaskChatModelChoice = async (
   modelId: string, fallbackChoice?: ChatProviderChoice,
 ): Promise<ChatProviderChoice | null> =>
   (await resolveConfiguredTaskChatModel(modelId)) ?? fallbackChoice ?? resolveChatProviderChoice();
+
+export const resolveConfiguredTaskModel = async (
+  reference: TaskModelReference, type: ModelType,
+): Promise<ChatProviderChoice | null> => {
+  if (reference.kind === 'legacy' && type === 'chat') {
+    return resolveConfiguredTaskChatModel(reference.modelId);
+  }
+  const providers: ProviderSetting[] | null = await loadProviders(getChatKvStore());
+  if (providers === null) return null;
+  const configured = findTaskProviderModel(providers, reference, type);
+  return configured === null ? null : makeProviderChoice(configured.provider, configured.model);
+};
+
+export const resolveTaskModelReference = async (
+  reference: TaskModelReference, fallbackChoice?: ChatProviderChoice,
+): Promise<ChatProviderChoice | null> =>
+  (await resolveConfiguredTaskModel(reference, 'chat')) ?? fallbackChoice ?? resolveChatProviderChoice();
+
+export const resolveTaskModelReferenceChain = async (
+  references: TaskModelReference[], fallbackChoice?: ChatProviderChoice,
+): Promise<ChatProviderChoice | null> => {
+  for (const reference of references) {
+    const choice: ChatProviderChoice | null = await resolveConfiguredTaskModel(reference, 'chat');
+    if (choice !== null) return choice;
+  }
+  return fallbackChoice ?? resolveChatProviderChoice();
+};
+
+export const taskModelReferenceForChoice = (choice: ChatProviderChoice): TaskModelReference =>
+  taskModelReferenceFromId(choice.model.id, choice.providerContainerId);
+
+export const currentChatModelReference = async (): Promise<TaskModelReference> => {
+  const choice: ChatProviderChoice | null = await resolveChatProviderChoice();
+  return choice === null ? taskModelReferenceFromId(DEFAULT_AUTO_MODEL_ID) : taskModelReferenceForChoice(choice);
+};
 
 // 链式解析:候选全部按顺序尝试，最后才回退当前聊天模型。
 export const resolveTaskModelChain = async (

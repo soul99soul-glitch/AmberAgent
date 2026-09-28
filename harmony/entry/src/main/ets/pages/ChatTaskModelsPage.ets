@@ -1,499 +1,370 @@
-// ChatTaskModelsPage — 任务模型设置面(D-094)
-// 2026-09-27 二级页 iOS 对齐(基准 IMG_1990 风格):仅换视觉骨架
-//   (CenteredTitleBar/PlainSection/CardGroup r18+描边/iOS 卡片行),逻辑零改动。
-// Android 锚点:SettingModelPage.kt 辅助任务区(:433-700)—
-//   title(:433-470)/suggestion(:472-509)/compress(:556-592):
-//     allowClear;follows = findModelById(id) == null → '跟随当前聊天模型' +
-//     '当前使用：X';onClear → DEFAULT_AUTO_MODEL_ID;'提示词' → ModelPromptSheet
-//     (变量 hint + 重置为默认 → DEFAULT_*_PROMPT)
-//   worker(:594-645)/daydream(:647-700):
-//     follows = followCompressModel && findModelById(modelId) == null →
-//     '跟随压缩模型' + '当前跟随压缩模型：X';onClear → AUTO + follow=true;
-//     onSelect → id + follow=false
-import {
-  ACCENT, BG, GUTTER, INK, INK3, INK4, LINE, OVERLAY, SURFACE, TEXT_STYLES, accentSoftBg, lineHeightForSize,
-} from '../design/tokens.ets';
-import { CenteredTitleBar, PlainSection, CardGroup, BtnGhost, BtnFill } from '../components/PageTemplate.ets';
-import { Icon } from '../components/ui/Icon.ets';
-import { FONT_MONO, FONT_MONO_MEDIUM, FONT_SANS_MEDIUM } from '../design/fonts.ets';
 import { router } from '@kit.ArkUI';
 import {
-  loadProviders, hasUsableAuth, DEFAULT_AUTO_MODEL_ID,
-  DEFAULT_TITLE_PROMPT, DEFAULT_SUGGESTION_PROMPT, DEFAULT_COMPRESS_PROMPT,
-  DEFAULT_OCR_PROMPT, resolveVisionRecognitionPrompt, probeVisionModelHealth,
+  loadProviders, DEFAULT_AUTO_MODEL_ID, DEFAULT_TITLE_PROMPT, DEFAULT_SUGGESTION_PROMPT,
+  DEFAULT_COMPRESS_PROMPT, DEFAULT_OCR_PROMPT, resolveVisionRecognitionPrompt,
+  taskModelReferenceFromId, memoryWorkerModelReferences, daydreamModelReferences,
 } from '@amber/chat-domain';
-import type { ProviderSetting, ProviderModel, UIMessage, VisionModelHealth } from '@amber/chat-domain';
+import type { ProviderSetting, TaskModelReference, ModelType, VisionModelHealth } from '@amber/chat-domain';
 import {
-  getChatKvStore, saveTaskModelId, loadTaskModelIds, TaskModelIds,
-  resolveTaskChatModelChoice, saveTaskPrompt, loadTaskPrompts, TaskPrompts,
-  ChatProviderChoice,
+  getChatKvStore, readTaskModelReference, saveTaskModelId, resolveTaskModelReference, resolveConfiguredTaskModel,
+  resolveTaskModelReferenceChain, taskModelReferenceForChoice,
+  saveTaskPrompt, loadTaskPrompts, TaskPrompts, ChatProviderChoice,
   TASK_TITLE_MODEL_KEY, TASK_SUGGESTION_MODEL_KEY, TASK_COMPRESS_MODEL_KEY, TASK_IMAGE_MODEL_KEY,
   TASK_TITLE_PROMPT_KEY, TASK_SUGGESTION_PROMPT_KEY, TASK_COMPRESS_PROMPT_KEY,
 } from '../di/AppContainer.ets';
-import { findModelByIdInProviders } from '../platform_impl/OcrSupport.ets';
+import { findTaskProviderModel } from '../platform_impl/TaskModelSelectionSupport.ets';
 import {
-  getOcrModelId, getOcrPrompt, saveOcrPrompt, findProviderOfModel, generateVisionText,
+  OCR_MODEL_KEY, getOcrPrompt, saveOcrPrompt, loadOcrSeed, probeEntryOcrHealth, OcrSeed,
 } from '../platform_impl/OcrSupport.ets';
+import { resolveImageGenChoice } from '../platform_impl/ImageGenTool.ets';
 import {
-  loadAgentRuntimeSnapshot, updateMemoryWorkerModels, AgentRuntimeSnapshot,
-  MemoryWorkerModelPatch,
+  loadAgentRuntimeSnapshot, updateMemoryWorkerModels, MemoryWorkerModelPatch, MemoryWorkerGateSnapshot,
 } from '../platform_impl/AgentRuntimePrefs.ets';
+import { CenteredTitleBar, PlainSection, CardGroup } from '../components/PageTemplate.ets';
+import { Icon } from '../components/ui/Icon.ets';
+import { SSHUIColors } from '../components/SSHUIColors.ets';
+import { ACCENT } from '../design/tokens.ets';
 
+interface TaskSlotView {
+  task: string;
+  reference: TaskModelReference | null;
+  current: string;
+  detail: string;
+  identity: string;
+  canClear: boolean;
+}
+interface TaskTexts {
+  title: string;
+  suggestion: string;
+  compress: string;
+  image: string;
+  worker: string;
+  daydream: string;
+  ocr: string;
+}
+const taskText = (texts: TaskTexts, task: string): string => {
+  switch (task) {
+    case 'suggestion': return texts.suggestion;
+    case 'compress': return texts.compress;
+    case 'image': return texts.image;
+    case 'worker': return texts.worker;
+    case 'daydream': return texts.daydream;
+    case 'ocr': return texts.ocr;
+    default: return texts.title;
+  }
+};
+const TASK_TITLES: TaskTexts = {
+  title: '标题总结模型', suggestion: '聊天建议模型', compress: '压缩模型', image: '生图模型',
+  worker: '记忆提取模型', daydream: 'Daydream 模型', ocr: '视觉识别模型',
+};
+const TASK_DESCRIPTIONS: TaskTexts = {
+  title: '用于总结对话标题，推荐快速、便宜的模型。', suggestion: '用于生成对话建议，推荐快速、便宜的模型。',
+  compress: '用于压缩对话历史。', image: '用于 generate_image；需要可用的 OpenAI 兼容生图模型，无聊天模型回退。',
+  worker: '用于对话结束后提取候选记忆，轻量稳定即可。', daydream: '用于记忆整理与主题派生，建议使用推理较强的模型。',
+  ocr: '当前聊天模型不能直接读取图片时，用它理解图片内容；无聊天模型回退。',
+};
+const TASK_ICONS: TaskTexts = {
+  title: 'edit', suggestion: 'spark', compress: 'history', image: 'image', worker: 'brain', daydream: 'star', ocr: 'eye',
+};
 
 @Entry
 @Component
 struct ChatTaskModelsPage {
   @State loaded: boolean = false;
-  @State providers: ProviderSetting[] = [];
-  @State titleUuid: string = DEFAULT_AUTO_MODEL_ID;
-  @State suggestionUuid: string = DEFAULT_AUTO_MODEL_ID;
-  @State compressUuid: string = DEFAULT_AUTO_MODEL_ID;
-  @State workerUuid: string = DEFAULT_AUTO_MODEL_ID;
-  @State workerFollow: boolean = true;
-  @State daydreamUuid: string = DEFAULT_AUTO_MODEL_ID;
-  @State daydreamFollow: boolean = true;
-  // 生图模型槽(Android 图像生成模型;AUTO = 未配置,generate_image 工具不装配)
-  @State imageUuid: string = DEFAULT_AUTO_MODEL_ID;
-  // 跟随时的回退名(Android fallbackModel?.displayName)
-  @State titleFallback: string = '';
-  @State suggestionFallback: string = '';
-  @State compressFallback: string = '';
+  @State slots: TaskSlotView[] = [];
+  @State error: string = '';
+  @State saving: boolean = false;
   @State prompts: TaskPrompts = {
-    titlePrompt: DEFAULT_TITLE_PROMPT,
-    suggestionPrompt: DEFAULT_SUGGESTION_PROMPT,
-    compressPrompt: DEFAULT_COMPRESS_PROMPT,
+    titlePrompt: DEFAULT_TITLE_PROMPT, suggestionPrompt: DEFAULT_SUGGESTION_PROMPT, compressPrompt: DEFAULT_COMPRESS_PROMPT,
   };
-  // 提示词编辑 overlay('' = 关闭;'ocr' = 视觉识别提示词,D-098)
   @State editingPrompt: string = '';
   @State promptDraft: string = '';
-  // D-098:OCR(ChatPrefs.kt:80,83 — 未配置 = random uuid;prompt 缺失 → DEFAULT)
-  @State ocrUuid: string = '';
   @State ocrPromptRaw: string = DEFAULT_OCR_PROMPT;
-  // D-111:视觉健康标签(VisionModelHealthChecker;初始 checking '检测中' 逐字)
   @State ocrHealthLabel: string = '检测中';
-  // 健康探测用原始 providers(Android settings.providers 未过滤;显示用 usable 过滤列表)
-  private rawProviders: ProviderSetting[] = [];
-  // iOS 二级页 accent 动态色(与 PageTemplate CardRow 家族一致)
-  @StorageProp('accentColor') accentColorStore: string = ACCENT;
+  @State colors: SSHUIColors = new SSHUIColors();
+  @StorageProp('darkMode') @Watch('refreshColors') darkMode: boolean = false;
+  @StorageProp('themePackId') @Watch('refreshColors') themePackId: string = '';
+  @StorageProp('accentColor') @Watch('refreshColors') accentColor: string = ACCENT;
+  @StorageProp('navBarHeight') navBarHeight: number = 0;
+  private alive: boolean = false;
+  private visible: boolean = false;
+  private loadSeq: number = 0;
 
-  aboutToAppear(): void {
-    this.refresh();
+  aboutToAppear(): void { this.alive = true; this.visible = true; this.refresh(); }
+  onPageShow(): void { if (!this.visible) { this.visible = true; this.refresh(); } }
+  onPageHide(): void { this.visible = false; this.loadSeq++; }
+  aboutToDisappear(): void { this.alive = false; this.onPageHide(); }
+  private refreshColors(): void { this.colors = new SSHUIColors(); }
+  private taskKey(task: string): string {
+    return task === 'title' ? TASK_TITLE_MODEL_KEY : task === 'suggestion' ? TASK_SUGGESTION_MODEL_KEY
+      : task === 'image' ? TASK_IMAGE_MODEL_KEY : task === 'ocr' ? OCR_MODEL_KEY : TASK_COMPRESS_MODEL_KEY;
+  }
+  private slot(task: string): TaskSlotView {
+    return this.slots.find((item: TaskSlotView): boolean => item.task === task) ?? {
+      task: task, reference: null, current: '尚未读取配置', detail: '', identity: '', canClear: task !== 'ocr',
+    };
+  }
+  private choiceName(choice: ChatProviderChoice | null): string {
+    if (choice === null) return '暂无可用模型';
+    return `${choice.provider.name} / ${choice.model.displayName || choice.model.modelId}`;
+  }
+  private referenceIdentity(reference: TaskModelReference): string {
+    if (reference.kind === 'auto') return '';
+    if (reference.kind === 'legacy') return `旧模型 UUID：${reference.modelId}（重新选择可固定 Provider）`;
+    return `Provider 配置 ID：${reference.pair.providerId}\n模型配置 UUID：${reference.pair.modelId}`;
+  }
+  private rawName(providers: ProviderSetting[], reference: TaskModelReference, type: ModelType): string {
+    const raw = findTaskProviderModel(providers, reference, type);
+    return raw === null ? '' : `${raw.provider.name} / ${raw.model.displayName || raw.model.modelId}`;
+  }
+  private configuredName(providers: ProviderSetting[], reference: TaskModelReference, type: ModelType,
+    choice: ChatProviderChoice | null): string {
+    if (reference.kind !== 'legacy') return this.rawName(providers, reference, type);
+    if (choice === null) return '';
+    const container: ProviderSetting | undefined = providers.find((provider: ProviderSetting): boolean => provider.id === choice.providerContainerId);
+    return `${container?.name ?? choice.provider.name} / ${choice.model.displayName || choice.model.modelId}`;
+  }
+  private invalidSlot(task: string, message: string): TaskSlotView {
+    return { task: task, reference: null, current: '配置无法解析', detail: message, identity: '', canClear: task !== 'ocr' };
   }
 
-  // 子选择页返回后重读选中名
-  onPageShow(): void {
-    this.refresh();
+  private async chatSlot(task: string, providers: ProviderSetting[]): Promise<TaskSlotView> {
+    try {
+      const reference: TaskModelReference = await readTaskModelReference(this.taskKey(task));
+      const configured: ChatProviderChoice | null = await resolveConfiguredTaskModel(reference, 'chat');
+      const actual: ChatProviderChoice | null = await resolveTaskModelReference(reference);
+      const name: string = this.configuredName(providers, reference, 'chat', configured);
+      return {
+        task: task, reference: reference,
+        current: reference.kind === 'auto' ? '跟随当前聊天模型' : configured === null ? '所选模型不可用' : name || this.choiceName(configured),
+        detail: reference.kind === 'auto' || configured === null
+          ? `设置页当前回退参考：${this.choiceName(actual)}；实际任务跟随本轮聊天选择。`
+          : `实际请求服务商：${configured.provider.name} · ${configured.provider.type}`,
+        identity: this.referenceIdentity(reference), canClear: reference.kind !== 'auto',
+      };
+    } catch (error) { return this.invalidSlot(task, error instanceof Error ? error.message : String(error)); }
+  }
+
+  private async memorySlot(task: string, providers: ProviderSetting[], worker: MemoryWorkerGateSnapshot,
+    compress: TaskModelReference | null, chat: ChatProviderChoice | null): Promise<TaskSlotView> {
+    const daydream: boolean = task === 'daydream';
+    const reference: TaskModelReference = daydream
+      ? taskModelReferenceFromId(worker.daydreamModelId, worker.daydreamProviderId)
+      : taskModelReferenceFromId(worker.modelId, worker.providerId);
+    const follow: boolean = daydream ? worker.daydreamFollowCompressModel : worker.followCompressModel;
+    const configured: ChatProviderChoice | null = await resolveConfiguredTaskModel(reference, 'chat');
+    const chatReference: TaskModelReference = chat === null ? { kind: 'auto' } : taskModelReferenceForChoice(chat);
+    const actual: ChatProviderChoice | null = compress === null ? null : await resolveTaskModelReferenceChain(daydream
+      ? daydreamModelReferences(worker, compress, chatReference) : memoryWorkerModelReferences(worker, compress, chatReference), chat ?? undefined);
+    return {
+      task: task, reference: reference,
+      current: reference.kind === 'auto' ? follow ? '跟随压缩模型' : daydream ? '按记忆提取设置跟随' : '跟随当前聊天模型'
+        : configured === null ? '所选模型不可用' : this.configuredName(providers, reference, 'chat', configured) || this.choiceName(configured),
+      detail: compress === null ? '压缩模型配置无法解析，请先修正该配置。'
+        : `设置页当前解析：${this.choiceName(actual)}；聊天回退以实际运行轮次为准。`,
+      identity: this.referenceIdentity(reference), canClear: reference.kind !== 'auto' || !follow,
+    };
+  }
+
+  private async imageSlot(providers: ProviderSetting[]): Promise<TaskSlotView> {
+    try {
+      const reference: TaskModelReference = await readTaskModelReference(TASK_IMAGE_MODEL_KEY);
+      const choice: ChatProviderChoice | null = await resolveImageGenChoice();
+      const name: string = this.configuredName(providers, reference, 'image', choice);
+      return {
+        task: 'image', reference: reference,
+        current: reference.kind === 'auto' ? '未配置' : choice === null ? '所选模型不可用' : name || this.choiceName(choice),
+        detail: choice === null ? `${name.length > 0 ? `已配置：${name}。` : ''}生图当前不可用，没有聊天模型回退。`
+          : `实际请求服务商：${choice.provider.name} · ${choice.provider.type}`,
+        identity: this.referenceIdentity(reference), canClear: reference.kind !== 'auto',
+      };
+    } catch (error) { return this.invalidSlot('image', error instanceof Error ? error.message : String(error)); }
   }
 
   private async refresh(): Promise<void> {
-    const kv = getChatKvStore();
-    const providers: ProviderSetting[] | null = await loadProviders(kv);
-    const usable: ProviderSetting[] = [];
-    if (providers !== null) {
-      this.rawProviders = providers;
-      for (const p of providers) {
-        if (hasUsableAuth(p) && p.models.some((m: ProviderModel): boolean => m.type === 'chat')) {
-          usable.push(p);
-        }
+    const seq: number = ++this.loadSeq;
+    try {
+      const providers: ProviderSetting[] = await loadProviders(getChatKvStore()) ?? [];
+      const worker: MemoryWorkerGateSnapshot = (await loadAgentRuntimeSnapshot(getChatKvStore())).memoryWorker;
+      const prompts: TaskPrompts = await loadTaskPrompts();
+      const ocrPrompt: string = await getOcrPrompt(getChatKvStore());
+      const title: TaskSlotView = await this.chatSlot('title', providers);
+      const suggestion: TaskSlotView = await this.chatSlot('suggestion', providers);
+      const compress: TaskSlotView = await this.chatSlot('compress', providers);
+      const image: TaskSlotView = await this.imageSlot(providers);
+      const chat: ChatProviderChoice | null = await resolveTaskModelReference({ kind: 'auto' });
+      const extraction: TaskSlotView = await this.memorySlot('worker', providers, worker, compress.reference, chat);
+      const daydream: TaskSlotView = await this.memorySlot('daydream', providers, worker, compress.reference, chat);
+      let ocr: TaskSlotView;
+      let ocrSeed: OcrSeed | null = null;
+      try {
+        ocrSeed = await loadOcrSeed(getChatKvStore());
+        const reference: TaskModelReference = ocrSeed.ocrReference;
+        const name: string = this.configuredName(providers, reference, 'chat', ocrSeed.ocrChoice);
+        ocr = {
+          task: 'ocr', reference: reference,
+          current: reference.kind === 'auto' ? '未配置' : ocrSeed.ocrChoice === null ? '所选模型不可用' : name || this.choiceName(ocrSeed.ocrChoice),
+          detail: ocrSeed.ocrChoice === null ? '视觉识别当前不可用，没有聊天模型回退。' : `实际请求服务商：${ocrSeed.ocrChoice.provider.name}`,
+          identity: this.referenceIdentity(reference), canClear: false,
+        };
+      } catch (error) { ocr = this.invalidSlot('ocr', error instanceof Error ? error.message : String(error)); }
+      if (!this.alive || !this.visible || seq !== this.loadSeq) return;
+      this.slots = [title, suggestion, compress, image, extraction, daydream, ocr];
+      this.prompts = prompts; this.ocrPromptRaw = ocrPrompt; this.loaded = true; this.error = '';
+      this.ocrHealthLabel = ocrSeed === null ? '不可用：配置无法解析' : '检测中';
+      if (ocrSeed !== null) this.probeOcrHealth(ocrSeed, seq);
+    } catch (error) {
+      if (this.alive && this.visible && seq === this.loadSeq) {
+        this.loaded = true; this.error = error instanceof Error ? error.message : String(error);
       }
     }
-    const ids: TaskModelIds = await loadTaskModelIds();
-    const snap: AgentRuntimeSnapshot = await loadAgentRuntimeSnapshot(kv);
-    const prompts: TaskPrompts = await loadTaskPrompts();
-    this.providers = usable;
-    this.titleUuid = ids.titleModelId;
-    this.suggestionUuid = ids.suggestionModelId;
-    this.compressUuid = ids.compressModelId;
-    this.imageUuid = ids.imageModelId;
-    this.workerUuid = snap.memoryWorker.modelId;
-    this.workerFollow = snap.memoryWorker.followCompressModel;
-    this.daydreamUuid = snap.memoryWorker.daydreamModelId;
-    this.daydreamFollow = snap.memoryWorker.daydreamFollowCompressModel;
-    this.prompts = prompts;
-    // fallback 名:resolveTaskChatModel(id)(:447/:486/:569/:601-602)
-    const titleChoice: ChatProviderChoice | null = await resolveTaskChatModelChoice(ids.titleModelId);
-    const suggChoice: ChatProviderChoice | null = await resolveTaskChatModelChoice(ids.suggestionModelId);
-    const compChoice: ChatProviderChoice | null = await resolveTaskChatModelChoice(ids.compressModelId);
-    this.titleFallback = titleChoice !== null ? titleChoice.model.displayName : '';
-    this.suggestionFallback = suggChoice !== null ? suggChoice.model.displayName : '';
-    this.compressFallback = compChoice !== null ? compChoice.model.displayName : '';
-    // D-098:OCR 设置面读侧(D-071b 同函数)
-    this.ocrUuid = await getOcrModelId(kv);
-    this.ocrPromptRaw = await getOcrPrompt(kv);
-    this.loaded = true;
-    // D-111:健康探测(produceState key = ocrModelId + providers;refresh 即重键)
-    this.probeOcrHealth();
   }
-
-  // D-111:SettingModelPage.kt:518-526 — initial checking();IO 探测 → label;
-  //   generateText 与 OcrTransformer 同口径(OcrSupport.generateVisionText,D-071b)
-  private probeOcrHealth(): void {
-    this.ocrHealthLabel = '检测中';
-    const providers: ProviderSetting[] = this.rawProviders;
-    const ocrId: string = this.ocrUuid;
-    probeVisionModelHealth({
-      findOcrModel: (): ProviderModel | null => findModelByIdInProviders(providers, ocrId),
-      modelSupportsImage: (m: ProviderModel): boolean => m.inputModalities.includes('image'),
-      findProvider: (m: ProviderModel): ProviderSetting | null =>
-        findProviderOfModel(providers, m),
-      generateText: (p: ProviderSetting, m: ProviderModel, msgs: UIMessage[]): Promise<string | null> =>
-        generateVisionText(p, m, msgs),
-    }).then((h: VisionModelHealth): void => {
-      this.ocrHealthLabel = h.label;
-    }).catch((): void => {
-      // probe 内部 runCatching 语义不拒promise;此处仅兜底装配期异常
-      this.ocrHealthLabel = '不可用：检测失败';
+  private probeOcrHealth(seed: OcrSeed, seq: number): void {
+    probeEntryOcrHealth(seed).then((health: VisionModelHealth): void => {
+      if (this.alive && this.visible && seq === this.loadSeq) this.ocrHealthLabel = health.label;
+    }).catch((error: Error): void => {
+      if (this.alive && this.visible && seq === this.loadSeq) this.ocrHealthLabel = `不可用：${error.message}`;
     });
   }
-
-  // follows = findModelById(id) == null(:446/:485/:568)
-  private followsChat(uuid: string): boolean {
-    const m: ProviderModel | null = findModelByIdInProviders(this.providers, uuid);
-    return m === null || m.type !== 'chat';
-  }
-
-  private selectedName(uuid: string): string {
-    const m: ProviderModel | null = findModelByIdInProviders(this.providers, uuid);
-    if (m === null || m.type !== 'chat') return '';
-    return m.displayName.length > 0 ? m.displayName : m.modelId;
-  }
-
-  // 生图槽解析(rawProviders 未过滤:image 模型可能挂在无 chat 模型的 provider 下)
-  private imageConfigured(): boolean {
-    const m: ProviderModel | null = findModelByIdInProviders(this.rawProviders, this.imageUuid);
-    return m !== null && m.type === 'image';
-  }
-
-  private selectedImageName(): string {
-    const m: ProviderModel | null = findModelByIdInProviders(this.rawProviders, this.imageUuid);
-    if (m === null || m.type !== 'image') return '';
-    return m.displayName.length > 0 ? m.displayName : m.modelId;
-  }
-
-  private openPicker(task: string): void {
-    router.pushUrl({ url: 'pages/ChatTaskModelPickerPage', params: { task: task } });
-  }
-
-  // onClear → DEFAULT_AUTO_MODEL_ID(:451-453/:490-492/:573-575)
-  private clearTaskModel(task: string): void {
-    const key: string = task === 'title' ? TASK_TITLE_MODEL_KEY
-      : task === 'suggestion' ? TASK_SUGGESTION_MODEL_KEY
-      : task === 'image' ? TASK_IMAGE_MODEL_KEY : TASK_COMPRESS_MODEL_KEY;
-    saveTaskModelId(key, DEFAULT_AUTO_MODEL_ID).then((): void => { this.refresh(); });
-  }
-
-  // worker/daydream onClear → AUTO + follow=true(:619-630/:678-683)
-  private clearWorkerModel(daydream: boolean): void {
-    const patch: MemoryWorkerModelPatch = daydream
-      ? { daydreamModelId: DEFAULT_AUTO_MODEL_ID, daydreamFollowCompressModel: true }
-      : { modelId: DEFAULT_AUTO_MODEL_ID, followCompressModel: true };
-    updateMemoryWorkerModels(getChatKvStore(), patch).then((): void => { this.refresh(); });
+  private openPicker(task: string): void { router.pushUrl({ url: 'pages/ChatTaskModelPickerPage', params: { task: task } }); }
+  private async clearTaskModel(task: string): Promise<void> {
+    if (this.saving) return;
+    this.saving = true; this.error = '';
+    try {
+      if (task === 'worker' || task === 'daydream') {
+        const patch: MemoryWorkerModelPatch = task === 'daydream'
+          ? { daydreamModelId: DEFAULT_AUTO_MODEL_ID, daydreamProviderId: null, daydreamFollowCompressModel: true }
+          : { modelId: DEFAULT_AUTO_MODEL_ID, providerId: null, followCompressModel: true };
+        await updateMemoryWorkerModels(getChatKvStore(), patch);
+      } else await saveTaskModelId(this.taskKey(task), DEFAULT_AUTO_MODEL_ID);
+      if (this.alive && this.visible) await this.refresh();
+    } catch (error) { if (this.alive) this.error = error instanceof Error ? error.message : String(error); }
+    finally { this.saving = false; }
   }
 
   private openPromptEditor(task: string): void {
-    // D-098:ocr 展示 resolveVisionRecognitionPrompt(settings.ocrPrompt)(:543 逐字)
-    this.promptDraft = task === 'title' ? this.prompts.titlePrompt
-      : task === 'suggestion' ? this.prompts.suggestionPrompt
-        : task === 'compress' ? this.prompts.compressPrompt
-          : resolveVisionRecognitionPrompt(this.ocrPromptRaw);
+    this.promptDraft = task === 'title' ? this.prompts.titlePrompt : task === 'suggestion' ? this.prompts.suggestionPrompt
+      : task === 'compress' ? this.prompts.compressPrompt : resolveVisionRecognitionPrompt(this.ocrPromptRaw);
     this.editingPrompt = task;
   }
-
   private promptKey(): string {
-    return this.editingPrompt === 'title' ? TASK_TITLE_PROMPT_KEY
-      : this.editingPrompt === 'suggestion' ? TASK_SUGGESTION_PROMPT_KEY
-        : TASK_COMPRESS_PROMPT_KEY;
+    return this.editingPrompt === 'title' ? TASK_TITLE_PROMPT_KEY : this.editingPrompt === 'suggestion' ? TASK_SUGGESTION_PROMPT_KEY : TASK_COMPRESS_PROMPT_KEY;
   }
-
   private promptDefault(): string {
-    return this.editingPrompt === 'title' ? DEFAULT_TITLE_PROMPT
-      : this.editingPrompt === 'suggestion' ? DEFAULT_SUGGESTION_PROMPT
-        : this.editingPrompt === 'compress' ? DEFAULT_COMPRESS_PROMPT
-          : DEFAULT_OCR_PROMPT;
+    return this.editingPrompt === 'title' ? DEFAULT_TITLE_PROMPT : this.editingPrompt === 'suggestion' ? DEFAULT_SUGGESTION_PROMPT
+      : this.editingPrompt === 'compress' ? DEFAULT_COMPRESS_PROMPT : DEFAULT_OCR_PROMPT;
+  }
+  private async savePrompt(): Promise<void> {
+    if (this.saving) return;
+    this.saving = true; this.error = '';
+    try {
+      if (this.editingPrompt === 'ocr') await saveOcrPrompt(getChatKvStore(), this.promptDraft);
+      else await saveTaskPrompt(this.promptKey(), this.promptDraft);
+      if (this.alive && this.visible) { this.editingPrompt = ''; await this.refresh(); }
+    } catch (error) { if (this.alive) this.error = error instanceof Error ? error.message : String(error); }
+    finally { this.saving = false; }
+  }
+  private async resetPrompt(): Promise<void> {
+    if (this.saving) return;
+    const value: string = this.promptDefault();
+    this.promptDraft = value; this.saving = true; this.error = '';
+    try {
+      if (this.editingPrompt === 'ocr') await saveOcrPrompt(getChatKvStore(), value);
+      else await saveTaskPrompt(this.promptKey(), value);
+      if (this.alive && this.visible) await this.refresh();
+    } catch (error) { if (this.alive) this.error = error instanceof Error ? error.message : String(error); }
+    finally { this.saving = false; }
+  }
+  private hasPrompt(task: string): boolean { return task === 'title' || task === 'suggestion' || task === 'compress' || task === 'ocr'; }
+  private clearLabel(task: string): string {
+    return task === 'image' ? '恢复为未配置' : task === 'worker' || task === 'daydream' ? '恢复跟随压缩模型' : '恢复跟随当前聊天模型';
   }
 
-  // ModelPromptSheet onPromptChange → updateSettings(:461-463/:500-502/:583-585/:544-546)
-  private savePrompt(): void {
-    if (this.editingPrompt === 'ocr') {
-      saveOcrPrompt(getChatKvStore(), this.promptDraft).then((): void => {
-        this.editingPrompt = '';
-        this.refresh();
-      });
-      return;
-    }
-    saveTaskPrompt(this.promptKey(), this.promptDraft).then((): void => {
-      this.editingPrompt = '';
-      this.refresh();
-    });
-  }
-
-  // onReset → DEFAULT_*_PROMPT(:464-466/:503-505/:586-588/:547-549)
-  private resetPrompt(): void {
-    const def: string = this.promptDefault();
-    this.promptDraft = def;
-    if (this.editingPrompt === 'ocr') {
-      saveOcrPrompt(getChatKvStore(), def).then((): void => { this.refresh(); });
-      return;
-    }
-    saveTaskPrompt(this.promptKey(), def).then((): void => { this.refresh(); });
-  }
-
-  // iOS 二级页任务行(基准 IMG_1990;视觉规格同 PageTemplate.CardRow):
-  //   主行 = 28 accent 图标座 + 标题 16/副标题 12 + 等宽当前值 + 箭头,整行点击进选择页;
-  //   副行(左缩进至标题起点 54)= 跟随回显(mono)+ 提示词 / 清除动作;发丝分隔线内缩 54。
-  //   功能与原 taskCard 一一对应:选择→整行,提示词→openPromptEditor,清除→clearTaskModel/clearWorkerModel
   @Builder
-  taskRow(title: string, desc: string, iconName: string, currentLine: string, followLine: string,
-    showClear: boolean, clearText: string, task: string, hasPrompt: boolean,
-    isWorkerRow: boolean, isLast: boolean) {
-    Column() {
-      Row() {
-        Row() {
-          Icon({ name: iconName, iconSize: 15, color: this.accentColorStore })
-        }
-        .width(28).height(28)
-        .borderRadius(7)
-        .backgroundColor(accentSoftBg(this.accentColorStore))
-        .justifyContent(FlexAlign.Center)
-        .alignItems(VerticalAlign.Center)
-        .margin({ right: 12 })
-
-        Column() {
-          Text(title)
-            .fontSize(16).fontWeight(FontWeight.Medium).lineHeight(lineHeightForSize(16))
-            .fontFamily(FONT_SANS_MEDIUM).fontColor(INK)
-            .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
-          if (desc.length > 0) {
-            Text(desc)
-              .fontSize(12).lineHeight(lineHeightForSize(12))
-              .fontFamily(FONT_SANS_MEDIUM).fontColor(INK3)
-              .maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis })
-              .margin({ top: 2 })
-          }
-        }
-        .alignItems(HorizontalAlign.Start).layoutWeight(1)
-
-        Text(currentLine)
-          .fontSize(TEXT_STYLES.meta.size).fontWeight(FontWeight.Medium)
-          .lineHeight(TEXT_STYLES.meta.lineHeight)
-          .fontFamily(FONT_MONO_MEDIUM).fontColor(INK3)
-          .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
-          .margin({ left: 8, right: 6 })
-        Icon({ name: 'chevron_right', iconSize: 16, color: INK4 })
-      }
-      .width('100%')
-      .alignItems(VerticalAlign.Center)
-      .constraintSize({ minHeight: 52 })
-      .padding({ left: 14, right: 14, top: 10, bottom: 10 })
-      .onClick((): void => { this.openPicker(task); })
-
-      if (followLine.length > 0 || hasPrompt || showClear) {
-        Row() {
-          if (followLine.length > 0) {
-            Text(followLine)
-              .fontSize(TEXT_STYLES.meta.size).fontWeight(FontWeight.Normal)
-              .lineHeight(TEXT_STYLES.meta.lineHeight)
-              .fontFamily(FONT_MONO).fontColor(INK3)
-              .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
-              .layoutWeight(1)
-          } else {
-            Blank()
-          }
-          if (hasPrompt) {
-            Text('提示词')
-              .fontSize(TEXT_STYLES.meta.size).fontWeight(FontWeight.Medium)
-              .lineHeight(TEXT_STYLES.meta.lineHeight)
-              .fontFamily(FONT_MONO_MEDIUM).fontColor(this.accentColorStore)
-              .padding({ left: 10, top: 6, bottom: 6 })
+  private TaskRow(task: string, last: boolean): void {
+    Column({ space: 8 }) {
+      Row({ space: 12 }) {
+        Row() { Icon({ name: taskText(TASK_ICONS, task), iconSize: 16, color: this.accentColor }) }
+          .width(28).height(28).borderRadius(7).backgroundColor(this.colors.inset).justifyContent(FlexAlign.Center)
+        Text(taskText(TASK_TITLES, task)).fontSize(16).fontWeight(FontWeight.Medium).fontColor(this.colors.ink).layoutWeight(1)
+        Icon({ name: 'chevron_right', iconSize: 16, color: this.colors.muted })
+      }.width('100%').constraintSize({ minHeight: 52 }).enabled(!this.saving).onClick((): void => { this.openPicker(task); })
+      Column({ space: 6 }) {
+        Text(this.slot(task).current).fontSize(14).fontColor(this.colors.ink).width('100%').wordBreak(WordBreak.BREAK_ALL)
+        Text(taskText(TASK_DESCRIPTIONS, task)).fontSize(12).fontColor(this.colors.secondary).width('100%')
+        Text(this.slot(task).detail).fontSize(12).fontColor(this.colors.secondary).width('100%').wordBreak(WordBreak.BREAK_ALL)
+        if (task === 'ocr') Text(`健康检测：${this.ocrHealthLabel}`).fontSize(12).fontColor(this.colors.secondary).width('100%')
+        if (this.slot(task).identity.length > 0) Text(this.slot(task).identity).fontSize(11).fontColor(this.colors.muted)
+          .width('100%').wordBreak(WordBreak.BREAK_ALL).copyOption(CopyOptions.LocalDevice)
+        if (this.hasPrompt(task) || this.slot(task).canClear) {
+          Row({ space: 8 }) {
+            if (this.hasPrompt(task)) Button('提示词').type(ButtonType.Normal).height(44).constraintSize({ minWidth: 64 }).fontSize(13)
+              .fontColor(this.accentColor).backgroundColor(this.colors.inset).enabled(!this.saving)
               .onClick((): void => { this.openPromptEditor(task); })
-          }
-          if (showClear) {
-            Text(clearText)
-              .fontSize(TEXT_STYLES.meta.size).fontWeight(FontWeight.Normal)
-              .lineHeight(TEXT_STYLES.meta.lineHeight)
-              .fontFamily(FONT_MONO).fontColor(INK3)
-              .padding({ left: 10, right: 4, top: 6, bottom: 6 })
-              .onClick((): void => {
-                if (isWorkerRow) {
-                  this.clearWorkerModel(task === 'daydream');
-                } else {
-                  this.clearTaskModel(task);
-                }
-              })
-          }
+            if (this.slot(task).canClear) Button(this.clearLabel(task)).type(ButtonType.Normal).height(44).layoutWeight(1).fontSize(12)
+              .fontColor(this.colors.secondary).backgroundColor(this.colors.inset).enabled(!this.saving)
+              .onClick((): void => { this.clearTaskModel(task); })
+          }.width('100%')
         }
-        .width('100%')
-        .alignItems(VerticalAlign.Center)
-        .padding({ left: 54, right: 10, bottom: 10 })
-      }
-
-      if (!isLast) {
-        // 发丝分隔线:width('100%')+margin 在本布局下不生效,走外层 padding 内缩至标题起点(14+28+12)
-        Row() {
-          Row()
-            .width('100%')
-            .height(1)
-            .backgroundColor(LINE)
-        }
-        .width('100%')
-        .padding({ left: 54, right: 14 })
-      }
-    }
-    .width('100%')
+      }.width('100%').padding({ left: 40 })
+      if (!last) Row().width('100%').height(1).backgroundColor(this.colors.line).margin({ top: 8 })
+    }.width('100%').padding({ left: 14, right: 14, top: 2, bottom: 10 })
   }
-
-  // 卡片内容(@Builder:组件构造必须在 builder 上下文,铁律 4b)
-  // 六个任务行,参数与原 taskCard 调用逐一对应(逻辑零改动)
   @Builder
-  TaskCard(): void {
-    // 标题总结模型(:433-470)
-    this.taskRow('标题总结模型',
-      '用于总结对话标题的模型, 推荐使用快速且便宜的模型', 'edit',
-      this.followsChat(this.titleUuid) ? '跟随当前聊天模型' : this.selectedName(this.titleUuid),
-      this.followsChat(this.titleUuid)
-        ? (this.titleFallback.length > 0 ? `当前使用：${this.titleFallback}` : '暂无可用聊天模型')
-        : '',
-      !this.followsChat(this.titleUuid), '恢复为跟随当前聊天模型', 'title', true, false, false)
-
-    // 聊天建议模型(:472-509)
-    this.taskRow('聊天建议模型',
-      '用于生成对话建议的模型, 推荐使用快速且便宜的模型', 'spark',
-      this.followsChat(this.suggestionUuid) ? '跟随当前聊天模型' : this.selectedName(this.suggestionUuid),
-      this.followsChat(this.suggestionUuid)
-        ? (this.suggestionFallback.length > 0 ? `当前使用：${this.suggestionFallback}` : '暂无可用聊天模型')
-        : '',
-      !this.followsChat(this.suggestionUuid), '恢复为跟随当前聊天模型', 'suggestion', true, false, false)
-
-    // 压缩模型(:556-592)
-    this.taskRow('压缩模型',
-      '用于压缩对话历史的模型', 'history',
-      this.followsChat(this.compressUuid) ? '跟随当前聊天模型' : this.selectedName(this.compressUuid),
-      this.followsChat(this.compressUuid)
-        ? (this.compressFallback.length > 0 ? `当前使用：${this.compressFallback}` : '暂无可用聊天模型')
-        : '',
-      !this.followsChat(this.compressUuid), '恢复为跟随当前聊天模型', 'compress', true, false, false)
-
-    // 生图模型(Android 图像生成模型槽;未配置 → generate_image 工具不装配;
-    //   清除 = 不生成图片,同 Android「清除」语义)
-    this.taskRow('生图模型',
-      '用于 generate_image 工具生成图片的模型', 'image',
-      this.imageConfigured() ? this.selectedImageName() : '未配置',
-      '',
-      this.imageConfigured(), '恢复为未配置', 'image', false, false, false)
-
-    // 记忆提取模型(:594-645)— follows = followCompressModel && findById==null(:600)
-    this.taskRow('记忆提取模型',
-      '用于对话结束后提取候选记忆，轻量稳定即可', 'brain',
-      (this.workerFollow && this.followsChat(this.workerUuid))
-        ? '跟随压缩模型' : this.selectedName(this.workerUuid),
-      (this.workerFollow && this.followsChat(this.workerUuid))
-        ? `当前跟随压缩模型：${this.compressFallback.length > 0 ? this.compressFallback : '不可用'}`
-        : '',
-      !(this.workerFollow && this.followsChat(this.workerUuid)), '恢复跟随压缩模型',
-      'worker', false, true, false)
-
-    // Daydream 模型(:647-700)
-    this.taskRow('Daydream 模型',
-      '用于后台整理、合并和审查记忆，建议选择推理更强的模型', 'star',
-      (this.daydreamFollow && this.followsChat(this.daydreamUuid))
-        ? '跟随压缩模型' : this.selectedName(this.daydreamUuid),
-      (this.daydreamFollow && this.followsChat(this.daydreamUuid))
-        ? `当前跟随压缩模型：${this.compressFallback.length > 0 ? this.compressFallback : '不可用'}`
-        : '',
-      !(this.daydreamFollow && this.followsChat(this.daydreamUuid)), '恢复跟随压缩模型',
-      'daydream', false, true, false)
-
-    // 视觉识别模型(:511-553;D-098)— 无 allowClear;IMAGE 模态过滤在 picker;
-    //   D-111:desc 健康后缀 "${desc} · ${health.label}"(:529 逐字)
-    this.taskRow('视觉识别模型',
-      `当前聊天模型不能直接读取图片时，用它理解图片内容 · ${this.ocrHealthLabel}`, 'eye',
-      this.selectedName(this.ocrUuid).length > 0 ? this.selectedName(this.ocrUuid) : '未配置',
-      '',
-      false, '', 'ocr', true, false, true)
+  private TaskCard(): void {
+    this.TaskRow('title', false)
+    this.TaskRow('suggestion', false)
+    this.TaskRow('compress', false)
+    this.TaskRow('image', false)
+    this.TaskRow('worker', false)
+    this.TaskRow('daydream', false)
+    this.TaskRow('ocr', true)
   }
-
   @Builder
-  promptEditorOverlay() {
+  private PromptEditor(): void {
     Column() {
-      Blank()
-      Column() {
+      Blank().onClick((): void => { if (!this.saving) this.editingPrompt = ''; })
+      Column({ space: 10 }) {
         Row() {
-          Text(this.editingPrompt === 'title' ? '标题总结模型'
-            : this.editingPrompt === 'suggestion' ? '聊天建议模型'
-              : this.editingPrompt === 'compress' ? '压缩模型' : '视觉识别模型')
-            .fontSize(16).fontWeight(FontWeight.Medium).lineHeight(lineHeightForSize(16))
-            .fontFamily(TEXT_STYLES.body.family).fontColor(INK)
-          Blank()
-          Text('重置为默认')
-            .fontSize(13).fontColor(INK3)
-            .onClick((): void => { this.resetPrompt(); })
-        }
-        .width('100%')
-
-        Text(this.editingPrompt === 'compress'
-          ? '变量：{content}、{target_tokens}、{additional_context}'
-          : this.editingPrompt === 'ocr'
-            ? '变量：图片数据：{images}'
-            : '变量: 对话内容: {content}, 语言: {locale}')
-          .fontSize(11).fontWeight(FontWeight.Normal).lineHeight(lineHeightForSize(11))
-          .fontFamily(TEXT_STYLES.meta.family).fontColor(INK3).margin({ top: 8 })
-
-        TextArea({ text: this.promptDraft })
-          .width('100%').height(220).margin({ top: 10 })
-          .fontSize(13).fontColor(INK)
-          .backgroundColor(BG).borderRadius(8)
-          .onChange((value: string): void => { this.promptDraft = value; })
-
-        Row() {
-          BtnGhost({ label: '取消', onTap: (): void => { this.editingPrompt = ''; } })
-          Blank()
-          BtnFill({ label: '保存', onTap: (): void => { this.savePrompt(); } })
-        }
-        .width('100%').margin({ top: 12 })
-      }
-      .width('100%')
-      .padding(16)
-      .backgroundColor(SURFACE)
-      .borderRadius({ topLeft: 16, topRight: 16 })
-    }
-    .width('100%').height('100%')
-    .backgroundColor(OVERLAY)
-    .onClick((): void => { this.editingPrompt = ''; })
+          Text(taskText(TASK_TITLES, this.editingPrompt)).fontSize(16).fontWeight(FontWeight.Medium).fontColor(this.colors.ink).layoutWeight(1)
+          Button('重置为默认').type(ButtonType.Normal).height(44).fontSize(13).fontColor(this.colors.secondary)
+            .backgroundColor(this.colors.inset).enabled(!this.saving).onClick((): void => { this.resetPrompt(); })
+        }.width('100%')
+        Text(this.editingPrompt === 'compress' ? '变量：{content}、{target_tokens}、{additional_context}'
+          : this.editingPrompt === 'ocr' ? '变量：图片数据：{images}' : '变量：对话内容 {content}，语言 {locale}')
+          .fontSize(12).fontColor(this.colors.secondary).width('100%')
+        if (this.error.length > 0) Text(this.error).fontSize(13).fontColor(this.colors.error).width('100%')
+        TextArea({ text: this.promptDraft }).width('100%').height(220).fontSize(13).fontColor(this.colors.ink)
+          .backgroundColor(this.colors.inset).borderRadius(8).enabled(!this.saving).onChange((value: string): void => { this.promptDraft = value; })
+        Row({ space: 8 }) {
+          Button('取消').type(ButtonType.Normal).height(44).layoutWeight(1).fontSize(14).fontColor(this.colors.secondary)
+            .backgroundColor(this.colors.inset).enabled(!this.saving).onClick((): void => { this.editingPrompt = ''; })
+          Button(this.saving ? '保存中' : '保存').type(ButtonType.Normal).height(44).layoutWeight(1).fontSize(14).fontColor(this.accentColor)
+            .backgroundColor(this.colors.inset).enabled(!this.saving).onClick((): void => { this.savePrompt(); })
+        }.width('100%')
+      }.width('100%').padding({ left: 16, right: 16, top: 16, bottom: 16 + this.navBarHeight })
+        .backgroundColor(this.colors.surface).borderRadius({ topLeft: 16, topRight: 16 })
+    }.width('100%').height('100%').backgroundColor('#66000000')
   }
 
-  build() {
+  build(): void {
     Stack() {
       Column() {
         CenteredTitleBar({ title: '任务模型' })
-
-        if (!this.loaded) {
-          Text('加载中…')
-            .fontSize(TEXT_STYLES.body.size)
-            .fontWeight(TEXT_STYLES.body.weight)
-            .lineHeight(TEXT_STYLES.body.lineHeight)
-            .fontFamily(TEXT_STYLES.body.family)
-            .fontColor(INK3)
-            .margin({ top: 32 })
-        } else {
-          Scroll() {
-            Column() {
-              // 辅助任务组(六个任务行,逻辑与原纸面列表一致)
+        Scroll() {
+          Column({ space: 10 }) {
+            if (this.error.length > 0) Text(this.error).fontSize(13).fontColor(this.colors.error).width('100%').wordBreak(WordBreak.BREAK_ALL)
+            if (!this.loaded) Text('加载中…').fontSize(14).fontColor(this.colors.secondary).width('100%')
+            else {
               PlainSection({ label: '辅助任务' })
               CardGroup({ radius: 18, stroke: true, content: (): void => { this.TaskCard(); } })
-                .margin({ left: GUTTER, right: GUTTER })
+              Text('固定选择绑定服务商配置与模型 UUID。旧 UUID 保持兼容，重新选择后固定；辅助任务的聊天回退以实际运行轮次为准。')
+                .fontSize(12).fontColor(this.colors.secondary).width('100%')
             }
-            .width('100%').padding({ top: 2, bottom: 32 })
-          }
-        .align(Alignment.TopStart)
-          .width('100%').layoutWeight(1)
-        }
-      }
-      .width('100%').height('100%').backgroundColor(BG)
-
-      if (this.editingPrompt.length > 0) {
-        this.promptEditorOverlay()
-      }
-    }
-    .width('100%').height('100%')
+          }.width('100%').padding({ left: 16, right: 16, top: 2, bottom: 16 + this.navBarHeight }).justifyContent(FlexAlign.Start)
+        }.width('100%').layoutWeight(1).align(Alignment.TopStart)
+      }.width('100%').height('100%').backgroundColor(this.colors.background)
+      if (this.editingPrompt.length > 0) this.PromptEditor()
+    }.width('100%').height('100%')
   }
 }

@@ -19,7 +19,9 @@ import { BUILTIN_TEMPLATES, loadCustomTemplates } from '../platform_impl/DeepRea
 import type { DeepReadTemplateDef, CustomTemplateDef } from '../platform_impl/DeepReadTemplate.ets';
 import { router } from '@kit.ArkUI';
 import { hilog } from '@kit.PerformanceAnalysisKit';
-import { getAppContainer, getModelRegistry } from '../di/AppContainer.ets';
+import { getAppContainer, getModelRegistry, resolveChatProviderChoice } from '../di/AppContainer.ets';
+import { chatChoiceToDeepReadDraft } from '../platform_impl/ChatDeepReadDraft.ets';
+import type { ChatDeepReadDraftResult } from '../platform_impl/ChatDeepReadDraft.ets';
 import type { Storage, ModelConfig } from '@amber/deepread-domain';
 import { makeModelConfig } from '@amber/deepread-domain';
 import { NEWSNOW_PRESETS } from '../platform_impl/NewsNowProvider.ets';
@@ -57,13 +59,15 @@ struct SettingDeepReadPage {
   @State aiBaseUrl: string = 'https://api.deepseek.com';
   @State model: string = 'deepseek-chat';
   @State saved: string = '';
+  @State chatCopyMessage: string = '';
+  @State copyingChat: boolean = false;
   @State hotlistToggles: SourceToggle[] = [];
   @State selectedSource: string = 'tavily';
   @State showSourcePicker: boolean = false;
   @State currentKey: string = '';
   @State testResult: string = '';
   @State testStatus: string = '';
-  // 模型库(多模型配置,供议会席位 / 小说生成选择)
+  // 旧模型库供议会席位；小说已经复用 Chat providers。
   @State models: ModelConfig[] = [];
   // P5:关注筛选 / 阅读体验 / 看板模型
   @State focusKeywords: string = '';
@@ -83,11 +87,12 @@ struct SettingDeepReadPage {
   private storage: Storage | null = null;
   private pageAlive: boolean = false;
   private loadToken: number = 0;
+  private pageLoad: Promise<void> = Promise.resolve();
 
   aboutToAppear(): void {
     this.pageAlive = true;
     const token: number = ++this.loadToken;
-    this.loadPage(token).catch((e: Error): void => {
+    this.pageLoad = this.loadPage(token).catch((e: Error): void => {
       if (this.pageAlive && token === this.loadToken) {
         this.saved = `加载失败：${e.message}`;
       }
@@ -148,6 +153,32 @@ struct SettingDeepReadPage {
     this.boardModelId = boardModelId;
     this.templateId = tplId;
     this.customTemplates = await loadCustomTemplates(storage);
+  }
+
+  private async fillCurrentChatDraft(): Promise<void> {
+    if (this.copyingChat) return;
+    const token: number = this.loadToken;
+    this.copyingChat = true;
+    this.chatCopyMessage = '';
+    try {
+      // A first-page load must finish before the requested draft replaces its fields.
+      await this.pageLoad;
+      const result: ChatDeepReadDraftResult = chatChoiceToDeepReadDraft(await resolveChatProviderChoice());
+      if (!this.pageAlive || token !== this.loadToken) return;
+      if (result.draft !== null) {
+        this.aiBaseUrl = result.draft.baseUrl;
+        this.aiKey = result.draft.apiKey;
+        this.model = result.draft.model;
+        this.saved = '';
+      }
+      this.chatCopyMessage = result.message;
+    } catch (_error) {
+      if (this.pageAlive && token === this.loadToken) {
+        this.chatCopyMessage = '读取当前聊天配置失败，请返回聊天服务商配置检查。';
+      }
+    } finally {
+      this.copyingChat = false;
+    }
   }
 
   // 模板 chips:内置 + 自定义(自定义无 description,chips 只用 id/name)
@@ -307,7 +338,7 @@ struct SettingDeepReadPage {
           CardGroup({ radius: 18, stroke: true, content: (): void => { this.ReadingCard(); } })
             .margin({ left: GUTTER, right: GUTTER })
 
-          PlainSection({ label: '看板模型' })
+          PlainSection({ label: '深读模型' })
           CardGroup({ radius: 18, stroke: true, content: (): void => { this.BoardModelCard(); } })
             .margin({ left: GUTTER, right: GUTTER })
 
@@ -318,6 +349,7 @@ struct SettingDeepReadPage {
           PlainSection({ label: '模型库' })
           CardGroup({ radius: 18, stroke: true, content: (): void => { this.ModelsCard(); } })
             .margin({ left: GUTTER, right: GUTTER })
+          FooterNote({ text: '模型库用于议会席位；聊天和小说使用聊天服务商配置。' })
           if (this.models.length === 0) {
             FooterNote({ text: '暂无模型,请在下方添加。议会的每个席位需指定一个模型。' })
           }
@@ -509,7 +541,7 @@ struct SettingDeepReadPage {
   BoardModelCard(): void {
     Column() {
       Column() {
-        TextInput({ text: this.boardModelId, placeholder: '留空跟随聊天模型(如 deepseek-chat)' })
+        TextInput({ text: this.boardModelId, placeholder: '留空使用下方 AI 配置的模型名称' })
           .fontSize(this.inputFontSize()).fontWeight(TEXT_STYLES.body.weight)
           .lineHeight(TEXT_STYLES.body.lineHeight).fontFamily(TEXT_STYLES.body.family)
           .fontColor(INK).height(44)
@@ -529,6 +561,19 @@ struct SettingDeepReadPage {
   AiConfigCard(): void {
     Column() {
       Column() {
+        Text('这里用于深度阅读，支持 OpenAI 兼容的 API Key 与 Chat Completions。聊天和小说使用聊天服务商配置。')
+          .fontSize(13).lineHeight(lineHeightForSize(13)).fontFamily(FONT_SANS_MEDIUM)
+          .fontColor(INK3).width('100%').margin({ bottom: 12 })
+        BtnGhost({ label: this.copyingChat ? '正在读取聊天配置…' : '填入当前 Chat 配置',
+          onTap: (): void => { this.fillCurrentChatDraft(); } })
+          .width('100%').enabled(!this.copyingChat)
+        if (this.chatCopyMessage.length > 0) {
+          Text(this.chatCopyMessage).fontSize(13).lineHeight(lineHeightForSize(13))
+            .fontFamily(FONT_SANS_MEDIUM).fontColor(INK3).width('100%').margin({ top: 8 })
+        }
+        Text('填入后请检查三个字段，再点击“保存全部”。深读模型非空时仍优先使用该模型。')
+          .fontSize(12).lineHeight(17).fontFamily(FONT_SANS_MEDIUM).fontColor(INK3)
+          .width('100%').margin({ top: 8, bottom: 16 })
         this.FieldLabel('API Base URL', 0)
         TextInput({ text: this.aiBaseUrl })
           .height(44).fontSize(this.inputFontSize()).fontWeight(TEXT_STYLES.body.weight)
@@ -556,6 +601,10 @@ struct SettingDeepReadPage {
       }
       .width('100%')
       .padding({ left: 14, right: 14, top: 12, bottom: 12 })
+      this.CardHairline(14)
+      CardRow({ label: '聊天服务商配置',
+        desc: '聊天和小说共用；任务模型可另选服务商', isLast: true,
+        onRowClick: (): void => { router.pushUrl({ url: 'pages/ChatProviderSettingsPage' }); } })
     }
     .width('100%')
   }

@@ -40,7 +40,7 @@ import {
   recoverInterruptedPlugins, parseDeepReadSlashCommand, estimateConversationInputTokens, formatNumberInt,
   formatContextTokens, nativeTokenizerForModel, loadSearchPrefs, updateSearchPrefs, SearchSettings,
   buildMentionRoleItems, MentionRoleItem, PromptInjection, Lorebook, ConversationSummary, toChatModel,
-  firstImageBlockingIssueForSend, inspectImageAttachment, imageAttachmentBlocksSend, probeVisionModelHealth,
+  firstImageBlockingIssueForSend, inspectImageAttachment, imageAttachmentBlocksSend,
   reasoningLevelForModel, withReasoningLevelForModel, defaultReasoningLevelForModel, reasoningLevelsForModel,
   deriveSandboxActivities, mergeSandboxTimeline, idleSandboxActivity, withStepProgress, isActiveOperation,
   buildTopModelMenuGroups, loadProviders, loadDisplaySetting, makeDisplaySetting, isCloseEnoughToBottom,
@@ -50,8 +50,8 @@ import type { MiniAppSetting } from '@amber/chat-domain';
 import type { TopModelMenuGroup, ReasoningLevelOption, ReasoningLevel } from '@amber/chat-domain';
 import {
   getChatRepository, getChatAssistants, resolveChatRuntime, ChatRuntime, getConversationRunService,
-  getChatKvStore, getCompactStore, ChatProviderChoice, buildProviderApi, loadTaskModelIds,
-  resolveTaskChatModelChoice, loadTaskPrompts, TaskPrompts, initMcpManager, getAgentTaskTools,
+  getChatKvStore, getCompactStore, ChatProviderChoice, buildProviderApi, readTaskModelReference, TASK_TITLE_MODEL_KEY, TASK_COMPRESS_MODEL_KEY,
+  resolveTaskModelReference, loadTaskPrompts, TaskPrompts, initMcpManager, getAgentTaskTools,
   getAgentCronTools, hydrateSubAgentSetting, getSubAgentManager, isModelCouncilEnabled,
 } from '../di/AppContainer.ets';
 import type { SubAgentRun } from '@amber/chat-domain';
@@ -103,7 +103,7 @@ import { TopModelMenu } from '../components/TopModelMenu.ets';
 import { sha256HexUtf8 } from '../platform_impl/EntryLocalToolPorts.ets';
 import { ensureSearchSdk } from '../platform_impl/SearchSdkInit.ets';
 import {
-  findModelByIdInProviders, findProviderOfModel, generateVisionText, loadOcrSeed, OcrSeed,
+  probeEntryOcrHealth, loadOcrSeed, OcrSeed,
 } from '../platform_impl/OcrSupport.ets';
 import { encodeImageDetailed } from '../platform_impl/EntryImageEncoder.ets';
 import {
@@ -963,9 +963,9 @@ struct ChatPage {
     });
     // D-087:compress 任务模型选择快照(resolveTaskChatModel(compressModelId),
     //   未设 = AUTO → findById 必失 → 回退当前 chat 模型,语义逐字)
-    loadTaskModelIds().then((ids): void => {
+    readTaskModelReference(TASK_COMPRESS_MODEL_KEY).then((reference): void => {
       if (!this.pageAlive) return;
-      resolveTaskChatModelChoice(ids.compressModelId).then((choice): void => {
+      resolveTaskModelReference(reference).then((choice): void => {
         if (!this.pageAlive) return;
         this.compressChoice = choice;
         this.taskChoicesLoaded = true;
@@ -1842,9 +1842,9 @@ struct ChatPage {
       //   params = model + reasoning OFF + model.customHeaders/customBodies(:55-59,
       //   不带 chat 温度/topP/maxTokens)
       generateText: async (prompt: string): Promise<string> => {
-        const ids = await loadTaskModelIds();
+        const reference = await readTaskModelReference(TASK_TITLE_MODEL_KEY);
         const choice: ChatProviderChoice | null =
-          await resolveTaskChatModelChoice(ids.titleModelId);
+          await resolveTaskModelReference(reference);
         if (choice === null) throw new Error('no title model');
         const headers: Record<string, string> = {};
         for (const h of choice.model.customHeaders) {
@@ -3289,15 +3289,10 @@ struct ChatPage {
       providers: seed !== null ? seed.providers : [],
     };
     const encodeCheck = (url: string): void => { encodeImageDetailed(url); };
-    const probeHealth = (): Promise<VisionModelHealth> => probeVisionModelHealth({
-      findOcrModel: (): ProviderModel | null =>
-        findModelByIdInProviders(settings.providers, settings.ocrModelId),
-      modelSupportsImage: (m: ProviderModel): boolean => m.inputModalities.includes('image'),
-      findProvider: (m: ProviderModel): ProviderSetting | null =>
-        findProviderOfModel(settings.providers, m),
-      generateText: (p: ProviderSetting, m: ProviderModel, msgs: UIMessage[]): Promise<string | null> =>
-        generateVisionText(p, m, msgs),
-    });
+    const probeHealth = (): Promise<VisionModelHealth> => {
+      if (seed === null) return Promise.reject(new Error('视觉识别配置尚未加载'));
+      return probeEntryOcrHealth(seed);
+    };
     firstImageBlockingIssueForSend(inputParts, settings, encodeCheck, probeHealth)
       .then((issue): void => {
         if (issue !== null) {

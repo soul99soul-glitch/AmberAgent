@@ -1,44 +1,55 @@
-// ChatTaskModelPickerPage — 任务模型选择器(D-094)
-// Android 锚点:SettingModelPage.kt ModelPickerRow(:798)+ ModelSelector —
-//   列出 hasUsableAuth 且非空 models 的 provider 模型;点选写回:
-//   title/suggestion/compress → saveTaskModelId(key, m.id)(:448-450/:487-489/:570-572)
-//   worker → updateMemoryWorkerModels{modelId = it.id, followCompressModel = false}(:631-641)
-//   daydream → 同构 {daydreamModelId, daydreamFollowCompressModel = false}(:684-697)
-// 与 ChatModelPickerPage 区别:任务模型按模型 uuid(m.id)存储,非 (providerId, modelId) 对。
-import { ACCENT, BG, INK, INK2, INK3, INK4, LINE, RAISED, TEXT_STYLES } from '../design/tokens.ets';
-import { PageTitleBar, PaperSeparator, Chip } from '../components/PageTemplate.ets';
-import { Icon } from '../components/ui/Icon.ets';
-import { FONT_MONO, FONT_MONO_SEMIBOLD, FONT_MONO_MEDIUM } from '../design/fonts.ets';
+// Task selection pins the provider container and the model configuration UUID.
 import { router } from '@kit.ArkUI';
-import { loadProviders, hasUsableAuth, DEFAULT_AUTO_MODEL_ID } from '@amber/chat-domain';
-import type { ProviderModel } from '@amber/chat-domain';
+import { loadProviders, hasUsableAuth, taskModelReferenceFromId } from '@amber/chat-domain';
+import type { ProviderSetting, TaskModelReference, TaskModelPair } from '@amber/chat-domain';
 import {
-  getChatKvStore, saveTaskModelId, loadTaskModelIds, TaskModelIds,
+  getChatKvStore, readTaskModelReference, saveTaskModelPair, resolveConfiguredTaskModel, ChatProviderChoice,
   TASK_TITLE_MODEL_KEY, TASK_SUGGESTION_MODEL_KEY, TASK_COMPRESS_MODEL_KEY, TASK_IMAGE_MODEL_KEY,
 } from '../di/AppContainer.ets';
-import {
-  loadAgentRuntimeSnapshot, updateMemoryWorkerModels, AgentRuntimeSnapshot,
-} from '../platform_impl/AgentRuntimePrefs.ets';
-import { getOcrModelId, saveOcrModelId } from '../platform_impl/OcrSupport.ets';
+import { loadAgentRuntimeSnapshot, updateMemoryWorkerModels, AgentRuntimeSnapshot } from '../platform_impl/AgentRuntimePrefs.ets';
+import { OCR_MODEL_KEY, loadOcrSeed } from '../platform_impl/OcrSupport.ets';
+import { resolveImageGenChoice } from '../platform_impl/ImageGenTool.ets';
+import { findTaskProviderModel } from '../platform_impl/TaskModelSelectionSupport.ets';
+import { CenteredTitleBar } from '../components/PageTemplate.ets';
+import { Icon } from '../components/ui/Icon.ets';
+import { SSHUIColors } from '../components/SSHUIColors.ets';
+import { ACCENT } from '../design/tokens.ets';
 
-
+interface TaskModelPickerParams { task?: string; }
 interface TaskModelRow {
+  providerId: string;
   providerName: string;
   providerType: string;
+  requestProviderLabel: string;
   modelUuid: string;
   displayName: string;
   modelId: string;
   selected: boolean;
+  viewVersion: number;
 }
-
-const TASK_TITLES: Record<string, string> = {
-  'title': '标题总结模型',
-  'suggestion': '聊天建议模型',
-  'compress': '压缩模型',
-  'worker': '记忆提取模型',
-  'daydream': 'Daydream 模型',
-  'ocr': '视觉识别模型',
-  'image': '生图模型',
+interface TaskTexts {
+  title: string;
+  suggestion: string;
+  compress: string;
+  worker: string;
+  daydream: string;
+  ocr: string;
+  image: string;
+}
+const taskText = (texts: TaskTexts, task: string): string => {
+  switch (task) {
+    case 'suggestion': return texts.suggestion;
+    case 'compress': return texts.compress;
+    case 'worker': return texts.worker;
+    case 'daydream': return texts.daydream;
+    case 'ocr': return texts.ocr;
+    case 'image': return texts.image;
+    default: return texts.title;
+  }
+};
+const TASK_TITLES: TaskTexts = {
+  title: '标题总结模型', suggestion: '聊天建议模型', compress: '压缩模型',
+  worker: '记忆提取模型', daydream: 'Daydream 模型', ocr: '视觉识别模型', image: '生图模型',
 };
 
 @Entry
@@ -47,154 +58,158 @@ struct ChatTaskModelPickerPage {
   @State rows: TaskModelRow[] = [];
   @State loaded: boolean = false;
   @State task: string = 'title';
-  @State currentUuid: string = DEFAULT_AUTO_MODEL_ID;
+  @State configured: string = '';
+  @State error: string = '';
+  @State saving: boolean = false;
+  @State colors: SSHUIColors = new SSHUIColors();
+  @StorageProp('darkMode') @Watch('refreshColors') darkMode: boolean = false;
+  @StorageProp('themePackId') @Watch('refreshColors') themePackId: string = '';
+  @StorageProp('accentColor') @Watch('refreshColors') accentColor: string = ACCENT;
+  @StorageProp('navBarHeight') navBarHeight: number = 0;
+  private alive: boolean = false;
+  private visible: boolean = false;
+  private loadSeq: number = 0;
 
   aboutToAppear(): void {
-    const params = router.getParams() as Record<string, string>;
-    this.task = params ? (params['task'] ?? 'title') : 'title';
-    this.refresh();
+    const params: TaskModelPickerParams = router.getParams() as TaskModelPickerParams;
+    const task: string = params?.task ?? 'title';
+    this.task = task === 'suggestion' || task === 'compress' || task === 'worker' || task === 'daydream'
+      || task === 'ocr' || task === 'image' ? task : 'title';
+    this.alive = true; this.visible = true; this.refresh();
+  }
+  onPageShow(): void { if (!this.visible) { this.visible = true; this.refresh(); } }
+  onPageHide(): void { this.visible = false; this.loadSeq++; }
+  aboutToDisappear(): void { this.alive = false; this.onPageHide(); }
+  private refreshColors(): void { this.colors = new SSHUIColors(); }
+  private taskKey(): string {
+    return this.task === 'title' ? TASK_TITLE_MODEL_KEY : this.task === 'suggestion' ? TASK_SUGGESTION_MODEL_KEY
+      : this.task === 'image' ? TASK_IMAGE_MODEL_KEY : this.task === 'ocr' ? OCR_MODEL_KEY : TASK_COMPRESS_MODEL_KEY;
+  }
+  private async readReference(): Promise<TaskModelReference> {
+    if (this.task === 'worker' || this.task === 'daydream') {
+      const snapshot: AgentRuntimeSnapshot = await loadAgentRuntimeSnapshot(getChatKvStore());
+      return this.task === 'worker'
+        ? taskModelReferenceFromId(snapshot.memoryWorker.modelId, snapshot.memoryWorker.providerId)
+        : taskModelReferenceFromId(snapshot.memoryWorker.daydreamModelId, snapshot.memoryWorker.daydreamProviderId);
+    }
+    return readTaskModelReference(this.taskKey());
+  }
+  private referenceLabel(reference: TaskModelReference): string {
+    if (reference.kind === 'auto') return this.task === 'ocr' || this.task === 'image' ? '当前未配置' : '当前按任务规则跟随';
+    if (reference.kind === 'legacy') return `旧选择（尚未固定 Provider）：${reference.modelId}`;
+    return `已固定 Provider：${reference.pair.providerId}\n模型配置 UUID：${reference.pair.modelId}`;
   }
 
-  private refresh(): void {
-    loadProviders(getChatKvStore()).then((providers): void => {
+  private async refresh(): Promise<void> {
+    const seq: number = ++this.loadSeq;
+    try {
+      const providers: ProviderSetting[] = await loadProviders(getChatKvStore()) ?? [];
+      let reference: TaskModelReference | null = null;
+      let referenceError: string = '';
+      try { reference = await this.readReference(); }
+      catch (error) { referenceError = error instanceof Error ? error.message : String(error); }
+      const selected = reference === null ? null : findTaskProviderModel(providers, reference, this.task === 'image' ? 'image' : 'chat');
+      let selectedProviderId: string = selected?.provider.id ?? '';
+      let selectedModelId: string = selected?.model.id ?? '';
+      if (reference?.kind === 'legacy') {
+        const choice: ChatProviderChoice | null = this.task === 'ocr' ? (await loadOcrSeed(getChatKvStore())).ocrChoice
+          : this.task === 'image' ? await resolveImageGenChoice() : await resolveConfiguredTaskModel(reference, 'chat');
+        selectedProviderId = choice?.providerContainerId ?? '';
+        selectedModelId = choice?.model.id ?? '';
+      }
+      if (!this.alive || !this.visible || seq !== this.loadSeq) return;
       const usable: TaskModelRow[] = [];
-      if (providers !== null) {
-        for (const p of providers) {
-          if (hasUsableAuth(p)) {
-            for (const m of p.models) {
-              // image 任务按 type==='image' 过滤(生图模型;Android type=image 槽位语义)
-              if (this.task === 'image') {
-                if (m.type !== 'image') continue;
-              } else if (m.type !== 'chat') continue;
-              // D-098:ocr 任务按 preferredInputModality=IMAGE 过滤
-              //   (SettingModelPage.kt:533;无 image 输入模态的模型不可做视觉识别)
-              if (this.task === 'ocr' && m.inputModalities.indexOf('image') < 0) {
-                continue;
-              }
-              usable.push({
-                providerName: p.name,
-                providerType: p.type,
-                modelUuid: m.id,
-                displayName: m.displayName,
-                modelId: m.modelId,
-                selected: false,
-              });
-            }
-          }
+      for (const provider of providers) {
+        for (const model of provider.models) {
+          if (this.task === 'image' ? model.type !== 'image' : model.type !== 'chat') continue;
+          if (this.task === 'ocr' && !model.inputModalities.includes('image')) continue;
+          const effective: ProviderSetting = model.providerOverwrite ?? provider;
+          if (!hasUsableAuth(effective)) continue;
+          if (this.task === 'image' && effective.type !== 'openai') continue;
+          usable.push({
+            providerId: provider.id, providerName: provider.name, providerType: provider.type,
+            requestProviderLabel: model.providerOverwrite === null ? '' : `${effective.name} · ${effective.type}`,
+            modelUuid: model.id, displayName: model.displayName || model.modelId, modelId: model.modelId,
+            selected: selectedProviderId === provider.id && selectedModelId === model.id,
+            viewVersion: seq,
+          });
         }
       }
-      // 当前选中 uuid:title/suggestion/compress 读任务键;worker/daydream 读 runtime
-      const markSelected = (uuid: string): void => {
-        this.currentUuid = uuid;
-        for (const row of usable) {
-          row.selected = row.modelUuid === uuid;
-        }
-        this.rows = usable;
-        this.loaded = true;
-      };
-      if (this.task === 'worker' || this.task === 'daydream') {
-        loadAgentRuntimeSnapshot(getChatKvStore()).then((snap: AgentRuntimeSnapshot): void => {
-          markSelected(this.task === 'worker'
-            ? snap.memoryWorker.modelId : snap.memoryWorker.daydreamModelId);
-        });
-      } else if (this.task === 'ocr') {
-        // ChatPrefs.kt:80 — 未配置 = random uuid(必不命中 → 无选中行)
-        getOcrModelId(getChatKvStore()).then((uuid: string): void => {
-          markSelected(uuid);
-        });
-      } else {
-        loadTaskModelIds().then((ids: TaskModelIds): void => {
-          const uuid: string = this.task === 'title' ? ids.titleModelId
-            : this.task === 'suggestion' ? ids.suggestionModelId
-            : this.task === 'image' ? ids.imageModelId : ids.compressModelId;
-          markSelected(uuid);
-        });
+      this.rows = usable;
+      this.configured = reference === null ? '已保存的任务模型配置无法读取。' : this.referenceLabel(reference);
+      if (reference !== null && reference.kind !== 'auto' && !usable.some((row: TaskModelRow): boolean => row.selected)) {
+        this.configured += '\n当前选择不可用；选择下方模型可替换此配置。';
       }
-    });
-  }
-
-  private pick(row: TaskModelRow): void {
-    const done = (): void => { router.back(); };
-    if (this.task === 'worker') {
-      // onSelect → modelId = it.id, followCompressModel = false(:631-641)
-      updateMemoryWorkerModels(getChatKvStore(), {
-        modelId: row.modelUuid, followCompressModel: false,
-      }).then((): void => { done(); });
-    } else if (this.task === 'daydream') {
-      updateMemoryWorkerModels(getChatKvStore(), {
-        daydreamModelId: row.modelUuid, daydreamFollowCompressModel: false,
-      }).then((): void => { done(); });
-    } else if (this.task === 'ocr') {
-      saveOcrModelId(getChatKvStore(), row.modelUuid).then((): void => { done(); });
-    } else {
-      const key: string = this.task === 'title' ? TASK_TITLE_MODEL_KEY
-        : this.task === 'suggestion' ? TASK_SUGGESTION_MODEL_KEY
-        : this.task === 'image' ? TASK_IMAGE_MODEL_KEY : TASK_COMPRESS_MODEL_KEY;
-      saveTaskModelId(key, row.modelUuid).then((): void => { done(); });
+      this.error = referenceError; this.loaded = true;
+    } catch (error) {
+      if (this.alive && this.visible && seq === this.loadSeq) {
+        this.loaded = true; this.error = error instanceof Error ? error.message : String(error);
+      }
     }
   }
 
-  build() {
+  private async pick(row: TaskModelRow): Promise<void> {
+    if (this.saving) return;
+    this.saving = true; this.error = '';
+    try {
+      if (this.task === 'worker') {
+        await updateMemoryWorkerModels(getChatKvStore(), {
+          modelId: row.modelUuid, providerId: row.providerId, followCompressModel: false,
+        });
+      } else if (this.task === 'daydream') {
+        await updateMemoryWorkerModels(getChatKvStore(), {
+          daydreamModelId: row.modelUuid, daydreamProviderId: row.providerId, daydreamFollowCompressModel: false,
+        });
+      } else {
+        const pair: TaskModelPair = { providerId: row.providerId, modelId: row.modelUuid };
+        await saveTaskModelPair(this.taskKey(), pair);
+      }
+      if (this.alive && this.visible) router.back();
+    } catch (error) {
+      if (this.alive) this.error = error instanceof Error ? error.message : String(error);
+    } finally { this.saving = false; }
+  }
+
+  build(): void {
     Column() {
-      PageTitleBar({ title: TASK_TITLES[this.task] ?? '选择模型' })
-
-      if (!this.loaded) {
-        Text('加载中…').fontSize(TEXT_STYLES.body.size).fontWeight(TEXT_STYLES.body.weight)
-          .lineHeight(TEXT_STYLES.body.lineHeight).fontFamily(TEXT_STYLES.body.family)
-          .fontColor(INK3).margin({ top: 32 })
-      } else if (this.rows.length === 0) {
-        Column() {
-          Text('没有可用的 Provider/模型').fontSize(TEXT_STYLES.body.size)
-            .fontWeight(600).lineHeight(TEXT_STYLES.body.lineHeight)
-            .fontFamily(TEXT_STYLES.body.family).fontColor(INK2)
-          Text('先在 Provider 设置页填写 baseUrl、API Key 和模型')
-            .fontSize(TEXT_STYLES.secondary.size).lineHeight(TEXT_STYLES.secondary.lineHeight)
-            .fontFamily(TEXT_STYLES.secondary.family).fontColor(INK3).margin({ top: 8 })
-          Text('去设置').fontSize(TEXT_STYLES.meta.size).fontWeight(FontWeight.Medium)
-            .lineHeight(TEXT_STYLES.meta.lineHeight).fontFamily(FONT_MONO_MEDIUM)
-            .fontColor(ACCENT).margin({ top: 16 })
-            .onClick((): void => { router.pushUrl({ url: 'pages/ChatProviderSettingsPage' }); })
-        }.margin({ top: 64 }).alignItems(HorizontalAlign.Center)
-      } else {
-        Scroll() {
-          Column() {
-            ForEach(this.rows, (row: TaskModelRow, index: number): void => {
-              Column() {
-                Row() {
-                  Column() {
-                    Text(row.modelId)
-                      .fontSize(TEXT_STYLES.secondary.size).fontWeight(600)
-                      .lineHeight(TEXT_STYLES.secondary.lineHeight).fontFamily(FONT_MONO_SEMIBOLD)
-                      .fontColor(row.selected ? ACCENT : INK)
-                      .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
-                    Text(`${row.providerName} · ${row.providerType}`)
-                      .fontSize(TEXT_STYLES.meta.size).fontWeight(FontWeight.Medium)
-                      .lineHeight(TEXT_STYLES.meta.lineHeight).fontFamily(FONT_MONO)
-                      .fontColor(INK3).margin({ top: 4 })
-                      .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
-                  }
-                  .alignItems(HorizontalAlign.Start).layoutWeight(1)
-                  if (row.selected) {
-                    Chip({ text: '当前' })
-                  }
-                  Icon({ name: 'chevron_right', iconSize: 16, color: INK4 }).margin({ left: 8 })
-                }
-                .width('100%').constraintSize({ minHeight: 64 })
-                .padding({ left: 16, right: 16, top: 12, bottom: 12 })
-                .backgroundColor(row.selected ? RAISED : Color.Transparent)
-                .onClick((): void => this.pick(row))
-                if (index < this.rows.length - 1) {
-                  PaperSeparator()
-                }
-              }
-              .width('100%')
-            }, (row: TaskModelRow): string => row.modelUuid)
+      CenteredTitleBar({ title: taskText(TASK_TITLES, this.task) })
+      Scroll() {
+        Column({ space: 10 }) {
+          if (this.error.length > 0) Text(this.error).fontSize(13).fontColor(this.colors.error).width('100%').wordBreak(WordBreak.BREAK_ALL)
+          if (!this.loaded) Text('加载中…').fontSize(14).fontColor(this.colors.secondary).width('100%')
+          else {
+            Text(this.configured).fontSize(12).fontColor(this.colors.secondary).width('100%')
+              .wordBreak(WordBreak.BREAK_ALL).copyOption(CopyOptions.LocalDevice)
+            Text('选择会保存服务商配置 ID 与模型配置 UUID；API 模型名仅用于实际请求。')
+              .fontSize(12).fontColor(this.colors.muted).width('100%')
+            if (this.rows.length === 0) {
+              Text('没有符合此任务的可用 Provider/模型。').fontSize(14).fontColor(this.colors.ink).width('100%')
+              Text(this.task === 'ocr' ? '视觉识别需要支持图片输入的聊天模型。' : this.task === 'image' ? '需要配置生图模型；实际生成还要求可用的 OpenAI 兼容服务商。' : '请先配置服务商凭据和聊天模型。')
+                .fontSize(13).fontColor(this.colors.secondary).width('100%')
+            }
+            ForEach(this.rows, (row: TaskModelRow): void => {
+              Row({ space: 12 }) {
+                Column({ space: 4 }) {
+                  Text(row.displayName).fontSize(15).fontWeight(FontWeight.Medium).fontColor(row.selected ? this.accentColor : this.colors.ink)
+                    .width('100%').maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis })
+                  Text(`${row.providerName} · ${row.providerType}`).fontSize(12).fontColor(this.colors.secondary)
+                    .width('100%').maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis })
+                  if (row.requestProviderLabel.length > 0) Text(`实际请求：${row.requestProviderLabel}`).fontSize(12)
+                    .fontColor(this.colors.secondary).width('100%').maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis })
+                  Text(row.modelId).fontSize(12).fontColor(this.colors.muted).width('100%').wordBreak(WordBreak.BREAK_ALL)
+                }.alignItems(HorizontalAlign.Start).layoutWeight(1)
+                if (row.selected) Text('当前').fontSize(12).fontColor(this.accentColor)
+                Icon({ name: 'chevron_right', iconSize: 16, color: this.colors.muted })
+              }.width('100%').constraintSize({ minHeight: 64 }).padding(16).borderRadius(14)
+                .backgroundColor(row.selected ? this.colors.inset : this.colors.surface).enabled(!this.saving)
+                .onClick((): void => { this.pick(row); })
+            }, (row: TaskModelRow): string => `${row.providerId.length}:${row.providerId}${row.modelUuid}:${row.viewVersion}`)
+            Button(this.saving ? '保存中' : '服务商设置').type(ButtonType.Normal).height(44).width('100%').fontSize(14)
+              .fontColor(this.accentColor).backgroundColor(this.colors.surface).enabled(!this.saving)
+              .onClick((): void => { router.pushUrl({ url: 'pages/ChatProviderSettingsPage' }); })
           }
-          .width('100%')
-        }
-        .align(Alignment.TopStart).width('100%').layoutWeight(1)
-      }
-    }
-    .width('100%').height('100%').backgroundColor(BG)
+        }.width('100%').padding({ left: 16, right: 16, top: 12, bottom: 16 + this.navBarHeight }).justifyContent(FlexAlign.Start)
+      }.width('100%').layoutWeight(1).align(Alignment.TopStart)
+    }.width('100%').height('100%').backgroundColor(this.colors.background)
   }
 }

@@ -34,8 +34,10 @@ export interface MemoryWorkerGateSnapshot {
   dreamMaxDailyRuns: number;
   // D-087:任务模型链字段(MemoryModels.kt:138-141;modelId 缺省 = AUTO 标记)
   modelId: string;
+  providerId: string | null;
   followCompressModel: boolean;
   daydreamModelId: string;
+  daydreamProviderId: string | null;
   daydreamFollowCompressModel: boolean;
   // D-103:MemoryModels.kt:142(默认 HIGH;Planner.kt:95 消费)
   daydreamReasoningLevel: ReasoningLevel;
@@ -120,8 +122,10 @@ interface MemoryWorkerJson {
   runOnlyOnCharging?: boolean;
   dreamMaxDailyRuns?: number;
   modelId?: string;
+  providerId?: string | null;
   followCompressModel?: boolean;
   daydreamModelId?: string;
+  daydreamProviderId?: string | null;
   daydreamFollowCompressModel?: boolean;
   daydreamReasoningLevel?: string;
   // 旧 Daydream 开关别名(SettingsAggregator.kt:542-553 迁移:
@@ -196,8 +200,8 @@ export const defaultAgentRuntimeSnapshot = (): AgentRuntimeSnapshot => ({
     dreamMaintenanceEnabled: true, dreamModelEnabled: false,
     topicWriteEnabled: false, timeoutMs: 120000,
     runOnlyOnIdle: true, runOnlyOnCharging: true, dreamMaxDailyRuns: 1,
-    modelId: DEFAULT_AUTO_MODEL_ID, followCompressModel: true,
-    daydreamModelId: DEFAULT_AUTO_MODEL_ID, daydreamFollowCompressModel: true,
+    modelId: DEFAULT_AUTO_MODEL_ID, providerId: null, followCompressModel: true,
+    daydreamModelId: DEFAULT_AUTO_MODEL_ID, daydreamProviderId: null, daydreamFollowCompressModel: true,
     daydreamReasoningLevel: 'high',
   },
   // :164-165/:226-229 默认
@@ -241,9 +245,12 @@ const parseMemoryWorker = (raw: MemoryWorkerJson | undefined): MemoryWorkerGateS
   // :138-141 — 非 string → AUTO;parseUuidOrNull 无效 → AUTO 等价(空串回退)
   modelId: typeof raw?.modelId === 'string' && raw.modelId.length > 0
     ? raw.modelId : DEFAULT_AUTO_MODEL_ID,
+  providerId: typeof raw?.providerId === 'string' && raw.providerId.length > 0 ? raw.providerId : null,
   followCompressModel: raw?.followCompressModel !== false,
   daydreamModelId: typeof raw?.daydreamModelId === 'string' && raw.daydreamModelId.length > 0
     ? raw.daydreamModelId : DEFAULT_AUTO_MODEL_ID,
+  daydreamProviderId: typeof raw?.daydreamProviderId === 'string' && raw.daydreamProviderId.length > 0
+    ? raw.daydreamProviderId : null,
   daydreamFollowCompressModel: raw?.daydreamFollowCompressModel !== false,
   // :142 默认 HIGH;非法值 → 默认(字段宽容先例;kotlinx 非法枚举整体 rescue
   //   → AgentRuntimeSetting() 同样 HIGH,等价)
@@ -388,8 +395,10 @@ export const updateMemoryWorkerToggles = (
 //   onSelect → modelId = it.id + followCompressModel = false(daydream 同构)
 export interface MemoryWorkerModelPatch {
   modelId?: string;
+  providerId?: string | null;
   followCompressModel?: boolean;
   daydreamModelId?: string;
+  daydreamProviderId?: string | null;
   daydreamFollowCompressModel?: boolean;
   daydreamReasoningLevel?: string;
 }
@@ -411,12 +420,14 @@ export const updateMemoryWorkerModels = (
   if (patch.modelId !== undefined) {
     worker.modelId = patch.modelId;
   }
+  if (patch.providerId !== undefined) worker.providerId = patch.providerId;
   if (patch.followCompressModel !== undefined) {
     worker.followCompressModel = patch.followCompressModel;
   }
   if (patch.daydreamModelId !== undefined) {
     worker.daydreamModelId = patch.daydreamModelId;
   }
+  if (patch.daydreamProviderId !== undefined) worker.daydreamProviderId = patch.daydreamProviderId;
   if (patch.daydreamFollowCompressModel !== undefined) {
     worker.daydreamFollowCompressModel = patch.daydreamFollowCompressModel;
   }

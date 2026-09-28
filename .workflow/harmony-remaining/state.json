@@ -2,7 +2,7 @@
   "objective": "完成所有纳入范围的剩余功能并逐阶段独立审查与验证",
   "baseline": "6840fa551",
   "status": "active",
-  "currentPhase": "E8",
+  "currentPhase": "E9",
   "authorization": "用户授权持续实施、subagent审查、分阶段推进",
   "phases": {
     "E0": "complete",
@@ -14,7 +14,7 @@
     "E6": "in_progress",
     "E7": "in_progress",
     "E8": "in_progress",
-    "E9": "pending",
+    "E9": "in_progress",
     "E10": "pending",
     "E11": "pending",
     "E12": "pending",
@@ -42,7 +42,10 @@
     "E6SourceCommit": "6305cf66b",
     "E7Contract": "frozen: packets/E7-contract.md; results/E7-memory-topic-design.md actual iOS/domain/store/UI evidence",
     "E7": "Source independent A/B PASS; only domain and actual Entry controlled group plus specific derived-import/expiry red-green PASS; types/affected lint NoDefects/final Release9.680s/local sign verify PASS. C actual provider/platform/UI/install pending; see E7-gate.md",
-    "E8Contract": "frozen: packets/E8-contract.md; results/E8-task-provider-design.md actual seven slots/provider UUID identity/consumer/setup evidence"
+    "E7SourceCommit": "1bbd1dc43",
+    "E8Contract": "frozen: packets/E8-contract.md; results/E8-task-provider-design.md actual seven slots/provider UUID identity/consumer/setup evidence",
+    "E8": "Source independent A/B PASS; only selection and actual consumer groups with concrete legacy/cache red-green PASS; affected types/lint0error/final Release9.256s PASS; local sign Digest/verify-app PASS. C device/real provider/UI/install pending; see E8-gate.md",
+    "E9Contract": "frozen: packets/E9-contract.md; separate Antigravity/CodeAssist/SA identity, secure references and per-request auth"
   },
   "blockers": [
     {
@@ -74,6 +77,11 @@
       "phase": "E7",
       "kind": "device_connection",
       "details": "Latest recorded HDC Empty; final source Release built/local sign verified and independent A/B closed. Necessary actual platform/charging/provider topic run and UI light/dark/source/node/document/install/launch pending. No repeated device recovery or matrix; E8 independent source continues."
+    },
+    {
+      "phase": "E8",
+      "kind": "device_connection",
+      "details": "Latest recorded HDC Empty; no repeated device recovery or matrix. Seven-slot/save-return/UI/OCR/image real provider/platform/install/launch acceptance pending. Independent E9 source follows checkpoint."
     }
   ]
 }

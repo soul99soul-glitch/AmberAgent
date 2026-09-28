@@ -20,7 +20,7 @@ import {
 import {
   buildProviderApi, getAgentCronTools, getAgentTaskTools, getChatKvStore,
   getChatRepository, getCompactStore, hydrateSubAgentSetting, initMcpManager,
-  loadTaskModelIds, loadTaskPrompts, resolveChatRuntime, resolveTaskChatModelChoice,
+  readTaskModelReference, TASK_COMPRESS_MODEL_KEY, loadTaskPrompts, resolveChatRuntime, resolveTaskModelReference,
 } from '../di/AppContainer.ets';
 import type { ChatRuntime, TaskPrompts } from '../di/AppContainer.ets';
 import type {
@@ -55,7 +55,7 @@ export const prepareConversationSeed = async (
     hilog.warn(DOMAIN, TAG, 'MCP initialization failed: %{public}s', e.message);
   });
   const display: DisplaySetting = await loadDisplaySetting(kv);
-  const ids = await loadTaskModelIds();
+  const compressReference = await readTaskModelReference(TASK_COMPRESS_MODEL_KEY);
   // Keep the existing optional OCR/subagent gates when their hydration fails.
   const ocr: OcrSeed | null = await loadOcrSeed(kv).catch((): null => {
     hilog.warn(DOMAIN, TAG, 'OCR settings unavailable for this run');
@@ -71,7 +71,7 @@ export const prepareConversationSeed = async (
   return {
     runtime,
     agentRuntime: await loadAgentRuntimeSnapshot(kv),
-    compressChoice: await resolveTaskChatModelChoice(ids.compressModelId, runtime.resolvedChoice),
+    compressChoice: await resolveTaskModelReference(compressReference, runtime.resolvedChoice),
     taskPrompts: await loadTaskPrompts(),
     searchSettings: await loadSearchPrefs(kv),
     ocrSeed: ocr,
@@ -192,8 +192,15 @@ export const buildConversationCompressProvider = (seed: PreparedConversationSeed
   const rt: ChatRuntime = seed.runtime;
   const choice = seed.compressChoice;
   if (choice === null) return asChatStreamProvider(rt.api, () => rt.params);
-  const api = buildProviderApi(choice.provider, {});
-  return asChatStreamProvider(api, () => makeTextGenerationParams({ model: toChatModel(choice.model) }));
+  const headers: Record<string, string> = {};
+  for (const header of choice.model.customHeaders) {
+    const name: string = header.name.trim();
+    if (name.length > 0) headers[name] = header.value.trim();
+  }
+  const api = buildProviderApi(choice.provider, headers);
+  return asChatStreamProvider(api, () => makeTextGenerationParams({
+    model: toChatModel(choice.model), customBody: choice.model.customBodies,
+  }));
 };
 
 const prepareMessages = (ctx: DetachedConversationContext):

@@ -255,6 +255,21 @@ struct ChatProviderSettingsPage {
   }
 
   @Builder
+  ConfigurationLinks(): void {
+    CardRow({
+      label: '任务模型',
+      desc: '标题、建议和压缩等任务可单独选择服务商与模型',
+      onRowClick: (): void => { router.pushUrl({ url: 'pages/ChatTaskModelsPage' }); },
+    })
+    CardRow({
+      label: '深度阅读配置',
+      desc: '填写兼容 API 配置，也可填入当前聊天配置的草稿',
+      isLast: true,
+      onRowClick: (): void => { router.pushUrl({ url: 'pages/SettingDeepReadPage' }); },
+    })
+  }
+
+  @Builder
   ImportCard(): void {
     CardRow({
       label: '从文件导入',
@@ -289,6 +304,14 @@ struct ChatProviderSettingsPage {
       } else {
         Scroll() {
           Column() {
+            FooterNote({
+              text: '聊天和小说共用这里的服务商与模型。小说默认跟随聊天，也可在项目设置中指定。任务模型可单独选择服务商；深度阅读目前使用独立的兼容 API 配置。',
+            })
+            Column() {
+              CardGroup({ radius: 18, stroke: true, content: (): void => { this.ConfigurationLinks(); } })
+            }
+            .width('100%').padding({ left: 16, right: 16, top: 12, bottom: 16 })
+
             // ── 搜索胶囊(iOS IMG_1989:圆角输入条 + 放大镜)──
             Column() {
               Row() {
