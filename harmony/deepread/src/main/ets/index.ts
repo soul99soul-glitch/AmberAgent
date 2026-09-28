@@ -82,7 +82,8 @@ export { createTavilyProvider, createFallbackProviders } from './research/search
 
 // ===== Model Council(模型议会) =====
 export type {
-  ModelCouncilMode, ModelCouncilRunStatus, ReasoningLevel,
+  ModelCouncilMode, ModelCouncilRunStatus, ReasoningLevel, CouncilToolMode, CouncilSeatRunKey,
+  CouncilSource, CouncilApprovalRequest, CouncilToolVerdict, CouncilToolSnapshot,
   ModelCouncilSeat, ModelCouncilSeatInit, ModelCouncilTaskSpec, ModelCouncilTurn,
   ModelCouncilResult, ModelCouncilRun, ModelCouncilRuntimeSetting, ModelCouncilRuntimeSettingInit,
   ModelCouncilRolePreset,
@@ -91,7 +92,7 @@ export {
   DEFAULT_MAX_SEATS, DEFAULT_DEFAULT_ROUNDS, DEFAULT_MAX_ROUNDS, DEFAULT_SEAT_TIMEOUT_MS,
   DEFAULT_TOTAL_TIMEOUT_MS, DEFAULT_OUTPUT_BUDGET_CHARS, DEFAULT_WAIT_TIMEOUT_MS,
   PROVIDER_PARALLELISM, SYNTHESIZER_SEAT_KEY, DEFAULT_OUTPUT_FORMAT,
-  isRunningStatus, makeSeat, newSeatId, makeRuntimeSetting, makeEmptyResult,
+  isRunningStatus, makeSeat, newSeatId, makeRuntimeSetting, makeEmptyResult, normalizeCouncilToolMode,
   CORE_SEATS, LENS_PRESETS, ROLE_PRESETS, isCoreRole, findRolePreset,
 } from './council/models.ts';
 export type { CouncilGenerateRequest, ModelCouncilTextResult, ModelCouncilTextRunner } from './council/runner.ts';

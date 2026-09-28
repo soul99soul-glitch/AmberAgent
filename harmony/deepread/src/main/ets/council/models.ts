@@ -3,6 +3,8 @@
 // Uuid→string,Long/Int→number,Float?→number|null。去掉 EXTERNAL_CLI runner(鸿蒙无本机 CLI),
 // 席位 modelId 引用 ModelConfig.id。ArkTS 安全:interface + factory,无 any。
 
+import type { UIMessage, UIMessagePartTool } from '../agent/message.ts';
+
 // ===== 常量(照搬 Android ModelCouncilModels.kt) =====
 export const DEFAULT_MAX_SEATS = 8;
 export const DEFAULT_DEFAULT_ROUNDS = 2;
@@ -21,6 +23,34 @@ export const DEFAULT_OUTPUT_FORMAT =
 
 // ===== 枚举 =====
 export type ModelCouncilMode = 'compare' | 'debate';
+export type CouncilToolMode = 'off' | 'search' | 'full';
+
+export const normalizeCouncilToolMode = (mode: string | undefined): CouncilToolMode =>
+  mode === 'search' || mode === 'full' ? mode : 'off';
+
+export interface CouncilSeatRunKey { runId: string; round: number; seatId: string; }
+export interface CouncilSource { title: string; url: string; service: string; }
+export interface CouncilApprovalRequest {
+  key: CouncilSeatRunKey;
+  conversationId: string;
+  messageId: string;
+  partIndex: number;
+  toolCallId: string;
+  subjectHash: string;
+  part: UIMessagePartTool;
+}
+export interface CouncilToolVerdict {
+  kind: 'approved' | 'denied' | 'answered';
+  reason: string;
+  answer: string | null;
+}
+export interface CouncilToolSnapshot {
+  key: CouncilSeatRunKey;
+  conversationId: string;
+  messages: UIMessage[];
+  pending: CouncilApprovalRequest[];
+  sources: CouncilSource[];
+}
 
 export type ModelCouncilRunStatus =
   | 'running' | 'completed' | 'partial_failed' | 'failed'
@@ -77,6 +107,7 @@ export const makeSeat = (init: ModelCouncilSeatInit): ModelCouncilSeat => {
 // ===== 任务 / 轮次 / 结果 / 运行 =====
 export interface ModelCouncilTaskSpec {
   mode: ModelCouncilMode;
+  toolMode?: CouncilToolMode; // Legacy task JSON has no field; parseTask always normalizes it.
   objective: string;
   context: string;
   outputFormat: string;
@@ -96,6 +127,8 @@ export interface ModelCouncilTurn {
   content: string;
   error: string;
   warnings: string[];
+  toolMessages?: UIMessage[]; // Legacy turns normalize absent arrays on read/copy.
+  sources?: CouncilSource[];
 }
 
 export interface ModelCouncilResult {
@@ -133,6 +166,7 @@ export interface ModelCouncilRun {
 // ===== 运行时设置 =====
 export interface ModelCouncilRuntimeSetting {
   enabled: boolean;
+  toolMode: CouncilToolMode;
   defaultSeats: ModelCouncilSeat[];
   synthesisModelId: string | null;
   maxSeats: number;
@@ -146,6 +180,7 @@ export interface ModelCouncilRuntimeSetting {
 
 export interface ModelCouncilRuntimeSettingInit {
   enabled?: boolean;
+  toolMode?: CouncilToolMode;
   defaultSeats?: ModelCouncilSeat[];
   synthesisModelId?: string | null;
   maxSeats?: number;
@@ -160,6 +195,7 @@ export interface ModelCouncilRuntimeSettingInit {
 export const makeRuntimeSetting = (init: ModelCouncilRuntimeSettingInit = {}): ModelCouncilRuntimeSetting => {
   const s: ModelCouncilRuntimeSetting = {
     enabled: init.enabled ?? true,
+    toolMode: normalizeCouncilToolMode(init.toolMode),
     defaultSeats: init.defaultSeats ?? [],
     synthesisModelId: init.synthesisModelId !== undefined ? init.synthesisModelId : null,
     maxSeats: init.maxSeats ?? DEFAULT_MAX_SEATS,

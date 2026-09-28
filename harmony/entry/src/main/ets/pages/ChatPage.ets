@@ -73,6 +73,7 @@ import type { ConversationTimelineLoadState } from '@amber/chat-domain';
 import { compressImageAsDataUrl } from '../platform_impl/ImageCompress.ets';
 import type { TokenUsage } from '@amber/chat-domain';
 import { EntryAbortController } from '../platform_impl/EntryAbortController.ets';
+import { currentJevApprovalSubjectHash } from '../platform_impl/JevApprovalTriage.ets';
 import { beginConversationRun, beginConversationRestore, hasActiveConversationRuns,
   conversationRestoreVersion } from '../platform_impl/ConversationRunGuard.ets';
 import { resolveEffectiveChatChoice, saveEffectiveChatChoice } from '../platform_impl/ChatModelSelectionSupport.ets';
@@ -423,6 +424,7 @@ struct ChatPage {
   // Tool preview sheet
   @State toolPreviewSheetOpen: boolean = false;
   private toolPreviewPart: UIMessagePartTool | null = null;
+  private toolPreviewLocator: ToolApprovalPartLocator | null = null;
   private drawerSearchText: string = '';
   private pendingQueue: PendingUserMessage[] = [];
   private initialImagePickerConsumed: boolean = false;
@@ -2883,13 +2885,34 @@ struct ChatPage {
   }
 
   // Tool preview sheet
-  private openToolPreview(part: UIMessagePartTool): void {
+  private jevSubjectHash(part: UIMessagePartTool, locator?: ToolApprovalPartLocator): string {
+    const viewed: Conversation | null = this.conversation;
+    if (viewed === null || locator === undefined) return '';
+    const canonical: Conversation | null = getConversationRunService().snapshot(viewed.id)?.conversation ?? viewed;
+    return canonical === null ? '' : currentJevApprovalSubjectHash(canonical, part.toolCallId, locator);
+  }
+  private currentToolPreviewPart(): UIMessagePartTool {
+    const part: UIMessagePartTool = this.toolPreviewPart as UIMessagePartTool;
+    const locator: ToolApprovalPartLocator | null = this.toolPreviewLocator;
+    const viewed: Conversation | null = this.conversation;
+    if (locator === null || viewed === null) return part;
+    const snapshot: ConversationRunSnapshot | null = getConversationRunService().snapshot(viewed.id);
+    if (snapshot?.conversationDeleted === true) return part;
+    const canonical: Conversation = snapshot?.conversation ?? viewed;
+    const message: UIMessage | undefined = currentMessages(canonical).find((item: UIMessage): boolean => item.id === locator.messageId);
+    const candidate: UIMessagePart | undefined = message?.parts[locator.partIndex];
+    return candidate?.type === 'tool' && (candidate as UIMessagePartTool).toolCallId === part.toolCallId
+      ? candidate as UIMessagePartTool : part;
+  }
+  private openToolPreview(part: UIMessagePartTool, locator?: ToolApprovalPartLocator): void {
+    this.toolPreviewLocator = locator ?? null;
     this.toolPreviewPart = part;
     this.toolPreviewSheetOpen = true;
   }
 
   private closeToolPreview(): void {
     this.toolPreviewSheetOpen = false;
+    this.toolPreviewLocator = null;
   }
 
   // TopModelMenu:打开/关闭下拉。打开 = 装配 groups(过滤 hasUsableAuth + chat 类型),
@@ -3552,7 +3575,8 @@ struct ChatPage {
   toolPreviewSheetBuilder() {
     if (this.toolPreviewPart !== null) {
       ChatMessageToolPreviewSheet({
-        part: this.toolPreviewPart as UIMessagePartTool,
+        part: this.currentToolPreviewPart(),
+        jevSubjectHash: this.jevSubjectHash(this.currentToolPreviewPart(), this.toolPreviewLocator ?? undefined),
         onDismiss: (): void => { this.closeToolPreview(); },
       })
     }
@@ -3729,7 +3753,8 @@ struct ChatPage {
           },
           onCopy: (): void => { this.openCopySheet(this.displayedRowMessage(row)); },
           onFavorite: (text: string): void => { this.favoriteText(text); },
-          onOpenToolPreview: (part: UIMessagePartTool): void => { this.openToolPreview(part); },
+          jevSubjectHashForPart: (part: UIMessagePartTool, locator?: ToolApprovalPartLocator): string => this.jevSubjectHash(part, locator),
+              onOpenToolPreview: (part: UIMessagePartTool, locator?: ToolApprovalPartLocator): void => { this.openToolPreview(part, locator); },
           onModifyGeneratedImage: (url: string): void => { this.modifyGeneratedImage(url); },
           onTextGrow: (): void => { this.followStreamingUpdate(); },
           onRunMiniApp: (appId: string): void => {
@@ -3781,7 +3806,8 @@ struct ChatPage {
           onOpenSubAgentRun: (rid: string, tools: UIMessagePartTool[]): void => {
             this.openSubAgentSheet(rid, tools);
           },
-          onOpenToolPreview: (part: UIMessagePartTool): void => { this.openToolPreview(part); },
+          jevSubjectHashForPart: (part: UIMessagePartTool, locator?: ToolApprovalPartLocator): string => this.jevSubjectHash(part, locator),
+              onOpenToolPreview: (part: UIMessagePartTool, locator?: ToolApprovalPartLocator): void => { this.openToolPreview(part, locator); },
           onModifyGeneratedImage: (url: string): void => { this.modifyGeneratedImage(url); },
           onTextGrow: (): void => { this.followStreamingUpdate(); },
           onRunMiniApp: (appId: string): void => {

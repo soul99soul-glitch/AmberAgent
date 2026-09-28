@@ -32,6 +32,7 @@ import { buildConversationToolLoop } from './ConversationRunTools.ets';
 import { completeConversationAuxiliary } from './ConversationRunAuxiliary.ets';
 import { releaseConversationBrowserRun } from './ConversationBrowserGuard.ets';
 import { cancelNativePluginJsConversation } from './NativePluginJsTransport.ets';
+import { cancelJevApprovalTriage, scheduleJevApprovalTriage } from './JevApprovalTriage.ets';
 
 export interface ConversationRunSnapshot {
   conversationId: string; runId: string; phase: KernelPhase; sending: boolean;
@@ -286,6 +287,7 @@ export class ConversationRunService {
     };
   }
   forgetDeletedConversation(conversationId: string): void {
+    cancelJevApprovalTriage(conversationId);
     const session: ConversationSession | undefined = this.sessions.get(conversationId);
     if (session === undefined) { cancelNativePluginJsConversation(conversationId); return; }
     if (this.isBusy(conversationId) || session.pendingWrites > 0 || session.pendingQueueWrites > 0) {
@@ -351,6 +353,7 @@ export class ConversationRunService {
     if (session.record !== null || session.appendActive || (session.drainActive && !fromDrain)) {
       throw new Error('该会话仍在运行，请先停止或将消息排队');
     }
+    cancelJevApprovalTriage(session.id);
     const release: () => void = beginConversationRun(session.id);
     const id: string = newId();
     const record: ActiveRun = {
@@ -427,13 +430,13 @@ export class ConversationRunService {
     return this.mutateStoredConversation(context.conversationId, update);
   }
   mutateStoredConversation(conversationId: string,
-    update: (latest: Conversation) => Conversation | null): Promise<Conversation | null> {
+    update: (latest: Conversation) => Conversation | null | Promise<Conversation | null>): Promise<Conversation | null> {
     const release: () => void = beginConversationRun(conversationId);
     const session: ConversationSession = this.session(conversationId);
     return this.write(session, async (): Promise<Conversation | null> => {
       const latest: Conversation | null = await this.loadCanonical(session);
       if (latest === null) return null;
-      const updated: Conversation | null = update(latest);
+      const updated: Conversation | null = await update(latest);
       if (updated === null) return null;
       if (updated.id !== conversationId) throw new Error('字段变更保存目标不匹配');
       await getChatRepository().save(updated);
@@ -637,6 +640,9 @@ export class ConversationRunService {
       record.release();
     }
     if (failure !== null) { this.drain(session); this.releaseIdle(session); throw failure; }
+    if (!record.controller.signal.aborted && session.state.awaitingTools) {
+      scheduleJevApprovalTriage(session.id, record.controller.signal);
+    }
     if (finalized !== null && record.context !== null && !record.controller.signal.aborted && !session.state.awaitingTools) {
       completeConversationAuxiliary(record.context, finalized, manualToolCallId);
     }
@@ -645,6 +651,7 @@ export class ConversationRunService {
   }
 
   cancel(conversationId: string, runId: string): void {
+    cancelJevApprovalTriage(conversationId);
     const session: ConversationSession | undefined = this.sessions.get(conversationId);
     const record: ActiveRun | null = session?.record ?? null;
     if (session === undefined || record === null || record.id !== runId || record.controller.signal.aborted) return;

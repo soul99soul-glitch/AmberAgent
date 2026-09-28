@@ -7,6 +7,19 @@
 
 export type JevMode = 'off' | 'shadow' | 'active';
 export type JevApiMode = 'typesafe' | 'vercel';
+export type JevNewPurpose = 'approval_triage' | 'web_automation';
+export interface JevNewPurposeSettings {
+  mode: JevMode;
+  allowToolMetadata: boolean;
+  allowTaskText: boolean;
+  allowPageContent: boolean;
+}
+export const makeJevNewPurposeSettings = (opts: Partial<JevNewPurposeSettings> = {}): JevNewPurposeSettings => ({
+  mode: opts.mode === 'active' || opts.mode === 'shadow' ? opts.mode : 'off',
+  allowToolMetadata: opts.allowToolMetadata === true,
+  allowTaskText: opts.allowTaskText === true,
+  allowPageContent: opts.allowPageContent === true,
+});
 
 export const JEV_TYPESAFE_ENDPOINT: string = 'https://api.typesafe.ai/v1/systemone';
 export const JEV_VERCEL_DEFAULT_BASE: string = 'https://ai-gateway.vercel.sh/v4/ai';
@@ -17,6 +30,8 @@ export interface JevSettings {
   apiKey: string;
   baseUrl: string;   // VERCEL 网关 base;TYPESAFE 恒用 JEV_TYPESAFE_ENDPOINT
   model: string;
+  approvalTriage: JevNewPurposeSettings;
+  webAutomation: JevNewPurposeSettings;
 }
 
 export const makeJevSettings = (opts: Partial<JevSettings> = {}): JevSettings => ({
@@ -25,6 +40,8 @@ export const makeJevSettings = (opts: Partial<JevSettings> = {}): JevSettings =>
   apiKey: opts.apiKey ?? '',
   baseUrl: opts.baseUrl ?? JEV_VERCEL_DEFAULT_BASE,
   model: opts.model ?? '',
+  approvalTriage: makeJevNewPurposeSettings(opts.approvalTriage),
+  webAutomation: makeJevNewPurposeSettings(opts.webAutomation),
 });
 
 // ===== 题 =====
@@ -86,6 +103,12 @@ export interface JevCallFailed {
 }
 
 export type JevCallOutcome = JevCallOk | JevCallSkipped | JevCallFailed;
+export interface JevEvaluateResult {
+  ok: boolean;
+  reason: string;
+  evaluation: JevEvaluation | null;
+  shadow: boolean;
+}
 
 // ===== KV 设置('jev_settings' JSON) =====
 
@@ -105,6 +128,10 @@ export const loadJevSettings = async (kv: KeyValueStore): Promise<JevSettings> =
       baseUrl: typeof parsed.baseUrl === 'string' && parsed.baseUrl.length > 0
         ? parsed.baseUrl : JEV_VERCEL_DEFAULT_BASE,
       model: typeof parsed.model === 'string' ? parsed.model : '',
+      approvalTriage: parsed.approvalTriage !== null && typeof parsed.approvalTriage === 'object'
+        ? parsed.approvalTriage : undefined,
+      webAutomation: parsed.webAutomation !== null && typeof parsed.webAutomation === 'object'
+        ? parsed.webAutomation : undefined,
     });
   } catch (_e) {
     return makeJevSettings();

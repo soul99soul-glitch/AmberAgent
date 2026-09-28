@@ -178,7 +178,7 @@ export {
 
 // ===== 工具执行核心(D-056,Tool/ToolRegistry 策略/PermissionDecisionResolver/
 //   AgentToolDispatcher/ToolInvocationHooks/ToolFailure/AgentLoopBudgetPrompt 全文) =====
-export type { InputSchemaObj, AgentTool, AgentToolOpts } from './chat/tool.ts';
+export type { InputSchemaObj, AgentTool, AgentToolOpts, McpToolIdentity } from './chat/tool.ts';
 export {
   makeInputSchemaObj, makeAgentTool, toolParametersToJson, toChatToolDefinition,
 } from './chat/tool.ts';
@@ -208,7 +208,7 @@ export type {
   AgentToolDispatcherDeps,
 } from './chat/tool_dispatcher.ts';
 export {
-  AgentToolDispatcher, defaultToolInvocationHooks,
+  AgentToolDispatcher, ToolInvocationBarrierError, defaultToolInvocationHooks,
   createToolTraceHook, createToolArgumentValidationHook, createToolFailureNormalizeHook,
   sanitizedToolFailureMessage, isRecoverableToolFailure,
   toAgentToolFailurePayload, toAgentToolFailureJson,
@@ -1237,11 +1237,11 @@ export { composeLatex } from './chat/math_compose.ts';
 
 // ===== Phase C5:Jev 判断服务 =====
 export {
-  makeJevSettings, loadJevSettings, saveJevSettings,
+  makeJevSettings, makeJevNewPurposeSettings, loadJevSettings, saveJevSettings,
   JEV_TYPESAFE_ENDPOINT, JEV_VERCEL_DEFAULT_BASE,
 } from './chat/jev_models.ts';
 export type {
-  JevMode, JevApiMode, JevSettings,
+  JevMode, JevApiMode, JevSettings, JevNewPurpose, JevNewPurposeSettings, JevEvaluateResult,
   JevNoulQuestion, JevChoiceQuestion, JevQuestion,
   JevNoulAnswer, JevChoiceAnswer, JevAnswer,
   JevUsage, JevEvaluation, JevCallOutcome, JevCallOk, JevCallSkipped, JevCallFailed,
@@ -1436,3 +1436,11 @@ export type { PluginToolDeps } from './chat/plugins/tools.ts';
 
 // E9 separate Google authentication identities and protocol ports.
 export * from './chat/google_auth.ts';
+
+export type { JevFact, JevApprovalLocator, JevApprovalTriage, JevApprovalSubject, JevApprovalPolicy,
+  JevPendingApproval, JevApprovalBatch } from './chat/jev_approval.ts';
+export { resolveJevPurposeMode, jevFactFromProbability, buildJevApprovalSubject, readJevApprovalTriage,
+  listJevPendingApprovals, jevTaskIntent, buildJevApprovalBatch, completeJevApprovalFacts } from './chat/jev_approval.ts';
+
+export type { JevWebCandidate, JevWebObservation, JevWebDecision } from './chat/jev_web.ts';
+export { buildJevWebChoice } from './chat/jev_web.ts';

@@ -116,7 +116,10 @@ export struct AgentMessageRow {
     (_id: string, _t: UIMessagePartTool[]): void => {};
   onCopy: () => void = (): void => {};
   onFavorite: (text: string) => void = (_t: string): void => {};
-  onOpenToolPreview: (part: UIMessagePartTool) => void = (_p: UIMessagePartTool): void => {};
+  onOpenToolPreview: (part: UIMessagePartTool, locator?: ToolApprovalPartLocator) => void =
+    (_p: UIMessagePartTool, _l?: ToolApprovalPartLocator): void => {};
+  jevSubjectHashForPart: (part: UIMessagePartTool, locator?: ToolApprovalPartLocator) => string =
+    (_p: UIMessagePartTool, _l?: ToolApprovalPartLocator): string => '';
   // generate_image 修改回调(edit 流程,宿主 ChatPage 注入)
   onModifyGeneratedImage: (url: string) => void = (_url: string): void => {};
   // F44:文档附件打开(宿主未提供路径时 capabilities.openDocument=false → 纯展示)
@@ -383,6 +386,7 @@ export struct AgentMessageRow {
               } else {
                 ChatMessageTools({
                   part: step.tool,
+                  jevSubjectHash: this.jevSubjectHashForPart(step.tool, this.locatorFor(step.tool)),
                   canApprove: this.capabilities.approveTool && this.packageAskUserPart(step.tool) === null,
                   canDeny: this.capabilities.denyTool,
                   canOpenPreview: this.capabilities.openToolPreview,
@@ -394,7 +398,7 @@ export struct AgentMessageRow {
                   onDeny: (toolCallId: string): void => {
                     this.onDenyTool(toolCallId, this.locatorFor(step.tool));
                   },
-                  onOpenPreview: (): void => { this.onOpenToolPreview(step.tool); },
+                  onOpenPreview: (): void => { this.onOpenToolPreview(step.tool, this.locatorFor(step.tool)); },
                   deniedLabel: step.tool.approvalState.type === 'denied' ? this.deniedLabel(step.tool) : '',
                 })
                 if (this.packageAskUserPart(step.tool) !== null) {
@@ -528,7 +532,7 @@ export struct AgentMessageRow {
           runId: block.step.runId,
           canOpenRun: this.capabilities.openToolPreview,
           onOpenRun: (_rid: string): void => {
-            if (block.step.tools.length > 0) this.onOpenToolPreview(block.step.tools[0]);
+            if (block.step.tools.length > 0) this.onOpenToolPreview(block.step.tools[0], this.locatorFor(block.step.tools[0]));
           },
         })
       }

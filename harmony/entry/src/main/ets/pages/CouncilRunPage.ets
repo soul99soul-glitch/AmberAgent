@@ -4,9 +4,11 @@ import { FONT_SERIF } from '../design/fonts.ets';
 import { Icon } from '../components/ui/Icon.ets';
 import { router } from '@kit.ArkUI';
 import { getCouncilManager } from '../di/AppContainer.ets';
-import type { ModelCouncilManager } from '@amber/deepread-domain';
+import type { ModelCouncilManager, CouncilToolMode, CouncilToolSnapshot, CouncilApprovalRequest, CouncilToolVerdict } from '@amber/deepread-domain';
 import { SYNTHESIZER_SEAT_KEY, isRunningStatus } from '@amber/deepread-domain';
 import type { ModelCouncilRun, ModelCouncilTurn } from '@amber/deepread-domain';
+import { CouncilSeatTools } from '../components/CouncilSeatTools.ets';
+import { SSHUIColors } from '../components/SSHUIColors.ets';
 
 
 const statusVerb = (s: string): string => {
@@ -17,6 +19,7 @@ const statusVerb = (s: string): string => {
     case 'failed': return '失败';
     case 'cancelled': return '已取消';
     case 'timed_out': return '超时';
+    case 'interrupted': return '已中断';
     default: return s;
   }
 };
@@ -35,17 +38,28 @@ struct CouncilRunPage {
   @State errorMsg: string = '';
   // F12:真实进度(由 snapshot.turns 推导),非墙钟伪阶段
   @State progressText: string = '';
+  @State toolMode: CouncilToolMode = 'off';
+  @State toolSnapshots: CouncilToolSnapshot[] = [];
+  @State turns: ModelCouncilTurn[] = [];
+  @State approvalError: string = '';
+  @State colors: SSHUIColors = new SSHUIColors();
+  @StorageProp('darkMode') @Watch('refreshColors') darkMode: boolean = false;
+  @StorageProp('themePackId') @Watch('refreshColors') themePackId: string = '';
   private manager: ModelCouncilManager | null = null;
   private runId: string = '';
   private unsubs: Array<() => void> = [];
   private pollTimer: number = 0;
 
   aboutToAppear(): void {
+    this.stopTimers();
+    this.toolSnapshots = [];
+    this.approvalError = '';
     const params = router.getParams() as Record<string, string>;
     const runId: string = params ? (params['runId'] ?? '') : '';
     const mgr: ModelCouncilManager | null = getCouncilManager();
     if (mgr === null || runId.length === 0) {
-      this.errorMsg = '没有进行中的议会运行';
+      this.errorMsg = '议会运行宿主不可用，运行已中断。本页不会自动恢复工具执行。';
+      this.finished = true;
       return;
     }
     this.manager = mgr;
@@ -56,9 +70,11 @@ struct CouncilRunPage {
       return;
     }
     this.objective = snap.task.objective;
+    this.toolMode = snap.task.toolMode ?? 'off';
+    this.turns = snap.turns;
     this.statusText = statusVerb(snap.status);
     this.progressText = this.deriveProgress(snap);
-    if (!isRunningStatus(snap.status)) this.finished = true;
+    this.finished = !isRunningStatus(snap.status);
     const keys: string[] = [SYNTHESIZER_SEAT_KEY];
     const labels: string[] = ['综合裁决'];
     for (let i = 0; i < snap.seats.length; i++) {
@@ -84,11 +100,51 @@ struct CouncilRunPage {
       this.unsubs.push(unsub);
     }
 
-    this.startPolling();
+    this.unsubs.push(mgr.subscribeTools(runId, (snapshot: CouncilToolSnapshot): void => {
+      if (snapshot.key.runId !== this.runId) return;
+      const next: CouncilToolSnapshot[] = this.toolSnapshots.filter((current: CouncilToolSnapshot): boolean =>
+        current.key.round !== snapshot.key.round || current.key.seatId !== snapshot.key.seatId);
+      next.push(snapshot);
+      this.toolSnapshots = next;
+    }));
+
+    if (!this.finished) this.startPolling();
   }
 
   aboutToDisappear(): void {
     this.stopTimers();
+  }
+
+  private refreshColors(): void { this.colors = new SSHUIColors(); }
+
+  private selectedTools(): CouncilToolSnapshot[] {
+    const seatId: string = this.tabKeys[this.currentIndex] ?? '';
+    return this.toolSnapshots.filter((snapshot: CouncilToolSnapshot): boolean => snapshot.key.seatId === seatId)
+      .sort((a: CouncilToolSnapshot, b: CouncilToolSnapshot): number => a.key.round - b.key.round);
+  }
+
+  private turnFor(snapshot: CouncilToolSnapshot): ModelCouncilTurn | null {
+    return this.turns.find((turn: ModelCouncilTurn): boolean =>
+      turn.round === snapshot.key.round && turn.seatId === snapshot.key.seatId) ?? null;
+  }
+
+  private toolsActive(snapshot: CouncilToolSnapshot): boolean {
+    const turn: ModelCouncilTurn | null = this.turnFor(snapshot);
+    return !this.finished && (turn === null || isRunningStatus(turn.status));
+  }
+
+  private toolRoundLabel(snapshot: CouncilToolSnapshot): string {
+    const turn: ModelCouncilTurn | null = this.turnFor(snapshot);
+    return `第 ${snapshot.key.round} 轮工具 · ${turn === null ? this.statusText : statusVerb(turn.status)}`;
+  }
+
+  private submitVerdict(request: CouncilApprovalRequest, verdict: CouncilToolVerdict): void {
+    const manager: ModelCouncilManager | null = this.manager;
+    if (this.finished || manager === null || !manager.submitToolVerdict(request, verdict)) {
+      this.approvalError = '该审批已结束或步骤已变化，请以当前卡片为准。';
+      return;
+    }
+    this.approvalError = '';
   }
 
   startPolling(): void {
@@ -99,6 +155,7 @@ struct CouncilRunPage {
       if (snap === null) return;
       this.statusText = statusVerb(snap.status);
       this.progressText = this.deriveProgress(snap);
+      this.turns = snap.turns;
       if (!isRunningStatus(snap.status)) {
         this.finished = true;
         this.currentIndex = 0;
@@ -137,7 +194,6 @@ struct CouncilRunPage {
 
   displayText(idx: number): string {
     const live: string = this.liveTexts[idx];
-    if (live.length > 0) return live;
     const mgr: ModelCouncilManager | null = this.manager;
     if (mgr === null) return '';
     const snap: ModelCouncilRun | null = mgr.snapshot(this.runId);
@@ -147,15 +203,19 @@ struct CouncilRunPage {
       if (snap.result !== null && snap.result.error.length > 0) {
         return '裁决失败：' + snap.result.error;
       }
+      if (live.length > 0) return live;
+      if (snap.result !== null && snap.result.finalRecommendation.length > 0) return snap.result.finalRecommendation;
       return this.finished ? '（无裁决内容）' : '等待各方输出后综合…';
     }
+    if (!this.finished && live.length > 0) return live;
     const turns: ModelCouncilTurn[] = snap.turns.filter(t => t.seatId === key);
     if (turns.length === 0) return this.finished ? '（该席位无输出）' : '等待输出…';
     let s: string = '';
     for (let i = 0; i < turns.length; i++) {
       const t: ModelCouncilTurn = turns[i];
-      if (t.content.length > 0) s += `--- 第 ${t.round} 轮 ---\n\n${t.content}\n\n`;
-      else if (t.error.length > 0) s += `（${statusVerb(t.status)}：${t.error}）\n\n`;
+      s += `--- 第 ${t.round} 轮 · ${statusVerb(t.status)} ---\n\n`;
+      if (t.content.length > 0) s += `${t.content}\n\n`;
+      if (t.error.length > 0) s += `（${t.error}）\n\n`;
     }
     return s.length > 0 ? s : '等待输出…';
   }
@@ -164,14 +224,15 @@ struct CouncilRunPage {
     Column() {
       // 顶栏
       Row() {
-        Icon({ name: 'back', iconSize: 20, color: INK3 }).onClick(() => { router.back(); })
+        Row() { Icon({ name: 'back', iconSize: 20, color: this.colors.muted }) }
+          .width(44).height(44).justifyContent(FlexAlign.Center).onClick((): void => { router.back(); })
         Text('@Council').fontSize(20).fontWeight(FontWeight.Bold).fontColor(INK)
           .fontFamily(FONT_SERIF).margin({ left: 12 })
         Blank()
         if (!this.finished) {
           LoadingProgress().width(14).height(14).color(ACCENT).margin({ right: 6 })
           Text(this.progressText.length > 0 ? this.statusText + ' · ' + this.progressText : this.statusText)
-            .fontSize(12).fontColor(INK3)
+            .fontSize(12).fontColor(this.colors.muted).layoutWeight(1)
         } else {
           Text(this.statusText).fontSize(12).fontColor(ACCENT)
         }
@@ -183,6 +244,7 @@ struct CouncilRunPage {
         Column() {
           Text(this.errorMsg).fontSize(14).fontColor('#E53935')
           Text('返回').fontSize(14).fontColor(ACCENT).margin({ top: 16 })
+            .constraintSize({ minHeight: 44 })
             .onClick(() => { router.back(); })
         }
         .width('100%').layoutWeight(1).justifyContent(FlexAlign.Center)
@@ -190,7 +252,9 @@ struct CouncilRunPage {
         // 议题
         Text(this.objective)
           .fontSize(15).fontWeight(FontWeight.Medium).fontColor(INK).lineHeight(22)
-          .width('100%').padding({ left: 24, right: 24, top: 8, bottom: 12 })
+          .width('100%').padding({ left: 16, right: 16, top: 8, bottom: 6 })
+        Text(`本轮工具功率：${this.toolMode === 'full' ? 'FULL' : (this.toolMode === 'search' ? '联网搜索' : '关闭')}`)
+          .fontSize(12).fontColor(this.colors.muted).width('100%').padding({ left: 16, right: 16, bottom: 10 })
 
         // 分页 chips
         Scroll() {
@@ -202,6 +266,7 @@ struct CouncilRunPage {
                 .fontColor(idx === this.currentIndex ? '#FFFFFF' : INK2)
                 .backgroundColor(idx === this.currentIndex ? ACCENT : SURFACE2)
                 .margin({ right: 8 })
+                .constraintSize({ minHeight: 44 })
                 .onClick(() => { this.currentIndex = idx; })
             }, (key: string) => key)
           }
@@ -215,11 +280,22 @@ struct CouncilRunPage {
         // 内容
         Scroll() {
           Column() {
+            if (this.approvalError.length > 0) {
+              Text(this.approvalError).fontSize(12).fontColor(this.colors.muted).width('100%').margin({ bottom: 8 })
+            }
+            ForEach(this.selectedTools(), (snapshot: CouncilToolSnapshot): void => {
+              Text(this.toolRoundLabel(snapshot)).fontSize(12).fontColor(this.colors.muted)
+                .width('100%').margin({ top: 8, bottom: 8 })
+              CouncilSeatTools({ snapshot: snapshot, active: this.toolsActive(snapshot),
+                onVerdict: (request: CouncilApprovalRequest, verdict: CouncilToolVerdict): void => {
+                  this.submitVerdict(request, verdict);
+                } })
+            }, (snapshot: CouncilToolSnapshot): string => `${snapshot.key.round}-${snapshot.key.seatId}`)
             Text(this.displayText(this.currentIndex))
               .fontSize(14).fontColor(INK).lineHeight(24)
               .width('100%')
           }
-          .width('100%').padding({ left: 24, right: 24, bottom: 24 })
+          .width('100%').padding({ left: 16, right: 16, bottom: 24 })
           .alignItems(HorizontalAlign.Start)
         }
         .layoutWeight(1)
@@ -230,6 +306,7 @@ struct CouncilRunPage {
           Row() {
             Text('取消运行').fontSize(14).fontColor('#E53935')
               .padding({ left: 20, right: 20, top: 10, bottom: 10 })
+              .constraintSize({ minHeight: 44 })
               .onClick(() => { this.cancelRun(); })
           }
           .width('100%').justifyContent(FlexAlign.Center)

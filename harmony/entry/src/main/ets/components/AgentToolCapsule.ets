@@ -124,7 +124,7 @@ export struct AgentToolCallCapsule {
           .layoutWeight(this.showApproval ? 1 : 0)
           .flexShrink(1)
           .padding({ left: 9, right: 9, top: 3, bottom: 3 })
-          .constraintSize({ minHeight: 32 })
+          .constraintSize({ minHeight: 44 })
           .backgroundColor(this.showApproval ? SURFACE2 : accentAlpha(this.accentColorStore, 0.16))
           .borderRadius(50)
           .border({ width: this.showApproval ? 1 : 0, color: LINE })

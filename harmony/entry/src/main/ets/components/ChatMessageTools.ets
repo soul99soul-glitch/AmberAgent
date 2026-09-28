@@ -13,6 +13,7 @@ import { isSSHApprovalTool, sshApprovalTargetLabel, sshApprovalCommand, sshAppro
 import { SSHUIColors } from './SSHUIColors.ets';
 import { RecipeApprovalView, recipeApprovalView } from './RecipeApprovalSummary.ets';
 import { pluginApprovalView } from './PluginApprovalSummary.ets';
+import { JevApprovalFacts } from './JevApprovalFacts.ets';
 import {
   AgentToolCallCapsule,
   ToolStatus,
@@ -25,6 +26,7 @@ import {
 @Component
 export struct ChatMessageTools {
   @Prop part: UIMessagePartTool;
+  @Prop jevSubjectHash: string = '';
   onApprove: (toolCallId: string) => void = (): void => {};
   onDeny: (toolCallId: string) => void = (): void => {};
   onOpenPreview: () => void = (): void => {};
@@ -158,6 +160,8 @@ export struct ChatMessageTools {
         onDeny: (): void => { this.onDeny(this.part.toolCallId); },
         onCapsuleClick: (): void => { this.onOpenPreview(); },
       })
+
+      JevApprovalFacts({ part: this.part, subjectHash: this.jevSubjectHash })
 
       // denied → 拒绝原因
       if (this.part.approvalState.type === 'denied' && this.deniedLabel.length > 0) {

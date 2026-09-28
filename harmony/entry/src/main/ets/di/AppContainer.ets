@@ -20,7 +20,8 @@ import {
 } from '@amber/deepread-domain';
 // 真实平台实现 import
 import { createRcpHttpClient } from '../platform_impl/RcpHttpClient.ets';
-import { jevChoiceSelect } from '../platform_impl/JevSupport.ets';
+import { jevChoiceSelect, jevEvaluate } from '../platform_impl/JevSupport.ets';
+import { initializeJevTriageHost } from '../platform_impl/JevTriageHost.ets';
 import { createPreferencesStorage } from '../platform_impl/PreferencesStorage.ets';
 import { createRdbRepository } from '../platform_impl/RdbRepository.ets';
 import { createOpenAiCompatibleAiClient } from '../platform_impl/OpenAiCompatibleAiClient.ets';
@@ -31,6 +32,9 @@ import { getChatKeyRoulette } from '../platform_impl/KeyRouletteSupport.ets';
 import { getValidCodexToken } from '../platform_impl/CodexOAuthClient.ets';
 import { getValidGrokToken } from '../platform_impl/GrokOAuthClient.ets';
 import { createModelCouncilRunner } from '../platform_impl/ModelCouncilRunner.ets';
+import { prepareCouncilToolRunner } from '../platform_impl/CouncilRunPreparation.ets';
+import { mutateAssistant } from '../platform_impl/AssistantMutation.ets';
+import { getMemoryToolDeps } from '../platform_impl/MemoryStore.ets';
 import { createEntryNovelChatRunAdapter } from '../platform_impl/NovelChatRunAdapter.ets';
 import {
   scheduleNovelPolishWork, cancelNovelPolishWork,
@@ -50,11 +54,11 @@ import type {
   AgentTool, ChatStreamProvider, ChatToolDefinition, CustomHeader,
   SubAgentRuntimeSetting, SubAgentOverride, SubAgentManagerDeps, SubAgentRunner,
   SubAgentAssistantResolution, SubAgentGenerationPort,
-  AgentPromptSettingsPort, NovelInteractiveRuntimeConfig,
+  AgentPromptSettingsPort, NovelInteractiveRuntimeConfig, Conversation, JevSettings, JevQuestion, JevEvaluateResult,
 } from '@amber/chat-domain';
 import type { NovelWorkspaceToolPort } from '@amber/chat-domain';
 import {
-  loadAssistants, loadProviders, makeAssistant, saveAssistants, patchAssistant,
+  loadAssistants, loadProviders, makeAssistant, saveAssistants, patchAssistant, loadJevSettings,
   makeProviderSettingOpenAI, createOpenAIChatApi, createClaudeChatApi, createGoogleChatApi,
   hasUsableAuth, openAIAuthHeaders, copyProviderSettingWithModels,
   taskModelReferenceId, taskModelReferenceFromId, findTaskProviderModel,
@@ -159,6 +163,15 @@ let cached: Container | null = null;
 const buildContainer = (): Container => {
   const httpClient: HttpClient = createRcpHttpClient();
   initializeEntryGoogleAuth(httpClient);
+  initializeJevTriageHost({
+    kv: getChatKvStore,
+    loadConversation: (id: string): Promise<Conversation | null> => getChatRepository().getById(id),
+    mutateConversation: (id: string, update: (latest: Conversation) => Conversation | null | Promise<Conversation | null>): Promise<Conversation | null> =>
+      getConversationRunService().mutateStoredConversation(id, update),
+    loadSettings: (): Promise<JevSettings> => loadJevSettings(getChatKvStore()),
+    evaluate: (state: JsonObject, questions: Record<string, JevQuestion>, signal?: AbortSignalLike): Promise<JevEvaluateResult> =>
+      jevEvaluate(state, questions, signal),
+  });
   const storage: Storage = createPreferencesStorage();
   const repository: DeepReadRepository = createRdbRepository();
   const searchRegistry: SearchProviderRegistry = createTavilyAndFallbackRegistry(httpClient, storage);
@@ -930,8 +943,29 @@ export const prepareCouncilManager = async (
   setting: ModelCouncilRuntimeSetting,
 ): Promise<ModelCouncilManager> => {
   const pool = await getModelRegistry().list();
+  const runner: ModelCouncilTextRunner = setting.toolMode === 'search' || setting.toolMode === 'full'
+    ? await prepareCouncilToolRunner({
+      http: getAppContainer().httpClient, files: getFileStore(), kv: getChatKvStore(),
+      getAssistants: getChatAssistants, workspace: getWorkspaceManager(),
+      getTerminalRuntime, getMoshRuntime, getSSHProfiles: getSSHProfileStore, getPythonRuntime,
+      initMcp: initMcpManager, mcpManager: getMcpManager(), mcpSettings: getMcpSettingsStore(),
+      skillManager: getSkillManager(), skillWorkspace: getSkillWorkspacePort(),
+      setSkillEnabled: async (assistantId: string, name: string, enabled: boolean): Promise<void> => {
+        await mutateAssistant(assistantId, (assistant: Assistant): Assistant => patchAssistant(assistant, {
+          enabledSkills: enabled
+            ? (assistant.enabledSkills.indexOf(name) >= 0 ? assistant.enabledSkills : assistant.enabledSkills.concat([name]))
+            : assistant.enabledSkills.filter((item: string): boolean => item !== name),
+        }));
+      },
+      memory: getMemoryToolDeps(new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' }).format(new Date())),
+      compactStore: getCompactStore(),
+      loadCompressPrompt: async (): Promise<string> => (await loadTaskPrompts()).compressPrompt,
+      repository: getChatRepository(), grantStore: getSessionGrantStore(),
+      getRecipeStore, getPluginStore, getAgentTaskTools, getAgentCronTools,
+      getPermissionsStatusTool, getAgentPromptConfigTool, playbookRepository: getDeepReadPlaybookRepository(),
+    }) : getCouncilRunner();
   councilManager = createModelCouncilManager({
-    runner: getCouncilRunner(),
+    runner: runner,
     fileStore: getFileStore(),
     modelPool: pool,
     setting: setting,

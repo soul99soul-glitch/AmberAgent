@@ -63,6 +63,11 @@ export const toAgentToolFailurePayload = (error: Error): JsonObject => ({
 export const toAgentToolFailureJson = (error: Error): string =>
   JSON.stringify(toAgentToolFailurePayload(error));
 
+// A caller's explicit persistence barrier must stop execution, unlike observational hooks.
+export class ToolInvocationBarrierError extends Error {
+  constructor(message: string) { super(message); this.name = 'ToolInvocationBarrierError'; }
+}
+
 // ===== ToolInvocationHooks(ToolInvocationHooks.kt 全文) =====
 
 export interface ToolInvocationRequest {
@@ -432,7 +437,7 @@ export class AgentToolDispatcher {
         request, { output: executed.output, metadata: {} });
       return withHookMetadata({ ...executed, output: hooked.output }, hooked.metadata);
     } catch (e) {
-      if (isAbortError(e)) throw e;
+      if (isAbortError(e) || e instanceof ToolInvocationBarrierError) throw e;
       const error: Error = e instanceof Error ? e : new Error(String(e));
       this.log(`execute failed for ${tool.toolName}: ${error.message}`);
       const hooked: ToolInvocationResult | null = await this.runErrorHooks(request, error);
@@ -490,7 +495,7 @@ export class AgentToolDispatcher {
     try {
       return await block();
     } catch (e) {
-      if (isAbortError(e)) throw e;
+      if (isAbortError(e) || e instanceof ToolInvocationBarrierError) throw e;
       const error: Error = e instanceof Error ? e : new Error(String(e));
       this.log(`tool hook ${phase} failed for ${toolName}: ${error.message}`);
       return null;
@@ -511,7 +516,7 @@ export class AgentToolDispatcher {
       try {
         return { ...tool, output: await execute() };
       } catch (e) {
-        if (isAbortError(e)) throw e;
+        if (isAbortError(e) || e instanceof ToolInvocationBarrierError) throw e;
         const error: Error = e instanceof Error ? e : new Error(String(e));
         const decision: GenerationRetryDecision = decideGenerationRetry(
           error, retryAttempt, retrySetting);

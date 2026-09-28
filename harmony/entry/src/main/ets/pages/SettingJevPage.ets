@@ -2,13 +2,14 @@
 //
 // 模式:关 / 影子(只记录不影响行为)/ 主动(结果影响工具发现选择);
 // 方言:TypeSafe 原生(/v1/systemone)/ Vercel AI Gateway(evaluation-model)。
-// 本批接线用途:工具发现语义重排(tool_search);其余用途登记未接,不展示假开关。
+// 新用途各自配置外发范围；审批分诊只显示中性事实，不改变批准决定。
 
 import {
   loadJevSettings, saveJevSettings, makeJevSettings, decodeJevResponse, buildJevRequest,
   JEV_TYPESAFE_ENDPOINT,
+  resolveJevPurposeMode,
 } from '@amber/chat-domain';
-import type { JevSettings, JevEvaluation, JevQuestion } from '@amber/chat-domain';
+import type { JevSettings, JevEvaluation, JevQuestion, JevMode, JevNewPurpose, JevNewPurposeSettings } from '@amber/chat-domain';
 import { getChatKvStore, getAppContainer } from '../di/AppContainer.ets';
 import { loadJevRuntimeStatus, JevRuntimeStatus } from '../platform_impl/JevSupport.ets';
 import {
@@ -19,6 +20,7 @@ import {
 } from '../components/PageTemplate.ets';
 import { FONT_MONO } from '../design/fonts.ets';
 import { promptAction } from '@kit.ArkUI';
+import { SSHUIColors } from '../components/SSHUIColors.ets';
 
 const MODE_OPTIONS: string[] = ['关', '影子', '主动'];
 const MODE_VALUES: string[] = ['off', 'shadow', 'active'];
@@ -36,25 +38,53 @@ struct SettingJevPage {
   @State loaded: boolean = false;
   @State testing: boolean = false;
   @State testMsg: string = '';
+  @State saveError: string = '';
+  @State loadError: string = '';
+  @State colors: SSHUIColors = new SSHUIColors();
+  @StorageProp('darkMode') @Watch('refreshColors') darkMode: boolean = false;
+  @StorageProp('themePackId') @Watch('refreshColors') themePackId: string = '';
+  private persistTail: Promise<void> = Promise.resolve();
+  private alive: boolean = false;
+  private loadRevision: number = 0;
 
   aboutToAppear(): void {
+    this.alive = true;
     this.refresh();
   }
 
+  aboutToDisappear(): void { this.alive = false; this.loadRevision++; }
+  private refreshColors(): void { this.colors = new SSHUIColors(); }
+
   private refresh(): void {
+    const revision: number = ++this.loadRevision;
+    this.loadError = '';
     loadJevSettings(getChatKvStore()).then((s: JevSettings): void => {
+      if (!this.alive || revision !== this.loadRevision) return;
       this.settings = s;
-    }).catch((): void => {});
-    loadJevRuntimeStatus().then((st: JevRuntimeStatus): void => {
-      this.status = st;
       this.loaded = true;
     }).catch((): void => {
-      this.loaded = true;
+      if (this.alive && revision === this.loadRevision) this.loadError = '设置读取失败，请重试。';
     });
+    loadJevRuntimeStatus().then((st: JevRuntimeStatus): void => {
+      if (!this.alive || revision !== this.loadRevision) return;
+      this.status = st;
+    }).catch((): void => {});
   }
 
   private persist(): void {
-    saveJevSettings(getChatKvStore(), this.settings).catch((): void => {});
+    const snapshot: JevSettings = this.settings;
+    this.persistTail = this.persistTail.then(async (): Promise<void> => {
+      try {
+        await saveJevSettings(getChatKvStore(), snapshot);
+        if (this.alive) this.saveError = '';
+      } catch (_error) {
+        if (this.alive) this.saveError = '保存失败，修改尚未完整写入。草稿已保留，可重试。';
+        return;
+      }
+      loadJevRuntimeStatus().then((status: JevRuntimeStatus): void => {
+        if (this.alive) this.status = status;
+      }).catch((): void => {});
+    });
   }
 
   private modeIndex(): number {
@@ -74,9 +104,10 @@ struct SettingJevPage {
       apiKey: this.settings.apiKey,
       baseUrl: this.settings.baseUrl,
       model: this.settings.model,
+      approvalTriage: this.settings.approvalTriage,
+      webAutomation: this.settings.webAutomation,
     });
     this.persist();
-    this.refresh();
   }
 
   private setApiMode(idx: number): void {
@@ -86,6 +117,8 @@ struct SettingJevPage {
       apiKey: this.settings.apiKey,
       baseUrl: this.settings.baseUrl,
       model: this.settings.model,
+      approvalTriage: this.settings.approvalTriage,
+      webAutomation: this.settings.webAutomation,
     });
     this.persist();
   }
@@ -97,8 +130,81 @@ struct SettingJevPage {
       apiKey: patch.apiKey ?? this.settings.apiKey,
       baseUrl: patch.baseUrl ?? this.settings.baseUrl,
       model: patch.model ?? this.settings.model,
+      approvalTriage: this.settings.approvalTriage,
+      webAutomation: this.settings.webAutomation,
     });
     this.persist();
+  }
+
+  private purposeSettings(purpose: JevNewPurpose): JevNewPurposeSettings {
+    return purpose === 'approval_triage' ? this.settings.approvalTriage : this.settings.webAutomation;
+  }
+  private patchPurpose(purpose: JevNewPurpose, patch: Partial<JevNewPurposeSettings>): void {
+    const current: JevNewPurposeSettings = this.purposeSettings(purpose);
+    const next: JevNewPurposeSettings = {
+      mode: patch.mode ?? current.mode,
+      allowToolMetadata: patch.allowToolMetadata ?? current.allowToolMetadata,
+      allowTaskText: patch.allowTaskText ?? current.allowTaskText,
+      allowPageContent: patch.allowPageContent ?? current.allowPageContent,
+    };
+    this.settings = makeJevSettings({ mode: this.settings.mode, apiMode: this.settings.apiMode,
+      apiKey: this.settings.apiKey, baseUrl: this.settings.baseUrl, model: this.settings.model,
+      approvalTriage: purpose === 'approval_triage' ? next : this.settings.approvalTriage,
+      webAutomation: purpose === 'web_automation' ? next : this.settings.webAutomation });
+    this.persist();
+  }
+  private purposeModeIndex(purpose: JevNewPurpose): number {
+    return MODE_VALUES.indexOf(this.purposeSettings(purpose).mode);
+  }
+  private modeValue(index: number): JevMode {
+    return MODE_VALUES[index] === 'active' ? 'active' : (MODE_VALUES[index] === 'shadow' ? 'shadow' : 'off');
+  }
+  private effectivePurpose(purpose: JevNewPurpose): string {
+    const effective: JevMode = resolveJevPurposeMode(this.settings, purpose);
+    const label: string = effective === 'active' ? '主动' : (effective === 'shadow' ? '影子' : '关');
+    return `当前生效：${label}${effective !== this.purposeSettings(purpose).mode ? '（受全局模式限制）' : ''}`;
+  }
+
+  @Builder
+  private AllowanceRow(label: string, description: string, checked: boolean, onToggle: () => void): void {
+    Row({ space: 12 }) {
+      Column({ space: 3 }) {
+        Text(label).fontSize(BODY).fontColor(this.colors.ink).width('100%')
+        Text(description).fontSize(LABEL).fontColor(this.colors.muted).width('100%')
+      }.layoutWeight(1).alignItems(HorizontalAlign.Start)
+      Text(checked ? '已允许' : '未允许').fontSize(LABEL)
+        .fontColor(checked ? this.accentColorStore : this.colors.muted)
+        .constraintSize({ minWidth: 56, minHeight: 44 }).textAlign(TextAlign.Center)
+        .onClick(onToggle)
+    }.width('100%').constraintSize({ minHeight: 52 }).padding({ left: 14, right: 14, top: 8, bottom: 8 })
+  }
+
+  @Builder
+  private PurposeCard(purpose: JevNewPurpose): void {
+    Column() {
+      Column({ space: 8 }) {
+        Row({ space: 4 }) {
+          ForEach(MODE_OPTIONS, (label: string, index: number): void => {
+            Text(label).fontSize(META).textAlign(TextAlign.Center).layoutWeight(1)
+              .constraintSize({ minHeight: 44 }).fontColor(this.colors.ink)
+              .backgroundColor(this.purposeModeIndex(purpose) === index ? this.colors.inset : Color.Transparent)
+              .borderRadius(8).onClick((): void => { this.patchPurpose(purpose, { mode: this.modeValue(index) }); })
+          }, (label: string): string => label)
+        }.width('100%')
+        Text(this.effectivePurpose(purpose)).fontSize(LABEL).fontColor(this.colors.muted).width('100%')
+      }.width('100%').padding({ left: 14, right: 14, top: 12, bottom: 12 })
+      this.AllowanceRow('允许工具元数据', '发送有限工具摘要；不发送原始脚本、凭据或完整参数。',
+        this.purposeSettings(purpose).allowToolMetadata,
+        (): void => { this.patchPurpose(purpose, { allowToolMetadata: !this.purposeSettings(purpose).allowToolMetadata }); })
+      this.AllowanceRow('允许任务意图摘要', '只发送有限意图分类，不包含任务原句。',
+        this.purposeSettings(purpose).allowTaskText,
+        (): void => { this.patchPurpose(purpose, { allowTaskText: !this.purposeSettings(purpose).allowTaskText }); })
+      if (purpose === 'web_automation') {
+        this.AllowanceRow('允许页面内容', '发送有限页面摘要；仅在真实浏览器目标循环接通后使用。',
+          this.purposeSettings(purpose).allowPageContent,
+          (): void => { this.patchPurpose(purpose, { allowPageContent: !this.purposeSettings(purpose).allowPageContent }); })
+      }
+    }.width('100%')
   }
 
   // 连接测试:一道 noul 是非题(真实往返;不伪造成功)
@@ -255,13 +361,29 @@ struct SettingJevPage {
   build(): void {
     Column() {
       CenteredTitleBar({ title: 'Jev 快速判断' })
+      if (this.loadError.length > 0 || this.saveError.length > 0) {
+        Text(this.loadError.length > 0 ? this.loadError : this.saveError).fontSize(LABEL)
+          .fontColor(this.colors.error).width('100%').padding({ left: GUTTER, right: GUTTER, top: 8 })
+        Text('重试').fontSize(META).fontColor(this.accentColorStore).constraintSize({ minHeight: 44 })
+          .onClick((): void => { if (this.loaded) this.persist(); else this.refresh(); })
+      }
       if (this.loaded) {
         Scroll() {
           Column() {
             PlainSection({ label: '模式' })
             CardGroup({ radius: 18, stroke: true, content: (): void => { this.ModeCard(); } })
               .margin({ left: GUTTER, right: GUTTER })
-            FooterNote({ text: '影子模式只做评估记录,不改变任何行为;主动模式用于工具发现的语义重排(tool_search)。' })
+            FooterNote({ text: '全局关闭会关闭全部用途；全局影子限制新增用途最多为影子。影子只记录评估，不改变行为。' })
+
+            PlainSection({ label: '审批分诊' })
+            CardGroup({ radius: 18, stroke: true, content: (): void => { this.PurposeCard('approval_triage'); } })
+              .margin({ left: GUTTER, right: GUTTER })
+            FooterNote({ text: '主动模式只补充“只读、可逆、与任务相关”三个中性事实，仍由你批准、拒绝或回答；未知事实不会变成批准建议。' })
+
+            PlainSection({ label: 'Web 自动化' })
+            CardGroup({ radius: 18, stroke: true, content: (): void => { this.PurposeCard('web_automation'); } })
+              .margin({ left: GUTTER, right: GUTTER })
+            FooterNote({ text: '当前只提供有限候选选择接缝，浏览器目标循环尚未接入；不会执行网页动作。接通后仍遵守站点权限与原审批。' })
 
             PlainSection({ label: '服务' })
             CardGroup({ radius: 18, stroke: true, content: (): void => { this.ApiCard(); } })
@@ -270,7 +392,7 @@ struct SettingJevPage {
             PlainSection({ label: '状态' })
             CardGroup({ radius: 18, stroke: true, content: (): void => { this.StatusCard(); } })
               .margin({ left: GUTTER, right: GUTTER })
-            FooterNote({ text: '预算:每日 200 次评估;连续错误进入 5 分钟冷却。已接用途:工具发现/记忆召回/上下文选择/模型路由(SHADOW 只记录,ACTIVE 影响选择);审批分诊/Web 自动化暂未接入。' })
+            FooterNote({ text: '预算：每日 200 次评估；连续错误进入 5 分钟冷却。已接用途：工具发现、记忆召回、上下文选择、模型路由、审批分诊；Web 自动化消费者待下一阶段接入。' })
             PageSpacer()
           }
           .width('100%')

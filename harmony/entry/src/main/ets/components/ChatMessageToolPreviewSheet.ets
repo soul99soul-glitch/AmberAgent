@@ -18,6 +18,7 @@ import { isSSHApprovalTool, sshApprovalTargetLabel, sshApprovalCommand, sshAppro
 import { SSHUIColors } from './SSHUIColors.ets';
 import { RecipeApprovalView, recipeApprovalView } from './RecipeApprovalSummary.ets';
 import { pluginApprovalView } from './PluginApprovalSummary.ets';
+import { JevApprovalFacts } from './JevApprovalFacts.ets';
 
 // 搜索结果项
 interface SearchResultItem {
@@ -29,6 +30,7 @@ interface SearchResultItem {
 @Component
 export struct ChatMessageToolPreviewSheet {
   @Prop part: UIMessagePartTool;
+  @Prop jevSubjectHash: string = '';
   onDismiss: () => void = (): void => {};
   @State sshColors: SSHUIColors = new SSHUIColors();
   @StorageProp('darkMode') @Watch('refreshSSHColors') darkMode: boolean = false;
@@ -143,6 +145,8 @@ export struct ChatMessageToolPreviewSheet {
 
       Scroll() {
         Column() {
+          JevApprovalFacts({ part: this.part, subjectHash: this.jevSubjectHash })
+            .padding({ left: 16, right: 16 })
           if (this.packageApprovalView() !== null) {
             this.RenderRecipePreview(this.packageApprovalView()!)
           } else if (isSSHApprovalTool(this.part.toolName)) {

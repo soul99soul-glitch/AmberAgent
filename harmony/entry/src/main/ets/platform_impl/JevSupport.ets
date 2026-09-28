@@ -2,8 +2,7 @@
 //
 // 职责:设置读取 → 预算门(日 200 次/错误冷却 5min)→ 协议调用(httpClient)→
 //   SHADOW 只记录指标不影响返回 / ACTIVE 返回评估结果。
-// 本批接线用途:TOOL_DISCOVERY(tool_search 语义重排);其余用途(记忆召回/上下文
-//   选择/模型路由/自动化)登记未接 — 设置面不展示假开关。
+// 用途接线由 JEV_WIRED_PURPOSES 如实列出;Web 自动化等待有限候选宿主。
 
 import type { JsonObject } from '@amber/chat-domain';
 import {
@@ -11,12 +10,15 @@ import {
   JEV_TYPESAFE_ENDPOINT, JEV_VERCEL_DEFAULT_BASE,
   buildJevRequest, decodeJevResponse,
   buildJevNoulBatch, readJevNoulBatchProbabilities,
-  type JevEvaluation, type JevMode, type JevQuestion, type JevSettings, type JevNoulBatchSpec,
+  type JevEvaluation, type JevMode, type JevQuestion, type JevSettings, type JevNoulBatchSpec, type JevEvaluateResult,
 } from '@amber/chat-domain';
+import type { AbortSignalLike } from '@amber/deepread-domain';
 import { getAppContainer, getChatKvStore } from '../di/AppContainer.ets';
 import type { ToolSearchReranker, ScoredTool } from '@amber/chat-domain';
 import type { AgentTool, UIMessagePart, JsonValue, InputSchemaObj } from '@amber/chat-domain';
 import { makeAgentTool, makeInputSchemaObj } from '@amber/chat-domain';
+
+export type { JevEvaluateResult } from '@amber/chat-domain';
 
 const JEV_DAILY_BUDGET: number = 200;
 const JEV_ERROR_COOLDOWN_MS: number = 5 * 60 * 1000;
@@ -64,24 +66,22 @@ const noteError = async (message: string): Promise<void> => {
   await kv.put(JEV_COOLDOWN_KEY, `${Date.now() + JEV_ERROR_COOLDOWN_MS}`);
 };
 
-export interface JevEvaluateResult {
-  ok: boolean;
-  reason: string;
-  evaluation: JevEvaluation | null;
-  shadow: boolean;
-}
-
 // 统一评估入口(off/预算/冷却 → skipped 语义;失败回退调用方本地路径)
 export const jevEvaluate = async (
   state: JsonObject,
   questions: Record<string, JevQuestion>,
+  signal?: AbortSignalLike,
 ): Promise<JevEvaluateResult> => {
+  const cancelled = (): boolean => signal?.aborted === true;
+  if (cancelled()) return { ok: false, reason: 'cancelled', evaluation: null, shadow: false };
   const kv = getChatKvStore();
   const settings: JevSettings = await loadJevSettings(kv);
+  if (cancelled()) return { ok: false, reason: 'cancelled', evaluation: null, shadow: false };
   if (settings.mode === 'off') return { ok: false, reason: 'off', evaluation: null, shadow: false };
   if (settings.apiKey.length === 0) return { ok: false, reason: 'no_api_key', evaluation: null, shadow: false };
   if (settings.model.length === 0) return { ok: false, reason: 'no_model', evaluation: null, shadow: false };
   const status: JevRuntimeStatus = await loadJevRuntimeStatus();
+  if (cancelled()) return { ok: false, reason: 'cancelled', evaluation: null, shadow: false };
   if (status.todayCount >= JEV_DAILY_BUDGET) {
     return { ok: false, reason: 'budget_exhausted', evaluation: null, shadow: false };
   }
@@ -103,7 +103,8 @@ export const jevEvaluate = async (
       method: 'POST',
       headers: spec.headers,
       body: spec.body,
-    }, { signal: undefined });
+    }, { signal });
+    if (cancelled()) return { ok: false, reason: 'cancelled', evaluation: null, shadow: false };
     if (resp.status < 200 || resp.status >= 300) {
       await noteError(`HTTP ${resp.status}`);
       return { ok: false, reason: `http_${resp.status}`, evaluation: null, shadow: false };
@@ -117,6 +118,7 @@ export const jevEvaluate = async (
       shadow: settings.mode === 'shadow',
     };
   } catch (e) {
+    if (cancelled()) return { ok: false, reason: 'cancelled', evaluation: null, shadow: false };
     await noteError(e instanceof Error ? e.message : String(e));
     return { ok: false, reason: 'transport_or_decode', evaluation: null, shadow: false };
   }
@@ -222,7 +224,7 @@ export const jevChoiceSelect = async (
 
 // 用途标识(设置页/jev_status 如实展示)
 export const JEV_WIRED_PURPOSES: string[] = [
-  'tool_discovery', 'memory_recall', 'context_selection', 'model_routing',
+  'tool_discovery', 'memory_recall', 'context_selection', 'model_routing', 'approval_triage',
 ];
 
 // jev_status 工具(只读;Android JevStatusTool 对齐)

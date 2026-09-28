@@ -2,11 +2,13 @@
 import { ACCENT,BG,INK,INK2,INK3,INK4,LINE,SURFACE,SURFACE2,TITLE } from '../design/tokens.ets';
 import { FONT_SERIF } from '../design/fonts.ets';
 import { Icon } from '../components/ui/Icon.ets';
+import { CouncilToolModePicker } from '../components/CouncilToolModePicker.ets';
+import { SSHUIColors } from '../components/SSHUIColors.ets';
 import { router } from '@kit.ArkUI';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { getModelRegistry, prepareCouncilManager, getCouncilRunner } from '../di/AppContainer.ets';
 import { LENS_PRESETS, CORE_SEATS, makeRuntimeSetting, makeSeat, resolveCouncilDynamicSeats } from '@amber/deepread-domain';
-import type { ModelCouncilRuntimeSetting, CouncilDynamicSeatSelection } from '@amber/deepread-domain';
+import type { ModelCouncilRuntimeSetting, CouncilDynamicSeatSelection, CouncilToolMode } from '@amber/deepread-domain';
 import { EntryAbortController } from '../platform_impl/EntryAbortController.ets';
 import { getAgentPromptSettingsPort } from '../di/AppContainer.ets';
 import type { ModelConfig, ModelCouncilRolePreset, CouncilTaskInput, ModelCouncilMode, ModelCouncilSeat } from '@amber/deepread-domain';
@@ -37,6 +39,7 @@ const baseToInit = (base: ModelCouncilRuntimeSetting): Record<string, Object | n
   init['totalTimeoutMs'] = base.totalTimeoutMs;
   init['outputBudgetChars'] = base.outputBudgetChars;
   init['showSeatOutputs'] = base.showSeatOutputs;
+  init['toolMode'] = base.toolMode;
   return init;
 };
 
@@ -46,6 +49,10 @@ struct CouncilPage {
   @StorageProp('statusBarHeight') statusBarHeight: number = 44;
   @State objective: string = '';
   @State mode: ModelCouncilMode = 'compare';
+  @State toolMode: CouncilToolMode = 'off';
+  @State colors: SSHUIColors = new SSHUIColors();
+  @StorageProp('darkMode') @Watch('refreshColors') darkMode: boolean = false;
+  @StorageProp('themePackId') @Watch('refreshColors') themePackId: string = '';
   @State rounds: number = 2;
   @State selectedLens: string[] = [];
   @State models: ModelConfig[] = [];
@@ -74,6 +81,7 @@ struct CouncilPage {
     getAgentPromptSettingsPort().getCouncilSetting().then((persisted: ModelCouncilRuntimeSetting): void => {
       if (this.pageAlive && token === this.loadToken) {
         this.persistedSetting = persisted;
+        this.toolMode = persisted.toolMode;
         this.reconcileDynamicSeats(persisted);
       }
     }).catch((): void => {});
@@ -88,6 +96,8 @@ struct CouncilPage {
     this.generatingSeats = false;
     this.starting = false;
   }
+
+  private refreshColors(): void { this.colors = new SSHUIColors(); }
 
   private async loadModels(token: number): Promise<void> {
     const models: ModelConfig[] = await getModelRegistry().list();
@@ -160,6 +170,7 @@ struct CouncilPage {
         temperature: null,
         onChunk: (): void => {},
         signal: controller.signal,
+        toolMode: 'off',
       });
       if (!this.pageAlive || token !== this.dynamicSeatToken || controller.signal.aborted) return;
       const text: string = result.text;
@@ -225,6 +236,7 @@ struct CouncilPage {
         ? this.persistedSetting
         : await getAgentPromptSettingsPort().getCouncilSetting();
       if (!this.pageAlive || token !== this.loadToken) return;
+      const toolMode: CouncilToolMode = this.persistedSetting === null ? base.toolMode : this.toolMode;
       if (!base.enabled) {
         this.errorMsg = '模型议会已在设置中关闭';
         return;
@@ -232,12 +244,14 @@ struct CouncilPage {
       const init: Record<string, Object | null> = baseToInit(base);
       init['defaultRounds'] = this.rounds;
       init['maxRounds'] = Math.max(base.maxRounds, this.rounds);
+      init['toolMode'] = toolMode;
       const setting: ModelCouncilRuntimeSetting = makeRuntimeSetting(init);
       if (this.reconcileDynamicSeats(setting)) return;
       const mgr = await prepareCouncilManager(setting);
       if (!this.pageAlive || token !== this.loadToken) return;
       const input: CouncilTaskInput = {
         mode: this.mode,
+        toolMode: toolMode,
         objective: this.objective,
         rounds: this.rounds,
         extraLens: this.selectedLens,
@@ -330,6 +344,15 @@ struct CouncilPage {
           }
           .width('100%').padding(18).backgroundColor(SURFACE).borderRadius(14)
           .border({ width: 1, color: LINE }).margin({ bottom: 20 })
+
+          Column() {
+            this.sectionTitle('工具功率', '本轮固定')
+            CouncilToolModePicker({ mode: this.toolMode, disabled: this.starting || this.generatingSeats || this.persistedSetting === null,
+              onSelect: (mode: CouncilToolMode): void => { this.toolMode = mode; } })
+            Text('工具配置使用默认助手（首个配置）；各席位仍使用模型库中的独立模型。FULL 不会开启自动批准。')
+              .fontSize(12).fontColor(this.colors.muted).width('100%').margin({ top: 8 })
+          }.width('100%').padding(18).backgroundColor(this.colors.surface).borderRadius(14)
+            .border({ width: 1, color: this.colors.line }).margin({ bottom: 20 })
 
           // 席位
           Column() {
@@ -450,7 +473,7 @@ struct CouncilPage {
           .onClick(() => { this.startCouncil(); })
           .margin({ bottom: 32 })
         }
-        .width('100%').padding({ left: 20, right: 20, top: 8 })
+        .width('100%').padding({ left: 16, right: 16, top: 8 })
       }
         .align(Alignment.TopStart)
       .layoutWeight(1)

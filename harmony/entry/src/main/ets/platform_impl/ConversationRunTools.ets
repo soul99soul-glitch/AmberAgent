@@ -5,20 +5,19 @@ import { hilog } from '@kit.PerformanceAnalysisKit';
 import type { AbortSignalLike } from '@amber/deepread-domain';
 import type {
   AgentTool, AgentToolActivityStore, Assistant, ChatStreamProvider,
-  ChatToolDefinition, Conversation, DeepReadOpenEvent, InstalledPlugin, InstalledRecipe,
-  JsonValue, LocalToolOption, McpToolActivityPort, PendingUserMessage, PluginLoopAdapter,
-  PluginStore, RecipeLoopAdapter, RecipeStore, TerminalApprovalGuard, TextGenerationParams,
-  ToolLoopOptions, ToolRegistry, UIMessage, UIMessagePart, UIMessagePartImage,
+  ChatToolDefinition, Conversation, DeepReadOpenEvent,
+  LocalToolOption, McpToolActivityPort, PendingUserMessage,
+  PluginStore, RecipeStore, TerminalApprovalGuard, TextGenerationParams,
+  ToolLoopOptions, UIMessage, UIMessagePart, UIMessagePartImage,
 } from '@amber/chat-domain';
 import {
   AgentToolDispatcher, asChatStreamProvider, createClipboardTool,
   createConversationContextTools, createConversationHistoryTools, createConversationQueueTools,
   createDeepReadOpenTool, createDeepReadPlaybookTools, createHealthSummaryTool,
-  createMcpManagementTools, createMcpServerTools, createMemoryTools, createPluginTools,
-  createRecipeLoopAdapter, createRecipeTools, createRegistryIntrospectionTools,
+  createMcpManagementTools, createMcpServerTools, createMemoryTools,
   createRunPlanUpdateTool, createSearchTools, createSkillTools, createTerminalApprovalGuard,
-  createToolRegistry, createToolSearchTool, currentMessages, defaultToolInvocationHooks,
-  filterToolProfile, makeAgentTool, makeCompactPolicy, makeTextGenerationParams, patchAssistant,
+  currentMessages, defaultToolInvocationHooks,
+  filterToolProfile, makeCompactPolicy, makeTextGenerationParams, patchAssistant,
 } from '@amber/chat-domain';
 import {
   getAgentPromptConfigTool, getChatRepository, getCompactStore,
@@ -35,7 +34,8 @@ import { buildConversationCompressProvider } from './ConversationRunDependencies
 import type { DetachedConversationContext, PreparedConversationSeed } from './ConversationRunService.ets';
 import { inflateRawEntry } from './EntryDocumentParser.ets';
 import { createEntryClipboardPort, sha256HexUtf8 } from './EntryLocalToolPorts.ets';
-import { createEntryPluginAdapter } from './EntryPluginRuntime.ets';
+import { createRunToolCatalog, scopeRunTools } from './RunToolCatalog.ets';
+import type { RunToolCatalogSnapshot } from './RunToolCatalog.ets';
 import { createFeishuDocsTools } from './FeishuDocsTools.ets';
 import { createEntryHealthReadPort } from './HealthReadPort.ets';
 import { createImageGenTool } from './ImageGenTool.ets';
@@ -57,23 +57,6 @@ const mcpActivityPort = (store: AgentToolActivityStore): McpToolActivityPort => 
     store.fail(toolCallId, error);
   },
 });
-
-const scopedToConversation = (tools: AgentTool[], ctx: DetachedConversationContext): AgentTool[] =>
-  tools.map((tool: AgentTool): AgentTool => makeAgentTool({
-    name: tool.name,
-    description: tool.description,
-    parameters: tool.parameters,
-    systemPrompt: tool.systemPrompt,
-    needsApproval: tool.needsApproval,
-    allowsAutoApproval: tool.allowsAutoApproval,
-    mandatoryApproval: tool.mandatoryApproval,
-    recipeEnvelope: tool.recipeEnvelope,
-    pluginEnvelope: tool.pluginEnvelope,
-    mcpTarget: tool.mcpTarget,
-    execute: (input: JsonValue, signal?: AbortSignalLike): Promise<UIMessagePart[]> =>
-      ctx.activityStore.withConversation(ctx.conversationId,
-        (): Promise<UIMessagePart[]> => tool.execute(input, signal)),
-  }));
 
 const setSkillEnabled = async (rt: ChatRuntime, name: string, enable: boolean): Promise<void> => {
   await mutateAssistant(rt.assistant.id, (assistant: Assistant): Assistant => {
@@ -248,38 +231,26 @@ export const buildConversationToolLoop = async (ctx: DetachedConversationContext
   warnIfToolAbilityMissing(ctx);
   const recipeStore: RecipeStore = await getRecipeStore();
   const pluginStore: PluginStore = await getPluginStore();
-  const primitiveRegistry: ToolRegistry = createToolRegistry(profiledTools);
-  const pluginPrimitives: AgentTool[] = [...profiledTools, ...createRegistryIntrospectionTools(primitiveRegistry),
-    createToolSearchTool(primitiveRegistry, rt.assistant.toolProfile, jevToolSearchReranker())];
-  let recipeAdapter: RecipeLoopAdapter = createRecipeLoopAdapter({ store: recipeStore, installed: [] });
-  let pluginAdapter: PluginLoopAdapter = createEntryPluginAdapter(pluginStore, [], pluginPrimitives, ctx.conversationId);
-  const catalog = (installed: InstalledRecipe[], installedPlugins: InstalledPlugin[]): AgentTool[] => {
-    recipeAdapter = createRecipeLoopAdapter({ store: recipeStore, installed });
-    const recipeTools: AgentTool[] = filterToolProfile(createRecipeTools({
-      store: recipeStore, installed, primitives: profiledTools,
-    }), rt.assistant.toolProfile).tools;
-    pluginAdapter = createEntryPluginAdapter(pluginStore, installedPlugins, pluginPrimitives, ctx.conversationId);
-    const pluginTools: AgentTool[] = filterToolProfile(createPluginTools({
-      store: pluginStore, installed: installedPlugins, primitives: pluginPrimitives,
-    }), rt.assistant.toolProfile).tools;
-    const registry: ToolRegistry = createToolRegistry([...profiledTools, ...recipeTools, ...pluginTools]);
-    ctx.baseTools = [...registry.tools(), ...createRegistryIntrospectionTools(registry)];
-    return scopedToConversation([...ctx.baseTools,
-      createToolSearchTool(registry, rt.assistant.toolProfile, jevToolSearchReranker()), ...ctx.subAgentTools], ctx);
-  };
-  const tools: AgentTool[] = catalog(await recipeStore.listInstalled(), await pluginStore.listInstalled(pluginPrimitives));
+  const catalog = async (): Promise<RunToolCatalogSnapshot> => createRunToolCatalog({
+    primitives: profiledTools, profile: rt.assistant.toolProfile, conversationId: ctx.conversationId,
+    recipeStore, pluginStore, reranker: jevToolSearchReranker(),
+  });
+  let snapshot: RunToolCatalogSnapshot = await catalog();
+  ctx.baseTools = snapshot.baseTools;
+  const tools: AgentTool[] = scopeRunTools([...snapshot.tools, ...ctx.subAgentTools], ctx.conversationId, ctx.activityStore);
   const options: ToolLoopOptions = {
     dispatcher: new AgentToolDispatcher({ hooks: terminalGuard === null
       ? defaultToolInvocationHooks() : [...defaultToolInvocationHooks(), terminalGuard.hook] }),
     captureInvocationMetadata: terminalGuard === null ? undefined : terminalGuard.captureInvocationMetadata,
     tools,
-    recipeAdapter,
-    pluginAdapter,
+    recipeAdapter: snapshot.recipeAdapter,
+    pluginAdapter: snapshot.pluginAdapter,
     refreshTools: async (): Promise<AgentTool[]> => {
-      const refreshed: AgentTool[] = catalog(await recipeStore.listInstalled(), await pluginStore.listInstalled(pluginPrimitives));
-      options.recipeAdapter = recipeAdapter;
-      options.pluginAdapter = pluginAdapter;
-      return refreshed;
+      snapshot = await catalog();
+      ctx.baseTools = snapshot.baseTools;
+      options.recipeAdapter = snapshot.recipeAdapter;
+      options.pluginAdapter = snapshot.pluginAdapter;
+      return scopeRunTools([...snapshot.tools, ...ctx.subAgentTools], ctx.conversationId, ctx.activityStore);
     },
     makeProviderForStep: (definitions: ChatToolDefinition[]): ChatStreamProvider =>
       asChatStreamProvider(rt.api, (): TextGenerationParams => makeTextGenerationParams({

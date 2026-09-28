@@ -31,7 +31,7 @@ import type {
   ModelCouncilRuntimeSetting, ModelCouncilSeat,
   ReasoningLevel as CouncilReasoningLevel,
 } from '@amber/deepread-domain';
-import { makeRuntimeSetting, makeSeat } from '@amber/deepread-domain';
+import { makeRuntimeSetting, makeSeat, normalizeCouncilToolMode } from '@amber/deepread-domain';
 import type { KeyValueStore } from '@amber/chat-domain';
 import { AGENT_RUNTIME_KEY } from './AgentRuntimePrefs.ets';
 
@@ -110,6 +110,7 @@ export const createEntryCouncilStrategy =
       s: ModelCouncilRuntimeSetting, seats: ModelCouncilSeat[],
     ): ModelCouncilRuntimeSetting => ({
       enabled: s.enabled,
+      toolMode: s.toolMode,
       defaultSeats: seats,
       synthesisModelId: s.synthesisModelId,
       maxSeats: s.maxSeats,
@@ -329,6 +330,7 @@ const parseCouncilSetting = (v: JsonValue | undefined): ModelCouncilRuntimeSetti
   }
   return makeRuntimeSetting({
     enabled: bool(j, 'enabled') ?? undefined,
+    toolMode: normalizeCouncilToolMode(str(j, 'toolMode') ?? undefined),
     defaultSeats: seats,
     synthesisModelId: str(j, 'synthesisModelId'),
     maxSeats: num(j, 'maxSeats') ?? undefined,
@@ -357,6 +359,7 @@ const councilSettingToJson = (s: ModelCouncilRuntimeSetting): Json => {
   });
   const j: Json = {};
   j['enabled'] = s.enabled;
+  j['toolMode'] = s.toolMode;
   j['defaultSeats'] = seats as object;
   j['synthesisModelId'] = s.synthesisModelId;
   j['maxSeats'] = s.maxSeats;

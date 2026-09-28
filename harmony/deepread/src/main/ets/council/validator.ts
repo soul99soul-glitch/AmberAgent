@@ -5,16 +5,17 @@ import { SYNTHESIZER_SEAT_KEY } from './models.ts';
 import type { ModelConfig } from '../domain/model_config.ts';
 import {
   CORE_SEATS, isCoreRole, findRolePreset, makeSeat,
-  DEFAULT_OUTPUT_FORMAT,
+  DEFAULT_OUTPUT_FORMAT, normalizeCouncilToolMode,
 } from './models.ts';
 import type {
   ModelCouncilMode, ModelCouncilSeat, ModelCouncilTaskSpec, ModelCouncilRuntimeSetting,
-  ModelCouncilRolePreset,
+  ModelCouncilRolePreset, CouncilToolMode,
 } from './models.ts';
 
 // UI 构造的任务输入(替代 Android 的 JsonObject)
 export interface CouncilTaskInput {
   mode: ModelCouncilMode | '';   // '' → compare
+  toolMode?: CouncilToolMode;
   objective: string;
   context?: string;
   outputFormat?: string;
@@ -171,6 +172,7 @@ export const parseTask = (
   // enabled fail-closed:任何调用路径(含未来不经 CouncilPage 的)都拦在解析层
   if (!setting.enabled) throw new Error('模型议会已在设置中关闭');
   const mode: ModelCouncilMode = input.mode === 'debate' ? 'debate' : 'compare';
+  const toolMode: CouncilToolMode = normalizeCouncilToolMode(input.toolMode ?? setting.toolMode);
   const objective: string = input.objective.trim();
   if (objective.length === 0) throw new Error('objective 不能为空');
 
@@ -195,8 +197,8 @@ export const parseTask = (
   validateSeats(setting, seats, pool);
 
   const spec: ModelCouncilTaskSpec = {
-    mode: mode, objective: objective, context: context, outputFormat: outputFormat,
-    evaluationCriteria: evaluationCriteria, rounds: rounds, seats: seats,
+    mode: mode, toolMode: toolMode, objective: objective, context: context, outputFormat: outputFormat,
+    evaluationCriteria: evaluationCriteria, rounds: rounds, seats: seats.map(seat => makeSeat(seat)),
   };
   return spec;
 };

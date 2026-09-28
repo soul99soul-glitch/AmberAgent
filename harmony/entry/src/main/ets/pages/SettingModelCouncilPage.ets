@@ -18,7 +18,7 @@
 
 import { getAgentPromptSettingsPort, getCouncilRunner, getModelRegistry } from '../di/AppContainer.ets';
 import { router } from '@kit.ArkUI';
-import type { ModelCouncilRuntimeSetting, ModelCouncilSeat, ModelCouncilRolePreset, ModelConfig } from '@amber/deepread-domain';
+import type { ModelCouncilRuntimeSetting, ModelCouncilSeat, ModelCouncilRolePreset, ModelConfig, CouncilToolMode } from '@amber/deepread-domain';
 import {
   LENS_PRESETS, findRolePreset, isCoreRole, makeSeat,
 } from '@amber/deepread-domain';
@@ -27,6 +27,7 @@ import { FONT_SANS_MEDIUM, FONT_SANS_SEMIBOLD, FONT_MONO_MEDIUM } from '../desig
 import {
   CenteredTitleBar, PlainSection, CardGroup, CardRow, CardToggleRow, FooterNote, PageSpacer,
 } from '../components/PageTemplate.ets';
+import { CouncilToolModePicker } from '../components/CouncilToolModePicker.ets';
 
 @Entry
 @Component
@@ -34,6 +35,7 @@ struct SettingModelCouncilPage {
   @StorageProp('statusBarHeight') statusBarHeight: number = 44;
   @StorageProp('accentColor') accentColorStore: string = ACCENT;
   @State councilEnabled: boolean = true;
+  @State toolMode: CouncilToolMode = 'off';
   @State maxSeats: number = 5;
   @State defaultRounds: number = 1;
   @State maxRounds: number = 3;
@@ -72,6 +74,7 @@ struct SettingModelCouncilPage {
       const port = getAgentPromptSettingsPort();
       const setting: ModelCouncilRuntimeSetting = await port.getCouncilSetting();
       this.councilEnabled = setting.enabled;
+      this.toolMode = setting.toolMode;
       this.maxSeats = setting.maxSeats;
       this.defaultRounds = setting.defaultRounds;
       this.maxRounds = setting.maxRounds;
@@ -116,6 +119,7 @@ struct SettingModelCouncilPage {
           temperature: null,
           onChunk: (): void => {},
           signal: null,
+          toolMode: 'off',
         });
         const secs: string = ((Date.now() - started) / 1000).toFixed(1);
         lines.push(`${name}|ok|${secs}s`);
@@ -135,6 +139,7 @@ struct SettingModelCouncilPage {
       const current: ModelCouncilRuntimeSetting = await port.getCouncilSetting();
       const next: ModelCouncilRuntimeSetting = {
         enabled: this.councilEnabled,
+        toolMode: this.toolMode,
         defaultSeats: this.seats,
         synthesisModelId: current.synthesisModelId,
         maxSeats: this.maxSeats,
@@ -225,6 +230,12 @@ struct SettingModelCouncilPage {
             PlainSection({ label: '运行参数' })
             CardGroup({ radius: 18, stroke: true, content: (): void => { this.ParamsCard(); } })
               .margin({ left: GUTTER, right: GUTTER })
+
+            PlainSection({ label: '默认工具功率' })
+            CouncilToolModePicker({ mode: this.toolMode, disabled: this.saving,
+              onSelect: (mode: CouncilToolMode): void => { this.toolMode = mode; this.dirty = true; } })
+              .margin({ left: GUTTER, right: GUTTER })
+            FooterNote({ text: '运行前可单独选择本轮功率。工具来自默认助手（首个配置），席位模型仍独立配置；FULL 保留原审批设置。' })
 
             PlainSection({ label: '席位编辑' })
             if (this.seats.length > 0) {

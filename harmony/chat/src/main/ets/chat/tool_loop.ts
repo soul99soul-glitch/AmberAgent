@@ -269,8 +269,8 @@ const runToolLoopCore = async (
     : Math.max(rawSteps, 0);
   const dispatcher: AgentToolDispatcher = loop.dispatcher
     ?? new DefaultDispatcher({ hooks: defaultToolInvocationHooks() });
-  const autoApproveTools: boolean = loop.autoApproveTools ?? false;
-  const autoApproveHighRiskTools: boolean = loop.autoApproveHighRiskTools ?? false;
+  let autoApproveTools: boolean = loop.autoApproveTools ?? false;
+  let autoApproveHighRiskTools: boolean = loop.autoApproveHighRiskTools ?? false;
   const autoApprovedToolNames: string[] = loop.autoApprovedToolNames ?? [];
   const invocationContext: ToolInvocationContext = loop.invocationContext ?? 'normal';
   const toolRetry: GenerationRetrySetting = loop.toolRetrySetting
@@ -286,6 +286,8 @@ const runToolLoopCore = async (
     if (loop.refreshTools !== undefined) {
       currentTools = await loop.refreshTools();
       toolExposure.replaceTools(currentTools);
+      autoApproveTools = loop.autoApproveTools ?? false;
+      autoApproveHighRiskTools = loop.autoApproveHighRiskTools ?? false;
     }
     const recipeAdapter: RecipeLoopAdapter | undefined = loop.recipeAdapter;
     const pluginAdapter: PluginLoopAdapter | undefined = loop.pluginAdapter;

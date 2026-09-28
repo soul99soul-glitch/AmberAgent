@@ -61,6 +61,7 @@ export struct ChatMessageAskUserStep {
                 ForEach(q.options, (opt: string) => {
                   if (this.interactive) {
                     Row() { this.OptionChipContent(q, opt); }
+                      .constraintSize({ minHeight: 44 })
                       .padding({ left: 14, right: 14, top: 8, bottom: 8 })
                       .margin({ right: 8, top: 6 })
                       .borderRadius(999)
@@ -136,11 +137,13 @@ export struct ChatMessageAskUserStep {
           if (hasAnyAskAnswer(this.answers, this.multiAnswers)) {
             Text('清空')
               .fontSize(11).fontColor(INK3)
+              .constraintSize({ minWidth: 44, minHeight: 44 })
               .padding({ left: 8, right: 8, top: 4, bottom: 4 })
               .onClick((): void => { this.onClear(); })
           }
           Text('提交')
             .fontSize(12).fontWeight(FontWeight.Medium)
+            .constraintSize({ minHeight: 44 })
             .fontColor(this.submittable() ? '#FFFFFF' : INK3)
             .padding({ left: 16, right: 16, top: 6, bottom: 6 })
             .margin({ left: 8 })

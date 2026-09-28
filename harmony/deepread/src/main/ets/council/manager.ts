@@ -7,14 +7,17 @@
 import type { ModelConfig } from '../domain/model_config.ts';
 import type { FileStore } from '../platform/files.ts';
 import type { AbortSignalLike } from '../platform/runtime_api.ts';
+import type { UIMessage } from '../agent/message.ts';
+import { isToolAwaitingExecution } from '../agent/message.ts';
 import type { ModelCouncilTextRunner } from './runner.ts';
 import { Semaphore, withPermit } from './semaphore.ts';
 import {
-  PROVIDER_PARALLELISM, SYNTHESIZER_SEAT_KEY, makeEmptyResult,
+  PROVIDER_PARALLELISM, SYNTHESIZER_SEAT_KEY, makeEmptyResult, makeRuntimeSetting, normalizeCouncilToolMode,
 } from './models.ts';
 import type {
   ModelCouncilRun, ModelCouncilSeat, ModelCouncilTurn, ModelCouncilRunStatus,
-  ModelCouncilRuntimeSetting, ModelCouncilResult,
+  ModelCouncilRuntimeSetting, ModelCouncilResult, CouncilApprovalRequest,
+  CouncilSeatRunKey, CouncilSource, CouncilToolSnapshot, CouncilToolVerdict,
 } from './models.ts';
 import {
   seatSystemPrompt, openingPrompt, responsePrompt, finalPositionPrompt,
@@ -22,6 +25,8 @@ import {
 } from './prompts.ts';
 import { parseTask, resolveSynthesisModelId } from './validator.ts';
 import type { CouncilTaskInput } from './validator.ts';
+import { CouncilApprovalWaiters, copyCouncilToolSnapshot, councilSeatKey,
+  validCouncilPending } from './approval_wait.ts';
 
 // ===== 超时 / 取消 工具 =====
 class TimeoutError extends Error {
@@ -96,16 +101,20 @@ class CancelSignal implements AbortSignalLike {
   abort(): void {
     if (this.aborted) return;
     this.aborted = true;
-    for (let i = 0; i < this.cbs.length; i++) this.cbs[i]();
+    const callbacks: Array<() => void> = this.cbs.slice();
+    this.cbs = [];
+    for (let i = 0; i < callbacks.length; i++) callbacks[i]();
   }
 }
 
 // 让模型调用与取消信号赛跑:即使 runner 没监听 abort,取消也能立即生效。
 const raceCancel = <T>(p: Promise<T>, signal: CancelSignal): Promise<T> => {
-  if (signal.aborted) return Promise.reject(new Error('aborted'));
   return new Promise<T>((resolve, reject) => {
-    signal.addEventListener('abort', () => { reject(new Error('aborted')); });
-    p.then(resolve, reject);
+    const abort = (): void => { reject(new Error('aborted')); };
+    signal.addEventListener('abort', abort);
+    p.then(value => { signal.removeEventListener('abort', abort); resolve(value); },
+      error => { signal.removeEventListener('abort', abort); reject(error); });
+    if (signal.aborted) abort();
   });
 };
 
@@ -141,12 +150,17 @@ export class ModelCouncilManager {
   private listeners: Map<string, Map<string, Set<(text: string) => void>>> = new Map();
   private signals: Map<string, CancelSignal> = new Map();
   private completions: Map<string, Promise<void>> = new Map();
+  private toolSnapshots: Map<string, CouncilToolSnapshot> = new Map();
+  private toolListeners: Map<string, Set<(snapshot: CouncilToolSnapshot) => void>> = new Map();
+  private approvalWaiters: CouncilApprovalWaiters = new CouncilApprovalWaiters();
+  private transcriptWrites: Map<string, Promise<void>> = new Map();
+  private transcriptErrors: Map<string, string[]> = new Map();
 
   constructor(deps: ModelCouncilDeps) {
     this.runner = deps.runner;
     this.fileStore = deps.fileStore;
-    this.modelPool = deps.modelPool;
-    this.setting = deps.setting;
+    this.modelPool = JSON.parse(JSON.stringify(deps.modelPool)) as ModelConfig[];
+    this.setting = makeRuntimeSetting(JSON.parse(JSON.stringify(deps.setting)) as ModelCouncilRuntimeSetting);
     this.nowMs = deps.nowMs ?? ((): number => Date.now());
   }
 
@@ -206,6 +220,33 @@ export class ModelCouncilManager {
     if (signal !== undefined) signal.abort();
   }
 
+  toolSnapshot(runId: string, round: number, seatId: string): CouncilToolSnapshot | null {
+    const value = this.toolSnapshots.get(councilSeatKey({ runId, round, seatId }));
+    return value === undefined ? null : copyCouncilToolSnapshot(value);
+  }
+
+  subscribeTools(runId: string, listener: (snapshot: CouncilToolSnapshot) => void): () => void {
+    let listeners = this.toolListeners.get(runId);
+    if (listeners === undefined) {
+      listeners = new Set();
+      this.toolListeners.set(runId, listeners);
+    }
+    const target = listeners;
+    target.add(listener);
+    this.toolSnapshots.forEach((snapshot: CouncilToolSnapshot): void => {
+      if (snapshot.key.runId === runId) listener(copyCouncilToolSnapshot(snapshot));
+    });
+    return (): void => { target.delete(listener); };
+  }
+
+  submitToolVerdict(request: CouncilApprovalRequest, verdict: CouncilToolVerdict): boolean {
+    const run = this.runs.get(request.key.runId);
+    const snapshot = this.toolSnapshots.get(councilSeatKey(request.key));
+    if (run?.status !== 'running' || snapshot === undefined
+      || !snapshot.pending.some(item => JSON.stringify(item) === JSON.stringify(request))) return false;
+    return this.approvalWaiters.submit(request, verdict);
+  }
+
   // 订阅某席(或 SYNTHESIZER_SEAT_KEY)的累积文本;立即回放当前值;返回取消订阅函数。
   subscribeLive(runId: string, seatKey: string, cb: (text: string) => void): () => void {
     let perRun: Map<string, Set<(text: string) => void>> | undefined = this.listeners.get(runId);
@@ -237,6 +278,7 @@ export class ModelCouncilManager {
       const turns: ModelCouncilTurn[] = run.turns.filter(t => t.seatId === seat.seatId);
       for (let j = 0; j < turns.length; j++) {
         md += `### 第 ${turns[j].round} 轮\n\n${turns[j].content}\n\n`;
+        for (const source of turns[j].sources ?? []) md += `- [${source.title}](${source.url}) · ${source.service}\n`;
       }
     }
     if (run.result !== null && run.result.finalRecommendation.length > 0) {
@@ -303,6 +345,14 @@ export class ModelCouncilManager {
       run.updatedAtMs = this.nowMs();
       const finished: TranscriptFinished = { event: 'finished', status: run.status };
       this.writeTranscriptLine(run.runId, JSON.stringify(finished));
+      await this.transcriptWrites.get(run.runId);
+      const archiveErrors: string[] = this.transcriptErrors.get(run.runId) ?? [];
+      if (archiveErrors.length > 0) {
+        if (run.result === null) run.result = makeEmptyResult();
+        run.result.warnings = [...run.result.warnings, ...archiveErrors];
+      }
+      this.transcriptWrites.delete(run.runId);
+      this.transcriptErrors.delete(run.runId);
       // 清理本轮运行状态(runs 保留以便 UI 事后读 snapshot/reportMarkdown;
       // signals/completions/listeners 不再需要,释放引用避免泄漏)
       this.signals.delete(run.runId);
@@ -310,6 +360,7 @@ export class ModelCouncilManager {
       // live 文本与 listener 集合同步释放(否则每次运行泄漏整份流文本闭包)
       this.liveText.delete(run.runId);
       this.listeners.delete(run.runId);
+      this.toolListeners.delete(run.runId);
     }
   }
 
@@ -341,8 +392,14 @@ export class ModelCouncilManager {
     const runId: string = run.runId;
     const model: ModelConfig | null = this.getModel(seat.modelId);
     const label: string = model !== null ? this.modelLabel(model) : seat.modelId;
+    const seatKey: CouncilSeatRunKey = { runId, round, seatId: seat.seatId };
     const prefix: string = this.livePrefixFor(run, seat.seatId, round);
     this.setLive(runId, seat.seatId, prefix);
+
+    if (signal.aborted) {
+      this.appendTurn(run, this.makeTurn(round, seat, label, 'cancelled', '', 'aborted', []));
+      return;
+    }
 
     if (model === null) {
       this.appendTurn(run, this.makeTurn(round, seat, label, 'failed', '', 'model not found', []));
@@ -364,20 +421,33 @@ export class ModelCouncilManager {
     const cascade = (): void => { seatSignal.abort(); };
     signal.addEventListener('abort', cascade);
     let seatTimer: ReturnType<typeof setTimeout> | null = null;
+    let ended: boolean = false;
     try {
       seatTimer = setTimeout((): void => { seatSignal.abort(); }, Math.max(this.setting.seatTimeoutMs, 1));
       const res = await withTimeout(raceCancel(this.runner.generate({
         model: model,
-        systemPrompt: seatSystemPrompt(seat),
+        systemPrompt: seatSystemPrompt(seat, normalizeCouncilToolMode(run.task.toolMode)),
         userPrompt: userPrompt,
         outputBudgetChars: seat.outputBudgetChars,
         reasoningLevel: seat.reasoningLevel,
         temperature: seat.temperature,
         onChunk: (text: string): void => {
+          if (ended || seatSignal.aborted || signal.aborted || run.status !== 'running') return;
           cumulative = prefix + text;
           this.setLive(runId, seat.seatId, cumulative);
         },
         signal: seatSignal,
+        key: seatKey,
+        toolMode: normalizeCouncilToolMode(run.task.toolMode),
+        onTools: (snapshot: CouncilToolSnapshot): void => {
+          if (ended || seatSignal.aborted || signal.aborted || run.status !== 'running') return;
+          this.publishTools(snapshot, seatKey, seatSignal);
+        },
+        requestApproval: (request: CouncilApprovalRequest, approvalSignal: AbortSignalLike): Promise<CouncilToolVerdict> => {
+          if (ended || approvalSignal !== seatSignal || seatSignal.aborted || signal.aborted)
+            return Promise.reject(new Error('seat ended'));
+          return this.approvalWaiters.wait(request, seatSignal);
+        },
       }), seatSignal), this.setting.seatTimeoutMs);
 
       if (signal.aborted) {
@@ -393,7 +463,12 @@ export class ModelCouncilManager {
           '', 'empty response text', res.warnings));
         return;
       }
-      this.appendTurn(run, this.makeTurn(round, seat, label, 'completed', content, '', res.warnings));
+      const snapshot = this.toolSnapshots.get(councilSeatKey(seatKey));
+      const messages: UIMessage[] = res.toolMessages ?? snapshot?.messages ?? [];
+      const unresolved: boolean = (snapshot?.pending.length ?? 0) > 0
+        || messages.some(message => message.parts.some(part => part.type === 'tool' && isToolAwaitingExecution(part)));
+      this.appendTurn(run, this.makeTurn(round, seat, label, unresolved ? 'failed' : 'completed',
+        content, unresolved ? 'unresolved tool calls' : '', res.warnings, messages, res.sources ?? snapshot?.sources ?? []));
     } catch (e) {
       let status: ModelCouncilRunStatus;
       if (signal.aborted) status = 'cancelled';
@@ -402,8 +477,18 @@ export class ModelCouncilManager {
       const partial: string = cumulative.length > prefix.length ? cumulative.slice(prefix.length) : '';
       this.appendTurn(run, this.makeTurn(round, seat, label, status, partial, String(e), []));
     } finally {
+      ended = true;
+      // Release this same seat's paused native/package owners on success or any
+      // save/hash/runner failure as well as timeout. Peers use separate signals.
+      seatSignal.abort();
       if (seatTimer !== null) clearTimeout(seatTimer);
       signal.removeEventListener('abort', cascade);
+      this.approvalWaiters.clearSeat(seatKey);
+      const snapshot = this.toolSnapshots.get(councilSeatKey(seatKey));
+      if (snapshot !== undefined && snapshot.pending.length > 0) {
+        snapshot.pending = [];
+        this.emitTools(snapshot);
+      }
     }
   }
 
@@ -424,6 +509,7 @@ export class ModelCouncilManager {
       const synthCascade = (): void => { synthSignal.abort(); };
       signal.addEventListener('abort', synthCascade);
       let synthTimer: ReturnType<typeof setTimeout> | null = null;
+      let ended: boolean = false;
       try {
         synthTimer = setTimeout((): void => { synthSignal.abort(); }, Math.max(this.setting.seatTimeoutMs, 1));
         const res = await withTimeout(raceCancel(this.runner.generate({
@@ -433,14 +519,20 @@ export class ModelCouncilManager {
           outputBudgetChars: this.setting.outputBudgetChars,
           reasoningLevel: 'off',
           temperature: null,
-          onChunk: (text: string): void => { this.setLive(run.runId, SYNTHESIZER_SEAT_KEY, text); },
+          onChunk: (text: string): void => {
+            if (!ended && !synthSignal.aborted && !signal.aborted && run.status === 'running')
+              this.setLive(run.runId, SYNTHESIZER_SEAT_KEY, text);
+          },
           signal: synthSignal,
+          toolMode: 'off',
         }), synthSignal), this.setting.seatTimeoutMs);
         const result = makeEmptyResult();
         applyVerdictText(result, res.text, res.warnings);
         result.perSeatSummaries = this.perSeatSummaries(run);
         run.result = result;
       } finally {
+        ended = true;
+        synthSignal.abort();
         if (synthTimer !== null) clearTimeout(synthTimer);
         signal.removeEventListener('abort', synthCascade);
       }
@@ -481,16 +573,24 @@ export class ModelCouncilManager {
   private makeTurn(
     round: number, seat: ModelCouncilSeat, label: string, status: ModelCouncilRunStatus,
     content: string, error: string, warnings: string[],
+    toolMessages: UIMessage[] = [], sources: CouncilSource[] = [],
   ): ModelCouncilTurn {
     const t: ModelCouncilTurn = {
       round: round, seatId: seat.seatId, seatName: seat.name, role: seat.role,
       modelId: seat.modelId, modelLabel: label, status: status,
       content: content, error: error, warnings: warnings,
+      toolMessages: JSON.parse(JSON.stringify(toolMessages)) as UIMessage[],
+      sources: sources.map(source => ({ title: source.title, url: source.url, service: source.service })),
     };
     return t;
   }
 
   private appendTurn(run: ModelCouncilRun, turn: ModelCouncilTurn): void {
+    const snapshot = this.toolSnapshots.get(councilSeatKey({ runId: run.runId, round: turn.round, seatId: turn.seatId }));
+    if (snapshot !== undefined) {
+      if ((turn.toolMessages?.length ?? 0) === 0) turn.toolMessages = copyCouncilToolSnapshot(snapshot).messages;
+      if ((turn.sources?.length ?? 0) === 0) turn.sources = copyCouncilToolSnapshot(snapshot).sources;
+    }
     run.turns.push(turn);
     run.updatedAtMs = this.nowMs();
     const ev: TranscriptTurn = { event: 'turn', turn: turn };
@@ -521,12 +621,12 @@ export class ModelCouncilManager {
   }
 
   private copyRun(run: ModelCouncilRun): ModelCouncilRun {
-    const copy: ModelCouncilRun = {
-      runId: run.runId, status: run.status, mode: run.mode,
-      seats: run.seats.slice(), task: run.task, turns: run.turns.slice(),
-      result: run.result, transcriptPath: run.transcriptPath,
-      startedAtMs: run.startedAtMs, updatedAtMs: run.updatedAtMs,
-    };
+    const copy: ModelCouncilRun = JSON.parse(JSON.stringify(run)) as ModelCouncilRun;
+    copy.task.toolMode = normalizeCouncilToolMode(copy.task.toolMode);
+    for (const turn of copy.turns) {
+      turn.toolMessages = turn.toolMessages ?? [];
+      turn.sources = turn.sources ?? [];
+    }
     return copy;
   }
 
@@ -534,8 +634,29 @@ export class ModelCouncilManager {
     if (this.fileStore === null) return;
     const run: ModelCouncilRun | undefined = this.runs.get(runId);
     if (run === undefined) return;
-    // 转录失败不应阻塞编排,但要吞掉异常避免 unhandled rejection
-    this.fileStore.appendText(run.transcriptPath, line + '\n').catch((): void => { /* 磁盘满/权限,忽略 */ });
+    const files: FileStore = this.fileStore;
+    // Ordered best-effort archive only. C's source-store save precedes every
+    // approval publication; this JSONL append is never that durability barrier.
+    const prior: Promise<void> = this.transcriptWrites.get(runId) ?? Promise.resolve();
+    const write = prior.then(() => files.appendText(run.transcriptPath, line + '\n')).catch((error: Error): void => {
+      const warnings = this.transcriptErrors.get(runId) ?? [];
+      warnings.push(`council transcript write failed: ${error.message}`);
+      this.transcriptErrors.set(runId, warnings);
+    });
+    this.transcriptWrites.set(runId, write);
+  }
+
+  private publishTools(snapshot: CouncilToolSnapshot, expected: CouncilSeatRunKey, signal: CancelSignal): void {
+    if (councilSeatKey(snapshot.key) !== councilSeatKey(expected) || snapshot.conversationId.length === 0
+      || !validCouncilPending(snapshot)) throw new Error('invalid council tool source');
+    const copy: CouncilToolSnapshot = copyCouncilToolSnapshot(snapshot);
+    this.approvalWaiters.register(copy, signal);
+    this.toolSnapshots.set(councilSeatKey(expected), copy);
+    this.emitTools(copy);
+  }
+
+  private emitTools(snapshot: CouncilToolSnapshot): void {
+    this.toolListeners.get(snapshot.key.runId)?.forEach(listener => { listener(copyCouncilToolSnapshot(snapshot)); });
   }
 }
 
