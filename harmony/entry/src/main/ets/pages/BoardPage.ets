@@ -460,44 +460,50 @@ struct BoardPage {
       PageSpacer()
       }
       .width('100%').height('100%').backgroundColor(BG)
-      // 条目操作 sheet(半模态 overlay)
+      // 条目操作 sheet(半模态 overlay);item 走 @Builder 参数快照——
+      // 关闭动画把 sheetItem 置 null 的同一帧,树内不能再读 this.sheetItem.xxx(空指针崩溃根因)
       if (this.sheetItem !== null) {
-        Column() {
-          Blank()
-            .onClick((): void => {
-              animateTo({ duration: 200, curve: Curve.EaseIn }, (): void => {
-                this.sheetItem = null;
-              });
-            })
-          Column() {
-            Text(this.sheetItem.title)
-              .fontSize(BODY2).fontWeight(FontWeight.Medium).fontColor(INK)
-              .maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis })
-              .width('100%').padding({ left: 20, right: 20, top: 18, bottom: 10 })
-            this.SheetAction('深度阅读', 'book', 'read')
-            this.SheetDivider()
-            this.SheetAction('重新生成', 'retry', 'regenerate')
-            this.SheetDivider()
-            this.SheetAction('打开原文', 'link', 'original')
-            this.SheetDivider()
-            this.SheetAction('分享', 'share', 'share')
-          }
-          .width('100%')
-          .padding({ bottom: 12 })
-          .backgroundColor(SURFACE)
-          .borderRadius({ topLeft: 20, topRight: 20 })
-          .shadow({ radius: 20, color: SHADOW_OVERLAY, offsetY: -4 })
-          .transition(TransitionEffect.translate({ y: 160 })
-            .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
-        }
-        .width('100%').height('100%')
-        .backgroundColor(OVERLAY)
-        .justifyContent(FlexAlign.End)
-        .transition(TransitionEffect.OPACITY
-          .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
+        this.SheetOverlay(this.sheetItem)
       }
     }
     .width('100%').height('100%')
+  }
+
+  @Builder
+  SheetOverlay(item: HotItem): void {
+    Column() {
+      Blank()
+        .onClick((): void => {
+          animateTo({ duration: 200, curve: Curve.EaseIn }, (): void => {
+            this.sheetItem = null;
+          });
+        })
+      Column() {
+        Text(item.title)
+          .fontSize(BODY2).fontWeight(FontWeight.Medium).fontColor(INK)
+          .maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis })
+          .width('100%').padding({ left: 20, right: 20, top: 18, bottom: 10 })
+        this.SheetAction('深度阅读', 'book', 'read')
+        this.SheetDivider()
+        this.SheetAction('重新生成', 'retry', 'regenerate')
+        this.SheetDivider()
+        this.SheetAction('打开原文', 'link', 'original')
+        this.SheetDivider()
+        this.SheetAction('分享', 'share', 'share')
+      }
+      .width('100%')
+      .padding({ bottom: 12 })
+      .backgroundColor(SURFACE)
+      .borderRadius({ topLeft: 20, topRight: 20 })
+      .shadow({ radius: 20, color: SHADOW_OVERLAY, offsetY: -4 })
+      .transition(TransitionEffect.translate({ y: 160 })
+        .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
+    }
+    .width('100%').height('100%')
+    .backgroundColor(OVERLAY)
+    .justifyContent(FlexAlign.End)
+    .transition(TransitionEffect.OPACITY
+      .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
   }
 
   @Builder

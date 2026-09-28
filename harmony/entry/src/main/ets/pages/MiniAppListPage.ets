@@ -12,6 +12,7 @@ import { util } from '@kit.ArkTS';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import type { MiniAppRecord, MiniAppVersionRecord } from '@amber/chat-domain';
 import { ACCENT, ACCENT_LIGHT, BG, BODY, BODY2, INK, INK2, INK3, INK4, LINE, META, OVERLAY, SURFACE, SURFACE2, TITLE } from '../design/tokens.ets';
+import { CenteredTitleBar } from '../components/PageTemplate.ets';
 import { getMiniAppPlatform } from '../platform_impl/MiniAppPlatform.ets';
 import type { MiniAppPlatform } from '../platform_impl/MiniAppPlatform.ets';
 import { ConfirmDialog } from '../components/ui/ConfirmDialog.ets';
@@ -212,36 +213,8 @@ struct MiniAppListPage {
 
   @Builder
   topBar(): void {
-    Row() {
-      Row() {
-        Icon({ name: 'back', iconSize: 20, color: INK })
-      }
-      .width(44).height(44)
-      .justifyContent(FlexAlign.Center)
-      .alignItems(VerticalAlign.Center)
-      .accessibilityText('返回')
-      .onClick((): void => { router.back(); })
-
-      Text('小应用')
-        .fontSize(TITLE)
-        .fontWeight(FontWeight.Bold)
-        .fontColor(INK)
-        .layoutWeight(1)
-        .margin({ left: 8 })
-
-      Row() {
-        Text('设置').fontSize(BODY).fontColor(this.accentColorStore)
-      }
-      .constraintSize({ minWidth: 44, minHeight: 44 })
-      .justifyContent(FlexAlign.Center)
-      .alignItems(VerticalAlign.Center)
-      .accessibilityText('小应用设置')
-      .onClick((): void => { this.openSettings(); })
-    }
-    .width('100%')
-    .padding({ left: 14, right: 10, top: this.statusBarHeight + 2, bottom: 11 })
-    .border({ width: { bottom: 1 }, color: { bottom: LINE } })
-    .backgroundColor(BG)
+    CenteredTitleBar({ title: '小应用', actionText: '设置',
+      onAction: (): void => { this.openSettings(); } })
   }
 
   @Builder

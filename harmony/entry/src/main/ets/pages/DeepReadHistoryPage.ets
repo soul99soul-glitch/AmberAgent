@@ -7,6 +7,7 @@ import type { DeepReadCacheEntry } from '@amber/deepread-domain';
 import { isCacheEntryExpired } from '@amber/deepread-domain';
 import { getRepository } from '../di/AppContainer.ets';
 import { INK, INK2, INK3, INK4, SURFACE, LINE, BG, ACCENT, ACCENT_LIGHT, SIGNAL, BODY, META, LABEL, TITLE } from '../design/tokens.ets';
+import { CenteredTitleBar } from '../components/PageTemplate.ets';
 
 const DANGER: string = 'ERROR';
 
@@ -72,13 +73,7 @@ struct DeepReadHistoryPage {
 
   build(): void {
     Column() {
-      // 标题栏
-      Row() {
-        Icon({ name: 'back', iconSize: 20, color: INK3 }).onClick((): void => { router.back(); })
-        Text('深度阅读历史').fontSize(TITLE).fontWeight(FontWeight.Bold).fontColor(INK)
-          .margin({ left: 12 }).layoutWeight(1)
-      }
-      .width('100%').padding({ left: 14, right: 14, top: this.statusBarHeight + 2, bottom: 11 }).border({ width: { bottom: 1 }, color: { bottom: LINE } }).backgroundColor(BG)
+      CenteredTitleBar({ title: '深度阅读历史' })
 
       if (!this.loaded) {
         Text('加载中…').fontSize(BODY).fontColor(INK3).padding({ top: 40 })
