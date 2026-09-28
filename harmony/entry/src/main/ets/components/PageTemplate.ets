@@ -239,20 +239,32 @@ export struct BtnGhost {
 }
 
 // youhua .seg 分段控件(iOS segmented 化:灰轨 r10 无外框,选中白 pill r8 内缩 2)
+// 乐观选择:点击先翻本地选中态(即时反馈),onSelect 持久化后由 selected 重同步;
+//   修复「点击没即时反应,退出重进才发现变了」— 控件级即时响应不依赖页面渲染链
 @Component
 export struct Seg {
   @Prop options: string[] = [];
-  @Prop selected: number = 0;
+  @Prop @Watch('syncFromProp') selected: number = 0;
+  @State private optimisticSelected: number = -1;
   onSelect: (idx: number) => void = (_idx: number): void => {};
+
+  private syncFromProp(): void {
+    this.optimisticSelected = -1;
+  }
+
+  private displayed(): number {
+    return this.optimisticSelected >= 0 ? this.optimisticSelected : this.selected;
+  }
+
   build(): void {
     Row() {
       ForEach(this.options, (opt: string, idx: number): void => {
         Text(opt)
           .fontSize(13)
-          .fontWeight(this.selected === idx ? 600 : FontWeight.Medium)
+          .fontWeight(this.displayed() === idx ? 600 : FontWeight.Medium)
           .lineHeight(lineHeightForSize(13))
-          .fontFamily(this.selected === idx ? FONT_SANS_SEMIBOLD : FONT_SANS_MEDIUM)
-          .fontColor(this.selected === idx ? INK : INK2)
+          .fontFamily(this.displayed() === idx ? FONT_SANS_SEMIBOLD : FONT_SANS_MEDIUM)
+          .fontColor(this.displayed() === idx ? INK : INK2)
           .textAlign(TextAlign.Center)
           .maxLines(1)
           .textOverflow({ overflow: TextOverflow.Ellipsis })
@@ -260,9 +272,13 @@ export struct Seg {
           .constraintSize({ minHeight: 40 })
           .padding({ top: 9, bottom: 9, left: 8, right: 8 })
           .borderRadius(8)
-          .backgroundColor(this.selected === idx ? RAISED : Color.Transparent)
+          .backgroundColor(this.displayed() === idx ? RAISED : Color.Transparent)
           .margin(2)
-          .onClick((): void => { this.onSelect(idx); })
+          .onClick((): void => {
+            if (this.displayed() === idx) return;
+            this.optimisticSelected = idx;
+            this.onSelect(idx);
+          })
       }, (opt: string, idx: number): string => `seg-${idx}-${opt}`)
     }
     .width('100%')
@@ -599,14 +615,25 @@ export struct PlainSection {
 }
 
 // iOS 卡片开关行:标题/副标题 + accent 药丸开关(开时 accent 底);无图标
+// 乐观翻转:点击先翻本地开关态(即时反馈),onToggle 持久化后由 checked 重同步
 @Component
 export struct CardToggleRow {
   @Prop label: string = '';
   @Prop desc: string = '';
-  @Prop checked: boolean = false;
+  @Prop @Watch('syncFromProp') checked: boolean = false;
   @Prop isLast: boolean = false;
+  @State private optimisticChecked: boolean = false;
+  @State private hasOptimistic: boolean = false;
   @StorageProp('accentColor') accentColorStore: string = ACCENT;
   onToggle: () => void = (): void => {};
+
+  private syncFromProp(): void {
+    this.hasOptimistic = false;
+  }
+
+  private displayed(): boolean {
+    return this.hasOptimistic ? this.optimisticChecked : this.checked;
+  }
 
   build(): void {
     Column() {
@@ -638,11 +665,11 @@ export struct CardToggleRow {
           Stack({ alignContent: Alignment.Start }) {
             Column()
               .width(42).height(24).borderRadius(99)
-              .backgroundColor(this.checked ? this.accentColorStore : LINE2)
+              .backgroundColor(this.displayed() ? this.accentColorStore : LINE2)
             Column()
               .width(20).height(20).borderRadius(10)
               .backgroundColor(Color.White) // 滑块固定纯白:off 轨上仍需对比
-              .margin({ left: this.checked ? 22 : 2 })
+              .margin({ left: this.displayed() ? 22 : 2 })
               .animation({ duration: 150, curve: Curve.EaseOut })
           }
           .clip(true)
@@ -651,8 +678,12 @@ export struct CardToggleRow {
         .justifyContent(FlexAlign.End)
         .alignItems(VerticalAlign.Center)
         .margin({ left: 12 })
-        .onClick((): void => { this.onToggle(); })
-        .accessibilityText(this.checked ? '已开启' : '已关闭')
+        .onClick((): void => {
+          this.optimisticChecked = !this.displayed();
+          this.hasOptimistic = true;
+          this.onToggle();
+        })
+        .accessibilityText(this.displayed() ? '已开启' : '已关闭')
       }
       .width('100%')
       .alignItems(VerticalAlign.Center)

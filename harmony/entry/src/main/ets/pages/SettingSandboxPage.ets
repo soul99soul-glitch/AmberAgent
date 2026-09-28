@@ -13,6 +13,7 @@ import {
   hydrateWorkspaceCustomDir, activateWorkspaceCustomDir,
 } from '../platform_impl/WorkspaceStore.ets';
 import { picker, fileShare } from '@kit.CoreFileKit';
+import { hilog } from '@kit.PerformanceAnalysisKit';
 import { promptAction, router } from '@kit.ArkUI';
 import { common } from '@kit.AbilityKit';
 import {
@@ -36,6 +37,9 @@ const coerceIn = (v: number, lo: number, hi: number): number =>
 @Component
 struct SettingSandboxPage {
   @State snap: AgentRuntimeSnapshot | null = null;
+  // 原始类型代际计数:设备实测对象型 @State 的 Promise 回调赋值在已建页面上
+  //   不触发重建(字符串可以),卡片读取本计数即可靠获得重建
+  @State snapVersion: number = 0;
   @State loadError: boolean = false;
   @State workspaceRoot: string = '';
   @State workspaceCustom: boolean = false;
@@ -95,10 +99,15 @@ struct SettingSandboxPage {
     this.workspaceNote = '';
   }
 
+  private applySnap(s: AgentRuntimeSnapshot): void {
+    this.snap = s;
+    this.snapVersion++;
+  }
+
   private loadSnapshot(): void {
     this.loadError = false;
     loadAgentRuntimeSnapshot(getChatKvStore()).then((s: AgentRuntimeSnapshot): void => {
-      this.snap = s;
+      this.applySnap(s);
     }).catch((): void => {
       this.snap = null;
       this.loadError = true;
@@ -109,29 +118,29 @@ struct SettingSandboxPage {
     const current: number = this.snap !== null ? this.snap.speculativeToolExecution.maxConcurrentTools : 4;
     const next: number = Math.min(Math.max(current + delta, 1), 8);
     updateSpeculativeToolExecution(getChatKvStore(), { maxConcurrentTools: next })
-      .then((s: AgentRuntimeSnapshot): void => { this.snap = s; });
+      .then((s: AgentRuntimeSnapshot): void => { this.applySnap(s); });
   }
 
   // ── 执行参数/生成稳定性(原「运行与显示」页并入;运行环境 = 执行设置统一入口) ──
 
   private setPreviewMode(mode: AgentOperationPreviewMode): void {
     updateAgentRuntimeExecution(getChatKvStore(), { operationPreviewMode: mode })
-      .then((s: AgentRuntimeSnapshot): void => { this.snap = s; });
+      .then((s: AgentRuntimeSnapshot): void => { this.applySnap(s); });
   }
 
   private setToolLoopSteps(steps: number): void {
     updateAgentRuntimeExecution(getChatKvStore(), { maxToolLoopSteps: steps })
-      .then((s: AgentRuntimeSnapshot): void => { this.snap = s; });
+      .then((s: AgentRuntimeSnapshot): void => { this.applySnap(s); });
   }
 
   private setRetryEnabled(checked: boolean): void {
     updateAgentRuntimeExecution(getChatKvStore(), { retryEnabled: checked })
-      .then((s: AgentRuntimeSnapshot): void => { this.snap = s; });
+      .then((s: AgentRuntimeSnapshot): void => { this.applySnap(s); });
   }
 
   private setRetryMaxRetries(maxRetries: number): void {
     updateAgentRuntimeExecution(getChatKvStore(), { retryMaxRetries: maxRetries })
-      .then((s: AgentRuntimeSnapshot): void => { this.snap = s; });
+      .then((s: AgentRuntimeSnapshot): void => { this.applySnap(s); });
   }
 
   private numericLabels(options: number[], suffix: string): string[] {
@@ -280,30 +289,36 @@ struct SettingSandboxPage {
   }
 
   // 「执行参数」组:操作预览 + 工具循环上限
+  //   状态必须在本 builder 内直接读取(this.snap),参数透传形参的写法在
+  //   CardGroup content 嵌套下不会随快照更新重渲染(真机复现:写入成功但 UI 不变)
   @Builder
-  ExecutionCard(snapshot: AgentRuntimeSnapshot): void {
-    this.SegRow('操作预览', '控制输入框上方的 Agent 实时操作预览显示方式。',
-      PREVIEW_MODE_LABELS, PREVIEW_MODE_OPTIONS.indexOf(snapshot.operationPreviewMode),
-      (idx: number): void => { this.setPreviewMode(PREVIEW_MODE_OPTIONS[idx]); })
-    this.CardHairline()
-    this.SegRow('工具循环上限', '单次回复最多调用多少轮工具。',
-      this.numericLabels(TOOL_LOOP_STEP_OPTIONS, '步'),
-      this.optionIndex(TOOL_LOOP_STEP_OPTIONS, coerceIn(snapshot.maxToolLoopSteps, 16, 512)),
-      (idx: number): void => { this.setToolLoopSteps(TOOL_LOOP_STEP_OPTIONS[idx]); })
+  ExecutionCard(): void {
+    if (this.snapVersion >= 0 && this.snap !== null) {
+      this.SegRow('操作预览', '控制输入框上方的 Agent 实时操作预览显示方式。',
+        PREVIEW_MODE_LABELS, PREVIEW_MODE_OPTIONS.indexOf(this.snap.operationPreviewMode),
+        (idx: number): void => { this.setPreviewMode(PREVIEW_MODE_OPTIONS[idx]); })
+      this.CardHairline()
+      this.SegRow('工具循环上限', '单次回复最多调用多少轮工具。',
+        this.numericLabels(TOOL_LOOP_STEP_OPTIONS, '步'),
+        this.optionIndex(TOOL_LOOP_STEP_OPTIONS, coerceIn(this.snap.maxToolLoopSteps, 16, 512)),
+        (idx: number): void => { this.setToolLoopSteps(TOOL_LOOP_STEP_OPTIONS[idx]); })
+    }
   }
 
   // 「生成稳定性」组:自动重试 + 重试上限
   @Builder
-  StabilityCard(snapshot: AgentRuntimeSnapshot): void {
-    CardToggleRow({
-      label: '自动重试生成', desc: '网络或服务临时中断时自动重试。',
-      checked: snapshot.generationRetry.enabled,
-      onToggle: (): void => { this.setRetryEnabled(!snapshot.generationRetry.enabled); },
-    })
-    this.SegRow('重试上限', '单次模型调用最多重试次数。',
-      this.numericLabels(RETRY_COUNT_OPTIONS, '次'),
-      this.optionIndex(RETRY_COUNT_OPTIONS, coerceIn(snapshot.generationRetry.maxRetries, 1, 5)),
-      (idx: number): void => { this.setRetryMaxRetries(RETRY_COUNT_OPTIONS[idx]); })
+  StabilityCard(): void {
+    if (this.snapVersion >= 0 && this.snap !== null) {
+      CardToggleRow({
+        label: '自动重试生成', desc: '网络或服务临时中断时自动重试。',
+        checked: this.snap.generationRetry.enabled,
+        onToggle: (): void => { this.setRetryEnabled(!this.snap!.generationRetry.enabled); },
+      })
+      this.SegRow('重试上限', '单次模型调用最多重试次数。',
+        this.numericLabels(RETRY_COUNT_OPTIONS, '次'),
+        this.optionIndex(RETRY_COUNT_OPTIONS, coerceIn(this.snap.generationRetry.maxRetries, 1, 5)),
+        (idx: number): void => { this.setRetryMaxRetries(RETRY_COUNT_OPTIONS[idx]); })
+    }
   }
 
   @Builder
@@ -326,18 +341,19 @@ struct SettingSandboxPage {
   }
 
   @Builder
-  ConcurrencyCard(snapshot: AgentRuntimeSnapshot): void {
-    Column() {
-      CardToggleRow({
-        label: '推测式并发工具执行',
-        desc: '仅对完整闭合且无需审批的只读工具生效，默认关闭。',
-        checked: snapshot.speculativeToolExecution.enabled,
-        onToggle: (): void => {
-          updateSpeculativeToolExecution(getChatKvStore(), {
-            enabled: !snapshot.speculativeToolExecution.enabled,
-          }).then((s: AgentRuntimeSnapshot): void => { this.snap = s; });
-        },
-      })
+  ConcurrencyCard(): void {
+    if (this.snapVersion >= 0 && this.snap !== null) {
+      Column() {
+        CardToggleRow({
+          label: '推测式并发工具执行',
+          desc: '仅对完整闭合且无需审批的只读工具生效，默认关闭。',
+          checked: this.snap.speculativeToolExecution.enabled,
+          onToggle: (): void => {
+            updateSpeculativeToolExecution(getChatKvStore(), {
+              enabled: !this.snap!.speculativeToolExecution.enabled,
+            }).then((s: AgentRuntimeSnapshot): void => { this.applySnap(s); });
+          },
+        })
       Row() {
         Column() {
           Text('最大并发工具数')
@@ -368,7 +384,7 @@ struct SettingSandboxPage {
           .alignItems(VerticalAlign.Center)
           .constraintSize({ minWidth: 44, minHeight: 44 })
           .onClick((): void => { this.adjustConcurrent(-1); })
-          Text(`${snapshot.speculativeToolExecution.maxConcurrentTools}`)
+          Text(`${this.snap.speculativeToolExecution.maxConcurrentTools}`)
             .fontSize(TEXT_STYLES.meta.size)
             .fontWeight(TEXT_STYLES.meta.weight)
             .lineHeight(TEXT_STYLES.meta.lineHeight)
@@ -396,7 +412,8 @@ struct SettingSandboxPage {
       .constraintSize({ minHeight: 52 })
       .padding({ left: 14, right: 14, top: 10, bottom: 12 })
     }
-    .width('100%')
+      .width('100%')
+    }
   }
 
   build(): void {
@@ -424,10 +441,7 @@ struct SettingSandboxPage {
 
           if (!this.loadError && this.snap !== null) {
             PlainSection({ label: '执行参数' })
-            CardGroup({ radius: 18, stroke: true, content: (): void => {
-              const s = this.snap;
-              if (s !== null) { this.ExecutionCard(s); }
-            } })
+            CardGroup({ radius: 18, stroke: true, content: (): void => { this.ExecutionCard(); } })
               .margin({ left: GUTTER, right: GUTTER })
           }
 
@@ -436,19 +450,13 @@ struct SettingSandboxPage {
             CardGroup({ radius: 18, stroke: true, content: (): void => { this.ErrorCard(); } })
               .margin({ left: GUTTER, right: GUTTER })
           } else if (this.snap !== null) {
-            CardGroup({ radius: 18, stroke: true, content: (): void => {
-              const s = this.snap;
-              if (s !== null) { this.ConcurrencyCard(s); }
-            } })
+            CardGroup({ radius: 18, stroke: true, content: (): void => { this.ConcurrencyCard(); } })
               .margin({ left: GUTTER, right: GUTTER })
           }
 
           if (!this.loadError && this.snap !== null) {
             PlainSection({ label: '生成稳定性' })
-            CardGroup({ radius: 18, stroke: true, content: (): void => {
-              const s = this.snap;
-              if (s !== null) { this.StabilityCard(s); }
-            } })
+            CardGroup({ radius: 18, stroke: true, content: (): void => { this.StabilityCard(); } })
               .margin({ left: GUTTER, right: GUTTER })
           }
           FooterNote({ text: '输出上限随工具类型内置，无独立设置面' })
