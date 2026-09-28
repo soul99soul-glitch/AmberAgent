@@ -42,6 +42,8 @@
 | 议会席位联网搜索 / FULL 功率(D5-3 余量) | 需席位级工具循环(runner 现为纯文本流式),独立批次 |
 | 记忆主题聚合派生文档(D5-4 余量) | iOS 独占大型子系统(聚类+派生文档+查看 UI),独立批次 |
 | 小说章节裁决卡 / 章节计划提案专用 UI(D7-1/D7-2) | 通用管线已闭环:候选评审原子提交(裁决语义)+ novel_workspace_write patch plan/this-chapter.md 走提案卡 diff→验收写回;专用 UI 为锦上添花,backlog |
+| Recipes(D8-1) | iOS 实现 6472 行/5 文件(Models/Store/Runner/Tools/View);端内最小闭环(manifest 校验+runner+recipe__name 工具+列表 UI)估 1500-2500 行,独立批次;基准 ~/Downloads/AI/amberagent-ios/iosApp/iosApp/IOSRecipe*.swift |
+| 动态插件(D8-2) | 更大子系统(自有 DYNAMIC_PLUGIN_IMPLEMENTATION_PLAN.md;试运行+expected_result+hash 注册+插件中心),独立批次 |
 
 ---
 
@@ -142,9 +144,8 @@
 
 ## 收尾记录(执行中)
 
-**已完成提交**:D0(13 项,审查 3P1+4P2 已修,真机验证)/ D1(3 项,审查 1P1 已修,真机验证)/ D2(2 项,审查 1P0+2P1 已修,真机验证自选目录全链路)/ D3(3 项落地+3 项登记,构建过;**D3 的 subagent 审查与真机截图待补**——窗口资源耗尽前提交,下窗口先补审 D3 再进 D4)。
+**已完成提交**:D0(13 项,审查 3P1+4P2 已修,真机验证)/ D1(3 项,审查 1P1 已修,真机验证)/ D2(2 项,审查 1P0+2P1 已修,真机验证自选目录全链路)/ D3(3 项落地+3 项登记,自检补审 PASS;subagent 供应商 quota 故障期间改自检+截图回路,恢复后可补审)/ D4(备份按类别导出/恢复,真机验证)/ D5(Jev 三用途/模型池 UI/悬浮条收起/动态席位/污染检测)/ D6(WebMount 4 件+飞书文档六件+Cookie 导入,真机验证)/ D7(Mermaid/长图导出/复制格式;D7-1/D7-2 经通用管线闭环,专用 UI 登记 backlog)/ D8(Recipes/动态插件调研裁定:规模独立批次,登记)。
 
-**下窗口接续点**:
-1. 先补 D3 subagent 审查(余额解析/导入互通/内置工具消费链)+ 真机服务商页截图。
-2. D4 备份完整化(恢复范围勾选/按类别导出)→ D5 Agent 体系 → D6 WebMount → D7 小说+渲染 → D8 Recipes/插件评估。
-3. 设计规范/铁律/验证回路见本文件头部;sess_165b90ed 胶囊 = 二级页 iOS 风骨架。
+**M5(D0–D2)✅ / M6(D3–D4)✅ / M7(D5–D6)✅ / M8(D7–D8)✅(裁定收口)**
+
+**遗留独立批次(均已在「范围裁定」登记)**:终端 SSH(rust-napi)/多会话并行生成/按用途 Provider Override/Vertex SA/Antigravity/Recipes/动态插件/Jev 审批分诊+Web 自动化/议会席位联网+FULL 功率/记忆主题聚合/WebMount 通用 oauth_connect+site_adapter+fetch_replay+run_goal。
