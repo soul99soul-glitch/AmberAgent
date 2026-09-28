@@ -104,6 +104,43 @@ export interface SubAgentRun {
   updatedAtMs: number;
 }
 
+export interface SubAgentActivityPresentation {
+  label: string;
+  tone: 'success' | 'error' | 'warning';
+  icon: 'check' | 'close';
+}
+
+const activityStatusLabel = (status: SubAgentRunStatus): string => {
+  if (status === 'completed') return '已完成';
+  if (status === 'failed') return '失败';
+  if (status === 'cancelled') return '已取消';
+  if (status === 'timed_out') return '超时';
+  if (status === 'interrupted') return '已中断';
+  if (status === 'approval_required') return '等待审批';
+  return '运行中';
+};
+
+export const subAgentActivityPresentation = (runs: SubAgentRun[]): SubAgentActivityPresentation => {
+  let tone: 'success' | 'error' | 'warning' = 'success';
+  for (const run of runs) {
+    if (run.status === 'failed' || run.status === 'timed_out') tone = 'error';
+    else if (run.status !== 'completed' && tone !== 'error') tone = 'warning';
+  }
+  const parts: string[] = [];
+  const statuses: SubAgentRunStatus[] = [
+    'completed', 'failed', 'cancelled', 'timed_out', 'interrupted', 'approval_required', 'running',
+  ];
+  for (const status of statuses) {
+    const count: number = runs.filter((run: SubAgentRun): boolean => run.status === status).length;
+    if (count > 0) parts.push(`${activityStatusLabel(status)} ${count} 个`);
+  }
+  return {
+    label: runs.length === 1 ? `子代理${activityStatusLabel(runs[0].status)}` : `子代理：${parts.join(' · ')}`,
+    tone,
+    icon: tone === 'success' ? 'check' : 'close',
+  };
+};
+
 export interface SubAgentRunInit {
   runId: string;
   parentConversationId: string;

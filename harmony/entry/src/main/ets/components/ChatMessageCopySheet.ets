@@ -3,7 +3,7 @@
 //   供选区复制/全部复制;ArkUI 用 bindSheet 实现(待接入 ChatPage)
 //   空状态:无 text part 时显示提示
 import type { UIMessage, UIMessagePartText } from '@amber/chat-domain';
-import { toText } from '@amber/chat-domain';
+import { messageCopyText, textPartCopyText } from '@amber/chat-domain';
 import { INK, INK2, INK3, ACCENT, SURFACE, SURFACE2, LINE, BODY, META } from '../design/tokens.ets';
 import { pasteboard } from '@kit.BasicServicesKit';
 
@@ -21,21 +21,9 @@ export struct ChatMessageCopySheet {
     board.setDataSync(pasteboard.createData(pasteboard.MIMETYPE_TEXT_PLAIN, text));
   }
 
-  // 全部复制文本:纯文本 = toText;Markdown = 结构重建(text 原样/
-  //   reasoning 引用块/tool 标记行)
+  // 全部复制与逐段复制共用格式转换;Markdown 保留 reasoning/tool 结构。
   private wholeText(): string {
-    if (!this.formatMarkdown) return toText(this.message);
-    let md: string = '';
-    for (const p of this.message.parts) {
-      if (p.type === 'text') {
-        md += `${p.text}\n\n`;
-      } else if (p.type === 'reasoning') {
-        md += `> **思考过程:**\n> ${p.reasoning.replace(/\n/g, '\n> ')}\n\n`;
-      } else if (p.type === 'tool') {
-        md += `**工具调用:** \`${p.toolName}\`\n\n`;
-      }
-    }
-    return md.trim();
+    return messageCopyText(this.message, this.formatMarkdown);
   }
 
   build(): void {
@@ -96,7 +84,7 @@ export struct ChatMessageCopySheet {
             Text('复制此段').fontSize(META).fontColor(ACCENT)
               .padding({ left: 16, bottom: 8 })
               .onClick((): void => {
-                this.copyToClipboard(p.text);
+                this.copyToClipboard(textPartCopyText(p.text, this.formatMarkdown));
                 this.onDismiss();
               })
           }

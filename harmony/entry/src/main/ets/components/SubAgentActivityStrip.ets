@@ -2,12 +2,13 @@
 //
 // 数据源:SubAgentManager.listActive()(内存态运行表);1s 轮询刷新(计时语义),
 //   不往 domain 加响应式管道。点按 → 来源会话(parentConversationId)。
-// 无运行中子代理时自隐(空渲染);D5-2:全部完成后保留 4s「已完成」再自隐。
+// 无运行中子代理时自隐(空渲染);D5-2:结束后保留 4s 真实终态再自隐。
 
 import { router } from '@kit.ArkUI';
-import type { SubAgentManager, SubAgentRun } from '@amber/chat-domain';
+import type { SubAgentManager, SubAgentRun, SubAgentActivityPresentation } from '@amber/chat-domain';
+import { subAgentActivityPresentation } from '@amber/chat-domain';
 import { getSubAgentManager } from '../di/AppContainer.ets';
-import { ACCENT, INK2, INK3, LINE, META, SURFACE, SUCCESS_FG } from '../design/tokens.ets';
+import { ACCENT, INK2, INK3, LINE, META, SURFACE, SUCCESS_FG, ERROR, WARNING_FG } from '../design/tokens.ets';
 import { Icon } from './ui/Icon.ets';
 
 @Component
@@ -15,7 +16,7 @@ export struct SubAgentActivityStrip {
   @StorageProp('accentColor') accentColorStore: string = ACCENT;
   @State runs: SubAgentRun[] = [];
   @State nowMs: number = Date.now();
-  // D5-2:完成时刻(>0 时 runs 冻结展示「已完成」,4s 后清空)
+  // D5-2:结束时刻(>0 时 runs 保存真实终态,4s 后清空)
   @State completedAtMs: number = 0;
   private timer: number = -1;
   private alive: boolean = false;
@@ -42,7 +43,13 @@ export struct SubAgentActivityStrip {
         this.completedAtMs = 0;
         this.runs = next;
       } else if (this.runs.length > 0 && this.completedAtMs === 0) {
-        this.completedAtMs = Date.now();
+        const ended: SubAgentRun[] = [];
+        for (const previous of this.runs) {
+          const snapshot: SubAgentRun | null = mgr.snapshot(previous.runId);
+          if (snapshot !== null) ended.push(snapshot);
+        }
+        this.runs = ended;
+        this.completedAtMs = ended.length > 0 ? Date.now() : 0;
       } else if (this.completedAtMs > 0 && Date.now() - this.completedAtMs >= 4000) {
         this.runs = [];
         this.completedAtMs = 0;
@@ -64,6 +71,15 @@ export struct SubAgentActivityStrip {
     return name.length > 0 ? `${name} · ${head}` : head;
   }
 
+  private terminalPresentation(): SubAgentActivityPresentation {
+    return subAgentActivityPresentation(this.runs);
+  }
+
+  private terminalColor(): string {
+    const tone: string = this.terminalPresentation().tone;
+    return tone === 'success' ? SUCCESS_FG : (tone === 'error' ? ERROR : WARNING_FG);
+  }
+
   private openSource(run: SubAgentRun): void {
     if (run.parentConversationId.length === 0) return;
     const params: Record<string, string> = {};
@@ -75,7 +91,7 @@ export struct SubAgentActivityStrip {
     if (this.runs.length > 0) {
       Row() {
         if (this.completedAtMs > 0) {
-          Icon({ name: 'check', iconSize: 12, color: SUCCESS_FG })
+          Icon({ name: this.terminalPresentation().icon, iconSize: 12, color: this.terminalColor() })
         } else {
           // 呼吸点(1s 轮询自然形成的脉动,不加动画框架)
           Column()
@@ -85,8 +101,8 @@ export struct SubAgentActivityStrip {
         }
         Text(this.completedAtMs > 0
           ? (this.runs.length === 1
-            ? `子代理已完成 · ${this.topLabel(this.runs[0])}`
-            : `子代理已完成 ${this.runs.length} 个`)
+            ? `${this.terminalPresentation().label} · ${this.topLabel(this.runs[0])}`
+            : this.terminalPresentation().label)
           : (this.runs.length === 1
             ? `子代理运行中 · ${this.topLabel(this.runs[0])} · ${this.elapsed(this.runs[0])}`
             : `子代理运行中 ${this.runs.length} 个 · ${this.elapsed(this.runs[0])}`))

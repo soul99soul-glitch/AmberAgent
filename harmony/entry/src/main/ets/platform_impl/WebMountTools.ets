@@ -24,7 +24,7 @@ import type { AbortSignalLike } from '@amber/deepread-domain';
 import type {
   AgentTool, JsonValue, JsonObject, UIMessagePart, InputSchemaObj, KeyValueStore,
 } from '@amber/chat-domain';
-import { makeAgentTool, makeInputSchemaObj } from '@amber/chat-domain';
+import { makeAgentTool, makeInputSchemaObj, fetchWebMountRequest } from '@amber/chat-domain';
 import type { WebMountSession } from './WebMountSession.ets';
 import {
   loadWebMountSites, saveWebMountSites, makeUserSite, siteAllowsUrl, sitesDeniedMessage,
@@ -97,7 +97,7 @@ const loadWebMountGlobalEnabled = async (kv: KeyValueStore): Promise<boolean> =>
 // OR 语义(LocalTools.kt:161-166):global || assistant 勾选 webmount。
 //   设置页显式关闭全局只终止**当前**会话;下一次合法建 tools / 页面操作时重新按 OR
 //   求值,助手单独勾选时仍可继续。
-const syncEnabled = async (
+export const syncEnabled = async (
   session: WebMountSession, kv: KeyValueStore, assistantEnabled: boolean,
 ): Promise<boolean> => {
   const global: boolean = await loadWebMountGlobalEnabled(kv);
@@ -716,7 +716,7 @@ export const createWebMountTools = (
       'method': { type: 'string', description: 'HTTP method (default GET).' },
       'body': { type: 'string', description: 'Optional request body (POST/PUT, JSON).' },
     } as JsonObject, ['url']),
-    execute: async (input: JsonValue): Promise<UIMessagePart[]> => {
+    execute: async (input: JsonValue, signal?: AbortSignalLike): Promise<UIMessagePart[]> => {
       const raw: string = strOf(input, 'url', '');
       if (raw.length === 0) throw new Error('url is required');
       const m: string = strOf(input, 'method', 'GET').toUpperCase();
@@ -740,10 +740,10 @@ export const createWebMountTools = (
       const headers: Record<string, string> = {};
       if (cookie.length > 0) headers['Cookie'] = cookie;
       if (body.length > 0) headers['Content-Type'] = 'application/json';
-      const resp = await getAppContainer().httpClient.fetch({
+      const resp = await fetchWebMountRequest(getAppContainer().httpClient, {
         url: check.url, method: method, headers: headers,
         body: body.length > 0 ? body : undefined,
-      }, { signal: undefined });
+      }, (): Promise<boolean> => syncEnabled(session, kv, assistantEnabled), signal);
       const text: string = typeof resp.body === 'string' ? resp.body : JSON.stringify(resp.body);
       return textPart({
         ok: resp.status >= 200 && resp.status < 300,

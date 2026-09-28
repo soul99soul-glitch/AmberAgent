@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import { strict as assert } from 'node:assert';
-import { parseTask, validateSeats, resolveSynthesisModelId, buildDefaultSeats } from '../main/ets/council/validator.ts';
+import { parseTask, validateSeats, resolveSynthesisModelId, buildDefaultSeats, resolveCouncilDynamicSeats } from '../main/ets/council/validator.ts';
 import type { CouncilTaskInput } from '../main/ets/council/validator.ts';
 import { makeSeat, makeRuntimeSetting } from '../main/ets/council/models.ts';
 import type { ModelCouncilRuntimeSetting, ModelCouncilSeat } from '../main/ets/council/models.ts';
@@ -125,4 +125,33 @@ test('parseTask: setting.enabled=false → fail closed(任何调用路径拦截)
   assert.throws(() => parseTask(
     { mode: 'compare', objective: 'q' },
     makeRuntimeSetting({ enabled: false }), pool), /模型议会/);
+});
+
+test('dynamic seat selection exposes only seats admitted by the same runner validator', () => {
+  const dynamic = [makeSeat({ name: '成本', role: 'cost' }), makeSeat({ name: '伦理', role: 'ethics' })];
+  const s = setting({ maxSeats: 4 });
+  const selected = resolveCouncilDynamicSeats(s, [], pool, dynamic);
+  assert.deepEqual(selected.seats.map(seat => seat.seatId), [dynamic[0].seatId]);
+  assert.equal(selected.remainingCapacity, 0);
+  const spec = parseTask({ mode: 'compare', objective: 'q', extraSeats: selected.seats }, s, pool);
+  assert.ok(spec.seats.some(seat => seat.seatId === selected.seats[0].seatId));
+  assert.equal(spec.seats.length, 4);
+  const full = resolveCouncilDynamicSeats(s, ['product'], pool, dynamic);
+  assert.deepEqual(full.seats, []);
+  assert.equal(full.remainingCapacity, 0);
+});
+
+test('dynamic seat selection preserves core seats and deduplicates default, lens and dynamic roles', () => {
+  const user = makeSeat({ name: '已有成本席', role: 'cost' });
+  const s = setting({ defaultSeats: [user], maxSeats: 8 });
+  const dynamic = [
+    makeSeat({ name: '伪核心', role: 'judge' }), makeSeat({ name: '重复成本', role: 'cost' }),
+    makeSeat({ name: '重复产品', role: 'product' }), makeSeat({ name: '伦理', role: 'ethics' }),
+    makeSeat({ name: '重复伦理', role: 'ethics' }),
+  ];
+  const selected = resolveCouncilDynamicSeats(s, ['product'], pool, dynamic);
+  assert.deepEqual(selected.seats.map(seat => seat.seatId), [dynamic[3].seatId]);
+  assert.equal(selected.remainingCapacity, 2);
+  const effective = buildDefaultSeats(s, ['product'], pool, selected.seats);
+  assert.deepEqual(effective.slice(0, 3).map(seat => seat.role), ['supporter', 'opponent', 'judge']);
 });

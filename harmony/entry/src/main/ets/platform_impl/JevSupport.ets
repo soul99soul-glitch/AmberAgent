@@ -10,7 +10,8 @@ import {
   loadJevSettings, makeJevSettings,
   JEV_TYPESAFE_ENDPOINT, JEV_VERCEL_DEFAULT_BASE,
   buildJevRequest, decodeJevResponse,
-  type JevEvaluation, type JevMode, type JevQuestion, type JevSettings,
+  buildJevNoulBatch, readJevNoulBatchProbabilities,
+  type JevEvaluation, type JevMode, type JevQuestion, type JevSettings, type JevNoulBatchSpec,
 } from '@amber/chat-domain';
 import { getAppContainer, getChatKvStore } from '../di/AppContainer.ets';
 import type { ToolSearchReranker, ScoredTool } from '@amber/chat-domain';
@@ -190,28 +191,10 @@ export const jevNoulBatch = async (
   purpose: string, query: string, keys: string[], candidates: Record<string, string>,
 ): Promise<JevNoulBatchResult | null> => {
   if (keys.length === 0) return null;
-  const questions: Record<string, JevQuestion> = {};
-  for (let idx = 0; idx < keys.length; idx++) {
-    questions[`c${idx}`] = {
-      kind: 'noul',
-      instructions: `判断该项是否与用户意图相关(用途:${purpose})。`,
-      trueCriteria: '与意图直接相关,或有助于完成意图',
-      falseCriteria: '与意图无关,或会干扰完成意图',
-    };
-  }
-  const stateCandidates: JsonObject = {};
-  for (const k of keys) stateCandidates[k] = candidates[k];
-  const state: JsonObject = { query: query.substring(0, 500), candidates: stateCandidates };
-  const result: JevEvaluateResult = await jevEvaluate(state, questions);
+  const batch: JevNoulBatchSpec = buildJevNoulBatch(purpose, query, keys, candidates);
+  const result: JevEvaluateResult = await jevEvaluate(batch.state, batch.questions);
   if (!result.ok || result.evaluation === null) return null;
-  const probs: Record<string, number> = {};
-  for (let idx = 0; idx < keys.length; idx++) {
-    const answer = result.evaluation.answers[`c${idx}`];
-    if (answer !== undefined && answer.kind === 'noul') {
-      probs[keys[idx]] = answer.probability;
-    }
-  }
-  return { probabilities: probs, shadow: result.shadow };
+  return { probabilities: readJevNoulBatchProbabilities(keys, result.evaluation), shadow: result.shadow };
 };
 
 export interface JevChoiceResult {

@@ -492,7 +492,7 @@ struct SettingSubAgentPage {
           })
             .width('100%').height(120).fontSize(TEXT_STYLES.body.size)
             .fontWeight(TEXT_STYLES.body.weight).lineHeight(TEXT_STYLES.body.lineHeight)
-            .fontFamily(TEXT_STYLES.body.family).fontColor(INK)
+            .fontFamily(TEXT_STYLES.body.family).fontColor(INK).placeholderColor(INK3)
             .backgroundColor(SURFACE2).borderRadius(8)
             .onChange((v: string): void => { this.updateRolePrompt(def.id, v); })
           Row() {
@@ -580,7 +580,7 @@ struct SettingSubAgentPage {
       }
     }
     .width('100%').alignItems(VerticalAlign.Center)
-    .constraintSize({ minHeight: 36 })
+    .constraintSize({ minHeight: 52 })
     .onClick((): void => { this.updateRoleModel(roleId, modelUuid); })
   }
 

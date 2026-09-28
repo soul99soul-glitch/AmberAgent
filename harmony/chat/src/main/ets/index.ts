@@ -3,6 +3,8 @@
 
 export type { JsonValue, JsonObject } from './chat/json.ts';
 export { newId, nowIso } from './chat/ids.ts';
+export type { ImageExportPage } from './chat/image_export_pages.ts';
+export { imageExportPages } from './chat/image_export_pages.ts';
 
 export type { TokenUsage } from './chat/usage.ts';
 export { mergeUsage } from './chat/usage.ts';
@@ -378,6 +380,7 @@ export type {
 // 会话导出 + Cron 执行器 (completion spiral Phase 2-3)
 export {
   exportConversationMarkdown, exportConversationJson, exportConversationJsonString,
+  messageImageExportText,
   exportFileNameFor, maskSensitiveJsonObject,
 } from './chat/conversation_export.ts';
 export type { ConversationExportOptions, ConversationExportJson } from './chat/conversation_export.ts';
@@ -394,6 +397,7 @@ export {
   conversationFromSyncDto, settingsFromSyncPayload,
   SYNC_ARCHIVE_VERSION, MANIFEST_ENTRY, PAYLOAD_ENTRY,
 } from './chat/sync_snapshot.ts';
+export { buildSyncSettingsBlob, applySyncRestoreSettings } from './chat/settings_backup.ts';
 export type {
   SyncManifest, SyncCryptoPort, SyncPayload, SyncBackupInput, SyncInspectPreview, SyncRestoreResult,
   SyncConversationDto, SyncRestoreSettings,
@@ -410,6 +414,10 @@ export {
 export type {
   WebMountCryptoPort, WebMountPkce, WebMountOAuthToken, WebMountOAuthTokenStore,
 } from './chat/webmount_oauth.ts';
+export { assertWebMountRequestActive, fetchWebMountRequest } from './chat/webmount_request.ts';
+export type { WebMountEnabledCheck } from './chat/webmount_request.ts';
+export { FeishuDocsClient, FEISHU_APP_ID_KEY, FEISHU_APP_SECRET_KEY } from './chat/feishu_docs_client.ts';
+export type { FeishuDocsTokenStore, FeishuDocsClientDependencies } from './chat/feishu_docs_client.ts';
 export {
   mergeContinueCandidates, continueStatusText, STATUS_RANK, SOURCE_LABEL,
 } from './chat/continue_candidate.ts';
@@ -656,6 +664,8 @@ export {
   serializeProviderSetting, parseProviderSetting,
   serializeProviderSettingList, parseProviderSettingList,
 } from './chat/provider_settings_serialize.ts';
+export { providerFromImportJson } from './chat/provider_import.ts';
+export { providerBalanceRequestIdentity } from './chat/provider_balance.ts';
 
 // D-133:TopModelMenu 顶部模型快速切换菜单的数据装配纯逻辑
 //   (Android feature/ui/components/ai/TopModelMenu.kt)
@@ -1079,12 +1089,14 @@ export type {
   SubAgentToolProfile, SubAgentTaskSpec, SubAgentTaskSpecInit,
   SubAgentRunStatus, SubAgentResult, SubAgentResultInit,
   SubAgentRun, SubAgentRunInit, SubAgentValidationResult,
+  SubAgentActivityPresentation,
 } from './chat/subagent_models.ts';
 export {
   EXTENDED_SUB_AGENT_TIMEOUT_MS, EXTENDED_SUB_AGENT_OUTPUT_BUDGET_CHARS,
   makeSubAgentTaskSpec, subAgentRunStatusRunning,
   makeSubAgentResult,
   makeSubAgentRun, makeSubAgentValidationResult,
+  subAgentActivityPresentation,
 } from './chat/subagent_models.ts';
 
 // ===== D-132a Task 2:subagent 稳定名称与验证器 =====
@@ -1178,6 +1190,7 @@ export { markdownToHtml } from './chat/markdown_html.ts';
 
 // ===== P0:Markdown→block AST(替代 RichText,原生 ArkUI 渲染) =====
 export { parseMarkdown, parseInline, orderedListLabel } from './chat/markdown_blocks.ts';
+export { markdownToPlainText, textPartCopyText, messageCopyText } from './chat/message_copy.ts';
 export type {
   MarkdownBlock,
   MarkdownBlockHeading,
@@ -1210,9 +1223,11 @@ export type {
   JevNoulAnswer, JevChoiceAnswer, JevAnswer,
   JevUsage, JevEvaluation, JevCallOutcome, JevCallOk, JevCallSkipped, JevCallFailed,
 } from './chat/jev_models.ts';
-export { buildJevRequest, decodeJevResponse } from './chat/jev_client.ts';
+export {
+  buildJevRequest, decodeJevResponse, buildJevNoulBatch, readJevNoulBatchProbabilities,
+} from './chat/jev_client.ts';
 export type { ToolSearchReranker, ScoredTool } from './chat/builtin_introspection_tools.ts';
-export type { JevRequestSpec } from './chat/jev_client.ts';
+export type { JevRequestSpec, JevNoulBatchSpec } from './chat/jev_client.ts';
 
 // ===== Phase 1:消息流跟随底部(纯逻辑,零 SDK 依赖) =====
 export type { FollowMode } from './chat/timeline_follow.ts';

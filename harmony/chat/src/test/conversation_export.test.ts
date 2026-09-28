@@ -6,6 +6,7 @@ import assert from 'node:assert/strict';
 import {
   exportConversationMarkdown, exportConversationJson, exportConversationJsonString,
   exportFileNameFor, maskSensitiveJsonObject,
+  messageImageExportText,
 } from '../main/ets/chat/conversation_export.ts';
 import { makeConversation, toMessageNode } from '../main/ets/chat/conversation.ts';
 import { makeUserMessage, makeAssistantMessage, makeUIMessage } from '../main/ets/chat/message.ts';
@@ -65,4 +66,14 @@ test('maskSensitiveJsonObject', () => {
   const nested = masked['nested'] as Record<string, unknown>;
   assert.equal(nested['token'], '***');
   assert.equal(nested['ok'], 'v');
+});
+
+test('image export includes reasoning only when requested', () => {
+  const message = makeUIMessage('assistant', [
+    { type: 'reasoning', reasoning: '比较两种方案', createdAt: '', finishedAt: null, metadata: null },
+    { type: 'text', text: '选用第二种', metadata: null },
+  ]);
+  assert.equal(messageImageExportText(message, false), '选用第二种');
+  assert.equal(messageImageExportText(message, true), '思考过程：\n比较两种方案\n\n选用第二种');
+  assert.equal(messageImageExportText(makeUIMessage('user', []), false), '[非文本内容]');
 });

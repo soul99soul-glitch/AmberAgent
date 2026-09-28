@@ -155,6 +155,32 @@ test('write tool approval resolves the C4 proposal before the same toolCallId co
   assert.equal((await creation.workspaceRead(project.id, path)).content, '新正文');
 });
 
+test('chapter plan write follows the existing tool approval and branch path normalization chain', async () => {
+  const store = createMemoryFileStore();
+  const repository = createFileNovelRepository(store);
+  const creation = createNovelCreation({
+    repository,
+    modelRunning: toolModel(
+      (): string => 'plan/this-chapter.md',
+      async (): Promise<void> => {
+        await creation.workspaceWriteResult(project.id, 'proposal-1', [{
+          operation: 'write', path: 'plan/this-chapter.md', content: '新正文',
+        }]);
+      }),
+    nowMs: (): number => 1_000,
+  });
+  const project = await creation.create('计划提案');
+  assert.equal((await terminal(creation.generate(project.id, '调整本章目标', 'discuss'))).kind, 'waiting_user');
+  assert.equal((await creation.workspaceRead(project.id, 'plan/this-chapter.md')).content, '');
+  assert.equal((await terminal(creation.continueTool(
+    project.id, 'write-call-1', { kind: 'approved' }))).kind, 'completed');
+  const reloaded = createFileNovelRepository(store);
+  assert.equal((await reloaded.loadProject(project.id)).branchSettings.thisChapterPlan, '新正文');
+  const proposal = (await reloaded.workspaceProposals(project.id))[0];
+  assert.equal(proposal.status, 'accepted');
+  assert.equal(proposal.patches[0].path, 'branches/main/plan/this-chapter.md');
+});
+
 test('write execution boundary rejects schema-invalid patch instead of coercing it to an empty write', async () => {
   const repository = createFileNovelRepository(createMemoryFileStore());
   const creation = createNovelCreation({

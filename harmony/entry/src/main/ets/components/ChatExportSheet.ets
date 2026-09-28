@@ -1,16 +1,15 @@
 // ChatExportSheet — 导出格式选择 sheet(G4-S4)
 // Android 基准: Export.kt(823 行)
 // 必要: Markdown 导出(一键) + 图片导出选项(展开推理开关)
-// 降级(跳过): ExportedChatImage bitmap 渲染(componentSnapshot) / FileProvider 分享
-//   图片导出降级为"功能入口"(提示需设备支持),Markdown 导出完整实现
-import type { UIMessage, Conversation } from '@amber/chat-domain';
-import { toText } from '@amber/chat-domain';
+// Markdown 复制与最近 40 条长图相册导出；由聊天消息操作菜单打开。
+import type { UIMessage, Conversation, ImageExportPage } from '@amber/chat-domain';
+import { exportConversationMarkdown, messageImageExportText, imageExportPages } from '@amber/chat-domain';
 import { ACCENT, BODY, INK, INK2, INK3, INK4, LABEL, LINE, META, OVERLAY, SURFACE, SURFACE2, BG, USER_BG, USER_INK } from '../design/tokens.ets';
 import { Icon } from './ui/Icon.ets';
 import { pasteboard } from '@kit.BasicServicesKit';
-import { promptAction } from '@kit.ArkUI';
+import { display, promptAction } from '@kit.ArkUI';
 import { image } from '@kit.ImageKit';
-import { savePixelMapToAlbum } from '../platform_impl/ImageSaveSupport.ets';
+import { packPixelMapToCache, saveImageFilesToAlbum, removeCachedImageFiles } from '../platform_impl/ImageSaveSupport.ets';
 
 // D7-4:长图渲染条数上限(超出提示仅最近 N 条)
 const IMAGE_EXPORT_MAX_MESSAGES: number = 40;
@@ -23,36 +22,36 @@ export struct ChatExportSheet {
   onDismiss: () => void = (): void => {};
   @State expandReasoning: boolean = false;
   @State renderImageMode: boolean = false;
+  @State exportMessages: UIMessage[] = [];
+  @State exportTitle: string = '';
+  @State exportSubtitle: string = '';
+  @State exportWidth: number = 360;
+  @State exportPageHeight: number = 600;
+  @State exportProgress: string = '';
+  private imageIncludeReasoning: boolean = false;
+  private screenHeightPx: number = 0;
+  private captureStarted: boolean = false;
+  private scroller: Scroller = new Scroller();
+  private renderTimer: number = -1;
+  private finishFrame: (() => void) | null = null;
+  private alive: boolean = false;
+
+  aboutToAppear(): void {
+    this.alive = true;
+  }
+
+  aboutToDisappear(): void {
+    this.alive = false;
+    if (this.renderTimer !== -1) clearTimeout(this.renderTimer);
+    this.renderTimer = -1;
+    if (this.finishFrame !== null) this.finishFrame();
+    this.finishFrame = null;
+  }
 
   // 导出为 Markdown 文本
   private exportToMarkdown(): string {
-    let md: string = '';
-    // 标题
-    const title: string = this.conversation !== null && this.conversation.title.length > 0
-      ? this.conversation.title : '未命名对话';
-    md += `# ${title}\n\n`;
-    md += `> 导出时间: ${new Date().toLocaleString()}\n\n`;
-    md += `---\n\n`;
-
-    // 消息
-    for (const msg of this.messages) {
-      const role: string = msg.role === 'user' ? '👤 **用户**' : '🤖 **助手**';
-      md += `### ${role}\n\n`;
-      for (const part of msg.parts) {
-        if (part.type === 'text') {
-          md += `${part.text}\n\n`;
-        } else if (part.type === 'reasoning' && this.expandReasoning) {
-          md += `> **思考过程:**\n> ${part.reasoning.replace(/\n/g, '\n> ')}\n\n`;
-        } else if (part.type === 'tool') {
-          md += `**工具调用:** \`${part.toolName}\`\n\n`;
-          if (part.output.length > 0) {
-            md += '```\n' + JSON.stringify(part.output, null, 2) + '\n```\n\n';
-          }
-        }
-      }
-      md += `---\n\n`;
-    }
-    return md;
+    return this.conversation === null ? '' : exportConversationMarkdown(
+      this.conversation, { includeReasoning: this.expandReasoning });
   }
 
   private copyMarkdown(): void {
@@ -63,74 +62,141 @@ export struct ChatExportSheet {
     this.onDismiss();
   }
 
-  // D7-4:长图导出 — 离屏渲染最近 N 条文本消息 → componentSnapshot → 相册
+  // 等待状态对应的一帧；截图再强制等待绘制完成，不保留常驻定时器。
+  private waitRenderFrame(): Promise<void> {
+    return new Promise<void>((resolve: () => void): void => {
+      this.finishFrame = resolve;
+      this.renderTimer = setTimeout((): void => {
+        this.renderTimer = -1;
+        this.finishFrame = null;
+        resolve();
+      }, 32);
+    });
+  }
+
+  // D7-4:实测内容高度后按屏幕尺寸截图；普通内容仍是一张。
   private startImageExport(): void {
+    if (this.renderImageMode) return;
     if (this.messages.length === 0) {
       promptAction.showToast({ message: '没有可导出的消息', duration: 1500 });
       return;
     }
-    this.renderImageMode = true;
-    setTimeout((): void => {
-      this.getUIContext().getComponentSnapshot().get('chat_export_image')
-        .then((pm: image.PixelMap): void => {
-          savePixelMapToAlbum(pm).catch((): void => {});
-          this.renderImageMode = false;
-          this.onDismiss();
-        })
-        .catch((): void => {
-          this.renderImageMode = false;
-          promptAction.showToast({ message: '导出失败', duration: 1500 });
-        });
-    }, 500);
+    try {
+      const screen: display.Display = display.getDefaultDisplaySync();
+      this.screenHeightPx = screen.height;
+      this.exportWidth = px2vp(Math.min(screen.width, Math.floor(vp2px(720))));
+      this.exportPageHeight = px2vp(screen.height);
+      this.exportMessages = this.messages.slice(-IMAGE_EXPORT_MAX_MESSAGES);
+      this.imageIncludeReasoning = this.expandReasoning;
+      this.exportTitle = this.conversation !== null && this.conversation.title.length > 0
+        ? this.conversation.title : '未命名对话';
+      this.exportSubtitle = this.messages.length > IMAGE_EXPORT_MAX_MESSAGES
+        ? `仅最近 ${IMAGE_EXPORT_MAX_MESSAGES} 条 · ${new Date().toLocaleDateString()}`
+        : new Date().toLocaleDateString();
+      this.captureStarted = false;
+      this.exportProgress = '正在测量内容…';
+      this.renderImageMode = true;
+    } catch (error) {
+      promptAction.showToast({ message: '导出失败:无法读取屏幕尺寸', duration: 1500 });
+    }
   }
 
-  private imageExportMessages(): UIMessage[] {
-    if (this.messages.length <= IMAGE_EXPORT_MAX_MESSAGES) return this.messages;
-    return this.messages.slice(this.messages.length - IMAGE_EXPORT_MAX_MESSAGES);
+  private onExportContentMeasured(height: number): void {
+    if (!this.renderImageMode || this.captureStarted || height <= 0) return;
+    this.captureStarted = true;
+    this.captureImagePages(height);
+  }
+
+  private async captureImagePages(contentHeight: number): Promise<void> {
+    const files: string[] = [];
+    try {
+      const pages: ImageExportPage[] = imageExportPages(vp2px(contentHeight), this.screenHeightPx);
+      for (let index: number = 0; index < pages.length; index++) {
+        if (!this.alive || !this.show) return;
+        const page: ImageExportPage = pages[index];
+        this.exportProgress = pages.length === 1 ? '正在生成图片…'
+          : `正在生成第 ${index + 1}/${pages.length} 张图片…`;
+        this.exportPageHeight = px2vp(page.height);
+        await this.waitRenderFrame();
+        if (!this.alive || !this.show) return;
+        this.scroller.scrollTo({ xOffset: 0, yOffset: px2vp(page.top), animation: false });
+        await this.waitRenderFrame();
+        if (!this.alive || !this.show) return;
+        if (Math.abs(vp2px(this.scroller.currentOffset().yOffset) - page.top) > 1) {
+          throw new Error('内容滚动尚未就绪');
+        }
+        const pm: image.PixelMap = await this.getUIContext().getComponentSnapshot()
+          .get('chat_export_image', { scale: 1, waitUntilRenderFinished: true });
+        try {
+          files.push(await packPixelMapToCache(pm));
+        } finally {
+          await pm.release();
+        }
+      }
+      if (!this.alive || !this.show) return;
+      this.exportProgress = files.length === 1 ? '请确认保存图片'
+        : `内容较长，已分为 ${files.length} 张，请确认保存`;
+      const saved: boolean = await saveImageFilesToAlbum(files);
+      if (saved && this.alive && this.show) this.onDismiss();
+    } catch (error) {
+      if (this.alive && this.show) {
+        const message: string = error instanceof Error ? error.message : String(error);
+        promptAction.showToast({ message: `导出失败:${message}`, duration: 2000 });
+      }
+    } finally {
+      removeCachedImageFiles(files);
+      if (this.alive) this.renderImageMode = false;
+    }
   }
 
   private messagePlainText(msg: UIMessage): string {
-    const t: string = toText(msg).trim();
-    return t.length > 0 ? t : '[非文本内容]';
+    return messageImageExportText(msg, this.imageIncludeReasoning);
   }
 
   @Builder
   ExportImageRender(): void {
-    Column() {
-      Text(this.conversation !== null && this.conversation.title.length > 0
-        ? this.conversation.title : '未命名对话')
-        .fontSize(17).fontWeight(FontWeight.Bold).fontColor(INK)
-        .width('100%').margin({ bottom: 6 })
-      Text(this.messages.length > IMAGE_EXPORT_MAX_MESSAGES
-        ? `仅最近 ${IMAGE_EXPORT_MAX_MESSAGES} 条 · ${new Date().toLocaleDateString()}`
-        : `${new Date().toLocaleDateString()}`)
-        .fontSize(11).fontColor(INK3)
-        .width('100%').margin({ bottom: 14 })
-      ForEach(this.imageExportMessages(), (msg: UIMessage): void => {
-        Column() {
-          Text(msg.role === 'user' ? '用户' : '助手')
-            .fontSize(11).fontColor(INK3).margin({ bottom: 4 })
+    Scroll(this.scroller) {
+      Column() {
+        Text(this.exportTitle)
+          .fontSize(17).fontWeight(FontWeight.Bold).fontColor(INK)
+          .width('100%').margin({ bottom: 6 })
+        Text(this.exportSubtitle)
+          .fontSize(11).fontColor(INK3)
+          .width('100%').margin({ bottom: 14 })
+        ForEach(this.exportMessages, (msg: UIMessage): void => {
           Column() {
-            Text(this.messagePlainText(msg))
-              .fontSize(14).fontColor(msg.role === 'user' ? USER_INK : INK)
-              .lineHeight(21)
+            Text(msg.role === 'user' ? '用户' : '助手')
+              .fontSize(11).fontColor(INK3).margin({ bottom: 4 })
+            Column() {
+              Text(this.messagePlainText(msg))
+                .fontSize(14).fontColor(msg.role === 'user' ? USER_INK : INK)
+                .lineHeight(21)
+            }
+            .padding(12)
+            .backgroundColor(msg.role === 'user' ? USER_BG : SURFACE)
+            .borderRadius(12)
+            .border({ width: msg.role === 'user' ? 0 : 0.5, color: LINE })
+            .constraintSize({ maxWidth: '85%' })
           }
-          .padding(12)
-          .backgroundColor(msg.role === 'user' ? USER_BG : SURFACE)
-          .borderRadius(12)
-          .border({ width: msg.role === 'user' ? 0 : 0.5, color: LINE })
-          .constraintSize({ maxWidth: '85%' })
-        }
-        .width('100%')
-        .alignItems(msg.role === 'user' ? HorizontalAlign.End : HorizontalAlign.Start)
-        .margin({ bottom: 10 })
-      }, (msg: UIMessage): string => msg.id)
+          .width('100%')
+          .alignItems(msg.role === 'user' ? HorizontalAlign.End : HorizontalAlign.Start)
+          .margin({ bottom: 10 })
+        }, (msg: UIMessage): string => msg.id)
+      }
+      .width('100%')
+      .padding(20)
+      .onAreaChange((_old: Area, area: Area): void => {
+        this.onExportContentMeasured(Number(area.height));
+      })
     }
-    .width(720)
-    .padding(20)
+    .width(this.exportWidth)
+    .height(this.exportPageHeight)
+    .scrollable(ScrollDirection.Vertical)
+    .scrollBar(BarState.Off)
+    .enableScrollInteraction(false)
     .backgroundColor(BG)
     .id('chat_export_image')
-    .position({ x: -2400, y: 0 })
+    .position({ x: -this.exportWidth - 100, y: 0 })
   }
 
   build(): void {
@@ -168,10 +234,11 @@ export struct ChatExportSheet {
             Row() {
               Icon({ name: 'image', iconSize: 20, color: INK2 }).margin({ right: 12 })
               Column() {
-                Text('图片').fontSize(BODY).fontColor(INK).fontWeight(FontWeight.Medium)
+                Text(this.renderImageMode ? this.exportProgress : '图片')
+                  .fontSize(BODY).fontColor(INK).fontWeight(FontWeight.Medium)
                 Text(this.messages.length > IMAGE_EXPORT_MAX_MESSAGES
-                  ? `导出最近 ${IMAGE_EXPORT_MAX_MESSAGES} 条为长图,存到相册`
-                  : '导出为长图,存到相册')
+                  ? `导出最近 ${IMAGE_EXPORT_MAX_MESSAGES} 条；内容较长时分为多张图片`
+                  : '导出到相册；内容较长时分为多张图片')
                   .fontSize(LABEL).fontColor(INK3).margin({ top: 2 })
               }
               .alignItems(HorizontalAlign.Start)
@@ -188,7 +255,9 @@ export struct ChatExportSheet {
               Text(this.expandReasoning ? '开启' : '关闭')
                 .fontSize(LABEL)
                 .fontColor(this.expandReasoning ? ACCENT : INK3)
-                .onClick((): void => { this.expandReasoning = !this.expandReasoning; })
+                .onClick((): void => {
+                  if (!this.renderImageMode) this.expandReasoning = !this.expandReasoning;
+                })
             }
             .width('100%')
           }

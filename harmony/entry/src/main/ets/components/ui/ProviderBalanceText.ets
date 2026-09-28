@@ -8,21 +8,30 @@ import { fetchProviderBalance } from '../../platform_impl/BalanceSupport.ets';
 
 @Component
 export struct ProviderBalanceText {
-  @Prop setting: ProviderSetting | null = null;
+  @Prop @Watch('onSettingChange') setting: ProviderSetting | null = null;
   @State balance: string = '~';
   private alive: boolean = false;
+  private requestSeq: number = 0;
 
   aboutToAppear(): void {
     this.alive = true;
+    this.onSettingChange();
+  }
+
+  private onSettingChange(): void {
+    const seq: number = ++this.requestSeq;
+    this.balance = '~';
+    if (!this.alive) return;
     const s: ProviderSetting | null = this.setting;
     if (s === null || !s.balanceOption.enabled) return;
     fetchProviderBalance(s).then((v: string): void => {
-      if (this.alive) this.balance = v;
+      if (this.alive && seq === this.requestSeq) this.balance = v;
     }).catch((): void => {});
   }
 
   aboutToDisappear(): void {
     this.alive = false;
+    ++this.requestSeq;
   }
 
   build(): void {

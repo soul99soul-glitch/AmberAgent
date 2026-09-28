@@ -361,8 +361,9 @@ describe('预算与步数', () => {
   it('main public path clamps maxSteps 1 to 16 observable provider calls', async () => {
     const conv: Conversation = makeConversation('c1', []);
     const script: MessageChunk[][] = [];
+    // 每步参数不同,确保验证步数预算而不是重复调用守护。
     for (let i: number = 0; i < 15; i++) {
-      script.push([toolDelta(`main-clamp-${i}`, 'conversation_search', '{"q":"x"}')]);
+      script.push([toolDelta(`main-clamp-${i}`, 'conversation_search', `{"q":"step-${i}"}`)]);
     }
     script.push([textDelta('final main step')]);
     const provider = scriptedProvider(script);
@@ -377,11 +378,11 @@ describe('预算与步数', () => {
   });
   it('工具循环不止:每步都调工具,直至 FINAL 步隐藏工具后模型纯文本收尾', async () => {
     const conv: Conversation = makeConversation('c1', []);
-    // 16 步(maxSteps 下限):前 15 步返回工具调用,但 FINAL 步(stepIndex=15)
+    // 16 步(maxSteps 下限):前 14 步返回工具调用,FINAL 步(stepIndex=14,remaining=2)
     //   hideTools → provider 无工具可用 → 脚本给文本
     const script: MessageChunk[][] = [];
-    for (let i = 0; i < 15; i++) {
-      script.push([toolDelta(`call-${i}`, 'conversation_search', '{"q":"x"}')]);
+    for (let i = 0; i < 14; i++) {
+      script.push([toolDelta(`call-${i}`, 'conversation_search', `{"q":"step-${i}"}`)]);
     }
     script.push([textDelta('收敛答复')]);
     const provider = scriptedProvider(script);
@@ -400,9 +401,15 @@ describe('预算与步数', () => {
     const lastPart = lastMsg.parts[lastMsg.parts.length - 1];
     assert.equal(lastPart.type, 'text');
     assert.equal((lastPart as { text: string }).text, '收敛答复');
-    // 15 个工具调用全部执行写回同一消息
-    assert.equal(lastMsg.parts.filter((p: UIMessagePart): boolean => p.type === 'tool').length, 15);
-    // FINAL 步(stepIndex=15)隐藏工具(agentLoopShouldHideTools)
+    // 14 个工具调用全部执行写回同一消息,没有隐藏工具后的伪造调用。
+    const toolParts: UIMessagePartTool[] = lastMsg.parts.filter(
+      (p: UIMessagePart): boolean => p.type === 'tool') as UIMessagePartTool[];
+    assert.equal(toolParts.length, 14);
+    toolParts.forEach((part: UIMessagePartTool, i: number): void => {
+      assert.equal((part.output[0] as { text: string }).text, `ran:conversation_search:step-${i}`);
+    });
+    assert.equal(provider.callCount, 15);
+    // FINAL 步(stepIndex=14)隐藏工具(agentLoopShouldHideTools)
     assert.equal(seenTools[seenTools.length - 1], 0);
     assert.equal(seenTools[0], 1);
   });
@@ -412,7 +419,7 @@ describe('预算与步数', () => {
     //   第二步 stepIndex=1 → remaining 15 → null;到 stepIndex=4 → remaining 12 → WARN
     const script: MessageChunk[][] = [];
     for (let i = 0; i < 4; i++) {
-      script.push([toolDelta(`call-${i}`, 'conversation_search', '{}')]);
+      script.push([toolDelta(`call-${i}`, 'conversation_search', `{"q":"step-${i}"}`)]);
     }
     script.push([textDelta('end')]);
     const provider = scriptedProvider(script);

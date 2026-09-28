@@ -271,8 +271,8 @@ const validateProposalPatchPath = (path: string, branchId: string): string => {
   if (!checked.startsWith(prefix)) throw invalidInput('proposal patch 必须属于预期分支');
   const relative: string = checked.slice(prefix.length);
   const chapter: RegExpMatchArray | null = relative.match(/^chapters\/\d{3}-.+\.md$/);
-  if (chapter !== null || relative === 'plan/plot.md') return checked;
-  throw invalidInput(`proposal patch 不是受控正文或剧情路径: ${checked}`);
+  if (chapter !== null || relative === 'plan/plot.md' || relative === 'plan/this-chapter.md') return checked;
+  throw invalidInput(`proposal patch 不是受控正文、剧情或本章计划路径: ${checked}`);
 };
 
 export const validateWorkspaceProposalPatch = (patch: WorkspaceProposalPatch,

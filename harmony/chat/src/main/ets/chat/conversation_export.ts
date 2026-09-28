@@ -70,6 +70,18 @@ const messagePlainText = (message: UIMessage, includeReasoning: boolean): string
   return chunks.join('\n\n').trim();
 };
 
+export const messageImageExportText = (message: UIMessage, includeReasoning: boolean): string => {
+  const chunks: string[] = [];
+  for (const part of message.parts) {
+    if (part.type === 'text' && part.text.trim().length > 0) {
+      chunks.push(part.text.trim());
+    } else if (part.type === 'reasoning' && includeReasoning && part.reasoning.trim().length > 0) {
+      chunks.push(`思考过程：\n${part.reasoning.trim()}`);
+    }
+  }
+  return chunks.length > 0 ? chunks.join('\n\n') : '[非文本内容]';
+};
+
 const formatTs = (iso: string): string => {
   if (iso.length === 0) return '';
   const d = new Date(iso);

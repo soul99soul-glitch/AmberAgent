@@ -12,7 +12,7 @@
   ],
   "ruleSet": [
     "plugin:@performance/recommended",
-    "plugin:@typescript/recommended"
+    "plugin:@typescript-eslint/recommended"
   ],
   "rules": {}
 }

@@ -29,6 +29,7 @@ export struct ChatMessageActionsSheet {
   onRegenerate: () => void = (): void => {};
   onFork: () => void = (): void => {};
   onShare: () => void = (): void => {};
+  onExport: () => void = (): void => {};
   onDelete: () => void = (): void => {};
   onDismiss: () => void = (): void => {};
 
@@ -60,6 +61,11 @@ export struct ChatMessageActionsSheet {
         this.actionRow('share', '分享', false, (): void => {
           this.onDismiss();
           this.onShare();
+        })
+        this.rowDivider()
+        this.actionRow('doc', '导出对话', false, (): void => {
+          this.onDismiss();
+          this.onExport();
         })
         this.rowDivider()
         // fork:恒显示

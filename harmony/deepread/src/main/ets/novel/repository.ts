@@ -1105,14 +1105,15 @@ export const createFileNovelRepository = (fileStore: FileStore): NovelProjectRep
     proposal: DurableWorkspaceProposal, branch: WorkspaceBranchSnapshot,
   ): void => {
     const plotPath: string = `branches/${branch.branchId}/plan/plot.md`;
+    const planPath: string = branchSettingPaths(branch.branchId).thisChapterPlan;
     const chapterPaths: Set<string> = new Set<string>();
     for (let i: number = 0; i < branch.state.chapters.length; i++) {
       chapterPaths.add(branch.state.chapters[i].path);
     }
     for (let i: number = 0; i < proposal.patches.length; i++) {
       const path: string = proposal.patches[i].path;
-      if (path !== plotPath && !chapterPaths.has(path)) {
-        throw invalidInput(`proposal 仅可修改已有章节或 plot: ${path}`);
+      if (path !== plotPath && path !== planPath && !chapterPaths.has(path)) {
+        throw invalidInput(`proposal 仅可修改已有章节、plot 或本章计划: ${path}`);
       }
     }
   };
@@ -1463,6 +1464,14 @@ export const createFileNovelRepository = (fileStore: FileStore): NovelProjectRep
     }
   };
 
+  const assertChapterPlanEditable = async (id: string, branchId: string): Promise<void> => {
+    const jobStore: WorkspaceNovelJobStore = await readNovelJobStore(id);
+    const bound: DurableGhostwriteJob | undefined = jobStore.jobs.find(
+      (job: DurableNovelJob): job is DurableGhostwriteJob => isGhostwriteJob(job) &&
+        job.branchId === branchId && !novelJobIsTerminal(job));
+    if (bound !== undefined) throw invalidInput('运行中的 ghostwrite job 已冻结本章计划');
+  };
+
   const commitLocked = async (
     id: string, expected: NovelWorkspaceCas, commandId: string, kind: NovelWorkspaceMutationKind,
     transform: (p: NovelProject) => NovelProject,
@@ -1480,11 +1489,7 @@ export const createFileNovelRepository = (fileStore: FileStore): NovelProjectRep
     const transformed: NovelProject = transform(current);
     if (transformed.id !== id) throw invalidInput('项目 id 不可变更');
     if (transformed.branchSettings.thisChapterPlan !== current.branchSettings.thisChapterPlan) {
-      const jobStore: WorkspaceNovelJobStore = await readNovelJobStore(id);
-      const bound: DurableGhostwriteJob | undefined = jobStore.jobs.find(
-        (job: DurableNovelJob): job is DurableGhostwriteJob => isGhostwriteJob(job) &&
-          job.branchId === checkout.branchId && !novelJobIsTerminal(job));
-      if (bound !== undefined) throw invalidInput('运行中的 ghostwrite job 已冻结本章计划');
+      await assertChapterPlanEditable(id, checkout.branchId);
     }
     const next: NovelProject = { ...transformed, revision: current.revision + 1 };
     const changedIndex: number | null = chapterChangedAt(current.chapters, next.chapters);
@@ -1850,12 +1855,19 @@ export const createFileNovelRepository = (fileStore: FileStore): NovelProjectRep
         }
         let chapters: NovelChapter[] = current.chapters.slice();
         let plotContent: string | null = branch.plotContent;
+        let plotChanged: boolean = false;
+        let thisChapterPlan: string = current.branchSettings.thisChapterPlan;
         let changedIndex: number | null = null;
         for (let i: number = 0; i < proposal.patches.length; i++) {
           const patch: WorkspaceProposalPatch = proposal.patches[i];
           const plotPath: string = `branches/${checkout.branchId}/plan/plot.md`;
           if (patch.path === plotPath) {
             plotContent = patch.operation === 'write' ? patch.content : null;
+            plotChanged = true;
+            continue;
+          }
+          if (patch.path === branchSettingPaths(checkout.branchId).thisChapterPlan) {
+            thisChapterPlan = patch.operation === 'write' ? patch.content ?? '' : '';
             continue;
           }
           const recordIndex: number = branch.state.chapters.findIndex(
@@ -1876,16 +1888,20 @@ export const createFileNovelRepository = (fileStore: FileStore): NovelProjectRep
             };
           }
         }
+        if (thisChapterPlan !== current.branchSettings.thisChapterPlan) {
+          await assertChapterPlanEditable(id, checkout.branchId);
+        }
         const next: NovelProject = {
           ...current,
           chapters,
+          branchSettings: { ...current.branchSettings, thisChapterPlan },
           revision: current.revision + 1,
           updatedAt: Math.max(current.updatedAt, resolvedAt),
         };
         const unresolved: number | null = changedIndex === null
           ? branch.unresolvedFromOrdinal
           : followingUnresolvedOrdinal(changedIndex, chapters.length);
-        const stale: boolean = changedIndex === null ? false : true;
+        const stale: boolean = changedIndex === null ? (plotChanged ? false : branch.plotStale) : true;
         await installSnapshot(
           next, 'proposal_resolve', [], checkout.branchId, commandId,
           unresolved, stale, true, changedIndex === null ? null : changedIndex + 1,

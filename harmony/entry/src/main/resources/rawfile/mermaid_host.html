@@ -4,9 +4,10 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <style>
-  html, body { margin: 0; padding: 8px; background: transparent; }
-  #app { width: 100%; overflow: auto; }
-  #app svg { max-width: 100%; height: auto; }
+  html { margin: 0; padding: 0; background: transparent; }
+  body { margin: 0; padding: 8px; box-sizing: border-box; background: transparent; }
+  #app { width: 100%; }
+  #app svg { display: block; max-width: 100%; height: auto; }
   pre { margin: 0; font-size: 11px; color: #999; white-space: pre-wrap; }
 </style>
 </head>
@@ -15,22 +16,56 @@
 <script src="mermaid.min.js"></script>
 <script>
 // D7-3:本地 mermaid 沙箱(host 页无网络;strict 安全级,标签禁 HTML)
-mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', theme: 'default' });
 let __amberSeq = 0;
-window.__amberRenderMermaid = async function(src) {
+let __amberRevision = 0;
+let __amberOk = false;
+window.__amberMeasureMermaid = function() {
+  const seq = __amberSeq;
+  requestAnimationFrame(function() {
+    if (seq !== __amberSeq) return;
+    const height = document.getElementById('app').getBoundingClientRect().height + 16;
+    AmberMermaid.postMessage(JSON.stringify({ revision: __amberRevision, height: height, ok: __amberOk }));
+  });
+};
+window.__amberSetExportOffset = function(top) {
+  // Web 视口高度会量化为 CSS 整数；临时留出滚动余量，避免短尾片被夹到前一行。
+  // 原始图高仍由 #app 测量，分页不计入此空白；结束后恢复。
+  document.body.style.minHeight = (top + window.innerHeight + 1) + 'px';
+  window.scrollTo(0, top);
+  return window.scrollY;
+};
+window.__amberEndExport = function() {
+  document.body.style.minHeight = '';
+  window.scrollTo(0, 0);
+};
+window.__amberRenderMermaid = async function(src, revision, theme) {
   const app = document.getElementById('app');
   const seq = ++__amberSeq;
+  __amberRevision = revision;
+  __amberOk = false;
   try {
+    mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', theme: theme });
     const id = 'amber-mmd-' + seq;
     const out = await mermaid.render(id, src);
     if (seq !== __amberSeq) return; // 流式期间只落最新一次
     app.innerHTML = out.svg;
+    __amberOk = true;
   } catch (e) {
     if (seq !== __amberSeq) return;
     const msg = String((e && e.message) || e).replace(/[<>&]/g, '');
     app.innerHTML = '<pre>mermaid 渲染失败:' + msg + '</pre>';
   }
+  window.scrollTo(0, 0);
+  window.__amberMeasureMermaid();
 };
+// 宽度改变会改变 SVG 的实际缩放高度；高度分页不触发重新渲染。
+let __amberWidth = 0;
+new ResizeObserver(function() {
+  const width = document.getElementById('app').getBoundingClientRect().width;
+  if (width === __amberWidth) return;
+  __amberWidth = width;
+  if (__amberSeq > 0) window.__amberMeasureMermaid();
+}).observe(document.getElementById('app'));
 </script>
 </body>
 </html>

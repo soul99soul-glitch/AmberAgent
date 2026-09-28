@@ -97,6 +97,24 @@ export const buildDefaultSeats = (
   return seats;
 };
 
+export interface CouncilDynamicSeatSelection {
+  seats: ModelCouncilSeat[];
+  remainingCapacity: number;
+}
+
+// 配置页展示与 runner 共享同一角色去重/容量规则,只保留实际纳入的动态席。
+export const resolveCouncilDynamicSeats = (
+  setting: ModelCouncilRuntimeSetting, extraLens: string[], pool: ModelConfig[],
+  extraSeats: ModelCouncilSeat[],
+): CouncilDynamicSeatSelection => {
+  const effective: ModelCouncilSeat[] = buildDefaultSeats(setting, extraLens, pool, extraSeats);
+  const ids: Set<string> = new Set<string>(effective.map((seat: ModelCouncilSeat): string => seat.seatId));
+  return {
+    seats: extraSeats.filter((seat: ModelCouncilSeat): boolean => ids.has(seat.seatId)),
+    remainingCapacity: Math.max(0, setting.maxSeats - effective.length),
+  };
+};
+
 // 校验席位;非法抛 Error(带可读信息)
 export const validateSeats = (
   setting: ModelCouncilRuntimeSetting,

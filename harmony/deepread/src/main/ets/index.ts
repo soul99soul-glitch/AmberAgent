@@ -99,8 +99,8 @@ export {
   seatSystemPrompt, openingPrompt, responsePrompt, finalPositionPrompt,
   synthesisPrompt, summaryBlock, truncate, SYNTHESIZER_SYSTEM_PROMPT,
 } from './council/prompts.ts';
-export type { CouncilTaskInput } from './council/validator.ts';
-export { parseTask, validateSeats, resolveSynthesisModelId, buildDefaultSeats } from './council/validator.ts';
+export type { CouncilTaskInput, CouncilDynamicSeatSelection } from './council/validator.ts';
+export { parseTask, validateSeats, resolveSynthesisModelId, buildDefaultSeats, resolveCouncilDynamicSeats } from './council/validator.ts';
 export type { ModelCouncilDeps } from './council/manager.ts';
 export { ModelCouncilManager, createModelCouncilManager } from './council/manager.ts';
 

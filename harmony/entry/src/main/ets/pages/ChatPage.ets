@@ -151,6 +151,7 @@ import type { AgentMessageRowHostCapabilities } from '../components/AgentMessage
 import { InteractiveMessageTimeline } from '../components/InteractiveMessageTimeline.ets';
 import { SubAgentRunSheet } from '../components/SubAgentRunSheet.ets';
 import { ChatMessageCopySheet } from '../components/ChatMessageCopySheet.ets';
+import { ChatExportSheet } from '../components/ChatExportSheet.ets';
 import { ChatMessageToolPreviewSheet } from '../components/ChatMessageToolPreviewSheet.ets';
 import { ChatMessageActionsSheet } from '../components/ChatMessageActionsSheet.ets';
 import { ChatDrawer } from '../components/ChatDrawer.ets';
@@ -455,6 +456,7 @@ struct ChatPage {
   // D-108:拒绝理由弹窗态(ToolDenyReasonDialog;空 = 关闭)
   @State denyDialogToolCallId: string = '';
   @State denyDialogOpen: boolean = false;
+  @State exportSheetOpen: boolean = false;
   private denyDialogLocator: ToolApprovalPartLocator | undefined = undefined;
   @State denyReasonText: string = '';
   // D-110:上下文用量指示(ContextUsageIndicator)— compacts/窗口快照 + 压缩活动计数
@@ -989,6 +991,7 @@ struct ChatPage {
   }
 
   onBackPress(): boolean {
+    if (this.exportSheetOpen) { this.exportSheetOpen = false; return true; }
     if (this.documentPreviewOpen) { this.documentPreviewOpen = false; return true; }
     if (this.denyDialogOpen) { this.dismissDenyDialog(); return true; }
     if (this.modelMenuOpen) { this.modelMenuOpen = false; return true; }
@@ -3720,7 +3723,7 @@ struct ChatPage {
           : []),
         // D6-3:飞书云文档工具族(与 webmount 同门;token 自解析,未登录诚实报错)
         ...((this.webmountGlobalEnabled || localOpts.indexOf('webmount') >= 0)
-          ? createFeishuDocsTools()
+          ? createFeishuDocsTools(localOpts.indexOf('webmount') >= 0)
           : []),
         // D-123:skills 工具组(ChatService.kt:2239-2246 — createSkillTools 五/六件,
         //   位置 = localTools 之后/MCP 管理之前);enabledSkills/allSkills =
@@ -4976,6 +4979,7 @@ struct ChatPage {
         onRegenerate: (): void => { this.regenerateActionsSheetMessage(); },
         onFork: (): void => { this.forkActionsSheetMessage(); },
         onShare: (): void => { this.shareActionsSheetMessage(); },
+        onExport: (): void => { this.exportSheetOpen = true; },
         onDelete: (): void => { this.deleteActionsSheetMessage(); },
         onDismiss: (): void => { this.closeActionsSheet(); },
       })
@@ -5326,8 +5330,77 @@ struct ChatPage {
     }
   }
 
+  @Builder
+  chatSheetHosts(): void {
+    // bindSheet 按宿主节点注册；每张 sheet 保持独立且稳定的宿主。
+    Column() {}
+      .width(0).height(0)
+      .hitTestBehavior(HitTestMode.None)
+      .bindSheet($$this.documentPreviewOpen, this.documentPreviewSheet(), {
+        height: '85%', showClose: false,
+      })
+    Column() {}
+      .width(0).height(0)
+      .hitTestBehavior(HitTestMode.None)
+      .bindSheet($$this.artifactShelfOpen, this.artifactShelfSheet(), {
+        height: '85%', showClose: false,
+      })
+    Column() {}
+      .width(0).height(0)
+      .hitTestBehavior(HitTestMode.None)
+      .bindSheet($$this.artifactDiffOpen, this.artifactDiffSheet(), {
+        height: '85%', showClose: false,
+      })
+    Column() {}
+      .width(0).height(0)
+      .hitTestBehavior(HitTestMode.None)
+      .bindSheet($$this.webmountSheetOpen, this.webmountSheet(), {
+        height: '92%', showClose: false,
+        onDisappear: (): void => {
+          // sheet 关闭(offscreen/手势):恢复 offscreen host 挂载
+          if (!this.webmountHostVisible) this.webmountHostVisible = true;
+        },
+      })
+    Column() {}
+      .width(0).height(0)
+      .hitTestBehavior(HitTestMode.None)
+      .bindSheet(this.sandboxSheetOpen, this.sandboxSheet(this.sandboxTimeline()), {
+        height: SheetSize.LARGE,
+        onDisappear: (): void => { this.sandboxSheetOpen = false; },
+      })
+    Column() {}
+      .width(0).height(0)
+      .hitTestBehavior(HitTestMode.None)
+      .bindSheet(this.subAgentSheetOpen, this.subAgentSheetBuilder(), {
+        height: SheetSize.LARGE,
+        onDisappear: (): void => { this.closeSubAgentSheet(); },
+      })
+    Column() {}
+      .width(0).height(0)
+      .hitTestBehavior(HitTestMode.None)
+      .bindSheet(this.copySheetOpen, this.copySheetBuilder(), {
+        height: SheetSize.MEDIUM,
+        onDisappear: (): void => { this.closeCopySheet(); },
+      })
+    Column() {}
+      .width(0).height(0)
+      .hitTestBehavior(HitTestMode.None)
+      .bindSheet(this.actionsSheetOpen, this.messageActionsSheetBuilder(), {
+        height: SheetSize.LARGE,
+        onDisappear: (): void => { this.clearActionsSheet(); },
+      })
+    Column() {}
+      .width(0).height(0)
+      .hitTestBehavior(HitTestMode.None)
+      .bindSheet(this.toolPreviewSheetOpen, this.toolPreviewSheetBuilder(), {
+        height: SheetSize.LARGE,
+        onDisappear: (): void => { this.closeToolPreview(); },
+      })
+  }
+
   build() {
     Stack() {
+    this.chatSheetHosts()
     // WebMount 会话宿主(移出可视区的真实尺寸 Web;按需挂载)
     WebMountHost({ visible: this.webmountHostVisible })
     // JS 沙箱宿主(隐藏 1x1;勾选 javascript_engine 时挂载)
@@ -5850,6 +5923,15 @@ struct ChatPage {
       })
     }
 
+    if (this.exportSheetOpen && this.conversation !== null) {
+      ChatExportSheet({
+        show: true,
+        conversation: this.conversation,
+        messages: currentMessages(this.conversation),
+        onDismiss: (): void => { this.exportSheetOpen = false; },
+      })
+    }
+
     // ===== D-108:拒绝理由弹窗(ToolDenyReasonDialog :428-461 逐字) =====
     //   title '拒绝工具执行'/hint '原因（可选）'/confirm '拒绝'/dismiss '取消'
     //   (strings.xml:204/:203/:202);AlertDialog → Stack overlay(同 D-101 先例)
@@ -5892,22 +5974,6 @@ struct ChatPage {
     }
     }
     .width('100%').height('100%')
-    .bindSheet($$this.documentPreviewOpen, this.documentPreviewSheet(), {
-      height: '85%', showClose: false,
-    })
-    .bindSheet($$this.artifactShelfOpen, this.artifactShelfSheet(), {
-      height: '85%', showClose: false,
-    })
-    .bindSheet($$this.artifactDiffOpen, this.artifactDiffSheet(), {
-      height: '85%', showClose: false,
-    })
-    .bindSheet($$this.webmountSheetOpen, this.webmountSheet(), {
-      height: '92%', showClose: false,
-      onDisappear: (): void => {
-        // sheet 关闭(offscreen/手势):恢复 offscreen host 挂载
-        if (!this.webmountHostVisible) this.webmountHostVisible = true;
-      },
-    })
     // 1:1 原型 slideInR .28s ease-out:整页入场 translateX 20→0 + opacity 0→1
     //   乘 themeTick 读取建依赖:主题变更 onPageShow 后 build 重读令牌
     .opacity(this.pageEnterOpacity * (this.themeTick >= 0 ? 1 : 1))
@@ -5917,31 +5983,6 @@ struct ChatPage {
         this.pageEnterOpacity = 1;
         this.pageEnterX = 0;
       });
-    })
-    // D-122:沙盒活动 sheet(sandboxOverlayOpen → sandboxSheetOpen)
-    .bindSheet(this.sandboxSheetOpen, this.sandboxSheet(this.sandboxTimeline()), {
-      height: SheetSize.LARGE,
-      onDisappear: (): void => { this.sandboxSheetOpen = false; },
-    })
-    // SubAgent run sheet
-    .bindSheet(this.subAgentSheetOpen, this.subAgentSheetBuilder(), {
-      height: SheetSize.LARGE,
-      onDisappear: (): void => { this.closeSubAgentSheet(); },
-    })
-    // Copy sheet
-    .bindSheet(this.copySheetOpen, this.copySheetBuilder(), {
-      height: SheetSize.MEDIUM,
-      onDisappear: (): void => { this.closeCopySheet(); },
-    })
-    // Message actions sheet
-    .bindSheet(this.actionsSheetOpen, this.messageActionsSheetBuilder(), {
-      height: SheetSize.LARGE,
-      onDisappear: (): void => { this.clearActionsSheet(); },
-    })
-    // Tool preview sheet
-    .bindSheet(this.toolPreviewSheetOpen, this.toolPreviewSheetBuilder(), {
-      height: SheetSize.LARGE,
-      onDisappear: (): void => { this.closeToolPreview(); },
     })
   }
 }

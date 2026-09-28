@@ -17,6 +17,41 @@ export interface JevRequestSpec {
   body: string;
 }
 
+export interface JevNoulBatchSpec {
+  state: JsonObject;
+  questions: Record<string, JevQuestion>;
+}
+
+// 每道 cN 题明确引用原始候选键;响应仍按相同 keys 顺序回绑。
+export const buildJevNoulBatch = (
+  purpose: string, query: string, keys: string[], candidates: Record<string, string>,
+): JevNoulBatchSpec => {
+  const questions: Record<string, JevQuestion> = {};
+  const stateCandidates: JsonObject = {};
+  for (let idx = 0; idx < keys.length; idx++) {
+    const key: string = keys[idx];
+    stateCandidates[key] = candidates[key];
+    questions[`c${idx}`] = {
+      kind: 'noul',
+      instructions: `判断 state.candidates[${JSON.stringify(key)}] 是否与用户意图相关(用途:${purpose})。`,
+      trueCriteria: '与意图直接相关,或有助于完成意图',
+      falseCriteria: '与意图无关,或会干扰完成意图',
+    };
+  }
+  return { state: { query: query.substring(0, 500), candidates: stateCandidates }, questions };
+};
+
+export const readJevNoulBatchProbabilities = (
+  keys: string[], evaluation: JevEvaluation,
+): Record<string, number> => {
+  const probabilities: Record<string, number> = {};
+  for (let idx = 0; idx < keys.length; idx++) {
+    const answer: JevAnswer | undefined = evaluation.answers[`c${idx}`];
+    if (answer !== undefined && answer.kind === 'noul') probabilities[keys[idx]] = answer.probability;
+  }
+  return probabilities;
+};
+
 const questionToJson = (q: JevQuestion, apiMode: JevApiMode): JsonObject => {
   if (q.kind === 'noul') {
     const out: JsonObject = {

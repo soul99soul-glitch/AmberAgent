@@ -21,11 +21,10 @@ import {
 import { FONT_MONO, FONT_SANS_SEMIBOLD } from '../design/fonts.ets';
 import { Icon } from '../components/ui/Icon.ets';
 import { router, promptAction } from '@kit.ArkUI';
-import type { ProviderSetting, ProviderModel, ModelType } from '@amber/chat-domain';
+import type { ProviderSetting } from '@amber/chat-domain';
 import { setPendingProvider } from './ChatProviderDetailPage.ets';
 import {
-  loadProviders, saveProviders, makeProviderModel,
-  makeProviderSettingOpenAIVariant, makeProviderSettingGoogle, makeProviderSettingClaude,
+  loadProviders, saveProviders, providerFromImportJson,
 } from '@amber/chat-domain';
 import { getChatKvStore } from '../di/AppContainer.ets';
 import { DEFAULT_PROVIDERS, toProviderMonogram, providerSlug, providerAuthLabel } from '../di/ProviderDefaults.ets';
@@ -33,28 +32,6 @@ import { ProviderTemplatePickerSheet } from '../components/ProviderTemplatePicke
 import { ProviderBalanceText } from '../components/ui/ProviderBalanceText.ets';
 import { picker, fileIo } from '@kit.CoreFileKit';
 import { common } from '@kit.AbilityKit';
-
-// D3-2:导入 payload 文档(与详情页 ProviderExportPayload 同构)
-interface ProviderImportModelDoc {
-  modelId?: string;
-  displayName?: string;
-  type?: string;
-}
-interface ProviderImportDoc {
-  format?: string;
-  version?: number;
-  type?: string;
-  name?: string;
-  baseUrl?: string;
-  chatCompletionsPath?: string;
-  useResponseApi?: boolean;
-  vertexAI?: boolean;
-  location?: string;
-  projectId?: string;
-  promptCaching?: boolean;
-  models?: ProviderImportModelDoc[];
-}
-
 
 interface ProviderRow {
   id: string;
@@ -75,7 +52,7 @@ struct ChatProviderSettingsPage {
   @State filterQuery: string = '';
   @State sheetShow: boolean = false;
   @State rows: ProviderRow[] = [];
-  private all: ProviderSetting[] = [];
+  @State all: ProviderSetting[] = [];
 
   aboutToAppear(): void {
     this.load();
@@ -146,40 +123,10 @@ struct ChatProviderSettingsPage {
       options.fileSuffixFilters = ['.json'];
       const uris: string[] = await new picker.DocumentViewPicker(ctx).select(options);
       if (uris.length === 0) return;
-      const doc: ProviderImportDoc = JSON.parse(fileIo.readTextSync(uris[0])) as ProviderImportDoc;
-      if (doc.format !== 'amber-provider' || doc.type === undefined
-        || doc.name === undefined || doc.baseUrl === undefined) {
-        promptAction.showToast({ message: '文件不是有效的 Provider 导出', duration: 2000 });
-        return;
-      }
-      const models: ProviderModel[] = (doc.models ?? []).map(
-        (m: ProviderImportModelDoc): ProviderModel => makeProviderModel({
-          modelId: m.modelId ?? '',
-          displayName: (m.displayName ?? '').length > 0 ? m.displayName : (m.modelId ?? ''),
-          type: (m.type ?? 'chat') as ModelType,
-        }));
-      let p: ProviderSetting;
-      if (doc.type === 'google') {
-        p = makeProviderSettingGoogle({
-          name: doc.name, baseUrl: doc.baseUrl, models: models,
-          vertexAI: doc.vertexAI ?? false,
-          location: doc.location ?? 'us-central1',
-          projectId: doc.projectId ?? '',
-        });
-      } else if (doc.type === 'claude') {
-        p = makeProviderSettingClaude({
-          name: doc.name, baseUrl: doc.baseUrl, models: models,
-          promptCaching: doc.promptCaching ?? false,
-        });
-      } else {
-        p = makeProviderSettingOpenAIVariant({
-          name: doc.name, baseUrl: doc.baseUrl, models: models,
-          chatCompletionsPath: doc.chatCompletionsPath ?? '/chat/completions',
-          useResponseApi: doc.useResponseApi ?? false,
-        });
-      }
-      this.all = [...this.all, p];
-      await saveProviders(getChatKvStore(), this.all);
+      const p: ProviderSetting = providerFromImportJson(fileIo.readTextSync(uris[0]));
+      const next: ProviderSetting[] = [...this.all, p];
+      await saveProviders(getChatKvStore(), next);
+      this.all = next;
       this.rebuildRows();
       promptAction.showToast({ message: '已导入,请在详情页补填 API Key', duration: 2000 });
     } catch (e) {
@@ -307,6 +254,16 @@ struct ChatProviderSettingsPage {
       }, (row: ProviderRow): string => `off-${row.id}`)
   }
 
+  @Builder
+  ImportCard(): void {
+    CardRow({
+      label: '从文件导入',
+      desc: '导入导出的 provider JSON(不含 API Key,导入后请补填)',
+      iconName: 'upload', plateSize: 28, isLast: true,
+      onRowClick: (): void => { this.importProvider().catch((): void => {}); },
+    })
+  }
+
   build() {
     Stack() {
     Column() {
@@ -387,14 +344,7 @@ struct ChatProviderSettingsPage {
             // ── D3-2:从文件导入(与详情页导出 JSON 互通)──
             PlainSection({ label: '其他' })
             Column() {
-              CardGroup({ radius: 18, stroke: true, content: (): void => {
-                CardRow({
-                  label: '从文件导入',
-                  desc: '导入导出的 provider JSON(不含 API Key,导入后请补填)',
-                  iconName: 'upload', plateSize: 28, isLast: true,
-                  onRowClick: (): void => { this.importProvider().catch((): void => {}); },
-                })
-              } })
+              CardGroup({ radius: 18, stroke: true, content: (): void => { this.ImportCard(); } })
             }
             .width('100%')
             .padding({ left: 16, right: 16 })

@@ -15,6 +15,7 @@
 //   ForEach 回调内 if/else 必须包裹 UI 组件(不能裸 const)。
 
 import {
+  newId,
   parseMarkdown,
   tokenizeCode,
   orderedListLabel,
@@ -36,9 +37,7 @@ import { Icon } from './ui/Icon.ets';
 import { promptAction } from '@kit.ArkUI';
 import { pasteboard } from '@kit.BasicServicesKit';
 import { common } from '@kit.AbilityKit';
-import { image } from '@kit.ImageKit';
 import { MermaidBlock } from './MermaidBlock.ets';
-import { savePixelMapToAlbum } from '../platform_impl/ImageSaveSupport.ets';
 
 // ===== P3:流式逐字 reveal + Markdown 增量解析(Phase 3 计划 §4) =====
 // 仅对「活动流式尾消息的最后文本块」启用 pacing(streaming=true 且 streamKey 非空);
@@ -150,6 +149,7 @@ export struct MarkdownText {
   @State private previewUrl: string = '';
   @State private previewScale: number = 1;
   private pinchStartScale: number = 1;
+  private mermaidInstanceId: string = newId().replace(/-/g, '_');
 
   aboutToAppear(): void {
     this.updateDisplay();
@@ -762,25 +762,14 @@ export struct MarkdownText {
     .alignItems(VerticalAlign.Top)
   }
 
-  // D7-3:mermaid 判定/块 id/导出(componentSnapshot → ImageSaveSupport)
+  // D7-3:mermaid 判定/实例唯一块 id;导出由 MermaidBlock 掌握实际图高。
   private isMermaid(block: MarkdownBlock): boolean {
     return block.kind === 'code_block' && block.lang.trim().toLowerCase() === 'mermaid';
   }
 
   private mermaidBlockId(block: MarkdownBlock, bi: number): string {
     const key: string = this.streamKey.replace(/[^A-Za-z0-9_]/g, '_');
-    return `mmd_${key}_${bi}`;
-  }
-
-  private exportMermaid(block: MarkdownBlock, bi: number): void {
-    const id: string = this.mermaidBlockId(block, bi);
-    this.getUIContext().getComponentSnapshot().get(id)
-      .then((pm: image.PixelMap): void => {
-        savePixelMapToAlbum(pm).catch((): void => {});
-      })
-      .catch((): void => {
-        promptAction.showToast({ message: '导出失败:渲染尚未就绪', duration: 1500 });
-      });
+    return `mmd_${this.mermaidInstanceId}_${key}_${bi}`;
   }
 
   @Builder
@@ -793,19 +782,6 @@ export struct MarkdownText {
             .fontColor('#9AA3B2')
             .fontFamily(FONT_MONO)
             .layoutWeight(1)
-          // D7-3:mermaid 导出图片(componentSnapshot → 相册)
-          if (this.isMermaid(block)) {
-            Text('导出')
-              .fontSize(META)
-              .lineHeight(lineHeightForSize(META))
-              .fontFamily(FONT_SANS)
-              .fontColor(CODE_TEXT)
-              .width(48)
-              .height(44)
-              .textAlign(TextAlign.Center)
-              .onClick((): void => { this.exportMermaid(block, bi); })
-              .accessibilityText('导出图片到相册')
-          }
           if (this.codeBlockAutoCollapse && this.codeLineCount(block) > CODE_COLLAPSE_THRESHOLD) {
             Text(this.codeIsCollapsed(block, bi) ? '展开' : '收起')
               .fontSize(META)

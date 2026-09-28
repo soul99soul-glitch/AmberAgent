@@ -4,6 +4,7 @@ import {
   assertWorkspaceCasMatch, classifyReceiptReplay, isWorkspacePlotStale,
   parseDurableWorkspaceProposal, parseWorkspaceCommit, refreshWorkspacePlotState,
   resolveDurableWorkspaceProposal, syncWorkspacePlot, unresolvedFromOrdinal,
+  validateWorkspaceProposalPatch,
 } from '../main/ets/novel/workspace_history.ts';
 import type { DurableWorkspaceProposal, WorkspaceCas, WorkspaceCommit } from '../main/ets/novel/workspace_history.ts';
 
@@ -65,6 +66,24 @@ test('durable proposal validates controlled paths and resolves approve, deny, an
   assert.throws(() => parseDurableWorkspaceProposal(JSON.stringify({
     ...proposal(), patches: [{ operation: 'write', path: 'setting/world/x.md', content: 'bypass' }],
   })));
+});
+
+test('proposal permits current chapter plan patches without opening other settings or branches', () => {
+  const path = 'branches/main/plan/this-chapter.md';
+  assert.deepEqual(validateWorkspaceProposalPatch({ operation: 'write', path, content: '本章目标' }, 'main'),
+    { operation: 'write', path, content: '本章目标' });
+  assert.deepEqual(validateWorkspaceProposalPatch({ operation: 'delete', path, content: null }, 'main'),
+    { operation: 'delete', path, content: null });
+  for (const forbidden of [
+    'branches/other/plan/this-chapter.md',
+    'branches/main/plan/future.md',
+    'branches/main/setting/preferences.md',
+    'branches/main/plan/../this-chapter.md',
+  ]) {
+    assert.throws(() => validateWorkspaceProposalPatch({
+      operation: 'write', path: forbidden, content: '不应写入',
+    }, 'main'));
+  }
 });
 
 test('middle edit marks itself and later chapters unresolved, but last chapter does not', () => {

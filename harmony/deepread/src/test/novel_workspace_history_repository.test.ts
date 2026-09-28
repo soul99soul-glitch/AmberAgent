@@ -233,6 +233,130 @@ test('durable proposal deny closes without changing branch tree or ledger and ca
   assert.equal((ledger ?? '').trim().split('\n').length, 1);
 });
 
+for (const operation of ['write', 'delete'] as const) {
+  test(`current chapter plan ${operation} remains pending until approval and persists exactly once`, async () => {
+    const store = createMemoryFileStore();
+    const repository = createFileNovelRepository(store);
+    const project = makeNovelProject({ id: `plan-${operation}`, name: '本章计划', now: NOW });
+    await repository.createProject({
+      ...project,
+      branchSettings: { ...project.branchSettings, thisChapterPlan: '旧目标', futurePlan: '远期目标' },
+    });
+    const creation = new NovelCreation({ repository, modelRunning: {} as NovelModelRunning });
+    const path = 'branches/main/plan/this-chapter.md';
+    const content = operation === 'write' ? '新目标\n保留段落' : null;
+    const before = await repository.workspaceStatus(project.id);
+    const proposal = await repository.createProposal(project.id, before.cas, 'plan-proposal', [
+      { operation, path, content },
+    ], NOW + 1);
+    assert.equal(proposal.status, 'pending');
+    assert.equal((await creation.workspaceRead(project.id, 'plan/this-chapter.md')).content, '旧目标');
+    // The pending proposal supplies the exact replacement text for the approval preview.
+    const pending = (await createFileNovelRepository(store).workspaceProposals(project.id))[0];
+    assert.deepEqual(pending.patches, [{ operation, path, content }]);
+    assert.deepEqual((await repository.workspaceStatus(project.id)).cas, before.cas);
+
+    await repository.resolveProposal(project.id, 'plan-proposal', true, 'plan-approve', NOW + 2);
+    const reloaded = createFileNovelRepository(store);
+    const accepted = await reloaded.loadProject(project.id);
+    assert.equal(accepted.branchSettings.thisChapterPlan, content ?? '');
+    assert.equal(accepted.branchSettings.futurePlan, '远期目标');
+    assert.equal(await store.readText(`amberagent/novel-workspace/${project.id}/${path}`), content ?? '');
+    assert.equal((await reloaded.workspaceProposals(project.id))[0].status, 'accepted');
+    await reloaded.resolveProposal(project.id, 'plan-proposal', true, 'plan-approve', NOW + 3);
+    assert.equal((await reloaded.loadProject(project.id)).revision, accepted.revision);
+    assert.equal((await store.readText(`amberagent/novel-workspace/${project.id}/.amber/ledger.jsonl`))
+      ?.trim().split('\n').length, 2);
+  });
+}
+
+test('rejected chapter plan proposal preserves the original plan through reload and later approval', async () => {
+  const store = createMemoryFileStore();
+  const repository = createFileNovelRepository(store);
+  const project = makeNovelProject({ id: 'plan-deny', name: '拒绝计划', now: NOW });
+  await repository.createProject({
+    ...project, branchSettings: { ...project.branchSettings, thisChapterPlan: '原目标' },
+  });
+  const before = await repository.workspaceStatus(project.id);
+  await repository.createProposal(project.id, before.cas, 'plan-proposal', [{
+    operation: 'write', path: 'branches/main/plan/this-chapter.md', content: '不应保存',
+  }], NOW + 1);
+  await repository.resolveProposal(project.id, 'plan-proposal', false, 'plan-deny', NOW + 2);
+  const reloaded = createFileNovelRepository(store);
+  assert.equal((await reloaded.loadProject(project.id)).branchSettings.thisChapterPlan, '原目标');
+  assert.deepEqual((await reloaded.workspaceStatus(project.id)).cas, before.cas);
+  assert.equal((await reloaded.resolveProposal(
+    project.id, 'plan-proposal', true, 'later-approve', NOW + 3)).status, 'rejected');
+  assert.equal(await store.readText(
+    'amberagent/novel-workspace/plan-deny/branches/main/plan/this-chapter.md'), '原目标');
+});
+
+test('plan-only approval preserves unresolved chapters and stale plot state', async () => {
+  const repository = createFileNovelRepository(createMemoryFileStore());
+  const project = makeNovelProject({ id: 'plan-stale', name: '待同步剧情', now: NOW });
+  await repository.createProject({
+    ...project,
+    chapters: [
+      makeNovelChapter({ id: 'c1', title: '第一章', content: '原文', now: NOW }),
+      makeNovelChapter({ id: 'c2', title: '第二章', content: '后续', now: NOW }),
+    ],
+  });
+  const initial = await repository.workspaceStatus(project.id);
+  await repository.commitProject(project.id, initial.cas, 'middle-edit', 'manual_edit', current => ({
+    ...current, chapters: [{ ...current.chapters[0], content: '改文' }, current.chapters[1]],
+  }));
+  const before = await repository.workspaceStatus(project.id);
+  assert.equal(before.plotStale, true);
+  assert.equal(before.unresolvedFromOrdinal, 2);
+  await repository.createProposal(project.id, before.cas, 'plan-proposal', [{
+    operation: 'write', path: 'branches/main/plan/this-chapter.md', content: '本章目标',
+  }], NOW + 1);
+  await repository.resolveProposal(project.id, 'plan-proposal', true, 'plan-approve', NOW + 2);
+  const after = await repository.workspaceStatus(project.id);
+  assert.equal(after.plotStale, before.plotStale);
+  assert.equal(after.unresolvedFromOrdinal, before.unresolvedFromOrdinal);
+});
+
+test('chapter plan proposals reject foreign branches and unsupported plan files before persistence', async () => {
+  const repository = createFileNovelRepository(createMemoryFileStore());
+  const project = makeNovelProject({ id: 'plan-paths', name: '路径边界', now: NOW });
+  await repository.createProject(project);
+  const before = await repository.workspaceStatus(project.id);
+  for (const path of [
+    'branches/other/plan/this-chapter.md',
+    'branches/main/plan/future.md',
+    'branches/main/chapters/001-nonexistent.md',
+  ]) {
+    await assert.rejects(repository.createProposal(project.id, before.cas, 'invalid-proposal', [{
+      operation: 'write', path, content: '不应保存',
+    }], NOW + 1));
+  }
+  assert.equal((await repository.workspaceProposals(project.id)).length, 0);
+  assert.deepEqual((await repository.workspaceStatus(project.id)).cas, before.cas);
+});
+
+test('plan proposal approval preserves the active ghostwrite freeze while rejection remains available', async () => {
+  const store = createMemoryFileStore();
+  const repository = createFileNovelRepository(store);
+  const project = makeNovelProject({ id: 'plan-frozen', name: '冻结计划', now: NOW });
+  await repository.createProject({
+    ...project, branchSettings: { ...project.branchSettings, thisChapterPlan: '已冻结目标' },
+  });
+  const before = await repository.workspaceStatus(project.id);
+  await repository.createProposal(project.id, before.cas, 'plan-proposal', [{
+    operation: 'write', path: 'branches/main/plan/this-chapter.md', content: '不可替换',
+  }], NOW + 1);
+  await repository.startGhostwriteJob(project.id, before.cas, 'job', 'plan', 1, NOW + 2);
+  await assert.rejects(repository.resolveProposal(
+    project.id, 'plan-proposal', true, 'plan-approve', NOW + 3), /冻结本章计划/);
+  const reloaded = createFileNovelRepository(store);
+  assert.equal((await reloaded.workspaceProposals(project.id))[0].status, 'pending');
+  assert.equal((await reloaded.loadProject(project.id)).branchSettings.thisChapterPlan, '已冻结目标');
+  assert.deepEqual((await reloaded.workspaceStatus(project.id)).cas, before.cas);
+  assert.equal((await reloaded.resolveProposal(
+    project.id, 'plan-proposal', false, 'plan-reject', NOW + 4)).status, 'rejected');
+});
+
 test('durable proposal approval fails closed when frozen expected CAS is stale', async () => {
   const repository = createFileNovelRepository(createMemoryFileStore());
   await repository.createProject({

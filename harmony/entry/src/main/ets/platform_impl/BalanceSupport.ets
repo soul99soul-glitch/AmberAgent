@@ -5,10 +5,12 @@
 //   2 分钟内存缓存(Android 同款);任何失败 → '~'(诚实降级,不造数字)。
 import { http } from '@kit.NetworkKit';
 import type { ProviderSetting } from '@amber/chat-domain';
+import { providerBalanceRequestIdentity } from '@amber/chat-domain';
 
 const CACHE_TTL_MS: number = 120000;
 
 interface BalanceCacheEntry {
+  identity: string;
   value: string;
   at: number;
 }
@@ -63,23 +65,28 @@ const resolveBalance = (root: Object, resultPath: string): string | null => {
 
 export const fetchProviderBalance = async (provider: ProviderSetting): Promise<string> => {
   const opt = provider.balanceOption;
-  const cached: BalanceCacheEntry | undefined = cache.get(provider.id);
-  if (cached !== undefined && Date.now() - cached.at < CACHE_TTL_MS) return cached.value;
+  const providerId: string = provider.id;
+  const apiKey: string = provider.apiKey;
+  const resultPath: string = opt.resultPath;
+  if (!opt.enabled || apiKey.length === 0 || opt.apiPath.length === 0) return '~';
+  const url: string = `${provider.baseUrl.replace(/\/+$/, '')}${opt.apiPath}`;
+  const identity: string = providerBalanceRequestIdentity(provider);
+  const cached: BalanceCacheEntry | undefined = cache.get(providerId);
+  if (cached !== undefined && cached.identity === identity
+    && Date.now() - cached.at < CACHE_TTL_MS) return cached.value;
   let value: string = '~';
   try {
-    if (provider.apiKey.length === 0 || opt.apiPath.length === 0) return '~';
-    const url: string = `${provider.baseUrl.replace(/\/+$/, '')}${opt.apiPath}`;
     const req: http.HttpRequest = http.createHttp();
     try {
       const resp: http.HttpResponse = await req.request(url, {
         method: http.RequestMethod.GET,
-        header: { 'Authorization': `Bearer ${provider.apiKey}` },
+        header: { 'Authorization': `Bearer ${apiKey}` },
         connectTimeout: 10000,
         readTimeout: 15000,
       });
       if (resp.responseCode >= 200 && resp.responseCode < 300 && typeof resp.result === 'string') {
         const resolved: string | null = resolveBalance(
-          JSON.parse(resp.result) as Object, opt.resultPath);
+          JSON.parse(resp.result) as Object, resultPath);
         if (resolved !== null) value = resolved;
       }
     } finally {
@@ -88,6 +95,6 @@ export const fetchProviderBalance = async (provider: ProviderSetting): Promise<s
   } catch (_e) {
     value = '~';
   }
-  cache.set(provider.id, { value: value, at: Date.now() });
+  cache.set(providerId, { identity: identity, value: value, at: Date.now() });
   return value;
 };

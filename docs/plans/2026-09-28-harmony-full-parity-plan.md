@@ -1,5 +1,9 @@
 # 鸿蒙版全量补齐计划(D0–D8)
 
+> 接续说明（2026-09-28 E0）：本文件的 D8/M8 为历史范围裁定收口，不能代表登记缓做项已经实现。
+> 用户已授权全部缓做项进入实施，见 [E0–E14 剩余执行计划](2026-09-28-harmony-remaining-execution.md)。
+> E0 独立补审查出真实断链并重新打开对应验收；原 lint 曾因规则插件拼写错误输出不完整报告，旧“0 error”不作新阶段验收证据。
+
 > 日期:2026-09-28。上游分析:2026-09-28 全量缺口复核(四路 subagent 核实,结论见会话记忆 harmony-remaining-gaps-audit;基准图 = [amber-final-feature-mindmap.md](../amber-final-feature-mindmap.md))。
 > 上游计划:[2026-09-27-harmony-parity-execution.md](2026-09-27-harmony-parity-execution.md)(C0–C6 已闭环,本计划接续)。
 > 设计规范:`docs/plans/2026-09-27-harmony-secondary-ios-alignment.md` + 交接胶囊(sess_165b90ed):**设置根页 Android 风 / 二级页 iOS 风(PlainSection + CardGroup r18 描边 + CardRow 52/h14)**,组件一律复用 `components/PageTemplate.ets`,token 用 `design/tokens.ets`,accent 走 `@StorageProp('accentColor')`,滑杆 accent 化。
@@ -41,7 +45,7 @@
 | Jev 审批分诊 / Web 自动化(D5-1 余量) | 分诊需审批卡协议改造、Web 自动化依赖 WebMount 远程能力,独立批次 |
 | 议会席位联网搜索 / FULL 功率(D5-3 余量) | 需席位级工具循环(runner 现为纯文本流式),独立批次 |
 | 记忆主题聚合派生文档(D5-4 余量) | iOS 独占大型子系统(聚类+派生文档+查看 UI),独立批次 |
-| 小说章节裁决卡 / 章节计划提案专用 UI(D7-1/D7-2) | 通用管线已闭环:候选评审原子提交(裁决语义)+ novel_workspace_write patch plan/this-chapter.md 走提案卡 diff→验收写回;专用 UI 为锦上添花,backlog |
+| 小说章节裁决卡 / 章节计划提案专用 UI(D7-1/D7-2) | 候选评审原子提交具有裁决语义。E0 补审纠正：this-chapter 路径原被提案校验拒绝，且审批胶囊没有拟写入 diff；E0 补通用批准写回链，专用卡与 diff 在 E13 完成，不能提前视作闭环 |
 | Recipes(D8-1) | iOS 实现 6472 行/5 文件(Models/Store/Runner/Tools/View);端内最小闭环(manifest 校验+runner+recipe__name 工具+列表 UI)估 1500-2500 行,独立批次;基准 ~/Downloads/AI/amberagent-ios/iosApp/iosApp/IOSRecipe*.swift |
 | 动态插件(D8-2) | 更大子系统(自有 DYNAMIC_PLUGIN_IMPLEMENTATION_PLAN.md;试运行+expected_result+hash 注册+插件中心),独立批次 |
 
@@ -144,7 +148,7 @@
 
 ## 收尾记录(执行中)
 
-**已完成提交**:D0(13 项,审查 3P1+4P2 已修,真机验证)/ D1(3 项,审查 1P1 已修,真机验证)/ D2(2 项,审查 1P0+2P1 已修,真机验证自选目录全链路)/ D3(3 项落地+3 项登记,自检补审 PASS;subagent 供应商 quota 故障期间改自检+截图回路,恢复后可补审)/ D4(备份按类别导出/恢复,真机验证)/ D5(Jev 三用途/模型池 UI/悬浮条收起/动态席位/污染检测)/ D6(WebMount 4 件+飞书文档六件+Cookie 导入,真机验证)/ D7(Mermaid/长图导出/复制格式;D7-1/D7-2 经通用管线闭环,专用 UI 登记 backlog)/ D8(Recipes/动态插件调研裁定:规模独立批次,登记)。
+**已完成提交**:D0(13 项,审查 3P1+4P2 已修,真机验证)/ D1(3 项,审查 1P1 已修,真机验证)/ D2(2 项,审查 1P0+2P1 已修,真机验证自选目录全链路)/ D3(3 项落地+3 项登记,自检补审 PASS;subagent 供应商 quota 故障期间改自检+截图回路,恢复后可补审)/ D4(备份按类别导出/恢复,真机验证)/ D5(Jev 三用途/模型池 UI/悬浮条收起/动态席位/污染检测)/ D6(WebMount 4 件+飞书文档六件+Cookie 导入,真机验证)/ D7(Mermaid/长图导出/复制格式;E0 补通本章计划批准写回，章节裁决/计划专用卡与 diff 待 E13)/ D8(Recipes/动态插件调研裁定:规模独立批次,登记)。
 
 **M5(D0–D2)✅ / M6(D3–D4)✅ / M7(D5–D6)✅ / M8(D7–D8)✅(裁定收口)**
 

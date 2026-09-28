@@ -5,8 +5,9 @@ import { Icon } from '../components/ui/Icon.ets';
 import { router } from '@kit.ArkUI';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { getModelRegistry, prepareCouncilManager, getCouncilRunner } from '../di/AppContainer.ets';
-import { LENS_PRESETS, CORE_SEATS, makeRuntimeSetting, makeSeat } from '@amber/deepread-domain';
-import type { ModelCouncilRuntimeSetting } from '@amber/deepread-domain';
+import { LENS_PRESETS, CORE_SEATS, makeRuntimeSetting, makeSeat, resolveCouncilDynamicSeats } from '@amber/deepread-domain';
+import type { ModelCouncilRuntimeSetting, CouncilDynamicSeatSelection } from '@amber/deepread-domain';
+import { EntryAbortController } from '../platform_impl/EntryAbortController.ets';
 import { getAgentPromptSettingsPort } from '../di/AppContainer.ets';
 import type { ModelConfig, ModelCouncilRolePreset, CouncilTaskInput, ModelCouncilMode, ModelCouncilSeat } from '@amber/deepread-domain';
 
@@ -58,8 +59,10 @@ struct CouncilPage {
   @State dynamicSeatError: string = '';
   private pageAlive: boolean = false;
   private loadToken: number = 0;
+  private dynamicSeatToken: number = 0;
+  private dynamicSeatAbortController: EntryAbortController | null = null;
 
-  private persistedSetting: ModelCouncilRuntimeSetting | null = null;
+  @State persistedSetting: ModelCouncilRuntimeSetting | null = null;
 
   aboutToAppear(): void {
     this.pageAlive = true;
@@ -69,13 +72,21 @@ struct CouncilPage {
     });
     // 读取持久化 council 设置(enabled 门/席位/预算/超时/裁判模型)
     getAgentPromptSettingsPort().getCouncilSetting().then((persisted: ModelCouncilRuntimeSetting): void => {
-      if (this.pageAlive && token === this.loadToken) this.persistedSetting = persisted;
+      if (this.pageAlive && token === this.loadToken) {
+        this.persistedSetting = persisted;
+        this.reconcileDynamicSeats(persisted);
+      }
     }).catch((): void => {});
   }
 
   aboutToDisappear(): void {
     this.pageAlive = false;
     this.loadToken++;
+    this.dynamicSeatToken++;
+    if (this.dynamicSeatAbortController !== null) this.dynamicSeatAbortController.abort();
+    this.dynamicSeatAbortController = null;
+    this.generatingSeats = false;
+    this.starting = false;
   }
 
   private async loadModels(token: number): Promise<void> {
@@ -94,19 +105,52 @@ struct CouncilPage {
     }
     if (!found) next.push(id);
     this.selectedLens = next;
+    this.reconcileDynamicSeats(this.persistedSetting ?? makeRuntimeSetting());
+  }
+
+  private dynamicSeatCapacity(): number {
+    return resolveCouncilDynamicSeats(this.persistedSetting ?? makeRuntimeSetting(),
+      this.selectedLens, this.models, this.generatedSeats).remainingCapacity;
+  }
+
+  private reconcileDynamicSeats(setting: ModelCouncilRuntimeSetting): boolean {
+    const selected: CouncilDynamicSeatSelection = resolveCouncilDynamicSeats(
+      setting, this.selectedLens, this.models, this.generatedSeats);
+    if (selected.seats.length === this.generatedSeats.length) return false;
+    this.generatedSeats = selected.seats;
+    this.dynamicSeatError = `席位上限为 ${setting.maxSeats} 个，已移除未纳入的动态席位`;
+    return true;
   }
 
   // D5-3:生成动态席位(单 LLM 调用,JSON 数组解析;role 去重追加)
   private async generateDynamicSeats(): Promise<void> {
     const objective: string = this.objective.trim();
-    if (objective.length === 0 || this.models.length === 0 || this.generatingSeats) return;
+    if (objective.length === 0 || this.models.length === 0 || this.generatingSeats || this.starting) return;
+    const token: number = ++this.dynamicSeatToken;
+    const controller: EntryAbortController = new EntryAbortController();
+    this.dynamicSeatAbortController = controller;
     this.generatingSeats = true;
     this.dynamicSeatError = '';
     try {
+      const base: ModelCouncilRuntimeSetting = this.persistedSetting !== null
+        ? this.persistedSetting : await getAgentPromptSettingsPort().getCouncilSetting();
+      if (!this.pageAlive || token !== this.dynamicSeatToken) return;
+      this.persistedSetting = base;
+      if (!base.enabled) {
+        this.dynamicSeatError = '模型议会已在设置中关闭';
+        return;
+      }
+      this.reconcileDynamicSeats(base);
+      const remaining: number = this.dynamicSeatCapacity();
+      if (remaining === 0) {
+        this.dynamicSeatError = `席位已满（${base.maxSeats} 个），请先移除可选视角席或动态席位`;
+        return;
+      }
+      const limit: number = Math.min(3, remaining);
       const model: ModelConfig = this.models[0];
       const result = await getCouncilRunner().generate({
         model: model,
-        systemPrompt: '你是多模型议会的组委。根据用户议题生成 2-3 个互补的评审视角席位,'
+        systemPrompt: `你是多模型议会的组委。根据用户议题生成 ${limit} 个互补的评审视角席位,`
           + '只输出 JSON 数组:[{"name":"不超过6字","role":"不超过12字",'
           + '"systemPrompt":"该视角的评审指令(不超过80字)"}],不要输出任何解释。'
           + '视角之间必须有明显差异(如 成本/风险/用户/技术/伦理/市场)。',
@@ -115,8 +159,9 @@ struct CouncilPage {
         reasoningLevel: null,
         temperature: null,
         onChunk: (): void => {},
-        signal: null,
+        signal: controller.signal,
       });
+      if (!this.pageAlive || token !== this.dynamicSeatToken || controller.signal.aborted) return;
       const text: string = result.text;
       const start: number = text.indexOf('[');
       const end: number = text.lastIndexOf(']');
@@ -134,20 +179,30 @@ struct CouncilPage {
           systemPrompt: (d.systemPrompt as string).substring(0, 200),
         }));
         added++;
-        if (added >= 3) break;
+        if (added >= limit) break;
       }
       if (added === 0) throw new Error('未解析出可用席位');
-      this.generatedSeats = next;
+      const selected: CouncilDynamicSeatSelection = resolveCouncilDynamicSeats(
+        base, this.selectedLens, this.models, next);
+      const included: number = selected.seats.length - this.generatedSeats.length;
+      if (included <= 0) throw new Error('没有可加入的席位，请检查席位容量和重复角色');
+      this.generatedSeats = selected.seats;
+      if (included < added) this.dynamicSeatError = `本轮已加入 ${included} 个动态席位，其余席位因容量或重复角色未纳入`;
     } catch (e) {
-      const msg: string = e instanceof Error ? e.message : String(e);
-      this.dynamicSeatError = `生成失败:${msg}`;
+      if (this.pageAlive && token === this.dynamicSeatToken && !controller.signal.aborted) {
+        const msg: string = e instanceof Error ? e.message : String(e);
+        this.dynamicSeatError = `生成失败:${msg}`;
+      }
     } finally {
-      this.generatingSeats = false;
+      if (this.pageAlive && token === this.dynamicSeatToken) {
+        this.generatingSeats = false;
+        this.dynamicSeatAbortController = null;
+      }
     }
   }
 
   async startCouncil(): Promise<void> {
-    if (this.starting) return;
+    if (this.starting || this.generatingSeats) return;
     if (this.objective.trim().length === 0) {
       this.errorMsg = '请输入议题';
       return;
@@ -162,12 +217,14 @@ struct CouncilPage {
     }
     this.errorMsg = '';
     this.starting = true;
+    const token: number = this.loadToken;
     try {
       // 持久化设置为基础,本轮 UI 选择的轮数覆盖;禁用态直接拦截。
       // 读取未完成时先 await(否则可用默认 enabled=true 绕过禁用开关)
       const base: ModelCouncilRuntimeSetting = this.persistedSetting !== null
         ? this.persistedSetting
         : await getAgentPromptSettingsPort().getCouncilSetting();
+      if (!this.pageAlive || token !== this.loadToken) return;
       if (!base.enabled) {
         this.errorMsg = '模型议会已在设置中关闭';
         return;
@@ -176,7 +233,9 @@ struct CouncilPage {
       init['defaultRounds'] = this.rounds;
       init['maxRounds'] = Math.max(base.maxRounds, this.rounds);
       const setting: ModelCouncilRuntimeSetting = makeRuntimeSetting(init);
+      if (this.reconcileDynamicSeats(setting)) return;
       const mgr = await prepareCouncilManager(setting);
+      if (!this.pageAlive || token !== this.loadToken) return;
       const input: CouncilTaskInput = {
         mode: this.mode,
         objective: this.objective,
@@ -189,10 +248,10 @@ struct CouncilPage {
       const params: Record<string, string> = { 'runId': run.runId };
       router.pushUrl({ url: 'pages/CouncilRunPage', params: params });
     } catch (e) {
-      this.errorMsg = String(e);
+      if (this.pageAlive && token === this.loadToken) this.errorMsg = String(e);
       hilog.error(DOMAIN, TAG, 'startCouncil failed: %{public}s', String(e));
     } finally {
-      this.starting = false;
+      if (this.pageAlive && token === this.loadToken) this.starting = false;
     }
   }
 
@@ -305,11 +364,19 @@ struct CouncilPage {
               }
               Text(this.generatingSeats ? '生成中…' : 'AI 生成')
                 .fontSize(13).fontColor(this.objective.trim().length === 0 || this.models.length === 0
+                  || this.dynamicSeatCapacity() === 0
+                  || (this.persistedSetting !== null && !this.persistedSetting.enabled)
                   ? INK4 : ACCENT)
                 .padding({ left: 12, right: 4, top: 6, bottom: 6 })
+                .enabled(!this.generatingSeats && !this.starting && this.dynamicSeatCapacity() > 0
+                  && (this.persistedSetting === null || this.persistedSetting.enabled))
                 .onClick((): void => { this.generateDynamicSeats(); })
             }
             .width('100%').margin({ top: 14 })
+            Text(this.persistedSetting === null ? '正在读取席位设置…'
+              : (!this.persistedSetting.enabled ? '模型议会已在设置中关闭'
+                : `还可加入 ${this.dynamicSeatCapacity()} 个动态席位`))
+              .fontSize(11).fontColor(INK4).width('100%').margin({ top: 4, bottom: 8 })
             if (this.generatedSeats.length > 0) {
               Flex({ wrap: FlexWrap.Wrap }) {
                 ForEach(this.generatedSeats, (s: ModelCouncilSeat) => {
@@ -371,13 +438,15 @@ struct CouncilPage {
           Column() {
             Row() {
               if (this.starting) LoadingProgress().width(16).height(16).color('#FFFFFF').margin({ right: 8 })
-              Text(this.starting ? '发起中…' : '开始议会').fontSize(15).fontWeight(FontWeight.Medium).fontColor('#FFFFFF')
+              Text(this.starting ? '发起中…' : (this.generatingSeats ? '等待席位生成…' : '开始议会'))
+                .fontSize(15).fontWeight(FontWeight.Medium).fontColor('#FFFFFF')
             }
             .justifyContent(FlexAlign.Center)
           }
           .width('70%').height(48).borderRadius(12).backgroundColor(ACCENT)
           .justifyContent(FlexAlign.Center)
-          .opacity(this.starting ? 0.6 : 1)
+          .opacity(this.starting || this.generatingSeats ? 0.6 : 1)
+          .enabled(!this.starting && !this.generatingSeats)
           .onClick(() => { this.startCouncil(); })
           .margin({ bottom: 32 })
         }

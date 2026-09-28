@@ -14,19 +14,19 @@ import {
 import {
   CenteredTitleBar, PlainSection, CardGroup, CardRow, CardToggleRow, FooterNote, PageSpacer,
 } from '../components/PageTemplate.ets';
+import { Icon } from '../components/ui/Icon.ets';
 import { getChatRepository, getChatKvStore, getAppContainer } from '../di/AppContainer.ets';
 import { createEntrySyncCryptoPort } from '../platform_impl/SyncCryptoPort.ets';
 import {
   hasActiveConversationRuns, beginConversationRestore, markConversationsRestored,
 } from '../platform_impl/ConversationRunGuard.ets';
 import { clearConversationDeletedMarker } from '../platform_impl/EntryCompactStore.ets';
-import type { Conversation, ConversationSummary, JsonObject, KeyValueStore } from '@amber/chat-domain';
+import type { Conversation, ConversationSummary, JsonObject } from '@amber/chat-domain';
 import {
   createSyncBackup, restoreSyncBackup, inspectSyncArchive,
   createWebDavClient, webDavBackupFileName,
-  loadAssistants, saveAssistants, loadProviders, saveProviders,
+  buildSyncSettingsBlob, applySyncRestoreSettings,
   conversationFromSyncDto, settingsFromSyncPayload,
-  ASSISTANTS_KEY, PROVIDERS_KEY,
   type SyncConversationDto, type SyncInspectPreview, type SyncRestoreResult, type SyncRestoreSettings, type WebDavConfig,
   type WebDavRemoteFile, type WebDavClient,
 } from '@amber/chat-domain';
@@ -37,6 +37,7 @@ struct SettingBackupPage {
   @StorageProp('statusBarHeight') statusBarHeight: number = 44;
   @StorageProp('accentColor') accentColorStore: string = ACCENT;
   @State passphrase: string = '';
+  @State showPassphrase: boolean = false;
   @State usePassphrase: boolean = true;
   @State busy: boolean = false;
   @State statusMsg: string = '';
@@ -52,6 +53,7 @@ struct SettingBackupPage {
   @State davUrl: string = '';
   @State davUser: string = '';
   @State davPass: string = '';
+  @State showDavPass: boolean = false;
   @State davPath: string = 'amber_agent_backups';
   @State davSnapshots: WebDavRemoteFile[] = [];
   @State davListBusy: boolean = false;
@@ -94,19 +96,11 @@ struct SettingBackupPage {
       }
     }
     const kv = getChatKvStore();
-    const settingsBlob: Record<string, object> = {};
-    if (this.exportAssistants) {
-      const assistants = await loadAssistants(kv);
-      if (assistants !== null) { settingsBlob['assistants'] = assistants as object; }
-    }
-    if (this.exportProviders) {
-      const providers = await loadProviders(kv);
-      if (providers !== null) { settingsBlob['providers'] = providers as object; }
-    }
+    const settingsBlob: JsonObject = await buildSyncSettingsBlob(kv, this.exportAssistants, this.exportProviders);
     const crypto = createEntrySyncCryptoPort();
     return createSyncBackup(crypto, {
       conversations,
-      settings: settingsBlob as JsonObject,
+      settings: settingsBlob,
       appVersionName: 'harmony-preview',
       appVersionCode: 1,
       deviceId: 'harmony',
@@ -280,49 +274,6 @@ struct SettingBackupPage {
     }
   }
 
-  // settings 第二阶段:覆盖前先取原值；覆盖失败回滚原值，并返回准确反馈。
-  // 不与会话恢复假装跨 store 原子(会话已单事务提交，settings 独立报告)。
-  private async applyRestoreSettings(
-    settings: SyncRestoreSettings, kv: KeyValueStore,
-  ): Promise<string | null> {
-    const writeAssistants: boolean = settings.assistants !== null;
-    const writeProviders: boolean = settings.providers !== null;
-    if (!writeAssistants && !writeProviders) return null;
-    let prevAssistants: string | null = null;
-    let prevProviders: string | null = null;
-    if (writeAssistants) prevAssistants = await kv.get(ASSISTANTS_KEY);
-    if (writeProviders) prevProviders = await kv.get(PROVIDERS_KEY);
-    try {
-      if (writeAssistants) await saveAssistants(kv, settings.assistants as never);
-      if (writeProviders) await saveProviders(kv, settings.providers as never);
-      return '（已覆盖 settings）';
-    } catch (e) {
-      // 原值回滚(尽力而为；回滚自身失败需一并如实告知)
-      let rollbackNote: string = '';
-      try {
-        if (writeAssistants) {
-          if (prevAssistants === null) await kv.delete(ASSISTANTS_KEY);
-          else await kv.put(ASSISTANTS_KEY, prevAssistants);
-        }
-      } catch (re) {
-        rollbackNote += ` assistants 回滚失败：${re instanceof Error ? re.message : String(re)}`;
-      }
-      try {
-        if (writeProviders) {
-          if (prevProviders === null) await kv.delete(PROVIDERS_KEY);
-          else await kv.put(PROVIDERS_KEY, prevProviders);
-        }
-      } catch (re) {
-        rollbackNote += ` providers 回滚失败：${re instanceof Error ? re.message : String(re)}`;
-      }
-      const msg: string = e instanceof Error ? e.message : String(e);
-      if (rollbackNote.length > 0) {
-        return `（settings 覆盖失败，回滚未完成：${msg}${rollbackNote}）`;
-      }
-      return `（settings 覆盖失败，已回滚原设置：${msg}）`;
-    }
-  }
-
   async doRestore(): Promise<void> {
     if (this.busy || this.pendingArchivePath.length === 0) return;
     if (!this.restoreConversations && !this.restoreAssistants && !this.restoreProviders) {
@@ -390,7 +341,7 @@ struct SettingBackupPage {
           assistants: this.restoreAssistants ? settings.assistants : null,
           providers: this.restoreProviders ? settings.providers : null,
         };
-        const note: string | null = await this.applyRestoreSettings(filtered, kv);
+        const note: string | null = await applySyncRestoreSettings(filtered, kv);
         settingsNote = note !== null ? note : '（备份不含所选 settings 类别）';
       }
       if (compactFailed) {
@@ -433,7 +384,7 @@ struct SettingBackupPage {
           if (this.statusMsg.length > 0 && this.preview === null) {
             FooterNote({ text: this.statusMsg })
           }
-          FooterNote({ text: '说明：WebDAV 支持上传与快照下载恢复；跨端加密互通（KDF）待后续。' })
+          FooterNote({ text: '备份包含所选服务商凭证，建议使用密码加密。WebDAV 支持上传与快照下载恢复；跨端加密互通（KDF）待后续。' })
           PageSpacer()
         }
         .width('100%')
@@ -446,21 +397,56 @@ struct SettingBackupPage {
   // ── 卡片内容(@Builder:组件构造必须在 builder 上下文,铁律 4b)──
 
   @Builder
+  PasswordField(isWebDav: boolean): void {
+    Row() {
+      TextInput({
+        text: isWebDav ? this.davPass : this.passphrase,
+        placeholder: isWebDav ? '密码 / App Token' : '备份密码（至少 4 位）',
+      })
+        .type((isWebDav ? this.showDavPass : this.showPassphrase) ? InputType.Normal : InputType.Password)
+        .showPasswordIcon(false)
+        .height(44).layoutWeight(1)
+        .fontSize(BODY).fontColor(INK).placeholderColor(INK4)
+        .backgroundColor(Color.Transparent)
+        .padding({ left: 14, right: 0 })
+        .onChange((value: string): void => {
+          if (isWebDav) this.davPass = value;
+          else this.passphrase = value;
+        })
+      Row() {
+        Icon({
+          name: (isWebDav ? this.showDavPass : this.showPassphrase) ? 'eye' : 'eye_off',
+          iconSize: 20, color: INK2,
+        })
+      }
+      .width(44).height(44)
+      .justifyContent(FlexAlign.Center)
+      .alignItems(VerticalAlign.Center)
+      .accessibilityText((isWebDav ? this.showDavPass : this.showPassphrase) ? '隐藏密码' : '显示密码')
+      .onClick((): void => {
+        if (!this.busy) {
+          if (isWebDav) this.showDavPass = !this.showDavPass;
+          else this.showPassphrase = !this.showPassphrase;
+        }
+      })
+    }
+    .width('100%').height(44)
+    .alignItems(VerticalAlign.Center)
+    .backgroundColor(SURFACE2).borderRadius(10)
+    .enabled(!this.busy)
+  }
+
+  @Builder
   ExportCard(): void {
     Column() {
       CardToggleRow({
         label: '使用密码加密',
         checked: this.usePassphrase,
-        onToggle: (): void => { this.usePassphrase = !this.usePassphrase; },
+        onToggle: (): void => { if (!this.busy) this.usePassphrase = !this.usePassphrase; },
       })
       if (this.usePassphrase) {
         Column() {
-          TextInput({ text: this.passphrase, placeholder: '备份密码（至少 4 位）' })
-            .type(InputType.Password)
-            .height(44).fontSize(BODY).fontColor(INK).placeholderColor(INK4)
-            .backgroundColor(SURFACE2).borderRadius(10)
-            .padding({ left: 14, right: 14 })
-            .onChange((v: string): void => { this.passphrase = v; })
+          this.PasswordField(false)
           Row() {
             Row().width('100%').height(1).backgroundColor(LINE)
           }
@@ -473,17 +459,17 @@ struct SettingBackupPage {
       CardToggleRow({
         label: '会话', desc: '打包全部会话内容',
         checked: this.exportConversations,
-        onToggle: (): void => { this.exportConversations = !this.exportConversations; },
+        onToggle: (): void => { if (!this.busy) this.exportConversations = !this.exportConversations; },
       })
       CardToggleRow({
         label: '助手', desc: '打包助手配置',
         checked: this.exportAssistants,
-        onToggle: (): void => { this.exportAssistants = !this.exportAssistants; },
+        onToggle: (): void => { if (!this.busy) this.exportAssistants = !this.exportAssistants; },
       })
       CardToggleRow({
-        label: '服务商', desc: '打包服务商配置(不含 API Key)',
+        label: '服务商', desc: '打包服务商配置及凭证',
         checked: this.exportProviders,
-        onToggle: (): void => { this.exportProviders = !this.exportProviders; },
+        onToggle: (): void => { if (!this.busy) this.exportProviders = !this.exportProviders; },
       })
       CardRow({
         label: '导出备份',
@@ -532,18 +518,18 @@ struct SettingBackupPage {
       CardToggleRow({
         label: '会话', desc: '恢复全部会话内容',
         checked: this.restoreConversations,
-        onToggle: (): void => { this.restoreConversations = !this.restoreConversations; },
+        onToggle: (): void => { if (!this.busy) this.restoreConversations = !this.restoreConversations; },
       })
       CardToggleRow({
         label: '助手', desc: '以备份内容覆盖助手配置',
         checked: this.restoreAssistants,
-        onToggle: (): void => { this.restoreAssistants = !this.restoreAssistants; },
+        onToggle: (): void => { if (!this.busy) this.restoreAssistants = !this.restoreAssistants; },
       })
       CardToggleRow({
         label: '服务商', desc: '以备份内容覆盖服务商配置',
         checked: this.restoreProviders,
         isLast: true,
-        onToggle: (): void => { this.restoreProviders = !this.restoreProviders; },
+        onToggle: (): void => { if (!this.busy) this.restoreProviders = !this.restoreProviders; },
       })
     }
     .width('100%')
@@ -581,12 +567,7 @@ struct SettingBackupPage {
       .width('100%')
       .padding({ left: 14, right: 14 })
       Column() {
-        TextInput({ text: this.davPass, placeholder: '密码 / App Token' })
-          .type(InputType.Password)
-          .height(44).fontSize(BODY).fontColor(INK).placeholderColor(INK4)
-          .backgroundColor(SURFACE2).borderRadius(10)
-          .padding({ left: 14, right: 14 })
-          .onChange((v: string): void => { this.davPass = v; })
+        this.PasswordField(true)
         Row() {
           Row().width('100%').height(1).backgroundColor(LINE)
         }
