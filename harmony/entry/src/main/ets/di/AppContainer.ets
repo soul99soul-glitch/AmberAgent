@@ -41,7 +41,7 @@ import {
   createNovelWorkspaceService, NovelWorkspaceService,
 } from '../platform_impl/NovelWorkspaceService.ets';
 import { hilog } from '@kit.PerformanceAnalysisKit';
-import type { Context } from '@kit.AbilityKit';
+import type { Context, common } from '@kit.AbilityKit';
 import type {
   ConversationRepository, KeyValueStore, Assistant, OpenAIChatApi, TextGenerationParams,
   ProviderSetting, ProviderSettingOpenAIVariant, ProviderSettingClaude, ProviderSettingGoogle,
@@ -74,6 +74,7 @@ import {
   runChatTurnWithTools, conversationHasPendingOrUnexecutedTools,
   createTimeTool, createWorkspaceTools, createSearchTools, loadSearchPrefs,
   createToolRegistry, filterToolProfile, createMcpServerTools,
+  createTerminalApprovalGuard,
   thinkTagTransformer, regexOutputTransformer,
   type ChatTurnDeps,
 } from '@amber/chat-domain';
@@ -97,6 +98,12 @@ import {
   createEntryBuiltinSkillAssetPort,
 } from '../platform_impl/SkillStore.ets';
 import { createEntryWorkspaceManager } from '../platform_impl/WorkspaceStore.ets';
+import type { JsonObject, RecipeStore } from '@amber/chat-domain';
+import { createEntryRecipeStore } from '../platform_impl/RecipeStore.ets';
+import { createAssistantLocalPrimitives } from '../platform_impl/AssistantLocalPrimitives.ets';
+import { startEntryRecipeFromPage } from '../platform_impl/RecipePageLaunch.ets';
+import { configureEntryScopedRecipeLoop } from '../platform_impl/ScopedRecipeLoop.ets';
+import type { ToolLoopOptions, TerminalApprovalGuard } from '@amber/chat-domain';
 import { sha256HexUtf8 } from '../platform_impl/EntryLocalToolPorts.ets';
 import {
   createEntryPromptConfigFilePort, createEntryCouncilStrategy,
@@ -796,7 +803,16 @@ const buildSubAgentGenerationPort = (): SubAgentGenerationPort => {
     const api: OpenAIChatApi = buildProviderApi(cached, customHeaderRecord);
     return asChatStreamProvider(api, (): TextGenerationParams => params);
   };
-  return new ChatStreamSubAgentGenerationPort({ resolveModel, resolveAssistant, makeProvider });
+  return new ChatStreamSubAgentGenerationPort({ resolveModel, resolveAssistant, makeProvider,
+    configureRecipeLoop: async (loop: ToolLoopOptions): Promise<void> => {
+      if (!loop.tools.some((tool: AgentTool): boolean =>
+        tool.name.startsWith('recipe_') || tool.name === 'recipes_list')) return;
+      const hasTerminal: boolean = loop.tools.some((tool: AgentTool): boolean => tool.name.startsWith('terminal_'));
+      const guard: TerminalApprovalGuard | null = hasTerminal
+        ? createTerminalApprovalGuard(await getTerminalRuntime(), await getSSHProfileStore(), await getMoshRuntime()) : null;
+      await configureEntryScopedRecipeLoop(loop, await getRecipeStore(), guard);
+    },
+  });
 };
 
 // Runner 单例(Koin single 等价;generation port 不持有会话状态)
@@ -1121,6 +1137,42 @@ export const getWorkspaceManager = (): PosixWorkspaceManager => {
 // D2-1:自选工作区目录变更后重建管理器(rootAbs 在构造时注入)
 export const resetWorkspaceManager = (): void => {
   workspaceManager = null;
+  recipeStorePromise = null;
+};
+
+let recipeStorePromise: Promise<RecipeStore> | null = null;
+export const getRecipeStore = (): Promise<RecipeStore> => {
+  if (recipeStorePromise === null) {
+    const context: common.UIAbilityContext = AppStorage.get<common.UIAbilityContext>('abilityContext') as common.UIAbilityContext;
+    const init: Promise<RecipeStore> = createEntryRecipeStore(context, getWorkspaceManager());
+    init.catch((): void => { if (recipeStorePromise === init) recipeStorePromise = null; });
+    recipeStorePromise = init;
+  }
+  return recipeStorePromise;
+};
+
+const recipePagePrimitives = async (assistant: Assistant): Promise<AgentTool[]> => {
+  const terminal: boolean = assistant.localTools.indexOf('terminal') >= 0;
+  const python: boolean = assistant.localTools.indexOf('python') >= 0;
+  return filterToolProfile(createAssistantLocalPrimitives({
+    assistant, conversationId: '', workspace: getWorkspaceManager(), activityStore: getToolActivityStore(),
+    terminalRuntime: terminal ? await getTerminalRuntime() : null,
+    moshRuntime: terminal ? await getMoshRuntime() : null,
+    sshProfiles: terminal ? await getSSHProfileStore() : null,
+    pythonRuntime: python ? await getPythonRuntime() : null,
+  }), assistant.toolProfile).tools;
+};
+
+export const getRecipePrimitives = async (): Promise<AgentTool[]> => {
+  const assistants: Assistant[] = await getChatAssistants();
+  return recipePagePrimitives(assistants[0]);
+};
+
+export const startRecipeFromPage = async (name: string, expectedHash: string, inputs: JsonObject): Promise<void> => {
+  const assistants: Assistant[] = await getChatAssistants();
+  const assistant: Assistant = assistants[0];
+  await startEntryRecipeFromPage({ store: await getRecipeStore(), primitives: await recipePagePrimitives(assistant),
+    assistant, repository: getChatRepository() }, name, expectedHash, inputs);
 };
 
 export const getChatAssistants = async (): Promise<Assistant[]> => {

@@ -53,9 +53,9 @@ import {
   copyValidCompactsToConversation, ContextCompactionFailedError,
   conversationWithMessagesAsNodes,
   runChatTurnWithTools, runToolLoopContinuation, runRegenerateAtWithTools,
-  createTimeTool, makeUIMessage,
-  createAskUserTool, createConversationContextTools, createConversationHistoryTools,
-  createTerminalTools, createMoshTools, createPythonTool, createTerminalApprovalGuard,
+  makeUIMessage,
+  createConversationContextTools, createConversationHistoryTools,
+  createTerminalApprovalGuard, createRecipeTools, createRecipeLoopAdapter, recoverInterruptedRecipes,
   AgentToolDispatcher, defaultToolInvocationHooks,
   createConversationQueueTools, createToolRegistry,
   createToolSearchTool, createRegistryIntrospectionTools, filterToolProfile,
@@ -80,7 +80,7 @@ import {
   firstImageBlockingIssueForSend, inspectImageAttachment, imageAttachmentBlocksSend,
   probeVisionModelHealth,
   createMcpManagementTools, createMcpServerTools, makeAgentTool, createSkillTools,
-  createWorkspaceTools, createWorkspaceArtifactTools, createDeepReadPlaybookTools,
+  createDeepReadPlaybookTools,
   patchAssistant,
   reasoningLevelForModel, withReasoningLevelForModel,
   defaultReasoningLevelForModel, reasoningLevelsForModel,
@@ -106,7 +106,7 @@ import {
   buildProviderApi, currentChatModelUuid, loadTaskModelIds, resolveTaskChatModelChoice,
   resolveTaskModelChain, loadTaskPrompts, TaskPrompts,
   getMcpManager, initMcpManager, getToolActivityStore, getSkillManager,
-  getWorkspaceManager,
+  getWorkspaceManager, getRecipeStore,
   getSkillWorkspacePort, getDeepReadPlaybookRepository, getAgentPromptConfigTool,
   getPermissionsStatusTool, getAgentTaskTools, getAgentCronTools,
   hydrateSubAgentSetting, getSubAgentTools, SubAgentToolsContext,
@@ -129,14 +129,12 @@ import {
 import type { ConversationTimelineLoadState } from '@amber/chat-domain';
 import { getMcpSettingsStore } from '../platform_impl/McpSettingsStore.ets';
 import { createEntryHealthReadPort } from '../platform_impl/HealthReadPort.ets';
-import { inflateRawEntry, createEntryXmlPull } from '../platform_impl/EntryDocumentParser.ets';
-import {
-  createArtifactHttpPort, createArtifactImagePort, createDeflateRawPort,
-} from '../platform_impl/ArtifactPorts.ets';
+import { inflateRawEntry } from '../platform_impl/EntryDocumentParser.ets';
 import { compressImageAsDataUrl } from '../platform_impl/ImageCompress.ets';
 import type { TokenUsage } from '@amber/chat-domain';
 import { EntryAbortController } from '../platform_impl/EntryAbortController.ets';
-import { beginConversationRun, conversationRestoreVersion } from '../platform_impl/ConversationRunGuard.ets';
+import { beginConversationRun, beginConversationRestore, hasActiveConversationRuns,
+  conversationRestoreVersion } from '../platform_impl/ConversationRunGuard.ets';
 import { resolveEffectiveChatChoice, saveEffectiveChatChoice } from '../platform_impl/ChatModelSelectionSupport.ets';
 import { countNativeContextTokens } from '../platform_impl/NativeTokenCounter.ets';
 import { mutateAssistant } from '../platform_impl/AssistantMutation.ets';
@@ -182,7 +180,9 @@ import type { MiniAppPlatform } from '../platform_impl/MiniAppPlatform.ets';
 import { createImageGenTool, imageGenToolAvailable, EditSourceImage } from '../platform_impl/ImageGenTool.ets';
 import { createSoulTools } from '../platform_impl/SoulTools.ets';
 import { jevToolSearchReranker, createJevStatusTool, jevNoulBatch, JevNoulBatchResult } from '../platform_impl/JevSupport.ets';
-import { createJavascriptExecuteTool, JsSandboxHost } from '../platform_impl/JsSandboxTool.ets';
+import { JsSandboxHost } from '../platform_impl/JsSandboxTool.ets';
+import { createAssistantLocalPrimitives } from '../platform_impl/AssistantLocalPrimitives.ets';
+import type { RecipeStore, InstalledRecipe, RecipeLoopAdapter } from '@amber/chat-domain';
 import { stopGenerationKeepAlive } from '../platform_impl/BackgroundGenerationKeepAlive.ets';
 import { SubAgentActivityStrip } from '../components/SubAgentActivityStrip.ets';
 
@@ -1176,6 +1176,7 @@ struct ChatPage {
     this.refreshMentionRoles();
     const params = router.getParams() as Record<string, string>;
     const convId: string = params ? (params['conversationId'] ?? '') : '';
+    const recipeManualId: string = params ? (params['recipeManualToolCallId'] ?? '') : '';
     this.loadedRestoreVersion = conversationRestoreVersion(convId);
     // Phase 1:首屏定位参数(最小兼容:initialMessageIndex 数字 index;nodeId 定位行)
     const initialIndexParam: string = params ? (params['initialMessageIndex'] ?? '') : '';
@@ -1197,12 +1198,28 @@ struct ChatPage {
           hilog.warn(HILOG_DOMAIN, HILOG_TAG, 'load tail window failed: %{public}s', e.message);
         })
         .then((): Promise<Conversation | null> => this.ensureFullConversationLoaded(convId))
-        .then((full: Conversation | null): void => {
+        .then(async (loaded: Conversation | null): Promise<void> => {
+          let full: Conversation | null = loaded;
           if (!this.pageAlive) return;
           this.conversationLoaded = true;
           if (full === null) {
             if (this.rows.length === 0) this.errorMsg = '会话不存在';
             return;
+          }
+          if (!hasActiveConversationRuns([full.id])) {
+            try {
+              const recovered: Conversation = recoverInterruptedRecipes(full);
+              if (recovered !== full) {
+                const release: () => void = beginConversationRestore([full.id]);
+                try { await getChatRepository().save(recovered); } finally { release(); }
+                if (!this.pageAlive) return;
+                full = recovered;
+                this.rows = buildRowsFromNodes(full.messageNodes.slice(this.timelineLoadState.oldestLoadedIndex), this.rows);
+              }
+            } catch (error) {
+              if (this.pageAlive) this.errorMsg = error instanceof Error ? this.compactErrorText(error) : String(error);
+              return;
+            }
           }
           this.conversation = full;
           this.restoreInputDraft(`chat_input_draft/${full.id}`);
@@ -1235,6 +1252,15 @@ struct ChatPage {
             this.applyInitialScroll(-1);
           } else {
             this.positionToTargetNode(targetNodeId, targetNodeIndex);
+          }
+          if (recipeManualId.length > 0) {
+            const messages: UIMessage[] = currentMessages(full);
+            const manual: UIMessagePartTool | undefined = messages.length > 0
+              ? messages[messages.length - 1].parts.find((part: UIMessagePart): boolean =>
+                part.type === 'tool' && (part as UIMessagePartTool).toolCallId === recipeManualId) as UIMessagePartTool | undefined
+              : undefined;
+            if (manual !== undefined && manual.metadata?.['recipe_manual'] === true
+              && manual.output.length === 0 && manual.approvalState.type === 'auto') this.resumeToolLoop(full);
           }
           // D-052:恢复持久化队列(session 创建时 load,ChatService.kt:334);
           //   解析失败 → hilog + 空队列(Android Log.w + getOrDefault 语义)
@@ -2060,9 +2086,9 @@ struct ChatPage {
             return this.runViaKernel(
               conv,
               deps,
-              (runtimeDeps: ChatTurnDeps): Promise<Conversation> =>
+              async (runtimeDeps: ChatTurnDeps): Promise<Conversation> =>
                 runRegenerateAtWithTools(
-                  conv, nodeId, runtimeDeps, this.buildToolLoop(rt, conv)),
+                  conv, nodeId, runtimeDeps, await this.buildToolLoop(rt, conv)),
             ).then((result: InteractiveTurnRunResult): Conversation => result.conversation);
           });
       })
@@ -3680,7 +3706,7 @@ struct ChatPage {
   //   :31-161 — 派生 needsApproval/display_title 注入/output budget);
   //   autoApprove/speculative 经 agentRuntime 快照接线(D-104);每步 provider 工厂按步内
   //   工具定义重建 params(arkts-no-spread 逐字段,不用 rt.params 展开)
-  private buildToolLoop(rt: ChatRuntime, conv: Conversation): ToolLoopOptions {
+  private async buildToolLoop(rt: ChatRuntime, conv: Conversation): Promise<ToolLoopOptions> {
     // Android conversationProvider = getConversationFlow().value(最新会话态)
     const conversationProvider: () => Promise<Conversation> = (): Promise<Conversation> =>
       Promise.resolve(this.conversation ?? conv);
@@ -3701,39 +3727,10 @@ struct ChatPage {
     }
     const profiledTools: AgentTool[] =
       filterToolProfile([
-        ...(localOpts.indexOf('time_info') >= 0 ? [createTimeTool()] : []),
-        ...(terminalGuard !== null && rt.terminalRuntime !== null && rt.sshProfiles !== null
-          ? createTerminalTools({ runtime: rt.terminalRuntime, profiles: rt.sshProfiles,
-            activityStore: getToolActivityStore(), conversationId: conv.id }) : []),
-        ...(terminalGuard !== null && rt.moshRuntime !== null && rt.sshProfiles !== null
-          ? createMoshTools({ runtime: rt.moshRuntime, profiles: rt.sshProfiles,
-            activityStore: getToolActivityStore(), conversationId: conv.id }) : []),
-        ...(localOpts.indexOf('python') >= 0 && rt.pythonRuntime !== null
-          ? [createPythonTool({ runtime: rt.pythonRuntime,
-            activityStore: getToolActivityStore(), conversationId: conv.id })] : []),
-        ...(localOpts.indexOf('ask_user') >= 0 ? [createAskUserTool()] : []),
-        // JS 沙箱(隐藏隔离 Web;无网络无文件;assistant 勾选 javascript_engine 门)
-        ...(localOpts.indexOf('javascript_engine') >= 0 ? [createJavascriptExecuteTool()] : []),        // D-124:workspace 六件(LocalTools.kt:122-126 — workspace_files 门内
-        //   workspaceTools.getTools(),位置 = ask_user 之后;同组
-        //   externalFileTools 未移植 → P1 登记);
-        //   activityStore = 全局单例(D-122)
-        ...(localOpts.indexOf('workspace_files') >= 0
-          ? createWorkspaceTools(getWorkspaceManager(), getToolActivityStore())
-          : []),
-        // D-125:workspace artifact 十一件(LocalTools.kt:123 — 同门第二组
-        //   workspaceArtifactTools.getTools();pdf_read/pdf_render_page 平台
-        //   阻断显式抛错,登记)
-        ...(localOpts.indexOf('workspace_files') >= 0
-          ? createWorkspaceArtifactTools({
-            workspaceManager: getWorkspaceManager(),
-            activityStore: getToolActivityStore(),
-            http: createArtifactHttpPort(),
-            image: createArtifactImagePort(),
-            inflateRaw: inflateRawEntry,
-            deflateRaw: createDeflateRawPort(),
-            newXmlParser: createEntryXmlPull,
-          })
-          : []),
+        ...createAssistantLocalPrimitives({ assistant: rt.assistant, conversationId: conv.id,
+          workspace: getWorkspaceManager(), activityStore: getToolActivityStore(),
+          terminalRuntime: rt.terminalRuntime, moshRuntime: rt.moshRuntime,
+          sshProfiles: rt.sshProfiles, pythonRuntime: rt.pythonRuntime }),
         // WebMount 工具组(LocalTools.kt:161-166 语义:全局开关 || 助手勾选;
         //   wm_eval 另有独立 eval 门;宿主按需挂载,工具闭包全局单会话)
         ...((this.webmountGlobalEnabled || localOpts.indexOf('webmount') >= 0)
@@ -3885,32 +3882,34 @@ struct ChatPage {
           ? createSearchTools(this.searchSettings)
           : []),
       ], rt.assistant.toolProfile).tools;
-    const registry: ToolRegistry = createToolRegistry(profiledTools);
-    // D-132c:Android ChatService.kt:2304-2306 — baseTools = baseRegistry.tools() +
-    //   introspection(baseRegistry);parentToolsProvider 只捕获此 base 集,
-    //   不含 subagent_*(后者由 step-5 条件挂载)。缓存供 subagent_start 委派读取。
-    this.baseToolsCache = [
-      ...registry.tools(),
-      ...createRegistryIntrospectionTools(registry),
-    ];
-    // D-132c:Android ChatService.kt:2307-2315 — conversation 存在且 subAgent.enabled
-    //   时挂五件 SubAgentTools(parentToolsProvider = baseTools);否则空。
-    //   public subagent_* 不进入 child scope(manager.start 过滤);不加入 LocalTools。
+    const recipeStore: RecipeStore = await getRecipeStore();
+    let recipeAdapter: RecipeLoopAdapter = createRecipeLoopAdapter({ store: recipeStore, installed: [] });
     const supervisorTools: AgentTool[] = this.subAgentEnabled && this.conversation !== null
-      ? this.subAgentToolsCache
-      : [];
-    return {
+      ? this.subAgentToolsCache : [];
+    const catalog = (installed: InstalledRecipe[]): AgentTool[] => {
+      recipeAdapter = createRecipeLoopAdapter({ store: recipeStore, installed });
+      const recipeTools: AgentTool[] = filterToolProfile(createRecipeTools({
+        store: recipeStore, installed, primitives: profiledTools,
+      }), rt.assistant.toolProfile).tools;
+      const registry: ToolRegistry = createToolRegistry([...profiledTools, ...recipeTools]);
+      this.baseToolsCache = [...registry.tools(), ...createRegistryIntrospectionTools(registry)];
+      return this.scopedToConversation([
+        ...this.baseToolsCache, createToolSearchTool(registry, rt.assistant.toolProfile, jevToolSearchReranker()),
+        ...supervisorTools,
+      ], conv);
+    };
+    const initialTools: AgentTool[] = catalog(await recipeStore.listInstalled());
+    const options: ToolLoopOptions = {
       dispatcher: new AgentToolDispatcher({ hooks: terminalGuard === null
         ? defaultToolInvocationHooks() : [...defaultToolInvocationHooks(), terminalGuard.hook] }),
       captureInvocationMetadata: terminalGuard === null ? undefined : terminalGuard.captureInvocationMetadata,
-      // createRunTools(ChatService.kt:2326-2329):registry.tools() +
-      //   tool_search(profile 透传,D-082)+ 自省对 + supervisor tools;
-      //   D-122:scopedToConversation(:2329 → :2332-2343)终表统一包覆
-      tools: this.scopedToConversation([
-        ...this.baseToolsCache,
-        createToolSearchTool(registry, rt.assistant.toolProfile, jevToolSearchReranker()),
-        ...supervisorTools,
-      ], conv),
+      tools: initialTools,
+      recipeAdapter,
+      refreshTools: async (): Promise<AgentTool[]> => {
+        const tools: AgentTool[] = catalog(await recipeStore.listInstalled());
+        options.recipeAdapter = recipeAdapter;
+        return tools;
+      },
       makeProviderForStep: (defs: ChatToolDefinition[]): ChatStreamProvider =>
         asChatStreamProvider(rt.api, (): TextGenerationParams => makeTextGenerationParams({
           model: rt.params.model,
@@ -3937,6 +3936,7 @@ struct ChatPage {
       //   (coerceIn 引擎侧 tool_loop.ts:147-148 已忠实,此处原样透传)
       maxSteps: this.agentRuntime.maxToolLoopSteps,
     };
+    return options;
   }
 
   // D-120:assistant.mcpServers 白名单 provider 接线(runtime 解析后;
@@ -4044,6 +4044,7 @@ struct ChatPage {
       needsApproval: tool.needsApproval,
       allowsAutoApproval: tool.allowsAutoApproval,
       mandatoryApproval: tool.mandatoryApproval,
+      recipeEnvelope: tool.recipeEnvelope,
       execute: (input: JsonValue, signal?: AbortSignalLike): Promise<UIMessagePart[]> =>
         store.withConversation(scopeId,
           (): Promise<UIMessagePart[]> => tool.execute(input, signal)),
@@ -4228,6 +4229,12 @@ struct ChatPage {
     const lastNodeId: string = conv.messageNodes.length > 0
       ? conv.messageNodes[conv.messageNodes.length - 1].id
       : '';
+    const tail: UIMessage[] = currentMessages(conv);
+    const manualPart: UIMessagePartTool | undefined = tail.length > 0
+      ? tail[tail.length - 1].parts.find((part: UIMessagePart): boolean =>
+        part.type === 'tool' && (part as UIMessagePartTool).metadata?.['recipe_manual'] === true) as UIMessagePartTool | undefined
+      : undefined;
+    const manualId: string | undefined = manualPart?.toolCallId;
     const holder: RuntimeHolder = { rt: null };
     resolveChatRuntime(conv.assistantId)
       .then(async (rt: ChatRuntime | null): Promise<Conversation> => {
@@ -4284,8 +4291,11 @@ struct ChatPage {
         return this.runViaKernel(
           conv,
           deps,
-          (runtimeDeps: ChatTurnDeps): Promise<Conversation> =>
-            runToolLoopContinuation(conv, runtimeDeps, this.buildToolLoop(rt, conv)),
+          async (runtimeDeps: ChatTurnDeps): Promise<Conversation> => {
+            const loop: ToolLoopOptions = await this.buildToolLoop(rt, conv);
+            loop.manualToolCallId = manualId;
+            return runToolLoopContinuation(conv, runtimeDeps, loop);
+          },
         ).then((result: InteractiveTurnRunResult): Conversation => result.conversation);
       })
       .then((out: Conversation): void => {
@@ -4297,13 +4307,15 @@ struct ChatPage {
         this.finishGenerationCommon(out, stopped);
         this.refreshContextCompacts(); // D-110:压缩可能已写新摘要,刷新足迹
         if (holder.rt !== null) {
-          this.maybeAutoTitle(this.conversation as Conversation);
-          this.maybeSuggestions(this.conversation as Conversation, holder.rt);
-          this.maybeMemoryExtraction(this.conversation as Conversation, holder.rt);
+          if (manualId === undefined) {
+            this.maybeAutoTitle(this.conversation as Conversation);
+            this.maybeSuggestions(this.conversation as Conversation, holder.rt);
+            this.maybeMemoryExtraction(this.conversation as Conversation, holder.rt);
+          }
           this.maybeGenerationDoneNotification(holder.rt);
           this.fireGenerationHaptic();
         }
-        this.drainPendingQueue();
+        if (manualId === undefined) this.drainPendingQueue();
       })
       .catch((e: Error): void => {
         if (!this.isGenerationOperationActive(operationToken)) return;
@@ -4328,7 +4340,7 @@ struct ChatPage {
             hilog.warn(HILOG_DOMAIN, HILOG_TAG,
               'regenerate reload failed: %{public}s', reloadError.message);
           })
-          .then((): void => { this.drainPendingQueue(); });
+          .then((): void => { if (manualId === undefined) this.drainPendingQueue(); });
       }).finally((): Promise<void> => this.releaseConversationRunAfterSaves(releaseRun));
   }
 
@@ -4817,22 +4829,22 @@ struct ChatPage {
             return getChatRepository().save(blocker.conversation)
               .then((): Promise<InteractiveTurnRunResult> => this.runViaKernel(
                 blocker.conversation, deps,
-                (runtimeDeps: ChatTurnDeps): Promise<Conversation> => runToolLoopContinuation(
-                  blocker.conversation, runtimeDeps, this.buildToolLoop(rt, blocker.conversation))))
+                async (runtimeDeps: ChatTurnDeps): Promise<Conversation> => runToolLoopContinuation(
+                  blocker.conversation, runtimeDeps, await this.buildToolLoop(rt, blocker.conversation))))
               .then((result: InteractiveTurnRunResult): Conversation => result.conversation);
           }
           return getChatRepository().save(blocker.conversation)
             .then((): Promise<InteractiveTurnRunResult> => this.runViaKernel(
               blocker.conversation, deps,
-              (runtimeDeps: ChatTurnDeps): Promise<Conversation> => runChatTurnWithTools(
+              async (runtimeDeps: ChatTurnDeps): Promise<Conversation> => runChatTurnWithTools(
                 blocker.conversation, userInput, runtimeDeps,
-                this.buildToolLoop(rt, blocker.conversation))))
+                await this.buildToolLoop(rt, blocker.conversation))))
             .then((result: InteractiveTurnRunResult): Conversation => result.conversation);
         }
         return this.runViaKernel(
           conv, deps,
-          (runtimeDeps: ChatTurnDeps): Promise<Conversation> => runChatTurnWithTools(
-            conv, userInput, runtimeDeps, this.buildToolLoop(rt, conv)))
+          async (runtimeDeps: ChatTurnDeps): Promise<Conversation> => runChatTurnWithTools(
+            conv, userInput, runtimeDeps, await this.buildToolLoop(rt, conv)))
           .then((result: InteractiveTurnRunResult): Conversation => result.conversation);
       })
       .then((out: Conversation): void => {

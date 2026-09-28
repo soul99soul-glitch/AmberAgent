@@ -38,6 +38,13 @@ export interface ToolMetadata {
 
 // toMetadata(:99-124 派生链逐字)
 export const toToolMetadata = (tool: AgentTool): ToolMetadata => {
+  if (tool.recipeEnvelope !== undefined) {
+    const envelope = tool.recipeEnvelope;
+    return { name: tool.name, category: 'recipe', mutates: envelope.mutates,
+      sensitiveRead: envelope.risk !== 'normal', needsApproval: envelope.needsApproval,
+      autoApprovable: false, outputBudgetChars: toolOutputBudgetChars(tool.name),
+      risk: envelope.risk, mandatoryApproval: false };
+  }
   const mutates: boolean = toolMutatesState(tool.name);
   const category: string = toolCategory(tool.name);
   const riskProfile: { risk: ToolRisk; explicit: boolean } = toolRiskProfile(tool.name);
@@ -103,6 +110,7 @@ export const createToolRegistry = (tools: AgentTool[]): ToolRegistry => {
       needsApproval: e.metadata.needsApproval,
       allowsAutoApproval: e.metadata.autoApprovable,
       mandatoryApproval: e.tool.mandatoryApproval,
+      recipeEnvelope: e.tool.recipeEnvelope,
       parameters: (): InputSchemaObj | null =>
         withDisplayTitleHint(e.tool.parameters(), e.tool.name),
       execute: (input: JsonValue, signal?: AbortSignalLike): Promise<UIMessagePart[]> =>

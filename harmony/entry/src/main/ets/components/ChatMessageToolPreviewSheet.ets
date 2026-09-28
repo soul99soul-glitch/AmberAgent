@@ -16,6 +16,7 @@ import { pasteboard } from '@kit.BasicServicesKit';
 import { promptAction } from '@kit.ArkUI';
 import { isSSHApprovalTool, sshApprovalTargetLabel, sshApprovalCommand, sshApprovalProtocolLabel } from './SSHApprovalSummary.ets';
 import { SSHUIColors } from './SSHUIColors.ets';
+import { RecipeApprovalView, recipeApprovalView } from './RecipeApprovalSummary.ets';
 
 // 搜索结果项
 interface SearchResultItem {
@@ -42,6 +43,10 @@ export struct ChatMessageToolPreviewSheet {
 
   private getInputJson(): string {
     try {
+      const recipe: RecipeApprovalView | null = recipeApprovalView(this.part);
+      if (recipe !== null && recipe.pendingStep !== null) {
+        return JSON.stringify(JSON.parse(recipe.pendingStep.input), null, 2);
+      }
       return JSON.stringify(toolInputAsJson(this.part), null, 2);
     } catch (_e) {
       return '{}';
@@ -133,7 +138,9 @@ export struct ChatMessageToolPreviewSheet {
 
       Scroll() {
         Column() {
-          if (isSSHApprovalTool(this.part.toolName)) {
+          if (recipeApprovalView(this.part) !== null) {
+            this.RenderRecipePreview(recipeApprovalView(this.part)!)
+          } else if (isSSHApprovalTool(this.part.toolName)) {
             this.RenderSSHPreview()
           } else if (this.isSearchWeb()) {
             this.RenderSearchPreview()
@@ -157,15 +164,40 @@ export struct ChatMessageToolPreviewSheet {
   // SSH 审批:展示持久化的批准目标和完整命令，随后保留通用参数/结果区。
   @Builder
   RenderSSHPreview(): void {
+    this.RenderSSHTarget(this.part)
+    this.RenderGenericPreview()
+  }
+
+  @Builder
+  private RenderSSHTarget(part: UIMessagePartTool): void {
     Column({ space: 6 }) {
-      Text(sshApprovalProtocolLabel(this.part) + ' · 批准目标').fontSize(META).fontColor(this.sshColors.muted).width('100%')
-      Text(sshApprovalTargetLabel(this.part)).fontSize(META).fontFamily('JetBrainsMono')
+      Text(sshApprovalProtocolLabel(part) + ' · 批准目标').fontSize(META).fontColor(this.sshColors.muted).width('100%')
+      Text(sshApprovalTargetLabel(part)).fontSize(META).fontFamily('JetBrainsMono')
         .fontColor(this.sshColors.ink).width('100%').wordBreak(WordBreak.BREAK_ALL).copyOption(CopyOptions.LocalDevice)
-      Text(this.part.toolName === 'terminal_session_start' ? '会话操作' : '执行命令')
+      Text(part.toolName.endsWith('_session_start') ? '会话操作' : '执行命令')
         .fontSize(META).fontColor(this.sshColors.muted).width('100%').margin({ top: 8 })
-      Text(sshApprovalCommand(this.part)).fontSize(META).fontFamily('JetBrainsMono').lineHeight(19)
+      Text(sshApprovalCommand(part)).fontSize(META).fontFamily('JetBrainsMono').lineHeight(19)
         .fontColor(this.sshColors.secondary).width('100%').wordBreak(WordBreak.BREAK_ALL).copyOption(CopyOptions.LocalDevice)
     }.width('100%').padding(16)
+  }
+
+  @Builder
+  private RenderRecipePreview(view: RecipeApprovalView): void {
+    Column({ space: 6 }) {
+      Text(view.title).fontSize(META).fontColor(this.sshColors.ink).width('100%')
+      Text(view.stepLabel).fontSize(META).fontColor(this.sshColors.secondary).width('100%')
+      Text(`Canonical hash: ${view.hash}`).fontSize(META).fontFamily('JetBrainsMono')
+        .fontColor(this.sshColors.secondary).width('100%').wordBreak(WordBreak.BREAK_ALL).copyOption(CopyOptions.LocalDevice)
+      if (view.kind === 'import') {
+        Text(`来源: ${view.workspacePath}\n安装基线: ${view.baseHash ?? '首次安装'}`)
+          .fontSize(META).fontColor(this.sshColors.secondary).width('100%').wordBreak(WordBreak.BREAK_ALL)
+        Text('固定 Canonical 内容').fontSize(META).fontColor(this.sshColors.muted).width('100%').margin({ top: 8 })
+        JsonTree({ json: view.canonicalJSON }).width('100%')
+      }
+    }.width('100%').padding(16)
+    if (view.pendingStep !== null && isSSHApprovalTool(view.pendingStep.toolName)) {
+      this.RenderSSHTarget(view.pendingStep)
+    }
     this.RenderGenericPreview()
   }
 
@@ -275,19 +307,19 @@ export struct ChatMessageToolPreviewSheet {
     Column() {
       // Input JSON
       Row() {
-        Text('输入参数').fontSize(META).fontColor(INK3).layoutWeight(1)
+        Text(recipeApprovalView(this.part)?.pendingStep ? '当前步骤实际参数' : '输入参数')
+          .fontSize(META).fontColor(INK3).layoutWeight(1)
         Text('复制').fontSize(LABEL).fontColor(ACCENT)
           .onClick((): void => { this.copyToClipboard(this.getInputJson()); })
       }
       .width('100%')
       .padding({ left: 16, right: 16, top: 8, bottom: 4 })
 
-      JsonTree({ json: this.getInputJson() })
-        .width('100%')
-        .padding(12)
-        .backgroundColor(SURFACE2)
-        .borderRadius(8)
-        .margin({ left: 16, right: 16, bottom: 8 })
+      Column() {
+        JsonTree({ json: this.getInputJson() })
+          .width('100%').padding(12).backgroundColor(SURFACE2).borderRadius(8)
+      }
+      .width('100%').padding({ left: 16, right: 16 }).margin({ bottom: 8 })
 
       // Output
       Row() {
@@ -298,24 +330,17 @@ export struct ChatMessageToolPreviewSheet {
       .width('100%')
       .padding({ left: 16, right: 16, top: 8, bottom: 4 })
 
-      if (Object.keys(this.getOutputJson()).length > 0) {
-        JsonTree({ json: JSON.stringify(this.getOutputJson(), null, 2) })
-          .width('100%')
-          .padding(12)
-          .backgroundColor(SURFACE2)
-          .borderRadius(8)
-          .margin({ left: 16, right: 16, bottom: 16 })
-      } else {
-        Text(toolOutputText(this.part))
-          .fontSize(LABEL)
-          .fontColor(INK2)
-          .fontFamily('JetBrainsMono')
-          .width('100%')
-          .padding(12)
-          .backgroundColor(SURFACE2)
-          .borderRadius(8)
-          .margin({ left: 16, right: 16, bottom: 16 })
+      Column() {
+        if (Object.keys(this.getOutputJson()).length > 0) {
+          JsonTree({ json: JSON.stringify(this.getOutputJson(), null, 2) })
+            .width('100%').padding(12).backgroundColor(SURFACE2).borderRadius(8)
+        } else {
+          Text(toolOutputText(this.part))
+            .fontSize(LABEL).fontColor(INK2).fontFamily('JetBrainsMono')
+            .width('100%').padding(12).backgroundColor(SURFACE2).borderRadius(8)
+        }
       }
+      .width('100%').padding({ left: 16, right: 16 }).margin({ bottom: 16 })
     }
     .width('100%')
   }

@@ -1373,3 +1373,19 @@ export type { MoshHandle, MoshOptions, MoshPacket, MoshCloseReason, MoshServerLo
 export type { MoshTransportPort } from './chat/mosh/ports.ts';
 export { MoshRuntime } from './chat/mosh/runtime.ts';
 export { createMoshTools } from './chat/mosh/tools.ts';
+
+// E4 declarative Recipes share storage, validation and per-step dispatch.
+export type { RecipeInputType, RecipeStep, RecipeManifest, RecipeIssue, RecipeEnvelope,
+  RecipeDescriptor, InstalledRecipe, RecipeBinding, RecipeRunCheckpoint,
+  RecipeImportCheckpoint } from './chat/recipes/models.ts';
+export { RECIPE_SCHEMA, RECIPE_MAX_STEPS, RECIPE_DEFAULT_TIMEOUT_SECONDS,
+  RECIPE_MAX_TIMEOUT_SECONDS } from './chat/recipes/models.ts';
+export type { RecipeImportPreview, RecipeStore, RecipeExecutionPort,
+  RecipeLoopAdapter } from './chat/recipes/ports.ts';
+export { decodeRecipe, validateRecipe, canonicalRecipeJSON, recipeEnvelope,
+  parseRecipeBinding, normalizeRecipeInputs, RecipeValidationError } from './chat/recipes/validation.ts';
+export { createRecipeRun, nextRecipeStep, acceptRecipeStep,
+  createRecipeLoopAdapter, recoverInterruptedRecipes } from './chat/recipes/runner.ts';
+export type { RecipeLoopAdapterDeps } from './chat/recipes/runner.ts';
+export { createRecipeTools } from './chat/recipes/tools.ts';
+export type { RecipeToolDeps } from './chat/recipes/tools.ts';

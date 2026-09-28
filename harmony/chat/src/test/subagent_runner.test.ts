@@ -1,5 +1,8 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+import ts from 'typescript';
+import * as chatDomain from '../main/ets/index.ts';
 import type { AbortSignalLike } from '@amber/deepread-domain';
 import type { Assistant } from '../main/ets/chat/assistant.ts';
 import { makeAssistant } from '../main/ets/chat/assistant.ts';
@@ -33,6 +36,13 @@ import type {
   ChatStreamSubAgentGenerationPortDeps, SubAgentGenerationRequest,
 } from '../main/ets/index.ts';
 import type { ChatStreamProvider } from '../main/ets/chat/chat_turn.ts';
+import type { ToolLoopOptions } from '../main/ets/chat/tool_loop.ts';
+import type { JsonObject } from '../main/ets/chat/json.ts';
+import type { RecipeDescriptor, RecipeManifest } from '../main/ets/chat/recipes/models.ts';
+import type { RecipeStore } from '../main/ets/chat/recipes/ports.ts';
+import { canonicalRecipeJSON } from '../main/ets/chat/recipes/validation.ts';
+import { createRecipeTools } from '../main/ets/chat/recipes/tools.ts';
+import { scopedSubAgentTools } from '../main/ets/chat/subagent_tool_scope.ts';
 
 interface DefinitionChanges {
   modelId?: string | null;
@@ -240,6 +250,86 @@ const toolChunk = (callId: string, toolName: string, input: string): MessageChun
 });
 
 describe('ChatStreamSubAgentGenerationPort', () => {
+  it('awaits Recipe configuration on the actual scoped child loop and executes its primitive', async () => {
+    const source = await readFile(new URL('../../../entry/src/main/ets/platform_impl/ScopedRecipeLoop.ets', import.meta.url), 'utf8');
+    const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
+    const platform = { exports: {} as { configureEntryScopedRecipeLoop: (loop: ToolLoopOptions, store: RecipeStore, guard: null) => Promise<void> } };
+    new Function('require', 'exports', 'module', compiled)((name: string) => {
+      if (name === '@amber/chat-domain') return chatDomain;
+      throw new Error('Unexpected platform fixture import: ' + name);
+    }, platform.exports, platform);
+    const manifest: RecipeManifest = { schema: 'amber.recipe.v1', name: 'child_read', version: '1',
+      description: 'Read within the child scope', inputs: { path: 'string' },
+      steps: [{ id: 'read', tool: 'file_read', arguments: { path: '${input.path}' } }],
+      outputs: { content: '${step.read.output.content}' } };
+    const descriptor: RecipeDescriptor = { manifest, canonicalJSON: canonicalRecipeJSON(manifest), hash: 'child-fixture-hash' };
+    const installed = [{ descriptor, enabled: true }];
+    const recipeStore: RecipeStore = { listInstalled: async () => installed,
+      prepareImport: async () => { throw new Error('Unexpected management call'); },
+      applyImport: async () => { throw new Error('Unexpected management call'); },
+      setEnabled: async () => { throw new Error('Unexpected management call'); },
+      remove: async () => { throw new Error('Unexpected management call'); } };
+    let reads: number = 0;
+    const primitive = makeAgentTool({ name: 'file_read', description: 'Child read', execute: async input => {
+      assert.deepEqual(input, { path: 'child.json' }); reads++;
+      return [{ type: 'text', text: '{"content":"child content"}', metadata: null }];
+    } });
+    const wrapper = createRecipeTools({ store: recipeStore, installed, primitives: [primitive] })
+      .find(tool => tool.name === 'recipe__child_read')!;
+    const scopedTools = scopedSubAgentTools([primitive, wrapper]);
+    assert.equal(scopedTools.find(tool => tool.name === wrapper.name), wrapper);
+    assert.deepEqual(wrapper.recipeEnvelope, { tools: ['file_read'], mutates: false, needsApproval: false, risk: 'normal' });
+    const newManifest: RecipeManifest = { ...manifest, name: 'outside_child' };
+    installed.push({ descriptor: { manifest: newManifest, canonicalJSON: canonicalRecipeJSON(newManifest), hash: 'new-fixture-hash' }, enabled: true });
+    let configured: boolean = false;
+    let callbackCalls: number = 0;
+    let providerCalls: number = 0;
+    const observedConfiguration: boolean[] = [];
+    let latestParts: UIMessagePart[] = [];
+    const deps: ChatStreamSubAgentGenerationPortDeps = {
+      resolveModel: async () => model('child-model'), resolveAssistant: async () => assistantResolution(),
+      configureRecipeLoop: async (loop: ToolLoopOptions): Promise<void> => {
+        callbackCalls++; assert.equal(loop.invocationContext, 'subagent');
+        assert.equal(loop.tools.find(tool => tool.name === wrapper.name), wrapper);
+        const originalReport = loop.tools.find(tool => tool.name === 'subagent_report');
+        assert.ok(originalReport); const originalSchema = originalReport.parameters();
+        assert.ok(originalSchema?.required?.includes('summary'));
+        await Promise.resolve();
+        await platform.exports.configureEntryScopedRecipeLoop(loop, recipeStore, null);
+        const refreshed = await loop.refreshTools!();
+        const refreshedReport = refreshed.find(tool => tool.name === originalReport.name);
+        assert.equal(refreshedReport, originalReport);
+        assert.deepEqual(refreshedReport!.parameters(), originalSchema);
+        assert.equal(refreshedReport!.execute, originalReport.execute);
+        assert.ok(!refreshed.some(tool => tool.name === 'recipe__outside_child'));
+        configured = true;
+      },
+      makeProvider: (_model, params) => ({ streamText: async (_messages, onChunk) => {
+        observedConfiguration.push(configured); providerCalls++;
+        if (providerCalls === 1) {
+          assert.ok(params.tools.some(tool => tool.name === wrapper.name));
+          assert.ok(params.tools.some(tool => tool.name === 'subagent_report'));
+          assert.ok(!params.tools.some(tool => tool.name === 'recipe__outside_child'));
+          onChunk(toolChunk('child-recipe-call', wrapper.name, '{"path":"child.json"}'));
+          onChunk(toolChunk('child-report-call', 'subagent_report', '{"summary":"child scoped report"}'));
+        } else onChunk(textChunk('child Recipe completed'));
+      } }),
+    };
+    const childResult = await new GenerationSubAgentRunner(new ChatStreamSubAgentGenerationPort(deps)).run(
+      definition(['file_read', wrapper.name], { maxTurns: 3 }), task(), scopedTools,
+      () => {}, parts => { latestParts = parts; },
+    );
+    assert.equal(childResult.status, 'completed', childResult.error);
+    assert.equal(childResult.summary, 'child scoped report');
+    assert.equal(callbackCalls, 1); assert.ok(observedConfiguration.length > 0);
+    assert.ok(observedConfiguration.every(value => value)); assert.equal(reads, 1);
+    const parent = latestParts.find(part => part.type === 'tool' && part.toolName === wrapper.name) as UIMessagePartTool;
+    assert.ok(parent); assert.equal(parent.approvalState.type, 'auto');
+    const result: JsonObject = JSON.parse((parent.output[0] as UIMessagePartText).text) as JsonObject;
+    assert.equal(result['status'], 'succeeded'); assert.deepEqual(result['outputs'], { content: 'child content' });
+    assert.equal(parent.metadata!['recipe_v1'] !== undefined, true);
+  });
+
   it('seeds every supplied retry-history message into the shared child loop', async () => {
     let providerMessages: UIMessage[] = [];
     const provider: ChatStreamProvider = {

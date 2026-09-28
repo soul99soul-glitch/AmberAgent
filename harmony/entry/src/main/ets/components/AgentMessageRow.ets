@@ -16,6 +16,7 @@ import { MarkdownText } from './MarkdownText.ets';
 import { ChatMessageReasoning } from './ChatMessageReasoning.ets';
 import { ChatMessageTools } from './ChatMessageTools.ets';
 import { ChatMessageAskUserStep } from './ChatMessageAskUserStep.ets';
+import { recipeAskUserPart } from './RecipeApprovalSummary.ets';
 import { ChatMessageAvatar } from './ChatMessageAvatar.ets';
 import { ChatMessageSubAgentStep } from './ChatMessageSubAgentStep.ets';
 import { ChatMessageCouncilStep } from './ChatMessageCouncilStep.ets';
@@ -173,7 +174,7 @@ export struct AgentMessageRow {
   }
 
   private askQuestionsOf(t: UIMessagePartTool): AskUserQuestion[] {
-    return parseAskUserQuestions(t.input);
+    return parseAskUserQuestions((recipeAskUserPart(t) ?? t).input);
   }
 
   // R08:partIndex 必须是原 message.parts 索引。先 indexOf 原数组;
@@ -377,7 +378,7 @@ export struct AgentMessageRow {
               } else {
                 ChatMessageTools({
                   part: step.tool,
-                  canApprove: this.capabilities.approveTool,
+                  canApprove: this.capabilities.approveTool && recipeAskUserPart(step.tool) === null,
                   canDeny: this.capabilities.denyTool,
                   canOpenPreview: this.capabilities.openToolPreview,
                   streaming: this.streaming,
@@ -391,6 +392,20 @@ export struct AgentMessageRow {
                   onOpenPreview: (): void => { this.onOpenToolPreview(step.tool); },
                   deniedLabel: step.tool.approvalState.type === 'denied' ? this.deniedLabel(step.tool) : '',
                 })
+                if (recipeAskUserPart(step.tool) !== null) {
+                  ChatMessageAskUserStep({
+                    part: recipeAskUserPart(step.tool)!,
+                    answers: this.askAnswers,
+                    multiAnswers: this.askMultiAnswers,
+                    interactive: this.capabilities.answerTool,
+                    onSubmit: (_a: Record<string, string>, _m: Record<string, string[]>): void => {
+                      this.submitAskAnswers(step.tool);
+                    },
+                    onAnswer: (qid: string, value: string): void => { this.setAskAnswer(qid, value); },
+                    onToggleMulti: (qid: string, opt: string): void => { this.toggleAskMulti(qid, opt); },
+                    onClear: (): void => { this.clearAskDrafts(); },
+                  })
+                }
               }
             }
           }, (step: ThinkingStep, si: number): string => `${bi}-${si}-${step.kind}`)

@@ -53,6 +53,7 @@ import { buildAgentLoopBudgetPrompt, agentLoopShouldHideTools } from './agent_lo
 // 观察类工具(读态随页面/文件/任务变化)豁免跨步重复(Android REPEATABLE_OBSERVATION_TOOLS);
 // resume 路径(用户交互后重放)不经此守卫。
 const GUARD_REPEATABLE_TOOLS: Set<string> = new Set([
+  'tool_search', 'tools_list', 'tool_policy_explain', 'recipes_list', 'recipe_validate',
   'file_read', 'file_list', 'file_search',
   'terminal_job_wait', 'terminal_job_read', 'terminal_session_read',
   'terminal_mosh_session_read',
@@ -121,6 +122,8 @@ import { createToolExposureState } from './tool_exposure.ts';
 import type { SpeculativeToolRunner } from './speculative_tool_runner.ts';
 import { createSpeculativeToolRunner } from './speculative_tool_runner.ts';
 import type { JsonObject } from './json.ts';
+import type { RecipeLoopAdapter } from './recipes/runner.ts';
+import { executeRecipeBatch } from './recipe_loop.ts';
 
 // ===== maxSteps 常量(PreferencesStore.kt:268-270) =====
 
@@ -132,6 +135,11 @@ export const DEFAULT_AGENT_MAX_TOOL_LOOP_STEPS: number = 256;
 
 export interface ToolLoopOptions {
   tools: AgentTool[];
+  recipeAdapter?: RecipeLoopAdapter;
+  refreshTools?: () => Promise<AgentTool[]>;
+  // Explicit page-launched Recipe: execute/resume this part without requesting
+  // model text, then return its persisted result or approval card.
+  manualToolCallId?: string;
   // ChatService:1349-1352 coerceIn(16,512);默认 256
   maxSteps?: number;
   // settings.agentRuntime.autoApproveAllToolCalls || conversation.autoApproveToolCalls
@@ -267,20 +275,48 @@ const runToolLoopCore = async (
   const ctx: TransformerContext = { assistant: deps.assistant, processingStatus: deps.onRetryStatus };
   // D-062:懒暴露状态(GenerationHandler:159 — 循环开始前 from(tools))
   const toolExposure: ToolExposureState = createToolExposureState(loop.tools);
+  let currentTools: AgentTool[] = loop.tools;
 
   for (let stepIndex = 0; stepIndex < maxSteps; stepIndex++) {
     if (deps.abortSignal !== undefined && deps.abortSignal.aborted) break;
     if (guardStopped) break;
+    if (loop.refreshTools !== undefined) {
+      currentTools = await loop.refreshTools();
+      toolExposure.replaceTools(currentTools);
+    }
+    const recipeAdapter: RecipeLoopAdapter | undefined = loop.recipeAdapter;
     const baseMessages: UIMessage[] = currentMessages(conv);
     const lastMsg: UIMessage | undefined = baseMessages.length > 0
       ? baseMessages[baseMessages.length - 1]
       : undefined;
     // pendingTools(:164-166):末条消息 canResumeExecution 工具
-    const pendingTools: UIMessagePartTool[] = lastMsg !== undefined
+    const manualPart: UIMessagePartTool | undefined = lastMsg?.parts.find(
+      (part: UIMessagePart): boolean => part.type === 'tool'
+        && (part as UIMessagePartTool).toolCallId === loop.manualToolCallId) as UIMessagePartTool | undefined;
+    if (loop.manualToolCallId !== undefined && (manualPart === undefined
+      || recipeAdapter === undefined || !recipeAdapter.supports(manualPart.toolName)
+      || manualPart.metadata?.['recipe_manual'] !== true)) {
+      throw new Error('Manual Recipe call is missing its persisted parent.');
+    }
+    if (manualPart !== undefined && (isToolExecuted(manualPart)
+      || manualPart.approvalState.type === 'pending')) break;
+    let recipeBatch: boolean = recipeAdapter !== undefined && lastMsg !== undefined
+      && lastMsg.parts.some((part: UIMessagePart): boolean =>
+        part.type === 'tool' && recipeAdapter.supports((part as UIMessagePartTool).toolName));
+    let pendingTools: UIMessagePartTool[] = lastMsg !== undefined
       ? lastMsg.parts.filter((p: UIMessagePart): boolean =>
-        p.type === 'tool' && canToolResumeExecution(p as UIMessagePartTool)) as UIMessagePartTool[]
+        p.type === 'tool' && (canToolResumeExecution(p as UIMessagePartTool)
+          || (loop.manualToolCallId !== undefined && (p as UIMessagePartTool).toolCallId === loop.manualToolCallId
+            && (p as UIMessagePartTool).approvalState.type === 'auto'))) as UIMessagePartTool[]
       : [];
+    if (recipeBatch && pendingTools.length > 0 && lastMsg !== undefined) {
+      pendingTools = lastMsg.parts.filter((part: UIMessagePart): boolean =>
+        part.type === 'tool' && !isToolExecuted(part as UIMessagePartTool)) as UIMessagePartTool[];
+    }
     const hasResumableTools: boolean = pendingTools.length > 0;
+    if (recipeBatch && !hasResumableTools && lastMsg !== undefined
+      && lastMsg.parts.some((part: UIMessagePart): boolean => part.type === 'tool'
+        && (part as UIMessagePartTool).approvalState.type === 'pending')) break;
     // D-062(:167):待恢复 pending 工具强制暴露(先于 toolsForStep)
     toolExposure.exposeToolNames(
       pendingTools.map((t: UIMessagePartTool): string => t.toolName));
@@ -393,11 +429,14 @@ const runToolLoopCore = async (
         // 无工具调用 → 结束(:281-285)
         break;
       }
+      recipeBatch = recipeAdapter !== undefined && newLast.parts.some(
+        (part: UIMessagePart): boolean => part.type === 'tool'
+          && recipeAdapter.supports((part as UIMessagePartTool).toolName));
 
       // 审批决策(:287-339):ASK → 置 Pending + permission_trace
       let hasPendingApproval: boolean = false;
       let changed: boolean = false;
-      const updatedTools: UIMessagePartTool[] = tools.map((tool: UIMessagePartTool): UIMessagePartTool => {
+      const updatedTools: UIMessagePartTool[] = recipeBatch ? tools : tools.map((tool: UIMessagePartTool): UIMessagePartTool => {
         let invocation: UIMessagePartTool = tool;
         if (loop.captureInvocationMetadata !== undefined && tool.approvalState.type === 'auto') {
           const captured: JsonObject | null = loop.captureInvocationMetadata(tool);
@@ -464,14 +503,32 @@ const runToolLoopCore = async (
     // 执行(approved 执行/denied 处理)(:348-358)
     // abort 到达后不再执行任何工具副作用；未执行工具留给页面 stop 收口。
     if (deps.abortSignal !== undefined && deps.abortSignal.aborted) break;
+    let executedPairs: ToolBatchResultPair[];
+    if (recipeBatch && recipeAdapter !== undefined) {
+      const batch = await executeRecipeBatch(toolsToProcess, {
+        adapter: recipeAdapter, tools: currentTools, dispatcher,
+        autoApproveTools, autoApproveHighRiskTools, invocationContext,
+        autoApprovedToolNames, toolRetry,
+        capture: loop.captureInvocationMetadata,
+        signal: deps.abortSignal,
+        save: async (previous: UIMessagePartTool, next: UIMessagePartTool): Promise<void> => {
+          conv = rewriteLastMessageTools(conv, [{ input: previous, result: next }]);
+          await deps.store.save(conv);
+          emitSnapshot(conv, deps, ctx);
+        },
+      });
+      executedPairs = batch.pairs;
+      if (batch.paused) break;
+    } else {
     const prefetchedTools: Map<string, UIMessagePartTool> = speculativeRunner !== null
       ? await speculativeRunner.reusableResults(toolsToProcess)
       : new Map<string, UIMessagePartTool>();
     if (deps.abortSignal !== undefined && deps.abortSignal.aborted) break;
-    const executedPairs: ToolBatchResultPair[] = await dispatcher.executeBatchPairs(
+    executedPairs = await dispatcher.executeBatchPairs(
       toolsToProcess, stepDefsMap,
       autoApproveTools, autoApproveHighRiskTools, autoApprovedToolNames,
       invocationContext, prefetchedTools, toolRetry, deps.abortSignal);
+    }
     if (executedPairs.length === 0) {
       // 全部 pending 无结果(:360-363)
       break;
@@ -481,9 +538,12 @@ const runToolLoopCore = async (
       executedPairs.map((pair: ToolBatchResultPair): UIMessagePartTool => pair.result));
 
     // 写回同一 assistant 消息(:366-373;按输入 part 身份定位)
-    conv = rewriteLastMessageTools(conv, executedPairs);
-    await deps.store.save(conv);
-    emitSnapshot(conv, deps, ctx);
+    if (!recipeBatch) {
+      conv = rewriteLastMessageTools(conv, executedPairs);
+      await deps.store.save(conv);
+      emitSnapshot(conv, deps, ctx);
+    }
+    if (loop.manualToolCallId !== undefined) break;
 
     // steer 消息步间消费(:386-390)
     const steerMessages: UIMessage[] = loop.consumeSteerMessages !== undefined

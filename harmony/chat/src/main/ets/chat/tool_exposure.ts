@@ -25,6 +25,7 @@ export interface ToolExposureState {
   toolsForStep: () => AgentTool[];
   exposeToolNames: (names: string[]) => void;
   observeExecutedTools: (executedTools: UIMessagePartTool[]) => void;
+  replaceTools: (tools: AgentTool[]) => void;
 }
 
 // expandedToolNames(:373-380):tool_search 输出 Text 段 JSON →
@@ -88,6 +89,15 @@ export const createToolExposureState = (allTools: AgentTool[]): ToolExposureStat
 
   const state: ToolExposureState = {
     enabled: lazyMode,
+    replaceTools: (tools: AgentTool[]): void => {
+      allTools = tools;
+      toolsByName.clear();
+      for (const tool of tools) toolsByName.set(tool.name, tool);
+      for (const name of exposedNames) {
+        if (!toolsByName.has(name)) exposedNames.delete(name);
+      }
+      if (!lazyMode) for (const tool of tools) exposedNames.add(tool.name);
+    },
     // toolsForStep(:279-281):非懒 → 全量;懒 → 原序过滤(不重排)
     toolsForStep: (): AgentTool[] => {
       if (!lazyMode) return allTools;

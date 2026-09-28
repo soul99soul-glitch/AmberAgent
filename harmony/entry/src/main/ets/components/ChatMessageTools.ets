@@ -11,6 +11,7 @@ import { INK, INK2, INK3, INK4, SURFACE, SURFACE2, LINE, ACCENT, ERROR, META, LA
 import { GeneratedImageCarousel } from './GeneratedImageCarousel.ets';
 import { isSSHApprovalTool, sshApprovalTargetLabel, sshApprovalCommand, sshApprovalProtocolLabel } from './SSHApprovalSummary.ets';
 import { SSHUIColors } from './SSHUIColors.ets';
+import { RecipeApprovalView, recipeApprovalView } from './RecipeApprovalSummary.ets';
 import {
   AgentToolCallCapsule,
   ToolStatus,
@@ -97,9 +98,36 @@ export struct ChatMessageTools {
     return urls;
   }
 
+  @Builder
+  private RecipeSummary(view: RecipeApprovalView): void {
+    Column({ space: 4 }) {
+      Text(view.title).fontSize(META).fontColor(this.sshColors.ink).width('100%')
+      Text(view.stepLabel).fontSize(LABEL).fontColor(this.sshColors.secondary).width('100%')
+      if (view.kind === 'import') {
+        Text(`候选 hash: ${view.hash}\n基线: ${view.baseHash ?? '首次安装'}`)
+          .fontSize(LABEL).fontFamily('JetBrainsMono').fontColor(this.sshColors.secondary)
+          .width('100%').wordBreak(WordBreak.BREAK_ALL)
+      } else if (view.pendingStep !== null) {
+        if (isSSHApprovalTool(view.pendingStep.toolName)) {
+          Text(`${sshApprovalProtocolLabel(view.pendingStep)} · ${sshApprovalTargetLabel(view.pendingStep)}`)
+            .fontSize(META).fontColor(this.sshColors.ink).fontFamily('JetBrainsMono')
+            .width('100%').maxLines(3).wordBreak(WordBreak.BREAK_ALL)
+        }
+        Text(view.pendingStep.input).fontSize(LABEL).fontColor(this.sshColors.secondary)
+          .fontFamily('JetBrainsMono').lineHeight(17).width('100%').maxLines(3)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+      }
+    }
+    .width('100%').padding({ left: 12, right: 12, top: 10, bottom: 10 })
+    .backgroundColor(this.sshColors.inset).borderRadius(8).margin({ bottom: 6 })
+    .onClick((): void => { if (this.canOpenPreview) this.onOpenPreview(); })
+  }
+
   build(): void {
     Column() {
-      if (isSSHApprovalTool(this.part.toolName) && this.part.approvalState.type === 'pending') {
+      if (recipeApprovalView(this.part) !== null && this.part.approvalState.type === 'pending') {
+        this.RecipeSummary(recipeApprovalView(this.part)!)
+      } else if (isSSHApprovalTool(this.part.toolName) && this.part.approvalState.type === 'pending') {
         Column({ space: 4 }) {
           Text(`${sshApprovalProtocolLabel(this.part)} · ${sshApprovalTargetLabel(this.part)}`)
             .fontSize(META).fontColor(this.sshColors.ink).fontFamily('JetBrainsMono')

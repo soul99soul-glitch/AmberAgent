@@ -2,7 +2,7 @@
   "objective": "完成所有纳入范围的剩余功能并逐阶段独立审查与验证",
   "baseline": "6840fa551",
   "status": "active",
-  "currentPhase": "E4",
+  "currentPhase": "E5",
   "authorization": "用户授权持续实施、subagent审查、分阶段推进",
   "phases": {
     "E0": "complete",
@@ -10,7 +10,7 @@
     "E2": "complete",
     "E3": "in_progress",
     "E4": "in_progress",
-    "E5": "pending",
+    "E5": "in_progress",
     "E6": "pending",
     "E7": "pending",
     "E8": "pending",
@@ -30,13 +30,26 @@
     "E2": "PASS: independent A/B/C; real SSH/Asset/PTY/approval/UI, tests/types/lint, Release/sign/install and Debug isolation; see E2-gate.md",
     "E2Commit": "87f69a88c",
     "E3Contract": "frozen: packets/E3-contract.md",
-    "E3": "Native and domain/review PASS; emulator 11 Python + 4 Mosh PASS; Python C PASS; final Mosh one-line layout fix built/linted, device visual/release install pending after HDC failure; see E3-gate.md"
+    "E3": "Native and domain/review PASS; emulator 11 Python + 4 Mosh PASS; Python C PASS; final Mosh one-line layout fix built/linted, device visual/release install pending after HDC failure; see E3-gate.md",
+    "E3Commit": "b612b0fcb",
+    "E4": "Source and independent A/B PASS; focused checks/types/Release build/sign verify PASS; C device UI pending, root SDK performance scan incomplete; see E4-gate.md",
+    "E5Design": "results/E5-plugin-design.md; model/schema contract and independent modules started"
   },
   "blockers": [
     {
       "phase": "E3",
       "kind": "device_connection",
       "details": "Phone disconnected; emulator HDC stopped returning commands. Completed native matrix and existing UI evidence retained; final Mosh layout screenshot and final Release install/launch pending. Independent E4 source work continues."
+    },
+    {
+      "phase": "E4",
+      "kind": "device_connection",
+      "details": "Final Release built and local sign verified; one read-only HDC snapshot Empty. UI C/install/launch pending; no repeated recovery or device matrix. E5 independent source work continues."
+    },
+    {
+      "phase": "E4",
+      "kind": "sdk_performance_lint",
+      "details": "Root ten-file SDK performance child stalled 13 minutes at84%; own child ended, syntactic diagnostics 0error/563warn but performance scan incomplete. New-module narrow lint and final two-file lint completed, compiler/types PASS."
     }
   ]
 }

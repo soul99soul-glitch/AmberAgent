@@ -216,6 +216,15 @@ struct SettingSandboxPage {
     })
   }
 
+  @Builder
+  RecipesCard(): void {
+    CardRow({
+      label: 'Recipes', desc: '安装声明式步骤，用现有工具逐步执行和审批。',
+      iconName: 'cpu', plateSize: 28, isLast: true,
+      onRowClick: (): void => { router.pushUrl({ url: 'pages/RecipesPage' }); },
+    })
+  }
+
   // 卡组内发丝分隔线(内缩至行文字起点,同 CardRow 分隔规则)
   @Builder
   CardHairline(): void {
@@ -396,6 +405,10 @@ struct SettingSandboxPage {
 
           PlainSection({ label: '本机执行' })
           CardGroup({ radius: 18, stroke: true, content: (): void => { this.PythonCard(); } })
+            .margin({ left: GUTTER, right: GUTTER })
+
+          PlainSection({ label: '工具编排' })
+          CardGroup({ radius: 18, stroke: true, content: (): void => { this.RecipesCard(); } })
             .margin({ left: GUTTER, right: GUTTER })
 
           if (!this.loadError && this.snap !== null) {

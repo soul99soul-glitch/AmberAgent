@@ -59,6 +59,7 @@ export interface ChatStreamSubAgentGenerationPortDeps {
   makeProvider: (
     model: ProviderModel, params: TextGenerationParams, headers: CustomHeader[],
   ) => ChatStreamProvider;
+  configureRecipeLoop?: (loop: ToolLoopOptions) => Promise<void>;
 }
 
 const unreachableSubAgentProvider: ChatStreamProvider = {
@@ -129,6 +130,7 @@ export class ChatStreamSubAgentGenerationPort implements SubAgentGenerationPort 
       makeProviderForStep: (definitions: ChatToolDefinition[]): ChatStreamProvider =>
         providerFor(definitions),
     };
+    if (this.deps.configureRecipeLoop !== undefined) await this.deps.configureRecipeLoop(loop);
     const result = await runAgenticToolLoop(seed, deps, loop);
     return currentMessages(result);
   }

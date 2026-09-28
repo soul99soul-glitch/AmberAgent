@@ -177,6 +177,7 @@ export const isPrivateNetworkTarget = (url: string | null): boolean => {
 // ===== category(:424-457) =====
 
 export const toolCategory = (name: string): string => {
+  if (name.startsWith('recipe_') || name === 'recipes_list') return 'recipe';
   if (name.startsWith('external_file_')) return 'external_file';
   if (name.startsWith('file_') || name.startsWith('archive_')
     || ['download_file', 'pdf_read', 'pdf_render_page', 'office_read', 'image_info',
@@ -401,6 +402,22 @@ export const toolOutputBudgetChars = (name: string): number => {
 // ===== invocationPolicy(:204-422 全文,含逐名覆盖表) =====
 
 export const toolInvocationPolicy = (tool: AgentTool, input: JsonValue | null): ToolInvocationPolicy => {
+  if (['recipe_import', 'recipe_enable', 'recipe_disable', 'recipe_delete'].includes(tool.name)) {
+    return { name: tool.name, category: 'recipe', mutates: true, needsApproval: true,
+      autoApprovable: false, concurrencySafe: false, outputBudgetChars: toolOutputBudgetChars(tool.name),
+      risk: 'sensitive', parallelGroup: null, requiresForegroundAppPackage: null,
+      speculativeEligible: false, speculativeBlockReason: 'recipe_installation_changes',
+      reason: null, mandatoryApproval: false, alwaysAsk: false };
+  }
+  if (tool.recipeEnvelope !== undefined) {
+    const envelope = tool.recipeEnvelope;
+    return { name: tool.name, category: 'recipe', mutates: envelope.mutates,
+      needsApproval: envelope.needsApproval, autoApprovable: false,
+      concurrencySafe: false, outputBudgetChars: toolOutputBudgetChars(tool.name),
+      risk: envelope.risk, parallelGroup: null, requiresForegroundAppPackage: null,
+      speculativeEligible: false, speculativeBlockReason: 'recipe_steps_require_dispatch',
+      reason: 'Recipe steps resolve their own permissions', mandatoryApproval: false, alwaysAsk: false };
+  }
   const name: string = tool.name;
   const baseMutates: boolean = toolMutatesState(name);
   const baseRiskProfile: RiskProfile = toolRiskProfile(name);
