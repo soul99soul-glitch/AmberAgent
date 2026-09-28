@@ -6,7 +6,7 @@ import type { AssistantMemory } from '@amber/chat-domain';
 import { MEMORY_BUCKET_GLOBAL } from '@amber/chat-domain';
 import { getMemoryLibraryOps, MemoryLibraryOps } from '../platform_impl/MemoryStore.ets';
 import { getChatKvStore } from '../di/AppContainer.ets';
-import { loadAgentRuntimeSnapshot, updateAgentSoulMarkdown } from '../platform_impl/AgentRuntimePrefs.ets';
+import { loadAgentRuntimeSnapshot, updateAgentSoulMarkdown, updateRecallToggles } from '../platform_impl/AgentRuntimePrefs.ets';
 import type { AgentRuntimeSnapshot } from '../platform_impl/AgentRuntimePrefs.ets';
 import { readPreviousSoulMarkdown, rollbackSoulToPrevious } from '../platform_impl/SoulTools.ets';
 import {
@@ -14,8 +14,9 @@ import {
 } from '../design/tokens.ets';
 import { FONT_MONO, FONT_SANS_MEDIUM } from '../design/fonts.ets';
 import {
-  CenteredTitleBar, PlainSection, CardGroup, StatusChip, FooterNote, PageSpacer,
+  CenteredTitleBar, PlainSection, CardGroup, CardToggleRow, FooterNote, NavRow, PageSpacer, StatusChip,
 } from '../components/PageTemplate.ets';
+import { router } from '@kit.ArkUI';
 import { Icon } from '../components/ui/Icon.ets';
 
 @Entry
@@ -32,6 +33,7 @@ struct SettingAgentMemoryPageFull {
   @State soulEditorOpen: boolean = false;
   @State soulDraft: string = '';
   @State soulNotice: string = '';
+  @State autoMemory: boolean = true;
   @StorageProp('accentColor') accentColorStore: string = ACCENT;
   private ops: MemoryLibraryOps = getMemoryLibraryOps();
   private reloadInFlight: boolean = false;
@@ -50,6 +52,7 @@ struct SettingAgentMemoryPageFull {
   private reloadSoul(): void {
     loadAgentRuntimeSnapshot(getChatKvStore()).then((snap: AgentRuntimeSnapshot): void => {
       this.soulMarkdown = snap.agentSoulMarkdown;
+      this.autoMemory = snap.enableCoreMemory;
       this.soulLoaded = true;
     }).catch((): void => { this.soulLoaded = true; });
     readPreviousSoulMarkdown().then((previous: string | null): void => {
@@ -230,6 +233,31 @@ struct SettingAgentMemoryPageFull {
     .width('100%')
   }
 
+  private toggleAutoMemory(): void {
+    const next: boolean = !this.autoMemory;
+    this.autoMemory = next;
+    updateRecallToggles(getChatKvStore(), { enableCoreMemory: next })
+      .then((snap: AgentRuntimeSnapshot): void => { this.autoMemory = snap.enableCoreMemory; })
+      .catch((): void => { this.reloadSoul(); });
+  }
+
+  // 自动积累卡(对齐 iOS 自动积累区;后端 = recall enableCoreMemory)
+  @Builder
+  private AutoMemoryCard(): void {
+    CardToggleRow({ label: '自动记忆', desc: 'Amber 会记住对话里值得留存的信息',
+      checked: this.autoMemory, isLast: true,
+      onToggle: (): void => { this.toggleAutoMemory(); } })
+  }
+
+  // 专题与文档入口(此前 MemoryPage 下线后两页失去入口)
+  @Builder
+  private MemoryEntryCard(): void {
+    NavRow({ label: '记忆主题与源记忆', desc: '自动归并的主题及其来源条目', iconName: 'brain',
+      onRowClick: (): void => { router.pushUrl({ url: 'pages/MemoryTopicsPage' }); } })
+    NavRow({ label: '只读记忆文档', desc: '由记忆蒸馏出的只读文档', iconName: 'doc', isLast: true,
+      onRowClick: (): void => { router.pushUrl({ url: 'pages/MemoryDocumentPage' }); } })
+  }
+
   // 灵魂卡:核心指令全文(mono 只读预览)+ 编辑/单次回退(对齐 iOS 灵魂区)
   @Builder
   private SoulCard(): void {
@@ -326,6 +354,14 @@ struct SettingAgentMemoryPageFull {
                 .fontSize(TEXT_STYLES.meta.size).fontColor(this.accentColorStore)
                 .width('100%').padding({ left: GUTTER, right: GUTTER, top: 6 })
             }
+
+            PlainSection({ label: '自动积累' })
+            CardGroup({ radius: 18, stroke: true, content: (): void => { this.AutoMemoryCard(); } })
+              .margin({ left: GUTTER, right: GUTTER })
+
+            PlainSection({ label: '专题与文档' })
+            CardGroup({ radius: 18, stroke: true, content: (): void => { this.MemoryEntryCard(); } })
+              .margin({ left: GUTTER, right: GUTTER })
 
             PlainSection({ label: '新增记忆' })
             CardGroup({ radius: 18, stroke: true, content: (): void => { this.AddMemoryCard(); } })

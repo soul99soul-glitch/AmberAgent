@@ -1,4 +1,5 @@
 // SearchPage — 全局搜索页
+import { CenteredTitleBar } from '../components/PageTemplate.ets';
 // 搜索框 + 真实网络搜索结果;网络不可用时降级为本地会话标题搜索。
 
 import { router, promptAction } from '@kit.ArkUI';
@@ -338,13 +339,7 @@ struct SearchPage {
 
   build(): void {
     Column() {
-      Row() {
-        Icon({ name: 'back', iconSize: 22, color: INK3 }).onClick((): void => { router.back(); })
-        Text('搜索').fontSize(TITLE).fontWeight(FontWeight.Bold).fontColor(INK)
-          .margin({ left: 8 }).layoutWeight(1)
-      }
-      .width('100%').padding({ left: 14, right: 14, top: this.statusBarHeight + 2, bottom: 11 })
-      .border({ width: { bottom: 1 }, color: { bottom: LINE } }).backgroundColor(BG)
+      CenteredTitleBar({ title: '搜索' })
 
       Row() {
         Icon({ name: 'search', iconSize: 14, color: INK3 }).margin({ right: 8 })

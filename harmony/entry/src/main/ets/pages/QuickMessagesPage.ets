@@ -1,4 +1,5 @@
 // QuickMessagesPage — 快捷消息列表
+import { CenteredTitleBar } from '../components/PageTemplate.ets';
 // 展示快捷消息模板(标题 + 内容预览),添加/内联编辑/滑动删除。
 import { router } from '@kit.ArkUI';
 import { Icon } from '../components/ui/Icon.ets';
@@ -159,18 +160,8 @@ struct QuickMessagesPage {
 
   build(): void {
     Column() {
-      Row() {
-        Icon({ name: 'back', iconSize: 22, color: INK3 }).onClick((): void => { router.back(); })
-        Text('快捷消息').fontSize(TITLE).fontWeight(FontWeight.Bold).fontColor(INK)
-          .margin({ left: 12 }).layoutWeight(1)
-        if (!this.editing) {
-          Text('+ 新建').fontSize(BODY).fontColor(ACCENT).maxLines(1)
-            .constraintSize({ minHeight: 40 })
-            .onClick((): void => { this.startNew(); });
-        }
-      }
-      .width('100%').padding({ left: 14, right: 14, top: this.statusBarHeight + 2, bottom: 11 })
-      .border({ width: { bottom: 1 }, color: { bottom: LINE } }).backgroundColor(BG)
+      CenteredTitleBar({ title: '快捷消息', actionIcon: this.editing ? '' : 'plus',
+        onAction: (): void => { this.startNew(); } })
 
       if (this.editing) {
         Scroll() {
