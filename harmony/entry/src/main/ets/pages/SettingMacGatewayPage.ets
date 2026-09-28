@@ -10,7 +10,7 @@ import { common } from '@kit.AbilityKit';
 import { notificationManager } from '@kit.NotificationKit';
 import { FONT_SANS } from '../design/fonts.ets';
 import { BG, INK3, ERROR, LABEL, META, TEXT_STYLES } from '../design/tokens.ets';
-import { PageTitleBar, SectionHeader, NavRow, ToggleRow, BtnFill, BtnGhost, PageSpacer } from '../components/PageTemplate.ets';
+import { CenteredTitleBar, PlainSection, CardGroup, FooterNote, NavRow, ToggleRow, BtnFill, BtnGhost, PageSpacer } from '../components/PageTemplate.ets';
 import {
   MacGatewayClient, MacGatewayError, describeMacGatewayError, parsePairingLink, loadMacGatewayConnection,
   forgetMacGatewayConnection, pairMacGateway, uploadMacGatewayPushToken,
@@ -306,29 +306,34 @@ struct SettingMacGatewayPage {
   // ── 分区 ──
 
   @Builder
-  Footer(text: string, isError: boolean): void {
-    Text(text)
-      .fontSize(LABEL).lineHeight(TEXT_STYLES.meta.lineHeight).fontFamily(FONT_SANS).fontColor(isError ? ERROR : INK3)
-      .width('100%').padding({ left: 16, right: 16, top: 6, bottom: 4 })
-  }
-
-  @Builder
-  PairSection(): void {
-    SectionHeader({ label: '配对' })
+  PairCard(): void {
     NavRow({ label: '扫码配对', desc: '在 Mac 终端运行 amber-gateway pair，扫描显示的二维码', iconName: 'hi_camera',
       onRowClick: (): void => { this.scan(); } })
     NavRow({ label: '粘贴配对链接', desc: '从其他设备复制的 amber:// 链接', iconName: 'clipboard', isLast: true,
       onRowClick: (): void => { this.paste(); } })
-    this.Footer('把 Mac 上 Claude Code / Codex 任务的状态推送到手机。推送只含项目名与状态，不含代码与对话内容。', false)
+  }
+
+  @Builder
+  PairSection(): void {
+    PlainSection({ label: '配对' })
+    CardGroup({ radius: 18, stroke: true, content: (): void => { this.PairCard(); } })
+      .margin({ left: 16, right: 16 })
+    FooterNote({ text: '把 Mac 上 Claude Code / Codex 任务的状态推送到手机。推送只含项目名与状态，不含代码与对话内容。' })
   }
 
   // 分区 builder 一律从 this 读状态:@Builder 按值传参时,参数变化不会触发内部刷新
   @Builder
-  ConfirmSection(): void {
-    SectionHeader({ label: '确认配对' })
+  ConfirmCard(): void {
     NavRow({ label: this.pending?.name ?? '', desc: this.pending?.addrs.join(' · ') ?? '', showChevron: false })
     NavRow({ label: '证书指纹', desc: this.pending?.fp ?? '', showChevron: false, isLast: true })
-    this.Footer('请核对与 Mac 终端显示的证书指纹一致。', false)
+  }
+
+  @Builder
+  ConfirmSection(): void {
+    PlainSection({ label: '确认配对' })
+    CardGroup({ radius: 18, stroke: true, content: (): void => { this.ConfirmCard(); } })
+      .margin({ left: 16, right: 16 })
+    FooterNote({ text: '请核对与 Mac 终端显示的证书指纹一致。' })
     Row() {
       BtnGhost({ label: '取消', onTap: (): void => { this.pending = null; } })
       Blank()
@@ -338,8 +343,7 @@ struct SettingMacGatewayPage {
   }
 
   @Builder
-  MacSection(): void {
-    SectionHeader({ label: 'Mac' })
+  MacCard(): void {
     NavRow({ label: this.connection?.name ?? '', desc: this.reachabilityText(), linkText: '刷新',
       onRowClick: (): void => { this.refresh(); } })
     NavRow({
@@ -354,14 +358,20 @@ struct SettingMacGatewayPage {
         if (this.pushRegistered()) this.testPush(); else this.enablePush();
       },
     })
+  }
+
+  @Builder
+  MacSection(): void {
+    PlainSection({ label: 'Mac' })
+    CardGroup({ radius: 18, stroke: true, content: (): void => { this.MacCard(); } })
+      .margin({ left: 16, right: 16 })
     if (this.reachable < 0) {
-      this.Footer('Mac 睡眠、合盖或断网时无法推送，也无法在这里查看状态。', false)
+      FooterNote({ text: 'Mac 睡眠、合盖或断网时无法推送，也无法在这里查看状态。' })
     }
   }
 
   @Builder
-  HealthSection(): void {
-    SectionHeader({ label: 'Mac 状态' })
+  HealthCard(): void {
     if (this.health()?.diskFreeBytes !== undefined) {
       NavRow({ label: '磁盘剩余', valueText: formatBytes(this.health()?.diskFreeBytes ?? 0), showChevron: false })
     }
@@ -374,8 +384,14 @@ struct SettingMacGatewayPage {
   }
 
   @Builder
-  TasksSection(): void {
-    SectionHeader({ label: '任务' })
+  HealthSection(): void {
+    PlainSection({ label: 'Mac 状态' })
+    CardGroup({ radius: 18, stroke: true, content: (): void => { this.HealthCard(); } })
+      .margin({ left: 16, right: 16 })
+  }
+
+  @Builder
+  TasksCard(): void {
     if (this.status?.synaraURL !== undefined) {
       NavRow({ label: '在 Synara 中回复或确认', desc: '在浏览器中打开 Synara，处理其中的任务', iconName: 'hi_message',
         onRowClick: (): void => { this.openSynara(this.status?.synaraURL ?? ''); } })
@@ -388,13 +404,28 @@ struct SettingMacGatewayPage {
         ToggleRow({ label: s.subject, desc: this.taskDetail(s), checked: s.monitored, isLast: i === this.sessions().length - 1,
           onToggle: (): void => { this.toggleTask(s); } })
       }, (s: MacGatewaySession): string => `${s.key}-${s.monitored}-${s.state}-${s.updatedAt}-${this.status?.serverTime}`)
-      this.Footer('关闭开关后，该任务不再推送。', false)
     }
+  }
+
+  @Builder
+  TasksSection(): void {
+    PlainSection({ label: '任务' })
+    CardGroup({ radius: 18, stroke: true, content: (): void => { this.TasksCard(); } })
+      .margin({ left: 16, right: 16 })
+    if (this.sessions().length > 0) {
+      FooterNote({ text: '关闭开关后，该任务不再推送。' })
+    }
+  }
+
+  @Builder
+  UnpairCard(): void {
+    NavRow({ label: this.busy ? '处理中…' : '取消配对', danger: true, showChevron: false, isLast: true,
+      onRowClick: (): void => { this.confirmUnpair(); } })
   }
 
   build(): void {
     Column() {
-      PageTitleBar({ title: 'Mac Gateway' })
+      CenteredTitleBar({ title: 'Mac Gateway' })
       if (!this.loaded) {
         Text('加载中…').fontSize(META).fontColor(INK3).padding({ top: 40 })
       } else {
@@ -414,11 +445,8 @@ struct SettingMacGatewayPage {
                 this.HealthSection()
               }
               this.TasksSection()
-              Column() {
-                NavRow({ label: this.busy ? '处理中…' : '取消配对', danger: true, showChevron: false, isLast: true,
-                  onRowClick: (): void => { this.confirmUnpair(); } })
-              }
-              .margin({ top: 20 })
+              CardGroup({ radius: 18, stroke: true, content: (): void => { this.UnpairCard(); } })
+              .margin({ left: 16, right: 16, top: 20 })
             } else {
               this.PairSection()
             }
