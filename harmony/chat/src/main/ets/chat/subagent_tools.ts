@@ -26,6 +26,7 @@ import type { JsonObject, JsonValue } from './json.ts';
 import type { UIMessage, UIMessagePart } from './message.ts';
 import { toText } from './message.ts';
 import type { AgentTool } from './tool.ts';
+import type { SubAgentRunner } from './subagent_runner.ts';
 import { makeAgentTool, makeInputSchemaObj } from './tool.ts';
 import type { SubAgentDefinition, SubAgentMode } from './agent_prompt_config.ts';
 import { subAgentExtractMentions } from './agent_prompt_config.ts';
@@ -52,6 +53,7 @@ const dynamicSubagentHelp = (mode: SubAgentMode): string => {
 
 export interface SubAgentToolsDeps {
   manager: SubAgentManager;
+  runner?: SubAgentRunner;
   parentConversationId: string;
   // 只返回已经 profile 过的 parent base tools;public subagent_* 工具不进入 child scope
   // (manager.start 自身过滤 subagent_* 与 allowlist,本 provider 只透传 base tools)
@@ -287,6 +289,7 @@ export class SubAgentTools {
           deps.parentConversationId,
           input as JsonObject,
           deps.parentToolsProvider(),
+          deps.runner,
         );
         return textPart(payload);
       },

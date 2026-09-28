@@ -16,18 +16,20 @@ import { fileIo } from '@kit.CoreFileKit';
 import type { Context } from '@kit.AbilityKit';
 import type { Conversation, ConversationSummary, DisplaySetting, ContinueCandidate, AgentCronTask } from '@amber/chat-domain';
 import type { ModelCouncilRun } from '@amber/deepread-domain';
-import { loadDisplaySetting, exportConversationMarkdown, exportFileNameFor, mergeContinueCandidates } from '@amber/chat-domain';
+import { loadDisplaySetting, exportConversationMarkdown, exportFileNameFor, mergeContinueCandidates, patchConversation } from '@amber/chat-domain';
 import {
   getChatKvStore, getChatRepository, getNovelCreation, getAgentCronManager, getRepository,
-  getCouncilManager,
+  getCouncilManager, getConversationRunService,
 } from '../di/AppContainer.ets';
 import { routePendingWant } from '../entryability/EntryAbility.ets';
 import { cleanupDeletedConversation, getFilesRepository } from '../platform_impl/ManagedFileStore.ets';
+import { beginConversationRestore } from '../platform_impl/ConversationRunGuard.ets';
 import { getMiniAppRepositorySync } from '../platform_impl/MiniAppPlatform.ets';
 import { Icon } from '../components/ui/Icon.ets';
 import { AmberWordmark } from '../components/ui/AmberWordmark.ets';
 import { PressGlowButton } from '../components/ui/PressGlowButton.ets';
 import { SubAgentActivityStrip } from '../components/SubAgentActivityStrip.ets';
+import { RunningIndicator } from '../components/ChatListIndicators.ets';
 import { ACCENT, ACCENT_INK, ERROR, HOME_BG, HOME_CARD, HOME_CARD2, HOME_DOT, HOME_GLASS_BOTTOM,
   HOME_GLASS_EDGE, HOME_GLASS_SHADOW, HOME_GLASS_TOP, HOME_INK, HOME_INK2, HOME_MUTED, HOME_MUTED2,
   HOME_PRESS, HOME_ROWLINE, HOME_SEP, HOME_SHADOW, MOTION_ENTER, MOTION_STAGGER, OVERLAY } from '../design/tokens.ets';
@@ -196,6 +198,7 @@ struct ChatListPage {
   @StorageProp('themePackId') themePackId: string = '';
   @StorageProp('homeDotGrid') @Watch('redrawDots') homeDotGrid: boolean = true;
   @State items: ConversationSummary[] = [];
+  @State runningIds: string[] = [];
   @State loaded: boolean = false;
   @State snackVisible: boolean = false;
   @State pressedId: string = '';
@@ -223,6 +226,7 @@ struct ChatListPage {
   private pendingDeleted: Conversation | null = null;
   private snackTimer: number = -1;
   private pageAlive: boolean = false;
+  private unsubscribeRunning: (() => void) | null = null;
   private refreshSeq: number = 0;
   private firstShowDone: boolean = false;
   private cascadeDone: boolean = false;
@@ -232,6 +236,7 @@ struct ChatListPage {
   private dotContext: CanvasRenderingContext2D = new CanvasRenderingContext2D(this.dotSettings);
 
   onPageShow(): void {
+    this.observeRunning();
     if (this.firstShowDone) {
       this.refresh();
       this.loadContinue();
@@ -250,6 +255,7 @@ struct ChatListPage {
 
   aboutToAppear(): void {
     this.pageAlive = true;
+    this.observeRunning();
     this.refresh();
     this.loadContinue();
     this.loadLastOpened();
@@ -296,7 +302,28 @@ struct ChatListPage {
 
   aboutToDisappear(): void {
     this.pageAlive = false;
+    this.stopRunningSubscription();
     if (this.pendingDeleted !== null) this.commitPendingDelete();
+  }
+
+  onPageHide(): void {
+    this.stopRunningSubscription();
+  }
+
+  private observeRunning(): void {
+    if (!this.pageAlive || this.unsubscribeRunning !== null) return;
+    this.unsubscribeRunning = getConversationRunService().subscribeRunning((ids: string[]): void => {
+      if (!this.pageAlive) return;
+      const removed: boolean = this.runningIds.some((id: string): boolean => ids.indexOf(id) < 0);
+      this.runningIds = ids;
+      if (removed) this.refresh();
+    });
+  }
+
+  private stopRunningSubscription(): void {
+    const unsubscribe: (() => void) | null = this.unsubscribeRunning;
+    this.unsubscribeRunning = null;
+    if (unsubscribe !== null) unsubscribe();
   }
 
   private refresh(): void {
@@ -591,11 +618,9 @@ struct ChatListPage {
   }
 
   private togglePin(item: ConversationSummary): void {
-    const repo = getChatRepository();
-    repo.getById(item.id).then((conversation: Conversation | null): void => {
-      if (conversation === null) return;
-      conversation.isPinned = !conversation.isPinned;
-      repo.save(conversation).then((): void => this.refresh());
+    getConversationRunService().mutateStoredConversation(item.id, (latest: Conversation): Conversation =>
+      patchConversation(latest, { isPinned: !latest.isPinned })).then((updated: Conversation | null): void => {
+      if (updated !== null) this.refresh();
     });
   }
 
@@ -643,10 +668,23 @@ struct ChatListPage {
       this.snackVisible = false;
     });
     if (fullConversation === null) return;
+    if (getConversationRunService().isBusy(fullConversation.id)) {
+      if (this.pageAlive) {
+        promptAction.showToast({ message: '该对话仍在运行，请等待任务结束后再删除', duration: 2000 });
+        this.refresh();
+      }
+      return;
+    }
     const repo = getChatRepository();
-    repo.delete(fullConversation.id)
-      .then((): Promise<void> =>
-        cleanupDeletedConversation(fullConversation, repo, getChatKvStore()))
+    const commit = async (): Promise<void> => {
+      const release: () => void = beginConversationRestore([fullConversation.id]);
+      try {
+        await repo.delete(fullConversation.id);
+        getConversationRunService().forgetDeletedConversation(fullConversation.id);
+        await cleanupDeletedConversation(fullConversation, repo, getChatKvStore());
+      } finally { release(); }
+    };
+    commit()
       .then((): void => { if (this.pageAlive) this.refresh(); })
       .catch((error: Error): void => {
         if (!this.pageAlive) return;
@@ -719,13 +757,9 @@ struct ChatListPage {
     const id: string = this.renameId;
     this.renameOpen = false;
     if (title.length === 0 || id.length === 0) return;
-    const repo = getChatRepository();
-    repo.getById(id).then((conv: Conversation | null): void => {
-      if (conv === null) return;
-      conv.title = title;
-      repo.save(conv).then((): void => {
-        if (this.pageAlive) this.refresh();
-      });
+    getConversationRunService().mutateStoredConversation(id, (latest: Conversation): Conversation =>
+      patchConversation(latest, { title })).then((updated: Conversation | null): void => {
+      if (updated !== null && this.pageAlive) this.refresh();
     }).catch((): void => {});
   }
 
@@ -1185,6 +1219,9 @@ struct ChatListPage {
           .layoutWeight(1)
           .alignItems(HorizontalAlign.Start)
           .margin({ left: 13 })
+          if (this.runningIds.indexOf(item.id) >= 0) {
+            RunningIndicator().margin({ left: 8 }).accessibilityText('运行中')
+          }
         }
         .width('100%')
         .alignItems(VerticalAlign.Center)

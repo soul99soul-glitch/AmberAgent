@@ -9,10 +9,11 @@ import { getWebMountSession } from './WebMountSession.ets';
 
 export const createEntryPluginAdapter = (
   store: PluginStore, installed: InstalledPlugin[], primitives: AgentTool[],
+  conversationId: string | null = null,
 ): PluginLoopAdapter => createPluginLoopAdapter({
   store, installed,
-  js: createNativePluginJsTransport(), http: createEntryPluginHttpPort(),
-  webMount: createEntryPluginWebMountPort(getWebMountSession()),
+  js: createNativePluginJsTransport(conversationId), http: createEntryPluginHttpPort(),
+  webMount: createEntryPluginWebMountPort(getWebMountSession(), conversationId),
   resolveMcpPrimitive: (serverId: string, toolName: string): AgentTool | null => primitives.find(
     (tool: AgentTool): boolean => tool.mcpTarget?.serverId === serverId
       && tool.mcpTarget?.toolName === toolName) ?? null,

@@ -10,7 +10,7 @@
 //   body value = JSON,逐键解析,非法 JSON 行内报错并保留旧值(:160-176)
 import { ACCENT,BG,ERROR,INK,INK2,INK3,LINE,SURFACE,TITLE,GUTTER,RADIUS,BODY,BODY2,META } from '../design/tokens.ets';
 import { Icon } from '../components/ui/Icon.ets';
-import { router } from '@kit.ArkUI';
+import { router, promptAction } from '@kit.ArkUI';
 import type {
   Assistant, ReasoningLevel, CustomHeader, CustomBody, JsonValue, MainAgentToolProfile,
   Conversation, ConversationSummary,
@@ -18,8 +18,9 @@ import type {
 import {
   loadAssistants, saveAssistants, makeAssistant, patchAssistant, newId,
 } from '@amber/chat-domain';
-import { getChatKvStore, getChatAssistants, getChatRepository } from '../di/AppContainer.ets';
+import { getChatKvStore, getChatAssistants, getChatRepository, getConversationRunService } from '../di/AppContainer.ets';
 import { cleanupDeletedConversation } from '../platform_impl/ManagedFileStore.ets';
+import { beginConversationRestore } from '../platform_impl/ConversationRunGuard.ets';
 
 // D-107:工具范围(MainAgentToolProfile.entries 声明序;label() :98-105 逐字)
 const TOOL_PROFILES: MainAgentToolProfile[] =
@@ -316,25 +317,37 @@ struct ChatAssistantsPage {
         value: '删除',
         fontColor: 'ERROR',
         action: (): void => {
-          loadAssistants(getChatKvStore()).then((loaded: Assistant[] | null): void => {
+          loadAssistants(getChatKvStore()).then((loaded: Assistant[] | null): Promise<void> => {
             const current: Assistant[] = loaded !== null && loaded.length > 0 ? loaded : this.items;
             const next: Assistant[] = current.filter((x: Assistant): boolean => x.id !== a.id);
-            saveAssistants(getChatKvStore(), next).then((): Promise<void> => {
-              // 级联删除该助手的会话
-              const repo = getChatRepository();
-              return repo.list(a.id).then((convs: ConversationSummary[]): Promise<void> => {
+            const repo = getChatRepository();
+            return repo.list(a.id).then((convs: ConversationSummary[]): Promise<void> => {
+              if (convs.some((c: ConversationSummary): boolean => getConversationRunService().isBusy(c.id))) {
+                throw new Error('该助手有对话仍在运行，请等待任务结束后再删除');
+              }
+              // 整组占用既有 run/restore 门，避免异步级联途中另一目标开始生成。
+              const release: () => void = beginConversationRestore(convs.map((c: ConversationSummary): string => c.id));
+              return saveAssistants(getChatKvStore(), next).then((): Promise<void> => {
                 let chain: Promise<void> = Promise.resolve();
                 for (const c of convs) {
                   chain = chain.then((): Promise<void> =>
                     repo.getById(c.id).then((full: Conversation | null): Promise<void> => {
                       if (full === null) return Promise.resolve();
-                      return repo.delete(c.id).then((): Promise<void> =>
-                        cleanupDeletedConversation(full, repo, getChatKvStore()));
+                      if (getConversationRunService().isBusy(c.id)) {
+                        throw new Error('该助手有对话仍在运行，请等待任务结束后再删除');
+                      }
+                      return repo.delete(c.id).then((): Promise<void> => {
+                        getConversationRunService().forgetDeletedConversation(c.id);
+                        return cleanupDeletedConversation(full, repo, getChatKvStore());
+                      });
                     }));
                 }
                 return chain;
-              });
-            }).then((): void => this.refresh());
+              }).finally((): void => { release(); });
+            });
+          }).then((): void => this.refresh()).catch((error: Error): void => {
+            promptAction.showToast({ message: `删除助手失败：${error.message}`, duration: 2000 });
+            this.refresh();
           });
         },
       },

@@ -86,3 +86,12 @@ Page 先 subscribe 即时回放后才考虑冷读；已有 snapshot 不运行冷
 实施冻结：主 agent 采用以上接口作为四模块协作合同；辅助 title/suggestions 的读取、条件合并与保存必须在同一个 session mutation 队列内，以 mutateConversation 完成，不能先读最新仓库再独立排旧值 save。模块实现只增必要的上下文端口，不另造 run 引擎、scheduler 或永久 ledger。E5 最终源收口后合入公开接线。
 
 实际 parent 模型事实：ChatRuntime 增加 resolvedChoice:ChatProviderChoice，直接取 resolveChatRuntime 已解析的 choice；子代理与辅助回退显式使用此快照，现有 task resolver 新可选 fallbackChoice 未传时保持原行为。导航订阅仅同 ID 可见 Page 绑定，hide/disappear 退订；普通快照订阅不算导航收集者。
+
+## 已核实的接线补充（2026-09-28）
+
+- Snapshot 同时保留真正落库的 `conversation` 和生成期间稳定的 `visualConversation`，避免 checkpoint 替换节点导致流式重复或目标行丢失。用户节点再生显示截断后的基线与新 tail；assistant 再生/工具续跑在原节点显示更新内容。
+- 新页显式登记一次未落库 seed；宿主只在真实仓储缺行且存在这个新建 seed 时创建。旧 snapshot 不用于复活删除行。无有效宿主 snapshot 的返回页面读一次实际仓储，并在宿主已重新接管时丢弃该迟到读。
+- 页面订阅实际运行 ID 集合。`chatGenerating` 是所有会话活跃生成的聚合；列表/抽屉的运行指示使用真实 ID 集合。
+- 标题、置顶、分支切换和删除消息通过同 ID 写队列在真实最新记录上修改；保存合并保留最新标题、建议和置顶。删除会话的实际提交受既有 restore guard 保护，成功后清宿主的旧 canonical/待发队列并发布删除状态。
+- Plugin WebMount scope 必须在任何全局 URL gate/read/reset 前获得本会话页面 lease，异步结束和错误清理前重新核归属。页面丢失不能重置另一会话当前页面。
+- 必要验证仅实际 A/B 宿主一组、已复现显示投影问题的受影响 case、浏览器 scope 归属一个受控组，以及改动文件 lint/实际编译/签名。设备不可用时不反复恢复或跑矩阵，C 闸门保持未验证。

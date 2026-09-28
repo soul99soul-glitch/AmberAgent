@@ -60,6 +60,7 @@ interface TerminalTaskUpdate {
 
 interface RuntimeRun {
   snapshot: SubAgentRun;
+  runner: SubAgentRunner;
   controller: LocalAbortController | null;
   terminalMutex: AsyncMutex;
   taskRegistered: boolean;
@@ -253,6 +254,7 @@ export class SubAgentManager {
 
   async start(
     parentConversationId: string, input: JsonObject, parentTools: AgentTool[],
+    runner: SubAgentRunner = this.deps.runner,
   ): Promise<JsonObject> {
     const setting: SubAgentRuntimeSetting = this.deps.getSubAgentSetting();
     if (!setting.enabled) {
@@ -341,6 +343,7 @@ export class SubAgentManager {
     });
     const runtimeRun: RuntimeRun = {
       snapshot: run,
+      runner,
       // controller 在创建 runtimeRun 时即存在:admission 后任意 await 窗口内
       // cancel() 都能立刻 abort,launchRun 启动前也会复查 signal
       controller: new LocalAbortController(),
@@ -551,7 +554,7 @@ export class SubAgentManager {
     let result: SubAgentResult;
     try {
       result = await this.runWithTimeout(
-        this.deps.runner.run(
+        runtimeRun.runner.run(
           run.definition,
           run.task,
           scopedSubAgentTools(allowedTools),

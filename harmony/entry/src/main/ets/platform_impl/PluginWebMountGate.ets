@@ -1,4 +1,5 @@
 import type { PluginWebMountPort } from '@amber/chat-domain';
+import { assertConversationBrowserOwner } from './ConversationBrowserGuard.ets';
 import type { WebMountHookBinding, WebMountSession } from './WebMountSession.ets';
 import { checkWebMountUrl } from './WebMountSites.ets';
 import type { WebMountUrlCheck } from './WebMountSites.ets';
@@ -11,12 +12,17 @@ const allowedUrl = (raw: string, domains: string[]): boolean => {
 
 class EntryPluginWebMountPort implements PluginWebMountPort {
   private readonly session: WebMountSession;
+  private readonly conversationId: string | null;
 
-  constructor(session: WebMountSession) {
+  constructor(session: WebMountSession, conversationId: string | null = null) {
     this.session = session;
+    this.conversationId = conversationId;
   }
 
   async withScope<T>(networkDomains: string[], operation: () => Promise<T>, requireCurrent: boolean = true): Promise<T> {
+    const assertOwner: (() => void) | null = this.conversationId === null
+      ? null : assertConversationBrowserOwner(this.conversationId);
+    if (assertOwner !== null) assertOwner();
     const domains: string[] = networkDomains.slice();
     const current: string = this.session.getUrl();
     if (requireCurrent && current.length > 0 && current !== 'about:blank' && !allowedUrl(current, domains)) {
@@ -28,6 +34,7 @@ class EntryPluginWebMountPort implements PluginWebMountPort {
       (target: string): boolean => allowedUrl(target, domains));
     try {
       const result: T = await operation();
+      if (assertOwner !== null) assertOwner();
       const finalUrl: string = this.session.getUrl();
       if (finalUrl.length > 0 && finalUrl !== 'about:blank' && !allowedUrl(finalUrl, domains)) {
         this.session.resetToBlank();
@@ -35,6 +42,7 @@ class EntryPluginWebMountPort implements PluginWebMountPort {
       }
       return result;
     } catch (error) {
+      if (assertOwner !== null) assertOwner();
       // open/reload reject on cancellation before pageEnd. Discard that
       // pending page before releasing its navigation gate.
       if (!this.session.isReady()) this.session.resetToBlank();
@@ -45,5 +53,6 @@ class EntryPluginWebMountPort implements PluginWebMountPort {
   }
 }
 
-export const createEntryPluginWebMountPort = (session: WebMountSession): PluginWebMountPort =>
-  new EntryPluginWebMountPort(session);
+export const createEntryPluginWebMountPort = (
+  session: WebMountSession, conversationId: string | null = null,
+): PluginWebMountPort => new EntryPluginWebMountPort(session, conversationId);

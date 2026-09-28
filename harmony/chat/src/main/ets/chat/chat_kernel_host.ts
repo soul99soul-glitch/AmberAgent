@@ -126,9 +126,9 @@ export const createChatKernelHost = (hostDeps: ChatKernelHostDeps): ChatKernelHo
         cancelled || (externalSignal !== undefined && externalSignal.aborted);
       let lastPersistedConversation: Conversation = conversation;
       const trackingStore: ConversationStore = {
-        save: (conv: Conversation): Promise<void> => {
+        save: async (conv: Conversation): Promise<void> => {
+          await deps.store.save(conv);
           lastPersistedConversation = conv;
-          return deps.store.save(conv);
         },
       };
 

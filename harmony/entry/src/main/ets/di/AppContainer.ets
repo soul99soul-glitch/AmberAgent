@@ -128,7 +128,9 @@ import {
   createEntrySubAgentTranscriptPort, subAgentRunsDir, subAgentTranscriptPathForRun,
 } from '../platform_impl/SubAgentStore.ets';
 import { loadAgentRuntimeSnapshot } from '../platform_impl/AgentRuntimePrefs.ets';
+import type { AgentRuntimeSnapshot } from '../platform_impl/AgentRuntimePrefs.ets';
 import { beginConversationRun } from '../platform_impl/ConversationRunGuard.ets';
+import { ConversationRunService } from '../platform_impl/ConversationRunService.ets';
 import { ensureSearchSdk } from '../platform_impl/SearchSdkInit.ets';
 import { util } from '@kit.ArkTS';
 
@@ -731,14 +733,18 @@ export const isModelCouncilEnabled = async (): Promise<boolean> => {
 //     (runner 内部 isolatedAssistant 应用隔离字段;此处只返回 parent + retry/flags)
 //   makeProvider = buildProviderApi + asChatStreamProvider(同步;provider 由
 //     resolveModel 阶段已解析并以 model.id 为键缓存,makeProvider 按 model.id 取)
-const buildSubAgentGenerationPort = (): SubAgentGenerationPort => {
+const buildSubAgentGenerationPort = (
+  parentRuntime: ChatRuntime | null = null, parentAgentRuntime: AgentRuntimeSnapshot | null = null,
+  parentConversationId: string | null = null,
+): SubAgentGenerationPort => {
   // model.id → 已解析 provider(resolveModel 异步解析后缓存;makeProvider 同步取)
   //   并行子代理按各自 model.id 取 provider,不互相干扰;同 model → 同 provider(正确)
   const providerByModelId: Map<string, ProviderSetting> = new Map<string, ProviderSetting>();
   // D5-1:Jev 模型路由(无 override 且有任务上下文时):候选 = 当前聊天模型 +
   //   各启用服务商首个 chat 模型(≤6);ACTIVE 用选中,SHADOW/失败/无路由空间 → null
   const jevRouteModel = async (taskHint: string): Promise<ChatProviderChoice | null> => {
-    const current: ChatProviderChoice | null = await resolveChatProviderChoice();
+    const current: ChatProviderChoice | null = parentRuntime === null
+      ? await resolveChatProviderChoice() : parentRuntime.resolvedChoice;
     const providers: ProviderSetting[] = (await loadProviders(getChatKvStore())) ?? [];
     const candidates: Record<string, string> = {};
     const choices: Map<string, ChatProviderChoice> = new Map<string, ChatProviderChoice>();
@@ -766,12 +772,13 @@ const buildSubAgentGenerationPort = (): SubAgentGenerationPort => {
     //   (SubAgentRunner.kt:52-54 语义的 Jev 增强,失败/未配置回退链不变)
     let choice: ChatProviderChoice | null = null;
     if (modelSettingId !== null && modelSettingId.length > 0) {
-      choice = await resolveTaskChatModelChoice(modelSettingId);
+      choice = await resolveTaskChatModelChoice(modelSettingId, parentRuntime?.resolvedChoice);
     }
     if (choice === null && taskHint !== undefined && taskHint.length > 0) {
       choice = await jevRouteModel(taskHint);
     }
-    if (choice === null) choice = await resolveChatProviderChoice();
+    if (choice === null) choice = parentRuntime === null
+      ? await resolveChatProviderChoice() : parentRuntime.resolvedChoice;
     if (choice === null) return null;
     providerByModelId.set(choice.model.id, choice.provider);
     return choice.model;
@@ -779,8 +786,8 @@ const buildSubAgentGenerationPort = (): SubAgentGenerationPort => {
   const resolveAssistant = async (): Promise<SubAgentAssistantResolution | null> => {
     const assistants: Assistant[] = await getChatAssistants();
     if (assistants.length === 0) return null;
-    const assistant: Assistant = assistants[0];
-    const snapshot = await loadAgentRuntimeSnapshot(getChatKvStore());
+    const assistant: Assistant = parentRuntime === null ? assistants[0] : parentRuntime.assistant;
+    const snapshot: AgentRuntimeSnapshot = parentAgentRuntime ?? await loadAgentRuntimeSnapshot(getChatKvStore());
     const generationRetry = makeGenerationRetrySetting({
       enabled: snapshot.generationRetry.enabled,
       maxRetries: snapshot.generationRetry.maxRetries,
@@ -822,7 +829,7 @@ const buildSubAgentGenerationPort = (): SubAgentGenerationPort => {
       await configureEntryScopedRecipeLoop(loop, await getRecipeStore(), guard, {
         store: pluginStore,
         createAdapter: (installed: InstalledPlugin[], primitives: AgentTool[]): PluginLoopAdapter =>
-          createEntryPluginAdapter(pluginStore, installed, primitives),
+          createEntryPluginAdapter(pluginStore, installed, primitives, parentConversationId),
       });
     },
   });
@@ -881,6 +888,8 @@ export const getSubAgentManager = async (): Promise<SubAgentManager> => {
 export interface SubAgentToolsContext {
   parentConversationId: string;
   parentToolsProvider: () => AgentTool[];
+  parentRuntime?: ChatRuntime;
+  parentAgentRuntime?: AgentRuntimeSnapshot;
 }
 export const getSubAgentTools = async (
   ctx: SubAgentToolsContext,
@@ -890,6 +899,8 @@ export const getSubAgentTools = async (
   const councilEnabled: boolean = await isModelCouncilEnabled();
   const tools: SubAgentTools = new SubAgentTools({
     manager,
+    runner: ctx.parentRuntime === undefined ? undefined : new GenerationSubAgentRunner(
+      buildSubAgentGenerationPort(ctx.parentRuntime, ctx.parentAgentRuntime ?? null, ctx.parentConversationId)),
     parentConversationId: ctx.parentConversationId,
     parentToolsProvider: ctx.parentToolsProvider,
     isModelCouncilEnabled: (): boolean => councilEnabled,
@@ -1083,6 +1094,12 @@ export const initMcpManager = async (): Promise<void> => {
 
 // D-122:AgentToolActivityStore(AgentInfraModule.kt:38 single)全局单例 —
 //   工具活动单槽时间线;ChatPage 订阅显示,mcp__ 组 execute 上报
+let conversationRunService: ConversationRunService | null = null;
+export const getConversationRunService = (): ConversationRunService => {
+  if (conversationRunService === null) conversationRunService = new ConversationRunService();
+  return conversationRunService;
+};
+
 let toolActivityStore: AgentToolActivityStore | null = null;
 export const getToolActivityStore = (): AgentToolActivityStore => {
   if (toolActivityStore === null) {
@@ -1261,6 +1278,7 @@ export const getChatAssistants = async (): Promise<Assistant[]> => {
 
 export interface ChatRuntime {
   api: OpenAIChatApi;
+  resolvedChoice: ChatProviderChoice;
   assistant: Assistant;
   params: TextGenerationParams;
   contextMessageSize: number;
@@ -1506,19 +1524,19 @@ export const loadNovelModelOptions = async (): Promise<NovelModelOption[]> => {
 // resolveTaskChatModel(PreferencesStore.kt:479-481)—
 //   findModelById(modelId) ?: getCurrentChatModel(= resolveChatProviderChoice)
 export const resolveTaskChatModelChoice = async (
-  modelId: string,
+  modelId: string, fallbackChoice?: ChatProviderChoice,
 ): Promise<ChatProviderChoice | null> =>
-  (await resolveConfiguredTaskChatModel(modelId)) ?? resolveChatProviderChoice();
+  (await resolveConfiguredTaskChatModel(modelId)) ?? fallbackChoice ?? resolveChatProviderChoice();
 
 // 链式解析:候选全部按顺序尝试，最后才回退当前聊天模型。
 export const resolveTaskModelChain = async (
-  candidates: string[],
+  candidates: string[], fallbackChoice?: ChatProviderChoice,
 ): Promise<ChatProviderChoice | null> => {
   for (const id of candidates) {
     const choice: ChatProviderChoice | null = await resolveConfiguredTaskChatModel(id);
     if (choice !== null) return choice;
   }
-  return resolveChatProviderChoice();
+  return fallbackChoice ?? resolveChatProviderChoice();
 };
 
 // 当前 chat 模型 uuid(供任务链 chatModelId 实参)
@@ -1681,7 +1699,7 @@ export const resolveChatRuntime = async (
   const pythonRuntime: PythonRuntime | null = assistant.localTools.includes('python') ? await getPythonRuntime() : null;
   const sshProfiles: SSHProfileStore | null = terminalEnabled ? await getSSHProfileStore() : null;
   return {
-    api, assistant, params,
+    api, resolvedChoice: choice, assistant, params,
     contextMessageSize: sessionDefaults.contextMessageSize,
     modelContextWindowTokens: model.contextWindowTokens,
     modelSupportsImageInput: model.inputModalities.includes('image'),

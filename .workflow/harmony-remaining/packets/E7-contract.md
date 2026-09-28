@@ -1,0 +1,34 @@
+# E7 frozen contract: memory topics and derived documents
+
+Scope: actual saved active non-core source memories → current daydream provider JSON grouping → maintained topic records → index.md/topic Markdown projection → topic/source/document UI. Preserve source content, identity and provenance. Reuse current MemoryStore guarded source JSON and write queue; no embedding store or second memory truth. Existing destructive DreamPlan approval remains separate.
+
+## Domain owner: public DTO and pure functions
+
+- MemoryKind adds `topic`; MemoryRecord fields `topicTitle:string|null`, `memberIds:number[]`. Existing JSON loads normalize missing fields to null/[]; factories/copies/upserts preserve them. Topic records use long_term/__long_term__, content=summary, no invented sourceConversationId.
+- Export named interfaces `MemoryTopicSuggestion {title:string; summary:string; memberIds:number[]}`, `MemoryTopicApplyResult {records:MemoryRecord[]; topicIds:number[]; changed:boolean; staleCount:number; rejectedReasons:string[]}`, `MemoryTopicPruneResult {records:MemoryRecord[]; changed:boolean}`.
+- `buildMemoryTopicPrompt(records:MemoryRecord[], now:number):string`; `decodeMemoryTopicSuggestions(raw:string):MemoryTopicSuggestion[]` rejects malformed shape. Validate short nonempty title (12 Unicode characters), nonempty summary, integer member IDs, ≥2 unique live members, no duplicate normalized titles or cross-topic member assignment in one result.
+- `applyMemoryTopicSuggestions(live:MemoryRecord[], baseline:MemoryRecord[], suggestions:MemoryTopicSuggestion[], now:number):MemoryTopicApplyResult` runs against latest guarded source; stale content/updatedAt/removal/archive/expiry rejects affected suggestion, reports it. Case/whitespace-normalized title upsert, stable ID, same content idempotent, union/distinct only eligible source members; do not merge/archive/edit the source records. Reject assigning members already belonging to another active topic.
+- `pruneMemoryTopics(records:MemoryRecord[], now:number):MemoryTopicPruneResult` removes unavailable members; <2 members archives topic. Ordinary source edits mark dependent summary stale or invalidate the affected topic explicitly; never treat old summary as freshly generated. Exact policy must be documented in the result.
+- Named `MemoryDocumentProjection {relativePath:string; title:string; preview:string; content:string; topicId:number|null}`, `MemoryDerivedDocument {relativePath:string; title:string; preview:string; sizeBytes:number; modifiedAt:number; topicId:number|null}`. `renderMemoryDocuments(records:MemoryRecord[], now:number):MemoryDocumentProjection[]` creates only `index.md` and `topics/<id>-<slug>.md`, actual member content/kind/dates/provenance and live coverage. Empty/no active source library has no misleading populated documents. No arbitrary filesystem path from user input.
+- Ordinary memory tools/extraction/import/frontmatter refuse to create/overwrite topics; export source records only with truthful count. Old Dream planner/applier excludes topic from managed non-core records. Topic records remain in main JSON but generated docs are readonly.
+
+## Platform owner: real write, model, document ports
+
+Own MemoryStore plus new MemoryTopicOps/MemoryDocumentStore and needed AgentRuntimePrefs/MemoryDreamOps narrow integration. Exports via their own named interfaces; root index exports domain only.
+
+- `getMemoryTopicStoreOps()` exposes `snapshotForTopics():Promise<MemoryRecord[]>`, `applyTopics(baseline,suggestions,now):Promise<MemoryTopicApplyResult>`, `deleteTopic(id:number):Promise<void>`, `syncDocuments():Promise<void>`, `listDocuments():Promise<MemoryDerivedDocument[]>`, `readDocument(relativePath:string):Promise<string|null>`.
+- All topic mutations and source invalidation/prune use current writeQueue and guarded real read. All relevant source writes preserve new fields, sync derived projection after successful source save; unchanged content does not rewrite files/mtime. Read error must not clear documents. Document failure reports source saved/doc refresh failed and supports explicit retry, never rolls successful source back.
+- `getMemoryTopicCoordinator()` exposes `state():MemoryTopicRunState`, `subscribe(listener):()=>void`, `run(manual:boolean):Promise<MemoryTopicRunResult>`, `cancel():void`, `foreground():void`, `background():void`. Named state/result interfaces communicate running/status/error/sourceSaved/documentError/topicCount/staleCount as actually meaningful; freeze concrete shape to UI owner before writing consumers.
+- Re-read runtime/model settings per run. Reuse daydream→worker→compress→actual chat model candidate resolution and reasoningLevel; no new model slot. Topic modelEnabled/write gate independent of extraction enabled; feature defaults remain false. Before committing recheck feature/write/background/cancel gate and live source. Model missing is a real result; no fake generated topics.
+- Worker timeout default 120000ms reuses actual provider signal, timeout closes write gate even if provider resolves late. Avoid unrelated retries or claiming hard transport termination. Manual skips idle/charging/daily schedule constraints, keeps feature/write/cancel gates. Foreground trigger uses existing actual idle/charging settings/daily budget; new @kit APIs must be read from local official docs. No claims of unimplemented WorkManager or indefinite background work.
+- Root owns EntryAbility/lifecycle hooks; provide thin coordinator foreground/background calls. Root owns shared AppContainer/index/routes and task prefs not listed above.
+
+## UI owner
+
+Own new MemoryTopicsPage/MemoryTopicDetailPage/MemoryRecordPage/MemoryDocumentPage and narrow MemoryPage entry. Use existing design tokens/MarkdownText; 16vp gutters, existing safe-area pattern, ≥44vp targets, long titles/paths/bodies wrap. Show actual loading/empty/missing-model/running/cancel/stale/write/document-failure states; topic+generated files readonly, exact member ID opens source editor, save/delete source through existing guarded ops. Source provenance uses real conversation/message IDs; deleted source conversation is shown as unavailable, not an invented deep link. Reload on returns/revisions, no stale detail after source deletion.
+
+Root integrates route declarations, lifecycle and domain exports. New pages export no fake image/mock records. UI source review is distinct from device C screenshots.
+
+## Necessary validation
+
+One small domain roundtrip/invalidation case and one actual store/model/document-port focused group only if needed for these new semantics; no full existing suites or repetitive device matrix. Root affected types/lint/actual compile/sign once, repair concrete diagnostics. Independent subagents A/B review phase source; necessary bright/dark UI evidence C remains pending while device unavailable. Continue independent next scope with explicit gates, never declare untested layers PASS.

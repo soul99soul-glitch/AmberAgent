@@ -1,0 +1,269 @@
+// Detached Chat dependencies: existing Entry loaders and chat-domain factories.
+import { hilog } from '@kit.PerformanceAnalysisKit';
+import type {
+  ChatTurnDeps, ChatStreamProvider, CompactPolicy, CompactResult, Conversation,
+  ConversationSummary, DisplaySetting, MemoryRecallRuntimeGate, MemoryRecallSelection,
+  MessageTransformer, MiniAppRecord, PreparedContext, RecentChatItem,
+  SubAgentRuntimeSetting, UIMessage,
+} from '@amber/chat-domain';
+import {
+  asChatStreamProvider, buildAgentSoulPrompt, buildMemoryRecallPrompt,
+  buildRecentChatsPrompt, conversationWithMessagesAsNodes, createDocumentTransformer,
+  createMiniAppOutputTransformer, createMiniAppPromptTransformer,
+  createPlaceholderTransformer, createPromptInjectionTransformer, createTemplateTransformer,
+  createTimeReminderTransformer, currentMessages, dayOfWeekFullName, estimateContextWindow,
+  javaLocalDateTimeString, loadDisplaySetting, loadMiniAppSetting, loadSearchPrefs,
+  makeCompactPolicy, makeGenerationRetrySetting, makeSubAgentRuntimeSetting,
+  makeTextGenerationParams, prepareContext, RECENT_CHATS_PROMPT_LIMIT,
+  regexOutputTransformer, thinkTagTransformer, toChatModel, toText,
+} from '@amber/chat-domain';
+import {
+  buildProviderApi, getAgentCronTools, getAgentTaskTools, getChatKvStore,
+  getChatRepository, getCompactStore, hydrateSubAgentSetting, initMcpManager,
+  loadTaskModelIds, loadTaskPrompts, resolveChatRuntime, resolveTaskChatModelChoice,
+} from '../di/AppContainer.ets';
+import type { ChatRuntime, TaskPrompts } from '../di/AppContainer.ets';
+import type {
+  DetachedConversationContext, PreparedConversationSeed,
+} from './ConversationRunService.ets';
+import { loadAgentRuntimeSnapshot, systemLanguage } from './AgentRuntimePrefs.ets';
+import { createEntryBase64ImageTransformer } from './Base64ImageSupport.ets';
+import { createEntryDocumentReader } from './DocumentSupport.ets';
+import { loadLorebooks, loadModeInjections } from './ExtensionPrefs.ets';
+import { imageGenToolAvailable } from './ImageGenTool.ets';
+import { jevNoulBatch } from './JevSupport.ets';
+import type { JevNoulBatchResult } from './JevSupport.ets';
+import { getMemoryReadRepository } from './MemoryStore.ets';
+import { getMiniAppPlatform, getMiniAppRepositorySync } from './MiniAppPlatform.ets';
+import type { MiniAppPlatform } from './MiniAppPlatform.ets';
+import { createEntryOcrTransformer, loadOcrSeed } from './OcrSupport.ets';
+import type { OcrSeed } from './OcrSupport.ets';
+import { createEntryPlaceholderValues } from './PlaceholderSupport.ets';
+import { ensureSearchSdk } from './SearchSdkInit.ets';
+
+const DOMAIN: number = 0x0001;
+const TAG: string = 'Chat.RunDependencies';
+
+export const prepareConversationSeed = async (
+  conversation: Conversation,
+): Promise<PreparedConversationSeed> => {
+  const runtime: ChatRuntime | null = await resolveChatRuntime(conversation.assistantId);
+  if (runtime === null) throw new Error('未配置可用的 Provider/模型');
+  const kv = getChatKvStore();
+  ensureSearchSdk();
+  await initMcpManager().catch((e: Error): void => {
+    hilog.warn(DOMAIN, TAG, 'MCP initialization failed: %{public}s', e.message);
+  });
+  const display: DisplaySetting = await loadDisplaySetting(kv);
+  const ids = await loadTaskModelIds();
+  // Keep the existing optional OCR/subagent gates when their hydration fails.
+  const ocr: OcrSeed | null = await loadOcrSeed(kv).catch((): null => {
+    hilog.warn(DOMAIN, TAG, 'OCR settings unavailable for this run');
+    return null;
+  });
+  let subAgent: SubAgentRuntimeSetting;
+  try {
+    subAgent = await hydrateSubAgentSetting();
+  } catch {
+    subAgent = makeSubAgentRuntimeSetting();
+    hilog.warn(DOMAIN, TAG, 'Subagent settings unavailable for this run');
+  }
+  return {
+    runtime,
+    agentRuntime: await loadAgentRuntimeSnapshot(kv),
+    compressChoice: await resolveTaskChatModelChoice(ids.compressModelId, runtime.resolvedChoice),
+    taskPrompts: await loadTaskPrompts(),
+    searchSettings: await loadSearchPrefs(kv),
+    ocrSeed: ocr,
+    miniAppSetting: await loadMiniAppSetting(kv),
+    userNickname: display.userNickname,
+    modeInjections: await loadModeInjections(kv),
+    lorebooks: await loadLorebooks(kv),
+    webmountGlobalEnabled: (await kv.get('webmount_global_enabled')) === 'true',
+    webmountEvalEnabled: (await kv.get('webmount_eval_enabled')) === 'true',
+    imageGenConfigured: await imageGenToolAvailable().catch((): boolean => false),
+    subAgentEnabled: subAgent.enabled,
+    subAgentMode: subAgent.mode,
+    agentTaskTools: await getAgentTaskTools(),
+    agentCronTools: await getAgentCronTools(),
+    enableGenerationNotification: display.enableNotificationOnMessageGeneration,
+  };
+};
+
+const inputTransformers = (ctx: DetachedConversationContext): MessageTransformer[] => {
+  const seed: PreparedConversationSeed = ctx.seed;
+  const rt: ChatRuntime = seed.runtime;
+  const list: MessageTransformer[] = [
+    createTimeReminderTransformer({
+      enabled: (): boolean => seed.agentRuntime.enableTimeReminder,
+      formatDayOfWeek: (ms: number): string => dayOfWeekFullName(systemLanguage(), ms),
+      formatLocalDateTime: javaLocalDateTimeString,
+    }),
+    createPromptInjectionTransformer({
+      modeInjections: () => seed.modeInjections,
+      lorebooks: () => seed.lorebooks,
+    }),
+    createMiniAppPromptTransformer({
+      enabled: (): boolean => seed.miniAppSetting.enabled,
+      loadApp: (id: string): Promise<MiniAppRecord | null> =>
+        getMiniAppPlatform().then((platform: MiniAppPlatform): Promise<MiniAppRecord | null> =>
+          platform.repository.getById(id)),
+    }),
+    createTemplateTransformer(),
+    createPlaceholderTransformer(createEntryPlaceholderValues(
+      rt.params.model.modelId, rt.params.model.displayName, (): string => seed.userNickname)),
+    createDocumentTransformer(createEntryDocumentReader()),
+  ];
+  if (seed.ocrSeed !== null) {
+    list.push(createEntryOcrTransformer(seed.ocrSeed, rt.modelSupportsImageInput));
+  }
+  return list;
+};
+
+const latestUserQuery = (conversation: Conversation, fallback: string = ''): string => {
+  const messages: UIMessage[] = currentMessages(conversation);
+  for (let i: number = messages.length - 1; i >= 0; i--) {
+    if (messages[i].role === 'user') return toText(messages[i]).substring(0, 300);
+  }
+  return fallback;
+};
+
+const extraSystemBlocks = async (ctx: DetachedConversationContext): Promise<string[]> => {
+  if (!ctx.seed.agentRuntime.enableRecentChatsReference) return [];
+  let recent: ConversationSummary[] = await getChatRepository().listRecent(RECENT_CHATS_PROMPT_LIMIT);
+  if (recent.length > 1) {
+    const query: string = latestUserQuery(ctx.conversation, ctx.conversation.title);
+    const keys: string[] = [];
+    const candidates: Record<string, string> = {};
+    for (const summary of recent.slice(0, 12)) {
+      keys.push(summary.id);
+      candidates[summary.id] = summary.title.substring(0, 120);
+    }
+    const batch: JevNoulBatchResult | null = await jevNoulBatch('context_selection', query, keys, candidates);
+    if (batch !== null && !batch.shadow) {
+      const filtered: ConversationSummary[] = recent.filter(
+        (summary: ConversationSummary): boolean => (batch.probabilities[summary.id] ?? 1) >= 0.5);
+      if (filtered.length > 0) recent = filtered;
+    }
+  }
+  const items: RecentChatItem[] = recent.map((summary: ConversationSummary): RecentChatItem => ({
+    title: summary.title,
+    lastChat: new Intl.DateTimeFormat(systemLanguage(), { dateStyle: 'medium' })
+      .format(new Date(summary.updateAt)),
+  }));
+  const prompt: string = buildRecentChatsPrompt(items);
+  return prompt.length > 0 ? [prompt] : [];
+};
+
+const memoryReranker = (query: string):
+  ((selections: MemoryRecallSelection[]) => Promise<MemoryRecallSelection[]>) =>
+  async (selections: MemoryRecallSelection[]): Promise<MemoryRecallSelection[]> => {
+    if (selections.length === 0) return selections;
+    const keys: string[] = [];
+    const candidates: Record<string, string> = {};
+    for (const selection of selections.slice(0, 8)) {
+      const key: string = `${selection.record.id}`;
+      keys.push(key);
+      candidates[key] = selection.record.content.substring(0, 120);
+    }
+    const batch: JevNoulBatchResult | null = await jevNoulBatch('memory_recall', query, keys, candidates);
+    if (batch === null || batch.shadow) return selections;
+    const kept: MemoryRecallSelection[] = selections.filter(
+      (selection: MemoryRecallSelection): boolean =>
+        (batch.probabilities[`${selection.record.id}`] ?? 1) >= 0.5);
+    return kept.length > 0 ? kept : selections;
+  };
+
+const memorySystemBlocks = (ctx: DetachedConversationContext): Promise<string[]> => {
+  const runtime = ctx.seed.agentRuntime;
+  const gate: MemoryRecallRuntimeGate = {
+    enableCoreMemory: runtime.enableCoreMemory,
+    enableShortTermMemory: runtime.enableShortTermMemory,
+    enableLongTermMemory: runtime.enableLongTermMemory,
+    memoryRecall: runtime.memoryRecall,
+  };
+  const conversation: Conversation = ctx.conversation;
+  return buildMemoryRecallPrompt(gate, currentMessages(conversation), getMemoryReadRepository(),
+    Date.now(), memoryReranker(latestUserQuery(conversation)))
+    .then((prompt: string): string[] => prompt.length > 0 ? [prompt] : []);
+};
+
+export const buildConversationCompressProvider = (seed: PreparedConversationSeed): ChatStreamProvider => {
+  const rt: ChatRuntime = seed.runtime;
+  const choice = seed.compressChoice;
+  if (choice === null) return asChatStreamProvider(rt.api, () => rt.params);
+  const api = buildProviderApi(choice.provider, {});
+  return asChatStreamProvider(api, () => makeTextGenerationParams({ model: toChatModel(choice.model) }));
+};
+
+const prepareMessages = (ctx: DetachedConversationContext):
+  ((messages: UIMessage[]) => Promise<UIMessage[]>) => {
+  const rt: ChatRuntime = ctx.seed.runtime;
+  const cc = ctx.seed.agentRuntime.contextCompaction;
+  const policy: CompactPolicy = makeCompactPolicy({
+    enabled: cc.enabled,
+    notifyOnly: cc.notifyOnly,
+    precompactRatio: cc.precompactRatio,
+    forceRatio: cc.forceRatio,
+    keepRecentTurns: cc.keepRecentTurns,
+    maxSummaryTokens: cc.maxSummaryTokens,
+  });
+  const provider: ChatStreamProvider = buildConversationCompressProvider(ctx.seed);
+  let compactActiveCount: number = 0;
+  const changeCompactCount = (change: number): void => {
+    compactActiveCount = Math.max(0, compactActiveCount + change);
+    ctx.publish({ compactActiveCount });
+  };
+  return async (messages: UIMessage[]): Promise<UIMessage[]> => {
+    const effective: Conversation = conversationWithMessagesAsNodes(ctx.conversation, messages);
+    // Keep the original compress-prompt refresh; the provider/model remains this run's seed.
+    const prompts: TaskPrompts = await loadTaskPrompts();
+    const prepared: PreparedContext = await prepareContext(effective, policy,
+      rt.modelContextWindowTokens, messages, rt.contextMessageSize, {
+        provider,
+        store: getCompactStore(),
+        compressPrompt: prompts.compressPrompt,
+        launchPrecompact: (run: () => Promise<CompactResult>): void => {
+          changeCompactCount(1);
+          run().catch((e: Error): void => {
+            hilog.warn(DOMAIN, TAG, 'precompact failed: %{public}s', e.message);
+          }).then((): void => { changeCompactCount(-1); });
+        },
+        onCompactActiveChange: (active: boolean): void => { changeCompactCount(active ? 1 : -1); },
+      });
+    return prepared.messages;
+  };
+};
+
+export const buildConversationTurnDeps = (ctx: DetachedConversationContext): ChatTurnDeps => {
+  const seed: PreparedConversationSeed = ctx.seed;
+  const rt: ChatRuntime = seed.runtime;
+  const window: number = estimateContextWindow(rt.modelContextWindowTokens);
+  return {
+    assistant: rt.assistant,
+    finalTokenBudget: Math.max(Math.trunc(window * seed.agentRuntime.contextCompaction.forceRatio), 4000),
+    agentSoul: buildAgentSoulPrompt(seed.agentRuntime.agentSoulMarkdown),
+    inputTransformers: inputTransformers(ctx),
+    modelSupportsImageInput: rt.modelSupportsImageInput,
+    outputTransformers: [
+      thinkTagTransformer, createEntryBase64ImageTransformer(),
+      createMiniAppOutputTransformer({
+        enabled: (): boolean => seed.miniAppSetting.enabled,
+        repository: getMiniAppRepositorySync(),
+      }),
+      regexOutputTransformer,
+    ],
+    provider: asChatStreamProvider(rt.api, () => rt.params),
+    store: { save: (conversation: Conversation): Promise<void> => ctx.save(conversation) },
+    contextMessageSize: rt.contextMessageSize,
+    prepareContextMessages: prepareMessages(ctx),
+    memorySystemBlocks: (): Promise<string[]> => memorySystemBlocks(ctx),
+    extraSystemBlocks: (): Promise<string[]> => extraSystemBlocks(ctx),
+    abortSignal: ctx.signal,
+    retrySetting: makeGenerationRetrySetting({
+      enabled: seed.agentRuntime.generationRetry.enabled,
+      maxRetries: seed.agentRuntime.generationRetry.maxRetries,
+    }),
+    onRetryStatus: (status: string | null): void => { ctx.publish({ retryStatus: status ?? '' }); },
+  };
+};

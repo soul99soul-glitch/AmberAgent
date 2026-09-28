@@ -6,8 +6,12 @@
 // D-038:图片输入 — PhotoViewPicker 选图 → data: URL → UIMessagePart[] 发送
 //   (文本可空,图片不可空);渲染 Image(p.url)
 // D-079b:物化即压缩(ImageCompress.compressImageAsDataUrl),对齐 FileEncoder 载荷
-import { ACCENT, ACCENT_INK, BG, BG_FADE_END, BG_FADE_START, BG_GLASS, BODY, BODY2, ERROR, HEADER, INK, INK2, INK3, INK4, LABEL, LINE, LINE2, META, MONO_SMALL, OVERLAY, RADIUS, SIGNAL, STATUS_AMBER, STATUS_BLUE, SURFACE, SURFACE2, TEXT_STYLES, USER_BG, USER_INK } from '../design/tokens.ets';
-import type { AbortSignalLike } from '@amber/deepread-domain';
+import {
+  ACCENT, ACCENT_INK, BG, BG_FADE_END, BG_FADE_START, BG_GLASS, BODY, BODY2, ERROR, HEADER, INK, INK2, INK3,
+  INK4, LABEL, LINE, LINE2, META, MONO_SMALL, OVERLAY, RADIUS, SIGNAL, STATUS_AMBER, STATUS_BLUE, SURFACE,
+  SURFACE2, TEXT_STYLES, USER_BG, USER_INK,
+} from '../design/tokens.ets';
+
 import { router, promptAction, window } from '@kit.ArkUI';
 import { fileIo, picker } from '@kit.CoreFileKit';
 import { camera, cameraPicker } from '@kit.CameraKit';
@@ -21,97 +25,34 @@ import { pasteboard } from '@kit.BasicServicesKit';
 import { systemShare } from '@kit.ShareKit';
 import { uniformTypeDescriptor as utd } from '@kit.ArkData';
 import type {
-  Conversation, MessageNode, UIMessage, UIMessagePart, UIMessagePartText, UIMessagePartDocument,
-  UIMessagePartImage, UIMessagePartMiniApp, Assistant,
-  PendingUserMessage, PendingUserMessageMode, DequeueNextResult,
-  CompactPolicy, CompactResult, PreparedContext, DisplaySetting, MessageSearchHit,
-  UIMessagePartTool, ToolLoopOptions, IdleToolBlockerResult, ChatToolDefinition,
-  TextGenerationParams, ChatStreamProvider, ToolApprovalVerdict, ToolApprovalPartLocator, ChatTurnDeps,
-  ToolRegistry, DeepReadOpenEvent, MessageTransformer, AgentTool, LocalToolOption,
-  MessageChunk, OpenAIChatApi, AskedAnswers, ConversationCompact,
-  ImageGuardSettings, VisionModelHealth, VisionProbeDeps, ProviderModel, ProviderSetting,
-  AgentToolActivityStore, SandboxActivityUiState, McpToolActivityPort, JsonValue,
-  InteractiveTurnRunResult, TerminalApprovalGuard,
-  ChatTimelineRow,
+  Conversation, MessageNode, UIMessage, UIMessagePart, UIMessagePartDocument, UIMessagePartImage,
+  UIMessagePartMiniApp, Assistant, PendingUserMessage, PendingUserMessageMode, DisplaySetting,
+  MessageSearchHit, UIMessagePartTool, ToolApprovalVerdict, ToolApprovalPartLocator, DeepReadOpenEvent,
+  AgentTool, MessageChunk, OpenAIChatApi, AskedAnswers, ConversationCompact, ImageGuardSettings,
+  VisionModelHealth, VisionProbeDeps, ProviderModel, ProviderSetting, SandboxActivityUiState,
+  InteractiveTurnRunResult, ChatTimelineRow,
 } from '@amber/chat-domain';
 import {
-  currentMessages, makeConversation, newId, nowIso,
-  createTemplateTransformer, thinkTagTransformer, regexOutputTransformer,
-  asChatStreamProvider, seedConversationWithPresets,
-  nodeCurrentMessage, nodeRole, selectMessageBranch, deleteMessage, editMessage,
-  buildChatTimelineRows,
-  forkConversation, patchConversation,
-  // Phase 2:停止生成收口 + 流式 checkpoint 纯逻辑(@amber/chat-domain)
-  applyStopGeneration, streamContentLength, shouldCheckpoint, checkpointConversationTail,
-  checkpointRegenerateConversation,
-  runAutoTitle, runSuggestion, makeUserMessage, toText, makeTextGenerationParams,
-  makePendingUserMessage, enqueuePendingUserMessage, dequeueNextPendingUserMessage,
-  cancelPendingUserMessage, preparePendingMessageForDispatch, pendingPreviewText,
-  convertSteerToFollowup, runAppendUserMessage,
-  persistPendingQueue, persistPendingQueueWithEvent, loadPendingQueue, recordPendingQueueEvent,
-  makeCompactPolicy, prepareContext, invalidateCompacts, estimateContextWindow,
-  copyValidCompactsToConversation, ContextCompactionFailedError,
-  conversationWithMessagesAsNodes,
-  runChatTurnWithTools, runToolLoopContinuation, runRegenerateAtWithTools,
-  makeUIMessage,
-  createConversationContextTools, createConversationHistoryTools,
-  createTerminalApprovalGuard, createRecipeTools, createRecipeLoopAdapter, recoverInterruptedRecipes,
-  createPluginTools, recoverInterruptedPlugins,
-  AgentToolDispatcher, defaultToolInvocationHooks,
-  createConversationQueueTools, createToolRegistry,
-  createToolSearchTool, createRegistryIntrospectionTools, filterToolProfile,
-  createRunPlanUpdateTool, createClipboardTool, createDeepReadOpenTool,
-  createHealthSummaryTool,
-  parseDeepReadSlashCommand,
-  applyToolApprovalToConversation, conversationHasPendingTools,
-  conversationHasPendingOrUnexecutedTools, resolveIdleToolBlocker,
-  estimateConversationInputTokens, formatNumberInt, formatContextTokens,
-  nativeTokenizerForModel,
-  loadSearchPrefs, updateSearchPrefs, SearchSettings, createSearchTools,
-  buildMentionRoleItems, MentionRoleItem,
-  createTimeReminderTransformer, javaLocalDateTimeString, dayOfWeekFullName,
-  createPlaceholderTransformer, createDocumentTransformer,
-  createPromptInjectionTransformer, PromptInjection, Lorebook,
-  RECENT_CHATS_PROMPT_LIMIT, buildRecentChatsPrompt, RecentChatItem, ConversationSummary,
-  buildMemoryRecallPrompt, MemoryRecallRuntimeGate, createMemoryTools, MemoryRecallSelection,
-  runMemoryExtraction, MemoryWorkerModelResolution, memoryWorkerModelCandidates,
-  buildAgentSoulPrompt,
-  toChatModel, DEFAULT_COMPRESS_PROMPT,
-  makeGenerationRetrySetting,
-  firstImageBlockingIssueForSend, inspectImageAttachment, imageAttachmentBlocksSend,
-  probeVisionModelHealth,
-  createMcpManagementTools, createMcpServerTools, makeAgentTool, createSkillTools,
-  createDeepReadPlaybookTools,
-  patchAssistant,
-  reasoningLevelForModel, withReasoningLevelForModel,
-  defaultReasoningLevelForModel, reasoningLevelsForModel,
-  deriveSandboxActivities, mergeSandboxTimeline, idleSandboxActivity,
-  withStepProgress, isActiveOperation,
-  buildTopModelMenuGroups,
-  loadProviders, loadDisplaySetting, makeDisplaySetting, isCloseEnoughToBottom, FOLLOW_BOTTOM_TOLERANCE_VP,
-  createMiniAppPromptTransformer, createMiniAppOutputTransformer,
-  makeMiniAppSetting, loadMiniAppSetting,
-  runInteractiveTurn,
-  createChatKernelHost,
-  type ChatKernelHost,
-  type KernelPhase,
+  currentMessages, makeConversation, newId, seedConversationWithPresets, nodeCurrentMessage,
+  selectMessageBranch, deleteMessage, editMessage, buildChatTimelineRows, forkConversation, patchConversation,
+  runAutoTitle, makeUserMessage, toText, makeTextGenerationParams, pendingPreviewText, convertSteerToFollowup,
+  invalidateCompacts, copyValidCompactsToConversation, ContextCompactionFailedError, recoverInterruptedRecipes,
+  recoverInterruptedPlugins, parseDeepReadSlashCommand, estimateConversationInputTokens, formatNumberInt,
+  formatContextTokens, nativeTokenizerForModel, loadSearchPrefs, updateSearchPrefs, SearchSettings,
+  buildMentionRoleItems, MentionRoleItem, PromptInjection, Lorebook, ConversationSummary, toChatModel,
+  firstImageBlockingIssueForSend, inspectImageAttachment, imageAttachmentBlocksSend, probeVisionModelHealth,
+  reasoningLevelForModel, withReasoningLevelForModel, defaultReasoningLevelForModel, reasoningLevelsForModel,
+  deriveSandboxActivities, mergeSandboxTimeline, idleSandboxActivity, withStepProgress, isActiveOperation,
+  buildTopModelMenuGroups, loadProviders, loadDisplaySetting, makeDisplaySetting, isCloseEnoughToBottom,
+  FOLLOW_BOTTOM_TOLERANCE_VP, makeMiniAppSetting, loadMiniAppSetting, runInteractiveTurn, type KernelPhase,
 } from '@amber/chat-domain';
-import type {
-  MiniAppSetting, MiniAppRecord, MiniAppRepository,
-} from '@amber/chat-domain';
+import type { MiniAppSetting } from '@amber/chat-domain';
 import type { TopModelMenuGroup, ReasoningLevelOption, ReasoningLevel } from '@amber/chat-domain';
 import {
-  getChatRepository, getChatAssistants, resolveChatRuntime, ChatRuntime,
-  getChatKvStore, getCompactStore, getSessionGrantStore,
-  ChatProviderChoice,
-  buildProviderApi, currentChatModelUuid, loadTaskModelIds, resolveTaskChatModelChoice,
-  resolveTaskModelChain, loadTaskPrompts, TaskPrompts,
-  getMcpManager, initMcpManager, getToolActivityStore, getSkillManager,
-  getWorkspaceManager, getRecipeStore, getPluginStore,
-  getSkillWorkspacePort, getDeepReadPlaybookRepository, getAgentPromptConfigTool,
-  getPermissionsStatusTool, getAgentTaskTools, getAgentCronTools,
-  hydrateSubAgentSetting, getSubAgentTools, SubAgentToolsContext,
-  getSubAgentManager, isModelCouncilEnabled,
+  getChatRepository, getChatAssistants, resolveChatRuntime, ChatRuntime, getConversationRunService,
+  getChatKvStore, getCompactStore, ChatProviderChoice, buildProviderApi, loadTaskModelIds,
+  resolveTaskChatModelChoice, loadTaskPrompts, TaskPrompts, initMcpManager, getAgentTaskTools,
+  getAgentCronTools, hydrateSubAgentSetting, getSubAgentManager, isModelCouncilEnabled,
 } from '../di/AppContainer.ets';
 import type { SubAgentRun } from '@amber/chat-domain';
 // Phase 1:消息流跟随底部(纯逻辑 helper,零 SDK 依赖;ChatPage 侧只做状态接线)
@@ -128,9 +69,7 @@ import {
   mergeOlderNodes,
 } from '@amber/chat-domain';
 import type { ConversationTimelineLoadState } from '@amber/chat-domain';
-import { getMcpSettingsStore } from '../platform_impl/McpSettingsStore.ets';
-import { createEntryHealthReadPort } from '../platform_impl/HealthReadPort.ets';
-import { inflateRawEntry } from '../platform_impl/EntryDocumentParser.ets';
+
 import { compressImageAsDataUrl } from '../platform_impl/ImageCompress.ets';
 import type { TokenUsage } from '@amber/chat-domain';
 import { EntryAbortController } from '../platform_impl/EntryAbortController.ets';
@@ -142,12 +81,11 @@ import { mutateAssistant } from '../platform_impl/AssistantMutation.ets';
 import { Icon } from '../components/ui/Icon.ets';
 import { DotText, DotGround } from '../components/ui/DotMatrix.ets';
 import { addFavorite } from '../platform_impl/FavoriteStore.ets';
-import { notifyGenerationDone } from '../platform_impl/NotificationNotifier.ets';
+
 import { vibrator } from '@kit.SensorServiceKit';
 import { WebMountHost, getWebMountSession, WebMountSurface } from '../platform_impl/WebMountSession.ets';
 import type { WebMountHookBinding } from '../platform_impl/WebMountSession.ets';
-import { createWebMountTools } from '../platform_impl/WebMountTools.ets';
-import { createFeishuDocsTools } from '../platform_impl/FeishuDocsTools.ets';
+
 import { ChatInput } from '../components/ChatInput.ets';
 import type { QuickMessage } from '../components/SlashCommandPanel.ets';
 import { ContextBarsIndicator } from '../components/ChatInputUsage.ets';
@@ -162,33 +100,31 @@ import { ChatMessageActionsSheet } from '../components/ChatMessageActionsSheet.e
 import { ChatDrawer } from '../components/ChatDrawer.ets';
 import { ChatListGrouped } from '../components/ChatListGrouped.ets';
 import { TopModelMenu } from '../components/TopModelMenu.ets';
-import { createEntryClipboardPort, sha256HexUtf8 } from '../platform_impl/EntryLocalToolPorts.ets';
+import { sha256HexUtf8 } from '../platform_impl/EntryLocalToolPorts.ets';
 import { ensureSearchSdk } from '../platform_impl/SearchSdkInit.ets';
-import { createEntryOcrTransformer, findModelByIdInProviders, findProviderOfModel, generateVisionText, loadOcrSeed, OcrSeed } from '../platform_impl/OcrSupport.ets';
+import {
+  findModelByIdInProviders, findProviderOfModel, generateVisionText, loadOcrSeed, OcrSeed,
+} from '../platform_impl/OcrSupport.ets';
 import { encodeImageDetailed } from '../platform_impl/EntryImageEncoder.ets';
 import {
-  AgentRuntimeSnapshot, defaultAgentRuntimeSnapshot, loadAgentRuntimeSnapshot, systemLanguage,
+  AgentRuntimeSnapshot, defaultAgentRuntimeSnapshot, loadAgentRuntimeSnapshot,
 } from '../platform_impl/AgentRuntimePrefs.ets';
-import { createEntryPlaceholderValues } from '../platform_impl/PlaceholderSupport.ets';
-import { createEntryDocumentReader, readDocumentPreview } from '../platform_impl/DocumentSupport.ets';
+
+import { readDocumentPreview } from '../platform_impl/DocumentSupport.ets';
 import { loadLorebooks, loadModeInjections } from '../platform_impl/ExtensionPrefs.ets';
-import { createEntryBase64ImageTransformer } from '../platform_impl/Base64ImageSupport.ets';
-import {
-  getMemoryExtractionStoreOps, getMemoryReadRepository, getMemoryToolDeps,
-} from '../platform_impl/MemoryStore.ets';
-import { getMiniAppPlatform, getMiniAppRepositorySync } from '../platform_impl/MiniAppPlatform.ets';
+
 import type { MiniAppPlatform } from '../platform_impl/MiniAppPlatform.ets';
-import { createImageGenTool, imageGenToolAvailable, EditSourceImage } from '../platform_impl/ImageGenTool.ets';
-import { createSoulTools } from '../platform_impl/SoulTools.ets';
-import { jevToolSearchReranker, createJevStatusTool, jevNoulBatch, JevNoulBatchResult } from '../platform_impl/JevSupport.ets';
+import { imageGenToolAvailable, EditSourceImage } from '../platform_impl/ImageGenTool.ets';
+
 import { JsSandboxHost } from '../platform_impl/JsSandboxTool.ets';
-import { createAssistantLocalPrimitives } from '../platform_impl/AssistantLocalPrimitives.ets';
-import type { RecipeStore, InstalledRecipe, RecipeLoopAdapter, PluginStore, InstalledPlugin,
-  PluginLoopAdapter } from '@amber/chat-domain';
-import { createEntryPluginAdapter } from '../platform_impl/EntryPluginRuntime.ets';
+
 import { createNativePluginJsTransport } from '../platform_impl/NativePluginJsTransport.ets';
-import { stopGenerationKeepAlive } from '../platform_impl/BackgroundGenerationKeepAlive.ets';
+import type { ConversationRunSnapshot, ConversationRunHandle, ConversationRunCommand,
+  ConversationSendCommand, ConversationRegenerateCommand, ConversationResumeCommand,
+  ConversationEditCommand, ConversationVerdictCommand } from '../platform_impl/ConversationRunService.ets';
+import { bindConversationBrowserPage } from '../platform_impl/ConversationBrowserGuard.ets';
 import { SubAgentActivityStrip } from '../components/SubAgentActivityStrip.ets';
+import { cleanupDeletedConversation } from '../platform_impl/ManagedFileStore.ets';
 
 // D-122:沙盒 sheet 代码块底色(设置面 ROW 惯例同值)
 const ROW: string = SURFACE2;
@@ -275,7 +211,6 @@ const TIMELINE_PAGE_SIZE: number = 50;
 const TIMELINE_MAX_PREFETCH_PAGES: number = 40;
 const TIMELINE_MAX_PREFETCH_NODES: number = 2000;
 
-
 // 节点视图模型:分支切换/重新生成需要节点级信息
 type MsgRow = ChatTimelineRow;
 
@@ -286,7 +221,6 @@ const buildRows = (conv: Conversation, previousRows: MsgRow[] = []): MsgRow[] =>
 //   保证首屏后置定位参数与分支切换走同一 MsgRow 形状)
 const buildRowsFromNodes = (nodes: MessageNode[], previousRows: MsgRow[] = []): MsgRow[] =>
   buildChatTimelineRows(nodes, previousRows);
-
 
 // holder 模式:跨 then 传递 runtime(ArkTS 闭包收窄限制 + arkts-no-obj-literals-as-types)
 interface RuntimeHolder {
@@ -375,7 +309,6 @@ struct ChatPage {
   // 页面被子路由覆盖时仍存活；IME 和异步 UI 刷新必须遵守可见性。
   private pageVisible: boolean = false;
   private hasShownOnce: boolean = false;
-  private generationToken: number = 0;
   private favSeq: number = 0;
   private searchSettingsSeq: number = 0;
   private quickMessagesSeq: number = 0;
@@ -421,8 +354,6 @@ struct ChatPage {
   @State currentReasoningLevel: string = '';
   // 当前模型内部 id(ReasoningPicker 记忆 key;refreshReasoningPicker 设置)
   private currentModelId: string = '';
-  private baseToolsCache: AgentTool[] = [];
-  private subAgentToolsCache: AgentTool[] = [];
   @State errorMsg: string = '';
   // D-108:拒绝理由弹窗态(ToolDenyReasonDialog;空 = 关闭)
   @State denyDialogToolCallId: string = '';
@@ -492,26 +423,26 @@ struct ChatPage {
   // Tool preview sheet
   @State toolPreviewSheetOpen: boolean = false;
   private toolPreviewPart: UIMessagePartTool | null = null;
-  private unsubActivity: () => void = (): void => {};
   private drawerSearchText: string = '';
   private pendingQueue: PendingUserMessage[] = [];
-  private pendingDrainActive: boolean = false;
-  private appendActive: boolean = false;
   private initialImagePickerConsumed: boolean = false;
   private pickerToken: number = 0;
   @State materializingImages: boolean = false;
   // D-050:重试状态文案(strings.xml:386;null = 清除)
   @State retryStatus: string = '';
   private conversation: Conversation | null = null;
-  private abortController: EntryAbortController | null = null;
+  private runConversationId: string = '';
+  private currentRunId: string = '';
+  private unsubscribeRun: (() => void) | null = null;
+  private unsubscribeRunNavigation: (() => void) | null = null;
+  private unbindConversationBrowser: (() => void) | null = null;
+  private displayedRunConversation: Conversation | null = null;
+  private unsavedConversationSeed: Conversation | null = null;
+  @State runningConversationIds: string[] = [];
+  private unsubscribeRunning: (() => void) | null = null;
   // Phase 2:停止生成收口 + 流式 checkpoint
   // 最后一次 raw 快照(onRawFlushSnapshot;checkpoint 投影基)
-  private lastRawSnapshot: UIMessage[] = [];
-  private checkpointRegenerateNodeId: string = '';
-  private lastCheckpointAtMs: number = 0;
-  private lastCheckpointLen: number = 0;
   // checkpoint 保存 promise 尾(串行化落库,不阻塞 provider chunk 回调)
-  private checkpointTail: Promise<void> = Promise.resolve();
   private scroller: Scroller = new Scroller();
   // Phase 1:滚动跟随/暂停/跳底/首屏定位
   // @State 驱动跳底按钮显隐(跟随模式/离底状态变化需触发重绘)
@@ -564,184 +495,7 @@ struct ChatPage {
   private modeInjections: PromptInjection[] = [];
   private lorebooks: Lorebook[] = [];
 
-  // D-071b~D-075:input transformers 链 —
-  //   [timeReminder, promptInjection, miniAppPrompt, template, placeholder,
-  //   document, ocr]
-  //   (Android ChatService.kt:169-177:TimeReminder 1/PromptInjection 2/
-  //   MiniAppPrompt 3/Placeholder 4/Document 5/Ocr 6 — 相对序忠实;template 为
-  //   D-016 既有位;MiniAppPrompt 依附 promptInjection 之后第 3 位);
-  //   seed 未就绪当轮不带 OCR(同 D-070 搜索工具门模式)
-  private buildInputTransformers(rt: ChatRuntime): MessageTransformer[] {
-    const list: MessageTransformer[] = [
-      createTimeReminderTransformer({
-        enabled: (): boolean => this.agentRuntime.enableTimeReminder,
-        formatDayOfWeek: (ms: number): string => dayOfWeekFullName(systemLanguage(), ms),
-        formatLocalDateTime: javaLocalDateTimeString,
-      }),
-      createPromptInjectionTransformer({
-        modeInjections: (): PromptInjection[] => this.modeInjections,
-        lorebooks: (): Lorebook[] => this.lorebooks,
-      }),
-      createMiniAppPromptTransformer({
-        enabled: (): boolean => this.miniAppSetting.enabled,
-        loadApp: (id: string): Promise<MiniAppRecord | null> =>
-          getMiniAppPlatform().then((platform: MiniAppPlatform): Promise<MiniAppRecord | null> =>
-            platform.repository.getById(id)),
-      }),
-      createTemplateTransformer(),
-      createPlaceholderTransformer(createEntryPlaceholderValues(
-        rt.params.model.modelId, rt.params.model.displayName,
-        (): string => this.userNickname)),
-      createDocumentTransformer(createEntryDocumentReader()),
-    ];
-    if (this.ocrSeed !== null) {
-      list.push(createEntryOcrTransformer(this.ocrSeed, rt.modelSupportsImageInput));
-    }
-    return list;
-  }
-
   // MiniApp:repository 惰性单例(output transformer 依赖;Android Koin inject 等价)
-  private miniAppRepositoryCache: MiniAppRepository | null = null;
-  private miniAppRepository(): MiniAppRepository {
-    if (this.miniAppRepositoryCache !== null) return this.miniAppRepositoryCache;
-    this.miniAppRepositoryCache = getMiniAppRepositorySync();
-    return this.miniAppRepositoryCache;
-  }
-
-  // D-077b:动态 system 块供给(recentChats 子集,GenerationHandler.kt:736);
-  //   每次组装调用时重取(Android 每次 generateInternal 重算语义);
-  //   enableRecentChatsReference 默认 true(PreferencesStore.kt:155)
-  // D5-1:Jev 上下文选择 — 近 12 会话逐题 noul,ACTIVE 滤相关子集(全滤空回退全集)
-  private async loadExtraSystemBlocks(): Promise<string[]> {
-    if (!this.agentRuntime.enableRecentChatsReference) return [];
-    let recent: ConversationSummary[] = await getChatRepository().listRecent(RECENT_CHATS_PROMPT_LIMIT);
-    if (recent.length > 1) {
-      let query: string = this.title;
-      const convMsgs: UIMessage[] = this.conversation !== null ? currentMessages(this.conversation) : [];
-      for (let i: number = convMsgs.length - 1; i >= 0; i--) {
-        if (convMsgs[i].role === 'user') {
-          query = toText(convMsgs[i]).substring(0, 300);
-          break;
-        }
-      }
-      const keys: string[] = [];
-      const candidates: Record<string, string> = {};
-      for (const s of recent.slice(0, 12)) {
-        keys.push(s.id);
-        candidates[s.id] = s.title.substring(0, 120);
-      }
-      const batch: JevNoulBatchResult | null = await jevNoulBatch('context_selection', query, keys, candidates);
-      if (batch !== null && !batch.shadow) {
-        const filtered: ConversationSummary[] = recent.filter(
-          (s: ConversationSummary): boolean => (batch.probabilities[s.id] ?? 1) >= 0.5);
-        if (filtered.length > 0) recent = filtered;
-      }
-    }
-    const items: RecentChatItem[] = recent.map(
-      (s: ConversationSummary): RecentChatItem => ({
-        title: s.title,
-        lastChat: new Intl.DateTimeFormat(systemLanguage(), { dateStyle: 'medium' })
-          .format(new Date(s.updateAt)),
-      }));
-    const prompt: string = buildRecentChatsPrompt(items);
-    return prompt.length > 0 ? [prompt] : [];
-  }
-
-  // D5-1:Jev 记忆召回 — 本地排序后每候选一道 noul(≤8,单次调用);
-  //   ACTIVE 滤掉 <0.5(全滤空则回退原序);SHADOW/off/失败 → 原序
-  private jevMemoryRerank(query: string): (sels: MemoryRecallSelection[]) => Promise<MemoryRecallSelection[]> {
-    return async (sels: MemoryRecallSelection[]): Promise<MemoryRecallSelection[]> => {
-      if (sels.length === 0) return sels;
-      const top: MemoryRecallSelection[] = sels.slice(0, 8);
-      const keys: string[] = [];
-      const candidates: Record<string, string> = {};
-      for (const s of top) {
-        const key: string = `${s.record.id}`;
-        keys.push(key);
-        candidates[key] = s.record.content.substring(0, 120);
-      }
-      const batch: JevNoulBatchResult | null = await jevNoulBatch('memory_recall', query, keys, candidates);
-      if (batch === null || batch.shadow) return sels;
-      const kept: MemoryRecallSelection[] = sels.filter(
-        (s: MemoryRecallSelection): boolean => (batch.probabilities[`${s.record.id}`] ?? 1) >= 0.5);
-      return kept.length > 0 ? kept : sels;
-    };
-  }
-
-  // D-085b:记忆召回块(GenerationHandler.kt:414 → :727,动态序最前);
-  //   每次组装重取 — 召回对当前会话消息(含刚入列的 user)打分;
-  //   空召回/三开关全关 → buildMemoryRecallPrompt 回 '' → 不进块(Android :727 isNotBlank 门)
-  private loadMemorySystemBlocks(): Promise<string[]> {
-    const conv: Conversation | null = this.conversation;
-    if (conv === null) return Promise.resolve([]);
-    const gate: MemoryRecallRuntimeGate = {
-      enableCoreMemory: this.agentRuntime.enableCoreMemory,
-      enableShortTermMemory: this.agentRuntime.enableShortTermMemory,
-      enableLongTermMemory: this.agentRuntime.enableLongTermMemory,
-      memoryRecall: this.agentRuntime.memoryRecall,
-    };
-    const msgs: UIMessage[] = currentMessages(conv);
-    let query: string = '';
-    for (let i: number = msgs.length - 1; i >= 0; i--) {
-      if (msgs[i].role === 'user') {
-        query = toText(msgs[i]).substring(0, 300);
-        break;
-      }
-    }
-    return buildMemoryRecallPrompt(gate, msgs, getMemoryReadRepository(),
-      Date.now(), this.jevMemoryRerank(query))
-      .then((prompt: string): string[] => prompt.length > 0 ? [prompt] : []);
-  }
-
-  private persistConversationCheckpoint(projected: Conversation): Promise<void> {
-    const tail: Promise<void> = this.checkpointTail
-      .then((): Promise<void> => getChatRepository().save(projected))
-      .catch((e: Error): void => {
-        hilog.warn(HILOG_DOMAIN, HILOG_TAG, 'checkpoint persist failed: %{public}s', e.message);
-      });
-    this.checkpointTail = tail;
-    return tail;
-  }
-
-  // 后台生成保活(C6-1):生成态发布 AppStorage(EntryAbility.onBackground 读);
-  //   生成结束(含后台中结束)→ 释放长时任务(幂等)
-  private setGeneratingFlag(v: boolean): void {
-    AppStorage.setOrCreate<boolean>('chatGenerating', v);
-    if (!v) {
-      const ctx: Context | undefined = this.getUIContext().getHostContext();
-      if (ctx !== undefined) {
-        stopGenerationKeepAlive(ctx).catch((): void => {});
-      }
-    }
-  }
-
-  // checkpoint 投影在入队前同步完成，锁定当轮 conversation 与 regenerate 目标；
-  // 后续页面切换或下一轮生成不会改变已排队快照的结构。
-  private persistCheckpoint(snapshot: UIMessage[]): Promise<void> {
-    if (this.conversation === null) return Promise.resolve();
-    const conv: Conversation = this.conversation;
-    const targetNodeId: string = this.checkpointRegenerateNodeId;
-    const projected: Conversation = targetNodeId.length > 0
-      ? checkpointRegenerateConversation(conv, targetNodeId, snapshot)
-      : checkpointConversationTail(conv, snapshot);
-    return this.persistConversationCheckpoint(projected);
-  }
-
-  // Phase 2:周期 checkpoint — 10s 或 512 字符合并信号(Android
-  //   ChatStreamCheckpointRecorder 语义),从 raw 快照捕获、投影保存;
-  //   不重复 append 节点(checkpointConversationTail 同 id 原位替换)。
-  private captureStreamCheckpoint(snapshot: UIMessage[]): void {
-    if (snapshot.length === 0) return;
-    const last: UIMessage = snapshot[snapshot.length - 1];
-    if (last.role !== 'assistant' && last.role !== 'user') return;
-    const now: number = Date.now();
-    const len: number = streamContentLength(last);
-    if (shouldCheckpoint(now, this.lastCheckpointAtMs, this.lastCheckpointLen, len)) {
-      this.lastCheckpointAtMs = now;
-      this.lastCheckpointLen = len;
-      this.persistCheckpoint(snapshot);
-    }
-  }
 
   // D-122:页面消失退订(store 为全局单例,防泄漏/跨页回调)
   // Phase 2:离页安全停止 — 生成中 abort + 以最后一次 raw 快照做 checkpoint 落库,
@@ -750,6 +504,9 @@ struct ChatPage {
   //   不虚假后台继续,也不在 checkpoint 完成前清 tail(计划 §3.6)。
   aboutToDisappear(): void {
     this.pageAlive = false;
+    this.pageVisible = false;
+    this.detachConversationRun();
+    if (this.runConversationId.length > 0) getConversationRunService().discardNewConversation(this.runConversationId);
     this.contextChoiceSeq++;
     this.nativeContextSeq++;
     this.nativeContextNodes = null;
@@ -757,49 +514,138 @@ struct ChatPage {
     this.flushInputDraft();
     this.webmountHookBinding?.unbind();
     this.webmountHookBinding = null;
-    this.pageVisible = false;
-    this.generationToken++;
-    // P4:离页注销 IME 键盘高度监听(防跨页回调泄漏)
     this.detachKeyboardListener();
     this.imeKeyboardHeightVp = 0;
-    this.pageVisible = false;
-    const wasSending: boolean = this.sending;
-    if (wasSending) {
-      this.abortController?.abort();
-    }
-    if (wasSending && this.lastRawSnapshot.length > 0 && this.conversation !== null) {
-      const projected: Conversation = this.checkpointRegenerateNodeId.length > 0
-        ? checkpointRegenerateConversation(
-          this.conversation, this.checkpointRegenerateNodeId, this.lastRawSnapshot)
-        : checkpointConversationTail(this.conversation, this.lastRawSnapshot);
-      const stopped: Conversation = applyStopGeneration(
-        projected, nowIso(), this.stopTargetNodeId(projected)) ?? projected;
-      // checkpoint 由仓储侧落库即可;页面已销毁,不再写组件 @State
-      this.persistConversationCheckpoint(stopped).catch((e: Error): void => {
-        hilog.warn(HILOG_DOMAIN, HILOG_TAG, 'teardown checkpoint failed: %{public}s', e.message);
-      });
-    } else {
-      this.sending = false;
-      this.setGeneratingFlag(false);
-      this.streamingTail = [];
-      this.regenTail = null;
-    }
-    this.abortController = null;
-    this.pendingDrainActive = false;
-    this.regenNodeId = '';
-    if (this.greetTimer !== -1) {
-      clearInterval(this.greetTimer);
-      this.greetTimer = -1;
-    }
-    if (this.cursorTimer !== -1) {
-      clearInterval(this.cursorTimer);
-      this.cursorTimer = -1;
-    }
+    if (this.greetTimer !== -1) { clearInterval(this.greetTimer); this.greetTimer = -1; }
+    if (this.cursorTimer !== -1) { clearInterval(this.cursorTimer); this.cursorTimer = -1; }
     this.invalidatePicker(true);
-    this.unsubActivity();
-    if (this.unsubSubAgentLive !== null) {
-      this.unsubSubAgentLive();
-      this.unsubSubAgentLive = null;
+    if (this.unsubSubAgentLive !== null) { this.unsubSubAgentLive(); this.unsubSubAgentLive = null; }
+  }
+
+  private serviceOwnsConversation(id: string): boolean {
+    const snapshot: ConversationRunSnapshot | null = getConversationRunService().snapshot(id);
+    return snapshot !== null && (snapshot.sending || snapshot.conversation !== null);
+  }
+
+  private detachConversationRun(): void {
+    this.unsubscribeRun?.(); this.unsubscribeRun = null;
+    this.unsubscribeRunning?.(); this.unsubscribeRunning = null;
+    this.unsubscribeRunNavigation?.(); this.unsubscribeRunNavigation = null;
+    this.unbindConversationBrowser?.(); this.unbindConversationBrowser = null;
+  }
+
+  private attachConversationRun(id: string, reloadIdle: boolean = false): void {
+    this.detachConversationRun();
+    this.runConversationId = id;
+    this.unsubscribeRunning = getConversationRunService().subscribeRunning((ids: string[]): void => {
+      if (this.pageAlive && this.pageVisible) this.runningConversationIds = ids;
+    });
+    let first: boolean = true;
+    this.unsubscribeRun = getConversationRunService().subscribe(id, (snapshot: ConversationRunSnapshot): void => {
+      if (!this.pageAlive || !this.pageVisible || this.runConversationId !== id) return;
+      this.applyConversationRunSnapshot(snapshot, !first);
+      first = false;
+    });
+    if (!this.pageVisible) return;
+    this.unsubscribeRunNavigation = getConversationRunService().subscribeNavigation(id, (event: DeepReadOpenEvent): void => {
+      if (this.pageAlive && this.pageVisible && this.runConversationId === id) this.openDeepRead(event);
+    });
+    this.unbindConversationBrowser = bindConversationBrowserPage(id);
+    this.webmountHookBinding?.unbind();
+    this.webmountHookBinding = getWebMountSession().bindHooks({
+      onMountNeeded: (): void => { if (this.pageAlive && this.pageVisible) this.webmountHostVisible = true; },
+    });
+    if (reloadIdle && !this.serviceOwnsConversation(id)) {
+      getChatRepository().getById(id).then((saved: Conversation | null): void => {
+        if (!this.pageAlive || !this.pageVisible || this.runConversationId !== id || this.serviceOwnsConversation(id)) return;
+        if (saved === null) {
+          if (this.unsavedConversationSeed === null) {
+            this.errorMsg = '会话不存在或已删除'; this.conversationLoaded = false;
+            this.conversation = null; this.rows = []; this.suggestions = [];
+          }
+          return;
+        }
+        const previous: Conversation | null = this.displayedRunConversation ?? this.conversation;
+        this.unsavedConversationSeed = null;
+        this.conversation = saved; this.displayedRunConversation = saved; this.conversationLoaded = true;
+        this.refreshRowsAfterConversationChange(previous, saved);
+        this.title = saved.title || '对话'; this.suggestions = saved.chatSuggestions;
+      }).catch((error: Error): void => {
+        if (this.pageAlive && this.pageVisible && this.runConversationId === id) this.errorMsg = error.message;
+      });
+    }
+  }
+
+  private applyConversationRunSnapshot(snapshot: ConversationRunSnapshot, settle: boolean): void {
+    const wasSending: boolean = this.sending;
+    const oldRunId: string = this.currentRunId;
+    this.currentRunId = snapshot.runId;
+    this.sending = snapshot.sending;
+    this.streamingTail = snapshot.streamingTail;
+    this.regenTail = snapshot.regenTail;
+    this.regenNodeId = snapshot.regenNodeId;
+    this.retryStatus = snapshot.retryStatus;
+    this.errorMsg = snapshot.errorMsg;
+    this.liveActivity = snapshot.liveActivity;
+    this.pendingQueue = snapshot.pendingQueue;
+    this.syncPendingRows();
+    if (snapshot.conversation !== null) this.contextCompacts = snapshot.contextCompacts;
+    this.compactActiveCount = snapshot.compactActiveCount;
+    if (snapshot.contextWindowTokens !== null) this.contextWindowTokens = snapshot.contextWindowTokens;
+    if (snapshot.modelLabel.length > 0) this.modelLabel = snapshot.modelLabel;
+    this.jsSandboxNeeded = snapshot.jsSandboxNeeded;
+    this.kernelPhase = snapshot.phase;
+    if (snapshot.conversationDeleted) {
+      this.conversation = null; this.displayedRunConversation = null; this.unsavedConversationSeed = null;
+      this.rows = []; this.suggestions = []; this.conversationLoaded = false;
+      this.errorMsg = '会话已删除';
+      return;
+    }
+    const full: Conversation | null = snapshot.conversation;
+    if (full !== null) {
+      this.unsavedConversationSeed = null;
+      this.conversation = full;
+      this.conversationLoaded = true;
+      this.title = full.title || '对话';
+      this.suggestions = full.chatSuggestions;
+      const visible: Conversation = snapshot.sending ? (snapshot.visualConversation ?? full) : full;
+      if (!this.timelineLoadState.initialized) {
+        const start: number = Math.max(0, visible.messageNodes.length - TIMELINE_PAGE_SIZE);
+        this.rows = buildRowsFromNodes(visible.messageNodes.slice(start), this.rows);
+        this.timelineLoadState = applyTailWindow(this.timelineLoadState, start,
+          visible.messageNodes.length - start, visible.messageNodes.length);
+      } else {
+        this.refreshRowsAfterConversationChange(this.displayedRunConversation, visible);
+      }
+      this.displayedRunConversation = visible;
+    }
+    if (snapshot.sending) this.followStreamingUpdate();
+    if (settle && wasSending && !snapshot.sending && oldRunId === snapshot.runId) {
+      this.handleGenerateEnd(this.atBottomApprox);
+      if (snapshot.phase === 'completed') this.fireGenerationHaptic();
+      if (!this.userTouchActive && this.followMode !== 'paused') this.scrollToBottom();
+    }
+  }
+
+  private submitConversationRun(command: ConversationRunCommand): boolean {
+    if (!this.pageAlive || this.conversation === null) return false;
+    const id: string = this.conversation.id;
+    if (conversationRestoreVersion(id) !== this.loadedRestoreVersion) {
+      this.refreshRestoredConversation().catch((error: Error): void => { if (this.pageAlive) this.errorMsg = error.message; });
+      this.errorMsg = '会话已恢复，正在刷新，请稍后重试';
+      return false;
+    }
+    if (this.unsubscribeRun === null || this.runConversationId !== id) this.attachConversationRun(id);
+    try {
+      const handle: ConversationRunHandle = getConversationRunService().start(id, command);
+      handle.done.catch((error: Error): void => {
+        if (this.pageAlive && this.pageVisible && this.runConversationId === id && this.currentRunId === handle.runId)
+          this.errorMsg = this.compactErrorText(error);
+      });
+      return true;
+    } catch (error) {
+      this.errorMsg = error instanceof Error ? error.message : String(error);
+      return false;
     }
   }
 
@@ -910,6 +756,7 @@ struct ChatPage {
 
   onPageShow(): void {
     this.pageVisible = true;
+    if (this.conversation !== null) this.attachConversationRun(this.conversation.id, true);
     this.startGreetTimer();
     this.refreshRestoredConversation().catch((e: Error): void => {
       if (this.pageAlive) this.errorMsg = e.message;
@@ -957,6 +804,9 @@ struct ChatPage {
 
   onPageHide(): void {
     this.pageVisible = false;
+    this.detachConversationRun();
+    this.webmountHookBinding?.unbind();
+    this.webmountHookBinding = null;
     this.stopGreetTimer();
     if (this.cursorTimer !== -1) {
       clearInterval(this.cursorTimer);
@@ -1061,17 +911,11 @@ struct ChatPage {
     }, 96);
   }
 
-  private isGenerationOperationActive(token: number): boolean {
-    return this.pageAlive && token === this.generationToken;
-  }
-
   aboutToAppear(): void {
     this.pageAlive = true;
     this.refreshNativeContextEstimate();
     this.pageVisible = true;
-    this.checkpointRegenerateNodeId = '';
     this.initialJumpSuppressedUntilUserScroll = false;
-    this.lastRawSnapshot = [];
     // WebMount 会话宿主:首次 open 时按需挂载(避免常驻隐藏 Web)
     this.webmountHookBinding?.unbind();
     this.webmountHookBinding = getWebMountSession().bindHooks({
@@ -1091,6 +935,10 @@ struct ChatPage {
     this.startGreetTimer();
     // 每次进入(含从选择器返回)刷新模型标签
     this.refreshQuickMessages();
+    hydrateSubAgentSetting().then((setting): void => {
+      if (!this.pageAlive) return;
+      this.subAgentEnabled = setting.enabled; this.subAgentMode = setting.mode;
+    });
     // D-110:上下文窗口快照(ModelRegistry.MODEL_CONTEXT_WINDOW 注册表查询
     //   = P1 登记;取持久化 model.contextWindowTokens = Android 未知模型
     //   回退路径 :110-111)
@@ -1150,11 +998,6 @@ struct ChatPage {
     initMcpManager().catch((e: Error): void => {
       hilog.error(0x0001, 'Chat.Page', 'initMcpManager failed: %{public}s', e.message);
     });
-    // D-122:activityStore.sandboxActivity collect(:501)— StateFlow 首发射语义
-    this.unsubActivity = getToolActivityStore().subscribe(
-      (a: SandboxActivityUiState | null): void => {
-        this.liveActivity = a;
-      });
     // D-073:display_setting 快照(placeholder nickname/user + Phase 1 滚动偏好)
     loadDisplaySetting(getChatKvStore()).then((setting: DisplaySetting): void => {
       if (!this.pageAlive || !this.pageVisible) return;
@@ -1188,12 +1031,27 @@ struct ChatPage {
     const initialIndexParam: string = params ? (params['initialMessageIndex'] ?? '') : '';
     const initialNodeIdParam: string = params ? (params['nodeId'] ?? '') : '';
     if (convId.length > 0) {
+      const existingRun: ConversationRunSnapshot | null = getConversationRunService().snapshot(convId);
+      this.attachConversationRun(convId);
+      if (existingRun !== null && (existingRun.sending || existingRun.conversation !== null)) {
+        this.restoreInputDraft(`chat_input_draft/${convId}`);
+        if (existingRun.conversation !== null && initialNodeIdParam.length > 0) {
+          const index: number = existingRun.conversation.messageNodes.findIndex((node: MessageNode): boolean => node.id === initialNodeIdParam);
+          if (index >= 0) this.positionToTargetNode(initialNodeIdParam, index); else this.applyInitialScroll(-1);
+        } else if (existingRun.conversation !== null && initialIndexParam.length > 0) {
+          const index: number = Number(initialIndexParam);
+          const node: MessageNode | undefined = existingRun.conversation.messageNodes[index];
+          if (Number.isInteger(index) && index >= 0 && node !== undefined) this.positionToTargetNode(node.id, index);
+          else this.applyInitialScroll(-1);
+        } else this.applyInitialScroll(-1);
+        return;
+      }
       // Phase 5:默认只加载尾部窗口(长会话首帧只渲染最近 TIMELINE_PAGE_SIZE 节点);
       //   this.conversation 仍经 getById 全量装载 — 生成/checkpoint/上下文引擎
       //   照旧读完整会话,rows 仅承载窗口(全量 invariant 见 ensureFullConversationLoaded)
       getChatRepository().getConversationTailWindow(convId, TIMELINE_PAGE_SIZE)
         .then((window): void => {
-          if (!this.pageAlive) return;
+          if (!this.pageAlive || this.serviceOwnsConversation(convId)) return;
           this.timelineLoadState = applyTailWindow(
             this.timelineLoadState,
             window.oldestLoadedIndex, window.nodes.length, window.totalNodeCount);
@@ -1206,7 +1064,7 @@ struct ChatPage {
         .then((): Promise<Conversation | null> => this.ensureFullConversationLoaded(convId))
         .then(async (loaded: Conversation | null): Promise<void> => {
           let full: Conversation | null = loaded;
-          if (!this.pageAlive) return;
+          if (!this.pageAlive || this.serviceOwnsConversation(convId)) return;
           this.conversationLoaded = true;
           if (full === null) {
             if (this.rows.length === 0) this.errorMsg = '会话不存在';
@@ -1270,19 +1128,7 @@ struct ChatPage {
               || manual.metadata?.['plugin_manual'] === true)
               && manual.output.length === 0 && manual.approvalState.type === 'auto') this.resumeToolLoop(full);
           }
-          // D-052:恢复持久化队列(session 创建时 load,ChatService.kt:334);
-          //   解析失败 → hilog + 空队列(Android Log.w + getOrDefault 语义)
-          loadPendingQueue(getChatKvStore(), full.id, undefined, (e: Error): void => {
-            hilog.warn(HILOG_DOMAIN, HILOG_TAG, 'load pending queue failed: %{public}s', e.message);
-          }).then((msgs: PendingUserMessage[]): void => {
-            if (msgs.length === 0) return;
-            if (!this.pageAlive) return;
-            this.pendingQueue = msgs;
-            this.syncPendingRows();
-            // launchPendingMessageLoopIfNeeded(ChatService.kt:588-595):
-            //   未生成且队列非空 → 恢复派发循环(进程死亡恢复)
-            if (!this.sending) this.drainPendingQueue();
-          });
+          this.drainPendingQueue();
         });
     } else {
       // 新对话:支持 router 参数 assistantId 指定助手(D-028)
@@ -1299,6 +1145,9 @@ struct ChatPage {
         }
         const fresh = makeConversation(newId(), [], { assistantId: picked.id });
         this.conversation = seedConversationWithPresets(fresh, picked);
+        this.unsavedConversationSeed = this.conversation;
+        getConversationRunService().seedNewConversation(this.conversation);
+        this.attachConversationRun(fresh.id);
         this.conversationLoaded = true;
         // 未发送新会话:恢复 __unsaved__ 稳定键草稿(fresh.id 每次进页都变,不可作键)
         this.restoreInputDraft('chat_input_draft/__unsaved__');
@@ -1341,100 +1190,9 @@ struct ChatPage {
   //   (避免「页面立即保存 + 完成保存」双写重复节点);convertSteerToFollowup
   //   既有逻辑保留。
   private requestStop(): void {
-    if (!this.sending) {
-      // 非生成中仍清 steer 队列(既有语义)
-      this.convertSteerQueue();
-      return;
+    if (this.runConversationId.length > 0 && this.currentRunId.length > 0) {
+      getConversationRunService().cancel(this.runConversationId, this.currentRunId);
     }
-    if (this.kernelHost !== null) {
-      this.kernelHost.cancel('user');
-    }
-    this.abortController?.abort();
-    this.convertSteerQueue();
-  }
-
-  private convertSteerQueue(): void {
-    const conv2 = convertSteerToFollowup(this.pendingQueue);
-    if (conv2.changed) {
-      this.pendingQueue = conv2.messages;
-      this.syncPendingRows();
-      this.persistQueue().catch((e: Error): void => { this.errorMsg = e.message; });
-    }
-  }
-
-  // assistant regenerate 的目标可能位于会话中间；普通 send/resume 与 user
-  // regenerate 的活动结果都落在末节点，保持默认末节点收口语义。
-  private stopTargetNodeId(
-    conv: Conversation,
-    requestedNodeId: string = this.checkpointRegenerateNodeId,
-  ): string {
-    if (requestedNodeId.length === 0) return '';
-    const target = conv.messageNodes.find(
-      (node): boolean => node.id === requestedNodeId);
-    return target !== undefined && nodeRole(target) === 'assistant'
-      ? requestedNodeId
-      : '';
-  }
-
-  // stop 对活动消息做收口；applyStopGeneration 自身负责无变化早退。
-  private finalizeGenerationResult(
-    convOut: Conversation,
-    stopped: boolean,
-    requestedNodeId: string = this.checkpointRegenerateNodeId,
-  ): Conversation {
-    if (!stopped) return convOut;
-    return applyStopGeneration(
-      convOut, nowIso(), this.stopTargetNodeId(convOut, requestedNodeId)) ?? convOut;
-  }
-
-  // 最终会话始终排在已捕获的 checkpoint 之后保存。生成引擎内部虽已保存 out，
-  // 这里的尾写负责保证较旧 checkpoint 永远不能覆盖终态/停止收口态。
-  private queueFinalConversationSave(finalized: Conversation): void {
-    const tail: Promise<void> = this.checkpointTail
-      .then((): Promise<void> => getChatRepository().save(finalized))
-      .catch((e: Error): void => {
-        hilog.warn(HILOG_DOMAIN, HILOG_TAG, 'generation final save failed: %{public}s', e.message);
-      });
-    this.checkpointTail = tail;
-  }
-
-  private finishGenerationCommon(
-    convOut: Conversation,
-    stopped: boolean,
-    requestedNodeId: string = '',
-  ): void {
-    this.sending = false;
-      this.setGeneratingFlag(false);
-    this.abortController = null;
-    this.streamingTail = [];
-    this.regenTail = null;
-    this.regenNodeId = '';
-    this.lastRawSnapshot = [];
-    this.lastCheckpointAtMs = 0;
-    this.lastCheckpointLen = 0;
-    const finalized: Conversation = this.finalizeGenerationResult(
-      convOut, stopped, requestedNodeId);
-    this.checkpointRegenerateNodeId = '';
-    this.queueFinalConversationSave(finalized);
-    const previousConversation: Conversation | null = this.conversation;
-    this.conversation = finalized;
-    // 数据保持全量，展示层按当前窗口同步，避免长会话生成结束时全量展开。
-    this.refreshRowsAfterConversationChange(previousConversation, finalized);
-    this.suggestions = finalized.chatSuggestions;
-    this.handleGenerateEnd(this.atBottomApprox);
-    if (!this.userTouchActive) this.scrollToBottom();
-  }
-
-  // 页面已经离开时不再写 UI，但生成 promise 仍负责把引擎最终结果排到
-  // checkpoint 后面，避免 tool-loop 自身的部分保存覆盖离页收口快照。
-  private finishInactiveGeneration(
-    convOut: Conversation,
-    stopped: boolean,
-    requestedNodeId: string = '',
-  ): void {
-    const finalized: Conversation = this.finalizeGenerationResult(
-      convOut, stopped, requestedNodeId);
-    this.queueFinalConversationSave(finalized);
   }
 
   // ===== Phase 5:历史分页窗口加载(纯逻辑在 chat-domain/timeline_load) =====
@@ -1496,6 +1254,8 @@ struct ChatPage {
     }
     return getChatRepository().getById(convId).then((full: Conversation | null): Conversation | null => {
       if (!this.pageAlive) return null;
+      const active: ConversationRunSnapshot | null = getConversationRunService().snapshot(convId);
+      if (active !== null && (active.sending || active.conversation !== null)) return active.conversation;
       this.conversation = full;
       return full;
     });
@@ -1993,154 +1753,22 @@ struct ChatPage {
 
   private switchBranch(nodeId: string, idx: number): void {
     if (this.conversation === null || this.sending) return;
-    // Phase 5 全量 invariant:分支切换读取全量会话(窗口未全量先补全)
-    this.ensureFullConversationForMutation().then((): void => {
-      if (this.conversation === null || this.sending) return;
-      const previous: Conversation = this.conversation;
-      const updated: Conversation = selectMessageBranch(previous, nodeId, idx);
-      this.conversation = updated;
-      this.refreshRowsAfterConversationChange(previous, updated);
-      getChatRepository().save(updated)
-        .then((): Promise<void> => this.invalidateConvCompacts(updated.id, 'message_branch_changed'))
-        .catch((e: Error): void => { this.errorMsg = e.message; });
-    }).catch((e: Error): void => { if (this.pageAlive) this.errorMsg = e.message; });
+    const id: string = this.conversation.id;
+    getConversationRunService().mutateStoredConversation(id, (latest: Conversation): Conversation | null => {
+      if (getConversationRunService().isBusy(id)) throw new Error('该会话仍在运行，请稍后重试');
+      return selectMessageBranch(latest, nodeId, idx);
+    }).then((updated: Conversation | null): Promise<void> => updated === null ? Promise.resolve()
+      : this.invalidateConvCompacts(id, 'message_branch_changed')).catch((error: Error): void => {
+        if (this.pageAlive && this.conversation?.id === id) this.errorMsg = error.message;
+      });
   }
 
   // Phase 5 全量 invariant:生成必须基于完整会话(窗口未全量时先补全再开跑;
   //   防首帧尾窗尚未补全就触发重新生成)
   private regenerate(nodeId: string): void {
-    if (this.conversation === null || this.sending) return;
-    this.ensureFullConversationForMutation().then((): void => {
-      if (this.conversation === null || this.sending) return;
-      this.runRegenerate(nodeId);
-    }).catch((e: Error): void => { if (this.pageAlive) this.errorMsg = e.message; });
-  }
-
-  private runRegenerate(nodeId: string): void {
     if (!this.pageAlive || this.conversation === null || this.sending) return;
-    const releaseRun: (() => void) | null = this.reserveConversationRun(this.conversation.id);
-    if (releaseRun === null) return;
-    this.sending = true;
-      this.setGeneratingFlag(true);
-    this.errorMsg = '';
-    const operationAbort: EntryAbortController = new EntryAbortController();
-    this.abortController = operationAbort;
-    this.checkpointRegenerateNodeId = nodeId;
-    const operationToken: number = ++this.generationToken;
-    const operationStopTargetNodeId: string = nodeId;
-    const conv: Conversation = this.conversation;
-    const holder: RuntimeHolder = { rt: null };
-    resolveChatRuntime(conv.assistantId)
-      .then(async (rt: ChatRuntime | null): Promise<Conversation> => {
-        holder.rt = rt;
-        if (rt === null) {
-          return Promise.reject(new Error('未配置可用的 Provider/模型'));
-        }
-        this.wireMcpAssistant(rt);
-        this.warnIfToolAbilityMissing(rt);
-        // D-132c:水合 subagent 设置 + 工具(buildToolLoop 前;parentToolsProvider 惰性)
-        await this.prepareSubAgentTools(conv);
-        // D-055:重生成使 compact 失效(ChatService.kt:1097 'message_regenerated'),
-        //   先于生成完成,避免 prepareContext 读到过期摘要
-        return this.invalidateConvCompacts(conv.id, 'message_regenerated')
-          .then((): Promise<Conversation> => {
-            const deps: ChatTurnDeps = {
-              assistant: rt.assistant,
-              finalTokenBudget: this.finalTokenBudgetOf(rt),
-          // D-090:agentSoul 静态块首槽位(GenerationHandler.kt:721-724)
-              agentSoul: buildAgentSoulPrompt(this.agentRuntime.agentSoulMarkdown),
-              inputTransformers: this.buildInputTransformers(rt),
-          // D-071b:视觉兜底门(模型 IMAGE 模态 + 有图才兜底,GenerationHandler.kt:431)
-              modelSupportsImageInput: rt.modelSupportsImageInput,
-              outputTransformers: [thinkTagTransformer, createEntryBase64ImageTransformer(), createMiniAppOutputTransformer({ enabled: (): boolean => this.miniAppSetting.enabled, repository: this.miniAppRepository() }), regexOutputTransformer], // ChatService.kt:179-184 序(MiniAppOutput 3 位) 依赖 this.miniAppRepository()
-              provider: asChatStreamProvider(rt.api, () => rt.params),
-              store: getChatRepository(),
-              contextMessageSize: rt.contextMessageSize,
-          // D-055:压缩引擎接管上下文(同 send 路径)
-              prepareContextMessages: this.buildPrepareContext(conv, rt),
-          // D-077b:recentChats 动态块(每次组装重取)
-          // D-085b:记忆召回块(动态序最前,GenerationHandler.kt:727)
-              memorySystemBlocks: (): Promise<string[]> => this.loadMemorySystemBlocks(),
-              extraSystemBlocks: (): Promise<string[]> => this.loadExtraSystemBlocks(),
-              abortSignal: operationAbort.signal,
-          // D-115:GenerationHandler.kt:357/475/621 — retrySetting =
-          //   settings.agentRuntime.generationRetry(PreferencesStore.kt:181 持久化)
-              retrySetting: makeGenerationRetrySetting({
-                enabled: this.agentRuntime.generationRetry.enabled,
-                maxRetries: this.agentRuntime.generationRetry.maxRetries,
-              }),
-          // D-050:重试状态(send 路径同语义)
-              onRetryStatus: (status: string | null): void => {
-                if (this.isGenerationOperationActive(operationToken)) {
-                  this.retryStatus = status ?? '';
-                }
-              },
-          // D-041:流式预览 — 快照末条即活动流式消息(assistant 路径占位
-          //   合并/user 路径尾部追加,均为末条);visual transforms 与 send 一致
-              onUpdate: (msgs: UIMessage[]): void => {
-                if (!this.isGenerationOperationActive(operationToken)
-                  || msgs.length === 0 || holder.rt === null) return;
-                this.regenNodeId = nodeId;
-                this.regenTail = msgs[msgs.length - 1];
-                this.followStreamingUpdate();
-              },
-          // Phase 2:raw 快照捕获(与 send 路径同接线)
-              onRawFlushSnapshot: (msgs: UIMessage[]): void => {
-                if (!this.isGenerationOperationActive(operationToken)) return;
-                this.lastRawSnapshot = msgs;
-                this.captureStreamCheckpoint(msgs);
-              },
-            };
-            return this.runViaKernel(
-              conv,
-              deps,
-              async (runtimeDeps: ChatTurnDeps): Promise<Conversation> =>
-                runRegenerateAtWithTools(
-                  conv, nodeId, runtimeDeps, await this.buildToolLoop(rt, conv)),
-            ).then((result: InteractiveTurnRunResult): Conversation => result.conversation);
-          });
-      })
-      .then((out: Conversation): void => {
-        const stopped: boolean = operationAbort.signal.aborted;
-        if (!this.isGenerationOperationActive(operationToken)) {
-          this.finishInactiveGeneration(out, stopped, operationStopTargetNodeId);
-          return;
-        }
-        this.finishGenerationCommon(out, stopped, operationStopTargetNodeId);
-        this.refreshContextCompacts(); // D-110:压缩可能已写新摘要,刷新足迹
-        if (holder.rt !== null) {
-          this.maybeAutoTitle(this.conversation as Conversation);
-          this.maybeSuggestions(this.conversation as Conversation, holder.rt);
-          this.maybeMemoryExtraction(this.conversation as Conversation, holder.rt);
-          this.maybeGenerationDoneNotification(holder.rt);
-          this.fireGenerationHaptic();
-        }
-        this.drainPendingQueue();
-      })
-      .catch((e: Error): void => {
-        if (!this.isGenerationOperationActive(operationToken)) return;
-        this.errorMsg = this.compactErrorText(e);
-        this.sending = false;
-      this.setGeneratingFlag(false);
-        this.refreshContextCompacts(); // D-110:压缩可能已写新摘要,刷新足迹
-        this.abortController = null;
-        this.regenTail = null;
-        this.regenNodeId = '';
-        this.lastRawSnapshot = [];
-        this.checkpointRegenerateNodeId = '';
-        getChatRepository().getById(conv.id).then((saved: Conversation | null): void => {
-          if (saved !== null) {
-            const previous: Conversation | null = this.conversation;
-            this.conversation = saved;
-            this.refreshRowsAfterConversationChange(previous, saved);
-            this.suggestions = saved.chatSuggestions;
-          }
-          this.drainPendingQueue();
-        }).catch((reloadError: Error): void => {
-          hilog.warn(HILOG_DOMAIN, HILOG_TAG, 'regenerate reload failed: %{public}s', reloadError.message);
-          this.drainPendingQueue();
-        });
-      }).finally((): Promise<void> => this.releaseConversationRunAfterSaves(releaseRun));
+    const command: ConversationRegenerateCommand = { kind: 'regenerate', nodeId: nodeId };
+    this.submitConversationRun(command);
   }
 
   // 生成完成通知(Android ChatService.kt:1396-1401 三条件:成功收尾 + 应用后台 + 开关开;
@@ -2159,17 +1787,6 @@ struct ChatPage {
   // JS 沙箱宿主挂载门(assistant 勾选 javascript_engine 后置真;C5-3)
   @State jsSandboxNeeded: boolean = false;
   private webmountHookBinding: WebMountHookBinding | null = null;
-  private maybeGenerationDoneNotification(rt: ChatRuntime): void {
-    if (!this.enableGenerationNotification) return;
-    const backgrounded: boolean = AppStorage.get<boolean>('appBackgrounded') ?? false;
-    if (!backgrounded) return;
-    const conv: Conversation | null = this.conversation;
-    if (conv === null) return;
-    const msgs: UIMessage[] = currentMessages(conv);
-    const last: UIMessage | null = msgs.length > 0 ? msgs[msgs.length - 1] : null;
-    const contentText: string = last === null ? '' : toText(last).slice(0, 50).trim();
-    notifyGenerationDone(rt.assistant.name, contentText);
-  }
 
   // D0-6:生成完成触觉反馈(DisplaySetting.enableMessageGenerationHapticEffect;
   //   canIUse 包裹马达能力 + isSupportEffect 预检,不支持预置降级时长振动;
@@ -2202,61 +1819,6 @@ struct ChatPage {
     getChatKvStore().get('webmount_eval_enabled').then((raw: string | null): void => {
       if (this.pageAlive) this.webmountEvalEnabled = raw === 'true';
     }).catch((): void => {});
-  }
-
-  // D-085d:记忆抽取(ChatService.kt:1494-1499 — 生成完成且无 pending/未执行
-  //   工具时 appScope.launch 非阻塞抽取);门/去抖/配额/事件在 HAR 编排逐字;
-  //   偏差:locale = systemLanguage()(Locale.getDefault().displayName 无直接等价)
-  private maybeMemoryExtraction(conv: Conversation, rt: ChatRuntime): void {
-    if (conversationHasPendingOrUnexecutedTools(conv)) return;
-    const ops = getMemoryExtractionStoreOps();
-    // D-087:链解析缓存(resolveWorkerModel 与 generateText 同一次编排共用,
-    //   对齐 Android 单次 resolveMemoryModel 后模型+provider 配套使用)
-    let extractionChoicePromise: Promise<ChatProviderChoice | null> | null = null;
-    const resolveExtractionChoice = (): Promise<ChatProviderChoice | null> => {
-      if (extractionChoicePromise === null) {
-        extractionChoicePromise = (async (): Promise<ChatProviderChoice | null> => {
-          const ids = await loadTaskModelIds();
-          const chatUuid: string = await currentChatModelUuid();
-          return resolveTaskModelChain(memoryWorkerModelCandidates(
-            this.agentRuntime.memoryWorker, ids.compressModelId, chatUuid));
-        })();
-      }
-      return extractionChoicePromise;
-    };
-    runMemoryExtraction(conv, {
-      worker: this.agentRuntime.memoryWorker,
-      locale: systemLanguage(),
-      // D-087:worker 任务模型链(MemoryExtractor.kt:185-195)— modelId≠AUTO →
-      //   followCompress → chat;外层 ?: chat;解析结果在闭包内缓存一次
-      resolveWorkerModel: async (): Promise<MemoryWorkerModelResolution> => {
-        const choice: ChatProviderChoice | null = await resolveExtractionChoice();
-        return choice === null
-          ? { kind: 'no_model' }
-          : { kind: 'ok', modelId: choice.model.modelId };
-      },
-      generateText: async (prompt: string): Promise<string> => {
-        const choice: ChatProviderChoice | null = await resolveExtractionChoice();
-        if (choice === null) throw new Error('no model');
-        const api: OpenAIChatApi = buildProviderApi(choice.provider, {});
-        // TextGenerationParams(model = model) 默认参(MemoryExtractor.kt:121)
-        const chunk: MessageChunk = await api.generateText(
-          [makeUserMessage(prompt)],
-          makeTextGenerationParams({ model: toChatModel(choice.model) }),
-        );
-        const msg = chunk.choices.length > 0 ? chunk.choices[0].message : null;
-        return msg !== null ? toText(msg) : '';
-      },
-      getAllActiveRecords: ops.getAllActiveRecords,
-      addCandidates: ops.addCandidates,
-      addCandidate: ops.addCandidate,
-      addMemory: ops.addMemory,
-      addEvent: ops.addEvent,
-      countEventsSince: ops.countEventsSince,
-    }).catch((e: Error): void => {
-      // 编排体内错误已吞为 EXTRACTION_FAILED 事件;此处仅存储层故障 — 记录不打扰
-      hilog.error(0x0000, 'AmberChat', 'memory extraction failed: %{public}s', e.message);
-    });
   }
 
   private sameConversationTail(a: Conversation, b: Conversation): boolean {
@@ -2308,11 +1870,10 @@ struct ChatPage {
       template: prompts.titlePrompt,
     }, force)
       .then(async (titled: Conversation): Promise<void> => {
-        const latest: Conversation | null = await getChatRepository().getById(titled.id);
-        if (latest === null || latest.title !== snapshot.title
-          || !this.sameConversationTail(snapshot, latest)) return;
-        const merged: Conversation = patchConversation(latest, { title: titled.title });
-        await getChatRepository().save(merged);
+        const merged: Conversation | null = await getConversationRunService().mutateStoredConversation(titled.id,
+          (latest: Conversation): Conversation | null => latest.title === snapshot.title
+            && this.sameConversationTail(snapshot, latest) ? patchConversation(latest, { title: titled.title }) : null);
+        if (merged === null) return;
         if (this.pageAlive && this.conversation !== null && this.conversation.id === merged.id) {
           this.conversation = merged;
           this.title = merged.title.length > 0 ? merged.title : this.title;
@@ -2320,65 +1881,6 @@ struct ChatPage {
       })
       .catch((e: Error): void => {
         if (this.pageAlive) this.errorMsg = `自动命名失败:${e.message}`;
-      });
-    } finally {
-      releaseRun();
-    }
-  }
-
-  // 会话建议(D-026):每轮生成完成后非阻塞刷新;失败 hilog 记录(非静默,
-  // 不上浮 UI — Android 对建议失败也不打扰用户,仅 printStackTrace)
-  private async maybeSuggestions(conv: Conversation, rt: ChatRuntime): Promise<void> {
-    let releaseRun: () => void;
-    try { releaseRun = beginConversationRun(conv.id); } catch { return; }
-    try {
-    const snapshot: Conversation = conv;
-    // D-094:settings.suggestionPrompt(ChatPrefs.kt:82)→ runSuggestion deps.template
-    //   (suggestion.ts:57;调用时新取)
-    const prompts: TaskPrompts = await loadTaskPrompts();
-    await runSuggestion(conv, {
-      // D-087:suggestion 任务模型(AiAuxiliaryGenerator.kt:87)— 同 title 链
-      generateText: async (prompt: string): Promise<string> => {
-        const ids = await loadTaskModelIds();
-        const choice: ChatProviderChoice | null =
-          await resolveTaskChatModelChoice(ids.suggestionModelId);
-        if (choice === null) throw new Error('no suggestion model');
-        const headers: Record<string, string> = {};
-        for (const h of choice.model.customHeaders) {
-          const name: string = h.name.trim();
-          if (name.length === 0) continue;
-          headers[name] = h.value.trim();
-        }
-        const api: OpenAIChatApi = buildProviderApi(choice.provider, headers);
-        const chunk: MessageChunk = await api.generateText(
-          [makeUserMessage(prompt)],
-          makeTextGenerationParams({
-            model: toChatModel(choice.model),
-            reasoningLevel: 'off',
-            customBody: choice.model.customBodies,
-          }),
-        );
-        const msg = chunk.choices.length > 0 ? chunk.choices[0].message : null;
-        return msg !== null ? toText(msg) : '';
-      },
-      store: { save: (_ignored: Conversation): Promise<void> => Promise.resolve() },
-      locale: '简体中文',
-      template: prompts.suggestionPrompt,
-    })
-      .then(async (suggested: Conversation): Promise<void> => {
-        const latest: Conversation | null = await getChatRepository().getById(suggested.id);
-        if (latest === null || !this.sameConversationTail(snapshot, latest)) return;
-        const merged: Conversation = patchConversation(latest, {
-          chatSuggestions: suggested.chatSuggestions,
-        });
-        await getChatRepository().save(merged);
-        if (this.pageAlive && this.conversation !== null && this.conversation.id === merged.id) {
-          this.conversation = merged;
-          this.suggestions = merged.chatSuggestions;
-        }
-      })
-      .catch((e: Error): void => {
-        hilog.warn(HILOG_DOMAIN, HILOG_TAG, 'suggestion failed: %{public}s', e.message);
       });
     } finally {
       releaseRun();
@@ -2394,14 +1896,13 @@ struct ChatPage {
 
   private saveTitle(): void {
     if (!this.pageAlive || this.conversation === null) return;
-    const release: (() => void) | null = this.reserveConversationRun(this.conversation.id);
-    if (release === null) return;
-    const updated: Conversation = patchConversation(this.conversation, { title: this.titleInput.trim() });
-    this.conversation = updated;
-    this.title = updated.title.length > 0 ? updated.title : '对话';
+    const id: string = this.conversation.id;
+    const title: string = this.titleInput.trim();
     this.editingTitle = false;
-    getChatRepository().save(updated)
-      .catch((e: Error): void => { this.errorMsg = e.message; }).finally(release);
+    getConversationRunService().mutateStoredConversation(id, (latest: Conversation): Conversation =>
+      patchConversation(latest, { title: title })).catch((error: Error): void => {
+        if (this.pageAlive && this.conversation?.id === id) this.errorMsg = error.message;
+      });
   }
 
   // 会话分叉(D-033):复制 0..目标节点为新会话并跳转
@@ -2542,24 +2043,6 @@ struct ChatPage {
     this.pendingDocs = [...this.pendingDocs,
       { url: `data:text/plain;base64,${b64}`, fileName: fileName, mime: 'text/plain' } as PendingDoc];
     promptAction.showToast({ message: `已作为文件附件(${text.length} 字符)`, duration: 1800 });
-  }
-
-  // generate_image edit 源:用户最近一条带图消息(最新优先;data: 解码 / file:// 读文件;
-  //   http(s) 不下载 — 源解析边界限本会话附件,Android file:// 同口径)
-  private async resolveEditSourceImage(): Promise<EditSourceImage | null> {
-    const conv: Conversation | null = this.conversation;
-    if (conv === null) return null;
-    const msgs: UIMessage[] = currentMessages(conv);
-    for (let i: number = msgs.length - 1; i >= 0; i--) {
-      if (msgs[i].role !== 'user') continue;
-      for (const p of msgs[i].parts) {
-        if (p.type !== 'image') continue;
-        const url: string = (p as UIMessagePartImage).url;
-        const resolved: EditSourceImage | null = await this.loadEditSourceBytes(url);
-        if (resolved !== null) return resolved;
-      }
-    }
-    return null;
   }
 
   private async loadEditSourceBytes(url: string): Promise<EditSourceImage | null> {
@@ -3060,51 +2543,15 @@ struct ChatPage {
     .alignItems(HorizontalAlign.Start)
   }
 
-
   // 编辑并重发:editMessage(新分支)→ 持久化 → runRegenerateAt(user 节点截断续跑)
   private sendEdit(text: string): void {
     if (!this.pageAlive || this.conversation === null || this.sending) return;
-    const operationToken: number = this.generationToken;
-    const conversationId: string = this.conversation.id;
-    // Phase 5 全量 invariant:编辑前确保完整会话(窗口未全量先补全)
-    this.ensureFullConversationForMutation().then((): void => {
-      if (!this.isGenerationOperationActive(operationToken)
-        || this.conversation === null || this.conversation.id !== conversationId || this.sending) return;
-      this.runSendEdit(text);
-    }).catch((e: Error): void => {
-      if (this.isGenerationOperationActive(operationToken)) this.errorMsg = e.message;
-    });
-  }
-
-  private runSendEdit(text: string): void {
-    if (!this.pageAlive || this.conversation === null || this.sending) return;
-    const releaseRun: (() => void) | null = this.reserveConversationRun(this.conversation.id);
-    if (releaseRun === null) return;
-    const operationToken: number = ++this.generationToken;
-    const conv: Conversation = this.conversation;
     const nodeId: string = this.editingNodeId;
-    const updated: Conversation = editMessage(conv, this.editingMessageId, makeUserMessage(text).parts);
-    this.conversation = updated;
-    this.refreshRowsAfterConversationChange(conv, updated);
-    this.editingNodeId = '';
-    this.editingMessageId = '';
-    this.sending = true;
-      this.setGeneratingFlag(true);
-    this.errorMsg = '';
-    this.invalidateConvCompacts(updated.id, 'message_edited')
-      .then((): Promise<void> => getChatRepository().save(updated))
-      .then((): void => {
-        if (!this.isGenerationOperationActive(operationToken)) return;
-        this.sending = false;
-      this.setGeneratingFlag(false);
-        this.regenerate(nodeId);
-      })
-      .catch((e: Error): void => {
-        if (!this.isGenerationOperationActive(operationToken)) return;
-        this.sending = false;
-      this.setGeneratingFlag(false);
-        this.errorMsg = this.compactErrorText(e);
-      }).finally(releaseRun);
+    const messageId: string = this.editingMessageId;
+    const command: ConversationEditCommand = { kind: 'edit', nodeId: nodeId, messageId: messageId, text: text };
+    if (this.submitConversationRun(command)) {
+      this.editingNodeId = ''; this.editingMessageId = '';
+    }
   }
 
   // 删除消息(D-029):长按 → 确认弹窗;生成中不提供入口(Android 同语义:
@@ -3123,17 +2570,14 @@ struct ChatPage {
         fontColor: ERROR,
         action: (): void => {
           if (this.conversation === null) return;
-          // Phase 5 全量 invariant:删除读取全量会话(窗口未全量先补全)
-          this.ensureFullConversationForMutation().then((): void => {
-            if (this.conversation === null) return;
-            const previous: Conversation = this.conversation;
-            const updated: Conversation = deleteMessage(previous, row.message.id, false);
-            this.conversation = updated;
-            this.refreshRowsAfterConversationChange(previous, updated);
-            getChatRepository().save(updated)
-              .then((): Promise<void> => this.invalidateConvCompacts(updated.id, 'message_deleted'))
-              .catch((e: Error): void => { this.errorMsg = e.message; });
-          });
+          const id: string = this.conversation.id;
+          getConversationRunService().mutateStoredConversation(id, (latest: Conversation): Conversation | null => {
+            if (getConversationRunService().isBusy(id)) throw new Error('生成中无法删除消息');
+            return deleteMessage(latest, row.message.id, false);
+          }).then((updated: Conversation | null): Promise<void> => updated === null ? Promise.resolve()
+            : this.invalidateConvCompacts(id, 'message_deleted')).catch((error: Error): void => {
+              if (this.pageAlive && this.conversation?.id === id) this.errorMsg = error.message;
+            });
         },
       },
     });
@@ -3146,38 +2590,6 @@ struct ChatPage {
       (m: PendingUserMessage): PendingChipRow => ({ id: m.id, preview: pendingPreviewText(m) }));
   }
 
-  // D-052:每次队列变更 → KV 持久化(Android ConversationSession 通知点
-  //   :128-231 + durable persist :712/:1046);失败 hilog 非静默
-  private persistQueue(): Promise<void> {
-    if (this.conversation === null) return Promise.resolve();
-    const convId: string = this.conversation.id;
-    return persistPendingQueue(getChatKvStore(), convId, this.pendingQueue).catch((e: Error): void => {
-      hilog.warn(HILOG_DOMAIN, HILOG_TAG, 'persist pending queue failed: %{public}s', e.message);
-      throw e;
-    });
-  }
-
-  private persistQueueWithEvent(event: string, messageId: string,
-    detail?: string): Promise<void> {
-    if (this.conversation === null) return Promise.resolve();
-    return persistPendingQueueWithEvent(getChatKvStore(), this.conversation.id,
-      this.pendingQueue, { event, messageId, detail }).catch((e: Error): void => {
-      hilog.warn(HILOG_DOMAIN, HILOG_TAG, 'pending queue mutation failed: %{public}s', e.message);
-      throw e;
-    });
-  }
-
-  // D-052:审计事件(recordEvent:62-87;entry 现有交互子集 enqueue/dequeue/cancel)
-  private auditQueueEvent(event: string, messageId: string, detail?: string): Promise<void> {
-    if (this.conversation === null) return Promise.resolve();
-    const convId: string = this.conversation.id;
-    return recordPendingQueueEvent(getChatKvStore(), convId, { event, messageId, detail })
-      .catch((e: Error): void => {
-        hilog.warn(HILOG_DOMAIN, HILOG_TAG, 'pending queue audit failed: %{public}s', e.message);
-        throw e;
-      });
-  }
-
   // ===== D-055 上下文压缩引擎接线(ConversationContextEngine.kt:112-286) =====
 
   // 失效钩子(ChatService.kt:1097/:2082/:2152/:2171;失败 hilog 非静默,不阻断交互)
@@ -3188,107 +2600,11 @@ struct ChatPage {
       });
   }
 
-  // prepareContextMessages 闭包:chat_turn 在 append user 后以基线消息回调;
-  //   重建 messageNodes 供压缩规划(message id 保持);policy 默认值
-  //   keepRecentTurns=8(PreferencesStore.kt:241 ContextCompactionSetting 默认,
-  //   设置面未做前硬编码);precompact 异步 launch(engine:173-186)
-  // D-087:compact 生成 provider(ConversationContextEngine.kt:408-410/:689)—
-  //   压缩任务模型(resolveTaskChatModel(compressModelId),未设=AUTO→chat 模型)
-  //   + TextGenerationParams(model) 最小参;快照未加载/无模型 → chat 运行态兜底
-  // 发送边界最终预算(D-055 补充):forceRatio × 上下文窗 — 组装完 agentSoul/
-  // memory/工具 prompt 等后置 system 块后,chat 域在发送边界再做一次兜底 fit,
-  // 否则 prepare 阶段的 fit 不含这些块,超长 prompt 仍会顶出窗口
-  private finalTokenBudgetOf(rt: ChatRuntime): number {
-    const cc = this.agentRuntime.contextCompaction;
-    const window: number = estimateContextWindow(rt.modelContextWindowTokens);
-    return Math.max(Math.trunc(window * cc.forceRatio), 4000);
-  }
-
-  private compressProvider(rt: ChatRuntime): ChatStreamProvider {
-    const choice: ChatProviderChoice | null = this.compressChoice;
-    if (choice === null) return asChatStreamProvider(rt.api, () => rt.params);
-    const api: OpenAIChatApi = buildProviderApi(choice.provider, {});
-    return asChatStreamProvider(
-      api, () => makeTextGenerationParams({ model: toChatModel(choice.model) }));
-  }
-
-  private buildPrepareContext(conv: Conversation, rt: ChatRuntime):
-    (messages: UIMessage[]) => Promise<UIMessage[]> {
-    // D-091:settings.agentRuntime.contextCompaction.toCompactPolicy()
-    //   (PreferencesStore.kt:247-255 字段直传;快照加载前 = Android 默认值)
-    const cc = this.agentRuntime.contextCompaction;
-    const policy: CompactPolicy = makeCompactPolicy({
-      enabled: cc.enabled,
-      notifyOnly: cc.notifyOnly,
-      precompactRatio: cc.precompactRatio,
-      forceRatio: cc.forceRatio,
-      keepRecentTurns: cc.keepRecentTurns,
-      maxSummaryTokens: cc.maxSummaryTokens,
-    });
-    return async (messages: UIMessage[]): Promise<UIMessage[]> => {
-      const effConv: Conversation = conversationWithMessagesAsNodes(conv, messages);
-      // D-094:settings.compressPrompt(ChatPrefs.kt:84)→ CompactEngineDeps.compressPrompt
-      //   (context_engine.ts:485;调用时新取 = settingsFlow.value 语义)
-      const prompts: TaskPrompts = await loadTaskPrompts();
-      const prepared: PreparedContext = await prepareContext(effConv, policy,
-        rt.modelContextWindowTokens, messages, rt.contextMessageSize, {
-          provider: this.compressProvider(rt),
-          store: getCompactStore(),
-          compressPrompt: prompts.compressPrompt,
-          launchPrecompact: (run: () => Promise<CompactResult>): void => {
-            // D-110:precompact 活动跟踪(engine:182-191 appScope.launch;
-            //   PLANNING/COMPACTING → 完成/失败复位)
-            this.compactActiveCount = this.compactActiveCount + 1;
-            run().catch((e: Error): void => {
-              hilog.warn(HILOG_DOMAIN, HILOG_TAG, 'precompact failed: %{public}s', e.message);
-            }).then((): void => {
-              this.compactActiveCount = Math.max(0, this.compactActiveCount - 1);
-            });
-          },
-          // D-110:force 压缩活动钩子(context_engine onCompactActiveChange)
-          onCompactActiveChange: (active: boolean): void => {
-            this.compactActiveCount = Math.max(0,
-              this.compactActiveCount + (active ? 1 : -1));
-          },
-        });
-      return prepared.messages;
-    };
-  }
-
   // 压缩失败统一文案(Android ChatVM 错误映射)
   private compactErrorText(e: Error): string {
     return e instanceof ContextCompactionFailedError
       ? '上下文已满，压缩失败，请配置任务模型'
       : e.message;
-  }
-
-  // ===== D-057 工具循环接线(GenerationHandler:161-391 调用面) =====
-
-  // D-132c:Android ChatService.kt:2307 — conversation 存在且 subAgent.enabled 时挂
-  //   五件 SubAgentTools。设置水合(复用 PromptConfigStore 唯一 RMW)+ 工具构建为异步,
-  //   在 buildToolLoop 前完成;parentToolsProvider 惰性读 baseToolsCache(buildToolLoop
-  //   内 step-4 设置)。禁用/无会话 → 空缓存,buildToolLoop 不挂载。
-  private async prepareSubAgentTools(conv: Conversation): Promise<void> {
-    try {
-      const setting = await hydrateSubAgentSetting();
-      this.subAgentEnabled = setting.enabled;
-      this.subAgentMode = setting.mode;
-      if (!setting.enabled) {
-        this.subAgentToolsCache = [];
-        return;
-      }
-      const ctx: SubAgentToolsContext = {
-        parentConversationId: conv.id,
-        parentToolsProvider: (): AgentTool[] => this.baseToolsCache,
-      };
-      this.subAgentToolsCache = await getSubAgentTools(ctx);
-    } catch (e) {
-      // 水合失败不阻塞主对话;subagent 工具本轮不挂载(fail-open 主链路)
-      const msg: string = e instanceof Error ? e.message : String(e);
-      hilog.warn(0x0001, 'Chat.Page', 'prepareSubAgentTools failed: %{public}s', msg);
-      this.subAgentEnabled = false;
-      this.subAgentToolsCache = [];
-    }
   }
 
   // SubAgent run sheet:打开时订阅 liveText,关闭时取消订阅
@@ -3501,7 +2817,7 @@ struct ChatPage {
 
   private deleteDrawerConversation(item: ConversationSummary): void {
     const deletingCurrent: boolean = this.conversation !== null && this.conversation.id === item.id;
-    if (deletingCurrent && this.isGenerationActive()) {
+    if (getConversationRunService().isBusy(item.id)) {
       this.errorMsg = '生成中无法删除当前会话';
       return;
     }
@@ -3513,7 +2829,18 @@ struct ChatPage {
         value: '删除',
         fontColor: ERROR,
         action: (): void => {
-          getChatRepository().delete(item.id).then((): void => {
+          if (getConversationRunService().isBusy(item.id)) { this.errorMsg = '生成中无法删除该会话'; return; }
+          const commit = async (): Promise<void> => {
+            const release: () => void = beginConversationRestore([item.id]);
+            try {
+              const full: Conversation | null = await getChatRepository().getById(item.id);
+              if (full === null) return;
+              await getChatRepository().delete(item.id);
+              getConversationRunService().forgetDeletedConversation(item.id);
+              await cleanupDeletedConversation(full, getChatRepository(), getChatKvStore());
+            } finally { release(); }
+          };
+          commit().then((): void => {
             if (deletingCurrent) {
               this.drawerOpen = false;
               router.replaceUrl({ url: 'pages/ChatPage' });
@@ -3708,274 +3035,6 @@ struct ChatPage {
       });
   }
 
-  // 工具循环选项:D-058 首批内置工具 = get_time_info + ask_user +
-  //   conversation_*(4) + session_*(4),D-059 追加 conversation_queue_*(2),
-  //   经 ToolRegistry 包装层(ToolRegistry.kt
-  //   :31-161 — 派生 needsApproval/display_title 注入/output budget);
-  //   autoApprove/speculative 经 agentRuntime 快照接线(D-104);每步 provider 工厂按步内
-  //   工具定义重建 params(arkts-no-spread 逐字段,不用 rt.params 展开)
-  private async buildToolLoop(rt: ChatRuntime, conv: Conversation): Promise<ToolLoopOptions> {
-    // Android conversationProvider = getConversationFlow().value(最新会话态)
-    const conversationProvider: () => Promise<Conversation> = (): Promise<Conversation> =>
-      Promise.resolve(this.conversation ?? conv);
-    // D-082:ToolProfileFilter(ChatService.kt:2302)— 先按 assistant.toolProfile
-    //   过滤原始工具集,再建 registry;tool_search/自省对在过滤后追加(:2326-2329)
-    // D-083:LocalToolOption 门控(LocalTools.kt:105-124 + ChatService.kt:2237)—
-    //   time_info/ask_user/clipboard 按 assistant.localTools 勾选加入;
-    //   run_plan_update/deep_read_open 无门恒在(:182/:188);
-    //   workspace_files 六件 D-124 + artifact 十一件 D-125 落地(见下);同组
-    //   terminal 由 E2 Remote SSH runtime 提供，批准目标随调用记录持久绑定。
-    const localOpts: LocalToolOption[] = rt.assistant.localTools;
-    const terminalGuard: TerminalApprovalGuard | null = localOpts.indexOf('terminal') >= 0
-      && rt.terminalRuntime !== null && rt.sshProfiles !== null
-      ? createTerminalApprovalGuard(rt.terminalRuntime, rt.sshProfiles, rt.moshRuntime ?? undefined) : null;
-    // JS 沙箱宿主按需挂载(首次注册工具时;evaluate 的 waitForMount 会等 attach)
-    if (localOpts.indexOf('javascript_engine') >= 0 && !this.jsSandboxNeeded) {
-      this.jsSandboxNeeded = true;
-    }
-    const profiledTools: AgentTool[] =
-      filterToolProfile([
-        ...createAssistantLocalPrimitives({ assistant: rt.assistant, conversationId: conv.id,
-          workspace: getWorkspaceManager(), activityStore: getToolActivityStore(),
-          terminalRuntime: rt.terminalRuntime, moshRuntime: rt.moshRuntime,
-          sshProfiles: rt.sshProfiles, pythonRuntime: rt.pythonRuntime }),
-        // WebMount 工具组(LocalTools.kt:161-166 语义:全局开关 || 助手勾选;
-        //   wm_eval 另有独立 eval 门;宿主按需挂载,工具闭包全局单会话)
-        ...((this.webmountGlobalEnabled || localOpts.indexOf('webmount') >= 0)
-          ? createWebMountTools(getWebMountSession(),
-            this.webmountEvalEnabled || localOpts.indexOf('webmount_eval') >= 0,
-            localOpts.indexOf('webmount') >= 0)
-          : []),
-        // D6-3:飞书云文档工具族(与 webmount 同门;token 自解析,未登录诚实报错)
-        ...((this.webmountGlobalEnabled || localOpts.indexOf('webmount') >= 0)
-          ? createFeishuDocsTools(localOpts.indexOf('webmount') >= 0)
-          : []),
-        // D-123:skills 工具组(ChatService.kt:2239-2246 — createSkillTools 五/六件,
-        //   位置 = localTools 之后/MCP 管理之前);enabledSkills/allSkills =
-        //   createRunTools 时快照(rt.assistant/rt.allSkills 同为本次发送快照);
-        //   updateEnabledSkill(:339-350)→ setSkillEnabled 闭包 RMW 当前 assistant
-        ...createSkillTools({
-          enabledSkills: rt.assistant.enabledSkills,
-          allSkills: rt.allSkills,
-          skillManager: getSkillManager(),
-          setSkillEnabled: (name: string, enable: boolean): Promise<void> =>
-            this.setSkillEnabled(rt, name, enable),
-          workspace: getSkillWorkspacePort(),
-          inflateRaw: inflateRawEntry,
-        }),
-        // D-120:MCP 工具桥接(ChatService.kt:2247-2282)— 管理四件
-        //   (mcp_list/mcp_call_tool/mcp_test + mcp_import_from_skill:D-123
-        //   skills 子系统落地并入)+ mcp__ 组(getAllAvailableTools 逐个)
-        ...createMcpManagementTools({
-          settings: getMcpSettingsStore(),
-          manager: getMcpManager(),
-          skills: getSkillManager(),
-          assistantIds: [...rt.assistant.mcpServers],
-        }),
-        // D-122:activityStore 事件面接线(ChatService.kt:2262-2274 —
-        //   startTool/complete/fail 三段;scope 由终表统一包覆,见 tools 组装)
-        ...createMcpServerTools({
-          manager: getMcpManager(),
-          activity: this.mcpActivityPort(),
-          // 按轮快照:全局 assistantIdsProvider 会被栈内其它 ChatPage 改写
-          assistantIds: [...rt.assistant.mcpServers],
-        }),
-        // D-085c:memory_* 四件(ChatService.kt:2280 addAll(createMemoryTools),
-        //   位置 = MCP 之后/ConversationContextTools 之前);
-        //   三开关全关 → 空组(:2346-2351);todayText = toLocalString(true) 等价
-        //   (本地化 MEDIUM 日期,建工具时快照)
-        ...((this.agentRuntime.enableCoreMemory || this.agentRuntime.enableShortTermMemory
-          || this.agentRuntime.enableLongTermMemory)
-          ? createMemoryTools(getMemoryToolDeps(
-            new Intl.DateTimeFormat(systemLanguage(), { dateStyle: 'medium' }).format(new Date())))
-          : []),
-        ...createConversationContextTools({
-          conversationProvider,
-          compactStore: getCompactStore(),
-          // 与 buildPrepareContext 同口径(settings.agentRuntime.contextCompaction,D-091)
-          policy: makeCompactPolicy({
-            enabled: this.agentRuntime.contextCompaction.enabled,
-            notifyOnly: this.agentRuntime.contextCompaction.notifyOnly,
-            precompactRatio: this.agentRuntime.contextCompaction.precompactRatio,
-            forceRatio: this.agentRuntime.contextCompaction.forceRatio,
-            keepRecentTurns: this.agentRuntime.contextCompaction.keepRecentTurns,
-            maxSummaryTokens: this.agentRuntime.contextCompaction.maxSummaryTokens,
-          }),
-          modelContextWindowTokens: rt.modelContextWindowTokens,
-          compactEngineDeps: {
-            provider: this.compressProvider(rt),
-            store: getCompactStore(),
-            // D-094:settings.compressPrompt(同步构建位 → aboutToAppear 快照,
-            //   未就绪 → DEFAULT_COMPRESS_PROMPT,与 deps.compressPrompt ?? DEFAULT 同义)
-            compressPrompt: this.taskPromptsCache !== null
-              ? this.taskPromptsCache.compressPrompt : DEFAULT_COMPRESS_PROMPT,
-          },
-        }),
-        // generate_image(Android LocalTools.buildImageGenTool:生图槽解析到才装配;
-        //   execute 实时解析随用户换槽;edit 源 = 用户最近一条带图消息)
-        ...(this.imageGenConfigured
-          ? [createImageGenTool({
-            conversationId: conv.id,
-            sourceImageResolver: (): Promise<EditSourceImage | null> => this.resolveEditSourceImage(),
-          })]
-          : []),
-        ...createConversationHistoryTools({
-          repository: getChatRepository(),
-          currentConversationProvider: conversationProvider,
-          grantStore: getSessionGrantStore(),
-        }),
-        // D-059:conversation_queue_* 工具对(ChatService.kt:2457-2544);
-        //   变更经既有页面路径(cancelPendingById/clear)— persist+审计与
-        //   ChatService:498-511 同语义(changed/count>0 才记录)
-        ...createConversationQueueTools({
-          pendingProvider: (): Promise<PendingUserMessage[]> => Promise.resolve(this.pendingQueue),
-          cancelOne: (messageId: string): Promise<void> => this.cancelPendingById(messageId),
-          clearAll: (): Promise<void> => {
-            const previous: PendingUserMessage[] = this.pendingQueue;
-            const count: number = previous.length;
-            if (count > 0) {
-              this.pendingQueue = [];
-              this.syncPendingRows();
-              return this.persistQueue().then((): Promise<void> =>
-                this.auditQueueEvent('clear', '', `count=${count}`))
-                .catch((e: Error): void => {
-                  this.pendingQueue = previous;
-                  this.syncPendingRows();
-                  this.errorMsg = e.message;
-                  throw e;
-                });
-            }
-            return Promise.resolve();
-          },
-        }),
-        // D-131:agent_task_* 六件(ChatService.kt:2299 无条件;
-        //   createConversationQueueTools(:2297)之后)
-        ...this.agentTaskToolsCache,
-        // D-129:permissions_status(LocalTools.kt:180 无条件,位置 =
-        //   agentCron(:181)/runPlanUpdate(:182)之前)
-        getPermissionsStatusTool(),
-        // jev_status(只读;C5-1)
-        createJevStatusTool(),
-        // D-130:agent_cron 四件(LocalTools.kt:181 无条件;aboutToAppear
-        //   水合,完成前为空数组 = searchSettings 时序先例)
-        ...this.agentCronToolsCache,
-        // D-061:本地工具三件(LocalTools runPlanUpdateTool/clipboardTool/
-        //   deepReadOpenTool);deep_read bus 收集器 = router 打开深读页
-        //   (Index.startDeepRead:120-127 同路由;页面存活即有收集者)
-        createRunPlanUpdateTool(), createHealthSummaryTool(createEntryHealthReadPort()),
-        // soul 三件套(P2-07;soul_preview 只读,soul_import/rollback 审批)
-        ...createSoulTools(),
-        ...(localOpts.indexOf('clipboard') >= 0
-          ? [createClipboardTool(createEntryClipboardPort())] : []),
-        // D-128:agent_prompt_config(LocalTools.kt:183 无条件,
-        //   位置 = runPlanUpdate(:182)之后/deepReadPlaybook(:187)之前)
-        getAgentPromptConfigTool(),
-        // D-127:DeepReadPlaybookTools 四件(LocalTools.kt:187 无条件,
-        //   位置 = deepReadOpenTool(:188)之前);仓库 = deepread HAR
-        //   playbook 单例,结构直配 DeepReadPlaybookPort
-        ...createDeepReadPlaybookTools(getDeepReadPlaybookRepository()),
-        createDeepReadOpenTool({
-          bus: {
-            hasCollectors: (): boolean => true,
-            emit: (event: DeepReadOpenEvent): void => {
-              this.openDeepRead(event);
-            },
-          },
-          sha256Hex: sha256HexUtf8,
-        }),
-        // D-070:搜索工具组(ChatService.kt:2232-2234 — enableWebSearch 门内
-        //   addAll(createSearchTools(settings)));searchSettings 未加载完成时
-        //   本轮不带搜索工具(偏好加载为异步,与 Android StateFlow 就绪时序等价)
-        ...(this.searchSettings !== null && this.searchSettings.enableWebSearch
-          ? createSearchTools(this.searchSettings)
-          : []),
-      ], rt.assistant.toolProfile).tools;
-    const recipeStore: RecipeStore = await getRecipeStore();
-    const pluginStore: PluginStore = await getPluginStore();
-    const primitiveRegistry: ToolRegistry = createToolRegistry(profiledTools);
-    const pluginPrimitives: AgentTool[] = [...profiledTools, ...createRegistryIntrospectionTools(primitiveRegistry),
-      createToolSearchTool(primitiveRegistry, rt.assistant.toolProfile, jevToolSearchReranker())];
-    let recipeAdapter: RecipeLoopAdapter = createRecipeLoopAdapter({ store: recipeStore, installed: [] });
-    let pluginAdapter: PluginLoopAdapter = createEntryPluginAdapter(pluginStore, [], pluginPrimitives);
-    const supervisorTools: AgentTool[] = this.subAgentEnabled && this.conversation !== null
-      ? this.subAgentToolsCache : [];
-    const catalog = (installed: InstalledRecipe[], installedPlugins: InstalledPlugin[]): AgentTool[] => {
-      recipeAdapter = createRecipeLoopAdapter({ store: recipeStore, installed });
-      const recipeTools: AgentTool[] = filterToolProfile(createRecipeTools({
-        store: recipeStore, installed, primitives: profiledTools,
-      }), rt.assistant.toolProfile).tools;
-      pluginAdapter = createEntryPluginAdapter(pluginStore, installedPlugins, pluginPrimitives);
-      const pluginTools: AgentTool[] = filterToolProfile(createPluginTools({ store: pluginStore,
-        installed: installedPlugins, primitives: pluginPrimitives }), rt.assistant.toolProfile).tools;
-      const registry: ToolRegistry = createToolRegistry([...profiledTools, ...recipeTools, ...pluginTools]);
-      this.baseToolsCache = [...registry.tools(), ...createRegistryIntrospectionTools(registry)];
-      return this.scopedToConversation([
-        ...this.baseToolsCache, createToolSearchTool(registry, rt.assistant.toolProfile, jevToolSearchReranker()),
-        ...supervisorTools,
-      ], conv);
-    };
-    const initialTools: AgentTool[] = catalog(await recipeStore.listInstalled(), await pluginStore.listInstalled(pluginPrimitives));
-    const options: ToolLoopOptions = {
-      dispatcher: new AgentToolDispatcher({ hooks: terminalGuard === null
-        ? defaultToolInvocationHooks() : [...defaultToolInvocationHooks(), terminalGuard.hook] }),
-      captureInvocationMetadata: terminalGuard === null ? undefined : terminalGuard.captureInvocationMetadata,
-      tools: initialTools,
-      recipeAdapter,
-      pluginAdapter,
-      refreshTools: async (): Promise<AgentTool[]> => {
-        const tools: AgentTool[] = catalog(await recipeStore.listInstalled(), await pluginStore.listInstalled(pluginPrimitives));
-        options.recipeAdapter = recipeAdapter;
-        options.pluginAdapter = pluginAdapter;
-        return tools;
-      },
-      makeProviderForStep: (defs: ChatToolDefinition[]): ChatStreamProvider =>
-        asChatStreamProvider(rt.api, (): TextGenerationParams => makeTextGenerationParams({
-          model: rt.params.model,
-          temperature: rt.params.temperature,
-          topP: rt.params.topP,
-          maxTokens: rt.params.maxTokens,
-          tools: defs,
-          reasoningLevel: rt.params.reasoningLevel,
-          customBody: rt.params.customBody,
-        })),
-      consumeSteerMessages: (): Promise<UIMessage[]> => this.drainSteerMessages(),
-      // D-077a:tool system prompt 块所需模型(buildSystemPromptParts:739-741)
-      toolPromptModel: rt.params.model,
-      // D-104:ChatService.kt:1345-1347 逐字 —
-      //   autoApproveTools = settings.agentRuntime.autoApproveAllToolCalls
-      //     || conversation.autoApproveToolCalls
-      autoApproveTools: this.agentRuntime.autoApproveAllToolCalls || conv.autoApproveToolCalls,
-      autoApproveHighRiskTools: this.agentRuntime.autoApproveHighRiskToolCalls,
-      // D-104:speculativeToolExecution(PreferencesStore.kt:226-229)门接线
-      speculativeEnabled: this.agentRuntime.speculativeToolExecution.enabled,
-      speculativeMaxConcurrentTools: this.agentRuntime.speculativeToolExecution.maxConcurrentTools,
-      // D-115:ChatService.kt:1349-1352 —
-      //   maxSteps = settings.agentRuntime.maxToolLoopSteps.coerceIn(16,512)
-      //   (coerceIn 引擎侧 tool_loop.ts:147-148 已忠实,此处原样透传)
-      maxSteps: this.agentRuntime.maxToolLoopSteps,
-    };
-    return options;
-  }
-
-  // D-120:assistant.mcpServers 白名单 provider 接线(runtime 解析后;
-  //   Android settings.getCurrentAssistant().mcpServers 的会话级等价)
-  private wireMcpAssistant(rt: ChatRuntime): void {
-    getMcpSettingsStore().setAssistantIdsProvider((): string[] => rt.assistant.mcpServers);
-  }
-
-  // D-121:tools_warning 门(ChatService.kt:1278-1286)— 模型无 TOOL 能力且
-  //   (settings.enableWebSearch || mcpManager.getAllAvailableTools() 非空) →
-  //   addError(tools_warning, title=error_title_tool_unavailable),**不中断生成**。
-  //   须在 wireMcpAssistant 之后调用(getAllAvailableTools 依赖 assistant provider)。
-  //   偏差登记:addError 带 title('工具不可用')— harmony 错误条无 title 槽位,
-  //   仅正文 values-zh:1277 逐字上浮。
-  private warnIfToolAbilityMissing(rt: ChatRuntime): void {
-    if (rt.modelAbilities.indexOf('tool') >= 0) return;
-    const searchOn: boolean = this.searchSettings !== null && this.searchSettings.enableWebSearch;
-    if (!searchOn && getMcpManager().getAllAvailableTools().length === 0) return;
-    this.errorMsg = '当前模型未开启工具调用，请在设置内启用模型的工具能力，再使用搜索/MCP等功能';
-  }
-
   // ===== D-122:沙盒活动时间线(ChatPage.kt:500-536 + ChatInputSandbox.kt) =====
 
   // :503-522 — derive + scoped live + merge + operationPreviewMode 门;
@@ -4035,130 +3094,8 @@ struct ChatPage {
     return this.sandboxStatusZh(activity.status);
   }
 
-  // ChatService.kt:2254-2282 activityStore 事件面 — store 适配 McpToolActivityPort
-  private mcpActivityPort(): McpToolActivityPort {
-    const store: AgentToolActivityStore = getToolActivityStore();
-    return {
-      startTool: (toolName: string, title: string, inputPreview: string, runtime: string): string =>
-        store.startTool(toolName, title, inputPreview, runtime),
-      complete: (toolCallId: string, outputPreview: string): void => {
-        store.complete(toolCallId, outputPreview);
-      },
-      fail: (toolCallId: string, error: Error): void => {
-        store.fail(toolCallId, error);
-      },
-    };
-  }
-
-  // ChatService.kt:2332-2343 — 终表每工具 execute 包 withConversation(scopeId)
-  private scopedToConversation(tools: AgentTool[], conv: Conversation): AgentTool[] {
-    const scopeId: string = conv.id;
-    const store: AgentToolActivityStore = getToolActivityStore();
-    return tools.map((tool: AgentTool): AgentTool => makeAgentTool({
-      name: tool.name,
-      description: tool.description,
-      parameters: tool.parameters,
-      systemPrompt: tool.systemPrompt,
-      needsApproval: tool.needsApproval,
-      allowsAutoApproval: tool.allowsAutoApproval,
-      mandatoryApproval: tool.mandatoryApproval,
-      recipeEnvelope: tool.recipeEnvelope,
-      pluginEnvelope: tool.pluginEnvelope,
-      mcpTarget: tool.mcpTarget,
-      execute: (input: JsonValue, signal?: AbortSignalLike): Promise<UIMessagePart[]> =>
-        store.withConversation(scopeId,
-          (): Promise<UIMessagePart[]> => tool.execute(input, signal)),
-    }));
-  }
-
-  // D-123:updateEnabledSkill(SkillsTools.kt:339-350)— settingsStore.update 对
-  //   当前 assistant enabledSkills 做 +name/-name RMW;entry = assistants KV
-  //   读改写(rt.assistant.id = 本次发送解析的当前助手 = getCurrentAssistant 同义)
-  private async setSkillEnabled(rt: ChatRuntime, name: string, enable: boolean): Promise<void> {
-    await mutateAssistant(rt.assistant.id, (a: Assistant): Assistant => {
-      const skills: string[] = enable
-        ? (a.enabledSkills.indexOf(name) >= 0 ? a.enabledSkills : a.enabledSkills.concat([name]))
-        : a.enabledSkills.filter((n: string): boolean => n !== name);
-      return patchAssistant(a, { enabledSkills: skills });
-    });
-  }
-
-  private reserveConversationRun(conversationId: string): (() => void) | null {
-    if (this.conversation?.id === conversationId
-      && conversationRestoreVersion(conversationId) !== this.loadedRestoreVersion) {
-      this.refreshRestoredConversation().catch((e: Error): void => { this.errorMsg = e.message; });
-      this.errorMsg = '会话已恢复，正在刷新，请稍后重试';
-      return null;
-    }
-    try {
-      return beginConversationRun(conversationId);
-    } catch (e) {
-      this.errorMsg = e instanceof Error ? e.message : String(e);
-      return null;
-    }
-  }
-
-  private async releaseConversationRunAfterSaves(release: () => void): Promise<void> {
-    try {
-      await this.checkpointTail;
-    } finally {
-      release();
-    }
-  }
-
   // Kernel façade:统一 phase 生命周期(对齐 iOS ChatKernelRunHost 可观察语义)
-  private kernelHost: ChatKernelHost | null = null;
   private kernelPhase: KernelPhase = 'idle';
-
-  private runViaKernel(
-    conversation: Conversation,
-    deps: ChatTurnDeps,
-    operation: (runtimeDeps: ChatTurnDeps) => Promise<Conversation>,
-  ): Promise<InteractiveTurnRunResult> {
-    const host = createChatKernelHost({
-      onPhase: (phase: KernelPhase): void => {
-        this.kernelPhase = phase;
-      },
-    });
-    this.kernelHost = host;
-    return host.run(conversation, deps, operation).then(
-      (out: KernelRunOutcome): InteractiveTurnRunResult => {
-        if (out.result === null) {
-          return {
-            conversation: out.conversation,
-            transport: 'unavailable',
-            firstParsedDeltaAt: null,
-            dataEndAt: null,
-          };
-        }
-        return out.result;
-      });
-  }
-
-  // steer 消息步间消费(Android session.dequeueSteerPendingUserMessages,
-  //   GenerationHandler:386-390):生成中到达的 STEER 出队 → user 消息注入会话;
-  //   出队后 durable persist + 审计(D-052 同规)
-  private drainSteerMessages(): Promise<UIMessage[]> {
-    const previous: PendingUserMessage[] = this.pendingQueue;
-    const steers: PendingUserMessage[] = previous.filter(
-      (m: PendingUserMessage): boolean => m.mode === 'STEER');
-    if (steers.length === 0) return Promise.resolve([]);
-    this.pendingQueue = this.pendingQueue.filter(
-      (m: PendingUserMessage): boolean => m.mode !== 'STEER');
-    this.syncPendingRows();
-    let durable: Promise<void> = this.persistQueue();
-    for (const s of steers) {
-      durable = durable.then((): Promise<void> => this.auditQueueEvent('dequeue', s.id, 'steer'));
-    }
-    return durable.then((): UIMessage[] => steers.map(
-      (s: PendingUserMessage): UIMessage => makeUIMessage('user', s.parts)))
-      .catch((e: Error): UIMessage[] => {
-        this.pendingQueue = previous;
-        this.syncPendingRows();
-        this.errorMsg = e.message;
-        throw e;
-      });
-  }
 
   // 工具审批(ChatService.kt:1122-1188):改写 approvalState → 持久化 →
   //   无 pending 残留 → 续跑生成(handleMessageComplete)
@@ -4205,164 +3142,16 @@ struct ChatPage {
   private applyToolVerdict(toolCallId: string, verdict: ToolApprovalVerdict,
     locator?: ToolApprovalPartLocator): void {
     if (!this.pageAlive || this.conversation === null || this.sending) return;
-    const previous: Conversation = this.conversation;
-    const releaseRun: (() => void) | null = this.reserveConversationRun(previous.id);
-    if (releaseRun === null) return;
-    const operationToken: number = this.generationToken;
-    const out: Conversation = applyToolApprovalToConversation(
-      previous, toolCallId, verdict, locator);
-    if (out === previous) {
-      releaseRun();
-      this.errorMsg = '工具调用已变化或无法唯一定位，请重新打开工具卡片';
-      return;
-    }
-    this.conversation = out;
-    this.refreshRowsAfterConversationChange(previous, out);
-    getChatRepository().save(out)
-      .then((): void => {
-        if (this.isGenerationOperationActive(operationToken) && !conversationHasPendingTools(out)) {
-          this.resumeToolLoop(out);
-        }
-      })
-      .catch((e: Error): void => {
-        if (this.isGenerationOperationActive(operationToken)) {
-          this.conversation = previous;
-          this.refreshRowsAfterConversationChange(out, previous);
-          this.errorMsg = e.message;
-        }
-      }).finally(releaseRun);
+    const command: ConversationVerdictCommand = { kind: 'verdict', toolCallId: toolCallId, verdict: verdict, locator: locator };
+    this.submitConversationRun(command);
   }
 
   // 审批后续跑:不追加 user 消息,直接进工具循环;流式预览复用 D-041
   //   regenTail 机制(末条 assistant 行下渲染 — 写回的就是末条消息)
   private resumeToolLoop(conv: Conversation): void {
     if (!this.pageAlive || this.sending) return;
-    const releaseRun: (() => void) | null = this.reserveConversationRun(conv.id);
-    if (releaseRun === null) return;
-    this.sending = true;
-      this.setGeneratingFlag(true);
-    this.errorMsg = '';
-    const operationAbort: EntryAbortController = new EntryAbortController();
-    this.abortController = operationAbort;
-    this.checkpointRegenerateNodeId = '';
-    const operationToken: number = ++this.generationToken;
-    const lastNodeId: string = conv.messageNodes.length > 0
-      ? conv.messageNodes[conv.messageNodes.length - 1].id
-      : '';
-    const tail: UIMessage[] = currentMessages(conv);
-    const manualPart: UIMessagePartTool | undefined = tail.length > 0
-      ? tail[tail.length - 1].parts.find((part: UIMessagePart): boolean =>
-        part.type === 'tool' && ((part as UIMessagePartTool).metadata?.['recipe_manual'] === true
-          || (part as UIMessagePartTool).metadata?.['plugin_manual'] === true)) as UIMessagePartTool | undefined
-      : undefined;
-    const manualId: string | undefined = manualPart?.toolCallId;
-    const holder: RuntimeHolder = { rt: null };
-    resolveChatRuntime(conv.assistantId)
-      .then(async (rt: ChatRuntime | null): Promise<Conversation> => {
-        holder.rt = rt;
-        if (rt === null) {
-          return Promise.reject(new Error('未配置可用的 Provider/模型'));
-        }
-        this.wireMcpAssistant(rt);
-        this.warnIfToolAbilityMissing(rt);
-        // D-132c:水合 subagent 设置 + 工具(buildToolLoop 前;parentToolsProvider 惰性)
-        await this.prepareSubAgentTools(conv);
-        const deps: ChatTurnDeps = {
-          assistant: rt.assistant,
-          // D-090:agentSoul 静态块首槽位(GenerationHandler.kt:721-724)
-          agentSoul: buildAgentSoulPrompt(this.agentRuntime.agentSoulMarkdown),
-          inputTransformers: this.buildInputTransformers(rt),
-          // D-071b:视觉兜底门(模型 IMAGE 模态 + 有图才兜底,GenerationHandler.kt:431)
-          modelSupportsImageInput: rt.modelSupportsImageInput,
-          outputTransformers: [thinkTagTransformer, createEntryBase64ImageTransformer(), createMiniAppOutputTransformer({ enabled: (): boolean => this.miniAppSetting.enabled, repository: this.miniAppRepository() }), regexOutputTransformer], // ChatService.kt:179-184 序(MiniAppOutput 3 位) 依赖 this.miniAppRepository()
-          provider: asChatStreamProvider(rt.api, () => rt.params),
-          store: getChatRepository(),
-          contextMessageSize: rt.contextMessageSize,
-          prepareContextMessages: this.buildPrepareContext(conv, rt),
-          // D-077b:recentChats 动态块(每次组装重取)
-          // D-085b:记忆召回块(动态序最前,GenerationHandler.kt:727)
-          memorySystemBlocks: (): Promise<string[]> => this.loadMemorySystemBlocks(),
-          extraSystemBlocks: (): Promise<string[]> => this.loadExtraSystemBlocks(),
-          abortSignal: operationAbort.signal,
-          // D-115:GenerationHandler.kt:357/475/621 — retrySetting =
-          //   settings.agentRuntime.generationRetry(续跑路径同接线)
-          retrySetting: makeGenerationRetrySetting({
-            enabled: this.agentRuntime.generationRetry.enabled,
-            maxRetries: this.agentRuntime.generationRetry.maxRetries,
-          }),
-          onRetryStatus: (status: string | null): void => {
-            if (this.isGenerationOperationActive(operationToken)) {
-              this.retryStatus = status ?? '';
-            }
-          },
-          onUpdate: (msgs: UIMessage[]): void => {
-            if (!this.isGenerationOperationActive(operationToken)
-              || msgs.length === 0 || holder.rt === null) return;
-            this.regenNodeId = lastNodeId;
-            this.regenTail = msgs[msgs.length - 1];
-            this.followStreamingUpdate();
-          },
-          // Phase 2:raw 快照捕获(与 send 路径同接线)
-          onRawFlushSnapshot: (msgs: UIMessage[]): void => {
-            if (!this.isGenerationOperationActive(operationToken)) return;
-            this.lastRawSnapshot = msgs;
-            this.captureStreamCheckpoint(msgs);
-          },
-        };
-        return this.runViaKernel(
-          conv,
-          deps,
-          async (runtimeDeps: ChatTurnDeps): Promise<Conversation> => {
-            const loop: ToolLoopOptions = await this.buildToolLoop(rt, conv);
-            loop.manualToolCallId = manualId;
-            return runToolLoopContinuation(conv, runtimeDeps, loop);
-          },
-        ).then((result: InteractiveTurnRunResult): Conversation => result.conversation);
-      })
-      .then((out: Conversation): void => {
-        const stopped: boolean = operationAbort.signal.aborted;
-        if (!this.isGenerationOperationActive(operationToken)) {
-          this.finishInactiveGeneration(out, stopped);
-          return;
-        }
-        this.finishGenerationCommon(out, stopped);
-        this.refreshContextCompacts(); // D-110:压缩可能已写新摘要,刷新足迹
-        if (holder.rt !== null) {
-          if (manualId === undefined) {
-            this.maybeAutoTitle(this.conversation as Conversation);
-            this.maybeSuggestions(this.conversation as Conversation, holder.rt);
-            this.maybeMemoryExtraction(this.conversation as Conversation, holder.rt);
-          }
-          this.maybeGenerationDoneNotification(holder.rt);
-          this.fireGenerationHaptic();
-        }
-        if (manualId === undefined) this.drainPendingQueue();
-      })
-      .catch((e: Error): void => {
-        if (!this.isGenerationOperationActive(operationToken)) return;
-        this.errorMsg = this.compactErrorText(e);
-        this.sending = false;
-      this.setGeneratingFlag(false);
-        this.refreshContextCompacts(); // D-110:压缩可能已写新摘要,刷新足迹
-        this.abortController = null;
-        this.regenTail = null;
-        this.regenNodeId = '';
-        this.lastRawSnapshot = [];
-        // 审批态/部分写回已持久化,刷新显示
-        getChatRepository().getById(conv.id)
-          .then((saved: Conversation | null): void => {
-            if (saved !== null) {
-              const previous: Conversation | null = this.conversation;
-              this.conversation = saved;
-              this.refreshRowsAfterConversationChange(previous, saved);
-            }
-          })
-          .catch((reloadError: Error): void => {
-            hilog.warn(HILOG_DOMAIN, HILOG_TAG,
-              'regenerate reload failed: %{public}s', reloadError.message);
-          })
-          .then((): void => { if (manualId === undefined) this.drainPendingQueue(); });
-      }).finally((): Promise<void> => this.releaseConversationRunAfterSaves(releaseRun));
+    const command: ConversationResumeCommand = { kind: 'resume', manualToolCallId: '' };
+    this.submitConversationRun(command);
   }
 
   // 生成中发送 → 入队;满 20 拒绝(Android 文案逐字)。
@@ -4373,125 +3162,25 @@ struct ChatPage {
   //   FOLLOWUP — 鸿蒙入队仅在 sending 分支发生,天然等价
   private enqueuePendingParts(
     parts: UIMessagePart[], answer: boolean, mode: PendingUserMessageMode = 'FOLLOWUP'): void {
-    const previous: PendingUserMessage[] = this.pendingQueue;
-    const msg: PendingUserMessage = makePendingUserMessage({ parts, answer, mode });
-    const r = enqueuePendingUserMessage(previous, msg);
-    if (!r.accepted) {
-      this.errorMsg = '消息队列已满，请先等待或取消一些排队消息。';
-      return;
-    }
-    this.pendingQueue = r.messages;
-    this.syncPendingRows();
-    this.persistQueueWithEvent('enqueue', msg.id, msg.mode.toLowerCase())
-      .catch((e: Error): void => {
-        this.pendingQueue = previous;
-        this.syncPendingRows();
-        this.errorMsg = e.message;
-      });
+    if (this.conversation === null) return;
+    const id: string = this.conversation.id;
+    getConversationRunService().enqueue(id, parts, answer, mode).catch((error: Error): void => {
+      if (this.pageAlive && this.conversation?.id === id) this.errorMsg = error.message;
+    });
   }
 
   private cancelPendingById(id: string): Promise<void> {
-    const previous: PendingUserMessage[] = this.pendingQueue;
-    const r = cancelPendingUserMessage(previous, id);
-    if (!r.changed) return Promise.resolve();
-    this.pendingQueue = r.messages;
-    this.syncPendingRows();
-    return this.persistQueueWithEvent('cancel', id)
-      .catch((e: Error): void => {
-        this.pendingQueue = previous;
-        this.syncPendingRows();
-        this.errorMsg = e.message;
-        throw e;
-      });
-  }
-
-  // 出队后派发失败回灌:头插回**当前**队列并持久化(不能回写旧快照 —
-  // 期间可能有并发入队,且 KV 已是 dequeue 后状态)
-  private requeueDispatchAtHead(dispatch: PendingUserMessage): void {
-    const current: PendingUserMessage[] = this.pendingQueue;
-    this.pendingQueue = [dispatch, ...current];
-    this.syncPendingRows();
-    this.persistQueueWithEvent('enqueue', dispatch.id, dispatch.mode.toLowerCase())
-      .catch((e: Error): void => { this.errorMsg = e.message; });
-  }
-
-  private async appendUserParts(parts: UIMessagePart[]): Promise<Conversation> {
-    if (!this.pageAlive || this.conversation === null) throw new Error('会话页面已关闭');
-    const release: () => void = beginConversationRun(this.conversation.id);
-    try {
-      return await runAppendUserMessage(this.conversation, parts, getChatRepository());
-    } finally {
-      release();
-    }
+    if (this.conversation === null) return Promise.resolve();
+    return getConversationRunService().cancelPending(this.conversation.id, id);
   }
 
   // 生成完成(成功/失败/中断)后出队下一条继续派发(Android 循环逐条 catch 后继续)
   private drainPendingQueue(): void {
-    if (!this.pageAlive || this.pendingDrainActive || this.sending || this.appendActive || this.conversation === null) return;
-    if (conversationHasPendingOrUnexecutedTools(this.conversation)) return;
-    const dq: DequeueNextResult = dequeueNextPendingUserMessage(this.pendingQueue);
-    if (dq.next === null) return;
-    const prep = preparePendingMessageForDispatch(dq.rest, dq.next);
-    this.pendingQueue = prep.rest;
-    this.syncPendingRows();
-    this.pendingDrainActive = true;
-    this.persistQueueWithEvent('dequeue', prep.dispatch.id, prep.dispatch.mode.toLowerCase())
-      .then((): void => {
-        this.pendingDrainActive = false;
-        if (!prep.dispatch.answer) {
-          this.pendingDrainActive = true;
-          this.appendActive = true;
-          // holder:append 失败时回灌该 dispatch(闭包内重赋值,ArkTS 收窄限制)
-          const requeue: PendingRequeueHolder = { msg: null };
-          // Phase 5 全量 invariant:append 落库前确保完整会话(窗口未全量先补全)
-          this.ensureFullConversationForMutation().then((): void => {
-            if (this.conversation === null) {
-              this.appendActive = false;
-              this.pendingDrainActive = false;
-              this.requeueDispatchAtHead(prep.dispatch);
-              return;
-            }
-            this.appendUserParts(prep.dispatch.parts)
-              .then((out: Conversation): void => {
-                const previous: Conversation | null = this.conversation;
-                this.conversation = out;
-                this.refreshRowsAfterConversationChange(previous, out);
-                this.scrollToBottom();
-              })
-              .catch((e: Error): void => {
-                this.errorMsg = e.message;
-                requeue.msg = prep.dispatch;
-              })
-              .then((): void => {
-                this.appendActive = false;
-                this.pendingDrainActive = false;
-                if (requeue.msg !== null) {
-                  // 已出队未落库 → 回灌保消息;本轮停轮避免 失败→重试 死循环,
-                  // 下次用户操作/生成结束再触发 drain
-                  this.requeueDispatchAtHead(requeue.msg);
-                  return;
-                }
-                this.drainPendingQueue();
-              });
-          }).catch((e: Error): void => {
-            // 补全失败:回灌 + 复位双标志,否则 pending queue 永久停滞
-            this.appendActive = false;
-            this.pendingDrainActive = false;
-            this.requeueDispatchAtHead(prep.dispatch);
-            this.errorMsg = e.message;
-          });
-          return;
-        }
-        this.sendParts(prep.dispatch.parts, prep.dispatch.id,
-          (): void => this.requeueDispatchAtHead(prep.dispatch));
-      })
-      .catch((e: Error): void => {
-        // dequeue 持久化失败:内存已是 rest — 头演回 dispatch 保消息(KV 仍是旧态,
-        // 回灌的 enqueue 持久化失败则内存已保住,尽力而为)
-        this.pendingDrainActive = false;
-        this.requeueDispatchAtHead(prep.dispatch);
-        this.errorMsg = e.message;
-      });
+    if (this.conversation === null) return;
+    const id: string = this.conversation.id;
+    getConversationRunService().resumePending(id).catch((error: Error): void => {
+      if (this.pageAlive && this.conversation?.id === id) this.errorMsg = error.message;
+    });
   }
 
   // ===== D-064 /deepread 斜杠命令(SendMessageOrchestrator.kt:26-41) =====
@@ -4553,35 +3242,14 @@ struct ChatPage {
           this.enqueuePendingParts(inputParts, true, 'STEER');
           return;
         }
-        if (this.appendActive) {
-          // 上一个「只追加不生成」还在跑:同样入队(answer=false,drain 时走 append 路径),
-          // 不能清空输入后静默丢弃消息
+        if (this.conversation === null) return;
+        const id: string = this.conversation.id;
+        if (getConversationRunService().isBusy(id)) {
           this.enqueuePendingParts(inputParts, false);
           return;
         }
-        this.appendActive = true;
-        // Phase 5 全量 invariant:append 落库前确保完整会话(窗口未全量先补全)
-        this.ensureFullConversationForMutation().then((): void => {
-          if (this.conversation === null) {
-            this.appendActive = false;
-            return;
-          }
-          this.appendUserParts(inputParts)
-            .then((out: Conversation): void => {
-              const previous: Conversation | null = this.conversation;
-              this.conversation = out;
-              this.refreshRowsAfterConversationChange(previous, out);
-              this.scrollToBottom();
-            })
-            .catch((e: Error): void => { this.errorMsg = e.message; })
-            .then((): void => {
-              this.appendActive = false;
-              this.drainPendingQueue();
-            });
-        }).catch((e: Error): void => {
-          // 补全失败必须复位,否则 appendActive 永久 true、后续长按发送全部被吞
-          this.appendActive = false;
-          this.errorMsg = e.message;
+        getConversationRunService().append(id, inputParts).catch((error: Error): void => {
+          if (this.pageAlive && this.conversation?.id === id) this.errorMsg = error.message;
         });
       });
     });
@@ -4709,215 +3377,9 @@ struct ChatPage {
 
   private sendParts(
     inputParts: UIMessagePart[], dispatchMessageId: string = '',
-    onPrepareFailed?: () => void,
   ): void {
-    if (this.conversation === null) return;
-    // 同步占位:ensureFull 是异步的,两次发送会在回调里才检查 sending,
-    // 双双基于同一旧快照开跑并互相覆盖保存(此处占位后 runSendParts 里的赋值幂等)
-    if (this.sending) return;
-    this.sending = true;
-      this.setGeneratingFlag(true);
-    // Phase 5 全量 invariant:生成必须基于完整会话(窗口未全量时先补全再开跑)
-    this.ensureFullConversationForMutation().then((): void => {
-      if (this.conversation === null) {
-        this.sending = false;
-      this.setGeneratingFlag(false);
-        if (onPrepareFailed !== undefined) onPrepareFailed();
-        return;
-      }
-      this.runSendParts(inputParts, dispatchMessageId);
-    }).catch((e: Error): void => {
-      this.sending = false;
-      this.setGeneratingFlag(false);
-      this.errorMsg = e.message;
-      if (onPrepareFailed !== undefined) onPrepareFailed();
-    });
-  }
-
-  private runSendParts(inputParts: UIMessagePart[], dispatchMessageId: string = ''): void {
-    if (!this.pageAlive || this.conversation === null) return;
-    const releaseRun: (() => void) | null = this.reserveConversationRun(this.conversation.id);
-    if (releaseRun === null) {
-      this.sending = false;
-      this.setGeneratingFlag(false);
-      return;
-    }
-    // 单文本 part → 退化为 string(与既有 send 路径行为一致)
-    let userInput: string | UIMessagePart[] = inputParts;
-    if (inputParts.length === 1 && inputParts[0].type === 'text') {
-      userInput = (inputParts[0] as UIMessagePartText).text;
-    }
-    this.sending = true;
-      this.setGeneratingFlag(true);
-    this.errorMsg = '';
-    const operationAbort: EntryAbortController = new EntryAbortController();
-    this.abortController = operationAbort;
-    this.checkpointRegenerateNodeId = '';
-    const operationToken: number = ++this.generationToken;
-    const conv: Conversation = this.conversation;
-    // 流式尾部起点 = 现有消息 + 即将入列的 user 消息
-    const tailStart: number = currentMessages(conv).length + 1;
-    // D-057:续跑模式(idle blocker「继续」/应答)— 不追加 user 消息,
-    //   流式预览切换为末条消息(写回末条 assistant,regenTail 机制)
-    let resumeMode: boolean = false;
-    let resumeNodeId: string = '';
-    // holder 模式:跨 then 传递 runtime(ArkTS 闭包收窄限制)
-    const holder: RuntimeHolder = { rt: null };
-    resolveChatRuntime(conv.assistantId)
-      .then(async (rt: ChatRuntime | null): Promise<Conversation> => {
-        holder.rt = rt;
-        if (rt === null) {
-          return Promise.reject(new Error('未配置可用的 Provider/模型(providers 未持久化或无可用 auth)'));
-        }
-        this.wireMcpAssistant(rt);
-        this.warnIfToolAbilityMissing(rt);
-        // D-132c:水合 subagent 设置 + 工具(buildToolLoop 前;parentToolsProvider 惰性)
-        await this.prepareSubAgentTools(conv);
-        const deps: ChatTurnDeps = {
-          assistant: rt.assistant,
-          finalTokenBudget: this.finalTokenBudgetOf(rt),
-          // D-090:agentSoul 静态块首槽位(GenerationHandler.kt:721-724;
-          //   buildAgentSoulPrompt 空白 → '' 自然滤除)
-          agentSoul: buildAgentSoulPrompt(this.agentRuntime.agentSoulMarkdown),
-          inputTransformers: this.buildInputTransformers(rt),
-          // D-071b:视觉兜底门(模型 IMAGE 模态 + 有图才兜底,GenerationHandler.kt:431)
-          modelSupportsImageInput: rt.modelSupportsImageInput,
-          outputTransformers: [thinkTagTransformer, createEntryBase64ImageTransformer(), createMiniAppOutputTransformer({ enabled: (): boolean => this.miniAppSetting.enabled, repository: this.miniAppRepository() }), regexOutputTransformer], // ChatService.kt:179-184 序(MiniAppOutput 3 位) 依赖 this.miniAppRepository()
-          provider: asChatStreamProvider(rt.api, () => rt.params),
-          store: getChatRepository(),
-          contextMessageSize: rt.contextMessageSize,
-          // D-055:压缩引擎接管上下文(engine 内部编辑/规划/截断;
-          //   chat_turn 侧 contextMessageSize 强制 0,避免双重截断)
-          prepareContextMessages: this.buildPrepareContext(conv, rt),
-          // D-077b:recentChats 动态块(每次组装重取)
-          // D-085b:记忆召回块(动态序最前,GenerationHandler.kt:727)
-          memorySystemBlocks: (): Promise<string[]> => this.loadMemorySystemBlocks(),
-          extraSystemBlocks: (): Promise<string[]> => this.loadExtraSystemBlocks(),
-          abortSignal: operationAbort.signal,
-          // D-115:GenerationHandler.kt:357/475/621 — retrySetting =
-          //   settings.agentRuntime.generationRetry(PreferencesStore.kt:181 持久化)
-          retrySetting: makeGenerationRetrySetting({
-            enabled: this.agentRuntime.generationRetry.enabled,
-            maxRetries: this.agentRuntime.generationRetry.maxRetries,
-          }),
-          // D-050:重试状态(strings.xml:386 文案;null 清除)
-          onRetryStatus: (status: string | null): void => {
-            if (this.isGenerationOperationActive(operationToken)) {
-              this.retryStatus = status ?? '';
-            }
-          },
-          onUpdate: (msgs: UIMessage[]): void => {
-            if (!this.isGenerationOperationActive(operationToken)) return;
-            if (resumeMode) {
-              if (msgs.length > 0) {
-                this.regenNodeId = resumeNodeId;
-                this.regenTail = msgs[msgs.length - 1];
-                this.followStreamingUpdate();
-              }
-              return;
-            }
-            this.streamingTail = msgs.slice(tailStart);
-            this.followStreamingUpdate();
-          },
-          // Phase 2:raw 快照捕获(onRawFlushSnapshot 节流观察点,未经 visual
-          //   transforms;与 onUpdate 独立)— checkpoint 投影基,不扰动 UI
-          onRawFlushSnapshot: (msgs: UIMessage[]): void => {
-            if (!this.isGenerationOperationActive(operationToken)) return;
-            this.lastRawSnapshot = msgs;
-            this.captureStreamCheckpoint(msgs);
-          },
-        };
-        // D-057:idle 工具阻塞(ChatService.kt:757/:838 — 派发前先解阻塞;
-        //   「继续」批准/ask_user 应答 → 消息不入列直接续跑;否则取消陈旧工具)
-        const isPureText: boolean = inputParts.every(
-          (p: UIMessagePart): boolean => p.type === 'text');
-        const answerText: string = inputParts
-          .filter((p: UIMessagePart): boolean => p.type === 'text')
-          .map((p: UIMessagePart): string => (p as UIMessagePartText).text)
-          .join('\n');
-        const blocker: IdleToolBlockerResult = resolveIdleToolBlocker(conv, answerText, isPureText);
-        if (blocker.changed) {
-          await this.auditQueueEvent(blocker.event ?? 'pending_tool_cancel', dispatchMessageId,
-            blocker.blockingToolNames.join(','));
-          if (blocker.shouldResume) {
-            resumeMode = true;
-            resumeNodeId = blocker.conversation.messageNodes.length > 0
-              ? blocker.conversation.messageNodes[blocker.conversation.messageNodes.length - 1].id
-              : '';
-            const previous: Conversation | null = this.conversation;
-            this.conversation = blocker.conversation;
-            this.refreshRowsAfterConversationChange(previous, blocker.conversation);
-            return getChatRepository().save(blocker.conversation)
-              .then((): Promise<InteractiveTurnRunResult> => this.runViaKernel(
-                blocker.conversation, deps,
-                async (runtimeDeps: ChatTurnDeps): Promise<Conversation> => runToolLoopContinuation(
-                  blocker.conversation, runtimeDeps, await this.buildToolLoop(rt, blocker.conversation))))
-              .then((result: InteractiveTurnRunResult): Conversation => result.conversation);
-          }
-          return getChatRepository().save(blocker.conversation)
-            .then((): Promise<InteractiveTurnRunResult> => this.runViaKernel(
-              blocker.conversation, deps,
-              async (runtimeDeps: ChatTurnDeps): Promise<Conversation> => runChatTurnWithTools(
-                blocker.conversation, userInput, runtimeDeps,
-                await this.buildToolLoop(rt, blocker.conversation))))
-            .then((result: InteractiveTurnRunResult): Conversation => result.conversation);
-        }
-        return this.runViaKernel(
-          conv, deps,
-          async (runtimeDeps: ChatTurnDeps): Promise<Conversation> => runChatTurnWithTools(
-            conv, userInput, runtimeDeps, await this.buildToolLoop(rt, conv)))
-          .then((result: InteractiveTurnRunResult): Conversation => result.conversation);
-      })
-      .then((out: Conversation): void => {
-        const stopped: boolean = operationAbort.signal.aborted;
-        if (!this.isGenerationOperationActive(operationToken)) {
-          this.finishInactiveGeneration(out, stopped);
-          return;
-        }
-        this.finishGenerationCommon(out, stopped);
-        this.refreshContextCompacts(); // D-110:压缩可能已写新摘要,刷新足迹
-        // 自动命名 + 会话建议(非阻塞,对齐 Android 独立 launch)
-        if (holder.rt !== null) {
-          this.maybeAutoTitle(this.conversation as Conversation);
-          this.maybeSuggestions(this.conversation as Conversation, holder.rt);
-          this.maybeMemoryExtraction(this.conversation as Conversation, holder.rt);
-          this.maybeGenerationDoneNotification(holder.rt);
-          this.fireGenerationHaptic();
-        }
-        // D-048:出队下一条(Android 循环:成功 → dequeueNext)
-        this.drainPendingQueue();
-      })
-      .catch((e: Error): void => {
-        if (!this.isGenerationOperationActive(operationToken)) return;
-        this.errorMsg = this.compactErrorText(e);
-        this.sending = false;
-      this.setGeneratingFlag(false);
-        this.refreshContextCompacts(); // D-110:压缩可能已写新摘要,刷新足迹
-        this.abortController = null;
-        this.streamingTail = [];
-        this.regenTail = null;
-        this.regenNodeId = '';
-        this.lastRawSnapshot = [];
-        // 图片已随 user 快照持久化,清空避免重发时重复
-        this.invalidatePicker(true);
-        // user 消息快照已持久化(chat_turn 语义),刷新显示
-        getChatRepository().getById(conv.id)
-          .then((saved: Conversation | null): void => {
-            if (saved !== null) {
-              const previous: Conversation | null = this.conversation;
-              this.conversation = saved;
-              this.refreshRowsAfterConversationChange(previous, saved);
-              this.suggestions = saved.chatSuggestions;
-            }
-          })
-          .catch((reloadError: Error): void => {
-            hilog.warn(HILOG_DOMAIN, HILOG_TAG, 'send reload failed: %{public}s', reloadError.message);
-          })
-          .then((): void => {
-            // D-048:失败也继续出队(Android 循环逐条 catch → addError 后继续)
-            this.drainPendingQueue();
-          });
-      }).finally((): Promise<void> => this.releaseConversationRunAfterSaves(releaseRun));
+    const command: ConversationSendCommand = { kind: 'send', parts: inputParts, dispatchMessageId: dispatchMessageId };
+    this.submitConversationRun(command);
   }
 
   // 当前索引(:523-527 — selected coerceIn(0,latest) ?: latest;-1 = 未选)
@@ -5048,17 +3510,15 @@ struct ChatPage {
     ChatListGrouped({
       conversations: this.drawerConversations,
       selectedId: this.conversation !== null ? this.conversation.id : '',
-      runningIds: this.isGenerationActive() && this.conversation !== null
-        ? [this.conversation.id] : [],
+      runningIds: this.runningConversationIds,
       onOpenConversation: (id: string): void => { this.openDrawerConversation(id); },
       onDelete: (item: ConversationSummary): void => {
         this.deleteDrawerConversation(item);
       },
       onPin: (item: ConversationSummary): void => {
-        getChatRepository().getById(item.id).then((conv: Conversation | null): Promise<void> => {
-          if (conv === null) return Promise.resolve();
-          return getChatRepository().save(patchConversation(conv, { isPinned: !conv.isPinned }));
-        }).then((): void => { this.refreshDrawerConversations(); })
+        getConversationRunService().mutateStoredConversation(item.id,
+          (latest: Conversation): Conversation => patchConversation(latest, { isPinned: !latest.isPinned }))
+          .then((): void => { this.refreshDrawerConversations(); })
           .catch((e: Error): void => { this.errorMsg = e.message; });
       },
       onRegenerateTitle: (item: ConversationSummary): void => {
@@ -5226,12 +3686,18 @@ struct ChatPage {
     .width('100%').height('100%').padding(16)
   }
 
+  private displayedRowMessage(row: MsgRow): UIMessage {
+    return row.nodeId === this.regenNodeId && this.regenTail !== null ? this.regenTail : row.message;
+  }
+
   @Builder
   chatTimelineRows(): void {
     ForEach(this.rows, (row: MsgRow): void => {
       ListItem() {
         AgentMessageRow({
-          message: row.message,
+          message: this.displayedRowMessage(row),
+          streaming: row.nodeId === this.regenNodeId && this.regenTail !== null,
+          streamKeyTag: row.nodeId === this.regenNodeId ? 'regen:' : '',
           capabilities: CHAT_MESSAGE_ROW_CAPABILITIES,
           showAssistantBubble: this.displaySettings.showAssistantBubble,
           showModelName: this.displaySettings.showModelName,
@@ -5266,7 +3732,7 @@ struct ChatPage {
           onOpenSubAgentRun: (rid: string, tools: UIMessagePartTool[]): void => {
             this.openSubAgentSheet(rid, tools);
           },
-          onCopy: (): void => { this.openCopySheet(row.message); },
+          onCopy: (): void => { this.openCopySheet(this.displayedRowMessage(row)); },
           onFavorite: (text: string): void => { this.favoriteText(text); },
           onOpenToolPreview: (part: UIMessagePartTool): void => { this.openToolPreview(part); },
           onModifyGeneratedImage: (url: string): void => { this.modifyGeneratedImage(url); },
@@ -5281,50 +3747,6 @@ struct ChatPage {
       if (this.compactBoundaryCount(row.message.id) > 0) {
         ListItem() {
           this.CompactMarkerRow(row)
-        }
-      }
-      if (row.nodeId === this.regenNodeId && this.regenTail !== null) {
-        ListItem() {
-          AgentMessageRow({
-            message: this.regenTail as UIMessage,
-            capabilities: CHAT_MESSAGE_ROW_CAPABILITIES,
-          showAssistantBubble: this.displaySettings.showAssistantBubble,
-          showModelName: this.displaySettings.showModelName,
-          showModelIcon: this.displaySettings.showModelIcon,
-          showUserAvatar: this.displaySettings.showUserAvatar,
-          userAvatar: this.userAvatar,
-          userNickname: this.userNickname,
-          fontSizeRatio: this.displaySettings.fontSizeRatio,
-          codeBlockAutoCollapse: this.displaySettings.codeBlockAutoCollapse,
-          showLineNumbers: this.displaySettings.showLineNumbers,
-          chatFontFamily: this.displaySettings.chatFontFamily,
-          enableLatexRendering: this.displaySettings.enableLatexRendering,
-          onOpenDocument: (part: UIMessagePartDocument): void => { this.openDocumentPreview(part); },
-            hostHeader: (): void => {},
-            hostFooter: (): void => {},
-            autoCloseThinking: this.autoCloseThinking,
-          showThinkingContent: this.displaySettings.showThinkingContent,
-            streaming: true,
-            streamKeyTag: 'regen:',
-            isLastAssistant: true,
-            onApproveTool: (toolCallId: string, locator?: ToolApprovalPartLocator): void =>
-            this.handleToolApproval(toolCallId, true, '', locator),
-            onDenyTool: (toolCallId: string, locator?: ToolApprovalPartLocator): void =>
-            this.openDenyDialog(toolCallId, locator),
-            onAnswerTool: (toolCallId: string, answer: string, locator?: ToolApprovalPartLocator): void =>
-              this.handleToolAnswer(toolCallId, answer, locator),
-            onOpenSubAgentRun: (rid: string, tools: UIMessagePartTool[]): void => {
-              this.openSubAgentSheet(rid, tools);
-            },
-            onOpenToolPreview: (part: UIMessagePartTool): void => { this.openToolPreview(part); },
-          onModifyGeneratedImage: (url: string): void => { this.modifyGeneratedImage(url); },
-            onTextGrow: (): void => { this.followStreamingUpdate(); },
-            onRunMiniApp: (appId: string): void => {
-              router.pushUrl({ url: 'pages/MiniAppRunnerPage', params: { appId: appId } });
-            },
-            onModifyMiniApp: (prompt: string): void => { this.inputText = prompt; },
-            onOpenMiniAppList: (): void => { router.pushUrl({ url: 'pages/MiniAppListPage' }); },
-          })
         }
       }
     }, (row: MsgRow): string => `${row.nodeId}-${row.displayRevision}${this.darkMode ? '-d' : '-l'}`)
@@ -5873,7 +4295,7 @@ struct ChatPage {
           .accessibilityText('打开 WebMount 浏览器面板')
         }
         ChatInput({
-          disabled: this.storageDegraded || !this.conversationLoaded,
+          disabled: (this.storageDegraded || !this.conversationLoaded) && !this.sending,
           text: this.inputText,
           sending: this.sending,
           editing: this.editingNodeId.length > 0,

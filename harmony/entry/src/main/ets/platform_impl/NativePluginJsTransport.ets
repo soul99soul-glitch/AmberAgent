@@ -4,6 +4,7 @@ import type { PluginJsPort, PluginJsRequest, PluginJsEvent } from '@amber/chat-d
 
 interface PluginJsSession {
   id: string;
+  conversationId: string | null;
   signal: AbortSignalLike | undefined;
   abort: () => void;
 }
@@ -36,6 +37,12 @@ export const cancelNativePluginJsSessions = (): void => {
   for (const id of ids) stopSession(id);
 };
 
+export const cancelNativePluginJsConversation = (conversationId: string): void => {
+  for (const session of Array.from(activeSessions.values())) {
+    if (session.conversationId === conversationId) stopSession(session.id);
+  }
+};
+
 const stopped = (signal?: AbortSignalLike): boolean =>
   signal?.aborted === true || AppStorage.get<boolean>('appBackgrounded') === true;
 
@@ -66,13 +73,13 @@ const receive = async (event: PluginJsEvent): Promise<PluginJsEvent> => {
   return event;
 };
 
-export const createNativePluginJsTransport = (): PluginJsPort => ({
+export const createNativePluginJsTransport = (conversationId: string | null = null): PluginJsPort => ({
   start: async (request: PluginJsRequest, signal?: AbortSignalLike): Promise<PluginJsEvent> => {
     if (stopped(signal)) return beforeStart(request.executionId);
     const id: string = request.executionId;
     if (activeSessions.has(id)) throw new PluginJsTransportError('runtime_busy', '插件脚本会话仍在运行');
     const session: PluginJsSession = {
-      id: id, signal: signal,
+      id: id, conversationId: conversationId, signal: signal,
       abort: (): void => { stopSession(id); },
     };
     activeSessions.set(id, session);
