@@ -82,6 +82,8 @@ struct SettingExperimentalWebMountPage {
   @State oauthSecret: string = '';
   @State oauthNote: string = '';
   @State oauthBusy: boolean = false;
+  // 长表单默认收起(有已配置应用时);添加/编辑展开,保存成功收起
+  @State oauthFormOpen: boolean = false;
   @State harArchives: HarArchiveRow[] = [];
   @State harNote: string = '';
   @State harBusy: boolean = false;
@@ -149,6 +151,7 @@ struct SettingExperimentalWebMountPage {
     this.oauthApiOrigins = app.apiOrigins.join(',');
     this.oauthSecret = '';
     this.oauthNote = `编辑 ${app.siteId};密钥留空则保留`;
+    this.oauthFormOpen = true;
   }
 
   private saveOauth(): void {
@@ -177,6 +180,7 @@ struct SettingExperimentalWebMountPage {
     getWebMountOAuthRuntime().saveApplication(draft).then((saved: WebMountOAuthApplication): void => {
       this.oauthNote = `已保存 ${saved.siteId}(绑定 ${saved.bindingHash.substring(0, 8)}…)`;
       this.oauthSecret = '';
+      this.oauthFormOpen = false;
       this.refreshOauth();
     }).catch((error: Error): void => {
       this.oauthNote = `保存失败:${error.message}`;
@@ -824,6 +828,32 @@ struct SettingExperimentalWebMountPage {
         this.OauthRow(app, index >= this.oauthApps.length - 1);
       }, (app: WebMountOAuthApplication): string => app.siteId)
 
+      if (!this.oauthFormOpen && this.oauthApps.length > 0) {
+        Row() {
+          Icon({ name: 'plus', iconSize: 14, color: this.accentColorStore })
+          Text('添加 OAuth 应用')
+            .fontSize(14).fontColor(this.accentColorStore).fontFamily(FONT_SANS_MEDIUM)
+            .margin({ left: 6 })
+        }
+        .width('100%')
+        .alignItems(VerticalAlign.Center)
+        .constraintSize({ minHeight: 44 })
+        .padding({ left: 14, right: 14, top: 6, bottom: 6 })
+        .onClick((): void => {
+          this.oauthSiteId = '';
+          this.oauthAuthEndpoint = '';
+          this.oauthTokenEndpoint = '';
+          this.oauthClientId = '';
+          this.oauthRedirect = '';
+          this.oauthScope = '';
+          this.oauthApiOrigins = '';
+          this.oauthSecret = '';
+          this.oauthNote = '';
+          this.oauthFormOpen = true;
+        })
+      }
+
+      if (this.oauthFormOpen || this.oauthApps.length === 0) {
       Text('站点 ID')
         .fontSize(12).fontColor(INK3).fontFamily(FONT_SANS_MEDIUM)
         .width('100%').padding({ left: 14, right: 14, top: 12 })
@@ -907,6 +937,7 @@ struct SettingExperimentalWebMountPage {
       }
       .width('100%')
       .padding({ left: 14, right: 14, top: 10, bottom: 14 })
+      }
     }
     .width('100%')
   }
@@ -1069,16 +1100,16 @@ struct SettingExperimentalWebMountPage {
               text: '关闭「启用 WebMount」会立即结束后台会话页面,但已单独勾选 WebMount 的助手仍可继续使用',
             })
 
-            PlainSection({ label: '飞书账号（OAuth）' })
-            CardGroup({ radius: 18, stroke: true, content: (): void => { this.FeishuCard(); } })
+            PlainSection({ label: '站点' })
+            CardGroup({ radius: 18, stroke: true, content: (): void => { this.SitesCard(); } })
               .margin({ left: 16, right: 16 })
-
-            PlainSection({ label: 'Cookie 导入' })
-            CardGroup({ radius: 18, stroke: true, content: (): void => { this.CookieCard(); } })
-              .margin({ left: 16, right: 16 })
+            if (this.addOpen) {
+              CardGroup({ radius: 18, stroke: true, content: (): void => { this.AddFormCard(); } })
+                .margin({ left: 16, right: 16, top: 12 })
+            }
             FooterNote({
-              text: '逐行 name=value,写入 WebView Cookie 罐(与 wm_* 工具/页面登录共享);'
-                + '域名可带 https:// 前缀,不带则自动补。',
+              text: '授权按域名匹配(含子域)。Agent 请求添加新站点时会在聊天中向你确认;'
+                + '点击类操作(wm_click)与站点增删均需逐次批准。',
             })
 
             PlainSection({ label: '站点 OAuth' })
@@ -1096,17 +1127,17 @@ struct SettingExperimentalWebMountPage {
               text: '导入的完整 HAR 只保留在本机;Agent 只能看到脱敏摘要,重放需逐次批准且仅限当前同源 GET/HEAD。',
             })
 
-            PlainSection({ label: '站点' })
-            CardGroup({ radius: 18, stroke: true, content: (): void => { this.SitesCard(); } })
+            PlainSection({ label: 'Cookie 导入' })
+            CardGroup({ radius: 18, stroke: true, content: (): void => { this.CookieCard(); } })
               .margin({ left: 16, right: 16 })
-            if (this.addOpen) {
-              CardGroup({ radius: 18, stroke: true, content: (): void => { this.AddFormCard(); } })
-                .margin({ left: 16, right: 16, top: 12 })
-            }
             FooterNote({
-              text: '授权按域名匹配(含子域)。Agent 请求添加新站点时会在聊天中向你确认;'
-                + '点击类操作(wm_click)与站点增删均需逐次批准。',
+              text: '逐行 name=value,写入 WebView Cookie 罐(与 wm_* 工具/页面登录共享);'
+                + '域名可带 https:// 前缀,不带则自动补。',
             })
+
+            PlainSection({ label: '飞书账号（OAuth）' })
+            CardGroup({ radius: 18, stroke: true, content: (): void => { this.FeishuCard(); } })
+              .margin({ left: 16, right: 16 })
 
             PageSpacer()
           }

@@ -148,7 +148,7 @@ struct SettingPage {
 
   @Builder
   AdvancedCard(): void {
-    CardRow({ label: 'WebMount', iconName: 'globe',
+    CardRow({ label: '站点', iconName: 'globe',
       onRowClick: (): void => { this.go('pages/SettingExperimentalWebMountPage'); } })
     CardRow({ label: '子代理', iconName: 'ph_users',
       onRowClick: (): void => { this.go('pages/SettingSubAgentPage'); } })
