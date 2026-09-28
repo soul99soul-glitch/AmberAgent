@@ -74,6 +74,8 @@ data class MacGatewayStatus(
     val device: Device,
     val serverTime: Double,
     val health: Health? = null,
+    /** Synara web address for replying to / approving Synara-hosted tasks; opened in the browser. */
+    val synaraURL: String? = null,
     val sessions: List<Session>,
 ) {
     @Serializable
@@ -98,6 +100,8 @@ data class MacGatewayStatus(
         val agent: String,
         val subject: String,
         val origin: String,
+        /** App hosting the session on the Mac, e.g. "Synara". */
+        val host: String? = null,
         val state: String,
         val waitReason: String? = null,
         val abnormal: Boolean,

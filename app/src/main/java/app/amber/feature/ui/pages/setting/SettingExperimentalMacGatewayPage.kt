@@ -2,6 +2,8 @@ package app.amber.feature.ui.pages.setting
 
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.Intent
+import android.net.Uri
 import android.os.Build
 import android.text.format.DateUtils
 import android.text.format.Formatter
@@ -226,7 +228,7 @@ fun SettingExperimentalMacGatewayPage(
                     }
                     status?.health?.let { health -> item { HealthSection(health) } }
                     item {
-                        TasksSection(status?.sessions.orEmpty().take(VISIBLE_TASK_LIMIT)) { session, monitored ->
+                        TasksSection(status?.sessions.orEmpty().take(VISIBLE_TASK_LIMIT), status?.synaraURL) { session, monitored ->
                             scope.launch {
                                 runCatching { repository.setMonitored(session.key, monitored) }
                                     .onFailure { notice = Notice(it.describe(context), error = true) }
@@ -283,10 +285,20 @@ private fun HealthSection(health: MacGatewayStatus.Health) {
 @Composable
 private fun TasksSection(
     sessions: List<MacGatewayStatus.Session>,
+    synaraURL: String?,
     onMonitoredChange: (MacGatewayStatus.Session, Boolean) -> Unit,
 ) {
     val workspace = workspaceColors()
+    val context = LocalContext.current
     ExperimentSectionCard(title = stringResource(R.string.mac_gateway_section_tasks)) {
+        if (synaraURL != null) {
+            ExperimentActionRow {
+                ExperimentActionButton(stringResource(R.string.mac_gateway_open_synara), enabled = true, primary = true) {
+                    // Straight to the browser: the app's openUrl helper logs the URL, which carries the Synara gate secret.
+                    runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(synaraURL))) }
+                }
+            }
+        }
         if (sessions.isEmpty()) {
             ExperimentNote(stringResource(R.string.mac_gateway_no_tasks))
             return@ExperimentSectionCard
@@ -339,17 +351,16 @@ private fun taskDetail(session: MacGatewayStatus.Session): String {
         "codex" -> "Codex"
         else -> stringResource(R.string.mac_gateway_agent_task)
     }
-    val base = stringResource(
+    val state = stringResource(
         when (session.state) {
             "running" -> R.string.mac_gateway_state_running
             "waiting" -> if (session.waitReason == "permission") R.string.mac_gateway_state_waiting_permission else R.string.mac_gateway_state_waiting
             "stalled" -> R.string.mac_gateway_state_stalled
             "completed" -> R.string.mac_gateway_state_completed
-            else -> R.string.mac_gateway_state_stopped
+            else -> if (session.abnormal) R.string.mac_gateway_state_abnormal else R.string.mac_gateway_state_stopped
         },
     )
-    val state = if (session.abnormal) stringResource(R.string.mac_gateway_state_abnormal, base) else base
-    return listOf(agent, state, relativeTime(session.updatedAt)).joinToString(" · ")
+    return listOfNotNull(agent, session.host, state, relativeTime(session.updatedAt)).joinToString(" · ")
 }
 
 @Composable
