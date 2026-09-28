@@ -8,7 +8,8 @@
 //   (AssistantBasicPage.kt:496-501 toIntOrNull()?.takeIf { it > 0 })
 // 请求自定义语义(Android PropertyEditor.kt 忠实):header name/value trim;
 //   body value = JSON,逐键解析,非法 JSON 行内报错并保留旧值(:160-176)
-import { ACCENT,BG,ERROR,INK,INK2,INK3,LINE,SURFACE,TITLE,GUTTER,RADIUS,BODY,BODY2,META } from '../design/tokens.ets';
+import { ACCENT,BG,ERROR,INK,INK2,INK3,INK4,LINE,SURFACE,TITLE,GUTTER,RADIUS,BODY,BODY2,META } from '../design/tokens.ets';
+import { CenteredTitleBar, PlainSection, CardGroup, NavRow, PaperSeparator, PageSpacer } from '../components/PageTemplate.ets';
 import { Icon } from '../components/ui/Icon.ets';
 import { router, promptAction } from '@kit.ArkUI';
 import type {
@@ -36,6 +37,10 @@ interface HeaderDraft {
   uid: string;
   name: string;
   value: string;
+}
+
+interface MenuResult {
+  index: number;
 }
 
 interface BodyDraft {
@@ -354,109 +359,121 @@ struct ChatAssistantsPage {
     });
   }
 
-  build() {
+  @Builder
+  PromptInjectionRow(): void {
+    NavRow({ label: '提示词注入', desc: '模式注入与世界书', iconName: 'doc', isLast: true,
+      onRowClick: (): void => { router.pushUrl({ url: 'pages/ChatPromptsPage' }); } })
+  }
+
+  @Builder
+  AssistantListCard(): void {
+    ForEach(this.items, (a: Assistant, idx: number): void => {
+      this.AssistantRow(a, idx === this.items.length - 1)
+    }, (a: Assistant): string => a.id)
+  }
+
+  @Builder
+  AssistantRow(a: Assistant, isLast: boolean): void {
     Column() {
       Row() {
-        Row() {
-          Icon({ name: 'back', iconSize: 20, color: INK })
-        }
-        .width(44).height(44)
-        .justifyContent(FlexAlign.Center).alignItems(VerticalAlign.Center)
-        .onClick((): void => { router.back(); })
-        .accessibilityText('返回')
-        Text('助手')
-          .fontSize(TITLE).fontWeight(FontWeight.Bold).fontColor(INK)
-          .margin({ left: 8 }).layoutWeight(1)
-        Text('提示词注入').fontSize(13).fontColor(INK3).margin({ right: 16 })
-          .padding({ top: 12, bottom: 12 })
-          .onClick((): void => { router.pushUrl({ url: 'pages/ChatPromptsPage' }); })
-          .accessibilityText('打开提示词注入')
-        Text('+ 新助手')
-          .fontSize(14).fontColor(ACCENT)
-          .padding({ left: 12, right: 12, top: 12, bottom: 12 })
-          .constraintSize({ minHeight: 44 })
-          .onClick((): void => this.startCreate())
-          .accessibilityText('新建助手')
+        Text(a.name.length > 0 ? a.name : '未命名助手')
+          .fontSize(15).fontColor(INK)
+          .layoutWeight(1)
+          .maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+        Text('对话')
+          .fontSize(12).fontColor(ACCENT)
+          .constraintSize({ minWidth: 44, minHeight: 44 }).textAlign(TextAlign.Center)
+          .onClick((): void => {
+            const params: Record<string, string> = {};
+            params['assistantId'] = a.id;
+            router.pushUrl({ url: 'pages/ChatPage', params: params });
+          })
+        Text('扩展')
+          .fontSize(12).fontColor(INK3)
+          .constraintSize({ minWidth: 44, minHeight: 44 }).textAlign(TextAlign.Center)
+          .onClick((): void => {
+            const params: Record<string, string> = {};
+            params['assistantId'] = a.id;
+            router.pushUrl({ url: 'pages/ChatAssistantExtensionsPage', params: params });
+          })
+        Text('更多')
+          .fontSize(12).fontColor(INK3)
+          .constraintSize({ minWidth: 44, minHeight: 44 }).textAlign(TextAlign.Center)
+          .onClick((): void => { this.showRowMenu(a); })
       }
-      .width('100%').padding({ left: 14, right: 14, top: this.statusBarHeight + 2, bottom: 11 })
-      .alignItems(VerticalAlign.Center)
-      .border({ width: { bottom: 1 }, color: { bottom: LINE } })
-      .backgroundColor(BG)
+      .width('100%')
+      if (a.systemPrompt.trim().length > 0) {
+        Text(a.systemPrompt)
+          .fontSize(META).fontColor(INK3).margin({ top: 2 })
+          .maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis })
+          .width('100%')
+      }
+    }
+    .width('100%').alignItems(HorizontalAlign.Start)
+    .padding({ left: GUTTER, right: GUTTER, top: 12, bottom: 10 })
+    .onClick((): void => this.startEdit(a))
+    if (!isLast) {
+      PaperSeparator()
+    }
+  }
+
+  // 次要动作收进菜单(工具/MCP/复制/删除),行内不再常驻四枚裸文本
+  private showRowMenu(a: Assistant): void {
+    promptAction.showActionMenu({
+      buttons: [
+        { text: '本地工具', color: INK },
+        { text: 'MCP 选择', color: INK },
+        { text: '复制', color: INK },
+        { text: '删除', color: ERROR },
+      ],
+    }).then((result: MenuResult): void => {
+      if (result.index === 0) {
+        const params: Record<string, string> = {};
+        params['assistantId'] = a.id;
+        router.pushUrl({ url: 'pages/ChatAssistantLocalToolsPage', params: params });
+      } else if (result.index === 1) {
+        const params: Record<string, string> = {};
+        params['assistantId'] = a.id;
+        router.pushUrl({ url: 'pages/ChatAssistantMcpPage', params: params });
+      } else if (result.index === 2) {
+        this.copyAssistant(a);
+      } else if (result.index === 3) {
+        this.confirmDelete(a);
+      }
+    }).catch((): void => {});
+  }
+
+  build() {
+    Column() {
+      CenteredTitleBar({ title: '助手', actionIcon: 'plus',
+        onAction: (): void => this.startCreate() })
 
       if (!this.loaded) {
         Column() {
           Text('加载中…').fontSize(BODY2).fontColor(INK3)
         }.width('100%').padding({ top: 48, bottom: 48 }).alignItems(HorizontalAlign.Center)
       } else if (!this.showEditor) {
-        List() {
-          ForEach(this.items, (a: Assistant): void => {
-            ListItem() {
-              Column() {
-                Row() {
-                  Text(a.name.length > 0 ? a.name : '未命名助手')
-                    .fontSize(15).fontColor(INK)
-                    .layoutWeight(1)
-                    .maxLines(1)
-                    .textOverflow({ overflow: TextOverflow.Ellipsis })
-                  Text('对话')
-                    .fontSize(12).fontColor(ACCENT)
-                    .margin({ right: 14 })
-                    .onClick((): void => {
-                      const params: Record<string, string> = {};
-                      params['assistantId'] = a.id;
-                      router.pushUrl({ url: 'pages/ChatPage', params: params });
-                    })
-                  Text('扩展')
-                    .fontSize(12).fontColor(INK3)
-                    .margin({ right: 14 })
-                    .onClick((): void => {
-                      const params: Record<string, string> = {};
-                      params['assistantId'] = a.id;
-                      router.pushUrl({ url: 'pages/ChatAssistantExtensionsPage', params: params });
-                    })
-                  // D-107:本地工具(AssistantLocalToolPage tab → 独立页)
-                  Text('工具')
-                    .fontSize(12).fontColor(INK3)
-                    .margin({ right: 14 })
-                    .onClick((): void => {
-                      const params: Record<string, string> = {};
-                      params['assistantId'] = a.id;
-                      router.pushUrl({ url: 'pages/ChatAssistantLocalToolsPage', params: params });
-                    })
-                  // D-121:助手 MCP 选择(AssistantMcpPage tab 'MCP' → 独立页,
-                  //   placement 同 '工具' 先例)
-                  Text('MCP')
-                    .fontSize(12).fontColor(INK3)
-                    .margin({ right: 14 })
-                    .onClick((): void => {
-                      const params: Record<string, string> = {};
-                      params['assistantId'] = a.id;
-                      router.pushUrl({ url: 'pages/ChatAssistantMcpPage', params: params });
-                    })
-                  Text('复制')
-                    .fontSize(12).fontColor(INK3)
-                    .margin({ right: 14 })
-                    .onClick((): void => this.copyAssistant(a))
-                  Text('删除')
-                    .fontSize(12).fontColor(ERROR)
-                    .onClick((): void => this.confirmDelete(a))
-                }
-                .width('100%')
-                if (a.systemPrompt.trim().length > 0) {
-                  Text(a.systemPrompt)
-                    .fontSize(META).fontColor(INK3).margin({ top: 4 })
-                    .maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis })
-                }
-              }
-              .width('100%').alignItems(HorizontalAlign.Start)
-              .padding({ left: GUTTER, right: GUTTER, top: 14, bottom: 14 })
-              .backgroundColor(SURFACE)
-              .onClick((): void => this.startEdit(a))
+        Scroll() {
+          Column() {
+            PlainSection({ label: '配置' })
+            CardGroup({ radius: 18, stroke: true, content: (): void => { this.PromptInjectionRow(); } })
+              .margin({ left: GUTTER, right: GUTTER })
+            PlainSection({ label: '全部助手' })
+            if (this.items.length === 0) {
+              Text('还没有助手。点右上角 + 新建。')
+                .fontSize(BODY2).fontColor(INK3)
+                .width('100%').padding({ left: GUTTER, right: GUTTER, top: 16 })
+            } else {
+              CardGroup({ radius: 18, stroke: true, content: (): void => { this.AssistantListCard(); } })
+                .margin({ left: GUTTER, right: GUTTER })
             }
-          }, (a: Assistant): string => a.id)
+            PageSpacer()
+          }
+          .width('100%')
         }
-        .width('100%').layoutWeight(1)
-        .divider({ strokeWidth: 1, color: LINE })
+        .layoutWeight(1)
+        .align(Alignment.TopStart)
       } else {
         // ── 编辑器 ──
         Scroll() {

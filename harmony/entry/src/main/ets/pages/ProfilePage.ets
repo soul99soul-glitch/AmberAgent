@@ -15,7 +15,7 @@ import type { common } from '@kit.AbilityKit';
 import type { DisplaySetting, ConversationSummary, Conversation, UIMessage } from '@amber/chat-domain';
 import { getChatKvStore, getChatRepository } from '../di/AppContainer.ets';
 import { compressImageAsDataUrl } from '../platform_impl/ImageCompress.ets';
-import { PageTitleBar, SectionHeader, PageSpacer } from '../components/PageTemplate.ets';
+import { CenteredTitleBar, PlainSection, CardGroup, NavRow, PageSpacer } from '../components/PageTemplate.ets';
 import { UIAvatar } from '../components/UIAvatar.ets';
 import { Icon } from '../components/ui/Icon.ets';
 import { FONT_MONO } from '../design/fonts.ets';
@@ -430,7 +430,7 @@ struct ProfilePage {
 
   build() {
     Column() {
-      PageTitleBar({ title: '个人中心' })
+      CenteredTitleBar({ title: '个人中心' })
 
       Scroll() {
         Column() {
@@ -488,7 +488,7 @@ struct ProfilePage {
 
           // ── 统计卡片 ──
           if (this.statsLoaded) {
-            SectionHeader({ label: 'STATISTICS' })
+            PlainSection({ label: '统计' })
             Row() {
               Column() {
                 this.statCard('总会话', formatCount(this.stats.totalConversations))
@@ -528,21 +528,12 @@ struct ProfilePage {
             }
 
             // ── 聊天热力图 ──
-            SectionHeader({ label: 'ACTIVITY' })
+            PlainSection({ label: '活跃' })
             this.HeatmapCard()
 
             // ── 助手管理入口(助手体系唯一 UI 入口:列表/编辑/扩展/工具/MCP/记忆) ──
-            Row() {
-              Text('助手管理').fontColor(INK).fontSize(BODY)
-              Text(' ›').fontColor(INK3).fontSize(BODY)
-            }
-            .padding({ left: 18, right: 18, top: 14, bottom: 14 })
-            .backgroundColor(SURFACE)
-            .borderRadius(RADIUS)
-            .margin({ top: 18 })
-            .onClick((): void => {
-              router.pushUrl({ url: 'pages/ChatAssistantsPage' });
-            })
+            PlainSection({ label: '助手' })
+            CardGroup({ radius: 18, stroke: true, content: (): void => { this.AssistantRow(); } })
           } else {
             Column() {
               Text('统计加载中…')
@@ -572,6 +563,12 @@ struct ProfilePage {
     }
     .width('100%').height('100%').backgroundColor(BG)
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
+  }
+
+  @Builder
+  AssistantRow(): void {
+    NavRow({ label: '助手管理', desc: '列表 / 编辑 / 扩展 / 工具 / MCP / 记忆', iconName: 'person',
+      isLast: true, onRowClick: (): void => { router.pushUrl({ url: 'pages/ChatAssistantsPage' }); } })
   }
 
   @Builder
