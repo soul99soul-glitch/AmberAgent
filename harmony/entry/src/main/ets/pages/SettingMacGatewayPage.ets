@@ -224,13 +224,14 @@ struct SettingMacGatewayPage {
     const sessions: MacGatewaySession[] = status.sessions.map((s: MacGatewaySession): MacGatewaySession => {
       if (s.key !== key) return s;
       const copy: MacGatewaySession = {
-        key: s.key, agent: s.agent, subject: s.subject, origin: s.origin, state: s.state, waitReason: s.waitReason,
-        abnormal: s.abnormal, monitored: monitored, updatedAt: s.updatedAt,
+        key: s.key, agent: s.agent, subject: s.subject, origin: s.origin, host: s.host, state: s.state,
+        waitReason: s.waitReason, abnormal: s.abnormal, monitored: monitored, updatedAt: s.updatedAt,
       };
       return copy;
     });
     const next: MacGatewayStatus = {
-      gateway: status.gateway, device: status.device, serverTime: status.serverTime, health: status.health, sessions: sessions,
+      gateway: status.gateway, device: status.device, serverTime: status.serverTime, health: status.health,
+      synaraURL: status.synaraURL, sessions: sessions,
     };
     return next;
   }
@@ -292,7 +293,14 @@ struct SettingMacGatewayPage {
     else if (s.state === 'waiting') state = s.waitReason === 'permission' ? '等你确认' : '等你回复';
     else if (s.state === 'stalled') state = '可能卡住了';
     else if (s.state === 'completed') state = '已完成';
-    return `${agent} · ${state} · ${relativeTime(s.updatedAt)}`;
+    const host: string = s.host === undefined ? '' : `${s.host} · `;
+    return `${agent} · ${host}${state} · ${relativeTime(s.updatedAt)}`;
+  }
+
+  private openSynara(url: string): void {
+    const ctx = this.getUIContext().getHostContext() as common.UIAbilityContext;
+    ctx.startAbility({ action: 'ohos.want.action.viewData', entities: ['entity.system.browsable'], uri: url })
+      .catch((e: Error): void => { this.report(e); });
   }
 
   // ── 分区 ──
@@ -368,6 +376,10 @@ struct SettingMacGatewayPage {
   @Builder
   TasksSection(): void {
     SectionHeader({ label: '任务' })
+    if (this.status?.synaraURL !== undefined) {
+      NavRow({ label: '在 Synara 中回复或确认', desc: '在浏览器中打开 Synara，处理其中的任务', iconName: 'hi_message',
+        onRowClick: (): void => { this.openSynara(this.status?.synaraURL ?? ''); } })
+    }
     if (this.sessions().length === 0) {
       NavRow({ label: '暂无任务', desc: '在 Mac 上使用 Claude Code 或 Codex 后会出现在这里', showChevron: false, isLast: true })
     } else {

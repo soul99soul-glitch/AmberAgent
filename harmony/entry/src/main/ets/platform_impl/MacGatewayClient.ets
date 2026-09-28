@@ -65,6 +65,8 @@ export interface MacGatewaySession {
   agent: string;
   subject: string;
   origin: string;
+  // Mac 上承载该会话的应用,如 Synara
+  host?: string;
   state: string;
   waitReason?: string;
   abnormal: boolean;
@@ -77,6 +79,8 @@ export interface MacGatewayStatus {
   device: MacGatewayDevice;
   serverTime: number;
   health?: MacGatewayHealth;
+  // 在外网回复/确认 Synara 任务的网页地址,用浏览器打开
+  synaraURL?: string;
   sessions: MacGatewaySession[];
 }
 
@@ -105,7 +109,7 @@ export class MacGatewayError extends Error {
 export const describeMacGatewayError = (e: Error): string => {
   if (!(e instanceof MacGatewayError)) return `操作失败：${e.message}`;
   switch (e.kind) {
-    case 'unreachable': return '无法连接 Mac：确认手机与 Mac 在同一局域网或 Tailscale 网络，且 Mac 未睡眠';
+    case 'unreachable': return '无法连接 Mac：确认 Mac 未睡眠，且网络可达（同一局域网、Tailscale 或公网地址）';
     case 'certificate': return 'Mac 的证书与配对时不一致（可能重装过 amber-gateway），请取消配对后重新扫码';
     case 'unauthorized': return '此设备已在 Mac 上被吊销，请重新配对';
     case 'invalid': return 'Mac Gateway 返回了无法识别的数据';
