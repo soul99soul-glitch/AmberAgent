@@ -42,6 +42,12 @@ const toTaskGate = (w: MemoryWorkerGateSnapshot): TaskModelWorkerGate => ({
   daydreamFollowCompressModel: w.daydreamFollowCompressModel,
 });
 
+export const resolveMemoryDaydreamChoice = async (worker: MemoryWorkerGateSnapshot): Promise<ChatProviderChoice | null> => {
+  const ids: TaskModelIds = await loadTaskModelIds();
+  const chatUuid: string = await currentChatModelUuid();
+  return resolveTaskModelChain(daydreamModelCandidates(toTaskGate(worker), ids.compressModelId, chatUuid));
+};
+
 // planDream 编排 deps(VM :143-168 + Planner.kt:74-100)
 // daydream 模型解析在首次调用时求值并缓存(与 ChatPage extraction 闭包同策略,
 //   D-087 登记:运行期改设置需重进页面生效)
@@ -52,12 +58,7 @@ export const loadMemoryDreamPlanOpDeps = async (): Promise<MemoryDreamPlanOpDeps
   let choicePromise: Promise<ChatProviderChoice | null> | null = null;
   const resolveChoice = (): Promise<ChatProviderChoice | null> => {
     if (choicePromise === null) {
-      choicePromise = (async (): Promise<ChatProviderChoice | null> => {
-        const ids: TaskModelIds = await loadTaskModelIds();
-        const chatUuid: string = await currentChatModelUuid();
-        return resolveTaskModelChain(
-          daydreamModelCandidates(toTaskGate(worker), ids.compressModelId, chatUuid));
-      })();
+      choicePromise = resolveMemoryDaydreamChoice(worker);
     }
     return choicePromise;
   };

@@ -905,6 +905,17 @@ export type {
   MemoryKind, MemoryRecallSetting, MemoryRecord, MemoryScope,
 } from './chat/memory_models.ts';
 export {
+  applyMemoryTopicSuggestions, buildMemoryTopicPrompt,
+  decodeMemoryTopicSuggestions, isMemoryTopicSource, pruneMemoryTopics,
+} from './chat/memory_topics.ts';
+export type {
+  MemoryTopicSuggestion, MemoryTopicApplyResult, MemoryTopicPruneResult,
+} from './chat/memory_topics.ts';
+export { renderMemoryDocuments } from './chat/memory_documents.ts';
+export type {
+  MemoryDocumentProjection, MemoryDerivedDocument,
+} from './chat/memory_documents.ts';
+export {
   classifyMemoryFreshness, deriveMemoryExpiresAt,
 } from './chat/memory_time_anchor.ts';
 export type { MemoryFreshness } from './chat/memory_time_anchor.ts';

@@ -50,6 +50,13 @@ MCP OAuth 和无主体的幻灯片字体维持原裁定。
 账号、站点服务或工具链问题把其他已授权、独立工作全部停住。遇到硬阻断保留具体证据，
 不把“登记”改成“完成”。
 
+E7 后续阶段预查校正：小说当前 global/fixed 模型已复用 Chat providers，不再要求重填
+深读配置；E8 引导解释的是 Chat 与深读两个真实入口，保留模型配置 UUID 与 API modelId
+的区别。E9 将 Gemini Code Assist 与 Antigravity 独立身份和请求封装分开核证，不靠名称互换。
+E10 的 Google 内置工具需同时处理工具组合和真实响应 parts，不能只补请求字段。
+E13 的 DATA_TRANSFER 进度更新和 manifest backgroundModes 配置按官方能力核实，
+不把 updateBackgroundRunning 的类型更新当作续约。精确合同见各阶段设计与 packet。
+
 E2 的平台边界已通过离线官方 `faqs-network-95` 查证：普通三方 SSH/Mosh 不能用
 DATA_TRANSFER 承诺长期后台保活，TASK_KEEPING 需要系统 ACL。异步 job 不等同于
 系统后台常驻；断线状态必须真实，回前台不得自动重发未确认命令。Asset SECRET

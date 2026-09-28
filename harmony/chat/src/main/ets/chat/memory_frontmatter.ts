@@ -45,6 +45,7 @@ export interface MemoryFrontmatterCodecDeps {
 export const encodeMemoryFrontmatter = (
   record: MemoryRecord, deps: MemoryFrontmatterCodecDeps = {},
 ): string => {
+  if (record.kind === 'topic') throw new Error('派生主题不能作为源记忆导出');
   const nowFn: () => number = deps.now ?? ((): number => Date.now());
   let out: string = '';
   out += '---\n';
@@ -126,6 +127,7 @@ export const decodeMemoryFrontmatter = (
   text: string, deps: MemoryFrontmatterCodecDeps = {},
 ): MemoryRecord => {
   const nowFn: () => number = deps.now ?? ((): number => Date.now());
+  if (!text.trimStart().startsWith('---')) throw new Error('Invalid memory frontmatter');
   // split('---', limit=3):第三段保留其余分隔符原样
   const segments: string[] = text.split('---');
   if (segments.length < 3) throw new Error('Invalid memory frontmatter');
@@ -139,6 +141,7 @@ export const decodeMemoryFrontmatter = (
   }
   const scope: MemoryScope = memoryScopeFromWireName(frontmatter.get('scope') ?? null);
   const kind: MemoryKind = memoryKindFromWireName(frontmatter.get('kind') ?? null);
+  if (kind === 'topic') throw new Error('派生主题不能作为源记忆导入');
   const idText: string | undefined = frontmatter.get('id');
   const idParsed: number = idText !== undefined && /^-?\d+$/.test(idText)
     ? Number.parseInt(idText, 10) : 0;
@@ -166,5 +169,7 @@ export const decodeMemoryFrontmatter = (
     createdAt: createdAtText !== undefined ? parseInstant(createdAtText) : nowFn(),
     updatedAt: updatedAtText !== undefined ? parseInstant(updatedAtText) : nowFn(),
     lastUsedAt: null,
+    topicTitle: null,
+    memberIds: [],
   };
 };

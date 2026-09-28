@@ -17,12 +17,12 @@ export const memoryScopeFromWireName = (value: string | null): MemoryScope => {
 };
 
 // ===== MemoryKind(MemoryEnums.kt:32-55)— wireName 即联合值 =====
-export type MemoryKind = 'user' | 'feedback' | 'project' | 'reference' | 'routine' | 'note';
+export type MemoryKind = 'user' | 'feedback' | 'project' | 'reference' | 'routine' | 'note' | 'topic';
 
 // fromWireName:未知 → NOTE 回退(:52-53)
 export const memoryKindFromWireName = (value: string | null): MemoryKind => {
   if (value === 'user' || value === 'feedback' || value === 'project' ||
-    value === 'reference' || value === 'routine' || value === 'note') {
+    value === 'reference' || value === 'routine' || value === 'note' || value === 'topic') {
     return value;
   }
   return 'note';
@@ -86,6 +86,8 @@ export interface MemoryRecord {
   createdAt: number;
   updatedAt: number;
   lastUsedAt: number | null;
+  topicTitle: string | null;
+  memberIds: number[];
 }
 
 export const makeMemoryRecord = (
@@ -106,6 +108,8 @@ export const makeMemoryRecord = (
   createdAt: opts.createdAt ?? 0,
   updatedAt: opts.updatedAt ?? 0,
   lastUsedAt: opts.lastUsedAt ?? null,
+  topicTitle: opts.topicTitle ?? null,
+  memberIds: opts.memberIds ?? [],
 });
 
 // ===== MemoryCandidate(MemoryModels.kt:90-105)=====

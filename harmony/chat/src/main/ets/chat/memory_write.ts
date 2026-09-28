@@ -16,6 +16,7 @@
 import type { AssistantMemory } from './builtin_memory_tools.ts';
 import type { MemoryKind, MemoryRecord, MemoryScope } from './memory_models.ts';
 import { makeMemoryRecord } from './memory_models.ts';
+import { invalidateMemoryTopicsForSource, pruneMemoryTopics } from './memory_topics.ts';
 
 // MemoryRepository.kt:26-30 伴生常量
 export const MEMORY_BUCKET_GLOBAL: string = '__global__';
@@ -74,6 +75,7 @@ const coerce01 = (v: number): number => Math.min(1, Math.max(0, v));
 export const appendMemoryRecord = (
   records: MemoryRecord[], params: MemoryAddParams, now: number,
 ): MemoryWriteResult => {
+  if (params.kind === 'topic') throw new Error('主题只能通过主题聚合生成');
   const supersedes: number[] = [];
   for (const id of (params.supersedesIds ?? [])) {
     if (supersedes.indexOf(id) < 0) supersedes.push(id);
@@ -104,16 +106,24 @@ export const updateMemoryRecordContent = (
 ): MemoryWriteResult => {
   const index: number = records.findIndex((r: MemoryRecord): boolean => r.id === id);
   if (index < 0) throw new Error(`Memory record #${id} not found`);
+  if (records[index].kind === 'topic') throw new Error('主题摘要只读，请重新聚合');
   const updated: MemoryRecord = { ...records[index], content, updatedAt: now };
   const next: MemoryRecord[] = [...records];
   next[index] = updated;
-  return { records: next, record: updated };
+  return { records: records[index].content === content ? next
+    : invalidateMemoryTopicsForSource(next, id, now), record: updated };
 };
 
 // deleteMemory(:145-147)— 未命中 = SQL DELETE 0 行(no-op,不抛错)
 export const deleteMemoryRecord = (
-  records: MemoryRecord[], id: number,
-): MemoryRecord[] => records.filter((r: MemoryRecord): boolean => r.id !== id);
+  records: MemoryRecord[], id: number, now: number = Date.now(),
+): MemoryRecord[] => {
+  if (records.find((record: MemoryRecord): boolean => record.id === id)?.kind === 'topic') {
+    throw new Error('删除主题请使用主题专用操作');
+  }
+  const next: MemoryRecord[] = records.filter((record: MemoryRecord): boolean => record.id !== id);
+  return pruneMemoryTopics(invalidateMemoryTopicsForSource(next, id, now), now).records;
+};
 
 // toAssistantMemory(:218-227)
 export const memoryRecordToAssistantMemory = (record: MemoryRecord): AssistantMemory => ({
@@ -131,7 +141,7 @@ export const memoryRecordToAssistantMemory = (record: MemoryRecord): AssistantMe
 export const memoriesOfAssistant = (
   records: MemoryRecord[], assistantId: string,
 ): AssistantMemory[] => records
-  .filter((r: MemoryRecord): boolean => r.assistantId === assistantId)
+  .filter((r: MemoryRecord): boolean => r.assistantId === assistantId && r.kind !== 'topic')
   .map(memoryRecordToAssistantMemory);
 
 // upsertRecord(:135-143)+ toEntity(:247-263)映射 —
@@ -141,6 +151,10 @@ export const memoriesOfAssistant = (
 export const upsertMemoryRecord = (
   records: MemoryRecord[], record: MemoryRecord, now: number,
 ): MemoryWriteResult => {
+  const original: MemoryRecord | undefined = records.find((r: MemoryRecord): boolean => r.id === record.id);
+  if (record.kind === 'topic' || original?.kind === 'topic') {
+    throw new Error('普通记忆写入不能创建或覆盖主题');
+  }
   const supersedes: number[] = [];
   for (const id of record.supersedesIds) {
     if (supersedes.indexOf(id) < 0) supersedes.push(id);
@@ -162,6 +176,8 @@ export const upsertMemoryRecord = (
     createdAt: record.createdAt > 0 ? record.createdAt : now,
     updatedAt: now,
     lastUsedAt: record.lastUsedAt,
+    topicTitle: record.topicTitle ?? null,
+    memberIds: record.memberIds ?? [],
   });
   if (record.id === 0) {
     const withId: MemoryRecord = { ...mapped, id: nextMemoryId(records) };
@@ -174,5 +190,9 @@ export const upsertMemoryRecord = (
   }
   const next: MemoryRecord[] = [...records];
   next[index] = mapped;
-  return { records: next, record: mapped };
+  const changedSource: boolean = original !== undefined && (
+    original.content !== mapped.content || original.kind !== mapped.kind || original.scope !== mapped.scope
+    || original.archived !== mapped.archived || original.expiresAt !== mapped.expiresAt);
+  return { records: pruneMemoryTopics(changedSource
+    ? invalidateMemoryTopicsForSource(next, record.id, now) : next, now).records, record: mapped };
 };

@@ -24,9 +24,11 @@ export interface MemoryWorkerGateSnapshot {
   // D-085f:MemoryModels.kt:144-145(dream 门;MemoryWorkerDreamGate 消费)
   dreamMaintenanceEnabled: boolean;
   dreamModelEnabled: boolean;
+  // Explicit opt-in for derived topic writes; independent from extraction and recall.
+  topicWriteEnabled: boolean;
+  timeoutMs: number;
   // D-085g:MemoryModels.kt:149-150,152
-  //   runOnlyOnCharging:Android 调度器同样忽略(SettingAgentMemoryPage.kt:514 注释),
-  //   仅为线格式忠实保留
+  // Topic foreground coordinator checks the actual charging state.
   runOnlyOnIdle: boolean;
   runOnlyOnCharging: boolean;
   dreamMaxDailyRuns: number;
@@ -112,6 +114,8 @@ interface MemoryWorkerJson {
   maxDailyRuns?: number;
   dreamMaintenanceEnabled?: boolean;
   dreamModelEnabled?: boolean;
+  topicWriteEnabled?: boolean;
+  timeoutMs?: number;
   runOnlyOnIdle?: boolean;
   runOnlyOnCharging?: boolean;
   dreamMaxDailyRuns?: number;
@@ -190,6 +194,7 @@ export const defaultAgentRuntimeSnapshot = (): AgentRuntimeSnapshot => ({
   memoryWorker: {
     enabled: true, extractionEnabled: true, maxDailyRuns: 8,
     dreamMaintenanceEnabled: true, dreamModelEnabled: false,
+    topicWriteEnabled: false, timeoutMs: 120000,
     runOnlyOnIdle: true, runOnlyOnCharging: true, dreamMaxDailyRuns: 1,
     modelId: DEFAULT_AUTO_MODEL_ID, followCompressModel: true,
     daydreamModelId: DEFAULT_AUTO_MODEL_ID, daydreamFollowCompressModel: true,
@@ -225,6 +230,9 @@ const parseMemoryWorker = (raw: MemoryWorkerJson | undefined): MemoryWorkerGateS
   dreamMaintenanceEnabled: raw?.dreamMaintenanceEnabled !== false,
   // 默认 false(:145)+ 旧别名迁移(dreamEnabled=true → true)
   dreamModelEnabled: raw?.dreamModelEnabled === true || raw?.dreamEnabled === true,
+  topicWriteEnabled: raw?.topicWriteEnabled === true,
+  timeoutMs: raw?.timeoutMs !== undefined && Number.isFinite(raw.timeoutMs) && raw.timeoutMs > 0
+    ? Math.min(120000, raw.timeoutMs) : 120000,
   // 默认 true(:149-150);仅显式 false 关
   runOnlyOnIdle: raw?.runOnlyOnIdle !== false,
   runOnlyOnCharging: raw?.runOnlyOnCharging !== false,
@@ -331,7 +339,9 @@ export const systemLanguage = (): string => {
 export interface MemoryWorkerTogglePatch {
   dreamMaintenanceEnabled?: boolean;
   dreamModelEnabled?: boolean;
+  topicWriteEnabled?: boolean;
   runOnlyOnIdle?: boolean;
+  runOnlyOnCharging?: boolean;
 }
 
 // Android: settingsStore.update { settings.copy(agentRuntime = ...) } 全文档重写
@@ -365,6 +375,8 @@ export const updateMemoryWorkerToggles = (
   if (patch.runOnlyOnIdle !== undefined) {
     worker.runOnlyOnIdle = patch.runOnlyOnIdle;
   }
+  if (patch.runOnlyOnCharging !== undefined) worker.runOnlyOnCharging = patch.runOnlyOnCharging;
+  if (patch.topicWriteEnabled !== undefined) worker.topicWriteEnabled = patch.topicWriteEnabled;
   root.memoryWorker = worker;
   await kv.put(AGENT_RUNTIME_KEY, JSON.stringify(root));
   return loadAgentRuntimeSnapshot(kv);

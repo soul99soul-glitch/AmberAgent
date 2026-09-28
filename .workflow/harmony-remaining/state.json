@@ -2,7 +2,7 @@
   "objective": "完成所有纳入范围的剩余功能并逐阶段独立审查与验证",
   "baseline": "6840fa551",
   "status": "active",
-  "currentPhase": "E7",
+  "currentPhase": "E8",
   "authorization": "用户授权持续实施、subagent审查、分阶段推进",
   "phases": {
     "E0": "complete",
@@ -13,7 +13,7 @@
     "E5": "in_progress",
     "E6": "in_progress",
     "E7": "in_progress",
-    "E8": "pending",
+    "E8": "in_progress",
     "E9": "pending",
     "E10": "pending",
     "E11": "pending",
@@ -36,10 +36,13 @@
     "E4SourceCommit": "3dc3b6b9d",
     "E5Design": "results/E5-plugin-design.md; model/schema contract and independent modules started",
     "E5": "Source independent package/native/runner/integration A/B PASS; focused checks/types/lint/Release build/sign verify PASS; C real JSVM/ports/UI/install pending device; see E5-gate.md",
-    "E6Contract": "frozen: packets/E6-contract.md; detached per-conversation service/dependencies/tools/auxiliary + Page/list/parent subagent integration; precise independent review fixes in progress",
+    "E6Contract": "frozen: packets/E6-contract.md; detached per-conversation execution and independent source reviews closed; device C pending",
     "E5SourceCommit": "9f950cf39",
     "E6": "Source independent A/B PASS; necessary A/B group, affected projection red/green and one browser scope group PASS; final types/lint0error/Release/sign verify PASS; C device navigation/UI/install pending. See E6-gate.md",
-    "E7Contract": "frozen: packets/E7-contract.md; results/E7-memory-topic-design.md actual iOS/domain/store/UI evidence"
+    "E6SourceCommit": "6305cf66b",
+    "E7Contract": "frozen: packets/E7-contract.md; results/E7-memory-topic-design.md actual iOS/domain/store/UI evidence",
+    "E7": "Source independent A/B PASS; only domain and actual Entry controlled group plus specific derived-import/expiry red-green PASS; types/affected lint NoDefects/final Release9.680s/local sign verify PASS. C actual provider/platform/UI/install pending; see E7-gate.md",
+    "E8Contract": "frozen: packets/E8-contract.md; results/E8-task-provider-design.md actual seven slots/provider UUID identity/consumer/setup evidence"
   },
   "blockers": [
     {
@@ -66,6 +69,11 @@
       "phase": "E6",
       "kind": "device_connection",
       "details": "Necessary real A→B→A/parallel stop and light/dark indicators/WebView host checks pending latest recorded HDC Empty; no repeated recovery/matrix. Final source Release built and local sign verified; E7 independent source continues."
+    },
+    {
+      "phase": "E7",
+      "kind": "device_connection",
+      "details": "Latest recorded HDC Empty; final source Release built/local sign verified and independent A/B closed. Necessary actual platform/charging/provider topic run and UI light/dark/source/node/document/install/launch pending. No repeated device recovery or matrix; E8 independent source continues."
     }
   ]
 }

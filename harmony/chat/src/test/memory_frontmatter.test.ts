@@ -22,6 +22,8 @@ const record: MemoryRecord = {
   createdAt: 1750000000000,
   updatedAt: 1750000000000,
   lastUsedAt: null,
+  topicTitle: null,
+  memberIds: [],
 };
 
 test('round-trip: scalar 含反斜杠/引号时 encode→decode 无失真', () => {

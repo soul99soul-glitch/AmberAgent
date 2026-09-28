@@ -23,6 +23,7 @@ import { runNativeTokenCounterFixture } from '../platform_impl/NativeTokenCounte
 import { runSSHRuntimeFixture } from '../platform_impl/SSHRuntimeFixture.ets';
 import { runRuntimeE3Fixture } from '../platform_impl/RuntimeE3Fixture.ets';
 import { cancelNativePluginJsSessions } from '../platform_impl/NativePluginJsTransport.ets';
+import { getMemoryTopicCoordinator } from '../platform_impl/MemoryTopicOps.ets';
 
 const DOMAIN: number = 0x0001;
 const TAG: string = 'DeepRead.EntryAbility';
@@ -360,6 +361,7 @@ export default class EntryAbility extends UIAbility {
   onForeground(): void {
     hilog.info(DOMAIN, TAG, 'onForeground — 回前台续跑');
     AppStorage.setOrCreate<boolean>('appBackgrounded', false);
+    getMemoryTopicCoordinator().foreground();
     // 后台生成保活对称释放(回到前台即不需要长时任务)
     stopGenerationKeepAlive(this.context).catch((): void => {});
   }
@@ -367,6 +369,7 @@ export default class EntryAbility extends UIAbility {
   onBackground(): void {
     hilog.info(DOMAIN, TAG, 'onBackground — 切后台暂停');
     AppStorage.setOrCreate<boolean>('appBackgrounded', true);
+    getMemoryTopicCoordinator().background();
     cancelNativePluginJsSessions();
     interruptTerminalForBackground().catch((e: Error): void => {
       hilog.warn(DOMAIN, TAG, 'terminal background disconnect failed: %{public}s', e.message);

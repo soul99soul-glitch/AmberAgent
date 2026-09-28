@@ -18,7 +18,7 @@ export interface MemorySummaryGroups {
 }
 
 const summaryVisible = (m: AssistantMemory): boolean =>
-  !m.archived && !isSensitiveMemoryContent(m.content);
+  m.kind !== 'topic' && !m.archived && !isSensitiveMemoryContent(m.content);
 
 const isStableKind = (m: AssistantMemory): boolean =>
   m.scope === 'core'

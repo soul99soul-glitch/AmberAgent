@@ -131,6 +131,7 @@ export const parseMemoryCandidates = (
     const expiresInDays: number | null = longOrNull(obj['expires_in_days']);
     const scopeValue: string | null = stringOrNull(obj['scope']);
     const kindValue: string | null = stringOrNull(obj['kind']);
+    if (kindValue === 'topic') throw new Error('记忆提炼不能创建派生主题');
     const scope: MemoryScope = scopeFromWireOrDefault(scopeValue);
     out.push({
       explicitScope: scopeValue !== null && MEMORY_SCOPE_WIRES.indexOf(scopeValue) >= 0,

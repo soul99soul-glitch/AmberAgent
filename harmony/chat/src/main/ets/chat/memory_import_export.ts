@@ -120,7 +120,8 @@ export const exportMemoriesTo = async (
 ): Promise<MemoryExportResult> => {
   const nowFn: () => number = deps.now ?? ((): number => Date.now());
   const root: string = resolveMemoryExportRoot(directory);
-  const records: MemoryRecord[] = await deps.getAllRecords();
+  const records: MemoryRecord[] = (await deps.getAllRecords()).filter(
+    (record: MemoryRecord): boolean => record.kind !== 'topic');
   const events: MemoryEvent[] = await deps.getRecentEvents(500);
   for (const kind of MEMORY_KIND_WIRES) {
     await deps.fs.mkdirs(joinPath(root, `memories/${kind}`));
@@ -162,7 +163,8 @@ export const importMemoriesFrom = async (
   const resolvedRoot: string = await resolveExistingRoot(root, deps.fs);
   // 去重索引须可变:固定快照下,前一个文件插入的记录不进索引,
   // 导入包内相同内容的文件会互相重复插入(id=0 双插)
-  const known: MemoryRecord[] = [...await deps.getAllRecords()];
+  const known: MemoryRecord[] = (await deps.getAllRecords()).filter(
+    (record: MemoryRecord): boolean => record.kind !== 'topic');
   let imported: number = 0;
   for (const dir of [joinPath(resolvedRoot, 'memories'), joinPath(resolvedRoot, 'archive')]) {
     if (!await deps.fs.exists(dir)) continue;

@@ -8,9 +8,9 @@ import type { MemoryCandidate, MemoryRecord } from './memory_models.ts';
 export const buildMemoryDreamPrompt = (
   records: MemoryRecord[], candidates: MemoryCandidate[],
 ): string => {
-  const recordLines: string = records.map(
+  const recordLines: string = records.filter((record: MemoryRecord): boolean => record.kind !== 'topic').map(
     (r: MemoryRecord): string => `- #${r.id} [${r.scope}/${r.kind}] ${r.content}`).join('\n');
-  const candidateLines: string = candidates.map(
+  const candidateLines: string = candidates.filter((candidate: MemoryCandidate): boolean => candidate.kind !== 'topic').map(
     (c: MemoryCandidate): string => `- #${c.id} [${c.scope}/${c.kind}] ${c.content}`).join('\n');
   return 'Review AmberAgent memories and produce a reviewable JSON diff.\n' +
     'Return only JSON with keys: merge, promote, archive, supersede, delete_suggestions, notes.\n' +
