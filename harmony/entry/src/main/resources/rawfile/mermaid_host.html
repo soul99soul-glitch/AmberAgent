@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>
+  html, body { margin: 0; padding: 8px; background: transparent; }
+  #app { width: 100%; overflow: auto; }
+  #app svg { max-width: 100%; height: auto; }
+  pre { margin: 0; font-size: 11px; color: #999; white-space: pre-wrap; }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script src="mermaid.min.js"></script>
+<script>
+// D7-3:本地 mermaid 沙箱(host 页无网络;strict 安全级,标签禁 HTML)
+mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', theme: 'default' });
+let __amberSeq = 0;
+window.__amberRenderMermaid = async function(src) {
+  const app = document.getElementById('app');
+  const seq = ++__amberSeq;
+  try {
+    const id = 'amber-mmd-' + seq;
+    const out = await mermaid.render(id, src);
+    if (seq !== __amberSeq) return; // 流式期间只落最新一次
+    app.innerHTML = out.svg;
+  } catch (e) {
+    if (seq !== __amberSeq) return;
+    const msg = String((e && e.message) || e).replace(/[<>&]/g, '');
+    app.innerHTML = '<pre>mermaid 渲染失败:' + msg + '</pre>';
+  }
+};
+</script>
+</body>
+</html>

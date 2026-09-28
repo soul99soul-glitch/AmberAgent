@@ -11,12 +11,31 @@ import { pasteboard } from '@kit.BasicServicesKit';
 @Component
 export struct ChatMessageCopySheet {
   @Prop message: UIMessage;
+  // D7-4:复制格式(false = 纯文本,true = Markdown)
+  @State formatMarkdown: boolean = false;
   onDismiss: () => void = (): void => {};
 
   private copyToClipboard(text: string): void {
     // 照搬 EntryLocalToolPorts.ets:30 正确用法
     const board: pasteboard.SystemPasteboard = pasteboard.getSystemPasteboard();
     board.setDataSync(pasteboard.createData(pasteboard.MIMETYPE_TEXT_PLAIN, text));
+  }
+
+  // 全部复制文本:纯文本 = toText;Markdown = 结构重建(text 原样/
+  //   reasoning 引用块/tool 标记行)
+  private wholeText(): string {
+    if (!this.formatMarkdown) return toText(this.message);
+    let md: string = '';
+    for (const p of this.message.parts) {
+      if (p.type === 'text') {
+        md += `${p.text}\n\n`;
+      } else if (p.type === 'reasoning') {
+        md += `> **思考过程:**\n> ${p.reasoning.replace(/\n/g, '\n> ')}\n\n`;
+      } else if (p.type === 'tool') {
+        md += `**工具调用:** \`${p.toolName}\`\n\n`;
+      }
+    }
+    return md.trim();
   }
 
   build(): void {
@@ -31,6 +50,27 @@ export struct ChatMessageCopySheet {
       .width('100%')
       .padding({ left: 16, right: 16, top: 12, bottom: 8 })
 
+      // D7-4:复制格式(纯文本 / Markdown)
+      Row() {
+        Text('纯文本')
+          .fontSize(META)
+          .fontColor(this.formatMarkdown ? INK3 : ACCENT)
+          .padding({ left: 12, right: 12, top: 6, bottom: 6 })
+          .backgroundColor(this.formatMarkdown ? Color.Transparent : SURFACE2)
+          .borderRadius(8)
+          .onClick((): void => { this.formatMarkdown = false; })
+        Text('Markdown')
+          .fontSize(META)
+          .fontColor(this.formatMarkdown ? ACCENT : INK3)
+          .padding({ left: 12, right: 12, top: 6, bottom: 6 })
+          .backgroundColor(this.formatMarkdown ? SURFACE2 : Color.Transparent)
+          .borderRadius(8)
+          .margin({ left: 8 })
+          .onClick((): void => { this.formatMarkdown = true; })
+      }
+      .width('100%')
+      .padding({ left: 16, right: 16, bottom: 4 })
+
       // 收集非空 text parts(Android isNotBlank 过滤)
       if (this.hasTextParts()) {
         // 全部复制按钮
@@ -38,7 +78,7 @@ export struct ChatMessageCopySheet {
           .width('100%')
           .padding({ left: 16, right: 16, top: 10, bottom: 10 })
           .onClick((): void => {
-            this.copyToClipboard(toText(this.message));
+            this.copyToClipboard(this.wholeText());
             this.onDismiss();
           })
 
