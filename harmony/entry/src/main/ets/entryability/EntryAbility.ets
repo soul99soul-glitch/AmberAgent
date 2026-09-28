@@ -17,7 +17,7 @@ import { ACCENT, applyTheme, setAccentColor, BG } from '../design/tokens.ets';
 import { themePackStore, applyCurrentTheme } from '../design/theme_packs.ets';
 import { registerAmberFonts, registerAmberFontsFor } from '../design/fonts.ets';
 import { syncMacGatewayPushTokenOnLaunch } from '../platform_impl/MacGatewayClient.ets';
-import { startGenerationKeepAlive, stopGenerationKeepAlive } from '../platform_impl/BackgroundGenerationKeepAlive.ets';
+import { setGenerationKeepAliveBackground, disposeGenerationKeepAlive } from '../platform_impl/BackgroundGenerationKeepAlive.ets';
 import { hydrateWorkspaceCustomDir, activateWorkspaceCustomDir, currentWorkspaceCustomDir } from '../platform_impl/WorkspaceStore.ets';
 import { runNativeTokenCounterFixture } from '../platform_impl/NativeTokenCounterFixture.ets';
 import { runSSHRuntimeFixture } from '../platform_impl/SSHRuntimeFixture.ets';
@@ -363,8 +363,8 @@ export default class EntryAbility extends UIAbility {
     hilog.info(DOMAIN, TAG, 'onForeground — 回前台续跑');
     AppStorage.setOrCreate<boolean>('appBackgrounded', false);
     getMemoryTopicCoordinator().foreground();
-    // 后台生成保活对称释放(回到前台即不需要长时任务)
-    stopGenerationKeepAlive(this.context).catch((): void => {});
+    // 后台生成保活对称释放(回到前台即不需要长时任务;desired 先行再串行停止)
+    setGenerationKeepAliveBackground(this.context, false).catch((): void => {});
   }
 
   onBackground(): void {
@@ -377,12 +377,13 @@ export default class EntryAbility extends UIAbility {
     interruptTerminalForBackground().catch((e: Error): void => {
       hilog.warn(DOMAIN, TAG, 'terminal background disconnect failed: %{public}s', e.message);
     });
-    // 生成中切后台:DATA_TRANSFER 长时任务保活,流式继续(C6-1)
-    const generating: boolean = AppStorage.get<boolean>('chatGenerating') ?? false;
-    if (generating) {
-      startGenerationKeepAlive(this.context).then((ok: boolean): void => {
-        if (!ok) hilog.warn(DOMAIN, TAG, 'generation keep-alive unavailable, stream may suspend');
-      }).catch((): void => {});
-    }
+    // 生成中切后台:声明 desired,由活动集驱动 DATA_TRANSFER 申请(E13;
+    //   无活动 run 时不会凭空申请;申请失败经 generationKeepAliveLastError 可观测)
+    setGenerationKeepAliveBackground(this.context, true).catch((): void => {});
+  }
+
+  onDestroy(): void {
+    hilog.info(DOMAIN, TAG, 'onDestroy — 清理后台任务与进度发布');
+    disposeGenerationKeepAlive(this.context).catch((): void => {});
   }
 }

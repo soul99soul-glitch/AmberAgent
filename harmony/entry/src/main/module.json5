@@ -21,6 +21,9 @@
         "startWindowIcon": "$media:app_icon",
         "startWindowBackground": "$color:start_window_background",
         "exported": true,
+        // E13:DATA_TRANSFER 长时任务类型声明(生成中切后台保活;
+        //   声明是申请前提,不代表系统已授予/续持)
+        "backgroundModes": ["dataTransfer"],
         "skills": [
           {
             "entities": ["entity.system.home"],

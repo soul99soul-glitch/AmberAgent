@@ -26,7 +26,8 @@ import type { AgentRuntimeSnapshot } from './AgentRuntimePrefs.ets';
 import type { OcrSeed } from './OcrSupport.ets';
 import { EntryAbortController } from './EntryAbortController.ets';
 import { beginConversationRun } from './ConversationRunGuard.ets';
-import { stopGenerationKeepAlive } from './BackgroundGenerationKeepAlive.ets';
+import { reportGenerationProgress } from './BackgroundGenerationKeepAlive.ets';
+import { GenerationProgressTracker } from './GenerationProgressTracker.ets';
 import { prepareConversationSeed, buildConversationTurnDeps } from './ConversationRunDependencies.ets';
 import { buildConversationToolLoop } from './ConversationRunTools.ets';
 import { completeConversationAuxiliary } from './ConversationRunAuxiliary.ets';
@@ -106,6 +107,7 @@ interface ActiveRun {
   controller: EntryAbortController;
   kernel: ChatKernelHost | null;
   context: DetachedConversationContext | null;
+  tracker: GenerationProgressTracker;
   raw: UIMessage[];
   checkpointAt: number;
   checkpointLen: number;
@@ -195,10 +197,15 @@ export class ConversationRunService {
     if (next === this.generating) return;
     this.generating = next;
     AppStorage.setOrCreate<boolean>('chatGenerating', next);
-    if (!next) {
-      const context: Context | undefined = AppStorage.get<Context>('abilityContext');
-      if (context !== undefined) stopGenerationKeepAlive(context).catch((): void => {});
-    }
+    // E13:后台任务的停止由活动集驱动(末个 run 报告 inactive 即触发),此处不再直停
+  }
+
+  private reportRunProgress(record: ActiveRun, active: boolean): void {
+    const context: Context | undefined = AppStorage.get<Context>('abilityContext');
+    if (context === undefined) return;
+    const totals = record.tracker.totals();
+    reportGenerationProgress(context, { source: 'chat', runId: record.id, generationActive: active,
+      receivedChars: totals.chars, receivedBytes: totals.bytes });
   }
   private write<T>(session: ConversationSession, operation: () => Promise<T>): Promise<T> {
     session.pendingWrites++;
@@ -357,11 +364,14 @@ export class ConversationRunService {
     const release: () => void = beginConversationRun(session.id);
     const id: string = newId();
     const record: ActiveRun = {
-      id: id, controller: new EntryAbortController(), kernel: null, context: null, raw: [],
+      id: id, controller: new EntryAbortController(), kernel: null, context: null,
+      tracker: new GenerationProgressTracker(), raw: [],
       checkpointAt: 0, checkpointLen: 0, historyCount: 0, regenerateNodeId: '', visualNodeId: '',
       resumeMode: command.kind !== 'send', writeError: null, inputCommitted: false, cancelQueue: null,
       release: release, unsubscribeActivity: null,
     };
+    // E13:preparing 即以零进度登记活动;真实增长在 captureRaw 测量,终态在 finally 注销
+    this.reportRunProgress(record, true);
     session.record = record; // Synchronous admission precedes every repository/seed await.
     session.state.runId = id; session.state.phase = 'preparing'; session.state.sending = true;
     session.state.conversation = null; session.state.errorMsg = ''; session.state.retryStatus = '';
@@ -447,6 +457,9 @@ export class ConversationRunService {
   private captureRaw(session: ConversationSession, record: ActiveRun, messages: UIMessage[]): void {
     if (session.record !== record || record.context === null) return;
     record.raw = messages.slice();
+    // E13:真实接收量在 checkpoint 节流前测量;只有新增才上报
+    const gained = record.tracker.observe(messages);
+    if (gained.chars > 0 || gained.bytes > 0) this.reportRunProgress(record, true);
     if (messages.length === 0) return;
     const last: UIMessage = messages[messages.length - 1];
     if (last.role !== 'assistant' && last.role !== 'user') return;
@@ -507,6 +520,8 @@ export class ConversationRunService {
       const context: DetachedConversationContext = new DetachedConversationContext(
         this, record.id, hydrated, seed, record.controller.signal);
       record.context = context; record.historyCount = currentMessages(loaded).length;
+      // 启动历史基线:已有内容不计为本租期接收(含再生命运目标;新分支消息以新 ID 计入)
+      record.tracker.seedBaseline(currentMessages(hydrated));
       session.state.historyNodeCount = loaded.messageNodes.length;
       session.state.visualConversation = hydrated;
       this.applyConversation(session, hydrated);
@@ -634,6 +649,8 @@ export class ConversationRunService {
           : (record.controller.signal.aborted ? 'cancelled' : (session.state.awaitingTools ? 'awaiting_approval' : 'completed'));
         session.state.errorMsg = failure === null ? '' : errorText(failure);
         session.record = null;
+        // E13:completed/failed/cancelled/awaiting_approval 均注销本 run 的后台活动
+        this.reportRunProgress(record, false);
         releaseConversationBrowserRun(session.id, failure === null && !record.controller.signal.aborted && session.state.awaitingTools);
         this.aggregate(); this.emit(session);
       }

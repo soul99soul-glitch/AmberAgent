@@ -1,5 +1,6 @@
 // NovelGhostwriteCard — C6 durable ghostwrite job projection and controls.
 // Job facts remain in the domain; this component holds only local detail expansion state.
+// E13:联合审稿段由 NovelChapterVerdictCard 承接(阻断/需重写/通过的真实裁定展示)。
 
 import {
   ACCENT, ACCENT_INK, ACCENT_LIGHT, ERROR, INK, INK2, INK3, INK4,
@@ -10,8 +11,9 @@ import {
   MIN_GHOSTWRITE_CHAPTER_COUNT,
 } from '@amber/deepread-domain';
 import type {
-  DurableGhostwriteJob, GhostwriteFinding, GhostwriteStage,
+  DurableGhostwriteJob, GhostwriteStage,
 } from '@amber/deepread-domain';
+import { NovelChapterVerdictCard } from './NovelChapterVerdictCard.ets';
 
 @Component
 export struct NovelGhostwriteCard {
@@ -31,7 +33,6 @@ export struct NovelGhostwriteCard {
   @State private targetChapterCount: number = DEFAULT_GHOSTWRITE_CHAPTER_COUNT;
   @State private planExpanded: boolean = false;
   @State private candidateExpanded: boolean = false;
-  @State private reviewExpanded: boolean = false;
 
   build(): void {
     Scroll() {
@@ -123,7 +124,7 @@ export struct NovelGhostwriteCard {
       }
       this.frozenPlanSection(job)
       this.candidateSection(job)
-      this.reviewSection(job)
+      NovelChapterVerdictCard({ review: job.review, candidate: job.candidate, frozenPlan: job.frozenPlan })
       this.actionRow(job)
     }
     .width('100%').padding(14).backgroundColor(SURFACE2).borderRadius(14)
@@ -157,33 +158,6 @@ export struct NovelGhostwriteCard {
           Text('候选未收录前不会改变正文。').fontSize(11).fontColor(INK3).margin({ top: 3 })
           Text(job.candidate.content).fontSize(12).fontColor(INK2).lineHeight(18).maxLines(16)
             .textOverflow({ overflow: TextOverflow.Ellipsis }).width('100%').margin({ top: 8 })
-        }
-      }
-      .width('100%').padding({ top: 11, bottom: 3 })
-      .border({ width: { top: 0.5 }, color: { top: LINE } }).margin({ top: 12 })
-    }
-  }
-
-  @Builder
-  private reviewSection(job: DurableGhostwriteJob): void {
-    if (job.review !== null) {
-      Column() {
-        this.detailToggle('联合审稿', this.reviewSummary(job), this.reviewExpanded,
-          (): void => { this.reviewExpanded = !this.reviewExpanded; })
-        if (this.reviewExpanded) {
-          if (job.review.rewriteInstructions.trim().length > 0) {
-            Text(`重写说明：${job.review.rewriteInstructions}`).fontSize(12).fontColor(INK2).lineHeight(18)
-              .maxLines(5).textOverflow({ overflow: TextOverflow.Ellipsis }).width('100%').margin({ top: 8 })
-          }
-          if (job.review.stateDelta.chapterHighlight.trim().length > 0) {
-            Text(`状态增量：${job.review.stateDelta.chapterHighlight}`).fontSize(12).fontColor(INK2).lineHeight(18)
-              .maxLines(3).textOverflow({ overflow: TextOverflow.Ellipsis }).width('100%').margin({ top: 7 })
-          }
-          ForEach(job.review.findings, (finding: GhostwriteFinding): void => {
-            Text(`${this.findingLabel(finding)}：${finding.message}`).fontSize(12).fontColor(INK2)
-              .lineHeight(18).maxLines(3).textOverflow({ overflow: TextOverflow.Ellipsis })
-              .width('100%').margin({ top: 7 })
-          }, (finding: GhostwriteFinding): string => `${finding.code}:${finding.location}`)
         }
       }
       .width('100%').padding({ top: 11, bottom: 3 })
@@ -328,19 +302,5 @@ export struct NovelGhostwriteCard {
     const content: string = job.frozenPlan.content.trim();
     const preview: string = content.length <= 32 ? content : `${content.slice(0, 32)}…`;
     return `${job.frozenPlan.planId} · ${this.shortDigest(job.frozenPlan.digest)} · ${preview}`;
-  }
-
-  private reviewSummary(job: DurableGhostwriteJob): string {
-    if (job.review === null) return '';
-    if (job.review.rewriteRequired) return `需重写 · ${job.review.findings.length} 项发现`;
-    return job.review.blocking ? `存在阻断问题 · ${job.review.findings.length} 项发现` :
-      `已通过 · ${job.review.findings.length} 项发现`;
-  }
-
-  private findingLabel(finding: GhostwriteFinding): string {
-    if (finding.kind === 'missing_required') return '缺失必写';
-    if (finding.kind === 'forbidden_violation') return '违反禁写';
-    if (finding.kind === 'hard_continuity') return '连续性硬伤';
-    return '提示';
   }
 }

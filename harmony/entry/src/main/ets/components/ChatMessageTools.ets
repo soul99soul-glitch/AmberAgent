@@ -14,6 +14,8 @@ import { SSHUIColors } from './SSHUIColors.ets';
 import { RecipeApprovalView, recipeApprovalView } from './RecipeApprovalSummary.ets';
 import { pluginApprovalView } from './PluginApprovalSummary.ets';
 import { JevApprovalFacts } from './JevApprovalFacts.ets';
+import { NovelChapterPlanProposalCard } from './NovelChapterPlanProposalCard.ets';
+import { parseNovelChapterPlanProposal } from '../platform_impl/NovelPlanProposalProjection.ets';
 import {
   AgentToolCallCapsule,
   ToolStatus,
@@ -146,6 +148,10 @@ export struct ChatMessageTools {
         .width('100%').padding({ left: 12, right: 12, top: 10, bottom: 10 })
         .backgroundColor(this.sshColors.inset).borderRadius(8).margin({ bottom: 6 })
         .onClick((): void => { if (this.canOpenPreview) this.onOpenPreview(); })
+      }
+      // E13:本章计划提案专用摘要(批准/拒绝仍走下方原胶囊回调,同一 toolCallId)
+      if (this.part.approvalState.type === 'pending') {
+        NovelChapterPlanProposalCard({ view: parseNovelChapterPlanProposal(this.part) })
       }
       // 工具胶囊(pill)
       AgentToolCallCapsule({

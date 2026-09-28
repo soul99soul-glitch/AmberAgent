@@ -51,6 +51,9 @@ export interface NovelInteractiveAdapterDeps {
     runId: string, transport: StreamTransportState,
     firstParsedDeltaAt: number | null, dataEndAt: number | null,
   ) => void;
+  // E13:可选 raw 观察者 — 经 ChatTurnDeps.onRawFlushSnapshot 转发(视觉变换前);
+  //   只观察,不改变生成/持久化语义
+  onRawSnapshot?: (request: NovelModelRequest, messages: UIMessage[]) => void;
 }
 
 interface NovelInteractiveRunHandle {
@@ -150,6 +153,9 @@ class ChatBackedNovelModel implements NovelModelRunning {
         retrySetting: resolved.retrySetting ?? makeGenerationRetrySetting({}),
         flushIntervalMs: 0,
         nowMs: this.deps.nowMs,
+        onRawFlushSnapshot: (messages: UIMessage[]): void => {
+          this.deps.onRawSnapshot?.(request, messages);
+        },
       };
       const configuredTools: AgentTool[] = resolved.tools ?? [];
       const tools: AgentTool[] = request.toolProfile === 'none'
