@@ -9,6 +9,8 @@ import type { UIMessagePartTool, UIMessagePartText, UIMessagePartImage } from '@
 import { toolActivityStatus, toolOutputJson } from '@amber/chat-domain';
 import { INK, INK2, INK3, INK4, SURFACE, SURFACE2, LINE, ACCENT, ERROR, META, LABEL } from '../design/tokens.ets';
 import { GeneratedImageCarousel } from './GeneratedImageCarousel.ets';
+import { isSSHApprovalTool, sshApprovalTargetLabel, sshApprovalCommand } from './SSHApprovalSummary.ets';
+import { SSHUIColors } from './SSHUIColors.ets';
 import {
   AgentToolCallCapsule,
   ToolStatus,
@@ -33,6 +35,11 @@ export struct ChatMessageTools {
   // generate_image 修改回调(edit 流程,回传宿主 ChatPage)
   onModifyImage: (url: string) => void = (_url: string): void => {};
   @State outputExpanded: boolean = false;
+  @State sshColors: SSHUIColors = new SSHUIColors();
+  @StorageProp('darkMode') @Watch('refreshSSHColors') darkMode: boolean = false;
+  @StorageProp('themePackId') @Watch('refreshSSHColors') themePackId: string = '';
+
+  private refreshSSHColors(): void { this.sshColors = new SSHUIColors(); }
 
   // F15:复用 chat-domain tool_activity 既有结构化判定
   //   (toolActivityStatus → indicatesFailure:exit_code≠0 / error / failed /
@@ -92,6 +99,19 @@ export struct ChatMessageTools {
 
   build(): void {
     Column() {
+      if (isSSHApprovalTool(this.part.toolName) && this.part.approvalState.type === 'pending') {
+        Column({ space: 4 }) {
+          Text(`Remote SSH · ${sshApprovalTargetLabel(this.part)}`)
+            .fontSize(META).fontColor(this.sshColors.ink).fontFamily('JetBrainsMono')
+            .width('100%').maxLines(3).wordBreak(WordBreak.BREAK_ALL)
+          Text(sshApprovalCommand(this.part))
+            .fontSize(LABEL).fontColor(this.sshColors.secondary).fontFamily('JetBrainsMono').lineHeight(17)
+            .width('100%').maxLines(3).textOverflow({ overflow: TextOverflow.Ellipsis })
+        }
+        .width('100%').padding({ left: 12, right: 12, top: 10, bottom: 10 })
+        .backgroundColor(this.sshColors.inset).borderRadius(8).margin({ bottom: 6 })
+        .onClick((): void => { if (this.canOpenPreview) this.onOpenPreview(); })
+      }
       // 工具胶囊(pill)
       AgentToolCallCapsule({
         toolName: this.part.toolName,
@@ -129,37 +149,40 @@ export struct ChatMessageTools {
       // output 预览(折叠/展开)
       if (this.part.toolName !== 'generate_image' && this.firstOutputText().length > 0) {
         Column() {
-          if (this.outputExpanded) {
-            Text(this.firstOutputText())
+          Column() {
+            if (this.outputExpanded) {
+              Text(this.firstOutputText())
+                .fontSize(LABEL)
+                .fontColor(INK2)
+                .fontFamily('JetBrainsMono')
+                .width('100%')
+                .lineHeight(16)
+            } else {
+              Text(this.firstOutputText())
+                .fontSize(LABEL)
+                .fontColor(INK2)
+                .fontFamily('JetBrainsMono')
+                .maxLines(3)
+                .textOverflow({ overflow: TextOverflow.Ellipsis })
+                .width('100%')
+                .lineHeight(16)
+            }
+            Text(this.outputExpanded ? '收起' : '展开')
               .fontSize(LABEL)
-              .fontColor(INK2)
-              .fontFamily('JetBrainsMono')
-              .width('100%')
-              .lineHeight(16)
-          } else {
-            Text(this.firstOutputText())
-              .fontSize(LABEL)
-              .fontColor(INK2)
-              .fontFamily('JetBrainsMono')
-              .maxLines(3)
-              .textOverflow({ overflow: TextOverflow.Ellipsis })
-              .width('100%')
-              .lineHeight(16)
+              .fontColor(INK3)
+              .padding({ left: 12, right: 12, top: 10, bottom: 6 })
+              .margin({ top: 2 })
+              .onClick((): void => { this.outputExpanded = !this.outputExpanded; })
+              .accessibilityText(this.outputExpanded ? '收起工具输出' : '展开工具输出')
           }
-          Text(this.outputExpanded ? '收起' : '展开')
-            .fontSize(LABEL)
-            .fontColor(INK3)
-            .padding({ left: 12, right: 12, top: 10, bottom: 6 })
-            .margin({ top: 2 })
-            .onClick((): void => { this.outputExpanded = !this.outputExpanded; })
-            .accessibilityText(this.outputExpanded ? '收起工具输出' : '展开工具输出')
+          .width('100%')
+          .padding({ left: 12, right: 12, top: 8, bottom: 8 })
+          .backgroundColor(SURFACE)
+          .borderRadius(8)
+          .border({ width: 0.5, color: LINE })
         }
         .width('100%')
-        .margin({ top: 4, left: 32 })
-        .padding({ left: 12, right: 12, top: 8, bottom: 8 })
-        .backgroundColor(SURFACE)
-        .borderRadius(8)
-        .border({ width: 0.5, color: LINE })
+        .padding({ left: 32, top: 4 })
       }
     }
     .width('100%')

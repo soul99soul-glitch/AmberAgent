@@ -25,11 +25,26 @@ add_library(amber_rust STATIC IMPORTED)
 set_target_properties(amber_rust PROPERTIES IMPORTED_LOCATION "${AMBER_RUST_ARCHIVE}")
 add_dependencies(amber_rust amber_rust_build)
 
-add_library(amber_native SHARED napi_init.cpp)
+get_filename_component(AMBER_SSH_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../../../native/ssh" ABSOLUTE)
+set(AMBER_SSH_INSTALL "${AMBER_SSH_ROOT}/build/ohos/install")
+add_custom_target(amber_ssh_build
+    COMMAND "${CMAKE_COMMAND}" -E env "OHOS_BASE_SDK_HOME=${OHOS_SDK_NATIVE}/.."
+        "${AMBER_SSH_ROOT}/scripts/build-deps.sh" ohos
+    BYPRODUCTS "${AMBER_SSH_INSTALL}/lib/libssh2.a" "${AMBER_SSH_INSTALL}/lib/libcrypto.a"
+    COMMENT "Building SSH dependencies for OHOS API 12"
+    VERBATIM)
+add_library(amber_ssh2 STATIC IMPORTED)
+set_target_properties(amber_ssh2 PROPERTIES IMPORTED_LOCATION "${AMBER_SSH_INSTALL}/lib/libssh2.a")
+add_dependencies(amber_ssh2 amber_ssh_build)
+add_library(amber_crypto STATIC IMPORTED)
+set_target_properties(amber_crypto PROPERTIES IMPORTED_LOCATION "${AMBER_SSH_INSTALL}/lib/libcrypto.a")
+add_dependencies(amber_crypto amber_ssh_build)
+
+add_library(amber_native SHARED napi_init.cpp ssh_core.cpp ssh_napi.cpp)
 target_compile_features(amber_native PRIVATE cxx_std_17)
-target_include_directories(amber_native PRIVATE "${AMBER_RUST_ROOT}/include")
+target_include_directories(amber_native PRIVATE "${AMBER_RUST_ROOT}/include" "${AMBER_SSH_INSTALL}/include")
 # The SDK toolchain passes --gcc-toolchain, which clang 15 does not consume for OHOS.
 target_compile_options(amber_native PRIVATE -Wall -Wextra -Werror -Wno-unused-command-line-argument)
 target_link_options(amber_native PRIVATE -Wl,--no-undefined -Wl,--exclude-libs,ALL -Wl,--as-needed)
 # Rust 1.96 OHOS --print=native-static-libs reports these two system libraries.
-target_link_libraries(amber_native PRIVATE amber_rust libace_napi.z.so unwind c)
+target_link_libraries(amber_native PRIVATE amber_rust amber_ssh2 amber_crypto libace_napi.z.so unwind c)

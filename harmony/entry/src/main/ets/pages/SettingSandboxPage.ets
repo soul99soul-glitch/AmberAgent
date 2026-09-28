@@ -1,5 +1,5 @@
 // SettingSandboxPage — 沙盒执行设置(接真实运行时偏好)
-// 工作区根 = filesDir 镜像或用户自选目录(D2-1);终端运行时 = builtin(鸿蒙无 shell 运行时)。
+// 工作区根 = filesDir 镜像或用户自选目录；终端运行时使用 Remote SSH。
 // 2026-09-27 二级页 iOS 对齐(基准 IMG_1986「运行环境」):仅换视觉骨架
 // (CenteredTitleBar/PlainSection/CardGroup r18+描边/CardRow/CardToggleRow/FooterNote),逻辑零改动。
 import type { AgentRuntimeSnapshot } from '../platform_impl/AgentRuntimePrefs.ets';
@@ -13,7 +13,7 @@ import {
   hydrateWorkspaceCustomDir, activateWorkspaceCustomDir,
 } from '../platform_impl/WorkspaceStore.ets';
 import { picker, fileShare } from '@kit.CoreFileKit';
-import { promptAction } from '@kit.ArkUI';
+import { promptAction, router } from '@kit.ArkUI';
 import { common } from '@kit.AbilityKit';
 import {
   BG, INK, INK3, LINE, TEXT_STYLES, GUTTER, lineHeightForSize,
@@ -152,8 +152,8 @@ struct SettingSandboxPage {
       CardRow({
         label: 'Workspace',
         desc: this.workspaceCustom
-          ? 'AmberAgent 将你选择的目录作为文件工具和命令运行的 /workspace。'
-          : 'AmberAgent 将应用沙箱目录作为文件工具和命令运行的 /workspace。',
+          ? 'AmberAgent 将你选择的目录作为文件工具的 /workspace。'
+          : 'AmberAgent 将应用沙箱目录作为文件工具的 /workspace。',
         iconName: 'folder', plateSize: 28,
         showChevron: false, isLast: true,
       })
@@ -194,10 +194,16 @@ struct SettingSandboxPage {
   TerminalCard(): void {
     CardRow({
       label: '终端运行时',
-      desc: '鸿蒙当前不提供 shell 运行时。',
-      valueText: 'builtin',
+      desc: '配置可信主机与登录凭据，在远端目录执行命令。',
+      valueText: 'Remote SSH',
       iconName: 'cpu', plateSize: 28,
-      showChevron: false, isLast: true,
+      isLast: false,
+      onRowClick: (): void => { router.pushUrl({ url: 'pages/SettingSSHProfilesPage' }); },
+    })
+    CardRow({
+      label: '打开终端', desc: '连接默认 SSH 主机，打开交互终端。',
+      iconName: 'cpu', plateSize: 28, isLast: true,
+      onRowClick: (): void => { router.pushUrl({ url: 'pages/TerminalPage' }); },
     })
   }
 

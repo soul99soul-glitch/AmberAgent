@@ -4,6 +4,7 @@
 // 保留现场后再按空库回退 —— 否则下一次写会以空快照覆盖,造成整库静默丢失。
 import { fileIo } from '@kit.CoreFileKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
+import { util } from '@kit.ArkTS';
 
 const DOMAIN: number = 0x0001;
 const TAG: string = 'AtomicJsonFile';
@@ -20,7 +21,19 @@ export const writeTextFileAtomic = async (path: string, text: string): Promise<v
   let file: fileIo.File | null = null;
   try {
     file = await fileIo.open(tmp, mode);
-    await fileIo.write(file.fd, text);
+    const bytes: Uint8Array = util.TextEncoder.create('utf-8').encodeInto(text);
+    let consumed: number = 0;
+    while (consumed < bytes.byteLength) {
+      const remaining: ArrayBuffer = (bytes.buffer as ArrayBuffer)
+        .slice(bytes.byteOffset + consumed, bytes.byteOffset + bytes.byteLength);
+      // WriteOptions.offset addresses the file, not the buffer. Omitting it
+      // continues from the current file position; slice supplies the unwritten bytes.
+      const written: number = await fileIo.write(file.fd, remaining);
+      if (written <= 0 || written > remaining.byteLength) {
+        throw new Error('Atomic file write returned invalid byte count');
+      }
+      consumed += written;
+    }
     await fileIo.close(file);
     file = null;
     fileIo.renameSync(tmp, path);

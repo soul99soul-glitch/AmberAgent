@@ -14,6 +14,8 @@ import { JsonTree } from './ui/JsonTree.ets';
 import { MarkdownText } from './MarkdownText.ets';
 import { pasteboard } from '@kit.BasicServicesKit';
 import { promptAction } from '@kit.ArkUI';
+import { isSSHApprovalTool, sshApprovalTargetLabel, sshApprovalCommand } from './SSHApprovalSummary.ets';
+import { SSHUIColors } from './SSHUIColors.ets';
 
 // 搜索结果项
 interface SearchResultItem {
@@ -26,6 +28,11 @@ interface SearchResultItem {
 export struct ChatMessageToolPreviewSheet {
   @Prop part: UIMessagePartTool;
   onDismiss: () => void = (): void => {};
+  @State sshColors: SSHUIColors = new SSHUIColors();
+  @StorageProp('darkMode') @Watch('refreshSSHColors') darkMode: boolean = false;
+  @StorageProp('themePackId') @Watch('refreshSSHColors') themePackId: string = '';
+
+  private refreshSSHColors(): void { this.sshColors = new SSHUIColors(); }
 
   private copyToClipboard(text: string): void {
     const board: pasteboard.SystemPasteboard = pasteboard.getSystemPasteboard();
@@ -126,7 +133,9 @@ export struct ChatMessageToolPreviewSheet {
 
       Scroll() {
         Column() {
-          if (this.isSearchWeb()) {
+          if (isSSHApprovalTool(this.part.toolName)) {
+            this.RenderSSHPreview()
+          } else if (this.isSearchWeb()) {
             this.RenderSearchPreview()
           } else if (this.isScrapeWeb()) {
             this.RenderScrapePreview()
@@ -143,6 +152,21 @@ export struct ChatMessageToolPreviewSheet {
     .height('70%')
     .backgroundColor(SURFACE)
     .borderRadius({ topLeft: 16, topRight: 16 })
+  }
+
+  // SSH 审批:展示持久化的批准目标和完整命令，随后保留通用参数/结果区。
+  @Builder
+  RenderSSHPreview(): void {
+    Column({ space: 6 }) {
+      Text('Remote SSH · 批准目标').fontSize(META).fontColor(this.sshColors.muted).width('100%')
+      Text(sshApprovalTargetLabel(this.part)).fontSize(META).fontFamily('JetBrainsMono')
+        .fontColor(this.sshColors.ink).width('100%').wordBreak(WordBreak.BREAK_ALL).copyOption(CopyOptions.LocalDevice)
+      Text(this.part.toolName === 'terminal_session_start' ? '会话操作' : '执行命令')
+        .fontSize(META).fontColor(this.sshColors.muted).width('100%').margin({ top: 8 })
+      Text(sshApprovalCommand(this.part)).fontSize(META).fontFamily('JetBrainsMono').lineHeight(19)
+        .fontColor(this.sshColors.secondary).width('100%').wordBreak(WordBreak.BREAK_ALL).copyOption(CopyOptions.LocalDevice)
+    }.width('100%').padding(16)
+    this.RenderGenericPreview()
   }
 
   // search_web 专项预览

@@ -31,13 +31,15 @@ import type {
   MessageChunk, OpenAIChatApi, AskedAnswers, ConversationCompact,
   ImageGuardSettings, VisionModelHealth, VisionProbeDeps, ProviderModel, ProviderSetting,
   AgentToolActivityStore, SandboxActivityUiState, McpToolActivityPort, JsonValue,
-  InteractiveTurnRunResult,
+  InteractiveTurnRunResult, TerminalApprovalGuard,
+  ChatTimelineRow,
 } from '@amber/chat-domain';
 import {
   currentMessages, makeConversation, newId, nowIso,
   createTemplateTransformer, thinkTagTransformer, regexOutputTransformer,
   asChatStreamProvider, seedConversationWithPresets,
   nodeCurrentMessage, nodeRole, selectMessageBranch, deleteMessage, editMessage,
+  buildChatTimelineRows,
   forkConversation, patchConversation,
   // Phase 2:停止生成收口 + 流式 checkpoint 纯逻辑(@amber/chat-domain)
   applyStopGeneration, streamContentLength, shouldCheckpoint, checkpointConversationTail,
@@ -53,6 +55,7 @@ import {
   runChatTurnWithTools, runToolLoopContinuation, runRegenerateAtWithTools,
   createTimeTool, makeUIMessage,
   createAskUserTool, createConversationContextTools, createConversationHistoryTools,
+  createTerminalTools, createTerminalApprovalGuard, AgentToolDispatcher, defaultToolInvocationHooks,
   createConversationQueueTools, createToolRegistry,
   createToolSearchTool, createRegistryIntrospectionTools, filterToolProfile,
   createRunPlanUpdateTool, createClipboardTool, createDeepReadOpenTool,
@@ -269,54 +272,15 @@ const TIMELINE_MAX_PREFETCH_NODES: number = 2000;
 
 
 // 节点视图模型:分支切换/重新生成需要节点级信息
-interface MsgRow {
-  nodeId: string;
-  message: UIMessage;
-  branchCount: number;
-  selectIndex: number;
-  isAssistant: boolean;
-  isLastAssistant: boolean;
-}
+type MsgRow = ChatTimelineRow;
 
-const buildRows = (conv: Conversation): MsgRow[] => {
-  let lastAssistantIdx: number = -1;
-  for (let i = conv.messageNodes.length - 1; i >= 0; i--) {
-    if (nodeRole(conv.messageNodes[i]) === 'assistant') {
-      lastAssistantIdx = i;
-      break;
-    }
-  }
-  return conv.messageNodes.map((n, i: number): MsgRow => ({
-    nodeId: n.id,
-    message: nodeCurrentMessage(n),
-    branchCount: n.messages.length,
-    selectIndex: n.selectIndex,
-    isAssistant: nodeRole(n) === 'assistant',
-    isLastAssistant: i === lastAssistantIdx,
-  }));
-};
+const buildRows = (conv: Conversation, previousRows: MsgRow[] = []): MsgRow[] =>
+  buildChatTimelineRows(conv.messageNodes, previousRows);
 
 // Phase 5:node 窗口 → rows(与 buildRows 同一映射;窗口用 messageNodes 切片,
 //   保证首屏后置定位参数与分支切换走同一 MsgRow 形状)
-const buildRowsFromNodes = (nodes: MessageNode[]): MsgRow[] => {
-  const rows: MsgRow[] = [];
-  const nodeCount: number = nodes.length;
-  let lastAssistantRow: MsgRow | null = null;
-  for (let i = 0; i < nodeCount; i++) {
-    const row: MsgRow = {
-      nodeId: nodes[i].id,
-      message: nodeCurrentMessage(nodes[i]),
-      branchCount: nodes[i].messages.length,
-      selectIndex: nodes[i].selectIndex,
-      isAssistant: nodeRole(nodes[i]) === 'assistant',
-      isLastAssistant: false,
-    };
-    rows.push(row);
-    if (row.isAssistant) lastAssistantRow = row;
-  }
-  if (lastAssistantRow !== null) lastAssistantRow.isLastAssistant = true;
-  return rows;
-};
+const buildRowsFromNodes = (nodes: MessageNode[], previousRows: MsgRow[] = []): MsgRow[] =>
+  buildChatTimelineRows(nodes, previousRows);
 
 
 // holder 模式:跨 then 传递 runtime(ArkTS 闭包收窄限制 + arkts-no-obj-literals-as-types)
@@ -1225,7 +1189,7 @@ struct ChatPage {
           this.timelineLoadState = applyTailWindow(
             this.timelineLoadState,
             window.oldestLoadedIndex, window.nodes.length, window.totalNodeCount);
-          this.rows = buildRowsFromNodes(window.nodes);
+          this.rows = buildRowsFromNodes(window.nodes, this.rows);
           this.conversationLoaded = true;
         })
         .catch((e: Error): void => {
@@ -1243,7 +1207,7 @@ struct ChatPage {
           this.restoreInputDraft(`chat_input_draft/${full.id}`);
           this.refreshEffectiveModelState();
           if (this.rows.length === 0 && full.messageNodes.length > 0) {
-            this.rows = buildRows(full);
+            this.rows = buildRows(full, this.rows);
             this.timelineLoadState = applyTailWindow(
               this.timelineLoadState, 0, full.messageNodes.length, full.messageNodes.length);
           }
@@ -1305,7 +1269,7 @@ struct ChatPage {
         this.restoreInputDraft('chat_input_draft/__unsaved__');
         this.refreshEffectiveModelState();
         // Phase 5:新会话空窗口 = fullyLoaded(rows 直接全量展示)
-        this.rows = buildRows(this.conversation);
+        this.rows = buildRows(this.conversation, this.rows);
         this.timelineLoadState = applyTailWindow(
           this.timelineLoadState, 0, this.rows.length, this.rows.length);
         this.suggestions = this.conversation.chatSuggestions;
@@ -1448,7 +1412,7 @@ struct ChatPage {
   ): void {
     const state: ConversationTimelineLoadState = this.timelineLoadState;
     if (!state.initialized || state.fullyLoaded) {
-      this.rows = buildRows(next);
+      this.rows = buildRows(next, this.rows);
       this.timelineLoadState = applyTailWindow(
         state, 0, next.messageNodes.length, next.messageNodes.length);
       return;
@@ -1480,7 +1444,7 @@ struct ChatPage {
     const count: number = wasAtTail
       ? available
       : Math.min(this.rows.length, available);
-    this.rows = buildRowsFromNodes(next.messageNodes.slice(start, start + count));
+    this.rows = buildRowsFromNodes(next.messageNodes.slice(start, start + count), this.rows);
     this.timelineLoadState = applyTailWindow(
       state, start, this.rows.length, next.messageNodes.length);
   }
@@ -1524,7 +1488,7 @@ struct ChatPage {
       throw new Error('恢复后的会话无法读取');
     }
     this.conversation = restored;
-    this.rows = buildRows(restored);
+    this.rows = buildRows(restored, this.rows);
     this.timelineLoadState = applyTailWindow(
       this.timelineLoadState, 0, restored.messageNodes.length, restored.messageNodes.length);
     this.suggestions = restored.chatSuggestions;
@@ -1575,7 +1539,7 @@ struct ChatPage {
     getChatRepository().getConversationNodePage(convId, offset, TIMELINE_PAGE_SIZE)
       .then((page): void => {
         if (!this.pageAlive) return;
-        const older: MsgRow[] = buildRowsFromNodes(page.nodes);
+        const older: MsgRow[] = buildRowsFromNodes(page.nodes, this.rows);
         const merged: MsgRow[] = mergeOlderNodes(this.rows, older);
         const added: number = merged.length - this.rows.length;
         this.rows = merged;
@@ -1663,7 +1627,7 @@ struct ChatPage {
     getChatRepository().getConversationNodePage(convId, offset, pageSize)
       .then((page): void => {
         if (!this.pageAlive) return;
-        const older: MsgRow[] = buildRowsFromNodes(page.nodes);
+        const older: MsgRow[] = buildRowsFromNodes(page.nodes, this.rows);
         const merged: MsgRow[] = mergeOlderNodes(this.rows, older);
         const added: number = merged.length - this.rows.length;
         this.rows = merged;
@@ -3725,10 +3689,11 @@ struct ChatPage {
     //   time_info/ask_user/clipboard 按 assistant.localTools 勾选加入;
     //   run_plan_update/deep_read_open 无门恒在(:182/:188);
     //   workspace_files 六件 D-124 + artifact 十一件 D-125 落地(见下);同组
-    //   externalFileTools 及其余 9 variant(javascript_engine/tts/terminal/
-    //   screen_automation/system_access/webview/icloud_drive/webmount/
-    //   webmount_eval)未移植 → 门为空转(登记)
+    //   terminal 由 E2 Remote SSH runtime 提供，批准目标随调用记录持久绑定。
     const localOpts: LocalToolOption[] = rt.assistant.localTools;
+    const terminalGuard: TerminalApprovalGuard | null = localOpts.indexOf('terminal') >= 0
+      && rt.terminalRuntime !== null && rt.sshProfiles !== null
+      ? createTerminalApprovalGuard(rt.terminalRuntime, rt.sshProfiles) : null;
     // JS 沙箱宿主按需挂载(首次注册工具时;evaluate 的 waitForMount 会等 attach)
     if (localOpts.indexOf('javascript_engine') >= 0 && !this.jsSandboxNeeded) {
       this.jsSandboxNeeded = true;
@@ -3736,6 +3701,9 @@ struct ChatPage {
     const profiledTools: AgentTool[] =
       filterToolProfile([
         ...(localOpts.indexOf('time_info') >= 0 ? [createTimeTool()] : []),
+        ...(terminalGuard !== null && rt.terminalRuntime !== null && rt.sshProfiles !== null
+          ? createTerminalTools({ runtime: rt.terminalRuntime, profiles: rt.sshProfiles,
+            activityStore: getToolActivityStore(), conversationId: conv.id }) : []),
         ...(localOpts.indexOf('ask_user') >= 0 ? [createAskUserTool()] : []),
         // JS 沙箱(隐藏隔离 Web;无网络无文件;assistant 勾选 javascript_engine 门)
         ...(localOpts.indexOf('javascript_engine') >= 0 ? [createJavascriptExecuteTool()] : []),        // D-124:workspace 六件(LocalTools.kt:122-126 — workspace_files 门内
@@ -3925,6 +3893,9 @@ struct ChatPage {
       ? this.subAgentToolsCache
       : [];
     return {
+      dispatcher: new AgentToolDispatcher({ hooks: terminalGuard === null
+        ? defaultToolInvocationHooks() : [...defaultToolInvocationHooks(), terminalGuard.hook] }),
+      captureInvocationMetadata: terminalGuard === null ? undefined : terminalGuard.captureInvocationMetadata,
       // createRunTools(ChatService.kt:2326-2329):registry.tools() +
       //   tool_search(profile 透传,D-082)+ 自省对 + supervisor tools;
       //   D-122:scopedToConversation(:2329 → :2332-2343)终表统一包覆
@@ -5316,7 +5287,7 @@ struct ChatPage {
           })
         }
       }
-    }, (row: MsgRow): string => row.nodeId + (this.darkMode ? '-d' : '-l'))
+    }, (row: MsgRow): string => `${row.nodeId}-${row.displayRevision}${this.darkMode ? '-d' : '-l'}`)
   }
 
   @Builder

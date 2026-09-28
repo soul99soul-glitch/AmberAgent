@@ -2,13 +2,13 @@
   "objective": "完成所有纳入范围的剩余功能并逐阶段独立审查与验证",
   "baseline": "6840fa551",
   "status": "active",
-  "currentPhase": "E2",
+  "currentPhase": "E3",
   "authorization": "用户授权持续实施、subagent审查、分阶段推进",
   "phases": {
     "E0": "complete",
     "E1": "complete",
-    "E2": "in_progress",
-    "E3": "pending",
+    "E2": "complete",
+    "E3": "in_progress",
     "E4": "pending",
     "E5": "pending",
     "E6": "pending",
@@ -24,7 +24,10 @@
   "verification": {
     "E0": "PASS: independent A/B/C for provided device states; tests/types/lint/build/sign/install; see E0-gate.md",
     "E1": "PASS: native host/target, Debug four device runs, Release gate and light/dark consumer UI; see E1-gate.md",
-    "E0Commit": "35ddd03d1"
+    "E0Commit": "35ddd03d1",
+    "E1Commit": "4964ff400",
+    "E2Contract": "frozen: packets/E2-contract.md",
+    "E2": "PASS: independent A/B/C; real SSH/Asset/PTY/approval/UI, tests/types/lint, Release/sign/install and Debug isolation; see E2-gate.md"
   },
   "blockers": []
 }

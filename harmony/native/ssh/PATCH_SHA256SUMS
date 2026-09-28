@@ -1,0 +1,2 @@
+e3b23e6035c13982df3600c47d0ebd979cb62d1a46c5c13fb7cad39fe15eba66  patches/libssh2-1.11.1-server-sig-algs-size.patch
+24dea5e8529773af96ea2eb36d521cdc115790fe4512ecd542925e14be59d5ae  patches/libssh2-1.11.1-exit-status-presence.patch

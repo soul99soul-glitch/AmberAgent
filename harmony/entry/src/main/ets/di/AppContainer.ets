@@ -79,6 +79,11 @@ import {
 } from '@amber/chat-domain';
 import { findModelByIdInProviders } from '../platform_impl/OcrSupport.ets';
 import { createChatKvStore } from '../platform_impl/ChatKvStore.ets';
+import { SSHProfileStore, TerminalRuntime } from '@amber/chat-domain';
+import type { SSHCredentialStorePort } from '@amber/chat-domain';
+import { createEntrySSHCredentialStore } from '../platform_impl/SSHCredentialStore.ets';
+import { createNativeSSHTransport } from '../platform_impl/NativeSSHTransport.ets';
+import { createEntryTerminalLogPort } from '../platform_impl/TerminalLogPort.ets';
 import { createChatRdbRepository } from '../platform_impl/ChatRdbRepository.ets';
 import { createEntryCompactStore } from '../platform_impl/EntryCompactStore.ets';
 import { encodeImageForChat, encodeImageDetailed } from '../platform_impl/EntryImageEncoder.ets';
@@ -421,6 +426,50 @@ export const getAgentTaskStore = (): Promise<AgentTaskStore> => {
     agentTaskStorePromise = init;
   }
   return agentTaskStorePromise;
+};
+
+let sshCredentialStore: SSHCredentialStorePort | null = null;
+let sshProfileStorePromise: Promise<SSHProfileStore> | null = null;
+let terminalRuntimePromise: Promise<TerminalRuntime> | null = null;
+
+const getSSHCredentials = (): SSHCredentialStorePort => {
+  if (sshCredentialStore === null) sshCredentialStore = createEntrySSHCredentialStore();
+  return sshCredentialStore;
+};
+
+export const getSSHProfileStore = (): Promise<SSHProfileStore> => {
+  if (sshProfileStorePromise === null) {
+    const init: Promise<SSHProfileStore> = SSHProfileStore.create({
+      kv: getChatKvStore(), credentials: getSSHCredentials(),
+    });
+    init.catch((): void => {
+      if (sshProfileStorePromise === init) sshProfileStorePromise = null;
+    });
+    sshProfileStorePromise = init;
+  }
+  return sshProfileStorePromise;
+};
+
+export const getTerminalRuntime = (): Promise<TerminalRuntime> => {
+  if (terminalRuntimePromise === null) {
+    const init: Promise<TerminalRuntime> = getSSHProfileStore().then(
+      async (profiles: SSHProfileStore): Promise<TerminalRuntime> => new TerminalRuntime({
+        profiles, credentials: getSSHCredentials(), transport: createNativeSSHTransport(),
+        logs: createEntryTerminalLogPort(), taskStore: await getAgentTaskStore(),
+      }));
+    init.catch((): void => {
+      if (terminalRuntimePromise === init) terminalRuntimePromise = null;
+    });
+    terminalRuntimePromise = init;
+  }
+  return terminalRuntimePromise;
+};
+
+// Do not initialize a runtime merely because the application entered background.
+export const interruptTerminalForBackground = (): Promise<void> => {
+  const pending: Promise<TerminalRuntime> | null = terminalRuntimePromise;
+  return pending === null ? Promise.resolve() : pending.then(
+    (runtime: TerminalRuntime): Promise<void> => runtime.interruptForBackground());
 };
 
 // D-131:AgentTaskScheduler 复用上面的 AgentTaskStore Promise(Koin single 等价)。
@@ -1066,6 +1115,8 @@ export interface ChatRuntime {
   // D-123:skillManager.listSkills() 快照(ChatService.kt:2241 createSkillTools
   //   入参;createRunTools 时机 ≈ resolveChatRuntime 时机 = 每次发送)
   allSkills: SkillMetadata[];
+  terminalRuntime: TerminalRuntime | null;
+  sshProfiles: SSHProfileStore | null;
 }
 
 export interface ChatProviderChoice {
@@ -1461,6 +1512,10 @@ export const resolveChatRuntime = async (
     await getValidGrokToken(chosenVariant.id).catch((): null => null);
   }
   const api: OpenAIChatApi = buildProviderApi(chosen, customHeaderRecord, codexAccountId);
+  // Await real dependencies before exposing terminal tools to the provider.
+  const terminalEnabled: boolean = assistant.localTools.includes('terminal');
+  const terminalRuntime: TerminalRuntime | null = terminalEnabled ? await getTerminalRuntime() : null;
+  const sshProfiles: SSHProfileStore | null = terminalEnabled ? await getSSHProfileStore() : null;
   return {
     api, assistant, params,
     contextMessageSize: sessionDefaults.contextMessageSize,
@@ -1469,6 +1524,7 @@ export const resolveChatRuntime = async (
     modelAbilities: model.abilities,
     // D-123:技能库快照(每次发送重新扫描;SkillManager 内部缓存,变更后失效)
     allSkills: getSkillManager().listSkills(),
+    terminalRuntime, sshProfiles,
   };
 };
 

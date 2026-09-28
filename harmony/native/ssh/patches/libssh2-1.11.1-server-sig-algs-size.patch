@@ -1,0 +1,12 @@
+--- a/src/userauth.c
++++ b/src/userauth.c
+@@ -1381,7 +1381,8 @@
+         return LIBSSH2_ERROR_NONE;
+     }
+ 
+-    filtered_algs = LIBSSH2_ALLOC(session, strlen(supported_algs) + 1);
++    filtered_algs = LIBSSH2_ALLOC(session,
++                                  strlen(session->server_sign_algorithms) + 1);
+     if(!filtered_algs) {
+         rc = _libssh2_error(session, LIBSSH2_ERROR_ALLOC,
+                             "Unable to allocate filtered algs");

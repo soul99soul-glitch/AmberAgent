@@ -120,6 +120,8 @@ export struct AgentToolCallCapsule {
     Row() {
       if (this.canOpen) {
         Row() { this.CapsuleContent(); }
+          .layoutWeight(this.showApproval ? 1 : 0)
+          .flexShrink(1)
           .padding({ left: 9, right: 9, top: 3, bottom: 3 })
           .constraintSize({ minHeight: 32 })
           .backgroundColor(this.showApproval ? SURFACE2 : accentAlpha(this.accentColorStore, 0.16))
@@ -130,6 +132,8 @@ export struct AgentToolCallCapsule {
           .accessibilityText(`查看工具 ${this.title}`)
       } else {
         Row() { this.CapsuleContent(); }
+          .layoutWeight(this.showApproval ? 1 : 0)
+          .flexShrink(1)
           .padding({ left: 9, right: 9, top: 3, bottom: 3 })
           .constraintSize({ minHeight: 32 })
           .backgroundColor(this.showApproval ? SURFACE2 : accentAlpha(this.accentColorStore, 0.16))
@@ -145,6 +149,7 @@ export struct AgentToolCallCapsule {
             .fontColor(ERROR)
             .width(44)
             .height(44)
+            .flexShrink(0)
             .textAlign(TextAlign.Center)
             .onClick((): void => { this.onDeny(); })
             .accessibilityText('拒绝工具执行')
@@ -155,12 +160,14 @@ export struct AgentToolCallCapsule {
             .fontColor(SIGNAL)
             .width(44)
             .height(44)
+            .flexShrink(0)
             .textAlign(TextAlign.Center)
             .onClick((): void => { this.onApprove(); })
             .accessibilityText('批准工具执行')
         }
       }
     }
+    .width('100%')
     .alignItems(VerticalAlign.Center)
   }
 

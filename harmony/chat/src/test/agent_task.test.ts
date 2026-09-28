@@ -232,6 +232,20 @@ test('store: upsert/update/remove/list 排序 + 持久化', async () => {
   assert.equal(await store.remove('a'), false);
 });
 
+test('store: cancel leaves a real terminal state intact when completion wins the cancellation race', async () => {
+  const store: AgentTaskStore = await AgentTaskStore.create(makeStoreDeps(new MemFiles()));
+  const task: AgentTaskSnapshot = makeAgentTaskSnapshot({ taskId: 'cancel-race', type: 'terminal', title: 'SSH',
+    status: 'RUNNING', createdAtMs: 1, cancelCapability: true });
+  await store.register(task, async (): Promise<boolean> => {
+    await store.update(task.taskId, { status: 'COMPLETED', cancelCapability: false, summary: 'Exit 0', error: null });
+    return false;
+  });
+  const result: AgentTaskSnapshot = await store.cancel(task.taskId);
+  assert.equal(result.status, 'COMPLETED');
+  assert.equal(result.summary, 'Exit 0');
+  assert.equal(result.error, null);
+});
+
 test('store: cancel — 无回调 → 错误文案;有回调 → CANCELLED', async () => {
   const files = new MemFiles();
   const store: AgentTaskStore = await AgentTaskStore.create(makeStoreDeps(files));

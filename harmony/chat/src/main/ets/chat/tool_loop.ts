@@ -140,6 +140,9 @@ export interface ToolLoopOptions {
   autoApprovedToolNames?: string[];
   invocationContext?: ToolInvocationContext;
   dispatcher?: AgentToolDispatcher;
+  // Capture invocation identity before approval is persisted. Continuation uses
+  // the saved part metadata; a rebuilt factory must not replace that identity.
+  captureInvocationMetadata?: (part: UIMessagePartTool) => JsonObject | null;
   // 工具执行重试(settings.agentRuntime.generationRetry 复用);默认禁用
   toolRetrySetting?: GenerationRetrySetting;
   // 每步 provider 工厂(步内工具集可能因预算隐藏而变化)
@@ -394,22 +397,30 @@ const runToolLoopCore = async (
       let hasPendingApproval: boolean = false;
       let changed: boolean = false;
       const updatedTools: UIMessagePartTool[] = tools.map((tool: UIMessagePartTool): UIMessagePartTool => {
+        let invocation: UIMessagePartTool = tool;
+        if (loop.captureInvocationMetadata !== undefined && tool.approvalState.type === 'auto') {
+          const captured: JsonObject | null = loop.captureInvocationMetadata(tool);
+          if (captured !== null) {
+            invocation = { ...tool, metadata: { ...(tool.metadata ?? {}), ...captured } };
+            changed = true;
+          }
+        }
         const toolDef: AgentTool | null = stepDefsMap.get(tool.toolName) ?? null;
         const decision: PermissionDecision = dispatcher.resolveDecision(
-          toolDef, tool, autoApproveTools, autoApproveHighRiskTools,
+          toolDef, invocation, autoApproveTools, autoApproveHighRiskTools,
           autoApprovedToolNames, invocationContext);
         if (decision.action === 'ask') {
           hasPendingApproval = true;
           changed = true;
-          const metadata: JsonObject = tool.metadata !== null ? { ...tool.metadata } : {};
+          const metadata: JsonObject = invocation.metadata !== null ? { ...invocation.metadata } : {};
           metadata['permission_trace'] = permissionDecisionTraceToJson(decision.trace);
-          return { ...tool, approvalState: { type: 'pending' }, metadata };
+          return { ...invocation, approvalState: { type: 'pending' }, metadata };
         }
         if (tool.approvalState.type === 'pending') {
           hasPendingApproval = true;
-          return tool;
+          return invocation;
         }
-        return tool;
+        return invocation;
       });
 
       if (changed) {

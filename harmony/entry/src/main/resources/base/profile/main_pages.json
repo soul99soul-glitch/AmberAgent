@@ -73,6 +73,8 @@
     "pages/SettingSubAgentPage",
     "pages/SettingSystemAccessPage",
     "pages/SkillDetailPage",
-    "pages/SkillsPage"
+    "pages/SkillsPage",
+    "pages/SettingSSHProfilesPage",
+    "pages/TerminalPage"
   ]
 }

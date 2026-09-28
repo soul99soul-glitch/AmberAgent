@@ -518,7 +518,11 @@ export const toolSandboxTitle = (tool: UIMessagePartTool, input?: JsonObject): s
   if (name === 'file_move') {
     return `移动文件 ${compactSandboxText(getStringContent(inp, 'from') ?? '', 16)}`;
   }
-  if (name === 'terminal_execute') return '执行 Alpine 命令';
+  if (name === 'terminal_execute') return '执行 SSH 命令';
+  if (name === 'terminal_job_start') return '启动 SSH 任务';
+  if (name === 'terminal_job_read') return '读取 SSH 任务';
+  if (name === 'terminal_job_wait') return '等待 SSH 任务';
+  if (name === 'terminal_job_stop') return '停止 SSH 任务';
   if (name === 'terminal_session_start') return '启动终端会话';
   if (name === 'terminal_session_exec') return '终端会话执行';
   if (name === 'terminal_session_read') return '读取终端输出';
@@ -565,7 +569,7 @@ export const toolSandboxInputPreview = (
     picked = getStringContent(inp, 'path');
   } else if (name === 'icloud_search') {
     picked = getStringContent(inp, 'query');
-  } else if (name === 'terminal_execute' || name === 'terminal_session_exec') {
+  } else if (name === 'terminal_execute' || name === 'terminal_job_start' || name === 'terminal_session_exec') {
     picked = getStringContent(inp, 'command');
   } else if (name === 'file_list' || name === 'file_read' ||
     name === 'file_write' || name === 'file_edit') {
@@ -594,12 +598,9 @@ export const toolDefaultRuntime = (toolName: string): string => {
   if (toolName === 'webview_wait_for_load') return 'webview';
   if (toolName === 'webview_read') return 'webview';
   if (toolName.startsWith('icloud_')) return 'icloud-web-mount';
-  if (toolName === 'terminal_execute' ||
-    toolName === 'terminal_install_packages' ||
-    toolName.startsWith('terminal_job_')) {
-    return 'alpine-proot-stage1';
-  }
-  if (toolName.startsWith('terminal_session_')) return 'alpine-proot-session';
+  if (toolName === 'terminal_execute' || toolName.startsWith('terminal_job_') ||
+    toolName.startsWith('terminal_session_')) return 'remote_ssh';
+  if (toolName === 'terminal_install_packages') return 'alpine-proot-stage1';
   if (toolName.startsWith('file_')) return 'saf-workspace';
   if (toolName.startsWith('screen_') || toolName === 'vlm_task') {
     return 'accessibility-service';
@@ -610,7 +611,7 @@ export const toolDefaultRuntime = (toolName: string): string => {
 
 // defaultWorkspace(:1403-1407)
 export const toolDefaultWorkspace = (toolName: string): string => {
-  if (toolName.startsWith('terminal_') || toolName.startsWith('file_')) {
+  if (toolName.startsWith('file_')) {
     return '/workspace';
   }
   if (toolName.startsWith('icloud_')) return '/icloud';

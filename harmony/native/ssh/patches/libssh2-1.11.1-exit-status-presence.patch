@@ -1,0 +1,47 @@
+--- a/src/libssh2_priv.h
++++ b/src/libssh2_priv.h
+@@ -452,6 +452,7 @@
+ 
+     /* channel's program exit status */
+     int exit_status;
++    unsigned char exit_status_present; /* Amber: receipt is distinct from value 0 */
+ 
+     /* channel's program exit signal (without the SIG prefix) */
+     char *exit_signal;
+--- a/src/packet.c
++++ b/src/packet.c
+@@ -1142,6 +1142,7 @@
+                         channelp->exit_status =
+                             _libssh2_ntohu32(data + 10 +
+                                              strlen("exit-status"));
++                        channelp->exit_status_present = 1;
+                         _libssh2_debug((session, LIBSSH2_TRACE_CONN,
+                                        "Exit status %d received for "
+                                        "channel %u/%u",
+--- a/include/libssh2.h
++++ b/include/libssh2.h
+@@ -1032,6 +1032,8 @@
+     libssh2_channel_flush_ex((channel), SSH_EXTENDED_DATA_STDERR)
+ 
+ LIBSSH2_API int libssh2_channel_get_exit_status(LIBSSH2_CHANNEL* channel);
++/* Amber extension: 1 only after an actual SSH exit-status request. */
++LIBSSH2_API int libssh2_channel_exit_status_received(LIBSSH2_CHANNEL* channel);
+ LIBSSH2_API int libssh2_channel_get_exit_signal(LIBSSH2_CHANNEL* channel,
+                                                 char **exitsignal,
+                                                 size_t *exitsignal_len,
+--- a/src/channel.c
++++ b/src/channel.c
+@@ -1794,6 +1794,13 @@
+     return channel->exit_status;
+ }
+ 
++/* Amber extension: do not interpret the default exit_status 0 as success. */
++LIBSSH2_API int
++libssh2_channel_exit_status_received(LIBSSH2_CHANNEL *channel)
++{
++    return channel && channel->exit_status_present;
++}
++
+ /*
+  * libssh2_channel_get_exit_signal
+  *

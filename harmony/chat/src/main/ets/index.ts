@@ -1248,6 +1248,8 @@ export {
 
 // ===== Phase 5:历史分页窗口加载(纯逻辑,零 SDK 依赖) =====
 export type { ConversationTimelineLoadState } from './chat/timeline_load.ts';
+export type { ChatTimelineRow } from './chat/timeline_rows.ts';
+export { buildChatTimelineRows } from './chat/timeline_rows.ts';
 export {
   createInitialTimelineLoadState, applyTailWindow, beginLoadOlder,
   applyOlderPage, canLoadOlder, coversIndex, nextOlderPageOffset,
@@ -1337,3 +1339,24 @@ export {
   mightContainMiniApp, revisionChangeNote, createMiniAppOutputTransformer,
 } from './chat/miniapp/miniapp_output_transformer.ts';
 export type { MiniAppOutputTransformerDeps } from './chat/miniapp/miniapp_output_transformer.ts';
+
+// E2 Remote SSH shared domain and platform contracts.
+export type {
+  SSHAuthMethod, SSHHandleKind, SSHReadState, SSHCloseReason,
+  SSHNativeErrorCode, SSHNativeError, SSHHandle, SSHProbeOptions,
+  SSHProbeResult, SSHConnectionOptions, SSHExecOptions, SSHPtyOptions,
+  SSHOutputChunk, SSHReadPacket, SSHCredentialBinding, SSHCredential,
+  SSHProfileDraft, SSHProfile, SSHProfileSettings, SSHTrustProbe,
+  SSHTargetSnapshot, TerminalCommandRequest, TerminalSessionRequest, TerminalJobSnapshot,
+  TerminalSessionSnapshot, TerminalSessionEvent,
+} from './chat/terminal/models.ts';
+export type { SSHTransportPort, SSHCredentialStorePort, TerminalLogPort } from './chat/terminal/ports.ts';
+export { SSHProfileStore } from './chat/terminal/profile_store.ts';
+export type { SSHProfileStoreDeps } from './chat/terminal/profile_store.ts';
+export { encodeSSHCredential, decodeSSHCredential } from './chat/terminal/credential_codec.ts';
+export { TerminalRuntime } from './chat/terminal/runtime.ts';
+export type { TerminalRuntimeDeps } from './chat/terminal/runtime.ts';
+export { createTerminalTools } from './chat/terminal/tools.ts';
+export { createTerminalApprovalGuard } from './chat/terminal_approval.ts';
+export type { TerminalApprovalGuard } from './chat/terminal_approval.ts';
+export type { TerminalToolsDeps } from './chat/terminal/tools.ts';

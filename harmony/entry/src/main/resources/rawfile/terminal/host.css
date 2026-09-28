@@ -1,0 +1,14 @@
+html, body { height: 100%; width: 100%; padding: 0; margin: 0; overflow: hidden; }
+body { display: flex; flex-direction: column; }
+#terminal { flex: 1; min-height: 0; padding: 8px; box-sizing: border-box; }
+#terminal-toolbar { display: flex; flex: 0 0 52px; gap: 4px; align-items: center; box-sizing: border-box;
+  padding: 4px 8px; overflow-x: auto; overflow-y: hidden; scrollbar-width: none;
+  background: var(--toolbar-background); }
+#terminal-toolbar::-webkit-scrollbar { display: none; }
+#terminal-toolbar button { flex: 0 0 auto; min-width: 44px; height: 44px; padding: 0 12px; border: 0;
+  border-radius: 8px; font: 12px monospace; color: var(--terminal-foreground);
+  background: var(--terminal-background); }
+#terminal-toolbar button:disabled { opacity: 0.45; }
+#terminal-toolbar #terminal-keyboard { color: var(--terminal-accent); }
+.xterm { height: 100%; }
+.xterm .xterm-viewport { overscroll-behavior: contain; }

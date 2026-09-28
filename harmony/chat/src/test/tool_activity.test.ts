@@ -263,6 +263,18 @@ test('deriveSandboxActivities:空 + processingStatus 门', () => {
   assert.equal(withStatus[0].conversationId, 'c1');
 });
 
+test('Remote SSH activities identify the remote runtime without claiming a local workspace', () => {
+  const tool: UIMessagePartTool = makeTool('ssh-call', 'terminal_execute', '{"command":"pwd"}');
+  assert.equal(toolSandboxTitle(tool), '执行 SSH 命令');
+  assert.equal(toolDefaultRuntime(tool.toolName), 'remote_ssh');
+  assert.equal(toolDefaultRuntime('terminal_job_start'), 'remote_ssh');
+  assert.equal(toolDefaultRuntime('terminal_session_start'), 'remote_ssh');
+  assert.equal(toolDefaultWorkspace(tool.toolName), '');
+  const activities = deriveSandboxActivities(convWith('ssh-conversation', [makeUIMessage('assistant', [tool])]), true, null);
+  assert.equal(activities[0].runtime, 'remote_ssh');
+  assert.equal(activities[0].workspace, '');
+});
+
 test('deriveSandboxActivities:工具行(title/status/步骤/canCancel/runtime 兜底)', () => {
   const conv: Conversation = convWith('c1', [
     makeUserMessage('go'),

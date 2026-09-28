@@ -9,7 +9,8 @@ import { hilog } from '@kit.PerformanceAnalysisKit';
 import { notificationManager } from '@kit.NotificationKit';
 import { BusinessError } from '@kit.BasicServicesKit';
 import BuildProfile from 'BuildProfile';
-import { getSkillManager, rescheduleCronTasksOnStartup, getChatKvStore, resetWorkspaceManager } from '../di/AppContainer.ets';
+import { getSkillManager, rescheduleCronTasksOnStartup, getChatKvStore, resetWorkspaceManager,
+  interruptTerminalForBackground } from '../di/AppContainer.ets';
 import { loadDisplaySetting } from '@amber/chat-domain';
 import type { DisplaySetting } from '@amber/chat-domain';
 import { ACCENT, applyTheme, setAccentColor, BG } from '../design/tokens.ets';
@@ -19,6 +20,7 @@ import { syncMacGatewayPushTokenOnLaunch } from '../platform_impl/MacGatewayClie
 import { startGenerationKeepAlive, stopGenerationKeepAlive } from '../platform_impl/BackgroundGenerationKeepAlive.ets';
 import { hydrateWorkspaceCustomDir, activateWorkspaceCustomDir, currentWorkspaceCustomDir } from '../platform_impl/WorkspaceStore.ets';
 import { runNativeTokenCounterFixture } from '../platform_impl/NativeTokenCounterFixture.ets';
+import { runSSHRuntimeFixture } from '../platform_impl/SSHRuntimeFixture.ets';
 
 const DOMAIN: number = 0x0001;
 const TAG: string = 'DeepRead.EntryAbility';
@@ -189,7 +191,10 @@ export default class EntryAbility extends UIAbility {
     AppStorage.setOrCreate<Context>('abilityContext', this.context);
     // Want 契约(§7.2):分享/deep-link 收 URL/title → 写 AppStorage 供 Index 跳转
     this.routeFromWant(want);
-    if (BuildProfile.DEBUG) runNativeTokenCounterFixture(want);
+    if (BuildProfile.DEBUG) {
+      runNativeTokenCounterFixture(want);
+      runSSHRuntimeFixture(want).catch((): void => hilog.error(DOMAIN, 'SSH.Fixture', 'fixture failed'));
+    }
     // D-126:AmberAgentApp.kt:205-213 — 启动 fire-and-forget 装内置技能
     //   (Dispatchers.IO 异步 → promise 丢弃;失败仅 Log.e,不阻塞启动)
     getSkillManager().installBuiltinSkillsIfMissing()
@@ -204,7 +209,10 @@ export default class EntryAbility extends UIAbility {
   onNewWant(want: Want, _launchParam: AbilityConstant.LaunchParam): void {
     hilog.info(DOMAIN, TAG, 'onNewWant');
     this.routeFromWant(want);
-    if (BuildProfile.DEBUG) runNativeTokenCounterFixture(want);
+    if (BuildProfile.DEBUG) {
+      runNativeTokenCounterFixture(want);
+      runSSHRuntimeFixture(want).catch((): void => hilog.error(DOMAIN, 'SSH.Fixture', 'fixture failed'));
+    }
   }
 
   private routeFromWant(want: Want): void {
@@ -355,6 +363,9 @@ export default class EntryAbility extends UIAbility {
   onBackground(): void {
     hilog.info(DOMAIN, TAG, 'onBackground — 切后台暂停');
     AppStorage.setOrCreate<boolean>('appBackgrounded', true);
+    interruptTerminalForBackground().catch((e: Error): void => {
+      hilog.warn(DOMAIN, TAG, 'terminal background disconnect failed: %{public}s', e.message);
+    });
     // 生成中切后台:DATA_TRANSFER 长时任务保活,流式继续(C6-1)
     const generating: boolean = AppStorage.get<boolean>('chatGenerating') ?? false;
     if (generating) {

@@ -698,6 +698,9 @@ export class AgentTaskStore {
     } catch {
       ok = false;
     }
+    // A completed owner may win while the cancellation callback is awaiting.
+    const latest: AgentTaskSnapshot | undefined = this.tasks.get(taskId);
+    if (latest !== undefined && !agentTaskStatusRunning(latest.status) && !latest.cancelCapability) return latest;
     // 成功取消置 cancelCapability:false(update 同时注销回调),避免残留回调
     //   让后续 cleanup 永久拒绝。
     const updated: AgentTaskSnapshot | null = ok

@@ -9,7 +9,8 @@
 //   - workspace/terminal/screen 三项 zh 缺失(values-zh 无该键)→ 按 Android
 //     zh 回退行为取 values/strings.xml:998-1003 en 逐字
 //   - detail tab(AssistantDetailPage tab 之一)→ 独立页,入口在助手行 '工具'
-//   - 平台专属工具(javascript_engine/terminal/system_access/webview/icloud/
+//   - terminal 已通过 Remote SSH runtime 接线；其余未移植工具仍按行标禁用。
+//   - 平台专属工具(javascript_engine/system_access/webview/icloud/
 //     webmount 系)在 harmony 无工具实体(ChatPage 注册表仅 4 门:time_info/
 //     ask_user/workspace_files/clipboard)→ 开关标记 unavailable 禁用,
 //     防"设置保存了却不生效"(F1 诚实原则);工具落地后移除标记即可
@@ -64,9 +65,9 @@ const LOCAL_TOOL_ROWS: LocalToolRow[] = [
     unavailable: false,
   },
   {
-    option: 'terminal', title: 'Terminal tools',
-    desc: 'Run commands and persistent terminal sessions in the AmberAgent runtime workspace.',
-    unavailable: true,
+    option: 'terminal', title: 'Remote SSH 终端',
+    desc: '在已配置的可信 SSH 主机上执行命令与交互会话，执行动作需要批准。',
+    unavailable: false,
   },
   {
     option: 'screen_automation', title: 'Screen automation tools',
@@ -208,9 +209,10 @@ struct ChatAssistantLocalToolsPage {
           .backgroundColor(SURFACE)
           .borderRadius(RADIUS)
           .border({ width: 1, color: LINE })
-          .margin({ left: GUTTER, right: GUTTER, bottom: 24 })
+          .margin({ bottom: 24 })
         }
         .align(Alignment.TopStart)
+        .padding({ left: GUTTER, right: GUTTER })
         .width('100%').layoutWeight(1)
       }
     }

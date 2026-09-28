@@ -1,0 +1,65 @@
+# E2 独立审查：领域、接线与 UI
+
+2026-09-28。最初为 readonly review worker，仅写本报告；后续 root 明确授权修复真实审批后原页面渲染冻结的窄链，新增 `timeline_rows.ts`/测试及 index 导出，只改 ChatPage 的 row 投影、旧 rows 传递和 ForEach key。未改生成/审批协议，未构建、签名或操作设备。已读 `harmony-arkts` skill、E2 合同及 domain/platform/UI/approval 报告。A/B 为代码和实际主机控制流证据；C 为 root 提供的真实设备截图，三者不相互替代。
+
+## 结论与修复跟踪
+
+本审查范围 A/B/C 收口 PASS，无未修复的确认缺陷。build7 已实际闭合原页审批结果刷新与输出布局，新展示 revision 获另一 domain worker 独立补审 PASS；build8 亮暗 DOM 键盘、IME 输入与 PTY 尺寸、工具键、重连 reset、中文后台中断均有最终设备证据并独立目测。Release 正常入口的持久配置/真实 PTY/IME 图也通过。以下逐项保留最初失败与最终证据，不把修前截图或 Node 测试当设备成功；构建、签名、两设备安装和 DEBUG selector 隔离由 root 操作并登记 E2-gate.md。
+
+| 发现 | 明确触发、证据 | 当前状态 |
+| --- | --- | --- |
+| P1：日志创建中的 start 跨后台继续认证 | 原 `job_runtime.ts:28` / `session_runtime.ts:28` 在 `logs.create` await 后才建立 controller/map，facade prepare 的 pending 已结束。日志挂起时后台 interrupt 找不到该 start；回前台再完成日志会进 native。实际 `/tmp/e2-review-pending-log.mts` 用真实 ProfileStore/Runtime/TaskStore，仅延迟日志端口，job/PTY 两条先失败，native starts=1。 | 已修并独立复跑 2/2 PASS；现 runtime pending 覆盖整个 prepare/start，manager 在 await 前登记 controller/map，取消后迟到日志结果不继续认证。root 实际设备后台 INTERRUPTED/无重发及最终截图通过，延迟 logs.create 的精确窗口由专项回归验证。 |
+| P1：close 排在正在等待的 network write 后，无法唤醒它 | 原 `stream.ts:116–124` 的 close 与 write 共用 serial 队列；PTY write 可能因远端不读取而长期 EAGAIN，此时断开/后台必须先触发 native cancellation。`/tmp/e2-review-blocked-write.mts` 用真实 runtime，仅将 write 挂到 close 才释放，stop/background 两条 150ms 后均未进入 transport.close，外部放行 write 才收口。 | 已修独立原脚本 2/2 PASS，关闭及时完成且每条 native close 仅1次。现 `stream.ts:119–142` 唯一 handle 先移交立即 native close，tail/status consume 继续串行；write/resize 因 close 拒绝不覆盖末态，manager 在启动 barrier 前请求关闭。无 PTY idle timeout。root gate 已登记两组真实 native 背压关闭各2/2、均小于1秒；不是本 reviewer 设备操作。 |
+| P1：已取消的排队 session_exec 仍发送命令 | 原 terminal_session_exec 没有把 tool AbortSignal 传到已有 write validate。`/tmp/e2-review-queued-exec.mts` 先挂第一条人工输入，tool.execute(command,signal) 排队→abort→释放首写，实际 sent 包含已取消的 `echo UNSENT\\n`。 | 已修独立原脚本 1/1 PASS，sent 仅首条人工输入 `a`；optional signal 沿 tools/runtime/session 在真正发送前 checkAbort，保留现有 session，不扩 AgentTool 协议。合同签名同步由 root 登记。 |
+| P2：xterm 异步解析跨 reset 污染新屏幕 | `host.js` 原 write 只调用 `term.write(bytes)`、reset 直接 `term.reset()`；`TerminalViewController` 等 JS 调用返回而非 VT 解析完成。实际 vendored xterm 5.5.0 在 Node 的 write OLD→reset→100ms 仍有 OLD；`/tmp/e2-review-host-reset.cjs` 执行实际 host + parser，OLD→reset→NEW 最终是 `OLD SESSIONNEW SESSION`。 | 已修并独立原脚本 PASS；现 `host.js:87–98` 用实际 write callback 串行现有 write/reset，最终仅 `NEW SESSION`。最终实际 host/parser/HTML 6/6 独立通过；`reset-final-light` 的43×26新连接仅新 prompt，无旧输出，ArkWeb 重连 C 通过。未引入重播/网络协议。 |
+| P2：live Activity 反复追加整份缓存 | 原 `terminal/tools.ts:64` 把累计 outputTail 交 `appendOutput`，followSession 随每次空 read 再追加。`/tmp/e2-review-activity.mts` 执行真实 runtime/tools/ActivityStore，第一包 `$ ` 后 460ms runtimeTail 仍为 `$ `，liveTail 为四份重复 prompt。Web raw bytes 没重复。 | 已修并独立原脚本 PASS：当前 `tools.ts:65–80` RUNNING 用既有 ActivityStore.start 替换快照 tail、保留 current 所有其它字段，不增 Store API；终态仍用原接口。 |
+| P2：空 profile_id 与默认协议分歧 | 工厂的缺省/null/空字符串都默认，但 approval helper 原 frozenTarget/before 把空字符串当显式不存在目标，批准后 target_changed。合同明确空字符串默认。 | 已修独立复跑 approval metadata 15/15 PASS，新增最后一条贯穿真实 loop→pending落盘→approve→重建guard/factory→真实 TerminalRuntime/tools，默认 host 仅执行一次。 |
+| P2：SSH 审批看不到冻结的主机 | ChatMessageTools 胶囊只显示工具名/状态，通用详情只 input/output；默认调用 input 仅 command，endpoint 只在 metadata digest。多 Profile 用户可直接批准而不知道目标 user@host:port。 | 已闭合：approval helper 固定 factory-time 非秘密 label 入 metadata；四种 SSH pending 卡和详情使用 SSHApprovalSummary，仅读持久 label + 输入 command，不查当前默认。上述 15/15 包含 label 保留/缺目标/session 显式目标；dark fixed 与 light final 的持久 host/command 和批准交互 C 通过。 |
+| P2：暗色输入和空列表布局 | 已独立目测 root 的 `/tmp/e2-profiles-new-dark.jpeg`：placeholder 和系统 password eye 近黑色，在暗底低对比；`/tmp/e2-profiles-empty-dark.jpeg` 空内容块垂直居中造成页头下大段空白。 | `/tmp/e2-host-rotation-dark.jpeg` 已独立确认密码placeholder/eye可辨，`saved-dark` 内容顶部起始正确；源码TopStart/Start及自绘eye与截图一致。初始空列表的新截图未单独收到，未将源码等同该状态实拍。 |
+| P2：终端 selector 和手势区 | `/tmp/e2-terminal-connected-dark.jpeg` 已有真实 `e2-fixture$` prompt、43×27；selector 无 profile 名称/黑箭头低对比，底部手势条覆盖 Ctrl-C 按钮下沿。 | 最终亮暗 connected+IME 与 Release 图均有清楚 profile 名/chevron；DOM 工具条52 CSSpx高、44 CSSpx hit area、水平滚动，IME与手势条不压按钮。`reset-final-light` 无键盘态底部留白也通过，C关闭。 |
+| P1：真实 SSH pending 卡批准按钮屏外，闭环无法完成 | `/tmp/e2-ssh-approval-pending-dark.jpeg` 的持久 frozen host/command 清晰，但胶囊占完整可用行宽，后续批准不见、拒绝仅屏外局部。原 `AgentToolCapsule.ets:122–174` 外层 Row 不定宽，两个 inner capsule Row 没有分配剩余宽度，内部 Text 的 layoutWeight 无法预留后续各44vp按钮。 | 新源码已独立复核；`/tmp/e2-approval-pending-fixed-dark.jpeg` 已独立目测两按钮完整屏内，root真点击批准并native exec0，按钮可达问题关闭。原页面结果刷新冻结为下列独立问题，未混同。 |
+| P1：批准已真实执行和保存，原页面仍缓存 pending 卡 | build6 已把✓放屏内，native events seq1880–1884 真认证/exec0，但原页几分钟仍 pending，sending=false；返回重进同 conversation 显示成功+JSON+最终 SSE，证明持久化/续跑正确。原 `ChatPage.ets:5228–5328` 只用 nodeId+theme 做 ForEach key，immutable新 row/message 没使旧 item 闭包重建；内部按 block/step 位置缓存派生对象随旧 subtree 保留。官方离线 `faqs-arkui-619` 问题一和 `faqs-arkui-41` 正是该相同 key 的替换冻结。 | root 授权 reviewer 窄修：`timeline_rows.ts` 对旧 rows 按 nodeId，仅 message/分支/lastAssistant 改变递增 displayRevision，key仅 nodeId+revision+theme；所有初载/窗口/恢复/追加路径传旧rows。新tests3红1绿→4/4、相关45/45/tsc0/lint0error。build7 原页点新✓1秒内success+新job d33acfd6… completed/exit0+finalSSE，独立目测两图C闭环；另一 domain worker只读补审无发现、独立62/62并记入其报告。 |
+| P2：成功输出预览超卡右侧 | root 在重进成功页测得输出 bounds `[225,963][1319,1131]`，卡右界1250。原 `ChatMessageTools.ets:192` 宽100%再左margin32，把右侧推过卡边。 | UI owner将32缩进移外Column padding；build7 completed light图已独立目测卡完整，root测bounds225…1207在1250内，C关闭。 |
+| P2：原生键盘按钮未建立 Web IME 用户动作 | root build6 的 requestFocus+JS focus 只出caret；build7再加已有API showTextInput仍报detached。实际直接触摸Web可以输入和stty，说明bytes/PTY没断，按钮动作尚未闭环。 | 已移除无效 native focus/showTextInput 路径及 native工具条；同一本地 DOM click同步term.focus，原bytegate统一控制。build8真实点击按钮即IME，亮暗输入 E2-IME-* 与stty10 43；工具条回车/Tab保持IME并真实执行，Release同入口也通过。最终源已只读复核、真实xterm/HTML6/6独立PASS，无新输入桥/attach controller/猜测API。 |
+
+## 已核查闭合的源码链
+
+- Profile probe 无 credential 参数；正式验证依据标准化 draft、持久 revision、明确用户信任和 real pinned auth-check，native adapter 层必须再比较指纹。认证后第二次 revision 校验再 CAS 提交，失败保留旧 profile/ref；新 ref 暂存→KV 一次提交→旧 ref 清理顺序正确。平台真实 Asset/crypto 属另一审查范围和设备验收，domain fake port 不证明服务可用。
+- Target digest 包含 endpoint/user/auth/pin/ref/default identity，不含可独立重命名的展示 name。秘密读取前后和 native start 前重验；审批 pending 前保存 metadata，resume 不 recapture。ChatPage 同一轮 guard + factory + dispatcher.before 接线存在，默认切换/host 改动会拒绝旧批准目标；stop/read/wait 依 immutable job/session ID 无需 host 重绑。
+- AppContainer 设置 UI、终端 UI、Chat 都消费相同 ProfileStore/TerminalRuntime 单例；仅 local terminal gate 取终端依赖并暴露工具。EntryAbility background 调 runtime interrupt，未把终端并入 DATA_TRANSFER/TASK_KEEPING。Native adapter 前后 background guard 保留。
+- 每 job/session 唯一 stream pump，read 工具只看缓存。Native stdout/stderr bytes 分流 UTF8 decoder；完整私有 append 日志、有限 tail、真实退出状态/exit code、release 和关闭输入门禁存在。TaskStore 使用 terminal/remote_ssh、source/log/offset 与真实 cancel callback，重启末态读取不重发命令。
+- UI 为 V1 状态；CardGroup callback 只调用 @Builder，连接字段/secret Builder 直接读取当前 state，没有值参数冻结输入。后台/隐藏/退出/取消/认证完成清秘密；in-flight probe/verify/start 有 operationVersion/AbortSignal，晚到回调不回写新 draft。
+- TerminalPage 对本页 session 唯一 ownership，页面退出只 stop 自己 session；输入/resize 均实际 bytes 和 fit 的尺寸，纯本地 xterm 网络禁用，未发现将远端内容插入 HTML/eval。最终 DOM 工具条沿现有 byte 输入门禁；主题 palette/字体/IME/fit 已有下面限定状态的 C 证据。
+
+## 初始 prompt 时序专项
+
+不需要添加重播 buffer。SessionRuntime 的 start 在 begin 完成后只 schedule `setTimeout(100ms)` 并返回；facade Promise 到 TerminalPage.connect 的 await continuation 是同一宏任务末的微任务链。connect 的 snapshot/ownedSessionId/subscribe 之间没有 await，早于第一次 pump。subscribe 的空 chunks snapshot 不会漏掉已开始消费的 prompt，因为此调用链尚未 drain native。首次真实 read 才把原始 bytes 发 UI，保持 VT 控制字节；复制 outputTail 回放反而可能破坏屏幕状态。
+
+## SubAgent 继承与审批专项
+
+此处没有重建 factory 丢冻结目标的 child approval resume 路径，不需新增 guard 系统。
+
+- 继承可达性有限但确实存在：`subagent_validator.ts:407–425` 在非 `smart_dynamic` 模式保留保存的 custom roster definition 的可用 allowlist，因此它可包含 terminal；内置定义无 terminal，动态创建的 profile 只允许 read-only 预定义集合，不能凭 `tool_allowlist` 加入 terminal。不可把这些限制概括成“所有子代理不可用 terminal”。
+- `ChatPage.ets:3284` 提供当前 baseToolsCache；`subagent_tools.ts:285–289` 仅在 start 调用一次 provider。`subagent_manager.ts:319–328` 将匹配的 terminal 原工具实例保留，`subagent_tool_scope.ts:143–157` 和 `subagent_runner.ts:318` 只复制数组；`subagent_manager.ts:542–559` 只启动一次 runner。factory-time snapshot 及 execute 闭包不重建，后来 parent 切换默认/profile 不改变该实例。高风险自动批准明确开启时直接执行仍经过原 terminal runtime 的冻结目标校验。
+- 常规 terminal 调用在子代理上下文要求审批（`tool_permission.ts:217–240`）。`subagent_runner.ts:377–386` 一旦发现 pending 就返回 `approval_required`，在 report retry 前结束；manager 在 `subagent_manager.ts:631–649` 以可见原因和 INTERRUPTED task 状态收口，仅保留 cancel。五个公开子代理工具和 manager 没有 approve/resume 接口，子代理隔离 conversation 的 pending 不移植进 parent。
+- 实际详情页 `SubAgentRunSheet.ets:25–58` 只有目标/文本/关闭，`ChatPage.ets:3297–3315` 只订阅 liveText 和 snapshot；没有 child 批准按钮或 terminal 卡触发子会话续跑的入口。主代理可依据结果另起 parent terminal 调用，该调用走主 ChatPage 正常 capture/pending/resume 链。
+- 独立执行现有 runner/manager 审批专项测试 4/4 PASS（最终消息 pending 精确结果、审批前截断展示、approval_required 可 cancel、TaskBoard cancel/cleanup）。不为不存在的 resume 增加工具协议或重播状态。
+
+## 最终验证与边界
+
+- 实际主机最小复现从源码执行，未伪造 native 认证/设备服务成功。pending-log 修后2/2，activity修后1/1，blocked-write修后2/2，queued-exec修后1/1，四个原脚本联合6/6 PASS；实际host+vendored parser reset原脚本修后PASS。独立 `tsx --test src/test/tool_invocation_metadata.test.ts` 15/15 PASS。各问题均先以失败证据交owner再复核，无放宽gate。
+- 独立补跑 terminal_runtime 新回归2/2 PASS：close-triggered write rejection保持INTERRUPTED、收取尾包UTF8 `末尾😀`、close重入仅一次；启动cwd write挂起时后台中断可收口。SubAgent既有审批专项4/4 PASS。完整suite/build由owner/root汇总，这些专项不代替设备网络/生命周期验收。
+- 展示revision的新回归调用真实 `applyToolApprovalToConversation`/`updateCurrentMessages`，验证只变对应节点、等长输出变化、内容相同reload、重排、分支与末assistant控制；先3红1绿，再4/4绿，相关45/45联合测试通过，domain `tsc --noEmit` exit0。窄lint `/tmp/e2-timeline-row-lint.log` 0 errors/16 warnings：ChatPage四条既有性能建议、新domain helper十二条SDK linter解析domain type产生的no-unsafe建议，源码无any且tsc通过。未为这些建议改协议或状态系统。
+- 此窄修已由 `/root/e2_domain_runtime` 独立只读补审：rollback/reload、分支、窗口、分页传递旧rows完整，无明确新问题；该worker独立跑rows/approval/paging45 + TaskStore17，共62/62，记录 `E2-domain-runtime.md`。该结论与修复作者的自检分别保留。
+- 已独立目测 `/tmp/e2-profile-trust-dark.jpeg`：密码eye可辨、完整SHA256两行、host/type和首次明确信任说明完整；`/tmp/e2-profiles-saved-dark.jpeg` 内容顶部起始、profile/userhost/default/终端/删除无错位。`/tmp/e2-profiles-final-light.jpeg`、`/tmp/e2-profile-new-final-light.jpeg` 字段/placeholder/eye/顶部位置/间距无新缺陷。实际保存成功为root操作证据，截图只证明对应视觉状态；未把保存后列表冒充空列表的新实拍。
+- 主机轮换图已独立目测：`/tmp/e2-host-rotation-dark.jpeg` 新旧指纹全串各两行、告警与重新信任清晰；`/tmp/e2-host-rotation-blocked-dark.jpeg` 有中文pin变化/连接失败。root提供的轮换段server events seq1 host_key1、seq2/3仅connection、0 auth_begin/password_auth证明probe/实际connect在pin前拒绝；本reviewer未操作服务端，root已恢复夹具原key。
+- 初始 `/tmp/e2-ssh-approval-pending-dark.jpeg` 证明持久frozen target/command可辨，但批准按钮屏外；修后 `/tmp/e2-approval-pending-fixed-dark.jpeg` 两按钮完整可达。build7 `/tmp/e2-approval-pending-final-light.jpeg` 与 `/tmp/e2-approval-completed-final-light.jpeg` 已独立目测：新用户消息下新pending有host/command及两按钮，同页直接success、完整JSON preview与final SSE；root真实点击后新job d33acfd6… completed/exit0。输出右界已从1319变1207，位于父卡1250内。源码capsule剩余宽和固定44vp按钮，以及输出外Column padding一致。初始失败不再是当前待验。
+- `/tmp/e2-assistant-tools-final-dark.jpeg` 已独立目测Release实际SSH assistant的Remote SSH开关为蓝色启用，switch完整在父卡内、左右gutter清楚；`ChatAssistantLocalToolsPage.ets:215` 的Scroll水平padding/去卡外margin与修后图一致，关闭该卡width100%叠外margin越界问题。未扩大审查该页其它placeholder功能。
+- build8 `/tmp/e2-terminal-ime-final-light.jpeg` 与 `/tmp/e2-terminal-ime-final-dark.jpeg` 均有真实IME和E2-IME-FINAL/DARK输出，页面43×10与远端 `stty size` 返回10 43一致；profile名、chevron、亮暗字体/cursor/工具条可辨，工具条与IME分开无碰撞。root实际点击DOM“键盘”即弹出IME，源码 `host.js:67–74` 在同一click同步focus，无native异步焦点路径。初始selector/gesture和键盘失败均已关闭。
+- `/tmp/e2-terminal-tools-final-light.jpeg` 展示回忆的历史命令和真实E2-WEB-ENTER输出；root实际先up、Ctrl-C清空，再横向滚动至回车并点击执行，IME仍在、末端回车完整可达。`/tmp/e2-terminal-tab-final-light.jpeg` 展示 `cat e2_tab_fixture.txt` 与E2-TAB-FINAL，root实际前缀经DOM Tab补全；末行prompt与工具条无互遮，输出未换行是夹具printf原语义。
+- `/tmp/e2-terminal-reset-final-light.jpeg` 为断开→重连后的43×26，仅新 `e2-fixture$` prompt，无此前命令/output；无键盘態工具条与gesture留白正确。真实ArkWeb重连reset的C关闭，与实际parser异步写入/中英文拆包回归补充，不声称覆盖任意未执行的压力序列。
+- `/tmp/e2-terminal-background-final-light.jpeg` 为实际后台缩放卡片：INTERRUPTED/“连接已中断，请重新连接”与“SSH连接已断开，请检查网络后重新连接”完整中文可辨，旧prompt保留、DOM工具键禁用。root操作确认无重发；此图用于后台对应状态，不冒充前台全屏截图。
+- 最终 `node --test harmony/tests/terminal-host-reset.test.cjs` 独立执行6/6 PASS：actual vendored VT parser/reset/UTF8、真实application-cursor模式、从打包HTML取9按钮、同click同步focus、全工具键bytegate及主题。DOM mounting/焦点/fit adapter为测试替身，实际IME与布局结论仅来自设备图/操作。只读复核 `TerminalPage.ets:59–76,147–166,176–186,215–245,308–315`、`TerminalView.ets:40–65,116–150`：退出只释放own session，后台取消pending且不在onPageHide清snapshot；统一RUNNING+foreground输入门禁、IME尺寸走原fit/resize。旧nativeIME/toolbar/requestFocus/showTextInput已移除，无第二输入桥。
+- `/tmp/e2-terminal-release-dark.jpeg` 已独立目测真实E2-RELEASE-UI、IME与10 43，正常持久配置名称/host、字体/工具条与Debug最终态一致。只读生成BuildProfile确认DEBUG=false；root gate登记Release17.318s、两设备install/start及此前有效SSH selector在独立release runId下0事件。日志中旧debug runId不能计作Release触发。本reviewer只读当前本地签名日志，codesign/SHA256 digest/verify-app均成功；测试CA输出仅在/tmp，实际安装仍用已有AGC包。构建/安装/selector及服务端操作均为root gate证据，不声称由本reviewer执行。
+- 本reviewer未重复owner全套构建/签名或操作设备。本范围A/B/C最终PASS：亮暗表单、明确信任/主机变更拒绝、真实shell/IME/fit、Chat审批/同页完成、工具条、重连与后台对应状态闭环。没有遗留“仅IME未实测”或“ArkWeb重连待验”状态。
+- 未扩大至SFTP、Python/Mosh、通用终端框架、持久重试或输出重播。已知Select.fontSize、共享AtomicJson短写、native libssh2修复由对应owner处理，本报告不重复归责。
