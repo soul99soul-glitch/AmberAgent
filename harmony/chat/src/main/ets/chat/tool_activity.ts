@@ -447,10 +447,12 @@ export const toolActivityStatus = (
   if (tool.approvalState.type === 'denied') return 'cancelled';
   if (!isToolExecuted(tool) && loading) return 'running';
   if (!isToolExecuted(tool)) return 'running';
-  if (tool.toolName === 'recipe_import' || tool.toolName.startsWith('recipe__')) {
+  if (tool.toolName === 'recipe_import' || tool.toolName.startsWith('recipe__')
+    || tool.toolName === 'plugin_test' || tool.toolName === 'plugin_import' || tool.toolName.startsWith('plugin__')) {
     const status: string | null = getStringContent(outputJson, 'status');
     if (status === 'cancelled') return 'cancelled';
     if (status === 'outcome_unknown') return 'failed';
+    if (status === 'test_failed') return 'failed';
   }
   if (tool.toolName === 'python_execute') {
     const status: string | null = getStringContent(outputJson, 'status');

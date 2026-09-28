@@ -349,6 +349,7 @@ export const createMcpServerTools = (deps: McpServerToolsDeps): AgentTool[] => {
       description: tool.description ?? '',
       parameters: (): InputSchemaObj | null => tool.inputSchema,
       needsApproval: tool.needsApproval,
+      mcpTarget: tool.serverId === undefined ? undefined : { serverId: tool.serverId, toolName: tool.name },
       execute: async (input: JsonValue, signal?: AbortSignalLike): Promise<UIMessagePart[]> => {
         const toolCallId: string | null = deps.activity !== undefined
           ? deps.activity.startTool(exposedName, '调用 MCP 工具', JSON.stringify(input), 'MCP')

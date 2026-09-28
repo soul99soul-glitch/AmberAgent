@@ -93,6 +93,20 @@ export const pythonVersion: () => string;
 export const pythonExecute: (requestId: string, options: PythonOptions) => Promise<PythonResult>;
 export const pythonCancel: (requestId: string) => void;
 
+export interface PluginJsRequest {
+  executionId: string; source: string; inputJson: string; hostTools: string[];
+  timeoutMs: number; maxOutputChars: number;
+}
+export type PluginJsEvent =
+  | { type: 'host_call'; sessionId: string; callId: string; toolName: string; argsJson: string }
+  | { type: 'finished'; sessionId: string; resultJson: string; logs: string[] }
+  | { type: 'failed'; sessionId: string; errorCode: string; message: string; logs: string[]; abandoned: boolean };
+export const pluginJsStart: (request: PluginJsRequest) => Promise<PluginJsEvent>;
+export const pluginJsReply: (sessionId: string, callId: string, resultJson: string) => Promise<PluginJsEvent>;
+export const pluginJsReject: (sessionId: string, callId: string, reason: string) => Promise<PluginJsEvent>;
+export const pluginJsCancel: (sessionId: string) => void;
+export const pluginJsHasSession: (sessionId: string) => boolean;
+
 export interface MoshHandle { id: string; kind: 'mosh'; }
 export interface MoshOptions {
   peerAddress: string;

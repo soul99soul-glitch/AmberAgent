@@ -2,6 +2,7 @@
 #include "amber_native.h"
 #include "ssh_napi.h"
 #include "python_napi.h"
+#include "plugin_js_napi.h"
 #include "mosh_napi.h"
 
 #include <memory>
@@ -178,7 +179,8 @@ napi_value Init(napi_env env, napi_value exports)
     if (napi_define_properties(env, exports, 1, functions) != napi_ok) return nullptr;
     if (RegisterSSH(env, exports) == nullptr) return nullptr;
     if (RegisterPython(env, exports) == nullptr) return nullptr;
-    return RegisterMosh(env, exports);
+    if (RegisterMosh(env, exports) == nullptr) return nullptr;
+    return RegisterPluginJs(env, exports);
 }
 
 napi_module module = {1, 0, nullptr, Init, "amber_native", nullptr, {0}};

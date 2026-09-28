@@ -177,6 +177,7 @@ export const isPrivateNetworkTarget = (url: string | null): boolean => {
 // ===== category(:424-457) =====
 
 export const toolCategory = (name: string): string => {
+  if (name.startsWith('plugin_') || name === 'plugins_list') return 'plugin';
   if (name.startsWith('recipe_') || name === 'recipes_list') return 'recipe';
   if (name.startsWith('external_file_')) return 'external_file';
   if (name.startsWith('file_') || name.startsWith('archive_')
@@ -374,6 +375,8 @@ export const toolSpeculativeBlockReason = (
 // ===== outputBudgetChars(:602-640) =====
 
 export const toolOutputBudgetChars = (name: string): number => {
+  // A complete JSON archive is already capped at 2 MiB by its decoder.
+  if (name === 'plugin_export') return 2 * 1024 * 1024 + 8192;
   // Native bounds the combined UTF-8 output to 128 KiB; JSON may escape each byte.
   if (name === 'python_execute') return 128 * 1024 * 6 + 2048;
   // 262144 = FILE_READ_HARD_MAX_CHARS(WorkspaceTools.kt 内部常量,+2048 信封余量)
@@ -402,6 +405,22 @@ export const toolOutputBudgetChars = (name: string): number => {
 // ===== invocationPolicy(:204-422 全文,含逐名覆盖表) =====
 
 export const toolInvocationPolicy = (tool: AgentTool, input: JsonValue | null): ToolInvocationPolicy => {
+  if (['plugin_import', 'plugin_enable', 'plugin_disable', 'plugin_delete', 'plugin_rollback', 'plugin_restore'].includes(tool.name)) {
+    return { name: tool.name, category: 'plugin', mutates: true, needsApproval: true,
+      autoApprovable: false, concurrencySafe: false, outputBudgetChars: toolOutputBudgetChars(tool.name),
+      risk: 'sensitive', parallelGroup: null, requiresForegroundAppPackage: null,
+      speculativeEligible: false, speculativeBlockReason: 'plugin_installation_changes',
+      reason: null, mandatoryApproval: tool.mandatoryApproval, alwaysAsk: tool.name === 'plugin_import' };
+  }
+  if (tool.pluginEnvelope !== undefined) {
+    const envelope = tool.pluginEnvelope;
+    return { name: tool.name, category: 'plugin', mutates: envelope.mutates,
+      needsApproval: envelope.needsApproval, autoApprovable: false, concurrencySafe: false,
+      outputBudgetChars: toolOutputBudgetChars(tool.name), risk: envelope.risk, parallelGroup: null,
+      requiresForegroundAppPackage: null, speculativeEligible: false,
+      speculativeBlockReason: 'plugin_primitives_require_dispatch',
+      reason: 'Plugin primitives resolve their own permissions', mandatoryApproval: tool.mandatoryApproval, alwaysAsk: false };
+  }
   if (['recipe_import', 'recipe_enable', 'recipe_disable', 'recipe_delete'].includes(tool.name)) {
     return { name: tool.name, category: 'recipe', mutates: true, needsApproval: true,
       autoApprovable: false, concurrencySafe: false, outputBudgetChars: toolOutputBudgetChars(tool.name),

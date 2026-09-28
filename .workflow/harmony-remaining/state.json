@@ -2,7 +2,7 @@
   "objective": "完成所有纳入范围的剩余功能并逐阶段独立审查与验证",
   "baseline": "6840fa551",
   "status": "active",
-  "currentPhase": "E5",
+  "currentPhase": "E6",
   "authorization": "用户授权持续实施、subagent审查、分阶段推进",
   "phases": {
     "E0": "complete",
@@ -11,7 +11,7 @@
     "E3": "in_progress",
     "E4": "in_progress",
     "E5": "in_progress",
-    "E6": "pending",
+    "E6": "in_progress",
     "E7": "pending",
     "E8": "pending",
     "E9": "pending",
@@ -33,7 +33,10 @@
     "E3": "Native and domain/review PASS; emulator 11 Python + 4 Mosh PASS; Python C PASS; final Mosh one-line layout fix built/linted, device visual/release install pending after HDC failure; see E3-gate.md",
     "E3Commit": "b612b0fcb",
     "E4": "Source and independent A/B PASS; focused checks/types/Release build/sign verify PASS; C device UI pending, root SDK performance scan incomplete; see E4-gate.md",
-    "E5Design": "results/E5-plugin-design.md; model/schema contract and independent modules started"
+    "E4SourceCommit": "3dc3b6b9d",
+    "E5Design": "results/E5-plugin-design.md; model/schema contract and independent modules started",
+    "E5": "Source independent package/native/runner/integration A/B PASS; focused checks/types/lint/Release build/sign verify PASS; C real JSVM/ports/UI/install pending device; see E5-gate.md",
+    "E6Contract": "frozen: packets/E6-contract.md; detached service/dependencies/tools/auxiliary implementation begun"
   },
   "blockers": [
     {
@@ -50,6 +53,11 @@
       "phase": "E4",
       "kind": "sdk_performance_lint",
       "details": "Root ten-file SDK performance child stalled 13 minutes at84%; own child ended, syntactic diagnostics 0error/563warn but performance scan incomplete. New-module narrow lint and final two-file lint completed, compiler/types PASS."
+    },
+    {
+      "phase": "E5",
+      "kind": "device_connection",
+      "details": "HDC latest snapshot Empty. Real JSVM/TSFN and platform ports/center UI/install/launch pending; no repeated recovery or device testing; E6 independent source work continues."
     }
   ]
 }

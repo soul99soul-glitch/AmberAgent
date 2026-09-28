@@ -12,6 +12,7 @@ import { GeneratedImageCarousel } from './GeneratedImageCarousel.ets';
 import { isSSHApprovalTool, sshApprovalTargetLabel, sshApprovalCommand, sshApprovalProtocolLabel } from './SSHApprovalSummary.ets';
 import { SSHUIColors } from './SSHUIColors.ets';
 import { RecipeApprovalView, recipeApprovalView } from './RecipeApprovalSummary.ets';
+import { pluginApprovalView } from './PluginApprovalSummary.ets';
 import {
   AgentToolCallCapsule,
   ToolStatus,
@@ -41,6 +42,10 @@ export struct ChatMessageTools {
   @StorageProp('themePackId') @Watch('refreshSSHColors') themePackId: string = '';
 
   private refreshSSHColors(): void { this.sshColors = new SSHUIColors(); }
+
+  private packageApprovalView(): RecipeApprovalView | null {
+    return recipeApprovalView(this.part) ?? pluginApprovalView(this.part);
+  }
 
   // F15:复用 chat-domain tool_activity 既有结构化判定
   //   (toolActivityStatus → indicatesFailure:exit_code≠0 / error / failed /
@@ -125,8 +130,8 @@ export struct ChatMessageTools {
 
   build(): void {
     Column() {
-      if (recipeApprovalView(this.part) !== null && this.part.approvalState.type === 'pending') {
-        this.RecipeSummary(recipeApprovalView(this.part)!)
+      if (this.packageApprovalView() !== null && this.part.approvalState.type === 'pending') {
+        this.RecipeSummary(this.packageApprovalView()!)
       } else if (isSSHApprovalTool(this.part.toolName) && this.part.approvalState.type === 'pending') {
         Column({ space: 4 }) {
           Text(`${sshApprovalProtocolLabel(this.part)} · ${sshApprovalTargetLabel(this.part)}`)

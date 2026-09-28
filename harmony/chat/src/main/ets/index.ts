@@ -1389,3 +1389,26 @@ export { createRecipeRun, nextRecipeStep, acceptRecipeStep,
 export type { RecipeLoopAdapterDeps } from './chat/recipes/runner.ts';
 export { createRecipeTools } from './chat/recipes/tools.ts';
 export type { RecipeToolDeps } from './chat/recipes/tools.ts';
+
+export type { PluginOutputType, PluginHttpMethod, PluginEnvelope, PluginIssue, PluginRemoteManifest,
+  PluginCommandManifest, PluginToolManifest, PluginCapabilities, PluginDirectoryMetadata, PluginManifest,
+  PluginFile, PluginImplementation, PluginResolvedTool, PluginDescriptor, PluginPackage, PluginValidationResult,
+  PluginSource, PluginSignature, PluginTrust, PluginTrustedKey, PluginFailureKind, PluginDiagnostic, PluginHealth,
+  InstalledPlugin, PluginReadResult, PluginImportPreview, PluginReceipt, PluginTestContext, PluginTestPlan,
+  PluginRunCheckpoint, PluginImportCheckpoint, PluginCheckpoint, PluginJsRequest, PluginJsEvent,
+  PluginHttpRequest, PluginHttpResult } from './chat/plugins/models.ts';
+export { PLUGIN_SCHEMA, PLUGIN_ARCHIVE_SCHEMA, PLUGIN_MAX_FILES, PLUGIN_MAX_FILE_BYTES,
+  PLUGIN_MAX_PACKAGE_BYTES, PLUGIN_MAX_ARCHIVE_BYTES, PLUGIN_PACKAGE_HASH_DOMAIN,
+  PLUGIN_SIGNATURE_DOMAIN, PluginHttpError } from './chat/plugins/models.ts';
+export type { PluginExecutionPort, PluginLoopAdapter, PluginStore, PluginHashPort, PluginSignaturePort,
+  PluginArchivePort, PluginJsPort, PluginHttpPort, PluginWebMountPort, PluginMcpPort } from './chat/plugins/ports.ts';
+export { decodePlugin, validatePlugin, canonicalPluginJSON, isCanonicalPluginPath, pluginPathCompare,
+  isAllowedPluginFilePath, pluginFileText, pluginPackageHashBytes, preparePluginPackage,
+  normalizePluginInputs, validatePluginOutput, PluginValidationError } from './chat/plugins/validation.ts';
+export { pluginSchemaIssues, pluginInputSchemaIssues, pluginSchemaValueIssues,
+  canonicalPluginValue, pluginJSONEqual } from './chat/plugins/json_schema.ts';
+export { pluginNetworkURLAllowed, supportedPluginWebMountActions } from './chat/plugins/broker.ts';
+export { createPluginRun, createPluginLoopAdapter, recoverInterruptedPlugins } from './chat/plugins/runner.ts';
+export type { PluginLoopAdapterDeps } from './chat/plugins/runner.ts';
+export { createPluginTools, getPluginSDK } from './chat/plugins/tools.ts';
+export type { PluginToolDeps } from './chat/plugins/tools.ts';

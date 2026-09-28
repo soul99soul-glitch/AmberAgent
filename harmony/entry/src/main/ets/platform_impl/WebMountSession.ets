@@ -66,6 +66,8 @@ export class WebMountSession {
   private hooks: WebMountHostHooks | null = null;
   private uiContext: UIContext | null = null;
   private urlGate: ((url: string) => boolean) | null = null;
+  private pluginUrlGate: ((url: string) => boolean) | null = null;
+  private pluginScopeActive: boolean = false;
   private lastBlockedUrl: string = '';
   private pendingExternalNav: boolean = false;
   // 全局开关:关闭时同步阻止一切会话操作(P2-1);由设置页 toggle 通知
@@ -182,7 +184,20 @@ export class WebMountSession {
 
   // 授权门:工具在每次 open/页面操作前刷新(见 WebMountTools)。null = fail closed。
   public setUrlGate(gate: ((url: string) => boolean) | null): void {
+    // An ordinary tool takes over the page. Site snapshots use their separate
+    // setter and preserve the plugin restriction on late page navigation.
+    if (!this.pluginScopeActive) this.pluginUrlGate = null;
     this.urlGate = gate;
+  }
+
+  public bindPluginUrlGate(gate: (url: string) => boolean): WebMountHookBinding {
+    if (this.pluginScopeActive) throw new Error('Plugin WebMount scope is busy');
+    this.pluginUrlGate = gate;
+    this.pluginScopeActive = true;
+    const binding: WebMountHookBinding = {
+      unbind: (): void => { if (this.pluginUrlGate === gate) this.pluginScopeActive = false; },
+    };
+    return binding;
   }
 
   public isEnabled(): boolean {
@@ -232,7 +247,7 @@ export class WebMountSession {
   private isAllowedNav(url: string): boolean {
     if (this.isInternalUrl(url)) return true;
     if (this.urlGate === null) return false;
-    return this.urlGate(url);
+    return this.urlGate(url) && (this.pluginUrlGate === null || this.pluginUrlGate(url));
   }
 
   // Web.onControllerAttached:controller 真正绑定成功 → 宿主可用

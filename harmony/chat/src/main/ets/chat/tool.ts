@@ -13,6 +13,7 @@ import type { AbortSignalLike } from '@amber/deepread-domain';
 import type { UIMessage, UIMessagePart } from './message.ts';
 import type { ChatModel, ChatToolDefinition } from './provider_model.ts';
 import type { RecipeEnvelope } from './recipes/models.ts';
+import type { PluginEnvelope } from './plugins/models.ts';
 
 // ===== InputSchema(Tool.kt:28-36) =====
 
@@ -21,6 +22,8 @@ export interface InputSchemaObj {
   properties: JsonObject;
   required: string[] | null;
 }
+
+export interface McpToolIdentity { serverId: string; toolName: string; }
 
 export const makeInputSchemaObj = (
   properties: JsonObject, required: string[] | null = null,
@@ -39,6 +42,8 @@ export interface AgentTool {
   //   "auto approve high-risk tools" 设置可无人值守执行(如 wm_eval)
   mandatoryApproval: boolean;
   recipeEnvelope?: RecipeEnvelope;
+  pluginEnvelope?: PluginEnvelope;
+  mcpTarget?: McpToolIdentity;
   // signal:调用方(工具循环)的取消信号 — 网络/长任务工具(MCP、搜索)应消费;
   //   其余工具忽略即可(可选参数,全部既有实现兼容)
   execute: (input: JsonValue, signal?: AbortSignalLike) => Promise<UIMessagePart[]>;
@@ -53,6 +58,8 @@ export interface AgentToolOpts {
   allowsAutoApproval?: boolean;
   mandatoryApproval?: boolean;
   recipeEnvelope?: RecipeEnvelope;
+  pluginEnvelope?: PluginEnvelope;
+  mcpTarget?: McpToolIdentity;
   execute: (input: JsonValue, signal?: AbortSignalLike) => Promise<UIMessagePart[]>;
 }
 
@@ -65,6 +72,8 @@ export const makeAgentTool = (opts: AgentToolOpts): AgentTool => ({
   allowsAutoApproval: opts.allowsAutoApproval ?? true,
   mandatoryApproval: opts.mandatoryApproval ?? false,
   recipeEnvelope: opts.recipeEnvelope,
+  pluginEnvelope: opts.pluginEnvelope,
+  mcpTarget: opts.mcpTarget,
   execute: opts.execute,
 });
 

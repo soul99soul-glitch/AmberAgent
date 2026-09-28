@@ -74,6 +74,7 @@ import {
   runChatTurnWithTools, conversationHasPendingOrUnexecutedTools,
   createTimeTool, createWorkspaceTools, createSearchTools, loadSearchPrefs,
   createToolRegistry, filterToolProfile, createMcpServerTools,
+  createRegistryIntrospectionTools, createToolSearchTool, newId,
   createTerminalApprovalGuard,
   thinkTagTransformer, regexOutputTransformer,
   type ChatTurnDeps,
@@ -98,11 +99,17 @@ import {
   createEntryBuiltinSkillAssetPort,
 } from '../platform_impl/SkillStore.ets';
 import { createEntryWorkspaceManager } from '../platform_impl/WorkspaceStore.ets';
-import type { JsonObject, RecipeStore } from '@amber/chat-domain';
+import type { JsonObject, RecipeStore, PluginStore, InstalledPlugin, PluginPackage, PluginLoopAdapter,
+  PluginDescriptor, UIMessagePartTool } from '@amber/chat-domain';
 import { createEntryRecipeStore } from '../platform_impl/RecipeStore.ets';
 import { createAssistantLocalPrimitives } from '../platform_impl/AssistantLocalPrimitives.ets';
 import { startEntryRecipeFromPage } from '../platform_impl/RecipePageLaunch.ets';
 import { configureEntryScopedRecipeLoop } from '../platform_impl/ScopedRecipeLoop.ets';
+import { createEntryPluginStore } from '../platform_impl/PluginStore.ets';
+import { createEntryPluginAdapter, exportEntryPlugin } from '../platform_impl/EntryPluginRuntime.ets';
+import { startEntryPluginFromPage } from '../platform_impl/PluginPageLaunch.ets';
+import { createWebMountTools } from '../platform_impl/WebMountTools.ets';
+import { getWebMountSession } from '../platform_impl/WebMountSession.ets';
 import type { ToolLoopOptions, TerminalApprovalGuard } from '@amber/chat-domain';
 import { sha256HexUtf8 } from '../platform_impl/EntryLocalToolPorts.ets';
 import {
@@ -806,11 +813,17 @@ const buildSubAgentGenerationPort = (): SubAgentGenerationPort => {
   return new ChatStreamSubAgentGenerationPort({ resolveModel, resolveAssistant, makeProvider,
     configureRecipeLoop: async (loop: ToolLoopOptions): Promise<void> => {
       if (!loop.tools.some((tool: AgentTool): boolean =>
-        tool.name.startsWith('recipe_') || tool.name === 'recipes_list')) return;
+        tool.name.startsWith('recipe_') || tool.name === 'recipes_list'
+          || tool.name.startsWith('plugin_') || tool.name === 'plugins_list')) return;
       const hasTerminal: boolean = loop.tools.some((tool: AgentTool): boolean => tool.name.startsWith('terminal_'));
       const guard: TerminalApprovalGuard | null = hasTerminal
         ? createTerminalApprovalGuard(await getTerminalRuntime(), await getSSHProfileStore(), await getMoshRuntime()) : null;
-      await configureEntryScopedRecipeLoop(loop, await getRecipeStore(), guard);
+      const pluginStore: PluginStore = await getPluginStore();
+      await configureEntryScopedRecipeLoop(loop, await getRecipeStore(), guard, {
+        store: pluginStore,
+        createAdapter: (installed: InstalledPlugin[], primitives: AgentTool[]): PluginLoopAdapter =>
+          createEntryPluginAdapter(pluginStore, installed, primitives),
+      });
     },
   });
 };
@@ -1173,6 +1186,66 @@ export const startRecipeFromPage = async (name: string, expectedHash: string, in
   const assistant: Assistant = assistants[0];
   await startEntryRecipeFromPage({ store: await getRecipeStore(), primitives: await recipePagePrimitives(assistant),
     assistant, repository: getChatRepository() }, name, expectedHash, inputs);
+};
+
+let pluginStorePromise: Promise<PluginStore> | null = null;
+export const getPluginStore = (): Promise<PluginStore> => {
+  if (pluginStorePromise === null) {
+    const context: common.UIAbilityContext = AppStorage.get<common.UIAbilityContext>('abilityContext') as common.UIAbilityContext;
+    const init: Promise<PluginStore> = createEntryPluginStore(context, getPluginPrimitives);
+    init.catch((): void => { if (pluginStorePromise === init) pluginStorePromise = null; });
+    pluginStorePromise = init;
+  }
+  return pluginStorePromise;
+};
+
+const pluginPagePrimitives = async (assistant: Assistant): Promise<AgentTool[]> => {
+  ensureSearchSdk();
+  await initMcpManager();
+  const kv = getChatKvStore();
+  const search = await loadSearchPrefs(kv);
+  const webMount: boolean = assistant.localTools.indexOf('webmount') >= 0;
+  const webMountEnabled: boolean = webMount || await kv.get('webmount_global_enabled') === 'true';
+  const base: AgentTool[] = filterToolProfile([
+    ...await recipePagePrimitives(assistant),
+    ...createMcpServerTools({ manager: getMcpManager(), assistantIds: [...assistant.mcpServers] }),
+    ...(search.enableWebSearch ? createSearchTools(search) : []),
+    ...(webMountEnabled ? createWebMountTools(getWebMountSession(), false, webMount) : []),
+  ], assistant.toolProfile).tools;
+  const registry = createToolRegistry(base);
+  return [...registry.tools(), ...createRegistryIntrospectionTools(registry),
+    createToolSearchTool(registry, assistant.toolProfile)];
+};
+
+export const getPluginPrimitives = async (): Promise<AgentTool[]> => {
+  const assistants: Assistant[] = await getChatAssistants();
+  return pluginPagePrimitives(assistants[0]);
+};
+
+export const startPluginFromPage = async (
+  toolName: string, input: JsonObject, title: string, expectedPackageHash: string | null = null,
+): Promise<void> => {
+  const assistants: Assistant[] = await getChatAssistants();
+  const assistant: Assistant = assistants[0];
+  if (await resolveChatRuntime(assistant.id) === null) throw new Error('请先配置可用的 Chat 供应商和模型。');
+  const primitives: AgentTool[] = await pluginPagePrimitives(assistant);
+  const store: PluginStore = await getPluginStore();
+  const installed: InstalledPlugin[] = await store.listInstalled(primitives);
+  if (expectedPackageHash !== null && !installed.some((item: InstalledPlugin): boolean => {
+    const candidate: PluginPackage | null = item.package;
+    return item.enabled && candidate !== null && candidate.hash === expectedPackageHash
+      && candidate.tools.some((tool: PluginDescriptor): boolean => tool.toolId === toolName);
+  })) {
+    throw new Error('插件已更新或停用，请重新选择。');
+  }
+  const parent: UIMessagePartTool = { type: 'tool', toolCallId: newId(), toolName,
+    input: JSON.stringify(input), output: [], approvalState: { type: 'auto' }, metadata: { plugin_manual: true } };
+  await startEntryPluginFromPage({ assistant, primitives, adapter: createEntryPluginAdapter(store, installed, primitives),
+    repository: getChatRepository() }, parent, title);
+};
+
+export const exportPluginFromPage = async (id: string, hash: string, destination: string): Promise<void> => {
+  await exportEntryPlugin(await getPluginStore(), getWorkspaceManager(), id, hash, destination);
 };
 
 export const getChatAssistants = async (): Promise<Assistant[]> => {

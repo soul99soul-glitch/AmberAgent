@@ -22,6 +22,7 @@ import { hydrateWorkspaceCustomDir, activateWorkspaceCustomDir, currentWorkspace
 import { runNativeTokenCounterFixture } from '../platform_impl/NativeTokenCounterFixture.ets';
 import { runSSHRuntimeFixture } from '../platform_impl/SSHRuntimeFixture.ets';
 import { runRuntimeE3Fixture } from '../platform_impl/RuntimeE3Fixture.ets';
+import { cancelNativePluginJsSessions } from '../platform_impl/NativePluginJsTransport.ets';
 
 const DOMAIN: number = 0x0001;
 const TAG: string = 'DeepRead.EntryAbility';
@@ -366,6 +367,7 @@ export default class EntryAbility extends UIAbility {
   onBackground(): void {
     hilog.info(DOMAIN, TAG, 'onBackground — 切后台暂停');
     AppStorage.setOrCreate<boolean>('appBackgrounded', true);
+    cancelNativePluginJsSessions();
     interruptTerminalForBackground().catch((e: Error): void => {
       hilog.warn(DOMAIN, TAG, 'terminal background disconnect failed: %{public}s', e.message);
     });

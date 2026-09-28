@@ -8,9 +8,11 @@ import type { GenerationRetrySetting } from './generation_retry.ts';
 import { permissionDecisionTraceToJson } from './tool_permission.ts';
 import { makeGenerationRetrySetting } from './generation_retry.ts';
 import type { RecipeLoopAdapter, RecipeExecutionPort } from './recipes/runner.ts';
+import type { PluginLoopAdapter } from './plugins/ports.ts';
 
 export interface RecipeBatchOptions {
-  adapter: RecipeLoopAdapter;
+  adapter?: RecipeLoopAdapter;
+  pluginAdapter?: PluginLoopAdapter;
   tools: AgentTool[];
   dispatcher: AgentToolDispatcher;
   autoApproveTools: boolean;
@@ -28,7 +30,7 @@ export interface RecipeBatchResult {
   paused: boolean;
 }
 
-// Only batches containing a Recipe use this ordered path. The adapter owns the
+// Batches containing a Recipe or plugin use this ordered path. The adapter owns the
 // pinned plan; this bridge supplies the same permission resolver and dispatcher.
 export const executeRecipeBatch = async (
   parts: UIMessagePartTool[], options: RecipeBatchOptions,
@@ -37,7 +39,7 @@ export const executeRecipeBatch = async (
   for (const tool of options.tools) definitions.set(tool.name, tool);
   const primitives = options.tools.filter((tool: AgentTool): boolean =>
     !tool.name.startsWith('recipe_') && tool.name !== 'recipes_list'
-      && !tool.name.startsWith('plugin__'));
+      && !tool.name.startsWith('plugin_') && tool.name !== 'plugins_list');
   const pairs: ToolBatchResultPair[] = [];
   const retry = makeGenerationRetrySetting({ enabled: false });
   for (const original of parts) {
@@ -47,12 +49,15 @@ export const executeRecipeBatch = async (
       await options.save(current, next);
       current = next;
     };
-    if (options.adapter.supports(current.toolName)) {
+    const adapter: RecipeLoopAdapter | undefined = options.pluginAdapter?.supports(current.toolName)
+      ? options.pluginAdapter : options.adapter?.supports(current.toolName) ? options.adapter : undefined;
+    const checkpointKey: string = options.pluginAdapter?.supports(current.toolName) ? 'plugin_v1' : 'recipe_v1';
+    if (adapter !== undefined) {
       try {
-        if (current.metadata?.['recipe_v1'] === undefined && !definitions.has(current.toolName)) {
-          throw new Error('Recipe is unavailable in this tool scope.');
+        if (current.metadata?.[checkpointKey] === undefined && !definitions.has(current.toolName)) {
+          throw new Error('Package tool is unavailable in this tool scope.');
         }
-        await save(await options.adapter.prepare(current, primitives));
+        await save(await adapter.prepare(current, primitives));
         const port: RecipeExecutionPort = {
           primitive: (name: string): AgentTool | null => definitions.get(name) ?? null,
           capture: (part: UIMessagePartTool): JsonObject | null => options.capture?.(part) ?? null,
@@ -63,14 +68,14 @@ export const executeRecipeBatch = async (
             options.invocationContext, retry, signal),
           saveParent: save,
         };
-        const result = await options.adapter.advance(current, port, options.signal);
+        const result = await adapter.advance(current, port, options.signal);
         if (result !== current) await save(result);
       } catch (error) {
         // A started checkpoint was already saved before dispatch. Never replace
         // it with a fresh plan or retry the primitive after an interrupted save.
-        if (current.metadata?.['recipe_v1'] !== undefined) throw error;
+        if (current.metadata?.[checkpointKey] !== undefined) throw error;
         await save({ ...current, output: [{ type: 'text', metadata: null,
-          text: JSON.stringify({ status: 'failed', error_code: 'recipe_prepare_failed',
+          text: JSON.stringify({ status: 'failed', error_code: checkpointKey === 'plugin_v1' ? 'plugin_prepare_failed' : 'recipe_prepare_failed',
             message: error instanceof Error ? error.message : String(error) }) }] });
       }
     } else {

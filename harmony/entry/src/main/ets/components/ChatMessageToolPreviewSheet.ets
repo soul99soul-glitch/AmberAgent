@@ -17,6 +17,7 @@ import { promptAction } from '@kit.ArkUI';
 import { isSSHApprovalTool, sshApprovalTargetLabel, sshApprovalCommand, sshApprovalProtocolLabel } from './SSHApprovalSummary.ets';
 import { SSHUIColors } from './SSHUIColors.ets';
 import { RecipeApprovalView, recipeApprovalView } from './RecipeApprovalSummary.ets';
+import { pluginApprovalView } from './PluginApprovalSummary.ets';
 
 // 搜索结果项
 interface SearchResultItem {
@@ -35,6 +36,10 @@ export struct ChatMessageToolPreviewSheet {
 
   private refreshSSHColors(): void { this.sshColors = new SSHUIColors(); }
 
+  private packageApprovalView(): RecipeApprovalView | null {
+    return recipeApprovalView(this.part) ?? pluginApprovalView(this.part);
+  }
+
   private copyToClipboard(text: string): void {
     const board: pasteboard.SystemPasteboard = pasteboard.getSystemPasteboard();
     board.setDataSync(pasteboard.createData(pasteboard.MIMETYPE_TEXT_PLAIN, text));
@@ -43,7 +48,7 @@ export struct ChatMessageToolPreviewSheet {
 
   private getInputJson(): string {
     try {
-      const recipe: RecipeApprovalView | null = recipeApprovalView(this.part);
+      const recipe: RecipeApprovalView | null = this.packageApprovalView();
       if (recipe !== null && recipe.pendingStep !== null) {
         return JSON.stringify(JSON.parse(recipe.pendingStep.input), null, 2);
       }
@@ -138,8 +143,8 @@ export struct ChatMessageToolPreviewSheet {
 
       Scroll() {
         Column() {
-          if (recipeApprovalView(this.part) !== null) {
-            this.RenderRecipePreview(recipeApprovalView(this.part)!)
+          if (this.packageApprovalView() !== null) {
+            this.RenderRecipePreview(this.packageApprovalView()!)
           } else if (isSSHApprovalTool(this.part.toolName)) {
             this.RenderSSHPreview()
           } else if (this.isSearchWeb()) {
@@ -186,12 +191,14 @@ export struct ChatMessageToolPreviewSheet {
     Column({ space: 6 }) {
       Text(view.title).fontSize(META).fontColor(this.sshColors.ink).width('100%')
       Text(view.stepLabel).fontSize(META).fontColor(this.sshColors.secondary).width('100%')
-      Text(`Canonical hash: ${view.hash}`).fontSize(META).fontFamily('JetBrainsMono')
+      Text(`内容 hash: ${view.hash}`).fontSize(META).fontFamily('JetBrainsMono')
         .fontColor(this.sshColors.secondary).width('100%').wordBreak(WordBreak.BREAK_ALL).copyOption(CopyOptions.LocalDevice)
       if (view.kind === 'import') {
         Text(`来源: ${view.workspacePath}\n安装基线: ${view.baseHash ?? '首次安装'}`)
           .fontSize(META).fontColor(this.sshColors.secondary).width('100%').wordBreak(WordBreak.BREAK_ALL)
-        Text('固定 Canonical 内容').fontSize(META).fontColor(this.sshColors.muted).width('100%').margin({ top: 8 })
+      }
+      if (view.canonicalJSON.length > 0) {
+        Text('固定审核内容').fontSize(META).fontColor(this.sshColors.muted).width('100%').margin({ top: 8 })
         JsonTree({ json: view.canonicalJSON }).width('100%')
       }
     }.width('100%').padding(16)
@@ -307,7 +314,7 @@ export struct ChatMessageToolPreviewSheet {
     Column() {
       // Input JSON
       Row() {
-        Text(recipeApprovalView(this.part)?.pendingStep ? '当前步骤实际参数' : '输入参数')
+        Text(this.packageApprovalView()?.pendingStep ? '当前步骤实际参数' : '输入参数')
           .fontSize(META).fontColor(INK3).layoutWeight(1)
         Text('复制').fontSize(LABEL).fontColor(ACCENT)
           .onClick((): void => { this.copyToClipboard(this.getInputJson()); })

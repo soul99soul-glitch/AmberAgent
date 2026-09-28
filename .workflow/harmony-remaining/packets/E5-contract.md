@@ -1,0 +1,22 @@
+# E5 frozen contract
+
+2026-09-28，E5-A。产品范围完整采用 `results/E5-plugin-design.md`；本文固定各 owner 的公共接口，shared index/DI/dispatcher/ChatPage 仅 root 接线。模型及端口分别位于 `chat/plugins/models.ts`、`chat/plugins/ports.ts`，不另造同名 DTO。
+
+- Manifest wire 保留 iOS 字段，缺省 `host_tools=[]/inputs={}/output=json/timeout_ms=10000/max_output_chars=10000`；空 `capabilities.localRuntimes` canonical 省略。`embedded_python` 为明确平台扩展。
+- `PluginFile={path,data:number[]}` 可进入 JSON checkpoint，内容 hash 含全部实际字节；路径/NFC/UTF8身份严格，孤立surrogate拒绝、正常emoji允许；key/path按Swift的Unicode scalar排序。摘要注入 `PluginHashPort`，domain 不实现 crypto。Store owner 唯一维护 Swift 跨端 fixture。
+- `PluginPackage={manifest,hash,files,fileHashes,tools,envelope}`；descriptor 固定源/私有 Recipe/remote、schema、timeout、能力与派生风险；`toolId=plugin__id__name`。通过验证后才构造 package，任何问题零注册/写入。
+- `InstalledPlugin` 明确 package nullable、currentHash nullable、configuredEnabled/实际 enabled、trust、health 与具体 errorCode/errorMessage；有效 current 指针即便包损坏仍保留 hash 供精确删除/回退，指针损坏才 null。仅可定位的包损坏列 invalid；目录读取、权限或索引 IO 失败必须 reject，不能伪装空列表。listInstalled(primitives?) 明确传当轮助手oracle，平台factory async provider只作中心/冷载默认，不能永久捕获假catalog。
+- `PluginStore.readPackage(source,primitives)` 返回 candidate/trust；source 固定 `{kind:'directory'|'archive',workspacePath}`。prepareImport 冻结 source/candidate/baseHash/permissionExpanded/permissionDiff/enable/trust；applyImport 双 hash CAS 并原子安装+启用，返回 PluginReceipt。启停/删除/回退/恢复/导出带 expected hash；一槽上一版，不建通用 ledger。
+- 插件中心 `plugin_import` 同时传展示预览的 `expected_base_hash: string|null`（新包明确 null）；Adapter.prepare 在该可选字段 present 时比较重新准备的 baseHash，变化报 stale_base，不替换用户已见的 baseline/diff。plugin_test 只固定 expected_candidate_hash，不带 expected_base_hash；applyImport 仍保留最终双 CAS。
+- health 按 id+hash，连续失败3次隔离，最多50条500字符；批准拒绝不算代码故障，candidate_test 不写 live health。recordSuccess/recordFailure 返回 PluginHealth。restore 仅解除当前版本隔离；rollback 返回 receipt。可信发布者 keys 用完整 SHA256 fingerprint，archive keyId 仅前16hex；有效 signed 与 publisherTrusted 分开。Store 提供 list/add/removeTrustedKey 和 archive export，ArchivePort 为平台内部可复用边界。
+- `PluginExecutionPort` 与 `PluginLoopAdapter` 直接 alias E4 ports；primitive/capture/decide/dispatch/saveParent 完全复用。支持仅 plugin_import/plugin_test/plugin__*。禁止父批准透传子调用。
+- parent.metadata.plugin_v1 是 `PluginCheckpoint`；run 固定 executionId/descriptor/inputs/test、phase、pendingStep 精确 child、pendingCallId、recipeState；`test.kind='candidate_test'`，expectedProvided 区分未提供与显式 null。原生 handle/秘密不持久化。save started 在真实副作用前；进程重启无同 native 会话则中断，不能重跑源码。
+- JS 请求确切字段：`executionId,source,inputJson,hostTools,timeoutMs,maxOutputChars`；sessionId=executionId。host_call event `type,sessionId,callId,toolName,argsJson`；finished `resultJson,logs`；failed `errorCode,message,logs,abandoned`。start/reply/reject 的 Promise 在下一事件结算，cancel 同步 void、hasSession 同步 boolean。reject 关闭 gate 且终止该会话成功路径；catch 不重新开 gate。等待 host_call 的整段暂停 JS 时间预算，不新增 pause/resume。
+- JSVM 每调用 fresh VM，专属 native 线程/TSFN/同步 host bridge；API12 无公开硬终止 API证据。采用诚实 abandon：关闭宿主 gate/拒绝迟到结果；唯一 active/abandoned slot，旧线程不结束不新开无限线程；UI不得 join。无限脚本仍可能耗CPU，SDK和错误须说明。
+- `PluginHttpPort.execute(PluginHttpRequest,signal?)` 返回 `{status,body}` 完整 UTF8。请求固定 url/method/input/networkDomains/timeout/maxoutput；platform 不允许输入替换 endpoint/header，关闭自动 redirect 并逐跳核域。runner统一 JSON/coarse output/schema 校验；超预算拒绝，不截断成功。`PluginHttpError(code,message,mayHaveApplied)` 表明非GET/HEAD已发出后的未知副作用，runner映射 outcome_unknown。
+- `PluginWebMountPort.withScope<T>(domains,operation,requireCurrent?)` 只围真实 dispatch；requireCurrent 默认true，wm_open/tab_select明确新目标传false。平台当前 URL、跳转每步与最终 URL 受插件域与现行站点 gate 交集，不覆盖原gate。wm_click/tab/back 等无URL输入，不能只检查 wm_open 参数。finally只释放active ownership，当前loaded-page保留插件gate挡晚到导航；下一明确普通工具setUrlGate且inactive才清，站点刷新不清。交互ack不保证导航完成，沿root窄生命周期修复而非sleep或黑名单。
+- `PluginMcpPort.resolveMcpPrimitive(serverId,toolName)` 由 root 根据本轮助手许可 MCP snapshot 精确绑定已生成 AgentTool，不能猜 mcp__ alias；实际执行仍 dispatcher，不直 call manager。
+- 能力 broker 与validation同一白名单：明确 Workspace 路径工具/scrape_web/已实现wm动作/tool_search/tools_list。拒绝 plugin/Recipe 管理、裸terminal/python/js、memory/private/subagent/exec。Python command 独立 localRuntimes授权与 python_execute 子审批，不把 iOS runtime 自动映射SSH。后台资格与已存在宿主 cron 能力相交，JS/Python不自动后台。
+- UI 从固定 descriptor/input 手动启动同 adapter；不让额外模型猜插件。中心包括 installed/disabled/quarantined/invalid、真实试跑 expected_result 与 candidateHash、批准导入diff/enable意图、启停删除、更新回退、有限诊断、信任keys和真实导出。
+
+必要验收最多六类：包/schema/path/hash/signature；Store CAS/生命周期/损坏；四backend真实结果；逐次子审批/取消/重启未知不重演；SDK→Workspace→test→hash导入→曝光调用→停用；端内UI/独立review及最终build/sign/install截图。各owner只跑本责任必要检查，最终设备与shared接线由root负责。

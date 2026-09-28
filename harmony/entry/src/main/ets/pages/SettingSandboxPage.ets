@@ -225,6 +225,15 @@ struct SettingSandboxPage {
     })
   }
 
+  @Builder
+  PluginsCard(): void {
+    CardRow({
+      label: '插件中心', desc: '预览、试跑和安装插件，按实际操作审批权限。',
+      iconName: 'cpu', plateSize: 28, isLast: true,
+      onRowClick: (): void => { router.pushUrl({ url: 'pages/PluginsPage' }); },
+    })
+  }
+
   // 卡组内发丝分隔线(内缩至行文字起点,同 CardRow 分隔规则)
   @Builder
   CardHairline(): void {
@@ -410,6 +419,8 @@ struct SettingSandboxPage {
           PlainSection({ label: '工具编排' })
           CardGroup({ radius: 18, stroke: true, content: (): void => { this.RecipesCard(); } })
             .margin({ left: GUTTER, right: GUTTER })
+          CardGroup({ radius: 18, stroke: true, content: (): void => { this.PluginsCard(); } })
+            .margin({ left: GUTTER, right: GUTTER, top: 8 })
 
           if (!this.loadError && this.snap !== null) {
             PlainSection({ label: '执行参数' })

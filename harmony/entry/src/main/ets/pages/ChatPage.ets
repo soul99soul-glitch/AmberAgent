@@ -56,6 +56,7 @@ import {
   makeUIMessage,
   createConversationContextTools, createConversationHistoryTools,
   createTerminalApprovalGuard, createRecipeTools, createRecipeLoopAdapter, recoverInterruptedRecipes,
+  createPluginTools, recoverInterruptedPlugins,
   AgentToolDispatcher, defaultToolInvocationHooks,
   createConversationQueueTools, createToolRegistry,
   createToolSearchTool, createRegistryIntrospectionTools, filterToolProfile,
@@ -106,7 +107,7 @@ import {
   buildProviderApi, currentChatModelUuid, loadTaskModelIds, resolveTaskChatModelChoice,
   resolveTaskModelChain, loadTaskPrompts, TaskPrompts,
   getMcpManager, initMcpManager, getToolActivityStore, getSkillManager,
-  getWorkspaceManager, getRecipeStore,
+  getWorkspaceManager, getRecipeStore, getPluginStore,
   getSkillWorkspacePort, getDeepReadPlaybookRepository, getAgentPromptConfigTool,
   getPermissionsStatusTool, getAgentTaskTools, getAgentCronTools,
   hydrateSubAgentSetting, getSubAgentTools, SubAgentToolsContext,
@@ -182,7 +183,10 @@ import { createSoulTools } from '../platform_impl/SoulTools.ets';
 import { jevToolSearchReranker, createJevStatusTool, jevNoulBatch, JevNoulBatchResult } from '../platform_impl/JevSupport.ets';
 import { JsSandboxHost } from '../platform_impl/JsSandboxTool.ets';
 import { createAssistantLocalPrimitives } from '../platform_impl/AssistantLocalPrimitives.ets';
-import type { RecipeStore, InstalledRecipe, RecipeLoopAdapter } from '@amber/chat-domain';
+import type { RecipeStore, InstalledRecipe, RecipeLoopAdapter, PluginStore, InstalledPlugin,
+  PluginLoopAdapter } from '@amber/chat-domain';
+import { createEntryPluginAdapter } from '../platform_impl/EntryPluginRuntime.ets';
+import { createNativePluginJsTransport } from '../platform_impl/NativePluginJsTransport.ets';
 import { stopGenerationKeepAlive } from '../platform_impl/BackgroundGenerationKeepAlive.ets';
 import { SubAgentActivityStrip } from '../components/SubAgentActivityStrip.ets';
 
@@ -1177,6 +1181,8 @@ struct ChatPage {
     const params = router.getParams() as Record<string, string>;
     const convId: string = params ? (params['conversationId'] ?? '') : '';
     const recipeManualId: string = params ? (params['recipeManualToolCallId'] ?? '') : '';
+    const pluginManualId: string = params ? (params['pluginManualToolCallId'] ?? '') : '';
+    const manualId: string = recipeManualId.length > 0 ? recipeManualId : pluginManualId;
     this.loadedRestoreVersion = conversationRestoreVersion(convId);
     // Phase 1:首屏定位参数(最小兼容:initialMessageIndex 数字 index;nodeId 定位行)
     const initialIndexParam: string = params ? (params['initialMessageIndex'] ?? '') : '';
@@ -1208,7 +1214,8 @@ struct ChatPage {
           }
           if (!hasActiveConversationRuns([full.id])) {
             try {
-              const recovered: Conversation = recoverInterruptedRecipes(full);
+              const recovered: Conversation = recoverInterruptedPlugins(recoverInterruptedRecipes(full),
+                createNativePluginJsTransport().hasSession);
               if (recovered !== full) {
                 const release: () => void = beginConversationRestore([full.id]);
                 try { await getChatRepository().save(recovered); } finally { release(); }
@@ -1253,13 +1260,14 @@ struct ChatPage {
           } else {
             this.positionToTargetNode(targetNodeId, targetNodeIndex);
           }
-          if (recipeManualId.length > 0) {
+          if (manualId.length > 0) {
             const messages: UIMessage[] = currentMessages(full);
             const manual: UIMessagePartTool | undefined = messages.length > 0
               ? messages[messages.length - 1].parts.find((part: UIMessagePart): boolean =>
-                part.type === 'tool' && (part as UIMessagePartTool).toolCallId === recipeManualId) as UIMessagePartTool | undefined
+                part.type === 'tool' && (part as UIMessagePartTool).toolCallId === manualId) as UIMessagePartTool | undefined
               : undefined;
-            if (manual !== undefined && manual.metadata?.['recipe_manual'] === true
+            if (manual !== undefined && (manual.metadata?.['recipe_manual'] === true
+              || manual.metadata?.['plugin_manual'] === true)
               && manual.output.length === 0 && manual.approvalState.type === 'auto') this.resumeToolLoop(full);
           }
           // D-052:恢复持久化队列(session 创建时 load,ChatService.kt:334);
@@ -3883,31 +3891,41 @@ struct ChatPage {
           : []),
       ], rt.assistant.toolProfile).tools;
     const recipeStore: RecipeStore = await getRecipeStore();
+    const pluginStore: PluginStore = await getPluginStore();
+    const primitiveRegistry: ToolRegistry = createToolRegistry(profiledTools);
+    const pluginPrimitives: AgentTool[] = [...profiledTools, ...createRegistryIntrospectionTools(primitiveRegistry),
+      createToolSearchTool(primitiveRegistry, rt.assistant.toolProfile, jevToolSearchReranker())];
     let recipeAdapter: RecipeLoopAdapter = createRecipeLoopAdapter({ store: recipeStore, installed: [] });
+    let pluginAdapter: PluginLoopAdapter = createEntryPluginAdapter(pluginStore, [], pluginPrimitives);
     const supervisorTools: AgentTool[] = this.subAgentEnabled && this.conversation !== null
       ? this.subAgentToolsCache : [];
-    const catalog = (installed: InstalledRecipe[]): AgentTool[] => {
+    const catalog = (installed: InstalledRecipe[], installedPlugins: InstalledPlugin[]): AgentTool[] => {
       recipeAdapter = createRecipeLoopAdapter({ store: recipeStore, installed });
       const recipeTools: AgentTool[] = filterToolProfile(createRecipeTools({
         store: recipeStore, installed, primitives: profiledTools,
       }), rt.assistant.toolProfile).tools;
-      const registry: ToolRegistry = createToolRegistry([...profiledTools, ...recipeTools]);
+      pluginAdapter = createEntryPluginAdapter(pluginStore, installedPlugins, pluginPrimitives);
+      const pluginTools: AgentTool[] = filterToolProfile(createPluginTools({ store: pluginStore,
+        installed: installedPlugins, primitives: pluginPrimitives }), rt.assistant.toolProfile).tools;
+      const registry: ToolRegistry = createToolRegistry([...profiledTools, ...recipeTools, ...pluginTools]);
       this.baseToolsCache = [...registry.tools(), ...createRegistryIntrospectionTools(registry)];
       return this.scopedToConversation([
         ...this.baseToolsCache, createToolSearchTool(registry, rt.assistant.toolProfile, jevToolSearchReranker()),
         ...supervisorTools,
       ], conv);
     };
-    const initialTools: AgentTool[] = catalog(await recipeStore.listInstalled());
+    const initialTools: AgentTool[] = catalog(await recipeStore.listInstalled(), await pluginStore.listInstalled(pluginPrimitives));
     const options: ToolLoopOptions = {
       dispatcher: new AgentToolDispatcher({ hooks: terminalGuard === null
         ? defaultToolInvocationHooks() : [...defaultToolInvocationHooks(), terminalGuard.hook] }),
       captureInvocationMetadata: terminalGuard === null ? undefined : terminalGuard.captureInvocationMetadata,
       tools: initialTools,
       recipeAdapter,
+      pluginAdapter,
       refreshTools: async (): Promise<AgentTool[]> => {
-        const tools: AgentTool[] = catalog(await recipeStore.listInstalled());
+        const tools: AgentTool[] = catalog(await recipeStore.listInstalled(), await pluginStore.listInstalled(pluginPrimitives));
         options.recipeAdapter = recipeAdapter;
+        options.pluginAdapter = pluginAdapter;
         return tools;
       },
       makeProviderForStep: (defs: ChatToolDefinition[]): ChatStreamProvider =>
@@ -4045,6 +4063,8 @@ struct ChatPage {
       allowsAutoApproval: tool.allowsAutoApproval,
       mandatoryApproval: tool.mandatoryApproval,
       recipeEnvelope: tool.recipeEnvelope,
+      pluginEnvelope: tool.pluginEnvelope,
+      mcpTarget: tool.mcpTarget,
       execute: (input: JsonValue, signal?: AbortSignalLike): Promise<UIMessagePart[]> =>
         store.withConversation(scopeId,
           (): Promise<UIMessagePart[]> => tool.execute(input, signal)),
@@ -4232,7 +4252,8 @@ struct ChatPage {
     const tail: UIMessage[] = currentMessages(conv);
     const manualPart: UIMessagePartTool | undefined = tail.length > 0
       ? tail[tail.length - 1].parts.find((part: UIMessagePart): boolean =>
-        part.type === 'tool' && (part as UIMessagePartTool).metadata?.['recipe_manual'] === true) as UIMessagePartTool | undefined
+        part.type === 'tool' && ((part as UIMessagePartTool).metadata?.['recipe_manual'] === true
+          || (part as UIMessagePartTool).metadata?.['plugin_manual'] === true)) as UIMessagePartTool | undefined
       : undefined;
     const manualId: string | undefined = manualPart?.toolCallId;
     const holder: RuntimeHolder = { rt: null };
