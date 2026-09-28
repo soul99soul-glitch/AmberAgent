@@ -1,7 +1,7 @@
-// NovelProjectsPage — 小说项目库:列表 / 新建 / 重命名 / 删除 / 进工作区
+// NovelProjectsPage — 小说项目库:列表 / 新建 / 重命名 / 删除 / 进工作区(对齐 iOS NovelProjectListView 卡片式)
 import { ACCENT, ACCENT_LIGHT, BG, INK, INK2, INK3, INK4, ERROR, MOTION_ENTER, MOTION_OVERLAY, MOTION_STAGGER, OVERLAY, SHADOW_OVERLAY, SURFACE, SURFACE2, TITLE, TEXT_STYLES } from '../design/tokens.ets';
 import { FONT_SERIF, FONT_SANS_SEMIBOLD } from '../design/fonts.ets';
-import { PageTitleBar, SectionHeader, BtnFill, IconSeat, PaperSeparator, PageSpacer } from '../components/PageTemplate.ets';
+import { CenteredTitleBar, PlainSection, CardGroup, BtnFill, IconSeat, PaperSeparator, PageSpacer } from '../components/PageTemplate.ets';
 import { Icon } from '../components/ui/Icon.ets';
 import { router, promptAction } from '@kit.ArkUI';
 import { getNovelCreation, getNovelWorkspaceService } from '../di/AppContainer.ets';
@@ -12,6 +12,15 @@ import { common } from '@kit.AbilityKit';
 interface RowMenuResult {
   index: number;
 }
+
+const relativeTime = (ms: number): string => {
+  const diff: number = Math.max(0, Date.now() - ms);
+  if (diff < 60 * 1000) return '刚刚';
+  if (diff < 3600 * 1000) return `${Math.floor(diff / 60000)} 分钟前`;
+  if (diff < 86400 * 1000) return `${Math.floor(diff / 3600000)} 小时前`;
+  if (diff < 30 * 86400 * 1000) return `${Math.floor(diff / 86400000)} 天前`;
+  return `${Math.floor(diff / (30 * 86400 * 1000))} 个月前`;
+};
 
 @Entry
 @Component
@@ -220,7 +229,7 @@ struct NovelProjectsPage {
             .fontColor(INK)
             .maxLines(1)
             .textOverflow({ overflow: TextOverflow.Ellipsis })
-          Text(`${project.chapters.length} 章 · ${project.materials.length} 条资料 · ${project.messages.length} 条对话`)
+          Text(`${relativeTime(project.updatedAt)} · ${project.chapters.length} 章`)
             .fontSize(TEXT_STYLES.secondary.size)
             .fontWeight(TEXT_STYLES.secondary.weight)
             .lineHeight(TEXT_STYLES.secondary.lineHeight)
@@ -258,26 +267,57 @@ struct NovelProjectsPage {
         delay: Math.min(idx * MOTION_STAGGER, 240) }))
   }
 
+  @Builder
+  WorkspaceCard(): void {
+    PlainSection({ label: '工作区' })
+    CardGroup({ radius: 18, stroke: true }) {
+      Column() {
+        Row() {
+          IconSeat({ iconName: 'arrow_down_to_line' })
+          Column() {
+            Text(this.importing ? '正在导入…' : '导入工作区')
+              .fontSize(TEXT_STYLES.body.size).fontWeight(600)
+              .lineHeight(TEXT_STYLES.body.lineHeight).fontFamily(TEXT_STYLES.body.family).fontColor(INK)
+            Text('从 ZIP 包恢复一个完整小说工作区')
+              .fontSize(TEXT_STYLES.secondary.size).fontWeight(TEXT_STYLES.secondary.weight)
+              .lineHeight(TEXT_STYLES.secondary.lineHeight).fontFamily(TEXT_STYLES.secondary.family)
+              .fontColor(INK3).margin({ top: 4 })
+          }
+          .alignItems(HorizontalAlign.Start).layoutWeight(1).margin({ left: 12 })
+          Icon({ name: 'chevron_right', iconSize: 16, color: INK4 })
+        }
+        .width('100%').constraintSize({ minHeight: 64 })
+        .padding({ left: 16, right: 16, top: 12, bottom: 12 })
+        .enabled(!this.importing)
+        .onClick((): void => { this.importWorkspace(); })
+        PaperSeparator()
+        Row() {
+          IconSeat({ iconName: 'history' })
+          Column() {
+            Text(this.restoring ? '正在恢复…' : '恢复删除的项目')
+              .fontSize(TEXT_STYLES.body.size).fontWeight(600)
+              .lineHeight(TEXT_STYLES.body.lineHeight).fontFamily(TEXT_STYLES.body.family).fontColor(INK)
+            Text('找回最近一次删除的小说项目')
+              .fontSize(TEXT_STYLES.secondary.size).fontWeight(TEXT_STYLES.secondary.weight)
+              .lineHeight(TEXT_STYLES.secondary.lineHeight).fontFamily(TEXT_STYLES.secondary.family)
+              .fontColor(INK3).margin({ top: 4 })
+          }
+          .alignItems(HorizontalAlign.Start).layoutWeight(1).margin({ left: 12 })
+          Icon({ name: 'chevron_right', iconSize: 16, color: INK4 })
+        }
+        .width('100%').constraintSize({ minHeight: 64 })
+        .padding({ left: 16, right: 16, top: 12, bottom: 12 })
+        .enabled(!this.restoring)
+        .onClick((): void => { this.restoreDeleted(); })
+      }
+      .width('100%')
+    }
+  }
+
   build(): void {
     Stack() {
       Column() {
-        PageTitleBar({ title: '小说创作', actionText: '新建', onAction: (): void => { this.openNew(); } })
-
-        // N3:恢复最近删除的项目
-        Row() {
-          Text(this.importing ? '正在导入…' : '导入工作区')
-            .fontSize(12).fontColor(this.importing ? INK4 : ACCENT)
-            .height(44).padding({ left: 20, right: 12 })
-            .textAlign(TextAlign.Center)
-            .onClick((): void => { this.importWorkspace(); })
-          Blank()
-          Text(this.restoring ? '正在恢复…' : '恢复删除的项目')
-            .fontSize(12).fontColor(this.restoring ? INK4 : INK3)
-            .height(44).padding({ left: 12, right: 20 })
-            .textAlign(TextAlign.Center)
-            .onClick((): void => { this.restoreDeleted(); })
-        }
-        .width('100%')
+        CenteredTitleBar({ title: '小说创作', actionText: '新建', onAction: (): void => { this.openNew(); } })
 
         if (this.errorMsg.length > 0 && !this.nameDialogOpen) {
           Text(this.errorMsg)
@@ -304,43 +344,52 @@ struct NovelProjectsPage {
           .width('100%').padding({ top: 64, left: 18, right: 18 })
           .alignItems(HorizontalAlign.Start)
         } else if (this.projects.length === 0) {
-          Column() {
-            // 空态图标座:accent 淡底圆座,避免纯文字荒芜感
-            Row() {
-              Icon({ name: 'book', iconSize: 30, color: ACCENT })
+          Scroll() {
+            Column() {
+              // 空态图标座:accent 淡底圆座,避免纯文字荒芜感
+              Row() {
+                Icon({ name: 'book', iconSize: 30, color: ACCENT })
+              }
+              .width(76).height(76).borderRadius(38)
+              .backgroundColor(ACCENT_LIGHT)
+              .justifyContent(FlexAlign.Center)
+              .alignItems(VerticalAlign.Center)
+              .margin({ bottom: 20, top: 40 })
+              Text('开始一本新小说')
+                .fontSize(TITLE)
+                .fontWeight(600)
+                .lineHeight(TEXT_STYLES.screenTitle.lineHeight)
+                .fontFamily(FONT_SANS_SEMIBOLD)
+                .fontColor(INK2)
+              Text('项目会独立保存设定、正文、分支和创作记录。')
+                .fontSize(TEXT_STYLES.secondary.size)
+                .fontWeight(TEXT_STYLES.secondary.weight)
+                .lineHeight(TEXT_STYLES.secondary.lineHeight)
+                .fontFamily(TEXT_STYLES.secondary.family)
+                .fontColor(INK3)
+                .margin({ top: 8 })
+              Row() {
+                BtnFill({ label: '新建项目', onTap: (): void => { this.openNew(); } })
+              }
+              .margin({ top: 24, bottom: 12 })
+              this.WorkspaceCard()
+              PageSpacer()
             }
-            .width(76).height(76).borderRadius(38)
-            .backgroundColor(ACCENT_LIGHT)
-            .justifyContent(FlexAlign.Center)
-            .alignItems(VerticalAlign.Center)
-            .margin({ bottom: 20 })
-            Text('开始你的第一部小说')
-              .fontSize(TITLE)
-              .fontWeight(600)
-              .lineHeight(TEXT_STYLES.screenTitle.lineHeight)
-              .fontFamily(FONT_SANS_SEMIBOLD)
-              .fontColor(INK2)
-            Text('建好项目后，在聊天区告诉 Amber 你想写什么。')
-              .fontSize(TEXT_STYLES.secondary.size)
-              .fontWeight(TEXT_STYLES.secondary.weight)
-              .lineHeight(TEXT_STYLES.secondary.lineHeight)
-              .fontFamily(TEXT_STYLES.secondary.family)
-              .fontColor(INK3)
-              .margin({ top: 8 })
-            Row() {
-              BtnFill({ label: '新建项目', onTap: (): void => { this.openNew(); } })
-            }
-            .margin({ top: 24 })
+            .width('100%')
+            .alignItems(HorizontalAlign.Center)
           }
-          .width('100%').padding({ top: 64, left: 18, right: 18 })
-          .alignItems(HorizontalAlign.Start)
+          .layoutWeight(1)
+          .align(Alignment.TopStart)
         } else {
           Scroll() {
             Column() {
-              SectionHeader({ label: '项目' })
-              ForEach(this.projects, (p: NovelProject, idx: number): void => {
-                this.projectRow(p, idx === this.projects.length - 1, idx)
-              }, (p: NovelProject): string => p.id)
+              PlainSection({ label: '项目' })
+              CardGroup({ radius: 18, stroke: true }) {
+                ForEach(this.projects, (p: NovelProject, idx: number): void => {
+                  this.projectRow(p, idx === this.projects.length - 1, idx)
+                }, (p: NovelProject): string => p.id)
+              }
+              this.WorkspaceCard()
               PageSpacer()
             }
             .width('100%')
@@ -351,6 +400,7 @@ struct NovelProjectsPage {
         }
       }
       .width('100%').height('100%').backgroundColor(BG)
+      .padding({ left: 0, right: 0 })
       .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
 
       // 名称对话框叠层

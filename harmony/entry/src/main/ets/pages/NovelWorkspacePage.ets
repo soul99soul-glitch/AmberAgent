@@ -115,6 +115,8 @@ struct NovelWorkspacePage {
   @State auditIssues: NovelAuditIssue[] = [];
   @State modelOptions: NovelModelOptionView[] = [];
   @State busy: boolean = false;
+  // 批量代笔卡默认收起(聊天优先);有任务时常显
+  @State ghostwriteEntryOpen: boolean = false;
   // 聊天
   @State draft: string = '';
   @State composeMode: ComposeMode = 'whole_chapter';
@@ -856,6 +858,31 @@ struct NovelWorkspacePage {
     }).catch((): void => {});
   }
 
+  // 章节目录次要操作(一致性/深度审计/撤销/批量润色);既有守卫逻辑不变
+  private showChapterToolsMenu(): void {
+    promptAction.showActionMenu({
+      buttons: [
+        { text: '一致性检查', color: INK },
+        { text: '深度审计', color: INK },
+        { text: this.workspaceStatus?.canUndo && !this.novelJobLocksWorkspace() ? '撤销上次工作区操作' : '撤销（当前不可用）',
+          color: this.workspaceStatus?.canUndo && !this.novelJobLocksWorkspace() ? INK : INK4 },
+        { text: this.polishConflictReason().length > 0 ? `批量润色（${this.polishConflictReason()}）` : '批量润色',
+          color: this.polishConflictReason().length > 0 ? INK4 : INK },
+      ],
+    }).then((result: ExportMenuResult): void => {
+      if (result.index === 0) this.runConsistencyCheck();
+      else if (result.index === 1) this.runLlmContinuityAudit();
+      else if (result.index === 2) {
+        if (this.workspaceStatus?.canUndo && !this.novelJobLocksWorkspace()) this.undoWorkspace();
+      } else if (result.index === 3) {
+        if (this.polishConflictReason().length === 0) {
+          this.requestedPolishJobId = '';
+          this.polishCreateOpen = true;
+        }
+      }
+    }).catch((): void => {});
+  }
+
   // ===== 聊天 =====
   assistantLabel(m: NovelMessage): string {
     if (m.interrupted) return '已停止（内容已保留）';
@@ -1577,14 +1604,28 @@ struct NovelWorkspacePage {
   @Builder
   chatPane(): void {
     Column() {
+    // 工具行:批量代笔入口(默认收起,聊天优先;有任务时卡片常显) + 归档讨论
     Row() {
+      Row() {
+        Icon({ name: 'spark', iconSize: 13, color: this.ghostwriteJob !== null ? ACCENT : INK3 })
+        Text(this.ghostwriteJob !== null ? '批量代笔进行中' : (this.ghostwriteEntryOpen ? '收起批量代笔' : '批量代笔'))
+          .fontSize(12).fontColor(this.ghostwriteJob !== null ? ACCENT : INK3).margin({ left: 6 })
+        Icon({ name: this.ghostwriteEntryOpen || this.ghostwriteJob !== null ? 'chevron_down' : 'chevron_right',
+          iconSize: 12, color: INK4 }).margin({ left: 4 })
+      }
+      .constraintSize({ minHeight: 44 })
+      .padding({ left: 20, right: 12 })
+      .alignItems(VerticalAlign.Center)
+      .enabled(this.ghostwriteJob === null)
+      .onClick((): void => { this.ghostwriteEntryOpen = !this.ghostwriteEntryOpen; })
+      .accessibilityText('展开或收起批量代笔')
       Blank()
       Text('归档讨论').fontSize(12).fontColor(INK3)
         .height(44).padding({ left: 12, right: 20 }).textAlign(TextAlign.Center)
         .onClick((): void => { this.archiveDiscussion(); })
     }
-    .width('100%').padding({ top: 8 })
-    if (this.project !== null) {
+    .width('100%').padding({ top: 4 })
+    if (this.project !== null && (this.ghostwriteJob !== null || this.ghostwriteEntryOpen)) {
       NovelGhostwriteCard({
         job: this.ghostwriteJob,
         planReady: this.ghostwritePlanReady(),
@@ -1729,40 +1770,22 @@ struct NovelWorkspacePage {
   chapterPane(): void {
     Column() {
       if (this.selectedChapterId.length === 0) {
-        // 目录
+        // 目录:次要操作收进「更多」菜单,常驻只留新建
         Row() {
           Text('章节目录').fontSize(15).fontWeight(FontWeight.Bold).fontColor(INK2)
           Blank()
-          Text('一致性').fontSize(12).fontColor(INK3)
-            .height(44).padding({ left: 8, right: 8 }).textAlign(TextAlign.Center)
-            .opacity(this.busy ? 0.5 : 1)
-            .onClick((): void => { this.runConsistencyCheck(); })
-          Text('深度审计').fontSize(12).fontColor(INK3)
-            .height(44).padding({ left: 8, right: 8 }).textAlign(TextAlign.Center)
-            .opacity(this.auditRunning ? 0.5 : 1)
-            .onClick((): void => { this.runLlmContinuityAudit(); })
-          Text('撤销').fontSize(12)
-            .fontColor(this.workspaceStatus?.canUndo && !this.novelJobLocksWorkspace() ? INK3 : INK4)
+          Text('更多 ▾').fontSize(12).fontColor(INK3)
             .constraintSize({ minWidth: 44 }).height(44)
             .padding({ left: 8, right: 8 }).textAlign(TextAlign.Center)
-            .onClick((): void => {
-              if (this.workspaceStatus?.canUndo && !this.novelJobLocksWorkspace()) this.undoWorkspace();
-            })
-          Text('批量润色').fontSize(12).fontColor(INK3)
-            .height(44).padding({ left: 8, right: 8 }).textAlign(TextAlign.Center)
-            .opacity(this.polishConflictReason().length > 0 ? 0.5 : 1)
-            .onClick((): void => {
-              if (this.polishConflictReason().length === 0) {
-                this.requestedPolishJobId = '';
-                this.polishCreateOpen = true;
-              }
-            })
-          Text('新建').fontSize(12).fontColor(ACCENT)
-            .constraintSize({ minWidth: 44 }).height(44)
-            .padding({ left: 8, right: 8 }).textAlign(TextAlign.Center)
+            .onClick((): void => { this.showChapterToolsMenu(); })
+          Text('新建').fontSize(13).fontColor(ACCENT_INK)
+            .constraintSize({ minWidth: 64 }).height(36)
+            .padding({ left: 14, right: 14 }).textAlign(TextAlign.Center)
+            .backgroundColor(ACCENT).borderRadius(18)
             .onClick(() => { this.openNewChapter(); })
         }
         .width('100%').padding({ left: 20, right: 20, top: 12, bottom: 10 })
+        .alignItems(VerticalAlign.Center)
 
         if (this.consistencyMessage.length > 0) {
           Text(this.consistencyMessage).fontSize(12).fontColor(INK3).lineHeight(18)
