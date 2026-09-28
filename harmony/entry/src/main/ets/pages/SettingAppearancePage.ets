@@ -3,8 +3,10 @@
 //   内置三包/导入导出/AI 生成试穿,对齐 iOS AmberThemePack 体系)。
 import {
   BG, INK, INK3, ACCENT, ACCENT_OPTIONS, setAccentColor, ERROR, TEXT_STYLES,
-  SURFACE, LINE, LINE2, OVERLAY,
+  SURFACE, LINE, LINE2, OVERLAY, lineHeightForSize,
 } from '../design/tokens.ets';
+import { FONT_SANS_MEDIUM } from '../design/fonts.ets';
+import { Icon } from '../components/ui/Icon.ets';
 import { CenteredTitleBar, PlainSection, PageSpacer, Seg, CardGroup, CardToggleRow } from '../components/PageTemplate.ets';
 import { getChatKvStore } from '../di/AppContainer.ets';
 import { applyWindowTheme } from '../entryability/EntryAbility.ets';
@@ -317,6 +319,77 @@ struct SettingAppearancePage {
     })
   }
 
+  // iOS themeCardChrome 对齐:画布样张(120 高)+ surface 页脚 + 选中描边(恒定 2pt 防跳动)
+  @Builder
+  ThemePackCard(pack: ThemePack): void {
+    Column() {
+      // 迷你样张:accent 圆点 + 品牌暗示条 + 骨架行 + accent 钮(全部取包内色板,不吃当前主题)
+      Column() {
+        Row() {
+          Column().width(15).height(15).borderRadius(7.5)
+            .backgroundColor(pack.accent)
+          Column().width(58).height(6).borderRadius(3)
+            .backgroundColor(pack.light.ink2)
+            .margin({ left: 9 })
+        }
+        .width('100%').margin({ top: 12 })
+        Column().width('72%').height(6).borderRadius(3)
+          .backgroundColor(pack.light.muted)
+          .margin({ top: 12 })
+        Column().width('52%').height(6).borderRadius(3)
+          .backgroundColor(pack.light.muted)
+          .margin({ top: 8 })
+        Column().width(46).height(16).borderRadius(8)
+          .backgroundColor(pack.accent)
+          .margin({ top: 12, bottom: 12 })
+      }
+      .width('100%')
+      .padding({ left: 14, right: 14 })
+      .backgroundColor(pack.light.bg)
+
+      Row() {
+        Text(pack.displayName)
+          .fontSize(13)
+          .fontWeight(FontWeight.Medium)
+          .lineHeight(lineHeightForSize(13))
+          .fontFamily(FONT_SANS_MEDIUM)
+          .fontColor(pack.light.ink)
+          .layoutWeight(1)
+          .maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+        if (this.selectedPackId === pack.id && this.tryOnPack === null) {
+          Stack() {
+            Column().width(18).height(18).borderRadius(9)
+              .backgroundColor(pack.accent)
+            Icon({ name: 'check', iconSize: 11, color: '#FFFFFF' })
+          }
+          .width(18).height(18)
+        } else if (!pack.builtin) {
+          Text('删除')
+            .fontSize(11).fontColor(ERROR)
+            .constraintSize({ minWidth: 32, minHeight: 32 })
+            .textAlign(TextAlign.Center)
+            .padding({ top: 8, bottom: 8 })
+            .onClick((): void => { this.removeImported(pack); })
+        }
+      }
+      .width('100%')
+      .alignItems(VerticalAlign.Center)
+      .constraintSize({ minHeight: 44 })
+      .padding({ left: 12, right: 12, top: 8, bottom: 8 })
+      .backgroundColor(pack.light.surface)
+    }
+    .width('100%')
+    .borderRadius(18)
+    .clip(true)
+    .border({
+      width: 2,
+      color: this.selectedPackId === pack.id && this.tryOnPack === null
+        ? this.accentColorStore : pack.light.borderSoft,
+    })
+    .onClick((): void => { this.applyPack(pack); })
+  }
+
   build(): void {
     Stack({ alignContent: Alignment.Bottom }) {
       Column() {
@@ -354,50 +427,20 @@ struct SettingAppearancePage {
             CardGroup({ radius: 18, stroke: true, content: (): void => { this.AmoledCard(); } })
               .margin({ left: 16, right: 16, top: 12 })
 
-            // ── 主题包(内置 + 导入;iOS 主题库对齐) ──
+            // ── 主题包(内置 + 导入;iOS 主题库对齐:双列迷你样张卡) ──
             PlainSection({ label: '主题包' })
-            ForEach(this.packs, (pack: ThemePack): void => {
-              Column() {
-                Row() {
-                  Row() {
-                    Column()
-                      .width(18).height(18).borderRadius(9)
-                      .backgroundColor(pack.light.bg)
-                      .border({ width: 1, color: LINE2 })
-                    Column()
-                      .width(18).height(18).borderRadius(9)
-                      .backgroundColor(pack.accent)
-                      .margin({ left: -6 })
-                  }
-                  Text(pack.displayName)
-                    .fontSize(15).fontColor(INK)
-                    .margin({ left: 10 })
-                    .layoutWeight(1)
-                    .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
-                  if (this.selectedPackId === pack.id && this.tryOnPack === null) {
-                    Text('使用中')
-                      .fontSize(12).fontColor(this.accentColorStore)
-                  } else if (!pack.builtin) {
-                    Text('删除')
-                      .fontSize(12).fontColor(ERROR)
-                      .padding(6)
-                      .onClick((): void => { this.removeImported(pack); })
-                  }
+            Grid() {
+              ForEach(this.packs, (pack: ThemePack): void => {
+                GridItem() {
+                  this.ThemePackCard(pack)
                 }
-                .width('100%')
-                .padding({ left: 14, right: 14, top: 12, bottom: 12 })
-                .alignItems(VerticalAlign.Center)
-              }
-              .width('100%')
-              .backgroundColor(SURFACE)
-              .borderRadius(12)
-              .border({
-                width: this.selectedPackId === pack.id ? 1.5 : 0.5,
-                color: this.selectedPackId === pack.id ? this.accentColorStore : LINE,
-              })
-              .margin({ left: 16, right: 16, bottom: 10 })
-              .onClick((): void => { this.applyPack(pack); })
-            }, (pack: ThemePack): string => pack.id)
+              }, (pack: ThemePack): string => pack.id)
+            }
+            .columnsTemplate('1fr 1fr')
+            .columnsGap(12)
+            .rowsGap(12)
+            .width('100%')
+            .padding({ left: 16, right: 16 })
             Row() {
               Text('导入主题包')
                 .fontSize(13).fontColor(this.accentColorStore)
@@ -409,7 +452,7 @@ struct SettingAppearancePage {
                 .onClick((): void => { this.exportCurrent(); })
             }
             .width('100%')
-            .margin({ bottom: 4 })
+            .margin({ top: 10, bottom: 4 })
 
             // ── AI 主题生成(试穿 → 采用/还原) ──
             PlainSection({ label: 'AI 主题生成' })
