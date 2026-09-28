@@ -198,6 +198,15 @@ export class ModelCouncilManager {
     return out.sort((a, b): number => b.updatedAtMs - a.updatedAtMs);
   }
 
+  // 议会落地页「最近讨论」:本会话全部 run(内存态,含已结束),最新在前
+  listAll(): ModelCouncilRun[] {
+    const out: ModelCouncilRun[] = [];
+    this.runs.forEach((run: ModelCouncilRun): void => {
+      out.push(this.copyRun(run));
+    });
+    return out.sort((a, b): number => b.updatedAtMs - a.updatedAtMs);
+  }
+
   read(runId: string): ModelCouncilRun | null {
     return this.snapshot(runId);
   }
