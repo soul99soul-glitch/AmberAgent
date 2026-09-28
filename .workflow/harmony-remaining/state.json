@@ -1,8 +1,8 @@
 {
   "objective": "完成所有纳入范围的剩余功能并逐阶段独立审查与验证",
   "baseline": "6840fa551",
-  "status": "paused",
-  "currentPhase": "E11",
+  "status": "active",
+  "currentPhase": "E12",
   "authorization": "用户授权持续实施、subagent审查、分阶段推进",
   "phases": {
     "E0": "complete",
@@ -52,7 +52,9 @@
     "E9SourceCommit": "caa5b9d50",
     "E10": "Source independent A/B PASS; only actual Google tools/metadata-tail/codec roundtrip group red-green1 PASS, narrow types/affected lint0error, final Release9.545s/local sign verify PASS. C actual Google/UI/link/height/install pending; see E10-gate.md",
     "E11Contract": "frozen: packets/E11-contract.md; neutral saved-subject triage, fixed ModelConfig council tool loops/per-seat durable approval, actual default Assistant tool scope and E12 Web dependency",
-    "E10SourceCommit": "ed2452cdf"
+    "E10SourceCommit": "ed2452cdf",
+    "E11": "Source checkpoint; council consumer group 1/1 and Jev lifecycle 7/7 PASS (fixture effect-recording, saved Recipe/Plugin checkpoint sources, council MCP identity in approval subject, ArkTS compile diagnostics fixed); changed-file lint 0 error, integrated CompileArkTS build PASS, local Test-CA sign verify PASS. C device install/live provider/UI pending.",
+    "E11SourceCommit": "e36090bad"
   },
   "blockers": [
     {
@@ -99,7 +101,11 @@
       "phase": "E10",
       "kind": "device_provider_acceptance",
       "details": "Latest recorded HDC Empty; no repeated recovery or provider requests. Actual Google builtin-model acceptance, persisted source/status/HTML bright-dark UI, adaptive Web height/external-link gesture and original-signature install/launch pending. Source Release/sign verified; continue E11."
+    },
+    {
+      "phase": "E11",
+      "kind": "device_provider_acceptance",
+      "details": "Latest recorded HDC Empty; no repeated recovery. Actual council run against live models, Jev triage with real evaluation endpoint, approval UI light/dark and original-signature install/launch pending. Source build/sign verified; continue E12."
     }
-  ],
-  "pauseReason": "用户明确要求暂停：耗时失控；E11 未收口，不再推进实现、审查或测试。"
+  ]
 }
