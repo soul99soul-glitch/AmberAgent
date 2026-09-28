@@ -349,7 +349,8 @@ export const buildGoogleCompletionRequestBody = (
     req['tools'] = [{ functionDeclarations: declarations as unknown as JsonValue }] as unknown as JsonValue;
   }
 
-  // BuiltInTools(model.tools)= P1 裁剪:鸿蒙 ChatModel 无 tools 字段(登记)
+  // BuiltInTools(model.tools):ChatModel.tools 已贯通(toChatModel 携带),Google 侧
+  //   映射(google_search/url_context)未实现 — P1 裁剪(登记);OpenAI Responses 已消费
 
   // safetySettings(:597-619)
   req['safetySettings'] = GOOGLE_SAFETY_SETTINGS as unknown as JsonValue;
