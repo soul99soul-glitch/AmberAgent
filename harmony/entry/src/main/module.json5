@@ -61,6 +61,8 @@
       //   "usedScene": { "abilities": ["EntryAbility"], "when": "inuse" } },
       { "name": "ohos.permission.READ_CALENDAR", "reason": "$string:reason_calendar",
         "usedScene": { "abilities": ["EntryAbility"], "when": "inuse" } },
+      // READ_PASTEBOARD 属 ACL 管控:当前 AGC 调试 profile 不含该权限,
+      //   声明会导致整包安装失败(9568289),故保持不声明并在权限页如实标注
       // HDR 提亮(uiEffect hdrBrightnessRatio,API 24+;normal 档,声明即授权)
       { "name": "ohos.permission.HDR_BRIGHTNESS", "reason": "$string:reason_hdr_brightness" },
       // { "name": "ohos.permission.WRITE_CALENDAR", "reason": "$string:reason_calendar",

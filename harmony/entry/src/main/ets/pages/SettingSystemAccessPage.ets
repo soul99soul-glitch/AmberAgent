@@ -76,7 +76,9 @@ struct SettingSystemAccessPage {
       makePerm('contacts', '通讯录', '调试 Profile 需加入 ACL 权限(AGC 后台)后解禁', 'acl'),
       makePerm('calendar', '日历', '读取日程用于提醒', calendar ? 'granted' : 'denied'),
       makePerm('notifications', '通知', '消息生成完成时推送通知', notifEnabled ? 'granted' : 'denied'),
+      makePerm('pasteboard', '剪贴板', '读取接口受 ACL 管控;调试 Profile 需加入 ACL 权限(AGC 后台)后解禁', 'acl'),
       makePerm('files', '文件与附件', '通过系统文件选择器按需选取', 'exempt'),
+      makePerm('camera', '相机', '拍照走系统相机应用,无需授权', 'exempt'),
     ];
     this.loaded = true;
   }
@@ -99,6 +101,8 @@ struct SettingSystemAccessPage {
     if (key === 'notifications') return 'bell';
     if (key === 'calendar') return 'clock';
     if (key === 'files') return 'folder';
+    if (key === 'pasteboard') return 'doc';
+    if (key === 'camera') return 'hi_camera';
     return 'person';
   }
 
