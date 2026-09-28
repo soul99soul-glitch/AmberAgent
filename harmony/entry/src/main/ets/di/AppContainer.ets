@@ -79,10 +79,12 @@ import {
 } from '@amber/chat-domain';
 import { findModelByIdInProviders } from '../platform_impl/OcrSupport.ets';
 import { createChatKvStore } from '../platform_impl/ChatKvStore.ets';
-import { SSHProfileStore, TerminalRuntime } from '@amber/chat-domain';
-import type { SSHCredentialStorePort } from '@amber/chat-domain';
+import { SSHProfileStore, TerminalRuntime, SSHTargetResolver, PythonRuntime, MoshRuntime } from '@amber/chat-domain';
+import type { SSHCredentialStorePort, PythonTransportPort } from '@amber/chat-domain';
 import { createEntrySSHCredentialStore } from '../platform_impl/SSHCredentialStore.ets';
 import { createNativeSSHTransport } from '../platform_impl/NativeSSHTransport.ets';
+import { createNativePythonTransport } from '../platform_impl/NativePythonTransport.ets';
+import { createNativeMoshTransport } from '../platform_impl/NativeMoshTransport.ets';
 import { createEntryTerminalLogPort } from '../platform_impl/TerminalLogPort.ets';
 import { createChatRdbRepository } from '../platform_impl/ChatRdbRepository.ets';
 import { createEntryCompactStore } from '../platform_impl/EntryCompactStore.ets';
@@ -431,6 +433,8 @@ export const getAgentTaskStore = (): Promise<AgentTaskStore> => {
 let sshCredentialStore: SSHCredentialStorePort | null = null;
 let sshProfileStorePromise: Promise<SSHProfileStore> | null = null;
 let terminalRuntimePromise: Promise<TerminalRuntime> | null = null;
+let pythonRuntimePromise: Promise<PythonRuntime> | null = null;
+let moshRuntimePromise: Promise<MoshRuntime> | null = null;
 
 const getSSHCredentials = (): SSHCredentialStorePort => {
   if (sshCredentialStore === null) sshCredentialStore = createEntrySSHCredentialStore();
@@ -465,11 +469,42 @@ export const getTerminalRuntime = (): Promise<TerminalRuntime> => {
   return terminalRuntimePromise;
 };
 
+export const getPythonRuntime = (): Promise<PythonRuntime> => {
+  if (pythonRuntimePromise === null) {
+    const init: Promise<PythonRuntime> = createNativePythonTransport().then(
+      async (transport: PythonTransportPort): Promise<PythonRuntime> => new PythonRuntime({
+        transport, taskStore: await getAgentTaskStore(),
+      }));
+    init.catch((): void => { if (pythonRuntimePromise === init) pythonRuntimePromise = null; });
+    pythonRuntimePromise = init;
+  }
+  return pythonRuntimePromise;
+};
+
+export const getMoshRuntime = (): Promise<MoshRuntime> => {
+  if (moshRuntimePromise === null) {
+    const init: Promise<MoshRuntime> = getSSHProfileStore().then(
+      async (profiles: SSHProfileStore): Promise<MoshRuntime> => new MoshRuntime({
+        targetResolver: new SSHTargetResolver({ profiles, credentials: getSSHCredentials() }),
+        sshTransport: createNativeSSHTransport(), transport: createNativeMoshTransport(),
+        taskStore: await getAgentTaskStore(),
+      }));
+    init.catch((): void => { if (moshRuntimePromise === init) moshRuntimePromise = null; });
+    moshRuntimePromise = init;
+  }
+  return moshRuntimePromise;
+};
+
 // Do not initialize a runtime merely because the application entered background.
 export const interruptTerminalForBackground = (): Promise<void> => {
-  const pending: Promise<TerminalRuntime> | null = terminalRuntimePromise;
-  return pending === null ? Promise.resolve() : pending.then(
-    (runtime: TerminalRuntime): Promise<void> => runtime.interruptForBackground());
+  const operations: Promise<void>[] = [];
+  if (terminalRuntimePromise !== null) operations.push(terminalRuntimePromise.then(
+    (runtime: TerminalRuntime): Promise<void> => runtime.interruptForBackground()));
+  if (pythonRuntimePromise !== null) operations.push(pythonRuntimePromise.then(
+    (runtime: PythonRuntime): Promise<void> => runtime.interruptForBackground()));
+  if (moshRuntimePromise !== null) operations.push(moshRuntimePromise.then(
+    (runtime: MoshRuntime): Promise<void> => runtime.interruptForBackground()));
+  return Promise.all(operations).then((): void => {});
 };
 
 // D-131:AgentTaskScheduler 复用上面的 AgentTaskStore Promise(Koin single 等价)。
@@ -1116,6 +1151,8 @@ export interface ChatRuntime {
   //   入参;createRunTools 时机 ≈ resolveChatRuntime 时机 = 每次发送)
   allSkills: SkillMetadata[];
   terminalRuntime: TerminalRuntime | null;
+  pythonRuntime: PythonRuntime | null;
+  moshRuntime: MoshRuntime | null;
   sshProfiles: SSHProfileStore | null;
 }
 
@@ -1515,6 +1552,8 @@ export const resolveChatRuntime = async (
   // Await real dependencies before exposing terminal tools to the provider.
   const terminalEnabled: boolean = assistant.localTools.includes('terminal');
   const terminalRuntime: TerminalRuntime | null = terminalEnabled ? await getTerminalRuntime() : null;
+  const moshRuntime: MoshRuntime | null = terminalEnabled ? await getMoshRuntime() : null;
+  const pythonRuntime: PythonRuntime | null = assistant.localTools.includes('python') ? await getPythonRuntime() : null;
   const sshProfiles: SSHProfileStore | null = terminalEnabled ? await getSSHProfileStore() : null;
   return {
     api, assistant, params,
@@ -1524,7 +1563,7 @@ export const resolveChatRuntime = async (
     modelAbilities: model.abilities,
     // D-123:技能库快照(每次发送重新扫描;SkillManager 内部缓存,变更后失效)
     allSkills: getSkillManager().listSkills(),
-    terminalRuntime, sshProfiles,
+    terminalRuntime, pythonRuntime, moshRuntime, sshProfiles,
   };
 };
 

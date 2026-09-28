@@ -1,0 +1,35 @@
+--- a/src/terminal/terminaldisplayinit.cc
++++ b/src/terminal/terminaldisplayinit.cc
+@@ -39,6 +39,7 @@
+ #include <string>
+ #include <stdexcept>
+ 
++#if !defined(AMBER_MOSH_EMBEDDED)
+ #if defined HAVE_NCURSESW_CURSES_H
+ #  include <ncursesw/curses.h>
+ #  include <ncursesw/term.h>
+@@ -80,10 +81,17 @@
+   return val;
+ }
+ 
++#endif // !AMBER_MOSH_EMBEDDED
++
++using namespace Terminal;
++
+ Display::Display( bool use_environment )
+   : has_ech( true ), has_bce( true ), has_title( true ), smcup( NULL ), rmcup( NULL )
+ {
+   if ( use_environment ) {
++#ifdef AMBER_MOSH_EMBEDDED
++    throw std::invalid_argument("Embedded Mosh requires Display(false)");
++#else
+     int errret = -2;
+     int ret = setupterm( (char *)0, 1, &errret );
+ 
+@@ -135,5 +143,6 @@
+       smcup = ti_str("smcup");
+       rmcup = ti_str("rmcup");
+     }
++#endif
+   }
+ }

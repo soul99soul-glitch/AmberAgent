@@ -1,8 +1,8 @@
 import { router, KeyboardAvoidMode } from '@kit.ArkUI';
-import { SSHProfileStore, TerminalRuntime } from '@amber/chat-domain';
-import type { SSHProfile, SSHProfileSettings, TerminalSessionEvent, TerminalSessionSnapshot,
-  TerminalSessionRequest } from '@amber/chat-domain';
-import { getSSHProfileStore, getTerminalRuntime } from '../di/AppContainer.ets';
+import { SSHProfileStore, TerminalRuntime, MoshRuntime } from '@amber/chat-domain';
+import type { SSHProfile, SSHProfileSettings, SSHTargetSnapshot, TerminalSessionEvent, TerminalSessionSnapshot,
+  TerminalSessionRequest, MoshSessionRequest, MoshSessionSnapshot, MoshSessionEvent, MoshServerLocale } from '@amber/chat-domain';
+import { getSSHProfileStore, getTerminalRuntime, getMoshRuntime } from '../di/AppContainer.ets';
 import { EntryAbortController } from '../platform_impl/EntryAbortController.ets';
 import { CenteredTitleBar } from '../components/PageTemplate.ets';
 import { TerminalView, TerminalViewController } from '../components/TerminalView.ets';
@@ -20,11 +20,15 @@ struct TerminalPage {
   @State profiles: SSHProfile[] = [];
   @State selectedId: string = '';
   @State choosingProfile: boolean = false;
+  @State protocol: 'ssh' | 'mosh' = 'ssh';
+  @State switchingProtocol: boolean = false;
+  @State serverLocale: MoshServerLocale = 'C.UTF-8';
+  @State choosingLocale: boolean = false;
   @State loaded: boolean = false;
   @State terminalReady: boolean = false;
   @State connecting: boolean = false;
   @State disconnecting: boolean = false;
-  @State session: TerminalSessionSnapshot | null = null;
+  @State session: TerminalSessionSnapshot | MoshSessionSnapshot | null = null;
   @State connectionLabel: string = '';
   @State error: string = '';
   @State columns: number = 0;
@@ -36,6 +40,8 @@ struct TerminalPage {
   @StorageProp('appBackgrounded') @Watch('backgroundChanged') backgrounded: boolean = false;
   @StorageProp('navBarHeight') navBarHeight: number = 0;
   private runtime: TerminalRuntime | null = null;
+  private moshRuntime: MoshRuntime | null = null;
+  private ownedRuntime: TerminalRuntime | MoshRuntime | null = null;
   private store: SSHProfileStore | null = null;
   private terminal: TerminalViewController = new TerminalViewController();
   private profileUnsubscribe: (() => void) | null = null;
@@ -80,9 +86,11 @@ struct TerminalPage {
     try {
       const store: SSHProfileStore = await getSSHProfileStore();
       const runtime: TerminalRuntime = await getTerminalRuntime();
+      const moshRuntime: MoshRuntime = await getMoshRuntime();
       if (!this.alive) return;
       this.store = store;
       this.runtime = runtime;
+      this.moshRuntime = moshRuntime;
       this.applySettings(store.snapshot());
       this.profileUnsubscribe = store.subscribe((settings: SSHProfileSettings): void => {
         if (this.alive) this.applySettings(settings);
@@ -108,10 +116,39 @@ struct TerminalPage {
     return this.session !== null && (this.session.status === 'RUNNING' || this.session.status === 'QUEUED');
   }
 
+  private selectedRuntime(): TerminalRuntime | MoshRuntime | null {
+    return this.protocol === 'mosh' ? this.moshRuntime : this.runtime;
+  }
+
+  private async selectProtocol(protocol: 'ssh' | 'mosh'): Promise<void> {
+    if (this.protocol === protocol || this.switchingProtocol || this.backgrounded) return;
+    this.switchingProtocol = true;
+    try {
+      await this.disconnect();
+      if (this.isRunning()) return;
+      if (this.sessionUnsubscribe !== null) this.sessionUnsubscribe();
+      this.sessionUnsubscribe = null;
+      this.ownedSessionId = '';
+      this.ownedRuntime = null;
+      this.session = null;
+      await this.terminal.reset();
+      if (this.alive) {
+        this.protocol = protocol; this.error = ''; this.connectionLabel = ''; this.choosingLocale = false;
+      }
+    } catch (error) {
+      if (this.alive) this.error = error instanceof Error ? sshPageError(error) : String(error);
+    } finally { if (this.alive) this.switchingProtocol = false; }
+  }
+
   private statusText(): string {
+    if (this.switchingProtocol) return '正在切换协议…';
     if (this.connecting) return '正在连接…';
     if (this.disconnecting) return '正在断开…';
     if (this.session === null) return this.terminalReady ? '未连接' : '终端加载中…';
+    if (this.protocol === 'mosh' &&
+      (this.session as MoshSessionSnapshot).connectionState === 'reconnecting') {
+      return `Mosh 重连中 · ${this.columns} × ${this.rows}`;
+    }
     if (this.session.status === 'RUNNING') return `已连接 · ${this.columns} × ${this.rows}`;
     if (this.session.status === 'QUEUED') return '正在连接…';
     if (this.session.status === 'COMPLETED') return '远程 Shell 已退出';
@@ -123,20 +160,25 @@ struct TerminalPage {
 
   private canConnect(): boolean {
     const profile: SSHProfile | null = this.selectedProfile();
-    return this.loaded && this.terminalReady && !this.connecting && !this.disconnecting &&
+    return this.loaded && this.terminalReady && !this.connecting && !this.disconnecting && !this.switchingProtocol &&
+      this.selectedRuntime() !== null &&
       !this.isRunning() && !this.backgrounded && this.columns >= 1 && this.rows >= 1 &&
       profile !== null && profile.knownHostSHA256 !== null && profile.credentialRef !== null;
   }
 
   private async connect(): Promise<void> {
-    const runtime: TerminalRuntime | null = this.runtime;
+    const runtime: TerminalRuntime | MoshRuntime | null = this.selectedRuntime();
+    const protocol: 'ssh' | 'mosh' = this.protocol;
+    const serverLocale: MoshServerLocale = this.serverLocale;
     const profile: SSHProfile | null = this.selectedProfile();
     if (runtime === null || profile === null || !this.canConnect()) return;
     if (this.sessionUnsubscribe !== null) this.sessionUnsubscribe();
     this.sessionUnsubscribe = null;
     this.ownedSessionId = '';
+    this.ownedRuntime = null;
     this.session = null;
     this.choosingProfile = false;
+    this.choosingLocale = false;
     this.error = '';
     this.connecting = true;
     this.connectionLabel = `${profile.username}@${profile.host}:${profile.port}`;
@@ -144,20 +186,34 @@ struct TerminalPage {
     this.operation = controller;
     const version: number = ++this.operationVersion;
     try {
+      const target: SSHTargetSnapshot = runtime.captureTarget(profile.id);
       await this.terminal.reset();
-      const request: TerminalSessionRequest = {
-        target: runtime.captureTarget(profile.id), cwd: null, columns: this.columns, rows: this.rows,
-        sourceToolName: null, sourceConversationId: null,
-      };
-      const session: TerminalSessionSnapshot = await runtime.startSession(request, controller.signal);
+      let session: TerminalSessionSnapshot | MoshSessionSnapshot;
+      if (protocol === 'mosh') {
+        if (this.moshRuntime === null) return;
+        const request: MoshSessionRequest = {
+          target: target, columns: this.columns, rows: this.rows,
+          udpPort: null, serverLocale: serverLocale, sourceToolName: null, sourceConversationId: null,
+        };
+        session = await this.moshRuntime.startSession(request, controller.signal);
+      } else {
+        if (this.runtime === null) return;
+        const request: TerminalSessionRequest = {
+          target: target, cwd: null, columns: this.columns, rows: this.rows,
+          sourceToolName: null, sourceConversationId: null,
+        };
+        session = await this.runtime.startSession(request, controller.signal);
+      }
       if (!this.alive || version !== this.operationVersion || controller.signal.aborted || this.backgrounded) {
         await runtime.stopSession(session.sessionId);
         return;
       }
       this.ownedSessionId = session.sessionId;
+      this.ownedRuntime = runtime;
       this.session = session;
       // Domain's first pump is delayed until the next tick; subscribe before it drains the prompt.
-      this.sessionUnsubscribe = runtime.subscribeSession(session.sessionId, (event: TerminalSessionEvent): void => {
+      this.sessionUnsubscribe = runtime.subscribeSession(session.sessionId,
+        (event: TerminalSessionEvent | MoshSessionEvent): void => {
         this.consumeEvent(event);
       });
       if (this.isRunning() && (session.columns !== this.columns || session.rows !== this.rows)) {
@@ -173,7 +229,7 @@ struct TerminalPage {
     }
   }
 
-  private consumeEvent(event: TerminalSessionEvent): void {
+  private consumeEvent(event: TerminalSessionEvent | MoshSessionEvent): void {
     if (!this.alive || event.snapshot.sessionId !== this.ownedSessionId) return;
     this.session = event.snapshot;
     if (event.snapshot.errorMessage !== null) {
@@ -196,7 +252,7 @@ struct TerminalPage {
   }
 
   private async sendBytes(bytes: Uint8Array): Promise<void> {
-    const runtime: TerminalRuntime | null = this.runtime;
+    const runtime: TerminalRuntime | MoshRuntime | null = this.ownedRuntime;
     if (runtime === null || this.ownedSessionId.length === 0 || !this.isRunning() || this.backgrounded) return;
     try { await runtime.sendSessionBytes(this.ownedSessionId, bytes); }
     catch (error) { if (this.alive) this.error = error instanceof Error ? sshPageError(error) : String(error); }
@@ -206,8 +262,9 @@ struct TerminalPage {
     if (columns === this.columns && rows === this.rows) return;
     this.columns = columns;
     this.rows = rows;
-    if (this.runtime === null || this.ownedSessionId.length === 0 || !this.isRunning() || this.backgrounded) return;
-    this.runtime.resizeSession(this.ownedSessionId, columns, rows).catch((error: Error): void => {
+    const runtime: TerminalRuntime | MoshRuntime | null = this.ownedRuntime;
+    if (runtime === null || this.ownedSessionId.length === 0 || !this.isRunning() || this.backgrounded) return;
+    runtime.resizeSession(this.ownedSessionId, columns, rows).catch((error: Error): void => {
       if (this.alive) this.error = sshPageError(error);
     });
   }
@@ -218,12 +275,12 @@ struct TerminalPage {
     this.operation = null;
     this.connecting = false;
     this.terminal.setInputEnabled(false);
-    const runtime: TerminalRuntime | null = this.runtime;
+    const runtime: TerminalRuntime | MoshRuntime | null = this.ownedRuntime;
     const id: string = this.ownedSessionId;
     if (runtime === null || id.length === 0 || this.disconnecting || !this.isRunning()) return;
     this.disconnecting = true;
     try {
-      const snapshot: TerminalSessionSnapshot = await runtime.stopSession(id);
+      const snapshot: TerminalSessionSnapshot | MoshSessionSnapshot = await runtime.stopSession(id);
       if (this.alive && id === this.ownedSessionId) this.session = snapshot;
     } catch (error) {
       if (this.alive) this.error = error instanceof Error ? sshPageError(error) : String(error);
@@ -239,11 +296,13 @@ struct TerminalPage {
     if (this.sessionUnsubscribe !== null) this.sessionUnsubscribe();
     this.sessionUnsubscribe = null;
     const id: string = this.ownedSessionId;
+    const runtime: TerminalRuntime | MoshRuntime | null = this.ownedRuntime;
     this.ownedSessionId = '';
+    this.ownedRuntime = null;
     this.session = null;
     this.connectionLabel = '';
-    if (this.runtime !== null && id.length > 0) {
-      this.runtime.stopSession(id).catch((error: Error): void => {
+    if (runtime !== null && id.length > 0) {
+      runtime.stopSession(id).catch((error: Error): void => {
         if (this.alive) this.error = sshPageError(error);
       });
     }
@@ -255,6 +314,42 @@ struct TerminalPage {
         this.releaseOwnedSession(); router.pushUrl({ url: 'pages/SettingSSHProfilesPage' });
       } })
       Column({ space: 6 }) {
+        Row({ space: 8 }) {
+          Button('SSH').type(ButtonType.Normal).height(44).layoutWeight(1).fontSize(14)
+            .fontColor(this.protocol === 'ssh' ? this.accentColor : this.colors.secondary)
+            .backgroundColor(this.protocol === 'ssh' ? this.colors.surface : this.colors.inset)
+            .enabled(this.terminalReady && !this.switchingProtocol && !this.disconnecting && !this.backgrounded)
+            .onClick((): void => { this.selectProtocol('ssh'); })
+          Button('Mosh').type(ButtonType.Normal).height(44).layoutWeight(1).fontSize(14)
+            .fontColor(this.protocol === 'mosh' ? this.accentColor : this.colors.secondary)
+            .backgroundColor(this.protocol === 'mosh' ? this.colors.surface : this.colors.inset)
+            .enabled(this.terminalReady && !this.switchingProtocol && !this.disconnecting && !this.backgrounded)
+            .onClick((): void => { this.selectProtocol('mosh'); })
+        }.width('100%')
+        if (this.protocol === 'mosh' && !this.isRunning() && !this.connecting && !this.disconnecting) {
+          Text('需要远端 mosh-server 和可达 UDP。后台中断后需新建会话；关闭未获确认时，远端会话可能仍在运行。')
+            .fontSize(12).fontColor(this.colors.secondary).width('100%')
+          Row() {
+            Text('服务器 UTF-8 区域').fontSize(12).fontColor(this.colors.secondary).layoutWeight(1)
+            Text(this.serverLocale).fontSize(13).fontFamily(FONT_MONO).fontColor(this.colors.ink)
+            Icon({ name: 'chevron_down', iconSize: 18, color: this.colors.secondary }).margin({ left: 8 })
+          }.width('100%').height(52).padding({ left: 14, right: 14 })
+            .backgroundColor(this.colors.surface).borderRadius(16)
+            .enabled(!this.isRunning() && !this.connecting && !this.disconnecting && !this.switchingProtocol)
+            .onClick((): void => { this.choosingLocale = !this.choosingLocale; })
+          if (this.choosingLocale && !this.isRunning() && !this.connecting) {
+            Row({ space: 8 }) {
+              Button('C.UTF-8').type(ButtonType.Normal).height(44).fontSize(13).layoutWeight(1)
+                .fontColor(this.serverLocale === 'C.UTF-8' ? this.accentColor : this.colors.ink)
+                .backgroundColor(this.colors.surface)
+                .onClick((): void => { this.serverLocale = 'C.UTF-8'; this.choosingLocale = false; })
+              Button('en_US.UTF-8').type(ButtonType.Normal).height(44).fontSize(13).layoutWeight(1)
+                .fontColor(this.serverLocale === 'en_US.UTF-8' ? this.accentColor : this.colors.ink)
+                .backgroundColor(this.colors.surface)
+                .onClick((): void => { this.serverLocale = 'en_US.UTF-8'; this.choosingLocale = false; })
+            }.width('100%')
+          }
+        }
         if (this.profiles.length > 0) {
           Row() {
             Text(this.selectedProfile()?.name ?? '选择 SSH 配置').fontSize(14).fontColor(this.colors.ink)
@@ -263,7 +358,7 @@ struct TerminalPage {
           }
             .width('100%').height(52).padding({ left: 14, right: 14 })
             .backgroundColor(this.colors.surface).borderRadius(16)
-            .enabled(!this.isRunning() && !this.connecting && !this.disconnecting)
+            .enabled(!this.isRunning() && !this.connecting && !this.disconnecting && !this.switchingProtocol)
             .accessibilityText(`选择 SSH 配置: ${this.selectedProfile()?.name ?? '未选择'}`)
             .onClick((): void => { this.choosingProfile = !this.choosingProfile; })
           if (this.choosingProfile && !this.isRunning() && !this.connecting) {

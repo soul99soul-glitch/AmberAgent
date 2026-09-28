@@ -55,7 +55,8 @@ import {
   runChatTurnWithTools, runToolLoopContinuation, runRegenerateAtWithTools,
   createTimeTool, makeUIMessage,
   createAskUserTool, createConversationContextTools, createConversationHistoryTools,
-  createTerminalTools, createTerminalApprovalGuard, AgentToolDispatcher, defaultToolInvocationHooks,
+  createTerminalTools, createMoshTools, createPythonTool, createTerminalApprovalGuard,
+  AgentToolDispatcher, defaultToolInvocationHooks,
   createConversationQueueTools, createToolRegistry,
   createToolSearchTool, createRegistryIntrospectionTools, filterToolProfile,
   createRunPlanUpdateTool, createClipboardTool, createDeepReadOpenTool,
@@ -3693,7 +3694,7 @@ struct ChatPage {
     const localOpts: LocalToolOption[] = rt.assistant.localTools;
     const terminalGuard: TerminalApprovalGuard | null = localOpts.indexOf('terminal') >= 0
       && rt.terminalRuntime !== null && rt.sshProfiles !== null
-      ? createTerminalApprovalGuard(rt.terminalRuntime, rt.sshProfiles) : null;
+      ? createTerminalApprovalGuard(rt.terminalRuntime, rt.sshProfiles, rt.moshRuntime ?? undefined) : null;
     // JS 沙箱宿主按需挂载(首次注册工具时;evaluate 的 waitForMount 会等 attach)
     if (localOpts.indexOf('javascript_engine') >= 0 && !this.jsSandboxNeeded) {
       this.jsSandboxNeeded = true;
@@ -3704,6 +3705,12 @@ struct ChatPage {
         ...(terminalGuard !== null && rt.terminalRuntime !== null && rt.sshProfiles !== null
           ? createTerminalTools({ runtime: rt.terminalRuntime, profiles: rt.sshProfiles,
             activityStore: getToolActivityStore(), conversationId: conv.id }) : []),
+        ...(terminalGuard !== null && rt.moshRuntime !== null && rt.sshProfiles !== null
+          ? createMoshTools({ runtime: rt.moshRuntime, profiles: rt.sshProfiles,
+            activityStore: getToolActivityStore(), conversationId: conv.id }) : []),
+        ...(localOpts.indexOf('python') >= 0 && rt.pythonRuntime !== null
+          ? [createPythonTool({ runtime: rt.pythonRuntime,
+            activityStore: getToolActivityStore(), conversationId: conv.id })] : []),
         ...(localOpts.indexOf('ask_user') >= 0 ? [createAskUserTool()] : []),
         // JS 沙箱(隐藏隔离 Web;无网络无文件;assistant 勾选 javascript_engine 门)
         ...(localOpts.indexOf('javascript_engine') >= 0 ? [createJavascriptExecuteTool()] : []),        // D-124:workspace 六件(LocalTools.kt:122-126 — workspace_files 门内

@@ -1,0 +1,14 @@
+#pragma once
+#define HAVE_MEMORY 1
+#define HAVE_STD_SHARED_PTR 1
+#define USE_OPENSSL_AES 1
+#cmakedefine HAVE_CLOCK_GETTIME 1
+#cmakedefine HAVE_POSIX_MEMALIGN 1
+#cmakedefine HAVE_SYS_UIO_H 1
+#cmakedefine HAVE_STRINGS_H 1
+#cmakedefine HAVE_ENDIAN_H 1
+#cmakedefine HAVE_DECL_BE64TOH 1
+#cmakedefine HAVE_DECL_BETOH64 1
+#cmakedefine HAVE_IP_MTU_DISCOVER 1
+#cmakedefine HAVE_IP_RECVTOS 1
+#cmakedefine HAVE_GETTIMEOFDAY 1

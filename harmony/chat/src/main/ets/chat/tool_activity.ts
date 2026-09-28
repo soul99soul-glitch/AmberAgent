@@ -32,6 +32,7 @@
 
 import { currentMessages } from './conversation.ts';
 import { newId } from './ids.ts';
+import { terminalTail } from './terminal/utf8.ts';
 import type { Conversation } from './conversation.ts';
 import {
   isToolExecuted, toolInputAsJson,
@@ -364,6 +365,11 @@ const SANDBOX_TOOL_NAMES: string[] = [
   'terminal_session_exec',
   'terminal_session_read',
   'terminal_session_stop',
+  'terminal_mosh_session_start',
+  'terminal_mosh_session_exec',
+  'terminal_mosh_session_read',
+  'terminal_mosh_session_stop',
+  'python_execute',
   'screen_click',
   'screen_long_click',
   'screen_swipe',
@@ -416,9 +422,10 @@ export const toolOutputText = (
 
 // outputJson(:1426-1432):blank/超长/解析失败/非 object → {}
 export const toolOutputJson = (tool: UIMessagePartTool): JsonObject => {
-  const output: string = toolOutputText(tool, MAX_SANDBOX_JSON_PARSE_CHARS + 1);
+  const limit: number = tool.toolName === 'python_execute' ? 128 * 1024 * 6 + 2048 : MAX_SANDBOX_JSON_PARSE_CHARS;
+  const output: string = toolOutputText(tool, limit + 1);
   if (output.trim().length === 0) return {};
-  if (output.length > MAX_SANDBOX_JSON_PARSE_CHARS) return {};
+  if (output.length > limit) return {};
   try {
     const parsed: unknown = JSON.parse(output);
     if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) {
@@ -440,6 +447,11 @@ export const toolActivityStatus = (
   if (tool.approvalState.type === 'denied') return 'cancelled';
   if (!isToolExecuted(tool) && loading) return 'running';
   if (!isToolExecuted(tool)) return 'running';
+  if (tool.toolName === 'python_execute') {
+    const status: string | null = getStringContent(outputJson, 'status');
+    if (status === 'cancelled' || status === 'interrupted') return 'cancelled';
+    if (status === 'timed_out') return 'failed';
+  }
   if (indicatesFailure(outputJson)) return 'failed';
   return 'succeeded';
 };
@@ -463,6 +475,11 @@ export const toolActivityOutputTail = (
   tool: UIMessagePartTool,
   outputJson: JsonObject,
 ): string => {
+  if (tool.toolName === 'python_execute') {
+    const stdout: string = getStringContent(outputJson, 'stdout') ?? '';
+    const stderr: string = getStringContent(outputJson, 'stderr') ?? '';
+    return terminalTail((stdout + (stdout && stderr ? '\n' : '') + stderr).trim(), MAX_SANDBOX_OUTPUT_TAIL_CHARS);
+  }
   const output: string = getStringContent(outputJson, 'output') ??
     getStringContent(outputJson, 'error') ??
     toolOutputText(tool, MAX_SANDBOX_OUTPUT_TAIL_CHARS);
@@ -519,6 +536,11 @@ export const toolSandboxTitle = (tool: UIMessagePartTool, input?: JsonObject): s
     return `移动文件 ${compactSandboxText(getStringContent(inp, 'from') ?? '', 16)}`;
   }
   if (name === 'terminal_execute') return '执行 SSH 命令';
+  if (name === 'python_execute') return '执行本机 Python';
+  if (name === 'terminal_mosh_session_start') return '启动 Mosh 会话';
+  if (name === 'terminal_mosh_session_exec') return 'Mosh 会话执行';
+  if (name === 'terminal_mosh_session_read') return '读取 Mosh 输出';
+  if (name === 'terminal_mosh_session_stop') return '停止 Mosh 会话';
   if (name === 'terminal_job_start') return '启动 SSH 任务';
   if (name === 'terminal_job_read') return '读取 SSH 任务';
   if (name === 'terminal_job_wait') return '等待 SSH 任务';
@@ -569,7 +591,10 @@ export const toolSandboxInputPreview = (
     picked = getStringContent(inp, 'path');
   } else if (name === 'icloud_search') {
     picked = getStringContent(inp, 'query');
-  } else if (name === 'terminal_execute' || name === 'terminal_job_start' || name === 'terminal_session_exec') {
+  } else if (name === 'python_execute') {
+    picked = getStringContent(inp, 'code');
+  } else if (name === 'terminal_execute' || name === 'terminal_job_start' || name === 'terminal_session_exec'
+    || name === 'terminal_mosh_session_exec') {
     picked = getStringContent(inp, 'command');
   } else if (name === 'file_list' || name === 'file_read' ||
     name === 'file_write' || name === 'file_edit') {
@@ -591,6 +616,8 @@ export const toolSandboxInputPreview = (
 
 // defaultRuntime(:1385-1401)
 export const toolDefaultRuntime = (toolName: string): string => {
+  if (toolName === 'python_execute') return 'embedded_python';
+  if (toolName.startsWith('terminal_mosh_session_')) return 'remote_mosh';
   if (toolName === 'search_web') return 'web-search';
   if (toolName === 'scrape_web') return 'webview';
   if (toolName === 'webview_search_open') return 'webview';

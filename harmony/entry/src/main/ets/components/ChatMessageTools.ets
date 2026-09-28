@@ -9,7 +9,7 @@ import type { UIMessagePartTool, UIMessagePartText, UIMessagePartImage } from '@
 import { toolActivityStatus, toolOutputJson } from '@amber/chat-domain';
 import { INK, INK2, INK3, INK4, SURFACE, SURFACE2, LINE, ACCENT, ERROR, META, LABEL } from '../design/tokens.ets';
 import { GeneratedImageCarousel } from './GeneratedImageCarousel.ets';
-import { isSSHApprovalTool, sshApprovalTargetLabel, sshApprovalCommand } from './SSHApprovalSummary.ets';
+import { isSSHApprovalTool, sshApprovalTargetLabel, sshApprovalCommand, sshApprovalProtocolLabel } from './SSHApprovalSummary.ets';
 import { SSHUIColors } from './SSHUIColors.ets';
 import {
   AgentToolCallCapsule,
@@ -101,7 +101,7 @@ export struct ChatMessageTools {
     Column() {
       if (isSSHApprovalTool(this.part.toolName) && this.part.approvalState.type === 'pending') {
         Column({ space: 4 }) {
-          Text(`Remote SSH · ${sshApprovalTargetLabel(this.part)}`)
+          Text(`${sshApprovalProtocolLabel(this.part)} · ${sshApprovalTargetLabel(this.part)}`)
             .fontSize(META).fontColor(this.sshColors.ink).fontFamily('JetBrainsMono')
             .width('100%').maxLines(3).wordBreak(WordBreak.BREAK_ALL)
           Text(sshApprovalCommand(this.part))

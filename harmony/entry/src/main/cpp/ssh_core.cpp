@@ -195,7 +195,17 @@ struct Owner : std::enable_shared_from_this<Owner> {
                 result = getsockopt(socket, SOL_SOCKET, SO_ERROR, &socketError, &size);
                 if (!result) result = socketError;
             }
-            if (!result) return;
+            if (!result) {
+                sockaddr_storage peer {};
+                socklen_t peerLength = sizeof(peer);
+                char numericHost[NI_MAXHOST] {};
+                if (getpeername(socket, reinterpret_cast<sockaddr *>(&peer), &peerLength) != 0 ||
+                    getnameinfo(reinterpret_cast<sockaddr *>(&peer), peerLength,
+                        numericHost, sizeof(numericHost), nullptr, 0, NI_NUMERICHOST) != 0)
+                    throw Failure("network_error", "Cannot obtain connected SSH peer address");
+                handle.peerAddress = numericHost;
+                return;
+            }
             ::close(socket); socket = -1;
         }
         throw Failure("network_error", "SSH TCP connection failed");
@@ -444,7 +454,7 @@ void Runtime::Start(const std::string &id, ConnectionOptions connection, StartOp
             throw Failure("invalid_arguments", "Invalid SSH credentials, trusted fingerprint, or channel options");
         auto owner = std::make_shared<Owner>(); owner->endpoint = connection;
         owner->connection = std::move(connection); owner->start = std::move(start);
-        owner->handle = {"ssh-" + std::to_string(nextHandle.fetch_add(1)), owner->start.kind};
+        owner->handle = {"ssh-" + std::to_string(nextHandle.fetch_add(1)), owner->start.kind, ""};
         auto now = Clock::now(); owner->connectDeadline = now + std::chrono::milliseconds(owner->endpoint.timeoutMs);
         owner->deadline = owner->start.kind == "exec" ? now + std::chrono::milliseconds(owner->start.timeoutMs) : Clock::time_point::max();
         auto impl = impl_;

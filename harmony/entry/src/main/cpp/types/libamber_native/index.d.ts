@@ -17,6 +17,7 @@ export interface SSHNativeError extends Error {
 export interface SSHHandle {
   id: string;
   kind: SSHHandleKind;
+  peerAddress?: string;
 }
 export interface SSHProbeOptions {
   host: string;
@@ -74,3 +75,44 @@ export const sshResize: (handle: SSHHandle, columns: number, rows: number) => Pr
 export const sshClose: (
   handle: SSHHandle, reason: SSHCloseReason
 ) => Promise<SSHReadPacket>;
+
+export interface PythonOptions {
+  source: string;
+  stdin: string;
+  timeoutMs: number;
+  resourceRoot: string;
+}
+export interface PythonResult {
+  status: 'completed' | 'failed' | 'cancelled' | 'timed_out';
+  exitCode: number | null;
+  stdout: string;
+  stderr: string;
+  errorCode: string | null;
+}
+export const pythonVersion: () => string;
+export const pythonExecute: (requestId: string, options: PythonOptions) => Promise<PythonResult>;
+export const pythonCancel: (requestId: string) => void;
+
+export interface MoshHandle { id: string; kind: 'mosh'; }
+export interface MoshOptions {
+  peerAddress: string;
+  port: number;
+  sessionKey: string;
+  columns: number;
+  rows: number;
+  connectTimeoutMs: number;
+}
+export interface MoshPacket {
+  state: 'running' | 'reconnecting' | 'closed' | 'cancelled' | 'disconnected' | 'failed';
+  bytes: Uint8Array;
+  errorCode: string | null;
+  lastHeardMs: number | null;
+}
+export const moshStart: (requestId: string, options: MoshOptions) => Promise<MoshHandle>;
+export const moshCancel: (requestId: string) => void;
+export const moshRead: (handle: MoshHandle, maxBytes: number) => MoshPacket;
+export const moshWrite: (handle: MoshHandle, bytes: Uint8Array) => Promise<void>;
+export const moshResize: (handle: MoshHandle, columns: number, rows: number) => Promise<void>;
+export const moshClose: (
+  handle: MoshHandle, reason: 'cancelled' | 'disconnected' | 'release'
+) => Promise<MoshPacket>;

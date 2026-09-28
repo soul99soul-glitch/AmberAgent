@@ -75,6 +75,7 @@
     "pages/SkillDetailPage",
     "pages/SkillsPage",
     "pages/SettingSSHProfilesPage",
-    "pages/TerminalPage"
+    "pages/TerminalPage",
+    "pages/PythonPage"
   ]
 }

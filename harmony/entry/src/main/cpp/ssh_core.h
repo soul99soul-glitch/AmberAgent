@@ -43,6 +43,7 @@ struct StartOptions {
 struct Handle {
     std::string id;
     std::string kind;
+    std::string peerAddress;
 };
 struct Chunk {
     std::vector<uint8_t> bytes;

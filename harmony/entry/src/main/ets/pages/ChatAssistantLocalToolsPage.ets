@@ -65,8 +65,13 @@ const LOCAL_TOOL_ROWS: LocalToolRow[] = [
     unavailable: false,
   },
   {
-    option: 'terminal', title: 'Remote SSH 终端',
-    desc: '在已配置的可信 SSH 主机上执行命令与交互会话，执行动作需要批准。',
+    option: 'terminal', title: 'SSH / Mosh 终端',
+    desc: 'SSH 执行远端命令；Mosh 提供远端交互会话。执行动作需要批准。',
+    unavailable: false,
+  },
+  {
+    option: 'python', title: '本机 Python',
+    desc: '内嵌 CPython 数据处理，可串联 Workspace 文件工具。执行动作需要批准。',
     unavailable: false,
   },
   {
@@ -176,7 +181,8 @@ struct ChatAssistantLocalToolsPage {
                     .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
                   Text(row.desc)
                     .fontSize(META).fontColor(INK3).margin({ top: 3 })
-                    .maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis })
+                    .maxLines(row.option === 'terminal' || row.option === 'python' ? 3 : 2)
+                    .textOverflow({ overflow: TextOverflow.Ellipsis })
                   if (row.unavailable) {
                     Text('鸿蒙版未实装')
                       .fontSize(TINY).fontColor(INK4).margin({ top: 3 })

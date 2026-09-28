@@ -25,7 +25,7 @@ export type Avatar =
 
 export type LocalToolOption =
   | 'javascript_engine' | 'time_info' | 'clipboard' | 'tts' | 'ask_user'
-  | 'workspace_files' | 'terminal' | 'screen_automation' | 'system_access'
+  | 'workspace_files' | 'terminal' | 'python' | 'screen_automation' | 'system_access'
   | 'webview' | 'icloud_drive' | 'webmount' | 'webmount_eval';
 
 // ===== MainAgentToolProfile(MainAgentToolProfile.kt) =====

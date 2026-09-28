@@ -1,5 +1,5 @@
 // SettingSandboxPage — 沙盒执行设置(接真实运行时偏好)
-// 工作区根 = filesDir 镜像或用户自选目录；终端运行时使用 Remote SSH。
+// 工作区根 = filesDir 镜像或用户自选目录；本机 CPython，远端 SSH/Mosh。
 // 2026-09-27 二级页 iOS 对齐(基准 IMG_1986「运行环境」):仅换视觉骨架
 // (CenteredTitleBar/PlainSection/CardGroup r18+描边/CardRow/CardToggleRow/FooterNote),逻辑零改动。
 import type { AgentRuntimeSnapshot } from '../platform_impl/AgentRuntimePrefs.ets';
@@ -193,17 +193,26 @@ struct SettingSandboxPage {
   @Builder
   TerminalCard(): void {
     CardRow({
-      label: '终端运行时',
-      desc: '配置可信主机与登录凭据，在远端目录执行命令。',
-      valueText: 'Remote SSH',
+      label: '远端主机配置',
+      desc: 'SSH 与 Mosh 共用可信主机、指纹和登录凭据。',
+      valueText: 'SSH / Mosh',
       iconName: 'cpu', plateSize: 28,
       isLast: false,
       onRowClick: (): void => { router.pushUrl({ url: 'pages/SettingSSHProfilesPage' }); },
     })
     CardRow({
-      label: '打开终端', desc: '连接默认 SSH 主机，打开交互终端。',
+      label: '打开终端', desc: '默认使用 SSH；可切换 Mosh 交互会话，服务端须支持 Mosh 和 UDP。',
       iconName: 'cpu', plateSize: 28, isLast: true,
       onRowClick: (): void => { router.pushUrl({ url: 'pages/TerminalPage' }); },
+    })
+  }
+
+  @Builder
+  PythonCard(): void {
+    CardRow({
+      label: '本机 Python', desc: '内嵌 CPython 数据处理，stdin / 输出可串联 Workspace 文件工具。',
+      valueText: 'CPython', iconName: 'cpu', plateSize: 28, isLast: true,
+      onRowClick: (): void => { router.pushUrl({ url: 'pages/PythonPage' }); },
     })
   }
 
@@ -383,6 +392,10 @@ struct SettingSandboxPage {
 
           PlainSection({ label: '终端运行时' })
           CardGroup({ radius: 18, stroke: true, content: (): void => { this.TerminalCard(); } })
+            .margin({ left: GUTTER, right: GUTTER })
+
+          PlainSection({ label: '本机执行' })
+          CardGroup({ radius: 18, stroke: true, content: (): void => { this.PythonCard(); } })
             .margin({ left: GUTTER, right: GUTTER })
 
           if (!this.loadError && this.snap !== null) {

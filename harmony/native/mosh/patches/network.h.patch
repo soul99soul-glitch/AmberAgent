@@ -1,0 +1,12 @@
+--- a/src/network/network.h
++++ b/src/network/network.h
+@@ -219,6 +219,9 @@
+     bool get_has_remote_addr( void ) const { return has_remote_addr; }
+ 
+     uint64_t timeout( void ) const;
++
++    /* Embedded observer: only authenticated, fresh sequence packets refresh this. */
++    uint64_t last_heard_timestamp( void ) const { return last_heard; }
+     double get_SRTT( void ) const { return SRTT; }
+ 
+     const Addr &get_remote_addr( void ) const { return remote_addr; }

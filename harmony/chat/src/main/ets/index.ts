@@ -1360,3 +1360,16 @@ export { createTerminalTools } from './chat/terminal/tools.ts';
 export { createTerminalApprovalGuard } from './chat/terminal_approval.ts';
 export type { TerminalApprovalGuard } from './chat/terminal_approval.ts';
 export type { TerminalToolsDeps } from './chat/terminal/tools.ts';
+
+// E3 local CPython and authenticated Mosh domain contracts.
+export { SSHTargetResolver } from './chat/terminal/target_resolver.ts';
+export type { PythonNativeStatus, PythonExecuteOptions, PythonNativeResult,
+  PythonExecuteRequest, PythonSnapshot } from './chat/python/models.ts';
+export type { PythonTransportPort } from './chat/python/ports.ts';
+export { PythonRuntime } from './chat/python/runtime.ts';
+export { createPythonTool } from './chat/python/tools.ts';
+export type { MoshHandle, MoshOptions, MoshPacket, MoshCloseReason, MoshServerLocale,
+  MoshSessionRequest, MoshSessionSnapshot, MoshSessionEvent } from './chat/mosh/models.ts';
+export type { MoshTransportPort } from './chat/mosh/ports.ts';
+export { MoshRuntime } from './chat/mosh/runtime.ts';
+export { createMoshTools } from './chat/mosh/tools.ts';

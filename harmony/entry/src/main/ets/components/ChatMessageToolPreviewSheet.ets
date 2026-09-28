@@ -14,7 +14,7 @@ import { JsonTree } from './ui/JsonTree.ets';
 import { MarkdownText } from './MarkdownText.ets';
 import { pasteboard } from '@kit.BasicServicesKit';
 import { promptAction } from '@kit.ArkUI';
-import { isSSHApprovalTool, sshApprovalTargetLabel, sshApprovalCommand } from './SSHApprovalSummary.ets';
+import { isSSHApprovalTool, sshApprovalTargetLabel, sshApprovalCommand, sshApprovalProtocolLabel } from './SSHApprovalSummary.ets';
 import { SSHUIColors } from './SSHUIColors.ets';
 
 // 搜索结果项
@@ -158,7 +158,7 @@ export struct ChatMessageToolPreviewSheet {
   @Builder
   RenderSSHPreview(): void {
     Column({ space: 6 }) {
-      Text('Remote SSH · 批准目标').fontSize(META).fontColor(this.sshColors.muted).width('100%')
+      Text(sshApprovalProtocolLabel(this.part) + ' · 批准目标').fontSize(META).fontColor(this.sshColors.muted).width('100%')
       Text(sshApprovalTargetLabel(this.part)).fontSize(META).fontFamily('JetBrainsMono')
         .fontColor(this.sshColors.ink).width('100%').wordBreak(WordBreak.BREAK_ALL).copyOption(CopyOptions.LocalDevice)
       Text(this.part.toolName === 'terminal_session_start' ? '会话操作' : '执行命令')

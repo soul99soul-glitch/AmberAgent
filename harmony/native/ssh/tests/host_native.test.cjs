@@ -61,6 +61,7 @@ async function test(name, action) { await action(); ++passed; console.log(`PASS 
   });
   await test('password exec stdout stderr nonzero exit and three-byte read chunks', async () => {
     const handle = await startExec("printf '你好🙂\\n'; printf 'err-line\\n' >&2; exit 7");
+    assert.equal(handle.peerAddress, '127.0.0.1');
     const result = await drain(handle, 3);
     assert.equal(result.stdout.toString(), '你好🙂\n'); assert.equal(result.stderr.toString(), 'err-line\n');
     assert.equal(result.packet.state, 'exited'); assert.equal(result.packet.exitCode, 7);

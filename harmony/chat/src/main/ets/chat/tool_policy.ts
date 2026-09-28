@@ -184,6 +184,7 @@ export const toolCategory = (name: string): string => {
   if (name.startsWith('icloud_')) return 'cloud';
   if (name.startsWith('officepro_')) return 'office';
   if (name.startsWith('terminal_')) return 'terminal';
+  if (name === 'python_execute') return 'python';
   if (['search_web', 'scrape_web', 'search_sources_status', 'search_strategy_explain',
     'http_request'].includes(name)) return 'web';
   if (name.startsWith('webview_')) return 'webview';
@@ -296,6 +297,7 @@ export const toolRiskProfile = (name: string): RiskProfile => {
   }
   if (name.startsWith('screen_') || name === 'vlm_task') return { risk: 'sensitive', explicit: true };
   if (name.startsWith('terminal_')) return { risk: 'sensitive', explicit: true };
+  if (name === 'python_execute') return { risk: 'sensitive', explicit: true };
   return { risk: 'normal', explicit: false };
 };
 
@@ -317,6 +319,7 @@ export const requiresFailClosedAutoApproval = (
 // ===== concurrencySafe(:552-559) =====
 
 export const toolConcurrencySafe = (name: string): boolean => {
+  if (name === 'python_execute') return false;
   if (['terminal_install_packages', 'terminal_job_stop', 'terminal_execute',
     'terminal_job_start'].includes(name)) return false;
   if (name.startsWith('cron_task_') && name !== 'cron_task_list') return false;
@@ -370,6 +373,8 @@ export const toolSpeculativeBlockReason = (
 // ===== outputBudgetChars(:602-640) =====
 
 export const toolOutputBudgetChars = (name: string): number => {
+  // Native bounds the combined UTF-8 output to 128 KiB; JSON may escape each byte.
+  if (name === 'python_execute') return 128 * 1024 * 6 + 2048;
   // 262144 = FILE_READ_HARD_MAX_CHARS(WorkspaceTools.kt 内部常量,+2048 信封余量)
   if (name === 'file_read') return 262144 + 2048;
   if (name === 'wm_screenshot') return 1200000;

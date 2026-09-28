@@ -90,6 +90,7 @@ void Deliver(napi_env env, napi_value, void *context, void *data) {
             } else if (completion->kind == Completion::START) {
                 value = Object(env); Set(env, value, "id", String(env, result->handle.id));
                 Set(env, value, "kind", String(env, result->handle.kind));
+                Set(env, value, "peerAddress", String(env, result->handle.peerAddress));
             } else if (completion->kind == Completion::CLOSE) value = PacketValue(env, result->packet);
             else Check(napi_get_undefined(env, &value));
             Check(napi_resolve_deferred(env, completion->deferred, value));
@@ -164,7 +165,7 @@ ConnectionOptions ReadConnection(napi_env env, napi_value object) {
     return options;
 }
 Handle ReadHandle(napi_env env, napi_value object) {
-    return {Field(env, object, "id", 256), Field(env, object, "kind", 16)};
+    return {Field(env, object, "id", 256), Field(env, object, "kind", 16), ""};
 }
 struct Call {
     std::vector<napi_value> args;

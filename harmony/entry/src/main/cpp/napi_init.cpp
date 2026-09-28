@@ -1,6 +1,8 @@
 #include <napi/native_api.h>
 #include "amber_native.h"
 #include "ssh_napi.h"
+#include "python_napi.h"
+#include "mosh_napi.h"
 
 #include <memory>
 #include <string>
@@ -174,7 +176,9 @@ napi_value Init(napi_env env, napi_value exports)
         {"countBatch", nullptr, CountBatch, nullptr, nullptr, nullptr, napi_default, nullptr}
     };
     if (napi_define_properties(env, exports, 1, functions) != napi_ok) return nullptr;
-    return RegisterSSH(env, exports);
+    if (RegisterSSH(env, exports) == nullptr) return nullptr;
+    if (RegisterPython(env, exports) == nullptr) return nullptr;
+    return RegisterMosh(env, exports);
 }
 
 napi_module module = {1, 0, nullptr, Init, "amber_native", nullptr, {0}};

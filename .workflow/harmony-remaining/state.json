@@ -2,14 +2,14 @@
   "objective": "完成所有纳入范围的剩余功能并逐阶段独立审查与验证",
   "baseline": "6840fa551",
   "status": "active",
-  "currentPhase": "E3",
+  "currentPhase": "E4",
   "authorization": "用户授权持续实施、subagent审查、分阶段推进",
   "phases": {
     "E0": "complete",
     "E1": "complete",
     "E2": "complete",
     "E3": "in_progress",
-    "E4": "pending",
+    "E4": "in_progress",
     "E5": "pending",
     "E6": "pending",
     "E7": "pending",
@@ -27,7 +27,16 @@
     "E0Commit": "35ddd03d1",
     "E1Commit": "4964ff400",
     "E2Contract": "frozen: packets/E2-contract.md",
-    "E2": "PASS: independent A/B/C; real SSH/Asset/PTY/approval/UI, tests/types/lint, Release/sign/install and Debug isolation; see E2-gate.md"
+    "E2": "PASS: independent A/B/C; real SSH/Asset/PTY/approval/UI, tests/types/lint, Release/sign/install and Debug isolation; see E2-gate.md",
+    "E2Commit": "87f69a88c",
+    "E3Contract": "frozen: packets/E3-contract.md",
+    "E3": "Native and domain/review PASS; emulator 11 Python + 4 Mosh PASS; Python C PASS; final Mosh one-line layout fix built/linted, device visual/release install pending after HDC failure; see E3-gate.md"
   },
-  "blockers": []
+  "blockers": [
+    {
+      "phase": "E3",
+      "kind": "device_connection",
+      "details": "Phone disconnected; emulator HDC stopped returning commands. Completed native matrix and existing UI evidence retained; final Mosh layout screenshot and final Release install/launch pending. Independent E4 source work continues."
+    }
+  ]
 }

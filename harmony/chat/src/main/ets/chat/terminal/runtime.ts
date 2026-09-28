@@ -8,7 +8,8 @@ import type {
   SSHTargetSnapshot, SSHTrustProbe, TerminalCommandRequest, TerminalJobSnapshot, TerminalSessionEvent,
   TerminalSessionRequest, TerminalSessionSnapshot,
 } from './models.ts';
-import { SSHProfileStore, TerminalError, draftDigest, normalizeDraft, sameBinding, targetDigest } from './profile_store.ts';
+import { SSHProfileStore, TerminalError, draftDigest, normalizeDraft, sameBinding } from './profile_store.ts';
+import { SSHTargetResolver } from './target_resolver.ts';
 import { TerminalController, checkAbort, relayAbort, terminalDelay } from './control.ts';
 import { TerminalJobRuntime } from './job_runtime.ts';
 import { TerminalSessionRuntime } from './session_runtime.ts';
@@ -24,26 +25,18 @@ interface PendingOperation { controller: TerminalController; done: Promise<void>
 export class TerminalRuntime {
   private readonly jobs: TerminalJobRuntime;
   private readonly sessions: TerminalSessionRuntime;
+  private readonly targetResolver: SSHTargetResolver;
   private pending: PendingOperation[] = [];
   constructor(private readonly deps: TerminalRuntimeDeps) {
     this.jobs = new TerminalJobRuntime(deps.transport, deps.logs, deps.taskStore);
     this.sessions = new TerminalSessionRuntime(deps.transport, deps.logs);
+    this.targetResolver = new SSHTargetResolver({ profiles: deps.profiles, credentials: deps.credentials });
   }
   captureTarget(profileId: string | null): SSHTargetSnapshot {
-    const profile: SSHProfile | null = profileId === null ? this.deps.profiles.defaultProfile() : this.deps.profiles.get(profileId);
-    if (profile === null) throw new TerminalError('profile_missing');
-    return { profileId: profile.id, digest: targetDigest(profile), usesDefault: profileId === null };
+    return this.targetResolver.captureTarget(profileId);
   }
   private targetProfile(target: SSHTargetSnapshot): SSHProfile {
-    const current: SSHProfile | null = this.deps.profiles.get(target.profileId);
-    if (current === null || targetDigest(current) !== target.digest ||
-      (target.usesDefault && this.deps.profiles.snapshot().defaultProfileId !== target.profileId)) {
-      throw new TerminalError('target_changed');
-    }
-    if (current.knownHostSHA256 === null || current.knownHostHost !== current.host || current.knownHostPort !== current.port) {
-      throw new TerminalError('host_trust_required');
-    }
-    return current;
+    return this.targetResolver.targetProfile(target);
   }
   private withPending<T>(signal: AbortSignalLike | undefined,
     action: (operation: PendingOperation) => Promise<T>): Promise<T> {
@@ -122,13 +115,7 @@ export class TerminalRuntime {
       secret: credential.secret, passphrase: credential.passphrase, expectedFingerprintSHA256: fingerprint, connectTimeoutMs: 10000 };
   }
   private async prepare(target: SSHTargetSnapshot, signal: AbortSignalLike): Promise<SSHConnectionOptions> {
-    checkAbort(signal);
-    const p: SSHProfile = this.targetProfile(target);
-    if (p.credentialRef === null) throw new TerminalError('credential_missing');
-    const auth: SSHCredential | null = await this.deps.credentials.load(p.credentialRef, p);
-    checkAbort(signal); this.targetProfile(target);
-    if (auth === null || !auth.secret) throw new TerminalError('credential_missing');
-    return this.connection(p, auth, p.knownHostSHA256!);
+    return this.targetResolver.prepare(target, signal);
   }
   async startJob(request: TerminalCommandRequest, signal?: AbortSignalLike): Promise<TerminalJobSnapshot> {
     const captured: TerminalCommandRequest = { target: { profileId: request.target.profileId, digest: request.target.digest,

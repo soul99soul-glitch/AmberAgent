@@ -37,6 +37,7 @@ export const toolIconEmoji = (toolName: string): string => {
   if (toolName.startsWith('search_web') || toolName.startsWith('scrape_web') || toolName.startsWith('webview_')) return '🔍';
   if (toolName.startsWith('file_')) return '📄';
   if (toolName.startsWith('terminal_')) return '⌨️';
+  if (toolName === 'python_execute') return '🐍';
   if (toolName.startsWith('screen_') || toolName.startsWith('vlm_task')) return '🖥️';
   if (toolName.startsWith('mcp__')) return '📦';
   if (toolName === 'get_time_info') return '🕐';

@@ -23,6 +23,10 @@ import { TerminalRuntime } from '../main/ets/chat/terminal/runtime.ts';
 import { createTerminalTools } from '../main/ets/chat/terminal/tools.ts';
 import { AgentTaskStore } from '../main/ets/chat/agent_task.ts';
 import { AgentToolActivityStore } from '../main/ets/chat/tool_activity.ts';
+import { SSHTargetResolver } from '../main/ets/chat/terminal/target_resolver.ts';
+import { MoshRuntime } from '../main/ets/chat/mosh/runtime.ts';
+import { createMoshTools } from '../main/ets/chat/mosh/tools.ts';
+import type { MoshTransportPort } from '../main/ets/chat/mosh/ports.ts';
 
 class PersistedStore implements ConversationStore {
   saved: string[] = [];
@@ -139,7 +143,23 @@ class ApprovalRuntime {
       errorCode: null, errorMessage: null };
   }
 }
-const approvalFixture = async (parts: UIMessagePartTool[]) => {
+class MoshApprovalRuntime {
+  sessionReads: number = 0;
+  constructor(private profiles: SSHProfileStore) {}
+  captureTarget(id: string | null): SSHTargetSnapshot {
+    const profile = id === null ? this.profiles.defaultProfile() : this.profiles.get(id);
+    if (profile === null) throw new Error('profile_missing');
+    return { profileId: profile.id, digest: targetDigest(profile), usesDefault: id === null };
+  }
+  readSession(id: string) {
+    this.sessionReads++;
+    if (id !== 'mosh-p') throw new Error('mosh_session_missing');
+    return { sessionId: id, profileId: 'p', runtime: 'remote_mosh' as const, status: 'RUNNING' as const,
+      connectionState: 'running' as const, reconnectLastHeardMs: 0, outputTail: '$ ', columns: 80, rows: 24,
+      errorCode: null, errorMessage: null };
+  }
+}
+const approvalFixture = async (parts: UIMessagePartTool[], enableMosh: boolean = false) => {
   const credentials = new FixtureCredentials();
   const profiles = await SSHProfileStore.create({ kv: createMemoryKeyValueStore(), credentials });
   for (const id of ['p', 'q']) {
@@ -148,11 +168,12 @@ const approvalFixture = async (parts: UIMessagePartTool[]) => {
   }
   await profiles.setDefault('p');
   const runtime = new ApprovalRuntime(profiles);
+  const moshRuntime = new MoshApprovalRuntime(profiles);
   const store = new PersistedStore();
   const provider = providerFor(parts);
   let executed: string[] = [];
   const build = (): ToolLoopOptions => {
-    const guard = createTerminalApprovalGuard(runtime, profiles);
+    const guard = createTerminalApprovalGuard(runtime, profiles, enableMosh ? moshRuntime : undefined);
     const names = Array.from(new Set(parts.map((part) => part.toolName)));
     // Construct new registry/factory on every continuation, like ChatPage.
     const tools = createToolRegistry(names.map((name) => gatedTool(name, async () => {
@@ -167,7 +188,7 @@ const approvalFixture = async (parts: UIMessagePartTool[]) => {
     await store.save(approve(store.load()));
     return runToolLoopContinuation(store.load(), depsFor(provider, store), build());
   };
-  return { profiles, credentials, runtime, store, resume, executed: () => executed };
+  return { profiles, credentials, runtime, moshRuntime, store, resume, executed: () => executed };
 };
 const assertTargetFailure = (conv: Conversation, callId: string): void => {
   const part = partsOf(conv).find((p) => p.toolCallId === callId)!;
@@ -332,3 +353,197 @@ test('empty profile_id resumes against default through real terminal tools and r
   assert.equal(result.profile_id, 'p');
   assert.equal(result.status, 'completed');
 });
+
+test('Mosh pending persists its protocol and readable target through rebuilt approval guard', async () => {
+  const s = await approvalFixture([toolPart('mosh-start', 'terminal_mosh_session_start', '{"profile_id":""}')], true);
+  const pending = partsOf(s.store.load())[0];
+  assert.equal(pending.metadata?.terminal_protocol, 'remote_mosh');
+  assert.equal(pending.metadata?.terminal_target_label, 'fixture@host-p:22');
+  assert.deepEqual(pending.metadata?.terminal_target, s.moshRuntime.captureTarget(null));
+  const out = await s.resume();
+  assert.deepEqual(s.executed(), ['terminal_mosh_session_start']);
+  assert.equal(partsOf(out)[0].metadata?.terminal_protocol, 'remote_mosh');
+});
+
+test('new SSH protocol is explicit; historical SSH pending without protocol still resumes only SSH', async () => {
+  const s = await approvalFixture([toolPart('legacy-ssh-protocol', 'terminal_execute')], true);
+  const legacy = s.store.load();
+  assert.equal(partsOf(legacy)[0].metadata?.terminal_protocol, 'remote_ssh');
+  delete partsOf(legacy)[0].metadata!['terminal_protocol'];
+  await s.store.save(legacy);
+  await s.resume();
+  assert.deepEqual(s.executed(), ['terminal_execute']);
+});
+
+test('Mosh approval missing persisted protocol is refused despite an otherwise valid target', async () => {
+  const s = await approvalFixture([toolPart('legacy-mosh-protocol', 'terminal_mosh_session_start')], true);
+  const legacy = s.store.load();
+  partsOf(legacy)[0].metadata!['terminal_target'] = { ...s.moshRuntime.captureTarget(null) };
+  delete partsOf(legacy)[0].metadata!['terminal_protocol'];
+  await s.store.save(legacy);
+  assertTargetFailure(await s.resume(), 'legacy-mosh-protocol');
+  assert.deepEqual(s.executed(), []);
+});
+
+for (const [name, protocol] of [
+  ['terminal_mosh_session_start', 'remote_ssh'], ['terminal_session_start', 'remote_mosh'],
+] as const) {
+  test(`${name} refuses persisted approval for ${protocol}`, async () => {
+    const s = await approvalFixture([toolPart('cross-protocol', name)], true);
+    const changed = s.store.load();
+    partsOf(changed)[0].metadata!['terminal_protocol'] = protocol;
+    await s.store.save(changed);
+    assertTargetFailure(await s.resume(), 'cross-protocol');
+    assert.deepEqual(s.executed(), []);
+  });
+}
+
+test('Mosh default changes reject execution and retain the approved protocol and target label', async () => {
+  const s = await approvalFixture([toolPart('mosh-default', 'terminal_mosh_session_start')], true);
+  await s.profiles.setDefault('q');
+  const out = await s.resume();
+  assertTargetFailure(out, 'mosh-default');
+  assert.equal(partsOf(out)[0].metadata?.terminal_protocol, 'remote_mosh');
+  assert.equal(partsOf(out)[0].metadata?.terminal_target_label, 'fixture@host-p:22');
+  assert.deepEqual(s.executed(), []);
+});
+
+test('Mosh explicit host change rejects approval continuation', async () => {
+  const s = await approvalFixture([toolPart('mosh-host', 'terminal_mosh_session_start', '{"profile_id":"p"}')], true);
+  const profile = s.profiles.get('p')!;
+  await s.profiles.saveMetadata({ ...profile, host: 'changed-mosh-host' }, profile.revision);
+  assertTargetFailure(await s.resume(), 'mosh-host');
+  assert.deepEqual(s.executed(), []);
+});
+
+test('mixed SSH and Mosh batch routes session identity to the Mosh runtime and preserves both protocols', async () => {
+  const s = await approvalFixture([toolPart('ssh-batch', 'terminal_execute', '{"profile_id":"p"}'),
+    toolPart('mosh-batch', 'terminal_mosh_session_exec', '{"session_id":"mosh-p"}')], true);
+  const pending = partsOf(s.store.load());
+  assert.deepEqual(pending.map((part) => part.metadata?.terminal_protocol), ['remote_ssh', 'remote_mosh']);
+  assert.equal(s.moshRuntime.sessionReads, 1);
+  await s.profiles.setDefault('q');
+  const out = await s.resume();
+  assert.equal(s.moshRuntime.sessionReads, 2);
+  assert.deepEqual(s.executed(), ['terminal_execute', 'terminal_mosh_session_exec']);
+  for (const part of partsOf(out)) {
+    assert.equal(part.metadata?.batch_marker, part.toolCallId);
+    assert.equal(part.metadata?.terminal_target_label, 'fixture@host-p:22');
+    assert.ok(part.metadata?.permission_trace);
+  }
+});
+
+test('Mosh session profile edit rejects resumed command send', async () => {
+  const s = await approvalFixture([toolPart('mosh-session-edit', 'terminal_mosh_session_exec', '{"session_id":"mosh-p"}')], true);
+  const profile = s.profiles.get('p')!;
+  await s.profiles.saveMetadata({ ...profile, host: 'changed-mosh-host' }, profile.revision);
+  assertTargetFailure(await s.resume(), 'mosh-session-edit');
+  assert.deepEqual(s.executed(), []);
+});
+
+test('Mosh start without the optional Mosh runtime never falls back to SSH execution', async () => {
+  const s = await approvalFixture([toolPart('no-mosh-runtime', 'terminal_mosh_session_start')]);
+  const pending = partsOf(s.store.load())[0];
+  assert.equal(pending.metadata?.terminal_protocol, 'remote_mosh');
+  assert.equal(pending.metadata?.terminal_target, null);
+  assertTargetFailure(await s.resume(), 'no-mosh-runtime');
+  assert.deepEqual(s.executed(), []);
+});
+
+test('Mosh read and stop keep ordinary metadata and do not rebind after default changes', async () => {
+  const names = ['terminal_mosh_session_read', 'terminal_mosh_session_stop'];
+  const s = await approvalFixture(names.map((name) => toolPart(name, name)), true);
+  for (const part of partsOf(s.store.load())) {
+    assert.equal(part.metadata?.terminal_target, undefined);
+    assert.equal(part.metadata?.terminal_protocol, undefined);
+  }
+  await s.profiles.setDefault('q');
+  await s.resume();
+  assert.deepEqual(s.executed(), names);
+});
+
+for (const changeDefault of [true, false]) {
+  test(`real Mosh tools persist approval and ${changeDefault ? 'reject changed default before SSH bootstrap' : 'register the exact source tool after unchanged approval'}`, async (t) => {
+    const credentials = new FixtureCredentials();
+    const profiles = await SSHProfileStore.create({ kv: createMemoryKeyValueStore(), credentials });
+    for (const id of ['p', 'q']) {
+      await profiles.commitVerified({ id, name: id, host: `host-${id}`, port: 22,
+        username: 'fixture', authMethod: 'password' }, null, `SHA256:${id}`, { secret: 'fixture-only', passphrase: null });
+    }
+    await profiles.setDefault('p');
+    const files = new Map<string, string>();
+    const taskStore = await AgentTaskStore.create({ taskDir: '/files/tasks', appFilesDir: '/files', files: {
+      async mkdirs() {}, async listJsonFileNames() { return []; },
+      async readText(path: string) { return files.get(path) ?? null; },
+      async writeText(path: string, value: string) { files.set(path, value); },
+      async delete(path: string) { files.delete(path); }, async exists(path: string) { return files.has(path); },
+      async isPathInside(root: string, path: string) { return path.startsWith(root + '/'); },
+    } });
+    let bootstraps: number = 0;
+    let udpStarts: number = 0;
+    const exited = () => ({ chunks: [], state: 'exited' as const, exitCode: 0, errorCode: null, errorMessage: null });
+    const sshTransport: SSHTransportPort = {
+      async probe() { return { fingerprintSHA256: 'SHA256:p', hostKeyType: 'ed25519' }; },
+      async startExec(_id, connection) {
+        bootstraps++;
+        assert.equal(connection.host, 'host-p');
+        return { id: 'bootstrap', kind: 'exec', peerAddress: '192.0.2.1' };
+      },
+      async startPty() { throw new Error('Mosh approval must not dispatch an SSH PTY'); },
+      async read() { return { ...exited(), chunks: [{ isStderr: false,
+        bytes: new TextEncoder().encode('MOSH CONNECT 60001 abcdefghijklmnopqrstuw\n') }] }; },
+      async close() { return exited(); }, async write() {}, async resize() {},
+    };
+    const transport: MoshTransportPort = {
+      async start() { udpStarts++; return { id: 'mosh-udp', kind: 'mosh' }; },
+      async read() { return { bytes: new Uint8Array(0), state: 'running', errorCode: null, lastHeardMs: 0 }; },
+      async write() {}, async resize() {},
+      async close(_handle, reason) { return { bytes: new Uint8Array(0),
+        state: reason === 'release' ? 'closed' : reason, errorCode: null, lastHeardMs: 0 }; },
+    };
+    const moshRuntime = new MoshRuntime({ targetResolver: new SSHTargetResolver({ profiles, credentials }),
+      sshTransport, transport, taskStore });
+    t.after(async () => { await moshRuntime.interruptForBackground(); });
+    const store = new PersistedStore();
+    const provider = providerFor([toolPart('real-mosh-start', 'terminal_mosh_session_start', '{"profile_id":""}')]);
+    const activityStore = new AgentToolActivityStore();
+    const build = (): ToolLoopOptions => {
+      const guard = createTerminalApprovalGuard(new ApprovalRuntime(profiles), profiles, moshRuntime);
+      const tools = createToolRegistry(createMoshTools({ runtime: moshRuntime, profiles,
+        activityStore, conversationId: 'real-mosh-approval' })).tools();
+      return { ...loopFor(provider, tools, guard.captureInvocationMetadata),
+        dispatcher: new AgentToolDispatcher({ hooks: [...defaultToolInvocationHooks(), guard.hook] }) };
+    };
+    await runChatTurnWithTools(makeConversation('real-mosh-approval', []), 'run', depsFor(provider, store), build());
+    const pending = partsOf(store.load())[0];
+    assert.equal(pending.approvalState.type, 'pending');
+    assert.equal(bootstraps, 0);
+    assert.equal(udpStarts, 0);
+    assert.deepEqual(taskStore.list(), []);
+    if (changeDefault) await profiles.setDefault('q');
+    await store.save(approve(store.load()));
+    const out = await runToolLoopContinuation(store.load(), depsFor(provider, store), build());
+    const part = partsOf(out)[0];
+    assert.deepEqual(part.metadata?.terminal_target, pending.metadata?.terminal_target);
+    assert.equal(part.metadata?.terminal_target_label, 'fixture@host-p:22');
+    assert.equal(part.metadata?.terminal_protocol, 'remote_mosh');
+    if (changeDefault) {
+      assertTargetFailure(out, 'real-mosh-start');
+      assert.equal(bootstraps, 0);
+      assert.equal(udpStarts, 0);
+      assert.deepEqual(taskStore.list(), []);
+      assert.equal(activityStore.sandboxActivity, null);
+    } else {
+      assert.equal(bootstraps, 1);
+      assert.equal(udpStarts, 1);
+      const result = JSON.parse((part.output[0] as { text: string }).text);
+      assert.equal(result.status, 'running');
+      assert.equal(result.runtime, 'remote_mosh');
+      assert.equal(result.profile_id, 'p');
+      assert.equal(taskStore.list()[0].sourceToolName, 'terminal_mosh_session_start');
+      assert.equal(taskStore.list()[0].sourceConversationId, 'real-mosh-approval');
+      assert.equal(taskStore.list()[0].runtime, 'remote_mosh');
+      await moshRuntime.stopSession(result.session_id);
+    }
+  });
+}

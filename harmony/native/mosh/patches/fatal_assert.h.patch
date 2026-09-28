@@ -1,0 +1,23 @@
+--- a/src/util/fatal_assert.h
++++ b/src/util/fatal_assert.h
+@@ -35,12 +35,20 @@
+ 
+ #include <stdio.h>
+ #include <stdlib.h>
++#ifdef AMBER_MOSH_EMBEDDED
++#include <stdexcept>
++#endif
+ 
+ static void fatal_error( const char *expression, const char *file, int line, const char *function )
+ {
++#ifdef AMBER_MOSH_EMBEDDED
++  (void)expression; (void)file; (void)line; (void)function;
++  throw std::runtime_error("Mosh native invariant failed");
++#else
+   fprintf( stderr, "Fatal assertion failure in function %s at %s:%d\nFailed test: %s\n",
+            function, file, line, expression );
+   abort();
++#endif
+ }
+ 
+ #define fatal_assert(expr)						\

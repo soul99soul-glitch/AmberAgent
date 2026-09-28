@@ -55,6 +55,7 @@ import { buildAgentLoopBudgetPrompt, agentLoopShouldHideTools } from './agent_lo
 const GUARD_REPEATABLE_TOOLS: Set<string> = new Set([
   'file_read', 'file_list', 'file_search',
   'terminal_job_wait', 'terminal_job_read', 'terminal_session_read',
+  'terminal_mosh_session_read',
   'subagent_wait', 'subagent_read', 'model_council_wait', 'model_council_read',
   'js_cell_wait', 'webview_wait_for_load', 'webview_read', 'webview_find_text', 'webview_links',
   'wm_wait', 'wm_observe', 'wm_state', 'wm_extract', 'wm_get', 'wm_find', 'wm_network_inspect',

@@ -7,7 +7,7 @@ export type SSHCloseReason = 'cancelled' | 'disconnected' | 'release';
 export type SSHNativeErrorCode = 'invalid_arguments' | 'unknown_handle' | 'network_error' |
   'host_key_mismatch' | 'authentication_failed' | 'unsupported_key' | 'connection_timeout' | 'cancelled' | 'channel_error';
 export interface SSHNativeError extends Error { code: SSHNativeErrorCode; }
-export interface SSHHandle { id: string; kind: SSHHandleKind; }
+export interface SSHHandle { id: string; kind: SSHHandleKind; peerAddress?: string; }
 export interface SSHProbeOptions { host: string; port: number; timeoutMs: number; }
 export interface SSHProbeResult { fingerprintSHA256: string; hostKeyType: string; }
 export interface SSHConnectionOptions {

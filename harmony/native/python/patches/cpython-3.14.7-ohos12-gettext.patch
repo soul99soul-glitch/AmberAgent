@@ -1,0 +1,13 @@
+--- a/Modules/_localemodule.c
++++ b/Modules/_localemodule.c
+@@ -20,6 +20,10 @@
+ #endif
+ #ifdef HAVE_LANGINFO_H
+ #  include <langinfo.h>           // nl_langinfo()
++#endif
++#if defined(__OHOS__) && __OHOS_API__ == 12
++// API12 libintl.h exists but declares no gettext functions.
++#  undef HAVE_LIBINTL_H
+ #endif
+ #ifdef HAVE_LIBINTL_H
+ #  include <libintl.h>

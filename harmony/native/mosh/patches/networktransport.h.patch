@@ -1,0 +1,12 @@
+--- a/src/network/networktransport.h
++++ b/src/network/networktransport.h
+@@ -116,6 +116,9 @@
+ 
+     unsigned int send_interval( void ) const { return sender.send_interval(); }
+ 
++    /* Read-only transport freshness; duplicate SSP packets are not fresh. */
++    uint64_t get_last_heard_timestamp( void ) const { return connection.last_heard_timestamp(); }
++
+     const Addr &get_remote_addr( void ) const { return connection.get_remote_addr(); }
+     socklen_t get_remote_addr_len( void ) const { return connection.get_remote_addr_len(); }
+ 

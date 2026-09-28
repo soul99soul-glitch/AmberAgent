@@ -114,6 +114,7 @@ export const PROFILE_WORKSPACE_READ_TOOLS: readonly string[] = Object.freeze([
 export const PROFILE_CODING_CATEGORIES: readonly string[] = Object.freeze([
   'workspace',
   'terminal',
+  'python',
   'mcp',
   'skill',
 ]);
