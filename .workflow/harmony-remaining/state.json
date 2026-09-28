@@ -58,7 +58,8 @@
     "E12": "Source checkpoint; contract frozen with narrow tap/replay admission decision; webmount domain 6/6, goal loop 4/4, jev lifecycle 7/7, council consumer 1/1 PASS; changed-file lint 0 error, integrated CompileArkTS build PASS, local Test-CA sign verify PASS. C real site OAuth/live ArkWeb/device UI pending.",
     "E12SourceCommit": "c394c7241",
     "E13": "Source checkpoint; plan projection 2/2, keepalive lifecycle 3/3, novel adapter groups 15/15 PASS; changed-file lint 0 error, integrated CompileArkTS build PASS, local Test-CA sign verify PASS. C system live-view rendering, >10min background acceptance, device UI pending.",
-    "E13SourceCommit": "35970ac90"
+    "E13SourceCommit": "35970ac90",
+    "E14": "results/E14-gate.md; AGC-signed install+launch PASS on 6HK0226627000384, WebMount page/OAuth/HAR cards light+dark UI PASS, zero fatal/crash in exercise; account/long-run gates listed pending in gate doc."
   },
   "blockers": [
     {
