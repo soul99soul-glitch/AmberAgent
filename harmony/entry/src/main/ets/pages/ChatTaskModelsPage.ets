@@ -6,7 +6,7 @@ import {
 } from '@amber/chat-domain';
 import type { ProviderSetting, TaskModelReference, ModelType, VisionModelHealth } from '@amber/chat-domain';
 import {
-  getChatKvStore, readTaskModelReference, saveTaskModelId, resolveTaskModelReference, resolveConfiguredTaskModel,
+  getChatKvStore, describeChatModel, readTaskModelReference, saveTaskModelId, resolveTaskModelReference, resolveConfiguredTaskModel,
   resolveTaskModelReferenceChain, taskModelReferenceForChoice,
   saveTaskPrompt, loadTaskPrompts, TaskPrompts, ChatProviderChoice,
   TASK_TITLE_MODEL_KEY, TASK_SUGGESTION_MODEL_KEY, TASK_COMPRESS_MODEL_KEY, TASK_IMAGE_MODEL_KEY,
@@ -82,6 +82,7 @@ struct ChatTaskModelsPage {
   @State ocrPromptRaw: string = DEFAULT_OCR_PROMPT;
   @State ocrHealthLabel: string = '检测中';
   @State colors: SSHUIColors = new SSHUIColors();
+  @State chatModelLabel: string = '';
   @StorageProp('darkMode') @Watch('refreshColors') darkMode: boolean = false;
   @StorageProp('themePackId') @Watch('refreshColors') themePackId: string = '';
   @StorageProp('accentColor') @Watch('refreshColors') accentColor: string = ACCENT;
@@ -90,7 +91,12 @@ struct ChatTaskModelsPage {
   private visible: boolean = false;
   private loadSeq: number = 0;
 
-  aboutToAppear(): void { this.alive = true; this.visible = true; this.refresh(); }
+  aboutToAppear(): void {
+    this.alive = true; this.visible = true; this.refresh();
+    describeChatModel().then((label: string): void => {
+      if (this.alive) this.chatModelLabel = label;
+    }).catch((): void => {});
+  }
   onPageShow(): void { if (!this.visible) { this.visible = true; this.refresh(); } }
   onPageHide(): void { this.visible = false; this.loadSeq++; }
   aboutToDisappear(): void { this.alive = false; this.onPageHide(); }
@@ -311,6 +317,26 @@ struct ChatTaskModelsPage {
     }.width('100%').padding({ left: 14, right: 14, top: 2, bottom: 10 })
   }
   @Builder
+  private ChatModelCard(): void {
+    // iOS ModelDefaultsView 聊天段:当前聊天模型(进入选择器固定 Provider+模型)
+    Column({ space: 8 }) {
+      Row({ space: 12 }) {
+        Row() { Icon({ name: 'cpu', iconSize: 16, color: this.accentColor }) }
+          .width(28).height(28).borderRadius(7).backgroundColor(this.colors.inset).justifyContent(FlexAlign.Center)
+        Text('聊天模型').fontSize(16).fontWeight(FontWeight.Medium).fontColor(this.colors.ink).layoutWeight(1)
+        Icon({ name: 'chevron_right', iconSize: 16, color: this.colors.muted })
+      }.width('100%').constraintSize({ minHeight: 52 }).enabled(!this.saving)
+      .onClick((): void => { router.pushUrl({ url: 'pages/ChatModelPickerPage' }); })
+      Column({ space: 6 }) {
+        Text(this.chatModelLabel.length > 0 ? this.chatModelLabel : '未选择')
+          .fontSize(14).fontColor(this.colors.ink).width('100%').wordBreak(WordBreak.BREAK_ALL)
+        Text('来自已启用服务商的聊天模型;已有会话保留当时的模型记录')
+          .fontSize(12).fontColor(this.colors.secondary).width('100%')
+      }.width('100%').padding({ left: 40 })
+    }.width('100%').padding({ left: 14, right: 14, top: 2, bottom: 10 })
+  }
+
+  @Builder
   private TaskCard(): void {
     this.TaskRow('title', false)
     this.TaskRow('suggestion', false)
@@ -350,12 +376,14 @@ struct ChatTaskModelsPage {
   build(): void {
     Stack() {
       Column() {
-        CenteredTitleBar({ title: '任务模型' })
+        CenteredTitleBar({ title: '模型与提示词' })
         Scroll() {
           Column({ space: 10 }) {
             if (this.error.length > 0) Text(this.error).fontSize(13).fontColor(this.colors.error).width('100%').wordBreak(WordBreak.BREAK_ALL)
             if (!this.loaded) Text('加载中…').fontSize(14).fontColor(this.colors.secondary).width('100%')
             else {
+              PlainSection({ label: '聊天' })
+              CardGroup({ radius: 18, stroke: true, content: (): void => { this.ChatModelCard(); } })
               PlainSection({ label: '辅助任务' })
               CardGroup({ radius: 18, stroke: true, content: (): void => { this.TaskCard(); } })
               Text('固定选择绑定服务商配置与模型 UUID。旧 UUID 保持兼容，重新选择后固定；辅助任务的聊天回退以实际运行轮次为准。')

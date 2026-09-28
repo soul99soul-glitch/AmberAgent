@@ -135,8 +135,6 @@ struct SettingPage {
     CardRow({ label: '服务商', iconName: 'key',
       onRowClick: (): void => { this.go('pages/ChatProviderSettingsPage'); } })
     CardRow({ label: '模型与提示词', valueText: this.modelLabel, iconName: 'spark',
-      onRowClick: (): void => { this.go('pages/ChatModelPickerPage'); } })
-    CardRow({ label: '任务模型', iconName: 'cpu',
       onRowClick: (): void => { this.go('pages/ChatTaskModelsPage'); } })
     CardRow({ label: '提示词', iconName: 'doc',
       onRowClick: (): void => { this.go('pages/ChatPromptsPage'); } })
