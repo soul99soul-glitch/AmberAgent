@@ -142,6 +142,7 @@ import { vibrator } from '@kit.SensorServiceKit';
 import { WebMountHost, getWebMountSession, WebMountSurface } from '../platform_impl/WebMountSession.ets';
 import type { WebMountHookBinding } from '../platform_impl/WebMountSession.ets';
 import { createWebMountTools } from '../platform_impl/WebMountTools.ets';
+import { createFeishuDocsTools } from '../platform_impl/FeishuDocsTools.ets';
 import { ChatInput } from '../components/ChatInput.ets';
 import type { QuickMessage } from '../components/SlashCommandPanel.ets';
 import { ContextBarsIndicator } from '../components/ChatInputUsage.ets';
@@ -3716,6 +3717,10 @@ struct ChatPage {
           ? createWebMountTools(getWebMountSession(),
             this.webmountEvalEnabled || localOpts.indexOf('webmount_eval') >= 0,
             localOpts.indexOf('webmount') >= 0)
+          : []),
+        // D6-3:飞书云文档工具族(与 webmount 同门;token 自解析,未登录诚实报错)
+        ...((this.webmountGlobalEnabled || localOpts.indexOf('webmount') >= 0)
+          ? createFeishuDocsTools()
           : []),
         // D-123:skills 工具组(ChatService.kt:2239-2246 — createSkillTools 五/六件,
         //   位置 = localTools 之后/MCP 管理之前);enabledSkills/allSkills =

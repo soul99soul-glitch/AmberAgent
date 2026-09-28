@@ -9,12 +9,13 @@
 // (CenteredTitleBar/PlainSection/CardGroup r18+描边/CardToggleRow/FooterNote),逻辑零改动。
 
 import { BG, INK, INK3, ERROR, ACCENT, LINE, SURFACE2, accentSoftBg, lineHeightForSize } from '../design/tokens.ets';
-import { FONT_SANS_MEDIUM } from '../design/fonts.ets';
+import { FONT_SANS_MEDIUM, FONT_MONO } from '../design/fonts.ets';
 import {
   CenteredTitleBar, PlainSection, CardGroup, CardToggleRow, FooterNote, BtnFill, PageSpacer,
 } from '../components/PageTemplate.ets';
 import { Icon } from '../components/ui/Icon.ets';
 import { common } from '@kit.AbilityKit';
+import { webview } from '@kit.ArkWeb';
 import { getChatKvStore, getAppContainer } from '../di/AppContainer.ets';
 import { loadWebMountSites, saveWebMountSites, makeUserSite, hostOf, isSeedSite, restoreMissingSeedSites, SEED_SITES } from '../platform_impl/WebMountSites.ets';
 import type { UserSiteEntry } from '../platform_impl/WebMountSites.ets';
@@ -23,6 +24,7 @@ import {
   makeFeishuPkce, exchangeFeishuCode, createKvWebMountTokenStore, feishuTokenStatusText,
   type FeishuExchangeInput,
 } from '../platform_impl/WebMountOAuthSupport.ets';
+import { FEISHU_APP_ID_KEY, FEISHU_APP_SECRET_KEY } from '../platform_impl/FeishuDocsTools.ets';
 import { buildFeishuAuthorizationUrl, type WebMountPkce, type WebMountOAuthToken } from '@amber/chat-domain';
 
 /** 飞书回调粘贴解析结果：裸 code 时 state 为 null */
@@ -64,6 +66,14 @@ struct SettingExperimentalWebMountPage {
       this.feishuToken = token;
       this.feishuStatus = feishuTokenStatusText(token);
     }).catch((): void => { this.feishuStatus = '未登录'; });
+    // D6-3:应用凭据回填(刷新 token 与文档工具需要)
+    const kv = getChatKvStore();
+    kv.get(FEISHU_APP_ID_KEY).then((raw: string | null): void => {
+      if (raw !== null) this.feishuAppId = raw;
+    }).catch((): void => {});
+    kv.get(FEISHU_APP_SECRET_KEY).then((raw: string | null): void => {
+      if (raw !== null) this.feishuAppSecret = raw;
+    }).catch((): void => {});
   }
 
   private refresh(): void {
@@ -154,6 +164,10 @@ struct SettingExperimentalWebMountPage {
       };
       const token = await exchangeFeishuCode(getAppContainer().httpClient, exchangeInput);
       await createKvWebMountTokenStore(getChatKvStore()).set(token);
+      // D6-3:应用凭据持久化(刷新 token 与 feishu_docs 工具需要)
+      const kv = getChatKvStore();
+      await kv.put(FEISHU_APP_ID_KEY, this.feishuAppId.trim());
+      await kv.put(FEISHU_APP_SECRET_KEY, this.feishuAppSecret.trim());
       this.feishuToken = token;
       this.feishuStatus = feishuTokenStatusText(token);
     } catch (e) {
@@ -281,6 +295,73 @@ struct SettingExperimentalWebMountPage {
           this.setToggle('webmount_eval_enabled', v);
         },
       })
+    }
+    .width('100%')
+  }
+
+  // D6-3:Cookie 逐行导入(configCookieSync 写 WebView Cookie 罐)
+  @State cookieHost: string = '';
+  @State cookieLines: string = '';
+  @State cookieNote: string = '';
+
+  private importCookies(): void {
+    const hostRaw: string = this.cookieHost.trim();
+    if (hostRaw.length === 0) {
+      this.cookieNote = '请填写域名';
+      return;
+    }
+    const url: string = hostRaw.startsWith('http') ? hostRaw : `https://${hostRaw}`;
+    const lines: string[] = this.cookieLines.split('\n');
+    let count: number = 0;
+    let firstError: string = '';
+    for (const raw of lines) {
+      const line: string = raw.trim();
+      if (line.length === 0 || line.indexOf('=') <= 0) continue;
+      try {
+        webview.WebCookieManager.configCookieSync(url, line);
+        count++;
+      } catch (e) {
+        if (firstError.length === 0) {
+          firstError = e instanceof Error ? e.message : String(e);
+        }
+      }
+    }
+    if (count === 0) {
+      this.cookieNote = firstError.length > 0 ? `导入失败:${firstError}` : '没有可导入的 cookie 行';
+    } else {
+      this.cookieNote = `已导入 ${count} 条 cookie → ${url}`;
+      this.cookieLines = '';
+    }
+  }
+
+  @Builder
+  CookieCard(): void {
+    Column() {
+      TextInput({ text: this.cookieHost, placeholder: '域名(如 feishu.cn 或 https://feishu.cn)' })
+        .height(44).fontSize(15).fontColor(INK).placeholderColor(INK3)
+        .backgroundColor(SURFACE2).borderRadius(8)
+        .padding({ left: 12, right: 12 })
+        .margin({ left: 14, right: 14, top: 12, bottom: 8 })
+        .onChange((v: string): void => { this.cookieHost = v; })
+      TextArea({ text: this.cookieLines, placeholder: 'name=value\nname2=value2\n…' })
+        .height(110).fontSize(13).fontColor(INK).placeholderColor(INK3)
+        .fontFamily(FONT_MONO)
+        .backgroundColor(SURFACE2).borderRadius(8)
+        .padding(12)
+        .margin({ left: 14, right: 14, bottom: 8 })
+        .onChange((v: string): void => { this.cookieLines = v; })
+      if (this.cookieNote.length > 0) {
+        Text(this.cookieNote)
+          .fontSize(12).fontColor(INK3)
+          .width('100%')
+          .padding({ left: 14, right: 14, bottom: 8 })
+      }
+      Row() {
+        Blank().layoutWeight(1)
+        BtnFill({ label: '导入', onTap: (): void => { this.importCookies(); } })
+      }
+      .width('100%')
+      .padding({ left: 14, right: 14, bottom: 12 })
     }
     .width('100%')
   }
@@ -595,6 +676,14 @@ struct SettingExperimentalWebMountPage {
             PlainSection({ label: '飞书账号（OAuth）' })
             CardGroup({ radius: 18, stroke: true, content: (): void => { this.FeishuCard(); } })
               .margin({ left: 16, right: 16 })
+
+            PlainSection({ label: 'Cookie 导入' })
+            CardGroup({ radius: 18, stroke: true, content: (): void => { this.CookieCard(); } })
+              .margin({ left: 16, right: 16 })
+            FooterNote({
+              text: '逐行 name=value,写入 WebView Cookie 罐(与 wm_* 工具/页面登录共享);'
+                + '域名可带 https:// 前缀,不带则自动补。',
+            })
 
             PlainSection({ label: '站点' })
             CardGroup({ radius: 18, stroke: true, content: (): void => { this.SitesCard(); } })

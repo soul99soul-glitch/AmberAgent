@@ -115,6 +115,18 @@ export class WebMountSession {
     return this.lastBlockedUrl;
   }
 
+  // D6-1:导航日志(network_inspect;环形 ≤50,'blocked|ok|atMs|url')
+  private navLog: string[] = [];
+
+  public getNavLog(): string[] {
+    return [...this.navLog];
+  }
+
+  private recordNav(kind: string, url: string): void {
+    this.navLog.push(`${kind}|${Date.now()}|${url}`);
+    if (this.navLog.length > 50) this.navLog = this.navLog.slice(this.navLog.length - 50);
+  }
+
   public getActiveTabId(): string {
     return this.activeTabId;
   }
@@ -198,7 +210,7 @@ export class WebMountSession {
 
   // onLoadIntercept 主框架判定:true = 阻止加载。仅 http(s) 且命中当次站点快照才放行,
   //   about: 内部占位页放行;gate 未设置时 fail closed(拒绝一切外部导航)。
-  public shouldBlockUrl(url: string): boolean {
+  private shouldBlockUrlInner(url: string): boolean {
     if (this.isInternalUrl(url)) return false;
     if (!this.enabled) {
       this.lastBlockedUrl = url;
@@ -208,6 +220,12 @@ export class WebMountSession {
     this.lastBlockedUrl = url;
     hilog.warn(DOMAIN, TAG, 'navigation blocked by site gate: %{public}s', url);
     return true;
+  }
+
+  public shouldBlockUrl(url: string): boolean {
+    const blocked: boolean = this.shouldBlockUrlInner(url);
+    if (blocked) this.recordNav('blocked', url);
+    return blocked;
   }
 
   // 单次导航授权判定(内部页放行;gate 缺失 fail closed)
@@ -242,6 +260,7 @@ export class WebMountSession {
 
   // Web.onPageEnd:用事件真实 url(F-02 残余:跟随链接后不再沿用旧地址)
   public markPageEnd(url: string): void {
+    this.recordNav('ok', url);
     const finalUrl: string = url.length > 0 ? url : this.currentUrl;
     // 宿主初始 about:blank 的 pageEnd 不算本次外部导航完成
     if (this.pendingExternalNav && this.isInternalUrl(finalUrl)) return;

@@ -4,9 +4,12 @@
 //   wm_stations/site_add/site_remove(审批)、wm_find/wait/back/forward/reload/
 //   keys/select/tab_list/tab_open/tab_select/tab_close/read_page;
 //   bot/hand 租约:hand(用户接管)下写操作拒绝,只读放行(guardPage mutating)。
-// 未移植(登记):tap(≈click,触摸事件变体)、signed_fetch、network_inspect、
-//   oauth_connect/refresh、site_adapter/site_memory、profile_synthesize、
-//   recipe_candidates、fetch_replay、run_goal、observe — 高级子系统,后续梯队。
+// D6-1 落地:signed_fetch(站点会话 Cookie 凭据请求)、network_inspect(主框架
+//   导航日志)、observe(页面签名变更观察)、site_memory(按站点 Agent 笔记)。
+// 未移植(登记):tap(≈click,触摸事件变体)、oauth_connect/refresh(通用 OAuth
+//   需站点级应用配置面)、site_adapter(逐站提取适配器数据)、profile_synthesize、
+//   recipe_candidates(依赖 Recipes 子系统)、fetch_replay(依赖完整 HAR)、
+//   run_goal(浏览器内多步目标循环)。
 //
 // 本批安全收口:
 //   L01 — 所有动态值只经 JSON 字符串编码注入,不再拼入脚本文本(error 文案里的
@@ -28,7 +31,8 @@ import {
   checkWebMountUrl, makeSiteGate,
 } from './WebMountSites.ets';
 import type { UserSiteEntry, WebMountUrlCheck } from './WebMountSites.ets';
-import { getChatKvStore } from '../di/AppContainer.ets';
+import { getChatKvStore, getAppContainer } from '../di/AppContainer.ets';
+import { webview } from '@kit.ArkWeb';
 
 const SESSION_ID: string = 'main';
 
@@ -60,6 +64,19 @@ const errorPart = (message: string): UIMessagePart[] =>
 const jsonString = (value: string): string => JSON.stringify(value)
   .replace(/\u2028/g, '\\u2028')
   .replace(/\u2029/g, '\\u2029');
+
+// D6-1:observe 页面签名(标题/URL/交互元素数/文本 hash/前 8 标题)
+const OBSERVE_JS: string = `(function(){
+  const text = (document.body && document.body.innerText) || '';
+  let hash = 0;
+  for (let i = 0; i < text.length; i++) { hash = ((hash << 5) - hash + text.charCodeAt(i)) | 0; }
+  const headings = [];
+  document.querySelectorAll('h1,h2,h3').forEach(function(h){ if (headings.length < 8) headings.push((h.textContent||'').trim().substring(0,80)); });
+  return { title: document.title, url: location.href,
+    elements: document.querySelectorAll('a,button,input,select,textarea').length,
+    hash: hash, headings: headings };
+})()`;
+let lastObserveSnapshot: string = '';
 
 // 统一:evalJson 结果字符串 → text part(ok/error 两形态)
 const evalToPart = async (session: WebMountSession, expr: string): Promise<UIMessagePart[]> => {
@@ -689,9 +706,137 @@ export const createWebMountTools = (
     },
   });
 
+  // D6-1:signed_fetch — 站点会话 Cookie 凭据请求(仅已授权站点;hand 租约禁写)
+  const signedFetchTool: AgentTool = makeAgentTool({
+    name: 'wm_signed_fetch',
+    description: 'Fetch a URL with the current WebMount session cookies attached (credentialed '
+      + 'request). URL must belong to an authorized WebMount site.',
+    parameters: (): InputSchemaObj | null => makeInputSchemaObj({
+      'url': { type: 'string', description: 'Absolute http(s) URL on an authorized site.' },
+      'method': { type: 'string', description: 'HTTP method (default GET).' },
+      'body': { type: 'string', description: 'Optional request body (POST/PUT, JSON).' },
+    } as JsonObject, ['url']),
+    execute: async (input: JsonValue): Promise<UIMessagePart[]> => {
+      const raw: string = strOf(input, 'url', '');
+      if (raw.length === 0) throw new Error('url is required');
+      const m: string = strOf(input, 'method', 'GET').toUpperCase();
+      if (['GET', 'POST', 'PUT', 'DELETE', 'PATCH'].indexOf(m) < 0) {
+        return errorPart(`unsupported method: ${m}`);
+      }
+      const method: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH' =
+        m as 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH';
+      const body: string = strOf(input, 'body', '');
+      const kv: KeyValueStore = getChatKvStore();
+      const enabled: boolean = await syncEnabled(session, kv, assistantEnabled);
+      if (!enabled) return errorPart('WebMount is disabled for this conversation');
+      const blocked: string | null = await guardPage(session, kv, assistantEnabled, method !== 'GET');
+      if (blocked !== null) return errorPart(blocked);
+      const check: WebMountUrlCheck = checkWebMountUrl(raw);
+      const sites: UserSiteEntry[] = await loadWebMountSites(kv);
+      if (!check.ok || !siteAllowsUrl(sites, check.url)) {
+        return [{ type: 'text', text: sitesDeniedMessage(sites, raw), metadata: null }];
+      }
+      const cookie: string = webview.WebCookieManager.fetchCookieSync(check.url);
+      const headers: Record<string, string> = {};
+      if (cookie.length > 0) headers['Cookie'] = cookie;
+      if (body.length > 0) headers['Content-Type'] = 'application/json';
+      const resp = await getAppContainer().httpClient.fetch({
+        url: check.url, method: method, headers: headers,
+        body: body.length > 0 ? body : undefined,
+      }, { signal: undefined });
+      const text: string = typeof resp.body === 'string' ? resp.body : JSON.stringify(resp.body);
+      return textPart({
+        ok: resp.status >= 200 && resp.status < 300,
+        status: resp.status,
+        body: text.length > 8000 ? `${text.substring(0, 8000)}…(truncated)` : text,
+      } as JsonObject);
+    },
+  });
+
+  // D6-1:network_inspect — 主框架导航日志(ok/blocked,环形 ≤50)
+  const networkInspectTool: AgentTool = makeAgentTool({
+    name: 'wm_network_inspect',
+    description: 'List recent WebMount main-frame navigations (allowed and blocked) with timestamps.',
+    parameters: (): InputSchemaObj | null => makeInputSchemaObj({
+      'limit': { type: 'number', description: 'Max entries (default 20, max 50).' },
+    } as JsonObject, null),
+    execute: async (input: JsonValue): Promise<UIMessagePart[]> => {
+      const kv: KeyValueStore = getChatKvStore();
+      const enabled: boolean = await syncEnabled(session, kv, assistantEnabled);
+      if (!enabled) return errorPart('WebMount is disabled for this conversation');
+      const limit: number = Math.min(50, Math.max(1, numOf(input, 'limit', 20)));
+      const log: string[] = session.getNavLog();
+      const tail: string[] = log.slice(Math.max(0, log.length - limit));
+      const lines: string[] = [];
+      for (const e of tail) lines.push(e);
+      return textPart({ count: lines.length, entries: lines.join('\n') } as JsonObject);
+    },
+  });
+
+  // D6-1:observe — 页面签名快照与上次比对(first/changed/unchanged)
+  const observeTool: AgentTool = makeAgentTool({
+    name: 'wm_observe',
+    description: 'Snapshot the current page signature (title/url/interactive count/text hash/'
+      + 'headings) and report whether it changed since the previous snapshot.',
+    execute: async (_input: JsonValue): Promise<UIMessagePart[]> => {
+      const blocked: string | null = await guardPage(session, getChatKvStore(), assistantEnabled, false);
+      if (blocked !== null) return errorPart(blocked);
+      const raw: string = await session.evalJson(OBSERVE_JS);
+      const prev: string = lastObserveSnapshot;
+      const changed: string = prev.length === 0 ? 'first_snapshot' : (prev !== raw ? 'changed' : 'unchanged');
+      lastObserveSnapshot = raw;
+      return textPart({ changed: changed, snapshot: JSON.parse(raw) as JsonValue } as JsonObject);
+    },
+  });
+
+  // D6-1:site_memory — 按站点 Agent 笔记(get/set/append,KV 持久)
+  const siteMemoryTool: AgentTool = makeAgentTool({
+    name: 'wm_site_memory',
+    description: 'Read or write per-site agent notes (site quirks, login hints, extraction tips). '
+      + 'Actions: get (default) | set | append.',
+    parameters: (): InputSchemaObj | null => makeInputSchemaObj({
+      'host': { type: 'string', description: 'Site host (default: current page host).' },
+      'action': { type: 'string', description: 'get | set | append (default get).' },
+      'value': { type: 'string', description: 'Note text (required for set/append).' },
+    } as JsonObject, null),
+    execute: async (input: JsonValue): Promise<UIMessagePart[]> => {
+      const kv: KeyValueStore = getChatKvStore();
+      const enabled: boolean = await syncEnabled(session, kv, assistantEnabled);
+      if (!enabled) return errorPart('WebMount is disabled for this conversation');
+      let host: string = strOf(input, 'host', '');
+      if (host.length === 0) {
+        const stripped: string = session.getUrl().replace(/^https?:\/\//, '');
+        const slash: number = stripped.indexOf('/');
+        host = slash > 0 ? stripped.substring(0, slash) : stripped;
+      }
+      if (host.length === 0) return errorPart('host is required (no page loaded)');
+      const key: string = `webmount_site_memory/${host}`;
+      const action: string = strOf(input, 'action', 'get');
+      if (action === 'get') {
+        const raw: string | null = await kv.get(key);
+        return textPart({ host: host, notes: raw ?? '' } as JsonObject);
+      }
+      const value: string = strOf(input, 'value', '');
+      if (value.length === 0) throw new Error('value is required for set/append');
+      if (action === 'set') {
+        await kv.put(key, value);
+        return textPart({ host: host, saved: true } as JsonObject);
+      }
+      if (action === 'append') {
+        const raw: string | null = await kv.get(key);
+        let next: string = raw === null || raw.length === 0 ? value : `${raw}\n${value}`;
+        if (next.length > 4000) next = next.substring(next.length - 4000);
+        await kv.put(key, next);
+        return textPart({ host: host, saved: true } as JsonObject);
+      }
+      return errorPart(`unknown action: ${action}`);
+    },
+  });
+
   const extras: AgentTool[] = [
     findTool, waitTool, backTool, forwardTool, reloadTool, keysTool, selectTool,
     tabListTool, tabOpenTool, tabSelectTool, tabCloseTool, readPageTool,
+    signedFetchTool, networkInspectTool, observeTool, siteMemoryTool,
   ];
 
   return includeEval
