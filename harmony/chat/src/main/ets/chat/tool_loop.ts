@@ -138,7 +138,9 @@ export const DEFAULT_AGENT_MAX_TOOL_LOOP_STEPS: number = 256;
 export interface ToolLoopOptions {
   tools: AgentTool[];
   recipeAdapter?: RecipeLoopAdapter;
-  pluginAdapter?: PluginLoopAdapter;
+  pluginAdapter?: RecipeLoopAdapter;
+  // E12:wm_run_goal 编排 adapter;同 RecipeExecutionPort 有序推进,不复制执行
+  goalAdapter?: RecipeLoopAdapter;
   refreshTools?: () => Promise<AgentTool[]>;
   // Explicit page-launched package: execute/resume this part without requesting
   // model text, then return its persisted result or approval card.
@@ -291,8 +293,9 @@ const runToolLoopCore = async (
     }
     const recipeAdapter: RecipeLoopAdapter | undefined = loop.recipeAdapter;
     const pluginAdapter: PluginLoopAdapter | undefined = loop.pluginAdapter;
+    const goalAdapter: RecipeLoopAdapter | undefined = loop.goalAdapter;
     const supportsPackage = (name: string): boolean => recipeAdapter?.supports(name) === true
-      || pluginAdapter?.supports(name) === true;
+      || pluginAdapter?.supports(name) === true || goalAdapter?.supports(name) === true;
     const baseMessages: UIMessage[] = currentMessages(conv);
     const lastMsg: UIMessage | undefined = baseMessages.length > 0
       ? baseMessages[baseMessages.length - 1]
@@ -514,7 +517,7 @@ const runToolLoopCore = async (
     let executedPairs: ToolBatchResultPair[];
     if (recipeBatch) {
       const batch = await executeRecipeBatch(toolsToProcess, {
-        adapter: recipeAdapter, pluginAdapter, tools: currentTools, dispatcher,
+        adapter: recipeAdapter, pluginAdapter, goalAdapter, tools: currentTools, dispatcher,
         autoApproveTools, autoApproveHighRiskTools, invocationContext,
         autoApprovedToolNames, toolRetry,
         capture: loop.captureInvocationMetadata,

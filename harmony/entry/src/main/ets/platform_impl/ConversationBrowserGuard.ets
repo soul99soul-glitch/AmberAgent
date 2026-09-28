@@ -53,6 +53,29 @@ export const assertConversationBrowserOwner = (conversationId: string): (() => v
 export const guardConversationBrowserTools = (tools: AgentTool[], conversationId: string): AgentTool[] =>
   tools.map((tool: AgentTool): AgentTool => {
     if (!tool.name.startsWith('wm_') && tool.name !== 'javascript_execute') return tool;
+    // E12(goal):wm_run_goal 只做宿主编排(原 lease/owner 断言),不占子操作的
+    //   inFlight 槽 — 否则其经 dispatcher 调用的 guarded 子工具会自锁
+    if (tool.name === 'wm_run_goal') {
+      return makeAgentTool({ name: tool.name, description: tool.description, parameters: tool.parameters,
+        needsApproval: tool.needsApproval, allowsAutoApproval: tool.allowsAutoApproval,
+        mandatoryApproval: tool.mandatoryApproval, systemPrompt: tool.systemPrompt,
+        recipeEnvelope: tool.recipeEnvelope,
+        pluginEnvelope: tool.pluginEnvelope, mcpTarget: tool.mcpTarget,
+        execute: async (input: JsonValue, signal?: AbortSignalLike): Promise<UIMessagePart[]> => {
+          if (visibleConversation !== conversationId) {
+            throw new Error('浏览器工具需要当前会话的页面宿主，请返回该会话后操作。');
+          }
+          let lease: BrowserLease | undefined = leases.get(conversationId);
+          if (lease === undefined) {
+            lease = { revision: pageRevision, lost: false };
+            leases.set(conversationId, lease);
+          }
+          if (lease.lost || lease.revision !== pageRevision) {
+            throw new Error('该工具链的浏览器页面已离开，原页面状态不再可用。请结束本轮后重新打开目标页面。');
+          }
+          return tool.execute(input, signal);
+        } });
+    }
     return makeAgentTool({ name: tool.name, description: tool.description, parameters: tool.parameters,
       needsApproval: tool.needsApproval, allowsAutoApproval: tool.allowsAutoApproval,
       mandatoryApproval: tool.mandatoryApproval, systemPrompt: tool.systemPrompt,

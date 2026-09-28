@@ -1,6 +1,12 @@
-# E12 narrow execution contract draft — pending root freeze
+# E12 narrow execution contract — frozen 2026-09-28
 
 Read-only preparation, 2026-09-28. Based on `results/E12-webmount-design.md` and the current source paths below. This draft authorizes no product/test/build/device/network work. Root freezes the final API/boundaries before implementation. E11 decision and approval-subject exports are dependencies, not already completed E12 consumers. Scope③ Moli/Playwright/Steel/remote desktop remains excluded.
+
+**Root freeze decisions (2026-09-28):**
+
+1. **Human-admission seam settled: narrow E12 admission.** `PermissionDecisionResolver.resolve` gains an exact-name check for `wm_tap`/`wm_fetch_replay` placed immediately after the existing `ask_user` special case and before the both-auto early allow: `auto` ⇒ `ask` with trace source `webmount_explicit_approval`; approved/denied remain authoritative via the preceding approval-state branch. This mirrors the `ask_user` precedent in the same function, changes no other tool's semantics, and requires no new permission framework. It applies uniformly to standalone dispatch and goal-child `port.decide` because both route through this resolver. Freezing the old behavior (both-auto silently bypassing tap/replay) is rejected: replay carries page credentials to the network and tap synthesizes page interaction; the product claim "mandatory human" must hold under every settings combination.
+2. **Execution shape:** single executor in the design's order — A pure domain → B platform browser/OAuth → C goal slot → D settings UI → root wiring — with the two focused fixture groups from §"Necessary counterexamples" (one domain group, one loop group), affected-file lint, and one integrated build/sign. No site×method×mode matrices, no parallel worker fan-out, no report sprawl.
+3. Everything below the freeze line is unchanged and binding, including the named DTO set, the honest-coverage limits (page_fetch_xhr ≠ full browser HAR; synthetic ≠ trusted touch; no DONE shortcut), and the exclusion of remote services.
 
 ## Verified seams and scope corrections
 

@@ -23,8 +23,9 @@
 import type { AbortSignalLike } from '@amber/deepread-domain';
 import type {
   AgentTool, JsonValue, JsonObject, UIMessagePart, InputSchemaObj, KeyValueStore,
+  WebMountNetworkSummary, WebMountOAuthApplication,
 } from '@amber/chat-domain';
-import { makeAgentTool, makeInputSchemaObj, fetchWebMountRequest } from '@amber/chat-domain';
+import { makeAgentTool, makeInputSchemaObj, fetchWebMountRequest, webMountOAuthAllowsApiOrigin } from '@amber/chat-domain';
 import type { WebMountSession } from './WebMountSession.ets';
 import {
   loadWebMountSites, saveWebMountSites, makeUserSite, siteAllowsUrl, sitesDeniedMessage,
@@ -33,11 +34,15 @@ import {
 import type { UserSiteEntry, WebMountUrlCheck } from './WebMountSites.ets';
 import { getChatKvStore, getAppContainer } from '../di/AppContainer.ets';
 import { webview } from '@kit.ArkWeb';
+import { webMountTemplateSummaries } from './WebMountTemplateSupport.ets';
+import { loadWebMountOAuthApplication, loadWebMountUsableAccessToken } from './WebMountOAuthRuntime.ets';
+import { webMountOAuthBearerFetch } from './WebMountRestrictedHttp.ets';
+import type { WebMountOAuthToken } from '@amber/chat-domain';
 
 const SESSION_ID: string = 'main';
 
 // ArkTS 工具入参读取(obj[key] as string;缺省回退)
-const strOf = (input: JsonValue, key: string, fallback: string): string => {
+export const strOf = (input: JsonValue, key: string, fallback: string): string => {
   if (typeof input === 'object' && input !== null && !Array.isArray(input)) {
     const v: JsonValue | undefined = (input as JsonObject)[key];
     if (typeof v === 'string') return v;
@@ -45,7 +50,7 @@ const strOf = (input: JsonValue, key: string, fallback: string): string => {
   return fallback;
 };
 
-const numOf = (input: JsonValue, key: string, fallback: number): number => {
+export const numOf = (input: JsonValue, key: string, fallback: number): number => {
   if (typeof input === 'object' && input !== null && !Array.isArray(input)) {
     const v: JsonValue | undefined = (input as JsonObject)[key];
     if (typeof v === 'number') return v;
@@ -53,15 +58,15 @@ const numOf = (input: JsonValue, key: string, fallback: number): number => {
   return fallback;
 };
 
-const textPart = (payload: JsonObject): UIMessagePart[] => [
+export const textPart = (payload: JsonObject): UIMessagePart[] => [
   { type: 'text', text: JSON.stringify(payload), metadata: null },
 ];
 
-const errorPart = (message: string): UIMessagePart[] =>
+export const errorPart = (message: string): UIMessagePart[] =>
   textPart({ ok: false, error: message } as JsonObject);
 
 // L01:唯一允许的动态注入方式 — JSON 字符串字面量(并转义 U+2028/2029,防脚本换行)
-const jsonString = (value: string): string => JSON.stringify(value)
+export const jsonString = (value: string): string => JSON.stringify(value)
   .replace(/\u2028/g, '\\u2028')
   .replace(/\u2029/g, '\\u2029');
 
@@ -112,7 +117,7 @@ export const syncEnabled = async (
 //   revoke 之后再次调用也会拒绝并复位页面(即便实时通知已复位,这里仍兜底)。
 //   bot/hand:hand 租约(用户接管)下,mutating 操作一律拒绝(bot-only),
 //   只读操作(state/extract/screenshot/find)经 mutating=false 放行。
-const guardPage = async (
+export const guardPage = async (
   session: WebMountSession, kv: KeyValueStore, assistantEnabled: boolean,
   mutating: boolean = true,
 ): Promise<string | null> => {
@@ -131,6 +136,33 @@ const guardPage = async (
   }
   return null;
 };
+
+// E12(goal 子步骤):可选 document_id/revision 绑定 — 宿主 assertDocument 前置 +
+//   脚本在同一 JS turn 复核 revision;普通旧调用不带绑定,行为不变
+interface DocumentBinding { documentId: string; revision: number; }
+
+const readDocumentBinding = (input: JsonValue): DocumentBinding | null => {
+  const documentId: string = strOf(input, 'document_id', '');
+  if (documentId.length === 0) return null;
+  const revision: number = numOf(input, 'revision', -1);
+  if (!Number.isInteger(revision) || revision < 0) {
+    throw new Error('revision must be a non-negative integer when document_id is provided');
+  }
+  return { documentId, revision };
+};
+
+const assertBinding = async (session: WebMountSession, binding: DocumentBinding | null): Promise<string | null> => {
+  if (binding === null) return null;
+  try {
+    await session.assertDocument({ sessionId: SESSION_ID, documentId: binding.documentId, revision: binding.revision });
+    return null;
+  } catch (_e) {
+    return 'document_changed: the page changed since this action was planned; observe again';
+  }
+};
+
+const revisionGuard = (binding: DocumentBinding | null): string => binding === null ? ''
+  : `if (!window.__wmDoc || window.__wmDoc.revision !== ${binding.revision}) return { error: 'document_changed' };\n  `;
 
 // 页面 outline + 交互元素 ref 标注(click 以 [data-wm-ref=N] 命中)
 // 脱敏:password 与 token/secret 命名的 input 不回传 value
@@ -162,8 +194,8 @@ const EXTRACT_JS: string = `(function(){
 
 // click:selector 只作为 JSON 字符串字面量进入 script;错误文案为静态常量,
 //   不再把 target 二次拼进单引号字符串(L01)。
-const clickScript = (selector: string): string => `(function(){
-  const sel = ${jsonString(selector)};
+const clickScript = (selector: string, binding: DocumentBinding | null = null): string => `(function(){
+  ${revisionGuard(binding)}const sel = ${jsonString(selector)};
   const el = document.querySelector(sel);
   if (el === null) return { clicked: false, error: 'element not found' };
   el.scrollIntoView({ block: 'center' });
@@ -173,8 +205,8 @@ const clickScript = (selector: string): string => `(function(){
   return { clicked: true, url: location.href };
 })()`;
 
-const typeScript = (selector: string, text: string): string => `(function(){
-  const sel = ${jsonString(selector)};
+const typeScript = (selector: string, text: string, binding: DocumentBinding | null = null): string => `(function(){
+  ${revisionGuard(binding)}const sel = ${jsonString(selector)};
   const el = document.querySelector(sel);
   if (el === null) return { typed: false, error: 'element not found' };
   el.focus();
@@ -248,6 +280,8 @@ export const createWebMountTools = (
       + 'explicit human approval.',
     parameters: (): InputSchemaObj | null => makeInputSchemaObj({
       'target': { type: 'string', description: 'Element ref from wm_extract (e.g. wm-3) or CSS selector.' },
+      'document_id': { type: 'string', description: 'Optional observed document id this click was planned against.' },
+      'revision': { type: 'number', description: 'Optional observed document revision (required with document_id).' },
     } as JsonObject, ['target']),
     needsApproval: true,
     allowsAutoApproval: false,
@@ -258,9 +292,12 @@ export const createWebMountTools = (
       if (signal !== undefined && signal.aborted) throw new Error('WebMount cancelled');
       const blocked: string | null = await guardPage(session, getChatKvStore(), assistantEnabled);
       if (blocked !== null) return errorPart(blocked);
+      const binding: DocumentBinding | null = readDocumentBinding(input);
+      const stale: string | null = await assertBinding(session, binding);
+      if (stale !== null) return errorPart(stale);
       const selector: string = target.startsWith('wm-')
         ? `[data-wm-ref="${target}"]` : target;
-      return evalToPart(session, clickScript(selector));
+      return evalToPart(session, clickScript(selector, binding));
     },
   });
 
@@ -270,6 +307,8 @@ export const createWebMountTools = (
     parameters: (): InputSchemaObj | null => makeInputSchemaObj({
       'selector': { type: 'string', description: 'CSS selector of the input element.' },
       'text': { type: 'string', description: 'Text to type.' },
+      'document_id': { type: 'string', description: 'Optional observed document id this input was planned against.' },
+      'revision': { type: 'number', description: 'Optional observed document revision (required with document_id).' },
     } as JsonObject, ['selector', 'text']),
     execute: async (input: JsonValue): Promise<UIMessagePart[]> => {
       const selector: string = strOf(input, 'selector', '');
@@ -277,7 +316,10 @@ export const createWebMountTools = (
       if (selector.length === 0) throw new Error('selector is required');
       const blocked: string | null = await guardPage(session, getChatKvStore(), assistantEnabled);
       if (blocked !== null) return errorPart(blocked);
-      return evalToPart(session, typeScript(selector, text));
+      const binding: DocumentBinding | null = readDocumentBinding(input);
+      const stale: string | null = await assertBinding(session, binding);
+      if (stale !== null) return errorPart(stale);
+      return evalToPart(session, typeScript(selector, text, binding));
     },
   });
 
@@ -287,14 +329,19 @@ export const createWebMountTools = (
     parameters: (): InputSchemaObj | null => makeInputSchemaObj({
       'dx': { type: 'number', description: 'Horizontal pixels (default 0).' },
       'dy': { type: 'number', description: 'Vertical pixels (default 600).' },
+      'document_id': { type: 'string', description: 'Optional observed document id this scroll was planned against.' },
+      'revision': { type: 'number', description: 'Optional observed document revision (required with document_id).' },
     } as JsonObject, null),
     execute: async (input: JsonValue): Promise<UIMessagePart[]> => {
       const dx: number = numOf(input, 'dx', 0);
       const dy: number = numOf(input, 'dy', 600);
       const blocked: string | null = await guardPage(session, getChatKvStore(), assistantEnabled);
       if (blocked !== null) return errorPart(blocked);
+      const binding: DocumentBinding | null = readDocumentBinding(input);
+      const stale: string | null = await assertBinding(session, binding);
+      if (stale !== null) return errorPart(stale);
       return evalToPart(session, `(function(){
-        window.scrollBy(${dx}, ${dy});
+        ${revisionGuard(binding)}window.scrollBy(${dx}, ${dy});
         return { scrolled: true, x: window.scrollX, y: window.scrollY };
       })()`);
     },
@@ -686,6 +733,8 @@ export const createWebMountTools = (
     parameters: (): InputSchemaObj | null => makeInputSchemaObj({
       'selector': { type: 'string', description: 'CSS selector of the select element.' },
       'value': { type: 'string', description: 'Option value to select.' },
+      'document_id': { type: 'string', description: 'Optional observed document id this selection was planned against.' },
+      'revision': { type: 'number', description: 'Optional observed document revision (required with document_id).' },
     } as JsonObject, ['selector', 'value']),
     execute: async (input: JsonValue): Promise<UIMessagePart[]> => {
       const selector: string = strOf(input, 'selector', '');
@@ -693,8 +742,11 @@ export const createWebMountTools = (
       if (selector.length === 0) throw new Error('selector is required');
       const blocked: string | null = await guardPage(session, getChatKvStore(), assistantEnabled);
       if (blocked !== null) return errorPart(blocked);
+      const binding: DocumentBinding | null = readDocumentBinding(input);
+      const stale: string | null = await assertBinding(session, binding);
+      if (stale !== null) return errorPart(stale);
       return evalToPart(session, `(function(){
-        const sel = ${jsonString(selector)};
+        ${revisionGuard(binding)}const sel = ${jsonString(selector)};
         const value = ${jsonString(value)};
         const el = document.querySelector(sel);
         if (el === null) return { selected: false, error: 'element not found' };
@@ -707,14 +759,18 @@ export const createWebMountTools = (
   });
 
   // D6-1:signed_fetch — 站点会话 Cookie 凭据请求(仅已授权站点;hand 租约禁写)
+  //   E12:可选 oauth_site_id — 由宿主在精确已配置 API origin 注入站点 OAuth Bearer,
+  //   逐跳核验,绝不把旧 Bearer/Cookie 送往跨 origin 目标
   const signedFetchTool: AgentTool = makeAgentTool({
     name: 'wm_signed_fetch',
     description: 'Fetch a URL with the current WebMount session cookies attached (credentialed '
-      + 'request). URL must belong to an authorized WebMount site.',
+      + 'request). URL must belong to an authorized WebMount site. Optional oauth_site_id injects '
+      + 'the site OAuth Bearer instead, restricted to the configured API origins.',
     parameters: (): InputSchemaObj | null => makeInputSchemaObj({
       'url': { type: 'string', description: 'Absolute http(s) URL on an authorized site.' },
       'method': { type: 'string', description: 'HTTP method (default GET).' },
       'body': { type: 'string', description: 'Optional request body (POST/PUT, JSON).' },
+      'oauth_site_id': { type: 'string', description: 'Optional site id whose OAuth Bearer is injected (GET/HEAD only).' },
     } as JsonObject, ['url']),
     execute: async (input: JsonValue, signal?: AbortSignalLike): Promise<UIMessagePart[]> => {
       const raw: string = strOf(input, 'url', '');
@@ -726,6 +782,7 @@ export const createWebMountTools = (
       const method: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH' =
         m as 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH';
       const body: string = strOf(input, 'body', '');
+      const oauthSiteId: string = strOf(input, 'oauth_site_id', '').trim();
       const kv: KeyValueStore = getChatKvStore();
       const enabled: boolean = await syncEnabled(session, kv, assistantEnabled);
       if (!enabled) return errorPart('WebMount is disabled for this conversation');
@@ -735,6 +792,31 @@ export const createWebMountTools = (
       const sites: UserSiteEntry[] = await loadWebMountSites(kv);
       if (!check.ok || !siteAllowsUrl(sites, check.url)) {
         return [{ type: 'text', text: sitesDeniedMessage(sites, raw), metadata: null }];
+      }
+      if (oauthSiteId.length > 0) {
+        // OAuth Bearer 路线:仅 GET/HEAD;应用必须存在且 URL 命中精确已配置 API origin
+        if (m !== 'GET' && m !== 'HEAD') {
+          return errorPart('oauth fetch supports GET/HEAD only');
+        }
+        const application: WebMountOAuthApplication | null = await loadWebMountOAuthApplication(oauthSiteId);
+        if (application === null) return errorPart(`oauth_not_configured: no OAuth application for "${oauthSiteId}"`);
+        if (!webMountOAuthAllowsApiOrigin(application, check.url)) {
+          return errorPart('oauth_origin_denied: URL is not one of the configured API origins for this site');
+        }
+        const token: WebMountOAuthToken | null = await loadWebMountUsableAccessToken(oauthSiteId);
+        if (token === null) return errorPart(`oauth_not_connected: site "${oauthSiteId}" has no usable token; connect first`);
+        const result = await webMountOAuthBearerFetch(application, token.accessToken, check.url,
+          m === 'HEAD' ? 'HEAD' : 'GET', 30000, signal);
+        const bearerText: string = result.text;
+        return textPart({
+          ok: result.status >= 200 && result.status < 300,
+          status: result.status,
+          oauth_site_id: oauthSiteId,
+          final_url: result.finalUrl,
+          followed_redirects: result.followedRedirects,
+          stopped_at_cross_origin_redirect: result.stoppedAtCrossOriginRedirect,
+          body: bearerText.length > 8000 ? `${bearerText.substring(0, 8000)}…(truncated)` : bearerText,
+        } as JsonObject);
       }
       const cookie: string = webview.WebCookieManager.fetchCookieSync(check.url);
       const headers: Record<string, string> = {};
@@ -754,9 +836,11 @@ export const createWebMountTools = (
   });
 
   // D6-1:network_inspect — 主框架导航日志(ok/blocked,环形 ≤50)
+  //   E12 增量:typed templates(页内台账 + 导入 HAR;脱敏 URL/replayable 资格)
   const networkInspectTool: AgentTool = makeAgentTool({
     name: 'wm_network_inspect',
-    description: 'List recent WebMount main-frame navigations (allowed and blocked) with timestamps.',
+    description: 'List recent WebMount main-frame navigations plus the observed request templates '
+      + '(page fetch/XHR ledger and imported HAR) with their replay eligibility.',
     parameters: (): InputSchemaObj | null => makeInputSchemaObj({
       'limit': { type: 'number', description: 'Max entries (default 20, max 50).' },
     } as JsonObject, null),
@@ -769,7 +853,24 @@ export const createWebMountTools = (
       const tail: string[] = log.slice(Math.max(0, log.length - limit));
       const lines: string[] = [];
       for (const e of tail) lines.push(e);
-      return textPart({ count: lines.length, entries: lines.join('\n') } as JsonObject);
+      const summaries: WebMountNetworkSummary[] = await webMountTemplateSummaries(session);
+      const coverage: string = session.getDocumentId().length > 0 ? 'page_fetch_xhr'
+        : summaries.some((s: WebMountNetworkSummary): boolean => s.captureCoverage === 'imported_har')
+          ? 'imported_har' : 'none';
+      const templates: JsonValue[] = summaries.map((s: WebMountNetworkSummary): JsonValue => ({
+        request_template_id: s.requestTemplateId,
+        source_id: s.sourceId,
+        capture_coverage: s.captureCoverage,
+        method: s.method,
+        display_url: s.displayUrl,
+        status: s.status as JsonValue,
+        replayable: s.replayable,
+        reason: s.reason as JsonValue,
+      }) as JsonValue);
+      return textPart({
+        count: lines.length, entries: lines.join('\n'),
+        capture_coverage: coverage, templates: templates as JsonValue,
+      } as JsonObject);
     },
   });
 

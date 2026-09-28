@@ -20,7 +20,7 @@ import {
   filterToolProfile, makeCompactPolicy, makeTextGenerationParams, patchAssistant,
 } from '@amber/chat-domain';
 import {
-  getAgentPromptConfigTool, getChatRepository, getCompactStore,
+  getAgentPromptConfigTool, getChatKvStore, getChatRepository, getCompactStore,
   getDeepReadPlaybookRepository, getMcpManager, getPermissionsStatusTool,
   getPluginStore, getRecipeStore, getSessionGrantStore, getSkillManager,
   getSkillWorkspacePort, getSubAgentTools, getWorkspaceManager,
@@ -29,7 +29,7 @@ import type { ChatRuntime, SubAgentToolsContext } from '../di/AppContainer.ets';
 import { systemLanguage } from './AgentRuntimePrefs.ets';
 import { mutateAssistant } from './AssistantMutation.ets';
 import { createAssistantLocalPrimitives } from './AssistantLocalPrimitives.ets';
-import { guardConversationBrowserTools } from './ConversationBrowserGuard.ets';
+import { guardConversationBrowserTools, assertConversationBrowserOwner } from './ConversationBrowserGuard.ets';
 import { buildConversationCompressProvider } from './ConversationRunDependencies.ets';
 import type { DetachedConversationContext, PreparedConversationSeed } from './ConversationRunService.ets';
 import { inflateRawEntry } from './EntryDocumentParser.ets';
@@ -45,7 +45,60 @@ import { getMcpSettingsStore } from './McpSettingsStore.ets';
 import { getMemoryToolDeps } from './MemoryStore.ets';
 import { createSoulTools } from './SoulTools.ets';
 import { getWebMountSession } from './WebMountSession.ets';
-import { createWebMountTools } from './WebMountTools.ets';
+import { createWebMountTools, guardPage } from './WebMountTools.ets';
+import { createWebMountAdvancedTools } from './WebMountAdvancedTools.ets';
+import { chooseJevWebCandidate } from './JevWebDecision.ets';
+import {
+  createWebMountGoalAdapter, createWebMountGoalTool, makeSystemMessage, makeUserMessage, toText,
+} from '@amber/chat-domain';
+import type {
+  JsonObject, JevWebCandidate, MessageChunk, WebMountGoalCandidate, WebMountGoalDecision,
+  WebMountGoalHostPorts, WebMountGoalRequest, WebMountObservation,
+} from '@amber/chat-domain';
+
+// E12(goal):主模型选择器 — 同一 parent runtime API/身份,只许选有限候选 ID 或 handback
+const runMainModelGoalChoice = async (
+  rt: ChatRuntime, request: WebMountGoalRequest, observation: WebMountObservation,
+  candidates: WebMountGoalCandidate[], signal?: AbortSignalLike,
+): Promise<WebMountGoalDecision> => {
+  const lines: string[] = candidates.map(
+    (candidate: WebMountGoalCandidate): string => `${candidate.id} [${candidate.kind}] ${candidate.description}`);
+  const systemPrompt: string = 'You are selecting exactly one next browser action for a bounded goal. '
+    + 'Answer with exactly one candidate id from the list, or the single word handback. Never invent new ids.';
+  const userText: string = [
+    `Goal: ${request.goal}`,
+    `Completion signal (matched against URL/title/visible text): ${request.completionText}`,
+    `Page: ${observation.title} — ${observation.url}`,
+    `Visible summary: ${observation.text.substring(0, 600)}`,
+    'Candidates:',
+    ...lines,
+  ].join('\n');
+  const provider: ChatStreamProvider = asChatStreamProvider(rt.api, (): TextGenerationParams => makeTextGenerationParams({
+    model: rt.params.model, temperature: 0, maxTokens: 64, tools: [],
+  }));
+  const prompt: UIMessage[] = [makeSystemMessage(systemPrompt), makeUserMessage(userText)];
+  let answer: string = '';
+  if (provider.generateText !== undefined) {
+    const chunk: MessageChunk = await provider.generateText(prompt, { signal: signal });
+    const choice = chunk.choices[0];
+    answer = choice !== undefined
+      ? (choice.message !== null ? toText(choice.message) : choice.delta !== null ? toText(choice.delta) : '') : '';
+  } else {
+    let latest: string = '';
+    await provider.streamText(prompt, (chunk: MessageChunk): void => {
+      const choice = chunk.choices[0];
+      if (choice !== undefined && choice.delta !== null) latest = toText(choice.delta);
+    }, { signal: signal });
+    answer = latest;
+  }
+  const trimmed: string = answer.trim();
+  if (/^cand-\d+$/.test(trimmed) && candidates.some(
+    (candidate: WebMountGoalCandidate): boolean => candidate.id === trimmed)) {
+    return { kind: 'action', candidateId: trimmed, reason: 'main_model_choice' };
+  }
+  return { kind: 'handback', candidateId: null,
+    reason: trimmed === 'handback' ? 'main_model_handback' : 'invalid_decision' };
+};
 
 const mcpActivityPort = (store: AgentToolActivityStore): McpToolActivityPort => ({
   startTool: (toolName: string, title: string, inputPreview: string, runtime: string): string =>
@@ -171,6 +224,49 @@ export const buildConversationToolLoop = async (ctx: DetachedConversationContext
   const webmountEnabled: boolean = seed.webmountGlobalEnabled || localOptions.indexOf('webmount') >= 0;
   const runtime = seed.agentRuntime;
   const compact = runtime.contextCompaction;
+  // E12:浏览器 owner 断言惰性求值 — 循环构建时该会话未必持有可见页面;
+  //   首次实际页面操作时绑定租约,离页后租约失效即拒绝(E6 语义保持)
+  const ownerAssertion = (() => {
+    let cached: (() => void) | null = null;
+    return (): void => {
+      if (cached === null) cached = assertConversationBrowserOwner(ctx.conversationId);
+      cached();
+    };
+  })();
+  const goalHostPorts: WebMountGoalHostPorts = {
+    observe: (signal?: AbortSignalLike): Promise<WebMountObservation> =>
+      getWebMountSession().observeDocument(signal),
+    assertUsable: async (): Promise<void> => {
+      ownerAssertion();
+      const blocked: string | null = await guardPage(getWebMountSession(), getChatKvStore(),
+        localOptions.indexOf('webmount') >= 0, true);
+      if (blocked !== null) throw new Error(blocked);
+    },
+    choose: async (
+      request: WebMountGoalRequest, observation: WebMountObservation,
+      candidates: WebMountGoalCandidate[], signal?: AbortSignalLike,
+    ): Promise<WebMountGoalDecision> => {
+      if (request.decisionSource === 'jev') {
+        // E11 有限候选接缝:OFF/SHADOW 即 handback,不自动降级主模型
+        const jevCandidates: JevWebCandidate[] = candidates.map((candidate: WebMountGoalCandidate): JevWebCandidate => ({
+          id: candidate.id,
+          toolName: candidate.part.toolName,
+          input: JSON.parse(candidate.part.input) as JsonObject,
+          description: candidate.description,
+        }));
+        const jev = await chooseJevWebCandidate({
+          sessionId: observation.token.sessionId,
+          revision: `${observation.token.documentId}:${observation.token.revision}`,
+          pageSummary: `${observation.title} ${observation.text.substring(0, 500)}`.substring(0, 600),
+        }, jevCandidates, signal);
+        return { kind: jev.kind === 'action' ? 'action' : 'handback',
+          candidateId: jev.candidateId, reason: jev.reason };
+      }
+      return runMainModelGoalChoice(rt, request, observation, candidates, signal);
+    },
+    now: (): number => Date.now(),
+  };
+  const goalAdapter = createWebMountGoalAdapter(goalHostPorts);
   const profiledTools: AgentTool[] = guardConversationBrowserTools(filterToolProfile([
     ...createAssistantLocalPrimitives({ assistant: rt.assistant, conversationId: ctx.conversationId,
       workspace: getWorkspaceManager(), activityStore: ctx.activityStore,
@@ -179,6 +275,12 @@ export const buildConversationToolLoop = async (ctx: DetachedConversationContext
     ...(webmountEnabled ? createWebMountTools(getWebMountSession(),
       seed.webmountEvalEnabled || localOptions.indexOf('webmount_eval') >= 0,
       localOptions.indexOf('webmount') >= 0) : []),
+    ...(webmountEnabled ? createWebMountAdvancedTools({
+      session: getWebMountSession(),
+      assistantEnabled: localOptions.indexOf('webmount') >= 0,
+      assertOwner: ownerAssertion,
+    }) : []),
+    ...(webmountEnabled ? [createWebMountGoalTool()] : []),
     ...(webmountEnabled ? createFeishuDocsTools(localOptions.indexOf('webmount') >= 0) : []),
     ...createSkillTools({
       enabledSkills: rt.assistant.enabledSkills,
@@ -245,6 +347,7 @@ export const buildConversationToolLoop = async (ctx: DetachedConversationContext
     tools,
     recipeAdapter: snapshot.recipeAdapter,
     pluginAdapter: snapshot.pluginAdapter,
+    goalAdapter: webmountEnabled ? goalAdapter : undefined,
     refreshTools: async (): Promise<AgentTool[]> => {
       snapshot = await catalog();
       ctx.baseTools = snapshot.baseTools;

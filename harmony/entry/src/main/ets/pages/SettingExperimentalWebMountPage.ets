@@ -16,6 +16,8 @@ import {
 import { Icon } from '../components/ui/Icon.ets';
 import { common } from '@kit.AbilityKit';
 import { webview } from '@kit.ArkWeb';
+import { picker, fileIo } from '@kit.CoreFileKit';
+import { util } from '@kit.ArkTS';
 import { getChatKvStore, getAppContainer } from '../di/AppContainer.ets';
 import { loadWebMountSites, saveWebMountSites, makeUserSite, hostOf, isSeedSite, restoreMissingSeedSites, SEED_SITES } from '../platform_impl/WebMountSites.ets';
 import type { UserSiteEntry } from '../platform_impl/WebMountSites.ets';
@@ -26,6 +28,16 @@ import {
 } from '../platform_impl/WebMountOAuthSupport.ets';
 import { FEISHU_APP_ID_KEY, FEISHU_APP_SECRET_KEY } from '../platform_impl/FeishuDocsTools.ets';
 import { buildFeishuAuthorizationUrl, type WebMountPkce, type WebMountOAuthToken } from '@amber/chat-domain';
+import type {
+  JsonObject, JsonValue, WebMountOAuthApplication, WebMountOAuthApplicationDraft, WebMountOAuthState,
+} from '@amber/chat-domain';
+import { WEBMOUNT_HAR_MAX_BYTES } from '@amber/chat-domain';
+import {
+  getWebMountOAuthRuntime, importWebMountHar, listWebMountHarArchives, removeWebMountHarArchive,
+} from '../platform_impl/WebMountOAuthRuntime.ets';
+import type { WebMountHarArchive } from '@amber/chat-domain';
+
+interface HarArchiveRow { id: string; count: number; }
 
 /** 飞书回调粘贴解析结果：裸 code 时 state 为 null */
 interface FeishuCodePaste {
@@ -55,10 +67,199 @@ struct SettingExperimentalWebMountPage {
   @State feishuBusy: boolean = false;
   private feishuPkce: WebMountPkce | null = null;
   private feishuToken: WebMountOAuthToken | null = null;
+  // E12:站点 OAuth(通用)与 HAR 导入
+  @State oauthApps: WebMountOAuthApplication[] = [];
+  @State oauthStates: Map<string, WebMountOAuthState> = new Map();
+  @State oauthSiteId: string = '';
+  @State oauthAuthEndpoint: string = '';
+  @State oauthTokenEndpoint: string = '';
+  @State oauthClientId: string = '';
+  @State oauthRedirect: string = '';
+  @State oauthScope: string = '';
+  @State oauthEncoding: string = 'form';
+  @State oauthClientAuth: string = 'body';
+  @State oauthApiOrigins: string = '';
+  @State oauthSecret: string = '';
+  @State oauthNote: string = '';
+  @State oauthBusy: boolean = false;
+  @State harArchives: HarArchiveRow[] = [];
+  @State harNote: string = '';
+  @State harBusy: boolean = false;
+  private oauthUnsubscribers: Array<() => void> = [];
 
   aboutToAppear(): void {
     this.refresh();
     this.refreshFeishu();
+    this.refreshOauth();
+    this.refreshHar();
+  }
+
+  aboutToDisappear(): void {
+    for (const unsubscribe of this.oauthUnsubscribers) unsubscribe();
+    this.oauthUnsubscribers = [];
+  }
+
+  // ── E12:站点 OAuth ──
+
+  private refreshOauth(): void {
+    for (const unsubscribe of this.oauthUnsubscribers) unsubscribe();
+    this.oauthUnsubscribers = [];
+    getWebMountOAuthRuntime().loadApplications().then((apps: WebMountOAuthApplication[]): void => {
+      this.oauthApps = apps;
+      for (const app of apps) {
+        getWebMountOAuthRuntime().readState(app.siteId).then((state: WebMountOAuthState): void => {
+          this.oauthStates.set(app.siteId, state);
+          this.oauthStates = new Map(this.oauthStates);
+        }).catch((): void => {});
+        this.oauthUnsubscribers.push(getWebMountOAuthRuntime().subscribe(app.siteId,
+          (state: WebMountOAuthState): void => {
+            this.oauthStates.set(app.siteId, state);
+            this.oauthStates = new Map(this.oauthStates);
+          }));
+      }
+    }).catch((): void => {});
+  }
+
+  private oauthStatusText(siteId: string): string {
+    const state: WebMountOAuthState | undefined = this.oauthStates.get(siteId);
+    if (state === undefined) return '状态未知';
+    if (state.status === 'connected') return '已连接';
+    if (state.status === 'awaiting_callback') return '等待浏览器回调…';
+    if (state.status === 'expired') return '已过期';
+    if (state.status === 'failed') return `失败:${state.message ?? state.errorCode ?? ''}`;
+    if (state.status === 'disconnected') return '未连接';
+    return '未配置';
+  }
+
+  private oauthParseClientAuth(value: string): 'none' | 'body' | 'basic' {
+    const trimmed: string = value.trim().toLowerCase();
+    if (trimmed === 'none' || trimmed === 'basic') return trimmed;
+    return 'body';
+  }
+
+  private editOauth(app: WebMountOAuthApplication): void {
+    this.oauthSiteId = app.siteId;
+    this.oauthAuthEndpoint = app.authorizationEndpoint;
+    this.oauthTokenEndpoint = app.tokenEndpoint;
+    this.oauthClientId = app.clientId;
+    this.oauthRedirect = app.redirectUri;
+    this.oauthScope = app.scope;
+    this.oauthEncoding = app.tokenEncoding;
+    this.oauthClientAuth = app.clientAuthentication;
+    this.oauthApiOrigins = app.apiOrigins.join(',');
+    this.oauthSecret = '';
+    this.oauthNote = `编辑 ${app.siteId};密钥留空则保留`;
+  }
+
+  private saveOauth(): void {
+    if (this.oauthBusy) return;
+    this.oauthBusy = true;
+    this.oauthNote = '保存中…';
+    const application: WebMountOAuthApplication = {
+      siteId: this.oauthSiteId.trim(),
+      bindingHash: '',
+      authorizationEndpoint: this.oauthAuthEndpoint.trim(),
+      tokenEndpoint: this.oauthTokenEndpoint.trim(),
+      clientId: this.oauthClientId.trim(),
+      redirectUri: this.oauthRedirect.trim().length > 0 ? this.oauthRedirect.trim() : 'http://127.0.0.1:53682/callback',
+      scope: this.oauthScope.trim(),
+      tokenEncoding: this.oauthEncoding.trim().toLowerCase() === 'json' ? 'json' : 'form',
+      clientAuthentication: this.oauthParseClientAuth(this.oauthClientAuth),
+      apiOrigins: this.oauthApiOrigins.split(',').map((item: string): string => item.trim())
+        .filter((item: string): boolean => item.length > 0),
+      clientSecretRef: null,
+    };
+    const draft: WebMountOAuthApplicationDraft = {
+      application: application,
+      secretAction: this.oauthSecret.trim().length > 0 ? 'replace' : 'keep',
+      clientSecret: this.oauthSecret.trim().length > 0 ? this.oauthSecret.trim() : null,
+    };
+    getWebMountOAuthRuntime().saveApplication(draft).then((saved: WebMountOAuthApplication): void => {
+      this.oauthNote = `已保存 ${saved.siteId}(绑定 ${saved.bindingHash.substring(0, 8)}…)`;
+      this.oauthSecret = '';
+      this.refreshOauth();
+    }).catch((error: Error): void => {
+      this.oauthNote = `保存失败:${error.message}`;
+    }).finally((): void => {
+      this.oauthBusy = false;
+    });
+  }
+
+  private connectOauth(siteId: string): void {
+    if (this.oauthBusy) return;
+    this.oauthBusy = true;
+    this.oauthNote = '';
+    getWebMountOAuthRuntime().connect(siteId).then((state: WebMountOAuthState): void => {
+      if (state.status === 'awaiting_callback') this.oauthNote = '已在系统浏览器打开授权页,完成后自动回填';
+    }).catch((error: Error): void => {
+      this.oauthNote = `连接失败:${error.message}`;
+    }).finally((): void => {
+      this.oauthBusy = false;
+    });
+  }
+
+  private cancelOauth(siteId: string): void {
+    getWebMountOAuthRuntime().cancel(siteId);
+    this.oauthNote = '已取消本次授权';
+  }
+
+  private disconnectOauth(siteId: string): void {
+    getWebMountOAuthRuntime().disconnect(siteId).then((): void => {
+      this.oauthNote = `已断开 ${siteId}`;
+    }).catch((): void => {});
+  }
+
+  // ── E12:HAR 导入 ──
+
+  private refreshHar(): void {
+    const archives: WebMountHarArchive[] = listWebMountHarArchives();
+    this.harArchives = archives.map((archive: WebMountHarArchive): HarArchiveRow => {
+      const log: JsonObject = archive.har['log'] as JsonObject;
+      const entries: JsonValue | undefined = log['entries'];
+      const row: HarArchiveRow = { id: archive.id, count: Array.isArray(entries) ? entries.length : 0 };
+      return row;
+    });
+  }
+
+  private async importHar(): Promise<void> {
+    if (this.harBusy) return;
+    this.harBusy = true;
+    this.harNote = '';
+    try {
+      const options: picker.DocumentSelectOptions = new picker.DocumentSelectOptions();
+      options.maxSelectNumber = 1;
+      options.fileSuffixFilters = ['HAR 归档|.har,.json'];
+      const context: common.UIAbilityContext =
+        this.getUIContext().getHostContext() as common.UIAbilityContext;
+      const uris: string[] = await new picker.DocumentViewPicker(context).select(options);
+      if (uris.length === 0) return;
+      const uri: string = uris[0];
+      const stat: fileIo.Stat = fileIo.statSync(uri);
+      if (stat.size > WEBMOUNT_HAR_MAX_BYTES) {
+        this.harNote = `文件超过 ${Math.floor(WEBMOUNT_HAR_MAX_BYTES / 1024 / 1024)}MiB 上限`;
+        return;
+      }
+      const file: fileIo.File = fileIo.openSync(uri, fileIo.OpenMode.READ_ONLY);
+      try {
+        const buffer: ArrayBuffer = new ArrayBuffer(stat.size);
+        fileIo.readSync(file.fd, buffer);
+        const text: string = util.TextDecoder.create('utf-8', { fatal: true }).decodeToString(new Uint8Array(buffer));
+        const result = await importWebMountHar(text);
+        this.harNote = `已导入 ${result.entryCount} 条(来源 imported_har;重放仅限当前同源 GET/HEAD)`;
+        this.refreshHar();
+      } finally {
+        fileIo.closeSync(file.fd);
+      }
+    } catch (error) {
+      this.harNote = `导入失败:${error instanceof Error ? error.message : String(error)}`;
+    } finally {
+      this.harBusy = false;
+    }
+  }
+
+  private removeHar(id: string): void {
+    removeWebMountHarArchive(id);
+    this.refreshHar();
   }
 
   private refreshFeishu(): void {
@@ -555,6 +756,201 @@ struct SettingExperimentalWebMountPage {
   }
 
   @Builder
+  OauthRow(app: WebMountOAuthApplication, isLast: boolean): void {
+    Column() {
+      Row() {
+        Column() {
+          Text(app.siteId)
+            .fontSize(16)
+            .fontWeight(FontWeight.Medium)
+            .lineHeight(lineHeightForSize(16))
+            .fontFamily(FONT_SANS_MEDIUM)
+            .fontColor(INK)
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+          Text(this.oauthStatusText(app.siteId))
+            .fontSize(12)
+            .lineHeight(lineHeightForSize(12))
+            .fontFamily(FONT_SANS_MEDIUM)
+            .fontColor(INK3)
+            .maxLines(2)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+            .margin({ top: 2 })
+        }
+        .alignItems(HorizontalAlign.Start)
+        .layoutWeight(1)
+
+        Text('编辑')
+          .fontSize(14).fontColor(this.accentColorStore)
+          .constraintSize({ minWidth: 44, minHeight: 44 })
+          .onClick((): void => { this.editOauth(app); })
+      }
+      .width('100%')
+      .alignItems(VerticalAlign.Center)
+
+      Row({ space: 12 }) {
+        BtnFill({
+          label: '连接',
+          onTap: (): void => { this.connectOauth(app.siteId); },
+        })
+        Text('取消')
+          .fontSize(14).fontColor(INK3)
+          .constraintSize({ minWidth: 44, minHeight: 44 })
+          .onClick((): void => { this.cancelOauth(app.siteId); })
+        Text('断开')
+          .fontSize(14).fontColor(ERROR)
+          .constraintSize({ minWidth: 44, minHeight: 44 })
+          .onClick((): void => { this.disconnectOauth(app.siteId); })
+      }
+      .width('100%')
+      .justifyContent(FlexAlign.Start)
+
+      if (!isLast) {
+        Row() {
+          Row().width('100%').height(1).backgroundColor(LINE)
+        }
+        .width('100%')
+        .padding({ top: 8 })
+      }
+    }
+    .width('100%')
+    .padding({ left: 14, right: 14, top: 10, bottom: 10 })
+  }
+
+  @Builder
+  OauthCard(): void {
+    Column() {
+      ForEach(this.oauthApps, (app: WebMountOAuthApplication, index: number): void => {
+        this.OauthRow(app, index >= this.oauthApps.length - 1);
+      }, (app: WebMountOAuthApplication): string => app.siteId)
+
+      Text('站点 ID')
+        .fontSize(12).fontColor(INK3).fontFamily(FONT_SANS_MEDIUM)
+        .width('100%').padding({ left: 14, right: 14, top: 12 })
+      TextInput({ text: this.oauthSiteId, placeholder: '如 hackernews(与该站点的注册应用一致)' })
+        .height(44).fontSize(15).fontColor(INK).placeholderColor(INK3)
+        .backgroundColor(SURFACE2).borderRadius(8)
+        .margin({ left: 14, right: 14, top: 6 })
+        .onChange((v: string): void => { this.oauthSiteId = v; })
+      TextInput({ text: this.oauthAuthEndpoint, placeholder: '授权端点 https://…/authorize' })
+        .height(44).fontSize(15).fontColor(INK).placeholderColor(INK3)
+        .backgroundColor(SURFACE2).borderRadius(8)
+        .margin({ left: 14, right: 14, top: 8 })
+        .onChange((v: string): void => { this.oauthAuthEndpoint = v; })
+      TextInput({ text: this.oauthTokenEndpoint, placeholder: '令牌端点 https://…/token' })
+        .height(44).fontSize(15).fontColor(INK).placeholderColor(INK3)
+        .backgroundColor(SURFACE2).borderRadius(8)
+        .margin({ left: 14, right: 14, top: 8 })
+        .onChange((v: string): void => { this.oauthTokenEndpoint = v; })
+      TextInput({ text: this.oauthClientId, placeholder: 'Client ID' })
+        .height(44).fontSize(15).fontColor(INK).placeholderColor(INK3)
+        .backgroundColor(SURFACE2).borderRadius(8)
+        .margin({ left: 14, right: 14, top: 8 })
+        .onChange((v: string): void => { this.oauthClientId = v; })
+      TextInput({ text: this.oauthRedirect, placeholder: '回调地址(默认 http://127.0.0.1:53682/callback)' })
+        .height(44).fontSize(15).fontColor(INK).placeholderColor(INK3)
+        .backgroundColor(SURFACE2).borderRadius(8)
+        .margin({ left: 14, right: 14, top: 8 })
+        .onChange((v: string): void => { this.oauthRedirect = v; })
+      TextInput({ text: this.oauthScope, placeholder: 'Scope(可空)' })
+        .height(44).fontSize(15).fontColor(INK).placeholderColor(INK3)
+        .backgroundColor(SURFACE2).borderRadius(8)
+        .margin({ left: 14, right: 14, top: 8 })
+        .onChange((v: string): void => { this.oauthScope = v; })
+      Row({ space: 12 }) {
+        Text('编码')
+          .fontSize(13).fontColor(INK3).fontFamily(FONT_SANS_MEDIUM)
+        Text('form')
+          .fontSize(14)
+          .fontColor(this.oauthEncoding === 'form' ? this.accentColorStore : INK3)
+          .constraintSize({ minWidth: 44, minHeight: 44 })
+          .onClick((): void => { this.oauthEncoding = 'form'; })
+        Text('json')
+          .fontSize(14)
+          .fontColor(this.oauthEncoding === 'json' ? this.accentColorStore : INK3)
+          .constraintSize({ minWidth: 44, minHeight: 44 })
+          .onClick((): void => { this.oauthEncoding = 'json'; })
+        Blank().layoutWeight(1)
+        Text('密钥方式')
+          .fontSize(13).fontColor(INK3).fontFamily(FONT_SANS_MEDIUM)
+        ForEach(['none', 'body', 'basic'], (mode: string): void => {
+          Text(mode)
+            .fontSize(14)
+            .fontColor(this.oauthClientAuth === mode ? this.accentColorStore : INK3)
+            .constraintSize({ minWidth: 44, minHeight: 44 })
+            .onClick((): void => { this.oauthClientAuth = mode; })
+        }, (mode: string): string => mode)
+      }
+      .width('100%')
+      .alignItems(VerticalAlign.Center)
+      .padding({ left: 14, right: 14, top: 8 })
+      TextInput({ text: this.oauthApiOrigins, placeholder: '允许注入 Bearer 的 API origins,逗号分隔(仅 https)' })
+        .height(44).fontSize(15).fontColor(INK).placeholderColor(INK3)
+        .backgroundColor(SURFACE2).borderRadius(8)
+        .margin({ left: 14, right: 14, top: 8 })
+        .onChange((v: string): void => { this.oauthApiOrigins = v; })
+      TextInput({ text: this.oauthSecret, placeholder: 'Client Secret(留空保留;none 方式不需要)' })
+        .type(InputType.Password)
+        .height(44).fontSize(15).fontColor(INK).placeholderColor(INK3)
+        .backgroundColor(SURFACE2).borderRadius(8)
+        .margin({ left: 14, right: 14, top: 8 })
+        .onChange((v: string): void => { this.oauthSecret = v; })
+      if (this.oauthNote.length > 0) {
+        Text(this.oauthNote)
+          .fontSize(12).fontColor(INK3).fontFamily(FONT_SANS_MEDIUM)
+          .width('100%')
+          .padding({ left: 14, right: 14, top: 8 })
+      }
+      Row() {
+        Blank().layoutWeight(1)
+        BtnFill({ label: '保存配置', onTap: (): void => { this.saveOauth(); } })
+      }
+      .width('100%')
+      .padding({ left: 14, right: 14, top: 10, bottom: 14 })
+    }
+    .width('100%')
+  }
+
+  @Builder
+  HarCard(): void {
+    Column() {
+      ForEach(this.harArchives, (archive: HarArchiveRow, index: number): void => {
+        Row() {
+          Column() {
+            Text(`archive ${archive.id.substring(0, 8)}…`)
+              .fontSize(15).fontColor(INK).fontFamily(FONT_SANS_MEDIUM)
+            Text(`${archive.count} 条 · imported_har`)
+              .fontSize(12).fontColor(INK3).fontFamily(FONT_SANS_MEDIUM)
+              .margin({ top: 2 })
+          }
+          .alignItems(HorizontalAlign.Start)
+          .layoutWeight(1)
+          Text('移除')
+            .fontSize(14).fontColor(ERROR)
+            .constraintSize({ minWidth: 44, minHeight: 44 })
+            .onClick((): void => { this.removeHar(archive.id); })
+        }
+        .width('100%')
+        .alignItems(VerticalAlign.Center)
+        .padding({ left: 14, right: 14, top: 10, bottom: 10 })
+      }, (archive: HarArchiveRow): string => archive.id)
+      if (this.harNote.length > 0) {
+        Text(this.harNote)
+          .fontSize(12).fontColor(INK3).fontFamily(FONT_SANS_MEDIUM)
+          .width('100%')
+          .padding({ left: 14, right: 14, top: 4 })
+      }
+      Row() {
+        Blank().layoutWeight(1)
+        BtnFill({ label: this.harBusy ? '导入中…' : '选择 HAR 文件导入', onTap: (): void => { this.importHar(); } })
+      }
+      .width('100%')
+      .padding({ left: 14, right: 14, top: 10, bottom: 14 })
+    }
+    .width('100%')
+  }
+
+  @Builder
   SitesCard(): void {
     Column() {
       if (this.sites.length === 0) {
@@ -683,6 +1079,21 @@ struct SettingExperimentalWebMountPage {
             FooterNote({
               text: '逐行 name=value,写入 WebView Cookie 罐(与 wm_* 工具/页面登录共享);'
                 + '域名可带 https:// 前缀,不带则自动补。',
+            })
+
+            PlainSection({ label: '站点 OAuth' })
+            CardGroup({ radius: 18, stroke: true, content: (): void => { this.OauthCard(); } })
+              .margin({ left: 16, right: 16 })
+            FooterNote({
+              text: '为某个站点登记 OAuth 应用后,Agent 可在聊天中发起连接;授权在系统浏览器完成,'
+                + '密钥与令牌只存本机安全仓,断开会删除该站点的令牌。',
+            })
+
+            PlainSection({ label: 'HAR 导入' })
+            CardGroup({ radius: 18, stroke: true, content: (): void => { this.HarCard(); } })
+              .margin({ left: 16, right: 16 })
+            FooterNote({
+              text: '导入的完整 HAR 只保留在本机;Agent 只能看到脱敏摘要,重放需逐次批准且仅限当前同源 GET/HEAD。',
             })
 
             PlainSection({ label: '站点' })

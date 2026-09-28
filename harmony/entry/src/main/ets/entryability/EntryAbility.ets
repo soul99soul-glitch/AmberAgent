@@ -24,6 +24,7 @@ import { runSSHRuntimeFixture } from '../platform_impl/SSHRuntimeFixture.ets';
 import { runRuntimeE3Fixture } from '../platform_impl/RuntimeE3Fixture.ets';
 import { cancelNativePluginJsSessions } from '../platform_impl/NativePluginJsTransport.ets';
 import { getMemoryTopicCoordinator } from '../platform_impl/MemoryTopicOps.ets';
+import { getWebMountOAuthRuntime } from '../platform_impl/WebMountOAuthRuntime.ets';
 
 const DOMAIN: number = 0x0001;
 const TAG: string = 'DeepRead.EntryAbility';
@@ -371,6 +372,8 @@ export default class EntryAbility extends UIAbility {
     AppStorage.setOrCreate<boolean>('appBackgrounded', true);
     getMemoryTopicCoordinator().background();
     cancelNativePluginJsSessions();
+    // E12:后台不保留 OAuth 等待 — 关闭 loopback 并使等待中的兑换失效
+    getWebMountOAuthRuntime().cancelAll();
     interruptTerminalForBackground().catch((e: Error): void => {
       hilog.warn(DOMAIN, TAG, 'terminal background disconnect failed: %{public}s', e.message);
     });

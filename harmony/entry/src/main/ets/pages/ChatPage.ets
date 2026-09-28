@@ -37,7 +37,7 @@ import {
   selectMessageBranch, deleteMessage, editMessage, buildChatTimelineRows, forkConversation, patchConversation,
   runAutoTitle, makeUserMessage, toText, makeTextGenerationParams, pendingPreviewText, convertSteerToFollowup,
   invalidateCompacts, copyValidCompactsToConversation, ContextCompactionFailedError, recoverInterruptedRecipes,
-  recoverInterruptedPlugins, parseDeepReadSlashCommand, estimateConversationInputTokens, formatNumberInt,
+  recoverInterruptedPlugins, recoverInterruptedWebMountGoals, parseDeepReadSlashCommand, estimateConversationInputTokens, formatNumberInt,
   formatContextTokens, nativeTokenizerForModel, loadSearchPrefs, updateSearchPrefs, SearchSettings,
   buildMentionRoleItems, MentionRoleItem, PromptInjection, Lorebook, ConversationSummary, toChatModel,
   firstImageBlockingIssueForSend, inspectImageAttachment, imageAttachmentBlocksSend,
@@ -1074,7 +1074,8 @@ struct ChatPage {
           }
           if (!hasActiveConversationRuns([full.id])) {
             try {
-              const recovered: Conversation = recoverInterruptedPlugins(recoverInterruptedRecipes(full),
+              const recovered: Conversation = recoverInterruptedPlugins(
+                recoverInterruptedWebMountGoals(recoverInterruptedRecipes(full)),
                 createNativePluginJsTransport().hasSession);
               if (recovered !== full) {
                 const release: () => void = beginConversationRestore([full.id]);

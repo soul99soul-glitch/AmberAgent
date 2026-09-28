@@ -21,6 +21,8 @@ import { image } from '@kit.ImageKit';
 import { util } from '@kit.ArkTS';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import type { AbortSignalLike } from '@amber/deepread-domain';
+import type { JsonObject, JsonValue, WebMountDocumentToken, WebMountElement, WebMountObservation } from '@amber/chat-domain';
+import { newId } from '@amber/chat-domain';
 import { makeSiteGate, siteAllowsUrl, setWebMountSitesListener } from './WebMountSites.ets';
 import type { UserSiteEntry } from './WebMountSites.ets';
 
@@ -30,6 +32,112 @@ const OPEN_TIMEOUT_MS: number = 15000;
 const HOST_MOUNT_TIMEOUT_MS: number = 10000;
 const WEB_HOST_ID: string = 'webmount-web';
 const INTERNAL_URL_PREFIX: string = 'about:';
+
+// E12:与 WebMountTools 同规约的唯一动态注入方式 — JSON 字符串字面量(转义 U+2028/29)
+const jsonLiteral = (value: string): string => JSON.stringify(value)
+  .replace(/\u2028/g, '\\u2028')
+  .replace(/\u2029/g, '\\u2029');
+
+// E12:document-start 桥 — 每文档初始化 revision/MutationObserver(忽略自身
+//   data-wm-ref 写入)与 fetch/XHR 观察台账(≤200 环形;只记 method/绝对 URL/
+//   状态,不消费原 stream、不追加网络请求)。覆盖率恒为 page_fetch_xhr,
+//   不是完整浏览器 HAR。全部 try/catch,绝不破坏原页面。
+export const WEBMOUNT_DOCSTART_JS: string = `(function(){
+  if (window.__wmDoc) return;
+  try {
+    window.__wmDoc = { revision: 0 };
+    var bump = function() { window.__wmDoc.revision = (window.__wmDoc.revision || 0) + 1; };
+    var observer = new MutationObserver(function(mutations) {
+      for (var i = 0; i < mutations.length; i++) {
+        var m = mutations[i];
+        if (m.type === 'attributes' && m.attributeName === 'data-wm-ref') continue;
+        bump(); break;
+      }
+    });
+    var attach = function() {
+      try { observer.observe(document.documentElement || document, { subtree: true, childList: true, attributes: true, characterData: true }); } catch (e) {}
+    };
+    if (document.documentElement) attach();
+    else document.addEventListener('DOMContentLoaded', attach);
+    window.__wmNet = [];
+    window.__wmNetSeq = 0;
+    window.__wmNetCoverage = 'page_fetch_xhr';
+    var pushNet = function(rec) {
+      try {
+        window.__wmNet.push(rec);
+        if (window.__wmNet.length > 200) window.__wmNet.splice(0, window.__wmNet.length - 200);
+      } catch (e) {}
+    };
+    var absUrl = function(u) { try { return new URL(u, location.href).href; } catch (e) { return String(u); } };
+    if (window.fetch) {
+      var originalFetch = window.fetch;
+      window.fetch = function(input, init) {
+        var method = 'GET';
+        try { method = String((init && init.method) || (input && input.method) || 'GET').toUpperCase(); } catch (e) {}
+        var url = absUrl(typeof input === 'string' ? input : (input && input.url) || '');
+        var rec = { seq: ++window.__wmNetSeq, type: 'fetch', method: method, url: url, status: null, error: false };
+        pushNet(rec);
+        return originalFetch.apply(this, arguments).then(function(resp) {
+          try { rec.status = resp.status; } catch (e) {}
+          return resp;
+        }, function(err) { rec.error = true; throw err; });
+      };
+    }
+    if (window.XMLHttpRequest) {
+      var OriginalXHR = window.XMLHttpRequest;
+      var originalOpen = OriginalXHR.prototype.open;
+      var originalSend = OriginalXHR.prototype.send;
+      OriginalXHR.prototype.open = function(method, url) {
+        this.__wmRec = { seq: ++window.__wmNetSeq, type: 'xhr', method: String(method || 'GET').toUpperCase(), url: absUrl(url), status: null, error: false };
+        pushNet(this.__wmRec);
+        return originalOpen.apply(this, arguments);
+      };
+      OriginalXHR.prototype.send = function() {
+        var rec = this.__wmRec;
+        if (rec) this.addEventListener('loadend', function() { try { rec.status = this.status; } catch (e) {} });
+        return originalSend.apply(this, arguments);
+      };
+    }
+  } catch (e) {}
+})();`;
+
+// E12:文档观察脚本 — 可见交互元素(ref/tag/text/href/inputType/options)+
+//   正文摘要 + 当前 revision;ref 按文档序当轮分配,revision 变化即全部作废
+const OBSERVE_DOCUMENT_JS: string = `(function(){
+  const revision = window.__wmDoc ? window.__wmDoc.revision : -1;
+  const els = [];
+  const all = document.querySelectorAll('a[href], button, input, textarea, select, [onclick], [role=button]');
+  let i = 0;
+  for (const el of all) {
+    if (els.length >= 200) break;
+    const r = el.getBoundingClientRect();
+    if (r.width <= 0 || r.height <= 0) continue;
+    const style = window.getComputedStyle(el);
+    if (style.display === 'none' || style.visibility === 'hidden') continue;
+    const ref = 'wm-' + (i++);
+    el.setAttribute('data-wm-ref', ref);
+    const tag = el.tagName.toLowerCase();
+    const type = (el.getAttribute('type') || '').toLowerCase();
+    const name = (el.getAttribute('name') || '').toLowerCase();
+    const isSecret = type === 'password' || /token|secret|api[_-]?key|password/.test(name);
+    let text = (el.innerText || el.getAttribute('aria-label') || el.getAttribute('placeholder') || '').trim().slice(0, 80);
+    if (isSecret) text = '***';
+    const href = tag === 'a' ? (el.getAttribute('href') || '') : '';
+    const options = [];
+    if (tag === 'select') {
+      for (const opt of el.options) { if (options.length < 50) options.push(String(opt.value).slice(0, 80)); }
+    }
+    els.push({ ref: ref, tag: tag, text: text, href: href || null,
+      inputType: (tag === 'input' || tag === 'textarea') ? (type || 'text') : null, options: options });
+  }
+  const bodyText = (document.body ? document.body.innerText : '').replace(/\\s+/g, ' ').trim().slice(0, 5000);
+  return { revision: revision, url: location.href, title: document.title, text: bodyText, elements: els };
+})()`;
+
+interface EvalJsonResult { ok: boolean; value: JsonValue | null; error: string | null; }
+
+const sleep = (ms: number): Promise<void> =>
+  new Promise<void>((resolve: () => void): void => { setTimeout(resolve, ms); });
 
 // 宿主需要的最小状态同步(session → ChatPage @State,经回调)
 export interface WebMountHostHooks {
@@ -264,6 +372,7 @@ export class WebMountSession {
     this.pageReady = false;
     this.uiContext = null;
     this.pendingExternalNav = false;
+    this.documentId = '';
     const err: Error = new Error('WebMount host detached');
     const mounts: SettleWaiter[] = this.mountWaiters;
     this.mountWaiters = [];
@@ -289,6 +398,8 @@ export class WebMountSession {
     }
     this.currentUrl = finalUrl;
     this.touchActiveTab(finalUrl);
+    // E12:每次外部文档提交即换文档身份(ref/页内模板全部作废);内部页无文档
+    this.documentId = this.isInternalUrl(finalUrl) ? '' : newId();
     // 页面状态发布(ChatPage 接管条订阅 'webmountUrl'/'webmountReady')
     AppStorage.setOrCreate<string>('webmountUrl', this.currentUrl);
     AppStorage.setOrCreate<boolean>('webmountReady', this.pageReady);
@@ -433,6 +544,7 @@ export class WebMountSession {
     this.pageReady = false;
     this.pendingExternalNav = false;
     this.currentUrl = '';
+    this.documentId = '';
     this.touchActiveTab('');
     try {
       this.controller.loadUrl('about:blank');
@@ -443,6 +555,9 @@ export class WebMountSession {
 
   public back(): boolean {
     if (!this.controller.accessBackward()) return false;
+    // 起航即失效旧文档 token:新文档提交(pageEnd)前,旧 ref/模板不得通过断言
+    this.pageReady = false;
+    this.documentId = '';
     this.controller.backward();
     this.pageReady = true;
     return true;
@@ -450,6 +565,8 @@ export class WebMountSession {
 
   public forward(): boolean {
     if (!this.controller.accessForward()) return false;
+    this.pageReady = false;
+    this.documentId = '';
     this.controller.forward();
     this.pageReady = true;
     return true;
@@ -469,6 +586,13 @@ export class WebMountSession {
     return this.pageReady;
   }
 
+  // E12:当前已提交文档身份;每次外部导航提交即换,ref/模板随之作废
+  private documentId: string = '';
+
+  public getDocumentId(): string {
+    return this.documentId;
+  }
+
   // 在会话页面执行同步表达式,结果 JSON 字符串;异常转 {wm_error}
   public async evalJson(expr: string): Promise<string> {
     const script: string = `(function(){ try { const v = ${expr};`
@@ -476,6 +600,136 @@ export class WebMountSession {
       + ` catch (e) { return JSON.stringify({ ok: false, error: String(e) }); } })()`;
     const raw: string = await this.controller.runJavaScript(script);
     return raw;
+  }
+
+  // E12:观察当前文档(token + url/title/text/可见交互元素)。无就绪文档即拒绝。
+  public async observeDocument(signal?: AbortSignalLike): Promise<WebMountObservation> {
+    if (!this.pageReady || this.documentId.length === 0) throw new Error('WebMount document unavailable');
+    if (signal !== undefined && signal.aborted) throw new Error('WebMount cancelled');
+    const raw: string = await this.evalJson(OBSERVE_DOCUMENT_JS);
+    const parsed: EvalJsonResult = JSON.parse(raw) as EvalJsonResult;
+    if (!parsed.ok || parsed.value === null || typeof parsed.value !== 'object' || Array.isArray(parsed.value)) {
+      throw new Error(`WebMount observe failed: ${parsed.error ?? 'no document'}`);
+    }
+    const value: JsonObject = parsed.value as JsonObject;
+    const elements: WebMountElement[] = [];
+    const rawElements: JsonValue | undefined = value['elements'];
+    if (Array.isArray(rawElements)) {
+      for (const item of rawElements) {
+        if (typeof item !== 'object' || item === null || Array.isArray(item)) continue;
+        const map: JsonObject = item as JsonObject;
+        const options: string[] = [];
+        const rawOptions: JsonValue | undefined = map['options'];
+        if (Array.isArray(rawOptions)) {
+          for (const option of rawOptions) {
+            if (typeof option === 'string') options.push(option);
+          }
+        }
+        elements.push({
+          ref: String(map['ref'] ?? ''), tag: String(map['tag'] ?? ''), text: String(map['text'] ?? ''),
+          href: typeof map['href'] === 'string' ? map['href'] as string : null,
+          inputType: typeof map['inputType'] === 'string' ? map['inputType'] as string : null,
+          options: options,
+        });
+      }
+    }
+    return {
+      token: {
+        sessionId: 'main',
+        documentId: this.documentId,
+        revision: typeof value['revision'] === 'number' ? value['revision'] as number : -1,
+      },
+      url: String(value['url'] ?? ''), title: String(value['title'] ?? ''),
+      text: String(value['text'] ?? ''), elements: elements,
+    };
+  }
+
+  // E12:宿主身份 + 页内 revision 双重核验;任何变化都拒绝后续动作
+  public async assertDocument(token: WebMountDocumentToken): Promise<void> {
+    if (token.sessionId !== 'main' || token.documentId.length === 0
+      || token.documentId !== this.documentId || !this.pageReady) {
+      throw new Error('WebMount document changed');
+    }
+    const raw: string = await this.evalJson(`(function(){ return window.__wmDoc ? window.__wmDoc.revision : -1; })()`);
+    const parsed: EvalJsonResult = JSON.parse(raw) as EvalJsonResult;
+    if (!parsed.ok || parsed.value !== token.revision) throw new Error('WebMount document changed');
+  }
+
+  // E12:有界异步槽 — expr 是返回 Promise 的表达式,可引用注入的 `signal`
+  //   (页内 AbortController.signal)。每轮轮询前核验 owner/document/signal/
+  //   deadline;结束/取消只清理本 requestId 的槽;文档已换则不触碰新文档。
+  public async evalAsyncJson(
+    expr: string, token: WebMountDocumentToken, assertOwner: () => void,
+    signal?: AbortSignalLike, timeoutMs: number = 30000,
+  ): Promise<string> {
+    await this.assertDocument(token);
+    assertOwner();
+    if (signal !== undefined && signal.aborted) throw new Error('WebMount cancelled');
+    const requestId: string = newId();
+    const launch: string = `(function(){ try {
+      window.__wmAsync = window.__wmAsync || {};
+      window.__wmAsyncCtl = window.__wmAsyncCtl || {};
+      const id = ${jsonLiteral(requestId)};
+      const ctl = new AbortController();
+      window.__wmAsyncCtl[id] = ctl;
+      const slot = { state: 'pending', value: null, error: null };
+      window.__wmAsync[id] = slot;
+      const signal = ctl.signal;
+      Promise.resolve().then(() => (${expr})).then(
+        (v) => { slot.state = 'done'; slot.value = v === undefined ? null : v; },
+        (e) => { slot.state = 'error'; slot.error = String((e && e.message) || e); });
+      return true;
+    } catch (e) { return false; } })()`;
+    const launched: string = await this.controller.runJavaScript(launch);
+    if (launched !== 'true') throw new Error('WebMount async slot launch failed');
+    const deadline: number = Date.now() + Math.max(1000, timeoutMs);
+    try {
+      while (true) {
+        assertOwner();
+        if (signal !== undefined && signal.aborted) throw new Error('WebMount cancelled');
+        if (Date.now() > deadline) throw new Error('WebMount async result timeout');
+        if (token.documentId !== this.documentId || !this.pageReady) throw new Error('WebMount document changed');
+        const raw: string = await this.evalJson(`(function(){
+          const slot = (window.__wmAsync || {})[${jsonLiteral(requestId)}];
+          return slot ? { state: slot.state, value: slot.value, error: slot.error } : null;
+        })()`);
+        const parsed: EvalJsonResult = JSON.parse(raw) as EvalJsonResult;
+        if (parsed.ok && parsed.value !== null && typeof parsed.value === 'object' && !Array.isArray(parsed.value)) {
+          const slot: JsonObject = parsed.value as JsonObject;
+          if (slot['state'] === 'done') return JSON.stringify(slot['value'] ?? null);
+          if (slot['state'] === 'error') throw new Error(`WebMount async page error: ${String(slot['error'] ?? 'unknown')}`);
+        }
+        await sleep(150);
+      }
+    } finally {
+      if (token.documentId === this.documentId && this.hostMounted) {
+        try {
+          await this.controller.runJavaScript(`(function(){ try {
+            const id = ${jsonLiteral(requestId)};
+            if (window.__wmAsyncCtl && window.__wmAsyncCtl[id]) { window.__wmAsyncCtl[id].abort(); delete window.__wmAsyncCtl[id]; }
+            if (window.__wmAsync) delete window.__wmAsync[id];
+          } catch (e) {} })()`);
+        } catch (_e) {
+          // 宿主已解绑;槽随页面销毁
+        }
+      }
+    }
+  }
+
+  // E12:页内 fetch/XHR 台账快照(page_fetch_xhr 覆盖,非完整浏览器 HAR)
+  public async getNetworkLedger(): Promise<JsonObject[]> {
+    const raw: string = await this.evalJson(`(function(){
+      return (window.__wmNet || []).map(function(r){
+        return { seq: r.seq, type: r.type, method: r.method, url: r.url, status: r.status, error: r.error };
+      });
+    })()`);
+    const parsed: EvalJsonResult = JSON.parse(raw) as EvalJsonResult;
+    if (!parsed.ok || !Array.isArray(parsed.value)) return [];
+    const out: JsonObject[] = [];
+    for (const item of parsed.value) {
+      if (typeof item === 'object' && item !== null && !Array.isArray(item)) out.push(item as JsonObject);
+    }
+    return out;
   }
 
   // 截图 → base64 png data url(经组件截图,宿主需真实尺寸)
@@ -526,6 +780,8 @@ export struct WebMountSurface {
   build(): void {
     Web({ src: 'about:blank', controller: this.session.getController() })
       .id(WEB_HOST_ID)
+      // E12:文档初始化即注入 revision/MutationObserver 与 fetch/XHR 台账(API 11+)
+      .javaScriptOnDocumentStart([{ script: WEBMOUNT_DOCSTART_JS, scriptRules: ['*'] }])
       .onControllerAttached((): void => {
         this.session.markControllerAttached();
       })

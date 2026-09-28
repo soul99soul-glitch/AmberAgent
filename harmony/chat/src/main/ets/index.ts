@@ -419,6 +419,40 @@ export type {
 } from './chat/webmount_oauth.ts';
 export { assertWebMountRequestActive, fetchWebMountRequest } from './chat/webmount_request.ts';
 export type { WebMountEnabledCheck } from './chat/webmount_request.ts';
+export {
+  validateWebMountOAuthApplication, canonicalWebMountOAuthBinding,
+  buildWebMountAuthorizationUrl, buildWebMountTokenRequest, parseWebMountTokenResponse,
+  webMountOAuthAllowsApiOrigin,
+} from './chat/webmount/oauth.ts';
+export type {
+  WebMountPkceChallenge, WebMountTokenGrant, WebMountTokenRequestSpec,
+} from './chat/webmount/oauth.ts';
+export {
+  parseWebMountHar, webMountHarTemplates, webMountReplayAllowed,
+  WEBMOUNT_HAR_MAX_BYTES, WEBMOUNT_HAR_MAX_ENTRIES,
+} from './chat/webmount/har.ts';
+export {
+  WEBMOUNT_READONLY_SITE_PROFILES, webMountSiteProfile, webMountSiteMatchesUrl,
+  buildWebMountSiteAdapterScript,
+  WEBMOUNT_SITE_ADAPTER_DEFAULT_LIMIT, WEBMOUNT_SITE_ADAPTER_MAX_LIMIT,
+} from './chat/webmount/profiles.ts';
+export type { WebMountSiteProfile, WebMountSiteField } from './chat/webmount/profiles.ts';
+export {
+  webMountOriginOf, webMountRedactedDisplayUrl, isWebMountAbsoluteHttpUrl,
+  isWebMountMutatingReplayUrl,
+} from './chat/webmount/url.ts';
+export {
+  createWebMountGoalTool, createWebMountGoalAdapter, webMountGoalPendingPart,
+  recoverInterruptedWebMountGoals, buildWebMountGoalCandidates,
+  webMountGoalRequestHash, webMountGoalRequestHashJson,
+} from './chat/webmount/goal.ts';
+export type { WebMountGoalCandidate, WebMountGoalHostPorts } from './chat/webmount/goal.ts';
+export type {
+  WebMountDocumentToken, WebMountElement, WebMountObservation,
+  WebMountOAuthApplication, WebMountOAuthApplicationDraft, WebMountOAuthState, WebMountOAuthStatus,
+  WebMountHarArchive, WebMountReplayTemplate, WebMountNetworkSummary,
+  WebMountSiteAdapterResult, WebMountGoalRequest, WebMountGoalDecision, WebMountGoalCheckpoint,
+} from './chat/webmount/models.ts';
 export { FeishuDocsClient, FEISHU_APP_ID_KEY, FEISHU_APP_SECRET_KEY } from './chat/feishu_docs_client.ts';
 export type { FeishuDocsTokenStore, FeishuDocsClientDependencies } from './chat/feishu_docs_client.ts';
 export {

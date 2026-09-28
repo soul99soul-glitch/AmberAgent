@@ -185,6 +185,17 @@ export class PermissionDecisionResolver {
     if (tool.toolName === ASK_USER_TOOL_NAME && policy.needsApproval) {
       return decision('ask', 'ask_user always needs a human answer.', 'hitl', policy);
     }
+    // E12 窄准入(冻结合同):wm_tap 合成页面交互、wm_fetch_replay 携带页面凭据
+    //   访问网络 — 任何设置组合(含双 auto)都必须显式人工批准;approved/denied
+    //   仍由上面的 approval_state 分支保持权威。与 ask_user 特例同构,不改其他工具语义。
+    if ((tool.toolName === 'wm_tap' || tool.toolName === 'wm_fetch_replay') && policy.needsApproval) {
+      return decision(
+        'ask',
+        'WebMount touch/replay always requires explicit human approval.',
+        'webmount_explicit_approval',
+        policy,
+      );
+    }
     if (autoApproveTools && autoApproveHighRiskTools) {
       return decision(
         'allow',

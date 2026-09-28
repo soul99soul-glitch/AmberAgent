@@ -12,7 +12,9 @@ import type { PluginLoopAdapter } from './plugins/ports.ts';
 
 export interface RecipeBatchOptions {
   adapter?: RecipeLoopAdapter;
-  pluginAdapter?: PluginLoopAdapter;
+  pluginAdapter?: RecipeLoopAdapter;
+  // E12:wm_run_goal 编排 adapter(goal_v1 checkpoint);与 recipe/plugin 并列的第三类
+  goalAdapter?: RecipeLoopAdapter;
   tools: AgentTool[];
   dispatcher: AgentToolDispatcher;
   autoApproveTools: boolean;
@@ -39,7 +41,8 @@ export const executeRecipeBatch = async (
   for (const tool of options.tools) definitions.set(tool.name, tool);
   const primitives = options.tools.filter((tool: AgentTool): boolean =>
     !tool.name.startsWith('recipe_') && tool.name !== 'recipes_list'
-      && !tool.name.startsWith('plugin_') && tool.name !== 'plugins_list');
+      && !tool.name.startsWith('plugin_') && tool.name !== 'plugins_list'
+      && tool.name !== 'wm_run_goal');
   const pairs: ToolBatchResultPair[] = [];
   const retry = makeGenerationRetrySetting({ enabled: false });
   for (const original of parts) {
@@ -49,9 +52,12 @@ export const executeRecipeBatch = async (
       await options.save(current, next);
       current = next;
     };
-    const adapter: RecipeLoopAdapter | undefined = options.pluginAdapter?.supports(current.toolName)
-      ? options.pluginAdapter : options.adapter?.supports(current.toolName) ? options.adapter : undefined;
-    const checkpointKey: string = options.pluginAdapter?.supports(current.toolName) ? 'plugin_v1' : 'recipe_v1';
+    const isPlugin: boolean = options.pluginAdapter?.supports(current.toolName) === true;
+    const isGoal: boolean = !isPlugin && options.goalAdapter?.supports(current.toolName) === true;
+    const adapter: RecipeLoopAdapter | undefined = isPlugin
+      ? options.pluginAdapter : isGoal ? options.goalAdapter
+      : options.adapter?.supports(current.toolName) ? options.adapter : undefined;
+    const checkpointKey: string = isPlugin ? 'plugin_v1' : isGoal ? 'goal_v1' : 'recipe_v1';
     if (adapter !== undefined) {
       try {
         if (current.metadata?.[checkpointKey] === undefined && !definitions.has(current.toolName)) {

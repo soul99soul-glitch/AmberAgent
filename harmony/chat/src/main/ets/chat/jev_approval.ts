@@ -2,6 +2,7 @@ import type { JevMode, JevSettings, JevQuestion, JevEvaluation } from './jev_mod
 import type { JsonObject, JsonValue } from './json.ts';
 import type { UIMessagePartTool } from './message.ts';
 import type { Conversation } from './conversation.ts';
+import { webMountGoalRequestHashJson } from './webmount/goal.ts';
 
 export type JevFact = 'yes' | 'no' | 'unknown';
 export interface JevApprovalLocator {
@@ -123,6 +124,18 @@ export const buildJevApprovalSubject = (
         pendingCallId: checkpoint['pendingCallId'] ?? null, nextIndex: recipeState?.['nextIndex'] ?? null,
         inputs: checkpoint['inputs'] ?? null, test };
     }
+  } else if (parent.toolName === 'wm_run_goal') {
+    // E12(goal):审批投影绑定保存的 goal_v1 awaiting child;请求身份为 fnv 小哈希
+    const checkpoint = object(parent.metadata?.['goal_v1']);
+    if (checkpoint === null) return null;
+    const request = object(checkpoint['request']);
+    action = pendingTool(checkpoint['pendingStep']);
+    if (checkpoint['version'] !== 1 || checkpoint['phase'] !== 'awaiting_approval' || request === null
+      || string(request['goal']) === null || action === null) return null;
+    const decisions = checkpoint['decisions'];
+    if (typeof decisions !== 'number' || !Number.isInteger(decisions) || decisions < 0) return null;
+    packageHash = webMountGoalRequestHashJson(request);
+    packageBinding = { kind: 'goal', hash: packageHash, decisions };
   }
   const binding: JsonObject | null = action === null ? null : actionBinding(action);
   if (action !== null && binding === null) return null;
