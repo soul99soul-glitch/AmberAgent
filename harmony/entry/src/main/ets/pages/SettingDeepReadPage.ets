@@ -6,7 +6,7 @@
 //   表单控件装入卡片(标题 16 medium sans、字段标 mono meta、值 12 muted)/
 //   FooterNote 组下脚注,逻辑零改动(读写/测试连通/保存/模型库增删全原样)。
 import {
-  ACCENT, BG, INK, INK3, INK4, SURFACE2, ERROR, SIGNAL, LINE,
+  ACCENT, BG, INK, INK3, INK4, SURFACE, SURFACE2, ERROR, SIGNAL, LINE,
   TEXT_STYLES, GUTTER, accentSoftBg, lineHeightForSize,
 } from '../design/tokens.ets';
 import { FONT_SANS_MEDIUM, FONT_MONO_MEDIUM } from '../design/fonts.ets';
@@ -15,9 +15,10 @@ import {
   BtnFill, BtnGhost, PageSpacer,
 } from '../components/PageTemplate.ets';
 import { PillSelect } from '../components/ui/Select.ets';
+import { Icon } from '../components/ui/Icon.ets';
 import { BUILTIN_TEMPLATES, loadCustomTemplates } from '../platform_impl/DeepReadTemplate.ets';
 import type { DeepReadTemplateDef, CustomTemplateDef } from '../platform_impl/DeepReadTemplate.ets';
-import { router } from '@kit.ArkUI';
+import { router, promptAction } from '@kit.ArkUI';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { getAppContainer, getModelRegistry, resolveChatProviderChoice } from '../di/AppContainer.ets';
 import { chatChoiceToDeepReadDraft } from '../platform_impl/ChatDeepReadDraft.ets';
@@ -84,6 +85,7 @@ struct SettingDeepReadPage {
   @State newApiKey: string = '';
   @State newModel: string = 'deepseek-chat';
   @State modelSaved: string = '';
+  @State modelSheetOpen: boolean = false;
   private storage: Storage | null = null;
   private pageAlive: boolean = false;
   private loadToken: number = 0;
@@ -214,9 +216,115 @@ struct SettingDeepReadPage {
     this.saved = '阅读体验已保存 ✓';
   }
 
-  private async saveBoardModel(): Promise<void> {
-    await this.storage!.set<string>('deepread_model_id', this.boardModelId.trim());
-    this.saved = '看板模型已保存 ✓';
+  // ── 深读模型选择(对齐 iOS BoardSettings 模型区:跟随聊天配置 / 模型库快照)──
+  // 引擎链静态读 ai_base_url/ai_api_key + (deepread_model_id || ai_model),
+  // 选择即把凭据快照写入既有键,不改动引擎。
+
+  private currentBoardModelLabel(): string {
+    if (this.boardModelId.trim().length > 0) return this.boardModelId.trim();
+    return this.model.length > 0 ? `跟随聊天配置（${this.model}）` : '跟随聊天配置';
+  }
+
+  private showModelMenu(): void {
+    this.modelSheetOpen = true;
+  }
+
+  @Builder
+  ModelSheet(): void {
+    Column() {
+      Blank()
+        .onClick((): void => { this.modelSheetOpen = false; })
+      Column() {
+        Text('深度阅读模型')
+          .fontSize(15).fontWeight(FontWeight.Medium).lineHeight(lineHeightForSize(15))
+          .fontFamily(FONT_SANS_MEDIUM).fontColor(INK)
+          .width('100%').padding({ left: 20, right: 20, top: 18, bottom: 10 })
+        Scroll() {
+          Column() {
+            this.ModelSheetRow('跟随当前聊天配置', this.boardModelId.trim().length === 0, (): void => {
+              this.followChatConfig();
+            })
+            ForEach(this.models, (m: ModelConfig): void => {
+              this.ModelSheetRow(m.label.length > 0 ? `${m.label}（${m.model}）` : m.model,
+                this.boardModelId.trim() === m.model, (): void => {
+                  this.applyRegistryModel(m);
+                })
+            }, (m: ModelConfig): string => m.id)
+            if (this.models.length === 0) {
+              Text('模型库为空，可在下方「高级 · 模型库」添加。')
+                .fontSize(12).lineHeight(17).fontFamily(FONT_SANS_MEDIUM).fontColor(INK3)
+                .width('100%').padding({ left: 20, right: 20, top: 8, bottom: 8 })
+            }
+          }
+          .width('100%')
+        }
+        .constraintSize({ maxHeight: 420 })
+        .scrollBar(BarState.Auto)
+      }
+      .width('100%')
+      .padding({ bottom: 12 })
+      .backgroundColor(SURFACE)
+      .borderRadius({ topLeft: 20, topRight: 20 })
+    }
+    .width('100%').height('100%')
+    .backgroundColor('#66000000')
+    .justifyContent(FlexAlign.End)
+  }
+
+  @Builder
+  ModelSheetRow(label: string, selected: boolean, onTap: () => void): void {
+    Row() {
+      Text(label)
+        .fontSize(15).lineHeight(lineHeightForSize(15)).fontFamily(FONT_SANS_MEDIUM)
+        .fontColor(selected ? this.accentColorStore : INK)
+        .layoutWeight(1).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+      if (selected) {
+        Icon({ name: 'check', iconSize: 16, color: this.accentColorStore })
+      }
+    }
+    .width('100%')
+    .constraintSize({ minHeight: 48 })
+    .padding({ left: 20, right: 20, top: 10, bottom: 10 })
+    .alignItems(VerticalAlign.Center)
+    .onClick((): void => {
+      this.modelSheetOpen = false;
+      onTap();
+    })
+  }
+
+  private async followChatConfig(): Promise<void> {
+    try {
+      const result: ChatDeepReadDraftResult = chatChoiceToDeepReadDraft(await resolveChatProviderChoice());
+      if (result.draft !== null) {
+        await this.storage!.set<string>('ai_base_url', result.draft.baseUrl);
+        await this.storage!.set<string>('ai_api_key', result.draft.apiKey);
+        await this.storage!.set<string>('ai_model', result.draft.model);
+        this.aiBaseUrl = result.draft.baseUrl;
+        this.aiKey = result.draft.apiKey;
+        this.model = result.draft.model;
+      }
+      await this.storage!.set<string>('deepread_model_id', '');
+      this.boardModelId = '';
+      this.saved = result.draft !== null ? '已跟随当前聊天配置 ✓' : result.message;
+    } catch (e) {
+      this.saved = `跟随失败：${String(e)}`;
+    }
+  }
+
+  private async applyRegistryModel(m: ModelConfig): Promise<void> {
+    try {
+      await this.storage!.set<string>('ai_base_url', m.baseUrl);
+      await this.storage!.set<string>('ai_api_key', m.apiKey);
+      await this.storage!.set<string>('ai_model', m.model);
+      await this.storage!.set<string>('deepread_model_id', m.model);
+      this.aiBaseUrl = m.baseUrl;
+      this.aiKey = m.apiKey;
+      this.model = m.model;
+      this.boardModelId = m.model;
+      this.saved = `深度阅读模型已切换为 ${m.label.length > 0 ? m.label : m.model} ✓`;
+    } catch (e) {
+      this.saved = `切换失败：${String(e)}`;
+    }
   }
 
   async loadModels(): Promise<void> {
@@ -326,10 +434,20 @@ struct SettingDeepReadPage {
   }
 
   build(): void {
-    Column() {
-      CenteredTitleBar({ title: '深度阅读设置' })
+    Stack() {
+      Column() {
+        CenteredTitleBar({ title: '深度阅读设置' })
       Scroll() {
         Column() {
+          PlainSection({ label: '模型' })
+          CardGroup({ radius: 18, stroke: true, content: (): void => { this.ModelPickerCard(); } })
+            .margin({ left: GUTTER, right: GUTTER })
+          FooterNote({ text: '从模型库选择会把该模型的地址与密钥快照给深度阅读；跟随则使用当前聊天配置。' })
+
+          PlainSection({ label: '热榜源' })
+          CardGroup({ radius: 18, stroke: true, content: (): void => { this.HotlistCard(); } })
+            .margin({ left: GUTTER, right: GUTTER })
+
           PlainSection({ label: '关注筛选' })
           CardGroup({ radius: 18, stroke: true, content: (): void => { this.FocusCard(); } })
             .margin({ left: GUTTER, right: GUTTER })
@@ -338,30 +456,22 @@ struct SettingDeepReadPage {
           CardGroup({ radius: 18, stroke: true, content: (): void => { this.ReadingCard(); } })
             .margin({ left: GUTTER, right: GUTTER })
 
-          PlainSection({ label: '深读模型' })
-          CardGroup({ radius: 18, stroke: true, content: (): void => { this.BoardModelCard(); } })
+          PlainSection({ label: '搜索源' })
+          CardGroup({ radius: 18, stroke: true, content: (): void => { this.SourceCard(); } })
             .margin({ left: GUTTER, right: GUTTER })
+          FooterNote({ text: 'NewsNow/DuckDuckGo/HackerNews/Jina 始终可用,无需 key。' })
 
-          PlainSection({ label: 'AI 配置' })
+          PlainSection({ label: '高级 · 手动 AI 配置' })
           CardGroup({ radius: 18, stroke: true, content: (): void => { this.AiConfigCard(); } })
             .margin({ left: GUTTER, right: GUTTER })
 
-          PlainSection({ label: '模型库' })
+          PlainSection({ label: '高级 · 模型库' })
           CardGroup({ radius: 18, stroke: true, content: (): void => { this.ModelsCard(); } })
             .margin({ left: GUTTER, right: GUTTER })
           FooterNote({ text: '模型库用于议会席位；聊天和小说使用聊天服务商配置。' })
           if (this.models.length === 0) {
             FooterNote({ text: '暂无模型,请在下方添加。议会的每个席位需指定一个模型。' })
           }
-
-          PlainSection({ label: '热榜源' })
-          CardGroup({ radius: 18, stroke: true, content: (): void => { this.HotlistCard(); } })
-            .margin({ left: GUTTER, right: GUTTER })
-
-          PlainSection({ label: '搜索源' })
-          CardGroup({ radius: 18, stroke: true, content: (): void => { this.SourceCard(); } })
-            .margin({ left: GUTTER, right: GUTTER })
-          FooterNote({ text: 'NewsNow/DuckDuckGo/HackerNews/Jina 始终可用,无需 key。' })
 
           Row() {
             BtnFill({ label: '保存全部', onTap: (): void => { this.save(); } })
@@ -382,8 +492,14 @@ struct SettingDeepReadPage {
       }
       .layoutWeight(1).align(Alignment.TopStart).backgroundColor(BG)
       .align(Alignment.TopStart)
+      }
+      .width('100%').height('100%').backgroundColor(BG)
+
+      if (this.modelSheetOpen) {
+        this.ModelSheet()
+      }
     }
-    .width('100%').height('100%').backgroundColor(BG)
+    .width('100%').height('100%')
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
   }
 
@@ -538,21 +654,14 @@ struct SettingDeepReadPage {
   }
 
   @Builder
-  BoardModelCard(): void {
+  ModelPickerCard(): void {
     Column() {
-      Column() {
-        TextInput({ text: this.boardModelId, placeholder: '留空使用下方 AI 配置的模型名称' })
-          .fontSize(this.inputFontSize()).fontWeight(TEXT_STYLES.body.weight)
-          .lineHeight(TEXT_STYLES.body.lineHeight).fontFamily(TEXT_STYLES.body.family)
-          .fontColor(INK).height(44)
-          .placeholderColor(INK4)
-          .backgroundColor(SURFACE2).borderRadius(8)
-          .padding({ left: 14, right: 14 })
-          .onChange((v: string): void => { this.boardModelId = v; })
-      }
-      .width('100%').padding({ left: 14, right: 14, top: 12, bottom: 12 })
+      CardRow({ label: '深度阅读模型', valueText: this.currentBoardModelLabel(),
+        onRowClick: (): void => { this.showModelMenu(); } })
       this.CardHairline(14)
-      this.CardAction('保存模型', (): void => { this.saveBoardModel(); })
+      CardRow({ label: '聊天服务商配置',
+        desc: '聊天和小说共用；任务模型可另选服务商', isLast: true,
+        onRowClick: (): void => { router.pushUrl({ url: 'pages/ChatProviderSettingsPage' }); } })
     }
     .width('100%')
   }
@@ -601,10 +710,6 @@ struct SettingDeepReadPage {
       }
       .width('100%')
       .padding({ left: 14, right: 14, top: 12, bottom: 12 })
-      this.CardHairline(14)
-      CardRow({ label: '聊天服务商配置',
-        desc: '聊天和小说共用；任务模型可另选服务商', isLast: true,
-        onRowClick: (): void => { router.pushUrl({ url: 'pages/ChatProviderSettingsPage' }); } })
     }
     .width('100%')
   }

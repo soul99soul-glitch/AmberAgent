@@ -15,7 +15,7 @@ import {
   OVERLAY, SHADOW_OVERLAY, SURFACE, LINE, LABEL, BODY2, META, TEXT_STYLES,
 } from '../design/tokens.ets';
 import { FONT_MONO_MEDIUM, FONT_SANS_SEMIBOLD } from '../design/fonts.ets';
-import { PageTitleBar, PageSpacer, PaperSeparator, SectionHeader } from '../components/PageTemplate.ets';
+import { PlainSection, CardGroup, PageSpacer, PaperSeparator } from '../components/PageTemplate.ets';
 import { Icon } from '../components/ui/Icon.ets';
 import { router, promptAction } from '@kit.ArkUI';
 import { pasteboard } from '@kit.BasicServicesKit';
@@ -84,6 +84,7 @@ struct BoardHotItemRow {
 @Entry
 @Component
 struct BoardPage {
+  @StorageProp('statusBarHeight') statusBarHeight: number = 44;
   @State sections: SourceSection[] = [];
   @State topics: HotTopic[] = [];
   @State lastUpdatedAt: number = 0;
@@ -105,11 +106,12 @@ struct BoardPage {
   }
 
   private applyFocusFilter(): void {
-    if (this.focusMode === 'all' || this.focusKeywords.length === 0) return;
+    const focusMode: string = this.focusMode;
+    if (focusMode === 'all' || this.focusKeywords.length === 0) return;
     // 聚合话题
     const matchedTopics: HotTopic[] = this.topics.filter(
       (t: HotTopic): boolean => this.matchesFocus(t.title));
-    if (this.focusMode === 'focus_only') {
+    if (focusMode === 'focus_only') {
       this.topics = matchedTopics;
     } else {
       const kept: HotTopic[] = matchedTopics;
@@ -119,10 +121,11 @@ struct BoardPage {
       this.topics = kept;
     }
     // 各源条目
+    const focusOnly: boolean = focusMode === 'focus_only';
     for (const sec of this.sections) {
       const matched: HotItem[] = sec.items.filter(
         (i: HotItem): boolean => this.matchesFocus(i.title));
-      if (this.focusMode === 'focus_only') {
+      if (focusOnly) {
         sec.items = matched;
       } else {
         const kept: HotItem[] = matched.slice();
@@ -306,30 +309,110 @@ struct BoardPage {
       });
   }
 
+  // iOS BoardView 顶栏:返回 / 居中标题 / 历史 + 设置圆钮
+  @Builder
+  BoardHeader(): void {
+    Stack({ alignContent: Alignment.Center }) {
+      Row() {
+        Row() {
+          Icon({ name: 'back', iconSize: 18, color: INK })
+        }
+        .width(44).height(44).borderRadius(22).backgroundColor(SURFACE)
+        .border({ width: 0.5, color: LINE })
+        .justifyContent(FlexAlign.Center)
+        .accessibilityText('返回')
+        .onClick((): void => { router.back(); })
+        Blank()
+        Row() {
+          Icon({ name: 'history', iconSize: 17, color: INK })
+        }
+        .width(44).height(44).borderRadius(22).backgroundColor(SURFACE)
+        .border({ width: 0.5, color: LINE })
+        .justifyContent(FlexAlign.Center)
+        .accessibilityText('深度阅读历史')
+        .onClick((): void => { router.pushUrl({ url: 'pages/DeepReadHistoryPage' }); })
+        Row() {
+          Icon({ name: 'gear', iconSize: 17, color: INK })
+        }
+        .width(44).height(44).borderRadius(22).backgroundColor(SURFACE)
+        .border({ width: 0.5, color: LINE })
+        .justifyContent(FlexAlign.Center)
+        .margin({ left: 8 })
+        .accessibilityText('深度阅读设置')
+        .onClick((): void => { router.pushUrl({ url: 'pages/SettingDeepReadPage' }); })
+      }
+      .width('100%')
+
+      Text('深度阅读')
+        .fontSize(16).fontWeight(FontWeight.Medium).fontFamily(FONT_SANS_SEMIBOLD).fontColor(INK)
+    }
+    .width('100%')
+    .padding({ left: 16, right: 16, top: this.statusBarHeight + 10, bottom: 10 })
+    .backgroundColor(BG)
+  }
+
+  // 卡片内容(@Builder:组件构造必须在 builder 上下文,铁律 4b)
+  @Builder
+  TopicsCardContent(): void {
+    ForEach(this.topics, (tp: HotTopic, index: number): void => {
+      this.HotTopicEntry(tp, index === 0, index === Math.min(this.topics.length, 10) - 1, index)
+    }, (tp: HotTopic): string => tp.id)
+  }
+
+  @Builder
+  SourceCardContent(sec: SourceSection): void {
+    if (sec.error !== null || sec.items.length === 0) {
+      BoardHotItemRow({
+        rankText: '',
+        title: sec.error !== null ? `抓取失败:${sec.error}` : '无条目',
+        heat: '',
+        isLast: true,
+        idx: 0,
+      })
+    } else {
+      ForEach(sec.items.slice(0, 12), (item: HotItem, index: number): void => {
+        BoardHotItemRow({
+          rankText: `${item.rank}`,
+          title: item.title,
+          heat: item.heat,
+          isLast: index === Math.min(sec.items.length, 12) - 1,
+          idx: index,
+          onRowClick: (): void => {
+            animateTo({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }, (): void => {
+              this.sheetItem = item;
+            });
+          },
+        })
+      }, (item: HotItem): string => `${sec.sourceId}-${item.rank}`)
+    }
+  }
+
   build(): void {
     Stack() {
       Column() {
-      PageTitleBar({
-        title: '深度阅读',
-        actionText: '历史',
-        onAction: (): void => { router.pushUrl({ url: 'pages/DeepReadHistoryPage' }); },
-      })
+      this.BoardHeader()
 
+      // 综合热榜组标 + 右侧刷新(iOS hotTopicSection)
       Row() {
-        Text('//')
-          .fontSize(META).fontWeight(500).lineHeight(TEXT_STYLES.meta.lineHeight)
-          .fontFamily(FONT_MONO_MEDIUM).fontColor(ACCENT)
-        Text(' HOTLIST')
-          .fontSize(META).fontWeight(500).lineHeight(TEXT_STYLES.meta.lineHeight)
-          .fontFamily(FONT_MONO_MEDIUM).fontColor(INK3)
-          .layoutWeight(1)
+        Text('综合热榜')
+          .fontSize(LABEL).fontWeight(600).lineHeight(TEXT_STYLES.meta.lineHeight)
+          .fontFamily(FONT_SANS_SEMIBOLD).fontColor(INK3).letterSpacing(0.4)
+        Blank()
+        if (this.lastUpdatedAt > 0) {
+          Text(this.timeAgo(this.lastUpdatedAt))
+            .fontSize(META).fontColor(INK4).margin({ right: 4 })
+        }
         Row() {
           Icon({ name: 'retry', iconSize: 15, color: INK3 })
         }
         .width(44).height(44).justifyContent(FlexAlign.Center).alignItems(VerticalAlign.Center)
+        .opacity(this.loading ? 0.45 : 1)
+        .enabled(!this.loading)
+        .accessibilityText(this.loading ? '刷新中' : '刷新热榜')
         .onClick((): void => { this.loadHotlist(); })
       }
-      .width('100%').padding({ left: 16, right: 16, top: 20, bottom: 8 })
+      .width('100%').padding({ left: 16, right: 4, top: 10, bottom: 2 })
+      .alignItems(VerticalAlign.Center)
 
       if (this.hotlistError.length > 0 && !this.loading) {
         Text(this.hotlistError)
@@ -360,70 +443,13 @@ struct BoardPage {
         Scroll() {
           Column() {
             if (this.topics.length > 0) {
-              Column() {
-                Row() {
-                  Text('//')
-                    .fontSize(META).fontWeight(500).lineHeight(TEXT_STYLES.meta.lineHeight)
-                    .fontFamily(FONT_MONO_MEDIUM).fontColor(ACCENT)
-                  Text(' 综合热点')
-                    .fontSize(META).fontWeight(500).lineHeight(TEXT_STYLES.meta.lineHeight)
-                    .fontFamily(FONT_MONO_MEDIUM).fontColor(INK3)
-                  Blank()
-                  Text(this.timeAgo(this.lastUpdatedAt))
-                    .fontSize(META).fontColor(INK4)
-                }
-                .width('100%').padding({ left: 16, right: 16, top: 14, bottom: 4 })
-                ForEach(this.topics, (tp: HotTopic, index: number): void => {
-                  this.HotTopicEntry(tp, index === 0, index === Math.min(this.topics.length, 10) - 1, index)
-                }, (tp: HotTopic): string => tp.id)
-              }
-              .width('100%')
+              CardGroup({ radius: 18, stroke: true, content: (): void => { this.TopicsCardContent(); } })
+                .margin({ left: 16, right: 16 })
             }
             ForEach(this.sections, (sec: SourceSection): void => {
-              Column() {
-                Row() {
-                  Text('//')
-                    .fontSize(META).fontWeight(500).lineHeight(TEXT_STYLES.meta.lineHeight)
-                    .fontFamily(FONT_MONO_MEDIUM).fontColor(ACCENT)
-                  Text(` ${sec.sourceName}`)
-                    .fontSize(META).fontWeight(500).lineHeight(TEXT_STYLES.meta.lineHeight)
-                    .fontFamily(FONT_MONO_MEDIUM).fontColor(INK3)
-                  Blank()
-                  if (sec.error !== null) {
-                    Text(`⚠ ${this.timeAgo(sec.fetchedAt)}`)
-                      .fontSize(META).fontColor(INK4)
-                  } else if (sec.fetchedAt > 0) {
-                    Text(this.timeAgo(sec.fetchedAt))
-                      .fontSize(META).fontColor(INK4)
-                  }
-                }
-                .width('100%').padding({ left: 16, right: 16, top: 14, bottom: 4 })
-                if (sec.error !== null || sec.items.length === 0) {
-                  BoardHotItemRow({
-                    rankText: '',
-                    title: sec.error !== null ? `抓取失败:${sec.error}` : '无条目',
-                    heat: '',
-                    isLast: true,
-                    idx: 0,
-                  })
-                } else {
-                  ForEach(sec.items.slice(0, 12), (item: HotItem, index: number): void => {
-                    BoardHotItemRow({
-                      rankText: `${item.rank}`,
-                      title: item.title,
-                      heat: item.heat,
-                      isLast: index === Math.min(sec.items.length, 12) - 1,
-                      idx: index,
-                      onRowClick: (): void => {
-                        animateTo({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }, (): void => {
-                          this.sheetItem = item;
-                        });
-                      },
-                    })
-                  }, (item: HotItem): string => `${sec.sourceId}-${item.rank}`)
-                }
-              }
-              .width('100%')
+              PlainSection({ label: sec.sourceName })
+              CardGroup({ radius: 18, stroke: true, content: (): void => { this.SourceCardContent(sec); } })
+                .margin({ left: 16, right: 16 })
             }, (sec: SourceSection): string => sec.sourceId)
           }
           .width('100%')
