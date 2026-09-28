@@ -8,6 +8,8 @@ export { imageExportPages } from './chat/image_export_pages.ts';
 
 export type { TokenUsage } from './chat/usage.ts';
 export { mergeUsage } from './chat/usage.ts';
+export type { ContextTokenBatchCounter } from './chat/native_context_tokens.ts';
+export { nativeTokenizerForModel, countNativeContextFootprint } from './chat/native_context_tokens.ts';
 
 export type {
   MessageRole, StreamTransportState, ToolApprovalState,

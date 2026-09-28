@@ -61,6 +61,7 @@ import {
   applyToolApprovalToConversation, conversationHasPendingTools,
   conversationHasPendingOrUnexecutedTools, resolveIdleToolBlocker,
   estimateConversationInputTokens, formatNumberInt, formatContextTokens,
+  nativeTokenizerForModel,
   loadSearchPrefs, updateSearchPrefs, SearchSettings, createSearchTools,
   buildMentionRoleItems, MentionRoleItem,
   createTimeReminderTransformer, javaLocalDateTimeString, dayOfWeekFullName,
@@ -133,6 +134,7 @@ import type { TokenUsage } from '@amber/chat-domain';
 import { EntryAbortController } from '../platform_impl/EntryAbortController.ets';
 import { beginConversationRun, conversationRestoreVersion } from '../platform_impl/ConversationRunGuard.ets';
 import { resolveEffectiveChatChoice, saveEffectiveChatChoice } from '../platform_impl/ChatModelSelectionSupport.ets';
+import { countNativeContextTokens } from '../platform_impl/NativeTokenCounter.ets';
 import { mutateAssistant } from '../platform_impl/AssistantMutation.ets';
 import { Icon } from '../components/ui/Icon.ets';
 import { DotText, DotGround } from '../components/ui/DotMatrix.ets';
@@ -410,7 +412,7 @@ struct ChatPage {
   private quickMessagesSeq: number = 0;
   @State greetName: string = '';
   @State cursorOn: boolean = true;
-  @State rows: MsgRow[] = [];
+  @State @Watch('refreshNativeContextEstimate') rows: MsgRow[] = [];
   // Phase 5:历史分页窗口 — this.conversation 恒全量(生成/checkpoint/上下文),
   //   rows 只承载尾部窗口 + 已上滑加载的历史页(展示层)
   @State timelineLoadState: ConversationTimelineLoadState = createInitialTimelineLoadState();
@@ -460,13 +462,22 @@ struct ChatPage {
   private denyDialogLocator: ToolApprovalPartLocator | undefined = undefined;
   @State denyReasonText: string = '';
   // D-110:上下文用量指示(ContextUsageIndicator)— compacts/窗口快照 + 压缩活动计数
-  @State contextCompacts: ConversationCompact[] = [];
+  @State @Watch('refreshNativeContextEstimate') contextCompacts: ConversationCompact[] = [];
   @State contextWindowTokens: number | null = null;
   @State compactActiveCount: number = 0;
   @State autoCloseThinking: boolean = true;
   private contextEstimateConversation: Conversation | null = null;
   private contextEstimateCompacts: ConversationCompact[] | null = null;
   private contextEstimateTokens: number = 0;
+  @State nativeContextTokens: number | null = null;
+  private contextTokenModelId: string = '';
+  private contextTokenizerId: string | null = null;
+  private contextChoiceSeq: number = 0;
+  private nativeContextSeq: number = 0;
+  private nativeContextNodes: MessageNode[] | null = null;
+  private nativeContextCompacts: ConversationCompact[] | null = null;
+  private nativeContextModelId: string = '';
+  private nativeContextConversationId: string = '';
   @State title: string = '新对话';
   @State modelLabel: string = '';
   // TopModelMenu:顶部模型快速切换下拉(Android TopModelMenu.kt)
@@ -770,6 +781,10 @@ struct ChatPage {
   //   不虚假后台继续,也不在 checkpoint 完成前清 tail(计划 §3.6)。
   aboutToDisappear(): void {
     this.pageAlive = false;
+    this.contextChoiceSeq++;
+    this.nativeContextSeq++;
+    this.nativeContextNodes = null;
+    this.nativeContextCompacts = null;
     this.flushInputDraft();
     this.webmountHookBinding?.unbind();
     this.webmountHookBinding = null;
@@ -949,15 +964,7 @@ struct ChatPage {
     }
     // P4:页面回到前台/从子页返回时刷新模型/上下文/显示设置快照
     //   (onPageShow 每次入页触发,与 aboutToAppear 同异步 helper;pageAlive 守卫防离页写 UI)
-    this.describeEffectiveModel().then((label: string): void => {
-      if (this.pageAlive) this.modelLabel = label;
-    });
-    resolveEffectiveChatChoice(this.conversation?.assistantId).then((choice: ChatProviderChoice | null): void => {
-      if (!this.pageAlive) return;
-      // 模型切换后刷新当前会话 context 窗口(计划 §5.6)+ ReasoningPicker 段集/档位
-      this.contextWindowTokens = choice !== null ? choice.model.contextWindowTokens : null;
-      this.refreshReasoningPicker(choice);
-    });
+    this.refreshEffectiveModelState();
     loadDisplaySetting(getChatKvStore()).then((setting: DisplaySetting): void => {
       if (!this.pageAlive) return;
       this.displaySettings = setting;
@@ -1091,6 +1098,7 @@ struct ChatPage {
 
   aboutToAppear(): void {
     this.pageAlive = true;
+    this.refreshNativeContextEstimate();
     this.pageVisible = true;
     this.checkpointRegenerateNodeId = '';
     this.initialJumpSuppressedUntilUserScroll = false;
@@ -1114,17 +1122,10 @@ struct ChatPage {
     this.startGreetTimer();
     // 每次进入(含从选择器返回)刷新模型标签
     this.refreshQuickMessages();
-    this.describeEffectiveModel().then((label: string): void => {
-      if (this.pageAlive && this.pageVisible) this.modelLabel = label;
-    });    // D-110:上下文窗口快照(ModelRegistry.MODEL_CONTEXT_WINDOW 注册表查询
+    // D-110:上下文窗口快照(ModelRegistry.MODEL_CONTEXT_WINDOW 注册表查询
     //   = P1 登记;取持久化 model.contextWindowTokens = Android 未知模型
     //   回退路径 :110-111)
-    resolveEffectiveChatChoice(this.conversation?.assistantId).then((choice: ChatProviderChoice | null): void => {
-      if (!this.pageAlive || !this.pageVisible) return;
-      this.contextWindowTokens = choice !== null ? choice.model.contextWindowTokens : null;
-      // M2.1:同步装配 ReasoningPicker 段集 + 当前档位
-      this.refreshReasoningPicker(choice);
-    });
+    this.refreshEffectiveModelState();
     // D-070:搜索 SDK 运行时装配(幂等)+ 搜索偏好加载(SearchTools 工具组接线)
     ensureSearchSdk();
     this.refreshSearchSettings();
@@ -1879,8 +1880,47 @@ struct ChatPage {
       .catch((): void => {});
   }
 
+  private setContextModel(choice: ChatProviderChoice | null): void {
+    this.contextWindowTokens = choice !== null ? choice.model.contextWindowTokens : null;
+    this.contextTokenModelId = choice !== null ? choice.model.modelId : '';
+    this.contextTokenizerId = nativeTokenizerForModel(this.contextTokenModelId);
+    this.refreshNativeContextEstimate();
+  }
+
+  // rows changes at committed conversation boundaries, not for streaming chunks.
+  // A history-page prepend retains messageNodes and therefore reuses this result.
+  private refreshNativeContextEstimate(): void {
+    if (!this.pageAlive) return;
+    const conv: Conversation | null = this.conversation;
+    const nodes: MessageNode[] | null = conv !== null ? conv.messageNodes : null;
+    const convId: string = conv !== null ? conv.id : '';
+    if (this.nativeContextNodes === nodes && this.nativeContextCompacts === this.contextCompacts
+      && this.nativeContextModelId === this.contextTokenModelId
+      && this.nativeContextConversationId === convId) return;
+    this.nativeContextNodes = nodes;
+    this.nativeContextCompacts = this.contextCompacts;
+    this.nativeContextModelId = this.contextTokenModelId;
+    this.nativeContextConversationId = convId;
+    const seq: number = ++this.nativeContextSeq;
+    this.nativeContextTokens = null;
+    const tokenizerId: string | null = this.contextTokenizerId;
+    if (conv === null || tokenizerId === null) return;
+    const modelId: string = this.contextTokenModelId;
+    countNativeContextTokens(currentMessages(conv), this.contextCompacts, tokenizerId)
+      .then((tokens: number): void => {
+        if (!this.pageAlive || seq !== this.nativeContextSeq || this.conversation === null
+          || this.conversation.id !== convId || this.conversation.messageNodes !== nodes
+          || this.contextTokenModelId !== modelId) return;
+        this.nativeContextTokens = tokens;
+      }).catch((): void => {});
+  }
+
   private estimatedContextTokens(): number {
     if (this.conversation === null) return 0;
+    if (this.nativeContextTokens !== null && this.nativeContextNodes === this.conversation.messageNodes
+      && this.nativeContextCompacts === this.contextCompacts
+      && this.nativeContextModelId === this.contextTokenModelId
+      && this.nativeContextConversationId === this.conversation.id) return this.nativeContextTokens;
     if (this.contextEstimateConversation !== this.conversation
       || this.contextEstimateCompacts !== this.contextCompacts) {
       this.contextEstimateConversation = this.conversation;
@@ -2957,7 +2997,7 @@ struct ChatPage {
   @Builder
   metaStat(label: string, value: string) {
     Column() {
-      Text(label).fontSize(10.5).fontColor(INK4).letterSpacing(0.3)
+      Text(label).fontSize(10.5).fontColor(INK2).letterSpacing(0.3)
       Text(value).fontSize(12).fontColor(INK).fontWeight(FontWeight.Medium)
         .letterSpacing(0.2).margin({ top: 2 })
     }
@@ -2980,7 +3020,7 @@ struct ChatPage {
         Text(`${this.estimatedContextTokens() > 0
           ? formatContextTokens(this.estimatedContextTokens()) : '0'} / ${this.contextWindowTokens !== null
           ? formatContextTokens(this.contextWindowTokens) : '--'}`)
-          .fontSize(11.5).fontColor(INK4).letterSpacing(0.3)
+          .fontSize(11.5).fontColor(INK2).letterSpacing(0.3)
       }
       .width('100%')
 
@@ -3539,15 +3579,24 @@ struct ChatPage {
   }
 
   private refreshEffectiveModelState(): void {
+    const seq: number = ++this.contextChoiceSeq;
+    const conversationId: string = this.conversation !== null ? this.conversation.id : '';
     const assistantId: string | undefined = this.conversation?.assistantId;
     resolveEffectiveChatChoice(assistantId).then((choice: ChatProviderChoice | null): void => {
-      if (!this.pageAlive || this.conversation?.assistantId !== assistantId) return;
+      if (!this.pageAlive || seq !== this.contextChoiceSeq
+        || (this.conversation !== null ? this.conversation.id : '') !== conversationId
+        || this.conversation?.assistantId !== assistantId) return;
       this.modelLabel = choice !== null ? `${choice.provider.name} / ${choice.model.modelId}` : '';
-      this.contextWindowTokens = choice !== null ? choice.model.contextWindowTokens : null;
+      this.setContextModel(choice);
       this.refreshReasoningPicker(choice);
-    }).catch((e: Error): void => { if (this.pageAlive) this.errorMsg = e.message; });
+    }).catch((e: Error): void => {
+      if (this.pageAlive && seq === this.contextChoiceSeq
+        && (this.conversation !== null ? this.conversation.id : '') === conversationId
+        && this.conversation?.assistantId === assistantId) this.errorMsg = e.message;
+    });
   }
 
+  // 未使用：模型标签现与 Context/Reasoning 一并由 refreshEffectiveModelState 更新。
   private async describeEffectiveModel(): Promise<string> {
     const choice: ChatProviderChoice | null =
       await resolveEffectiveChatChoice(this.conversation?.assistantId);
@@ -3593,12 +3642,8 @@ struct ChatPage {
   private selectModelFromMenu(providerId: string, modelId: string): void {
     saveEffectiveChatChoice({ providerId, modelId }, this.conversation?.assistantId).then((): void => {
       if (!this.pageAlive) return;
-      this.describeEffectiveModel().then((label: string): void => { if (this.pageAlive) this.modelLabel = label; });
       // contextWindowTokens + ReasoningPicker 段集也随之刷新(模型变了,档位段集 + 当前档位变)
-      resolveEffectiveChatChoice(this.conversation?.assistantId).then((choice: ChatProviderChoice | null): void => {
-        this.contextWindowTokens = choice !== null ? choice.model.contextWindowTokens : null;
-        this.refreshReasoningPicker(choice);
-      });
+      this.refreshEffectiveModelState();
       this.closeModelMenu();
     }).catch((e: Error): void => { if (this.pageAlive) this.errorMsg = e.message; });
   }

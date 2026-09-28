@@ -6,6 +6,7 @@
   "license": "Apache-2.0",
   "dependencies": {
     "@amber/deepread-domain": "file:../deepread",
-    "@amber/chat-domain": "file:../chat"
+    "@amber/chat-domain": "file:../chat",
+    "libamber_native.so": "file:./src/main/cpp/types/libamber_native"
   }
 }

@@ -1,0 +1,14 @@
+[package]
+name = "amber-native-core"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+name = "amber_native_core"
+crate-type = ["staticlib", "rlib"]
+
+[dependencies]
+tiktoken-rs = "=0.6.0"
+
+[workspace]

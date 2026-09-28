@@ -52,6 +52,17 @@ const env = {
   OHOS_BASE_SDK_HOME: ohosBaseSdkHome,
 };
 
+const sdkNinja = path.join(ohosBaseSdkHome, 'native/build-tools/cmake/bin/ninja');
+if (process.platform === 'darwin' && process.arch === 'arm64' && !env.AMBER_NATIVE_NINJA) {
+  const check = spawnSync(sdkNinja, ['--version']);
+  if (check.error?.errno === -86) {
+    const armNinja = '/Applications/DevEco-Studio.app/Contents/sdk/default/openharmony/native/build-tools/cmake/bin/ninja';
+    const armCheck = spawnSync(armNinja, ['--version']);
+    if (armCheck.status !== 0) throw new Error('The SDK Ninja cannot run; set AMBER_NATIVE_NINJA to a compatible Ninja.');
+    env.AMBER_NATIVE_NINJA = armNinja;
+  }
+}
+
 const args = process.argv.slice(2);
 const taskArgs = args.length > 0 ? args : ['assembleApp', '--no-daemon'];
 console.log(`DEVECO_SDK_HOME=${env.DEVECO_SDK_HOME}`);
