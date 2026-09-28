@@ -18,6 +18,21 @@ const DEFAULT_SOUL_FILE: string = 'SOUL.md';
 const MAX_SOUL_CHARS: number = 64 * 1024;
 const SOUL_PREVIOUS_KEY: string = 'soul_previous_markdown';
 
+// 灵魂与记忆页共用:回退可用性查询/执行(与 soul_import/soul_rollback 同一存储键,单次有效)
+export const readPreviousSoulMarkdown = async (): Promise<string | null> => {
+  const kv = getChatKvStore();
+  return kv.get(SOUL_PREVIOUS_KEY);
+};
+
+export const rollbackSoulToPrevious = async (): Promise<boolean> => {
+  const kv = getChatKvStore();
+  const previous: string | null = await kv.get(SOUL_PREVIOUS_KEY);
+  if (previous === null) return false;
+  await updateAgentSoulMarkdown(kv, previous);
+  await kv.delete(SOUL_PREVIOUS_KEY);
+  return true;
+};
+
 const textPart = (payload: JsonObject): UIMessagePart[] => [
   { type: 'text', text: JSON.stringify(payload), metadata: null },
 ];

@@ -958,7 +958,7 @@ struct ChatPromptsPage {
     Stack() {
       Column() {
         CenteredTitleBar({
-          title: '提示词',
+          title: '提示词注入',
           actionIcon: 'plus',
           onAction: (): void => {
             // 添加动作跟随当前分段(原底部 floating toolbar 适配)
