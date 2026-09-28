@@ -2,7 +2,7 @@
   "objective": "完成所有纳入范围的剩余功能并逐阶段独立审查与验证",
   "baseline": "6840fa551",
   "status": "active",
-  "currentPhase": "E10",
+  "currentPhase": "E11",
   "authorization": "用户授权持续实施、subagent审查、分阶段推进",
   "phases": {
     "E0": "complete",
@@ -16,7 +16,7 @@
     "E8": "in_progress",
     "E9": "in_progress",
     "E10": "in_progress",
-    "E11": "pending",
+    "E11": "in_progress",
     "E12": "pending",
     "E13": "pending",
     "E14": "pending"
@@ -48,7 +48,10 @@
     "E9Contract": "frozen: packets/E9-contract.md; separate Antigravity/CodeAssist/SA identity, secure references and per-request auth",
     "E8SourceCommit": "189eec7bd",
     "E9": "Source independent A/B PASS; only domain HTTP10, Entry lifecycle1 with concrete stale-binding red/green, temporary RSA1 and native TCP1/SDK syntax groups PASS; narrow types/lint0error/final Release10.586s/local sign verify PASS. C actual Google account/API12 store/crypto/browser/UI/install pending; see E9-gate.md",
-    "E10Contract": "frozen: packets/E10-contract.md; explicit Google builtin request mode, complete metadata-only tail/source-status/HTML persistence and actual UI consumers"
+    "E10Contract": "frozen: packets/E10-contract.md; explicit Google builtin request mode, complete metadata-only tail/source-status/HTML persistence and actual UI consumers",
+    "E9SourceCommit": "caa5b9d50",
+    "E10": "Source independent A/B PASS; only actual Google tools/metadata-tail/codec roundtrip group red-green1 PASS, narrow types/affected lint0error, final Release9.545s/local sign verify PASS. C actual Google/UI/link/height/install pending; see E10-gate.md",
+    "E11Contract": "frozen: packets/E11-contract.md; neutral saved-subject triage, fixed ModelConfig council tool loops/per-seat durable approval, actual default Assistant tool scope and E12 Web dependency"
   },
   "blockers": [
     {
@@ -90,6 +93,11 @@
       "phase": "E9",
       "kind": "device_account_acceptance",
       "details": "Latest recorded HDC Empty; no repeated recovery or account requests. Registered client/redirect, API12 Asset/Crypto/native browser callback, Code Assist/Antigravity eligibility and Vertex inference, streaming/nonstream, UI/install/launch pending. Source Release and local sign verified; continue E10."
+    },
+    {
+      "phase": "E10",
+      "kind": "device_provider_acceptance",
+      "details": "Latest recorded HDC Empty; no repeated recovery or provider requests. Actual Google builtin-model acceptance, persisted source/status/HTML bright-dark UI, adaptive Web height/external-link gesture and original-signature install/launch pending. Source Release/sign verified; continue E11."
     }
   ]
 }

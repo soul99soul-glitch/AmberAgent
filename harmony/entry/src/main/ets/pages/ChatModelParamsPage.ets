@@ -14,8 +14,7 @@
 // 偏差登记:
 //   - Android 逐键 trim 入草稿(显示保留原始按键)→ 确认时统一 trim,
 //     持久化结果等价;显示态 raw 保留
-//   - 高级设置 tab 的 ProviderOverwriteSettings(:251-257)/内置工具 tab
-//     (:275-283)未移植(P1 已登),本页仅 customHeaders/customBodies 两节
+//   - 提供商覆写保留展示/移除入口；内置工具按实际请求提供商说明支持边界。
 import {
   ACCENT, BG, ERROR, INK, INK3, LINE, RAISED, TEXT_STYLES,
 } from '../design/tokens.ets';
@@ -24,7 +23,7 @@ import { FONT_MONO, FONT_MONO_MEDIUM } from '../design/fonts.ets';
 import { router } from '@kit.ArkUI';
 import type {
   CustomBody, CustomHeader, JsonValue, ProviderModel, ProviderSetting,
-  ModelType, ModalityFull, BuiltInTools,
+  ModelType, ModalityFull, BuiltInTools, ProviderSettingOpenAIVariant,
 } from '@amber/chat-domain';
 import { loadProviders, saveProviders } from '@amber/chat-domain';
 import { getChatKvStore } from '../di/AppContainer.ets';
@@ -47,6 +46,15 @@ interface RouterParams {
 const MODEL_TYPE_OPTIONS: string[] = ['聊天', '生图', '嵌入'];
 const MODEL_TYPE_VALUES: string[] = ['chat', 'image', 'embedding'];
 
+class ModelParameterColors {
+  background: string = BG;
+  ink: string = INK;
+  muted: string = INK3;
+  line: string = LINE;
+  raised: string = RAISED;
+  error: string = ERROR;
+}
+
 @Entry
 @Component
 struct ChatModelParamsPage {
@@ -63,16 +71,24 @@ struct ChatModelParamsPage {
   private modelRowId: string = '';
   // 提供商覆写(D-109 补:展示 + 移除;新增/编辑待提供商编辑器支持 detached 模式)
   @State overwriteName: string = '';
-  private hasOverwrite: boolean = false;
+  @State hasOverwrite: boolean = false;
   // 模型属性(类型/输入模态/上下文窗口;Android 单模型表单对齐)
   @State modelType: string = 'chat';
   @State inputText: boolean = true;
   @State inputImage: boolean = false;
   @State inputAudio: boolean = false;
   @State contextWindowText: string = '';
-  // D3-3:内置工具草稿(model.tools;search/image_generation 经 OpenAI Responses 消费)
+  // 同一 model.tools 草稿；不因当前协议不支持而移除已存选项。
   @State toolSearch: boolean = false;
+  @State toolUrlContext: boolean = false;
   @State toolImageGen: boolean = false;
+  @State toolProtocol: string = 'other';
+  @State toolProviderName: string = '';
+  @State colors: ModelParameterColors = new ModelParameterColors();
+  @StorageProp('darkMode') @Watch('refreshColors') darkMode: boolean = false;
+  @StorageProp('themePackId') @Watch('refreshColors') themePackId: string = '';
+  @StorageProp('accentColor') @Watch('refreshColors') accentColor: string = ACCENT;
+  @StorageProp('navBarHeight') navBarHeight: number = 0;
 
   aboutToAppear(): void {
     const params = router.getParams() as RouterParams;
@@ -107,10 +123,19 @@ struct ChatModelParamsPage {
         this.contextWindowText = model.contextWindowTokens !== null
           ? `${model.contextWindowTokens}` : '';
         this.toolSearch = model.tools.indexOf('search') >= 0;
+        this.toolUrlContext = model.tools.indexOf('url_context') >= 0;
         this.toolImageGen = model.tools.indexOf('image_generation') >= 0;
+        this.updateToolProtocol(model.providerOverwrite ?? provider);
       }
       this.loaded = true;
     });
+  }
+
+  private refreshColors(): void { this.colors = new ModelParameterColors(); }
+  private updateToolProtocol(provider: ProviderSetting): void {
+    this.toolProviderName = provider.name;
+    this.toolProtocol = provider.type === 'google' ? 'google'
+      : provider.type === 'openai' && (provider as ProviderSettingOpenAIVariant).useResponseApi ? 'responses' : 'other';
   }
 
   // ===== Headers(:327-394) =====
@@ -252,6 +277,7 @@ struct ChatModelParamsPage {
     const modelType: string = this.modelType;
     const tools: BuiltInTools[] = [];
     if (this.toolSearch) tools.push('search');
+    if (this.toolUrlContext) tools.push('url_context');
     if (this.toolImageGen) tools.push('image_generation');
     const models: ProviderModel[] = provider.models.map((m: ProviderModel): ProviderModel => {
       if (m.id !== this.modelRowId) return m;
@@ -304,10 +330,61 @@ struct ChatModelParamsPage {
         return this.rebuildProvider(p, models);
       });
       saveProviders(getChatKvStore(), all).then((): void => {
+        this.provider = this.rebuildProvider(provider, models);
         this.hasOverwrite = false;
         this.overwriteName = '';
+        this.updateToolProtocol(provider);
       });
     });
+  }
+
+  @Builder
+  private builtInToolRow(tool: BuiltInTools, last: boolean): void {
+    Row() {
+      Text(tool === 'search' ? '联网搜索' : tool === 'url_context' ? '网址上下文（Google）' : '生成图片')
+        .fontSize(TEXT_STYLES.body.size).fontWeight(600).fontColor(this.colors.ink).layoutWeight(1)
+      Row() {
+        Toggle({ type: ToggleType.Switch, isOn: tool === 'search' ? this.toolSearch : tool === 'url_context' ? this.toolUrlContext : this.toolImageGen })
+          .width(44).height(44).selectedColor(this.accentColor).onChange((value: boolean): void => {
+            if (tool === 'search') this.toolSearch = value;
+            else if (tool === 'url_context') this.toolUrlContext = value;
+            else this.toolImageGen = value;
+          })
+      }.constraintSize({ minWidth: 44, minHeight: 44 }).justifyContent(FlexAlign.End).margin({ left: 12 })
+    }.width('100%').constraintSize({ minHeight: 64 }).padding({ left: 16, right: 16, top: 12, bottom: 12 })
+    if (!last) Row().width('100%').height(1).backgroundColor(this.colors.line)
+  }
+
+  @Builder
+  private builtInTools(): void {
+    Column({ space: 8 }) {
+      Text(`实际请求服务商：${this.toolProviderName}`).fontSize(TEXT_STYLES.secondary.size)
+        .fontColor(this.colors.muted).width('100%').wordBreak(WordBreak.BREAK_ALL)
+      if (this.toolProtocol === 'google') {
+        Text('Google 联网搜索与网址上下文由服务商执行，模型是否支持以实际返回为准。')
+          .fontSize(TEXT_STYLES.secondary.size).fontColor(this.colors.muted).width('100%')
+        if (this.toolSearch || this.toolUrlContext) {
+          Text('当前为 Google 内置工具模式，不注册本地工具或 MCP 函数。需要这些函数工具时，请关闭联网搜索和网址上下文。')
+            .fontSize(TEXT_STYLES.secondary.size).fontColor(this.colors.ink).width('100%')
+        } else {
+          Text('未启用 Google 搜索或网址上下文，保留原有函数工具模式；本地和 MCP 工具是否可用仍由助手配置决定。')
+            .fontSize(TEXT_STYLES.secondary.size).fontColor(this.colors.muted).width('100%')
+        }
+        if (this.toolImageGen) Text('生成图片选项会保留，但此处不映射为 Google 内置工具，也不会单独改变函数工具模式。')
+          .fontSize(TEXT_STYLES.secondary.size).fontColor(this.colors.muted).width('100%')
+      } else if (this.toolProtocol === 'responses') {
+        Text('OpenAI Responses 使用现有联网搜索与生成图片映射；网址上下文仅适用于 Google，在当前协议下不发送，该选项仍会保存。')
+          .fontSize(TEXT_STYLES.secondary.size).fontColor(this.colors.muted).width('100%')
+      } else {
+        Text('当前服务商协议不映射这些内置工具。已选项仍会保存，但不会因此变成可用工具；网址上下文仅适用于 Google。')
+          .fontSize(TEXT_STYLES.secondary.size).fontColor(this.colors.muted).width('100%')
+      }
+      this.builtInToolRow('search', false)
+      this.builtInToolRow('url_context', false)
+      this.builtInToolRow('image_generation', true)
+      Text('服务商错误会如实显示。自定义 Body 沿原规则最后覆盖请求字段，包括 tools；请确认它与所选模式一致。')
+        .fontSize(TEXT_STYLES.secondary.size).fontColor(this.colors.muted).width('100%')
+    }.width('100%').alignItems(HorizontalAlign.Start).padding({ left: 16, right: 16, top: 12, bottom: 4 })
   }
 
   @Builder
@@ -315,11 +392,11 @@ struct ChatModelParamsPage {
     Column() {
       Text(label).fontSize(TEXT_STYLES.secondary.size).fontWeight(FontWeight.Medium)
         .lineHeight(TEXT_STYLES.secondary.lineHeight).fontFamily(TEXT_STYLES.secondary.family)
-        .fontColor(INK3).margin({ bottom: 4 })
+        .fontColor(this.colors.muted).margin({ bottom: 4 })
       TextInput({ text: value, placeholder: placeholder })
         .fontSize(TEXT_STYLES.meta.size).fontWeight(FontWeight.Medium)
-        .lineHeight(TEXT_STYLES.meta.lineHeight).fontFamily(FONT_MONO_MEDIUM).fontColor(INK).height(40)
-        .backgroundColor(RAISED).borderRadius(8).border({ width: 1, color: LINE })
+        .lineHeight(TEXT_STYLES.meta.lineHeight).fontFamily(FONT_MONO_MEDIUM).fontColor(this.colors.ink).placeholderColor(this.colors.muted).height(44)
+        .backgroundColor(this.colors.raised).borderRadius(8).border({ width: 1, color: this.colors.line })
         .onChange(onChange)
     }
     .width('100%').alignItems(HorizontalAlign.Start).margin({ bottom: 10 })
@@ -330,9 +407,9 @@ struct ChatModelParamsPage {
       PageTitleBar({ title: `模型参数 · ${this.modelLabel}` })
 
       if (!this.loaded) {
-        Text('加载中…').fontSize(13).fontColor(INK3).margin({ top: 32 })
+        Text('加载中…').fontSize(13).fontColor(this.colors.muted).margin({ top: 32 })
       } else if (this.provider === null) {
-        Text('模型不存在').fontSize(13).fontColor(INK3).margin({ top: 32 })
+        Text('模型不存在').fontSize(13).fontColor(this.colors.muted).margin({ top: 32 })
       } else {
         Scroll() {
           Column() {
@@ -344,12 +421,12 @@ struct ChatModelParamsPage {
                   Column() {
                     Text(this.overwriteName)
                       .fontSize(TEXT_STYLES.body.size).fontWeight(600)
-                      .lineHeight(TEXT_STYLES.body.lineHeight).fontColor(INK)
+                      .lineHeight(TEXT_STYLES.body.lineHeight).fontColor(this.colors.ink)
                       .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
                     Text('override')
                       .fontSize(TEXT_STYLES.tinyTag.size)
                       .lineHeight(TEXT_STYLES.tinyTag.lineHeight).fontFamily(FONT_MONO)
-                      .fontColor(INK3).margin({ top: 2 })
+                      .fontColor(this.colors.muted).margin({ top: 2 })
                   }
                   .alignItems(HorizontalAlign.Start).layoutWeight(1).margin({ right: 12 })
                   BtnGhost({ label: '移除', onTap: (): void => { this.removeOverwrite(); } })
@@ -363,7 +440,7 @@ struct ChatModelParamsPage {
             Text('该模型使用独立的提供商参数;新增与编辑覆写随提供商编辑器扩展提供。')
               .fontSize(TEXT_STYLES.secondary.size)
               .lineHeight(TEXT_STYLES.secondary.lineHeight).fontFamily(TEXT_STYLES.secondary.family)
-              .fontColor(INK3).width('100%')
+              .fontColor(this.colors.muted).width('100%')
               .padding({ left: 16, right: 16, top: this.hasOverwrite ? 8 : 12, bottom: 8 })
 
             // ── 模型属性(类型/输入模态/上下文窗口;Android 单模型表单对齐) ──
@@ -372,7 +449,7 @@ struct ChatModelParamsPage {
               Text('类型')
                 .fontSize(TEXT_STYLES.secondary.size).fontWeight(FontWeight.Medium)
                 .lineHeight(TEXT_STYLES.secondary.lineHeight).fontFamily(TEXT_STYLES.secondary.family)
-                .fontColor(INK3).margin({ bottom: 4 })
+                .fontColor(this.colors.muted).margin({ bottom: 4 })
               Seg({
                 options: MODEL_TYPE_OPTIONS,
                 selected: this.modelTypeIndex(),
@@ -381,7 +458,7 @@ struct ChatModelParamsPage {
               Text('输入模态')
                 .fontSize(TEXT_STYLES.secondary.size).fontWeight(FontWeight.Medium)
                 .lineHeight(TEXT_STYLES.secondary.lineHeight).fontFamily(TEXT_STYLES.secondary.family)
-                .fontColor(INK3).margin({ top: 12, bottom: 4 })
+                .fontColor(this.colors.muted).margin({ top: 12, bottom: 4 })
               ToggleRow({
                 label: '文本', checked: this.inputText, isLast: false,
                 onToggle: (): void => { this.inputText = !this.inputText; },
@@ -401,24 +478,9 @@ struct ChatModelParamsPage {
             .width('100%').alignItems(HorizontalAlign.Start)
             .padding({ left: 16, right: 16, top: 12, bottom: 4 })
 
-            // ── 内置工具(D3-3;OpenAI Responses 消费:url_context/Google 侧 P1 登记) ──
+            // ── 内置工具：按实际 effective 提供商展示模式，保存所有草稿选项 ──
             SectionHeader({ label: '内置工具' })
-            Column() {
-              Text('由服务商侧执行的模型自带工具(仅 OpenAI Responses 协议生效)')
-                .fontSize(TEXT_STYLES.secondary.size)
-                .lineHeight(TEXT_STYLES.secondary.lineHeight).fontFamily(TEXT_STYLES.secondary.family)
-                .fontColor(INK3).width('100%').margin({ bottom: 4 })
-              ToggleRow({
-                label: '联网搜索(web_search)', checked: this.toolSearch, isLast: false,
-                onToggle: (): void => { this.toolSearch = !this.toolSearch; },
-              })
-              ToggleRow({
-                label: '生成图片(image_generation)', checked: this.toolImageGen, isLast: true,
-                onToggle: (): void => { this.toolImageGen = !this.toolImageGen; },
-              })
-            }
-            .width('100%').alignItems(HorizontalAlign.Start)
-            .padding({ left: 16, right: 16, top: 12, bottom: 4 })
+            this.builtInTools()
 
             // ── 请求伪装(UA 预设;iOS/Android 同源,写入下方自定义 Headers) ──
             SectionHeader({ label: '请求伪装' })
@@ -426,16 +488,16 @@ struct ChatModelParamsPage {
               Text('User-Agent 预设(草稿语义,确定后生效)')
                 .fontSize(TEXT_STYLES.secondary.size)
                 .lineHeight(TEXT_STYLES.secondary.lineHeight).fontFamily(TEXT_STYLES.secondary.family)
-                .fontColor(INK3).width('100%')
+                .fontColor(this.colors.muted).width('100%')
               Flex({ wrap: FlexWrap.Wrap }) {
                 ForEach(UA_PRESETS, (p: string[]): void => {
                   Text(p[0])
                     .fontSize(TEXT_STYLES.meta.size).fontWeight(FontWeight.Medium)
                     .lineHeight(TEXT_STYLES.meta.lineHeight).fontFamily(FONT_MONO_MEDIUM)
-                    .fontColor(this.uaCurrent() === p[1] ? ACCENT : INK3)
-                    .padding({ left: 10, right: 10, top: 6, bottom: 6 })
-                    .backgroundColor(RAISED)
-                    .border({ width: 1, color: this.uaCurrent() === p[1] ? ACCENT : LINE, radius: 8 })
+                    .fontColor(this.uaCurrent() === p[1] ? this.accentColor : this.colors.muted)
+                    .constraintSize({ minHeight: 44 }).padding({ left: 10, right: 10, top: 6, bottom: 6 })
+                    .backgroundColor(this.colors.raised)
+                    .border({ width: 1, color: this.uaCurrent() === p[1] ? this.accentColor : this.colors.line, radius: 8 })
                     .margin({ right: 8, top: 8 })
                     .onClick((): void => { this.applyUaPreset(p[1]); })
                 }, (p: string[]): string => p[0])
@@ -443,10 +505,10 @@ struct ChatModelParamsPage {
                   Text('清除')
                     .fontSize(TEXT_STYLES.meta.size).fontWeight(FontWeight.Medium)
                     .lineHeight(TEXT_STYLES.meta.lineHeight).fontFamily(FONT_MONO_MEDIUM)
-                    .fontColor(ERROR)
-                    .padding({ left: 10, right: 10, top: 6, bottom: 6 })
-                    .backgroundColor(RAISED)
-                    .border({ width: 1, color: LINE, radius: 8 })
+                    .fontColor(this.colors.error)
+                    .constraintSize({ minHeight: 44 }).padding({ left: 10, right: 10, top: 6, bottom: 6 })
+                    .backgroundColor(this.colors.raised)
+                    .border({ width: 1, color: this.colors.line, radius: 8 })
                     .margin({ right: 8, top: 8 })
                     .onClick((): void => { this.clearUa(); })
                 }
@@ -463,7 +525,7 @@ struct ChatModelParamsPage {
                 Row() {
                   Text(`HEADER ${i + 1}`).fontSize(TEXT_STYLES.meta.size).fontWeight(600)
                     .lineHeight(TEXT_STYLES.meta.lineHeight).fontFamily(FONT_MONO_MEDIUM)
-                    .fontColor(INK3)
+                    .fontColor(this.colors.muted)
                   Blank()
                   BtnGhost({ label: '删除', onTap: (): void => { this.removeHeader(i); } })
                 }
@@ -491,7 +553,7 @@ struct ChatModelParamsPage {
                 Row() {
                   Text(`BODY ${i + 1}`).fontSize(TEXT_STYLES.meta.size).fontWeight(600)
                     .lineHeight(TEXT_STYLES.meta.lineHeight).fontFamily(FONT_MONO_MEDIUM)
-                    .fontColor(INK3)
+                    .fontColor(this.colors.muted)
                   Blank()
                   BtnGhost({ label: '删除', onTap: (): void => { this.removeBody(i); } })
                 }
@@ -501,16 +563,16 @@ struct ChatModelParamsPage {
                 Column() {
                   Text('Body 值 (JSON)').fontSize(TEXT_STYLES.secondary.size).fontWeight(FontWeight.Medium)
                     .lineHeight(TEXT_STYLES.secondary.lineHeight).fontFamily(TEXT_STYLES.secondary.family)
-                    .fontColor(INK3).margin({ bottom: 4 })
+                    .fontColor(this.colors.muted).margin({ bottom: 4 })
                   TextArea({ text: this.bodyTexts[i] ?? '', placeholder: 'Body 值 (JSON)' })
                     .fontSize(TEXT_STYLES.meta.size).lineHeight(TEXT_STYLES.meta.lineHeight)
-                    .fontFamily(FONT_MONO).fontColor(INK).backgroundColor(RAISED)
-                    .borderRadius(8).border({ width: 1, color: LINE }).height(98)
+                    .fontFamily(FONT_MONO).fontColor(this.colors.ink).placeholderColor(this.colors.muted).backgroundColor(this.colors.raised)
+                    .borderRadius(8).border({ width: 1, color: this.colors.line }).height(98)
                     .onChange((v: string): void => { this.setBodyText(i, v); })
                   if ((this.bodyErrors[i] ?? '').length > 0) {
                     Text(this.bodyErrors[i]).fontSize(TEXT_STYLES.meta.size)
                       .lineHeight(TEXT_STYLES.meta.lineHeight).fontFamily(FONT_MONO)
-                      .fontColor(ERROR).width('100%').margin({ top: 6 })
+                      .fontColor(this.colors.error).width('100%').margin({ top: 6 })
                   }
                 }
                 .width('100%').alignItems(HorizontalAlign.Start).margin({ bottom: 10 })
@@ -526,7 +588,7 @@ struct ChatModelParamsPage {
             }
             .padding({ left: 16, right: 16, top: 8, bottom: 24 })
           }
-          .width('100%').padding({ left: 16, right: 16, bottom: 32 })
+          .width('100%').padding({ left: 16, right: 16, bottom: 16 }).justifyContent(FlexAlign.Start)
         }
         .align(Alignment.TopStart)
         .layoutWeight(1)
@@ -539,9 +601,9 @@ struct ChatModelParamsPage {
           }
           .margin({ left: 8 })
         }
-        .width('100%').padding({ left: 16, right: 16, top: 8, bottom: 16 })
+        .width('100%').padding({ left: 16, right: 16, top: 8, bottom: 16 + this.navBarHeight })
       }
     }
-    .width('100%').height('100%').backgroundColor(BG)
+    .width('100%').height('100%').backgroundColor(this.colors.background)
   }
 }

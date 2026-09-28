@@ -117,6 +117,25 @@ export const parseSearchGroundingMetadata = (
   return out;
 };
 
+// 非流式与 SSE 的 candidate 来源采用同一映射,保留真实状态和建议 HTML。
+const parseGoogleCandidateAnnotations = (candidate: JsonObject): UIMessageAnnotation[] => {
+  const grounding: JsonValue | undefined = candidate['groundingMetadata'];
+  const annotations: UIMessageAnnotation[] = parseSearchGroundingMetadata(isObj(grounding) ? grounding : null);
+  const entry: JsonValue | undefined = isObj(grounding) ? grounding['searchEntryPoint'] : undefined;
+  const html: string | null = isObj(entry) ? strOrNull(entry['renderedContent']) : null;
+  if (html !== null && html.length > 0) annotations.push({ type: 'google_search_suggestions', html });
+
+  const context: JsonValue | undefined = candidate['urlContextMetadata'];
+  const urls: JsonValue | undefined = isObj(context) ? context['urlMetadata'] : undefined;
+  if (Array.isArray(urls)) for (const item of urls) {
+    if (!isObj(item)) continue;
+    const url: string | null = strOrNull(item['retrievedUrl']);
+    const status: string | null = strOrNull(item['urlRetrievalStatus']);
+    if (url !== null && status !== null) annotations.push({ type: 'url_context', url, status });
+  }
+  return annotations;
+};
+
 // ===== parseMessage(:640-658) =====
 
 export const parseGoogleMessage = (message: JsonObject): UIMessage => {
@@ -131,9 +150,7 @@ export const parseGoogleMessage = (message: JsonObject): UIMessage => {
         parseGoogleMessagePart(isObj(p) ? p : {}))
     : [];
 
-  const groundingRaw: JsonValue | undefined = message['groundingMetadata'];
-  const annotations: UIMessageAnnotation[] = parseSearchGroundingMetadata(
-    isObj(groundingRaw) ? groundingRaw : null);
+  const annotations: UIMessageAnnotation[] = parseGoogleCandidateAnnotations(message);
 
   return makeUIMessage(role, parts, { annotations });
 };
@@ -252,7 +269,12 @@ export const parseGoogleStreamEventData = (
       if (isObj(content)) {
         const wrapped: JsonObject = { role: 'model', content };
         if (isObj(grounding)) wrapped['groundingMetadata'] = grounding;
+        const context: JsonValue | undefined = candidateObj['urlContextMetadata'];
+        if (isObj(context)) wrapped['urlContextMetadata'] = context;
         message = allocator(parseGoogleMessage(wrapped));
+      } else {
+        const annotations: UIMessageAnnotation[] = parseGoogleCandidateAnnotations(candidateObj);
+        if (annotations.length > 0) message = makeUIMessage('assistant', [], { annotations });
       }
       return { index, delta: message, message: null, finishReason };
     });

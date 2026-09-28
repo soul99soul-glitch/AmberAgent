@@ -16,6 +16,7 @@ export type {
   UIMessagePart, UIMessagePartText, UIMessagePartImage, UIMessagePartVideo,
   UIMessagePartAudio, UIMessagePartDocument, UIMessagePartMiniApp,
   UIMessagePartReasoning, UIMessagePartTool,
+  UIMessageUrlContextAnnotation, UIMessageGoogleSearchSuggestionsAnnotation,
   UIMessageAnnotation, UIMessage, UIMessageOpts, UIMessageChoice, MessageChunk,
 } from './chat/message.ts';
 export {

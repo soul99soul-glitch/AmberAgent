@@ -9,8 +9,8 @@
 //   Request.kt removeElements(:97-127)
 //
 // 裁剪(登记):
-//   - BuiltInTools(googleSearch/urlContext):Android Model.tools 在鸿蒙 ChatModel
-//     无对应字段 → 不生成 built-in tools 块(P1)
+//   - BuiltInTools(googleSearch/urlContext):使用显式内置工具模式;
+//     该模式不注册 functionDeclarations,不启用 Gemini 3 的混用协议
 //   - Vertex AI service account / Gemini Code Assist OAuth 传输差异 = adapter
 //     关注点(API 层登记);isCodeAssistOAuth 仅保留对 thinkingConfig 的纯逻辑影响
 //   - image 编码注入 Port(与 Claude 同构 ClaudeImageEncoder,mime + 无前缀 base64);
@@ -339,8 +339,14 @@ export const buildGoogleCompletionRequestBody = (
   // contents(:538-542)
   req['contents'] = buildGoogleContents(messages, encodeImage) as unknown as JsonValue;
 
-  // tools(:544-572):functionDeclarations + schema 键裁剪
-  if (params.tools.length > 0 && params.model.abilities.indexOf('tool') >= 0) {
+  // model.tools 的 Google 内置模式;image_generation 不是 Google 工具声明。
+  const builtInTools: JsonValue[] = [];
+  if (params.model.tools.indexOf('search') >= 0) builtInTools.push({ googleSearch: {} });
+  if (params.model.tools.indexOf('url_context') >= 0) builtInTools.push({ urlContext: {} });
+  if (builtInTools.length > 0) {
+    req['tools'] = builtInTools;
+  } else if (params.tools.length > 0 && params.model.abilities.indexOf('tool') >= 0) {
+    // 没有 Google 内置工具时保留 functionDeclarations + schema 键裁剪。
     const declarations: JsonValue[] = params.tools.map((tool): JsonObject => ({
       name: tool.name,
       description: tool.description,
@@ -348,9 +354,6 @@ export const buildGoogleCompletionRequestBody = (
     }));
     req['tools'] = [{ functionDeclarations: declarations as unknown as JsonValue }] as unknown as JsonValue;
   }
-
-  // BuiltInTools(model.tools):ChatModel.tools 已贯通(toChatModel 携带),Google 侧
-  //   映射(google_search/url_context)未实现 — P1 裁剪(登记);OpenAI Responses 已消费
 
   // safetySettings(:597-619)
   req['safetySettings'] = GOOGLE_SAFETY_SETTINGS as unknown as JsonValue;

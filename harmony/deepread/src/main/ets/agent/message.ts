@@ -98,9 +98,22 @@ export type UIMessagePart =
   | UIMessagePartReasoning
   | UIMessagePartTool;
 
+export interface UIMessageUrlContextAnnotation {
+  type: 'url_context';
+  url: string;
+  status: string;
+}
+
+export interface UIMessageGoogleSearchSuggestionsAnnotation {
+  type: 'google_search_suggestions';
+  html: string;
+}
+
 export type UIMessageAnnotation =
   | { type: 'url_citation'; title: string; url: string }
-  | { type: 'generation_interrupted'; reason: string };
+  | { type: 'generation_interrupted'; reason: string }
+  | UIMessageUrlContextAnnotation
+  | UIMessageGoogleSearchSuggestionsAnnotation;
 
 export interface UIMessage {
   id: string;

@@ -93,6 +93,8 @@ export const serializePart = (p: UIMessagePart): JsonObject => {
 
 const serializeAnnotation = (a: UIMessageAnnotation): JsonObject => {
   if (a.type === 'url_citation') return { type: 'url_citation', title: a.title, url: a.url };
+  if (a.type === 'url_context') return { type: 'url_context', url: a.url, status: a.status };
+  if (a.type === 'google_search_suggestions') return { type: 'google_search_suggestions', html: a.html };
   return { type: 'generation_interrupted', reason: a.reason };
 };
 
@@ -209,6 +211,12 @@ const parseAnnotation = (v: JsonValue): UIMessageAnnotation => {
   }
   if (type === 'generation_interrupted') {
     return { type: 'generation_interrupted', reason: strOr(v['reason'], '') };
+  }
+  if (type === 'url_context') {
+    return { type: 'url_context', url: reqStr(v, 'url'), status: reqStr(v, 'status') };
+  }
+  if (type === 'google_search_suggestions') {
+    return { type: 'google_search_suggestions', html: reqStr(v, 'html') };
   }
   throw new Error(`unknown annotation type: ${type}`);
 };

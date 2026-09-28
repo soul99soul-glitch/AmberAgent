@@ -6,6 +6,7 @@ export type {
   UIMessagePart, UIMessagePartText, UIMessagePartImage, UIMessagePartVideo,
   UIMessagePartAudio, UIMessagePartDocument, UIMessagePartMiniApp,
   UIMessagePartReasoning, UIMessagePartTool,
+  UIMessageUrlContextAnnotation, UIMessageGoogleSearchSuggestionsAnnotation,
   UIMessageAnnotation, UIMessage, UIMessageOpts, UIMessageChoice, MessageChunk,
 } from '@amber/deepread-domain';
 
