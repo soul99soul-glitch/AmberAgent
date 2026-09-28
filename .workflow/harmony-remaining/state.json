@@ -2,7 +2,7 @@
   "objective": "完成所有纳入范围的剩余功能并逐阶段独立审查与验证",
   "baseline": "6840fa551",
   "status": "active",
-  "currentPhase": "E12",
+  "currentPhase": "E13",
   "authorization": "用户授权持续实施、subagent审查、分阶段推进",
   "phases": {
     "E0": "complete",
@@ -54,7 +54,9 @@
     "E11Contract": "frozen: packets/E11-contract.md; neutral saved-subject triage, fixed ModelConfig council tool loops/per-seat durable approval, actual default Assistant tool scope and E12 Web dependency",
     "E10SourceCommit": "ed2452cdf",
     "E11": "Source checkpoint; council consumer group 1/1 and Jev lifecycle 7/7 PASS (fixture effect-recording, saved Recipe/Plugin checkpoint sources, council MCP identity in approval subject, ArkTS compile diagnostics fixed); changed-file lint 0 error, integrated CompileArkTS build PASS, local Test-CA sign verify PASS. C device install/live provider/UI pending.",
-    "E11SourceCommit": "e36090bad"
+    "E11SourceCommit": "e36090bad",
+    "E12": "Source checkpoint; contract frozen with narrow tap/replay admission decision; webmount domain 6/6, goal loop 4/4, jev lifecycle 7/7, council consumer 1/1 PASS; changed-file lint 0 error, integrated CompileArkTS build PASS, local Test-CA sign verify PASS. C real site OAuth/live ArkWeb/device UI pending.",
+    "E12SourceCommit": "c394c7241"
   },
   "blockers": [
     {
@@ -106,6 +108,11 @@
       "phase": "E11",
       "kind": "device_provider_acceptance",
       "details": "Latest recorded HDC Empty; no repeated recovery. Actual council run against live models, Jev triage with real evaluation endpoint, approval UI light/dark and original-signature install/launch pending. Source build/sign verified; continue E12."
+    },
+    {
+      "phase": "E12",
+      "kind": "device_site_acceptance",
+      "details": "Latest recorded HDC Empty. Real site OAuth with registered application credentials, live ArkWeb ledger/replay/touch counts, adapter DOM match on real sites, goal with live decision model, settings UI bright/dark and original-signature install pending. Source build/sign verified; continue E13."
     }
   ]
 }
