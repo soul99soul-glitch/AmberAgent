@@ -22,8 +22,16 @@ ArkTS 模块级 `export let` 是可变绑定,重新赋值**不触发任何 UI �
 
 - 已踩真 bug:`harmony/entry/src/main/ets/design/tokens.ets` 用 `export let` 色板 +
   `applyTheme(dark)` 整体赋值 → 切深色后栈内页面不刷新(退出重进才变)。
-- 正确做法:跨页共享状态一律 `AppStorage.setOrCreate('key', v)` 写入,消费端用
-  `@StorageProp('key')` / `@StorageLink('key')` 声明,状态驱动全 UI 刷新。
+- **现行机制(2026-09-29,勿拆)**:tokens.ets 保留 export let 令牌库,变更收口统一调
+  `bumpThemeEpoch()`(递增 AppStorage 'themeEpoch');全部 struct 订阅
+  `@StorageProp('themeEpoch')`;全部 @Entry 页面 build() 内容包
+  `ForEach([this.themeEpoch], …)` 纪元重挂载,epoch 变 → 整页子树销毁重建全量重读令牌。
+- **V1 深层限制(实测证伪两级方案后确认)**:「状态变量不能独立于 UI 存在」——
+  只声明 `@StorageProp` 而未在 build() UI 表达式中读取,变化**不触发重建**;
+  且 V1 是属性级精准更新,根节点挂 `.opacity(this.themeEpoch >= 0 ? 1 : 1)` 之类的
+  no-op 消费只重刷该属性,不带动整页。要全量刷新只有页面级 ForEach 重挂载。
+- 新加全局状态(非主题)仍走 `AppStorage.setOrCreate` + `@StorageProp/@StorageLink`,
+  且消费端必须在 UI 表达式里真读它。
 
 ### 2. API 基线是 12,不是 SDK 26
 
