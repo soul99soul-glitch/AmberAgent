@@ -77,7 +77,8 @@ export struct PageTitleBar {
   }
 }
 
-// ===== Section Label (youhua .sec-label:`//` + 标签 + 右侧发丝线) =====
+// ===== Section Label (youhua .sec-label:`//` + 标签) =====
+// 2026-09-29:右侧发丝线移除(用户裁定对齐 iOS 素组标;分隔线过多)
 @Component
 export struct SectionHeader {
   @Prop label: string = '';
@@ -98,12 +99,6 @@ export struct SectionHeader {
         .fontColor(INK2)
         .maxLines(1)
         .textOverflow({ overflow: TextOverflow.Ellipsis })
-      // 标签右侧延伸到行尾的发丝线(youhua .sec-label::after)
-      Row()
-        .layoutWeight(1)
-        .height(1)
-        .backgroundColor(LINE)
-        .margin({ left: 8 })
     }
     .width('100%')
     .alignItems(VerticalAlign.Center)

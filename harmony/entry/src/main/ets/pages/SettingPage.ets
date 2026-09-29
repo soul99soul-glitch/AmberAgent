@@ -11,7 +11,7 @@ import { bundleManager } from '@kit.AbilityKit';
 import type { DisplaySetting, ManagedFileEntity } from '@amber/chat-domain';
 import { loadDisplaySetting } from '@amber/chat-domain';
 import {
-  BG, ACCENT, INK, INK2, INK3, LINE, SURFACE2, LABEL, TEXT_STYLES, GUTTER,
+  BG, ACCENT, INK, INK2, INK3, SURFACE2, LABEL, TEXT_STYLES, GUTTER,
 } from '../design/tokens.ets';
 import { SectionHeader, CardGroup, CardRow, PageSpacer } from '../components/PageTemplate.ets';
 import { FONT_MONO, FONT_SANS_SEMIBOLD } from '../design/fonts.ets';
@@ -106,76 +106,78 @@ struct SettingPage {
 
   // ── 六组卡片内容(@Builder:组件构造必须发生在 builder 上下文,
   //    裸 lambda 直接 new 组件会炸 "class constructor cannot called without 'new'")──
+  // 行图标统一 phosphor 族(与 iOS HomePhosphor 同源);plateStyle accent =
+  // accentSoftBg 座 + accent 图标,随「外观」强调色切换(@StorageProp 响应)
 
   @Builder
   GeneralCard(): void {
-    CardRow({ label: '外观', valueText: this.appearanceValue, iconName: 'ph_sun',
+    CardRow({ label: '外观', valueText: this.appearanceValue, iconName: 'ph_circleHalf', plateStyle: 'accent',
       onRowClick: (): void => { this.go('pages/SettingAppearancePage'); } })
-    CardRow({ label: '显示与字体', iconName: 'gear',
+    CardRow({ label: '显示与字体', iconName: 'ph_slidersHorizontal', plateStyle: 'accent',
       onRowClick: (): void => { this.go('pages/SettingDisplayPage'); } })
-    CardRow({ label: 'Mac Gateway', iconName: 'link', isLast: true,
+    CardRow({ label: 'Mac Gateway', iconName: 'ph_laptop', plateStyle: 'accent', isLast: true,
       onRowClick: (): void => { this.go('pages/SettingMacGatewayPage'); } })
   }
 
   @Builder
   AgentCard(): void {
-    CardRow({ label: '灵魂与记忆', iconName: 'brain',
+    CardRow({ label: '灵魂与记忆', iconName: 'ph_database', plateStyle: 'accent',
       onRowClick: (): void => { this.go('pages/SettingAgentMemoryPageFull'); } })
-    CardRow({ label: '运行环境', iconName: 'ph_code',
+    CardRow({ label: '运行环境', iconName: 'ph_terminalWindow', plateStyle: 'accent',
       onRowClick: (): void => { this.go('pages/SettingSandboxPage'); } })
-    CardRow({ label: '技能', iconName: 'puzzle',
+    CardRow({ label: '技能', iconName: 'ph_wrench', plateStyle: 'accent',
       onRowClick: (): void => { this.go('pages/SkillsPage'); } })
     // 权限与批准 = 系统权限的父级(iOS:系统权限在其内作子页);执行/显示并入运行环境
-    CardRow({ label: '权限与批准', iconName: 'shield', isLast: true,
+    CardRow({ label: '权限与批准', iconName: 'ph_shield', plateStyle: 'accent', isLast: true,
       onRowClick: (): void => { this.go('pages/ChatAgentPermissionsPage'); } })
   }
 
   @Builder
   ModelCard(): void {
-    CardRow({ label: '服务商', iconName: 'key',
+    CardRow({ label: '服务商', iconName: 'ph_hardDrives', plateStyle: 'accent',
       onRowClick: (): void => { this.go('pages/ChatProviderSettingsPage'); } })
-    CardRow({ label: '模型与提示词', valueText: this.modelLabel, iconName: 'spark',
+    CardRow({ label: '模型与提示词', valueText: this.modelLabel, iconName: 'ph_cpu', plateStyle: 'accent',
       onRowClick: (): void => { this.go('pages/ChatTaskModelsPage'); } })
-    CardRow({ label: '搜索服务', iconName: 'search',
+    CardRow({ label: '搜索服务', iconName: 'ph_magnifyingGlass', plateStyle: 'accent',
       onRowClick: (): void => { this.go('pages/ChatSearchSettingsPage'); } })
-    CardRow({ label: 'Jev 快速判断', iconName: 'brain', isLast: true,
+    CardRow({ label: 'Jev 快速判断', iconName: 'ph_lightning', plateStyle: 'accent', isLast: true,
       onRowClick: (): void => { this.go('pages/SettingJevPage'); } })
   }
 
   @Builder
   AdvancedCard(): void {
-    CardRow({ label: '站点', iconName: 'globe',
+    CardRow({ label: '站点', iconName: 'ph_globe', plateStyle: 'accent',
       onRowClick: (): void => { this.go('pages/SettingExperimentalWebMountPage'); } })
-    CardRow({ label: '子代理', iconName: 'ph_users',
+    CardRow({ label: '子代理', iconName: 'ph_users', plateStyle: 'accent',
       onRowClick: (): void => { this.go('pages/SettingSubAgentPage'); } })
-    CardRow({ label: '模型议会', iconName: 'ph_quotes',
+    CardRow({ label: '模型议会', iconName: 'ph_quotes', plateStyle: 'accent',
       onRowClick: (): void => { this.go('pages/SettingModelCouncilPage'); } })
-    CardRow({ label: '小应用', iconName: 'box',
+    CardRow({ label: '小应用', iconName: 'ph_squaresFour', plateStyle: 'accent',
       onRowClick: (): void => { this.go('pages/MiniAppSettingsPage'); } })
-    CardRow({ label: '小说创作', iconName: 'ph_pencil',
+    CardRow({ label: '小说创作', iconName: 'ph_pencil', plateStyle: 'accent',
       onRowClick: (): void => { this.go('pages/NovelProjectsPage'); } })
-    CardRow({ label: '深度阅读', iconName: 'book', isLast: true,
+    CardRow({ label: '深度阅读', iconName: 'ph_bookOpen', plateStyle: 'accent', isLast: true,
       onRowClick: (): void => { this.go('pages/SettingDeepReadPage'); } })
   }
 
   @Builder
   DataCard(): void {
-    CardRow({ label: '同步与备份', iconName: 'hi_app_archive',
+    CardRow({ label: '同步与备份', iconName: 'ph_arrowsClockwise', plateStyle: 'accent',
       onRowClick: (): void => { this.go('pages/SettingBackupPage'); } })
-    CardRow({ label: '聊天记录存储', valueText: this.storageLabel, iconName: 'hi_files',
+    CardRow({ label: '聊天记录存储', valueText: this.storageLabel, iconName: 'ph_files', plateStyle: 'accent',
       onRowClick: (): void => { this.go('pages/SettingFilesPage'); } })
     // 历史/收藏在别处无入口(基准截图虽无此两行,鸿蒙不能静默丢功能)
-    CardRow({ label: '历史记录', iconName: 'history',
+    CardRow({ label: '历史记录', iconName: 'ph_clockCounterClockwise', plateStyle: 'accent',
       onRowClick: (): void => { this.go('pages/HistoryPage'); } })
-    CardRow({ label: '收藏', iconName: 'star',
+    CardRow({ label: '收藏', iconName: 'ph_star', plateStyle: 'accent',
       onRowClick: (): void => { this.go('pages/FavoritePage'); } })
-    CardRow({ label: '快捷消息', iconName: 'hi_message', isLast: true,
+    CardRow({ label: '快捷消息', iconName: 'ph_chatCircleDots', plateStyle: 'accent', isLast: true,
       onRowClick: (): void => { this.go('pages/QuickMessagesPage'); } })
   }
 
   @Builder
   AmberCard(): void {
-    CardRow({ label: '关于', iconName: 'info', isLast: true,
+    CardRow({ label: '关于', iconName: 'ph_info', plateStyle: 'accent', isLast: true,
       onRowClick: (): void => { this.go('pages/SettingAboutPage'); } })
   }
 
@@ -233,7 +235,6 @@ struct SettingPage {
       .width('100%')
       .constraintSize({ minHeight: 64 })
       .padding({ left: 4, right: GUTTER, top: this.statusBarHeight, bottom: 8 })
-      .border({ width: { bottom: 1 }, color: { bottom: LINE } })
       .backgroundColor(BG)
 
       Scroll() {

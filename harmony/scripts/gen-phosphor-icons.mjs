@@ -31,6 +31,10 @@ const ICONS = [
   'bell', 'lock', 'key', 'translate', 'quotes', 'users', 'baby', 'rocket',
   'briefcase', 'handshake', 'yin-yang', 'ghost', 'alien', 'mask-happy',
   'palette', 'paint-brush', 'chat-circle',
+  // settings iOS 对齐(2026-09-29):行图标统一 phosphor 族
+  'circle-half', 'sliders-horizontal', 'laptop', 'database', 'terminal-window',
+  'wrench', 'shield', 'hard-drives', 'cpu', 'arrows-clockwise', 'files',
+  'clock-counter-clockwise', 'star', 'info',
 ];
 
 const BASE = 'https://cdn.jsdelivr.net/gh/phosphor-icons/core@main/assets/fill';
