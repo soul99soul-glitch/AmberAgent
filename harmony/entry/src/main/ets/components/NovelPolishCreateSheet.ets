@@ -3,7 +3,7 @@
 
 import {
   ACCENT, ACCENT_INK, ACCENT_LIGHT, ERROR, INK, INK2, INK3, INK4,
-  LINE, OVERLAY, SURFACE, SURFACE2,
+  LINE, MOTION_OVERLAY, OVERLAY, SURFACE, SURFACE2,
 } from '../design/tokens.ets';
 import type { PolishContextOptions } from '@amber/deepread-domain';
 
@@ -64,8 +64,12 @@ export struct NovelPolishCreateSheet {
         .width('100%').constraintSize({ maxHeight: '90%' })
         .backgroundColor(SURFACE).borderRadius({ topLeft: 20, topRight: 20 })
         .padding({ left: 20, right: 20, top: 18, bottom: 24 + this.bottomPadding })
+        .transition(TransitionEffect.translate({ y: 160 })
+          .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
       }
       .width('100%').height('100%').alignContent(Alignment.Bottom)
+      .transition(TransitionEffect.OPACITY
+        .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
     }
   }
 

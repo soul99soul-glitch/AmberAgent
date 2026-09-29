@@ -3,7 +3,7 @@
 // 组件不持有或修改工作区数据；父页面负责以回调执行创建、切换、撤销及状态同步。
 import {
   ACCENT, ACCENT_INK, ACCENT_LIGHT, BODY, ERROR, INK, INK3, INK4,
-  LINE, OVERLAY, RAISED, SURFACE, SURFACE2, TEXT_STYLES,
+  LINE, MOTION_OVERLAY, OVERLAY, RAISED, SURFACE, SURFACE2, TEXT_STYLES,
 } from '../design/tokens.ets';
 
 export type NovelBranchSheetLifecycle = 'active' | 'deleted';
@@ -55,8 +55,12 @@ export struct NovelBranchSheet {
         .backgroundColor(SURFACE)
         .borderRadius({ topLeft: 20, topRight: 20 })
         .padding({ left: 20, right: 20, top: 18, bottom: 24 })
+        .transition(TransitionEffect.translate({ y: 160 })
+          .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
       }
       .width('100%').height('100%').alignContent(Alignment.Bottom)
+      .transition(TransitionEffect.OPACITY
+        .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
     }
   }
 
