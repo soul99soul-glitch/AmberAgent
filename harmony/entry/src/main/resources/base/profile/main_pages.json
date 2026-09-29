@@ -29,6 +29,7 @@
     "pages/MiniAppSettingsPage",
     "pages/NovelProjectsPage",
     "pages/NovelWorkspacePage",
+    "pages/NovelChapterReaderPage",
     "pages/ProfilePage",
     "pages/QuickMessagesPage",
     "pages/SearchPage",

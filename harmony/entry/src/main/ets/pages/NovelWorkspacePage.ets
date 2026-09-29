@@ -35,7 +35,7 @@ import { MATERIAL_KIND_LABELS } from '@amber/deepread-domain';
 import {
   NovelProject, NovelMessage, NovelChapter, NovelMaterial, NovelMaterialSuggestion,
   NovelChatMode, NovelGenerationGranularity, NovelMaterialKind, NovelCollectionTarget,
-  NovelRunKind, NovelRun, NovelActiveRun, NovelRunEvent, NovelChapterVersion, NovelChapterVersionKind,
+  NovelRunKind, NovelRun, NovelActiveRun, NovelRunEvent,
   NovelSettingProposal,
   NovelWorkspaceStatus, StreamTransportState, UIMessage, makeUIMessage,
   UIMessagePart, novelMessageUi, novelMessageText, NovelToolContinuationVerdict,
@@ -161,15 +161,11 @@ struct NovelWorkspacePage {
   }
 
   // N2:章节版本历史 sheet
-  @State versionsChapterId: string = '';
-  @State versionsOpen: boolean = false;
   @StorageProp('navBarHeight') navBarHeight: number = 0;
-  @State chapterMenuId: string = '';
   @State pendingUserText: string = '';
   @State collectMessageId: string = '';
   @State collectTitle: string = '';
   // 章节
-  @State selectedChapterId: string = '';
   @State chapterEditorOpen: boolean = false;
   @State editingChapterId: string = '';
   @State chapterTitle: string = '';
@@ -240,6 +236,18 @@ struct NovelWorkspacePage {
     this.send('quick_start');
   }
 
+  // 阅读器 push 返回时刷新(章节编辑/版本恢复/删除在子页完成)
+  private pageHiddenOnce: boolean = false;
+
+  onPageHide(): void { this.pageHiddenOnce = true; }
+
+  onPageShow(): void {
+    if (this.pageHiddenOnce) {
+      this.pageHiddenOnce = false;
+      this.reload();
+    }
+  }
+
   aboutToDisappear(): void {
     this.getUIContext().setKeyboardAvoidMode(KeyboardAvoidMode.OFFSET);
     this.pageAlive = false;
@@ -278,14 +286,6 @@ struct NovelWorkspacePage {
     }
     if (this.branchSheetOpen) {
       this.branchSheetOpen = false;
-      return true;
-    }
-    if (this.versionsOpen) {
-      this.versionsOpen = false;
-      return true;
-    }
-    if (this.chapterMenuId.length > 0) {
-      this.chapterMenuId = '';
       return true;
     }
     if (this.materialEditorOpen) {
@@ -747,7 +747,6 @@ struct NovelWorkspacePage {
     this.busy = true;
     try {
       await getNovelCreation().switchBranch(this.projectId, branchId);
-      this.selectedChapterId = '';
       this.branchSheetOpen = false;
       await this.reload();
     } catch (e) {
@@ -1186,23 +1185,11 @@ struct NovelWorkspacePage {
     this.chapterEditorOpen = true;
   }
 
-  openEditChapter(c: NovelChapter): void {
-    if (this.novelJobLocksWorkspace()) return;
-    this.editingChapterId = c.id;
-    this.chapterTitle = c.title;
-    this.chapterContent = c.content;
-    this.chapterOriginalTitle = c.title;
-    this.chapterOriginalContent = c.content;
-    this.chapterEditorOpen = true;
-  }
-
-  // N2:订阅章节级 Run(复用 send 的流式订阅;终态 reload)
   private attachChapterRun(run: NovelRun, statusText: string): void {
     this.attachNovelRun(
       run, this.project?.messages.length ?? 0, '', Date.now(), statusText);
   }
 
-  // N2:单章重新生成(整章 regeneration Run)
   async regenerateChapter(chapterId: string): Promise<void> {
     if (this.hasBlockingNovelRun()) return;
     try {
@@ -1326,15 +1313,6 @@ struct NovelWorkspacePage {
   }
 
   // N2:章节版本历史
-  async openChapterVersions(chapterId: string): Promise<void> {
-    const p: NovelProject | null = await getNovelCreation().open(this.projectId);
-    if (this.pageAlive && p !== null) {
-      this.project = p;
-      this.versionsChapterId = chapterId;
-      this.versionsOpen = true;
-    }
-  }
-
   async saveChapter(): Promise<void> {
     if (this.novelJobLocksWorkspace()) return;
     this.busy = true;
@@ -1343,7 +1321,6 @@ struct NovelWorkspacePage {
         this.projectId, this.editingChapterId.length > 0 ? this.editingChapterId : null,
         this.chapterTitle, this.chapterContent);
       this.chapterEditorOpen = false;
-      this.selectedChapterId = saved.id;
       this.errorMsg = '';
       await this.reload();
     } catch (e) {
@@ -1358,7 +1335,6 @@ struct NovelWorkspacePage {
     this.busy = true;
     try {
       await getNovelCreation().deleteChapter(this.projectId, id);
-      if (this.selectedChapterId === id) this.selectedChapterId = '';
       await this.reload();
     } catch (e) {
       this.errorMsg = String(e);
@@ -2020,149 +1996,113 @@ struct NovelWorkspacePage {
   @Builder
   chapterPane(): void {
     Column() {
-      if (this.selectedChapterId.length === 0) {
-        // 目录:次要操作收进「更多」菜单,常驻只留新建
-        Row() {
-          Text('章节目录').fontSize(15).fontWeight(FontWeight.Bold).fontColor(INK2)
-          Blank()
-          Text('更多 ▾').fontSize(12).fontColor(INK3)
-            .constraintSize({ minWidth: 44 }).height(44)
-            .padding({ left: 8, right: 8 }).textAlign(TextAlign.Center)
-            .onClick((): void => { this.showChapterToolsMenu(); })
-          Text('新建').fontSize(13).fontColor(ACCENT_INK)
-            .constraintSize({ minWidth: 64 }).height(36)
-            .padding({ left: 14, right: 14 }).textAlign(TextAlign.Center)
-            .backgroundColor(ACCENT).borderRadius(18)
-            .onClick(() => { this.openNewChapter(); })
+      // 目录(iOS NovelChapterManagementView):标题 + 共 N 章;次要操作收「更多」
+      Row() {
+        Text('目录').fontSize(15).fontWeight(FontWeight.Bold).fontColor(INK2)
+        if (this.project !== null) {
+          Text(`共 ${this.project.chapters.length} 章`).fontSize(12).fontColor(INK3)
+            .margin({ left: 8 })
         }
-        .width('100%').padding({ left: 20, right: 20, top: 12, bottom: 10 })
-        .alignItems(VerticalAlign.Center)
+        Blank()
+        Text('更多 ▾').fontSize(12).fontColor(INK3)
+          .constraintSize({ minWidth: 44 }).height(44)
+          .padding({ left: 8, right: 8 }).textAlign(TextAlign.Center)
+          .onClick((): void => { this.showChapterToolsMenu(); })
+        Text('新建').fontSize(13).fontColor(ACCENT_INK)
+          .constraintSize({ minWidth: 64 }).height(36)
+          .padding({ left: 14, right: 14 }).textAlign(TextAlign.Center)
+          .backgroundColor(ACCENT).borderRadius(18)
+          .onClick(() => { this.openNewChapter(); })
+      }
+      .width('100%').padding({ left: 20, right: 20, top: 12, bottom: 10 })
+      .alignItems(VerticalAlign.Center)
 
-        if (this.consistencyMessage.length > 0) {
-          Text(this.consistencyMessage).fontSize(12).fontColor(INK3).lineHeight(18)
-            .width('100%').padding({ left: 20, right: 20, bottom: 10 })
-        }
+      if (this.consistencyMessage.length > 0) {
+        Text(this.consistencyMessage).fontSize(12).fontColor(INK3).lineHeight(18)
+          .width('100%').padding({ left: 20, right: 20, bottom: 10 })
+      }
 
-        if (this.auditMessage.length > 0 || this.auditIssues.length > 0) {
-          Column() {
-            Text(this.auditMessage).fontSize(12).fontColor(INK3).lineHeight(18)
-            ForEach(this.auditIssues, (issue: NovelAuditIssue): void => {
-              Column() {
-                Row() {
-                  Text(issue.severity).fontSize(11).fontColor(this.auditSeverityColor(issue.severity))
-                    .padding({ left: 6, right: 6, top: 2, bottom: 2 }).borderRadius(6)
-                    .backgroundColor(SURFACE2)
-                  Text(issue.chapterRef).fontSize(12).fontColor(INK3).margin({ left: 6 })
-                }
-                Text(issue.summary).fontSize(13).fontColor(INK).lineHeight(18).margin({ top: 4 })
-                if (issue.suggestion.length > 0) {
-                  Text(`建议：${issue.suggestion}`).fontSize(12).fontColor(INK3).lineHeight(17).margin({ top: 2 })
-                }
+      if (this.auditMessage.length > 0 || this.auditIssues.length > 0) {
+        Column() {
+          Text(this.auditMessage).fontSize(12).fontColor(INK3).lineHeight(18)
+          ForEach(this.auditIssues, (issue: NovelAuditIssue): void => {
+            Column() {
+              Row() {
+                Text(issue.severity).fontSize(11).fontColor(this.auditSeverityColor(issue.severity))
+                  .padding({ left: 6, right: 6, top: 2, bottom: 2 }).borderRadius(6)
+                  .backgroundColor(SURFACE2)
+                Text(issue.chapterRef).fontSize(12).fontColor(INK3).margin({ left: 6 })
               }
-              .width('100%').alignItems(HorizontalAlign.Start)
-              .padding({ left: 12, right: 12, top: 10, bottom: 10 })
-              .backgroundColor(SURFACE).borderRadius(10)
-              .margin({ top: 8 })
-            }, (issue: NovelAuditIssue): string =>
-              `${issue.severity}|${issue.chapterRef}|${issue.summary}`)
-          }
-          .width('100%').alignItems(HorizontalAlign.Start)
-          .padding({ left: 20, right: 20, bottom: 12 })
-        }
-
-        if (this.polishJob !== null) {
-          NovelPolishJobCard({
-            job: this.polishJob,
-            busy: this.polishBusy,
-            onPause: (): void => { this.pausePolish(); },
-            onResume: (): void => { this.resumePolish(); },
-            onRetry: (): void => { this.retryPolish(); },
-            onCancel: (): void => { this.cancelPolish(); },
-          })
-          .margin({ left: 16, right: 16, bottom: 10 })
-        }
-
-        if (this.project !== null && this.project.chapters.length === 0) {
-          Text('还没有章节。新建第一章，或在聊天写作中把 Amber 的正文收进章节。')
-            .fontSize(13).fontColor(INK3).padding({ left: 20, right: 20, top: 20 })
-        } else {
-          List({ space: 0 }) {
-            if (this.project !== null) {
-              ForEach(this.project.chapters, (c: NovelChapter, idx: number) => {
-                ListItem() {
-                  Row() {
-                    Text((idx + 1) < 10 ? '0' + (idx + 1) : '' + (idx + 1))
-                      .fontSize(13).fontColor(INK4).width(30)
-                    Column() {
-                      Text((c.discarded ? '[已废弃] ' : '') + (c.title.length > 0 ? c.title : '未命名章节'))
-                        .fontSize(15).fontColor(c.discarded ? INK4 : INK).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
-                      Text(`${this.charCount(c.content)} 字`).fontSize(11).fontColor(INK3).margin({ top: 4 })
-                    }
-                    .alignItems(HorizontalAlign.Start).layoutWeight(1)
-                    Text('⋯').fontSize(16).fontColor(INK3)
-                      .width(44).height(44).textAlign(TextAlign.Center)
-                      .onClick(() => { this.chapterMenuId = c.id; })
-                    Text('›').fontSize(18).fontColor(INK4)
-                  }
-                  .width('100%').padding({ left: 20, right: 20, top: 14, bottom: 14 })
-                  .border({ width: { bottom: 0.5 }, color: { bottom: LINE } })
-                  .onClick(() => { this.selectedChapterId = c.id; })
-                }
-              }, (c: NovelChapter) => c.id)
+              Text(issue.summary).fontSize(13).fontColor(INK).lineHeight(18).margin({ top: 4 })
+              if (issue.suggestion.length > 0) {
+                Text(`建议：${issue.suggestion}`).fontSize(12).fontColor(INK3).lineHeight(17).margin({ top: 2 })
+              }
             }
-          }
-          .layoutWeight(1)
+            .width('100%').alignItems(HorizontalAlign.Start)
+            .padding({ left: 12, right: 12, top: 10, bottom: 10 })
+            .backgroundColor(SURFACE).borderRadius(10)
+            .margin({ top: 8 })
+          }, (issue: NovelAuditIssue): string =>
+            `${issue.severity}|${issue.chapterRef}|${issue.summary}`)
         }
+        .width('100%').alignItems(HorizontalAlign.Start)
+        .padding({ left: 20, right: 20, bottom: 12 })
+      }
+
+      if (this.polishJob !== null) {
+        NovelPolishJobCard({
+          job: this.polishJob,
+          busy: this.polishBusy,
+          onPause: (): void => { this.pausePolish(); },
+          onResume: (): void => { this.resumePolish(); },
+          onRetry: (): void => { this.retryPolish(); },
+          onCancel: (): void => { this.cancelPolish(); },
+        })
+        .margin({ left: 16, right: 16, bottom: 10 })
+      }
+
+      if (this.project !== null && this.project.chapters.length === 0) {
+        Text('在创作对话中收录的正文会按章节出现在这里。')
+          .fontSize(13).fontColor(INK3).padding({ left: 20, right: 20, top: 20 })
       } else {
-        this.chapterReader()
+        List({ space: 0 }) {
+          if (this.project !== null) {
+            ForEach(this.project.chapters, (c: NovelChapter, idx: number) => {
+              ListItem() {
+                Row() {
+                  Text((idx + 1) < 10 ? '0' + (idx + 1) : '' + (idx + 1))
+                    .fontSize(13).fontColor(INK4).width(30)
+                  Column() {
+                    Text((c.discarded ? '[已废弃] ' : '') + (c.title.length > 0 ? c.title : '未命名章节'))
+                      .fontSize(15).fontColor(c.discarded ? INK4 : INK).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+                    Text(`${this.charCount(c.content)} 字`).fontSize(11).fontColor(INK3).margin({ top: 4 })
+                  }
+                  .alignItems(HorizontalAlign.Start).layoutWeight(1)
+                  Icon({ name: 'chevron_right', iconSize: 16, color: INK4 })
+                }
+                .width('100%').padding({ left: 20, right: 20, top: 14, bottom: 14 })
+                .border({ width: { bottom: 0.5 }, color: { bottom: LINE } })
+                .onClick(() => { this.openChapterReader(c.id); })
+              }
+            }, (c: NovelChapter) => c.id)
+          }
+        }
+        .layoutWeight(1)
       }
     }
     .width('100%').height('100%')
+  }
+
+  // 章节阅读器为 push 独立页(iOS NovelChapterReaderView;操作集中在其 ⋯菜单)
+  private openChapterReader(chapterId: string): void {
+    router.pushUrl({
+      url: 'pages/NovelChapterReaderPage',
+      params: { 'projectId': this.projectId, 'chapterId': chapterId } as Record<string, string>,
+    });
   }
 
   charCount(s: string): number {
     return s.replace(/\s/g, '').length;
-  }
-
-  @Builder
-  chapterReader(): void {
-    Column() {
-      Row() {
-        Text('← 目录').fontSize(13).fontColor(ACCENT)
-          .constraintSize({ minWidth: 44 }).height(44).textAlign(TextAlign.Center)
-          .onClick(() => { this.selectedChapterId = ''; })
-        Blank()
-        Text('编辑').fontSize(13).fontColor(INK3)
-          .constraintSize({ minWidth: 44 }).height(44).textAlign(TextAlign.Center).margin({ right: 8 })
-          .onClick(() => {
-            const c: NovelChapter | undefined = this.project?.chapters.find(x => x.id === this.selectedChapterId);
-            if (c !== undefined) this.openEditChapter(c);
-          })
-        Text('删除').fontSize(13).fontColor(ERROR)
-          .constraintSize({ minWidth: 44 }).height(44).textAlign(TextAlign.Center)
-          .onClick(() => { this.deleteChapter(this.selectedChapterId); })
-      }
-      .width('100%').padding({ left: 20, right: 20, top: 12, bottom: 10 })
-
-      Scroll() {
-        Column() {
-          if (this.project !== null) {
-            ForEach(this.project.chapters.filter(c => c.id === this.selectedChapterId), (c: NovelChapter) => {
-              Text(c.title).fontSize(20).fontWeight(FontWeight.Bold).fontColor(INK)
-                .fontFamily(FONT_SERIF).margin({ bottom: 6 })
-              Text(`${this.charCount(c.content)} 字`).fontSize(12).fontColor(INK3).margin({ bottom: 16 })
-              Text(c.content.length > 0 ? c.content : '这一章还没有正文。')
-                .fontSize(15).fontColor(INK).lineHeight(28)
-            }, (c: NovelChapter) => c.id)
-          }
-        }
-        .width('100%').padding({ left: 20, right: 20, bottom: 24 })
-        .alignItems(HorizontalAlign.Start)
-      }
-        .align(Alignment.TopStart)
-      .layoutWeight(1)
-    }
-    .width('100%').height('100%')
   }
 
   @Builder
@@ -2419,14 +2359,6 @@ struct NovelWorkspacePage {
       if (this.materialEditorOpen) {
         this.materialEditor()
       }
-      // N2:章节操作菜单
-      if (this.chapterMenuId.length > 0) {
-        this.chapterMenuOverlay(this.chapterMenuId)
-      }
-      // N2:版本历史 sheet
-      if (this.versionsOpen) {
-        this.versionsSheetOverlay(this.versionsFor(this.versionsChapterId))
-      }
       if (this.branchSheetOpen && this.workspaceStatus !== null) {
         NovelBranchSheet({
           visible: this.branchSheetOpen,
@@ -2602,155 +2534,5 @@ struct NovelWorkspacePage {
     .width('100%').height('100%').backgroundColor(OVERLAY)
     .justifyContent(FlexAlign.Center)
     .transition(TransitionEffect.OPACITY.animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
-  }
-
-  @Builder
-  chapterMenuOverlay(chapterId: string): void {
-    if (this.chapterMenuId.length > 0) {
-      Column() {
-        Blank().onClick(() => { this.chapterMenuId = ''; })
-        Column() {
-          this.menuRow('重新生成', 'regenerate')
-          this.menuRow('润色', 'polish')
-          this.menuRow('版本历史', 'versions')
-          this.menuRow('编辑', 'edit')
-          this.menuRow(this.isDiscarded(chapterId) ? '取消废弃' : '废弃章节', 'discard')
-        }
-        .width('100%')
-        .backgroundColor(SURFACE)
-        .borderRadius({ topLeft: 20, topRight: 20 })
-        .padding({ top: 10, bottom: 16 })
-        .transition(TransitionEffect.translate({ y: 160 })
-          .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
-      }
-      .width('100%').height('100%')
-      .backgroundColor(OVERLAY)
-      .justifyContent(FlexAlign.End)
-      .transition(TransitionEffect.OPACITY.animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
-    }
-  }
-
-  // action: 'regenerate' | 'polish' | 'versions' | 'edit' | 'discard'
-  @Builder
-  menuRow(label: string, action: string): void {
-    Row() {
-      Text(label).fontSize(15).fontColor(INK)
-    }
-    .width('100%')
-    .constraintSize({ minHeight: 48 })
-    .padding({ left: 22, right: 22 })
-    .onClick((): void => { this.onChapterMenuAction(action); })
-  }
-
-  private onChapterMenuAction(action: string): void {
-    const id: string = this.chapterMenuId;
-    this.chapterMenuId = '';
-    if (id.length === 0 || this.novelJobLocksWorkspace()) return;
-    if (action === 'regenerate') this.regenerateChapter(id);
-    else if (action === 'polish') this.polishChapter(id);
-    else if (action === 'versions') this.openChapterVersions(id);
-    else if (action === 'edit') {
-      const c: NovelChapter | null = this.project !== null
-        ? this.project.chapters.find(x => x.id === id) ?? null : null;
-      if (c !== null) this.openEditChapter(c);
-    } else if (action === 'discard') {
-      this.toggleDiscarded(id, !this.isDiscarded(id));
-    }
-  }
-
-  @Builder
-  versionsSheetOverlay(versions: NovelChapterVersion[]): void {
-    if (this.versionsOpen) {
-      Column() {
-        Blank().onClick(() => { this.versionsOpen = false; })
-        Column() {
-          Text('版本历史').fontSize(17).fontWeight(FontWeight.Bold).fontColor(INK)
-            .width('100%').padding({ left: 20, right: 20, top: 16, bottom: 8 })
-          if (versions.length === 0) {
-            Text('暂无历史版本').fontSize(13).fontColor(INK3)
-              .width('100%').padding({ left: 20, right: 20, top: 12, bottom: 20 })
-          } else {
-            List() {
-              ForEach(versions, (v: NovelChapterVersion) => {
-                ListItem() {
-                  Row() {
-                    Column() {
-                      Text(this.versionKindLabel(v.kind)).fontSize(14).fontColor(INK)
-                      Text(this.versionTime(v.createdAt)).fontSize(11).fontColor(INK3).margin({ top: 2 })
-                    }
-                    .alignItems(HorizontalAlign.Start).layoutWeight(1)
-                    Text('恢复').fontSize(13).fontColor(ACCENT)
-                      .constraintSize({ minWidth: 44 }).height(44).textAlign(TextAlign.Center)
-                      .padding({ left: 12, right: 4 })
-                      .onClick((): void => { this.restoreVersion(v.id); })
-                  }
-                  .width('100%').padding({ left: 20, right: 20, top: 10, bottom: 10 })
-                }
-              }, (v: NovelChapterVersion): string => v.id)
-            }
-            .height(320)
-          }
-        }
-        .width('100%')
-        .backgroundColor(SURFACE)
-        .borderRadius({ topLeft: 20, topRight: 20 })
-        .padding({ bottom: 16 })
-        .transition(TransitionEffect.translate({ y: 160 })
-          .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
-      }
-      .width('100%').height('100%')
-      .backgroundColor(OVERLAY)
-      .justifyContent(FlexAlign.End)
-      .transition(TransitionEffect.OPACITY.animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
-    }
-  }
-
-  private isDiscarded(chapterId: string): boolean {
-    if (this.project === null) return false;
-    const c: NovelChapter | null = this.project.chapters.find(x => x.id === chapterId) ?? null;
-    return c !== null && c.discarded;
-  }
-
-  private async toggleDiscarded(chapterId: string, discarded: boolean): Promise<void> {
-    if (this.novelJobLocksWorkspace()) return;
-    this.busy = true;
-    try {
-      this.project = await getNovelCreation().setChapterDiscarded(this.projectId, chapterId, discarded);
-    } catch (e) {
-      this.errorMsg = String(e);
-    } finally {
-      this.busy = false;
-    }
-  }
-
-  private versionsFor(chapterId: string): NovelChapterVersion[] {
-    if (this.project === null) return [];
-    return this.project.chapterVersions.filter(v => v.chapterId === chapterId).slice().reverse();
-  }
-
-  private versionKindLabel(kind: NovelChapterVersionKind): string {
-    if (kind === 'manual') return '手动保存';
-    if (kind === 'polish') return '润色前';
-    if (kind === 'regenerate') return '重生成前';
-    return '收录';
-  }
-
-  private versionTime(ts: number): string {
-    const d: Date = new Date(ts);
-    const pad = (n: number): string => n < 10 ? `0${n}` : `${n}`;
-    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
-  }
-
-  private async restoreVersion(versionId: string): Promise<void> {
-    if (this.novelJobLocksWorkspace()) return;
-    this.busy = true;
-    try {
-      this.project = await getNovelCreation().restoreChapterVersion(this.projectId, versionId);
-      this.versionsOpen = false;
-    } catch (e) {
-      this.errorMsg = String(e);
-    } finally {
-      this.busy = false;
-    }
   }
 }
