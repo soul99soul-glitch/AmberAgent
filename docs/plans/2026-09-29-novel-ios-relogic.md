@@ -42,6 +42,13 @@
 
 每批一 commit,lint 0 error + build + 真机截图验证。
 
+## 完成状态(2026-09-29 收口)
+
+- A `961b4576c` 列表页;B `b791a13a5`+`631d8c84e` 工作区骨架;C `782646502` 阅读器 push;
+  D `05bb736e0` 收录四段式;E `412b7f7e8`+`76f23886c` 设定四分类;F `f158c4efb` 切换动效
+  (tab/子分类 animateTo+pane 进场过渡,阅读器换章重挂载过渡,FAB 进场)
+- 并行会话(modal/motion 两工作流)已先行提交;其 themeEpoch 整树重挂载承接保留
+
 ## 不做(本轮)
 
 - 批量润色面板接线(NovelBatchPolishSheet 仍后置)
