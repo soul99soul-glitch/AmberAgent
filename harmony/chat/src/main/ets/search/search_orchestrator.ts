@@ -5,14 +5,10 @@
 import type { JsonObject, JsonValue } from '../chat/json.ts';
 import { newId } from '../chat/ids.ts';
 import type { SearchCommonOptions, SearchResult, SearchServiceOptions } from './search_service.ts';
-import { SEARCH_SERVICE_TYPES, makeSearchServiceOptions } from './search_service.ts';
-import type { JinaOptions, BingLocalOptions } from './search_service.ts';
+import { SEARCH_SERVICE_TYPES } from './search_service.ts';
 import { getSearchService } from './service_registry.ts';
-import { jinaSearchService } from './jina_service.ts';
-import { bingSearchService } from './bing_service.ts';
-import { duckDuckGoSearch } from './duckduckgo_service.ts';
-import { wikipediaSearch } from './wikipedia_service.ts';
-import { hackerNewsSearch } from './hackernews_service.ts';
+import type { FreeEngineId } from './free_web_engines.ts';
+import { looksTechnicalQuery, runFreeEngine } from './free_web_engines.ts';
 import {
   SearchSettings, buildServiceParams, canonicalizeUrlWithTracker, enabledServices,
   normalizedTitle,
@@ -20,8 +16,9 @@ import {
 import { stringContentOrNull } from './json_pick.ts';
 import { javaUrlEncodeForm } from './url_codec.ts';
 
-const MAX_SOURCES = 5;
-const MAX_SOURCE_VARIANT_CALLS = 10;
+// 免费网页引擎扩到 5 个 + 2 个垂直源,上限随之放宽(配置的 API 源按优先级仍排最前)
+const MAX_SOURCES = 8;
+const MAX_SOURCE_VARIANT_CALLS = 16;
 const ALLOWED_TOPICS: string[] = ['general', 'news', 'market', 'technical', 'finance'];
 const ALLOWED_TIME_RANGES: string[] = ['day', 'week', 'month', 'year', 'any'];
 const ALLOWED_DEPTHS: string[] = ['quick', 'standard', 'deep'];
@@ -32,9 +29,20 @@ export interface OrchestratorDeps {
 
 // ===== OrchestratorSource(:689-752)→ 判别联合 =====
 
+// Jina 无 Key 搜索(s.jina.ai)现返回 401,已从搜索源移除;Jina 开关只管 scrape_web 的 Reader
 export type BuiltinSourceId =
-  | 'duckduckgo_builtin' | 'jina_builtin' | 'bing_builtin'
+  | 'duckduckgo_builtin' | 'brave_builtin' | 'bing_builtin' | 'so360_builtin' | 'quark_builtin'
   | 'wikipedia_builtin' | 'hackernews_builtin';
+
+const BUILTIN_ENGINE: Record<BuiltinSourceId, FreeEngineId> = {
+  duckduckgo_builtin: 'duckduckgo',
+  brave_builtin: 'brave',
+  bing_builtin: 'bing',
+  so360_builtin: 'so360',
+  quark_builtin: 'quark',
+  wikipedia_builtin: 'wikipedia',
+  hackernews_builtin: 'hackernews',
+};
 
 export interface OrchestratorSource {
   source: BuiltinSourceId | 'configured';
@@ -54,10 +62,20 @@ const builtinSource = (id: BuiltinSourceId): OrchestratorSource => {
         source: id, id, name: 'DuckDuckGo', kind: 'public_html', builtin: true,
         priority: 200, reason: 'Built-in free public recall source',
       };
-    case 'jina_builtin':
+    case 'brave_builtin':
       return {
-        source: id, id, name: 'Jina Search', kind: 'public_api', builtin: true,
-        priority: 90, reason: 'Built-in Jina search source; API key optional',
+        source: id, id, name: 'Brave', kind: 'public_html', builtin: true,
+        priority: 201, reason: 'Built-in free public recall source',
+      };
+    case 'so360_builtin':
+      return {
+        source: id, id, name: '360 搜索', kind: 'public_html', builtin: true,
+        priority: 212, reason: 'Built-in free public recall source reachable from mainland China',
+      };
+    case 'quark_builtin':
+      return {
+        source: id, id, name: '夸克', kind: 'public_html', builtin: true,
+        priority: 214, reason: 'Built-in free public recall source reachable from mainland China',
       };
     case 'bing_builtin':
       return {
@@ -93,14 +111,12 @@ const applicableFor = (source: OrchestratorSource, query: string | null, topic: 
   if (query === null) return true;
   if (source.source !== 'wikipedia_builtin' && source.source !== 'hackernews_builtin') return true;
   const lower: string = query.toLowerCase();
+  // Wikipedia API 稳定且无 Key:普通/技术话题都作为背景知识源(新闻/行情类时效性不匹配)
   if (source.source === 'wikipedia_builtin') {
-    return topic === 'general' &&
-      ['是什么', '百科', 'wiki', 'wikipedia', 'who is', 'what is', 'definition', '介绍']
-        .some((k: string) => lower.includes(k));
+    return topic === 'general' || topic === 'technical' ||
+      ['百科', 'wiki', 'wikipedia'].some((k: string) => lower.includes(k));
   }
-  return topic === 'technical' ||
-    ['github', '开源', 'developer', 'claude code', 'codex', 'mcp', 'llm', 'ai agent', 'hacker news']
-      .some((k: string) => lower.includes(k));
+  return topic === 'technical' || looksTechnicalQuery(query);
 };
 
 // :772-793
@@ -175,11 +191,13 @@ export const buildSources = (
     (s: OrchestratorSource) => s.options !== undefined && s.options.type === 'bing_local',
   );
   const builtins: OrchestratorSource[] = [];
-  if (settings.searchBuiltinJinaEnabled && allowed('jina_builtin', 'Jina')) {
-    builtins.push(builtinSource('jina_builtin'));
-  }
-  if (settings.searchBuiltinDuckDuckGoEnabled && allowed('duckduckgo_builtin', 'DuckDuckGo')) {
-    builtins.push(builtinSource('duckduckgo_builtin'));
+  // searchBuiltinDuckDuckGoEnabled 即"免费网页聚合"总开关:DDG/Brave/360/夸克并发,
+  // 单个被拦截就跳过(不新增 Settings 字段,对齐 iOS)
+  if (settings.searchBuiltinDuckDuckGoEnabled) {
+    if (allowed('duckduckgo_builtin', 'DuckDuckGo')) builtins.push(builtinSource('duckduckgo_builtin'));
+    if (allowed('brave_builtin', 'Brave')) builtins.push(builtinSource('brave_builtin'));
+    if (allowed('so360_builtin', '360 搜索')) builtins.push(builtinSource('so360_builtin'));
+    if (allowed('quark_builtin', '夸克')) builtins.push(builtinSource('quark_builtin'));
   }
   if (settings.searchBuiltinBingEnabled && !hasConfiguredBing && allowed('bing_builtin', 'Bing')) {
     builtins.push(builtinSource('bing_builtin'));
@@ -582,29 +600,21 @@ const requestServiceParams = (request: SourceSearchRequest, deps: OrchestratorDe
 
 const defaultExecutor = (deps: OrchestratorDeps): OrchestratorSearchExecutor =>
   async (request: SourceSearchRequest, commonOptions: SearchCommonOptions): Promise<SearchResult> => {
-    switch (request.source.source) {
-      case 'jina_builtin': {
-        const o = makeSearchServiceOptions('jina') as JinaOptions;
-        return jinaSearchService.search(requestServiceParams(request, deps), commonOptions, o);
-      }
-      case 'duckduckgo_builtin':
-        return duckDuckGoSearch(request.query, commonOptions);
-      case 'bing_builtin': {
-        const o = makeSearchServiceOptions('bing_local') as BingLocalOptions;
-        return bingSearchService.search(requestServiceParams(request, deps), commonOptions, o);
-      }
-      case 'wikipedia_builtin':
-        return wikipediaSearch(request.query, commonOptions);
-      case 'hackernews_builtin':
-        return hackerNewsSearch(request.query, commonOptions);
-      case 'configured': {
-        const options: SearchServiceOptions = request.source.options as SearchServiceOptions;
-        return getSearchService(options).search(
-          requestServiceParams(request, deps), commonOptions, options,
-        );
-      }
+    if (request.source.source === 'configured') {
+      const options: SearchServiceOptions = request.source.options as SearchServiceOptions;
+      return getSearchService(options).search(
+        requestServiceParams(request, deps), commonOptions, options,
+      );
     }
+    // 内置源统一走带验证码熔断的免费引擎分派
+    return runFreeEngine(BUILTIN_ENGINE[request.source.source], request.query, commonOptions);
   };
+
+export const FREE_TIER_SETUP_HINT: string =
+  'Only free public sources are enabled and they returned few results (public engines may rate-limit or show verification pages). ' +
+  'If the user needs more reliable search, suggest configuring a search API with a free tier in Search Service settings: ' +
+  'Tavily (1,000 free credits/month), Serper (2,500 free queries on sign-up), Exa (free credits), ' +
+  'or Zhipu / Bocha (low cost, reachable from mainland China).';
 
 // ===== 主入口(:43-171) =====
 
@@ -712,6 +722,10 @@ export const searchOrchestratorSearch = async (
   out['query_variants'] = variants;
   if (shouldOfferWebView) {
     out['webview_fallback'] = webViewFallback(query);
+  }
+  // 只靠免费源且结果偏少:提示用户配置有免费额度的 API(模型可转述给用户)
+  if (merged.length < Math.min(maxResults, 5) && sources.every((s: OrchestratorSource) => s.builtin)) {
+    out['setup_hint'] = FREE_TIER_SETUP_HINT;
   }
   if (merged.length === 0) {
     out['message'] = shouldOfferWebView

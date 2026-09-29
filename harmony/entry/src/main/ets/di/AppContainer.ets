@@ -83,7 +83,7 @@ import {
   createRegistryIntrospectionTools, createToolSearchTool, newId,
   createTerminalApprovalGuard,
   thinkTagTransformer, regexOutputTransformer,
-  type ChatTurnDeps,
+  type ChatTurnDeps, type SearchSettings,
 } from '@amber/chat-domain';
 import { findModelByIdInProviders } from '../platform_impl/OcrSupport.ets';
 import { loadTaskModelReference, storeTaskModelPair } from '../platform_impl/TaskModelSelectionSupport.ets';
@@ -174,7 +174,10 @@ const buildContainer = (): Container => {
   });
   const storage: Storage = createPreferencesStorage();
   const repository: DeepReadRepository = createRdbRepository();
-  const searchRegistry: SearchProviderRegistry = createTavilyAndFallbackRegistry(httpClient, storage);
+  // 深度阅读复用聊天「搜索服务」设置(已配置 API + 免费源开关);均在搜索时惰性读取
+  const searchRegistry: SearchProviderRegistry = createTavilyAndFallbackRegistry(
+    httpClient, storage, (): Promise<SearchSettings> => loadSearchPrefs(getChatKvStore()), ensureSearchSdk,
+  );
   const prefetcher: SourcePrefetcher = createSourcePrefetcher(httpClient, searchRegistry);
   const aiClient: AiClient = createOpenAiCompatibleAiClient(httpClient, storage);
   const notifier: Notifier = createNotificationNotifier();

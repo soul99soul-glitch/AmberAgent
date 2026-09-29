@@ -137,3 +137,28 @@ export const base64EncodeLatin1 = (s: string): string => {
 // Credentials.basic(username, password) = "Basic " + base64("u:p")
 export const basicAuthHeader = (username: string, password: string): string =>
   `Basic ${base64EncodeLatin1(`${username}:${password}`)}`;
+
+// base64url(无 padding 亦可)→ UTF-8 字符串;非法输入返回 null
+// 用途:Bing 跳转链接 u=a1<base64url(目标 URL)>
+export const base64UrlDecodeUtf8 = (s: string): string | null => {
+  const clean: string = s.replace(/-/g, '+').replace(/_/g, '/').replace(/=+$/, '');
+  let bits: number = 0;
+  let acc: number = 0;
+  let hex: string = '';
+  for (let i = 0; i < clean.length; i++) {
+    const v: number = B64_ALPHABET.indexOf(clean[i]);
+    if (v < 0) return null;
+    acc = (acc << 6) | v;
+    bits += 6;
+    if (bits >= 8) {
+      bits -= 8;
+      hex += '%' + ((acc >> bits) & 0xFF).toString(16).padStart(2, '0');
+      acc &= (1 << bits) - 1; // 只留未消费的低位,防左移溢出
+    }
+  }
+  try {
+    return decodeURIComponent(hex);
+  } catch {
+    return null;
+  }
+};

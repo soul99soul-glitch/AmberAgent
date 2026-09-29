@@ -117,66 +117,66 @@ test('bing:query 缺失 → 逐字;scrape → not supported 逐字;parameters sc
 
 // ===== DuckDuckGo(DuckDuckGoSearchService.kt 全文) =====
 
-const DDG_LITE: string = `<html><body><table>
-<tr class="result-sponsored"><td><a class="result-link" href="https://ads.com/x">Ad</a></td></tr>
-<tr><td><a class="result-link" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Freal.com%2Fddg1">DDG One</a></td></tr>
-<tr><td class="result-snippet">snippet ddg1</td></tr>
-<tr><td><a class="result-link" href="/l/?uddg=https%3A%2F%2Freal.com%2Fddg2">DDG Two</a></td></tr>
-</table></body></html>`;
-
 const DDG_HTML: string = `<html><body>
+<div class="result results_links">
+  <div class="links_main result__body">
+    <h2 class="result__title"><a class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Freal.com%2Fddg1&amp;rut=x">DDG One</a></h2>
+    <a class="result__snippet" href="#">snippet ddg1</a>
+  </div>
+</div>
+<div class="result">
+  <a class="result__a" href="https://duckduckgo.com/y.js?ad_domain=ads.com">Ad</a>
+</div>
 <div class="result">
   <a class="result__a" href="https://html.com/one">HTML One</a>
   <a class="result__snippet">html snippet</a>
 </div>
 </body></html>`;
 
-test('ddg:lite 命中 — sponsored 过滤 + uddg 解码 + // 与 / 归一 + snippet 行提取', async () => {
+test('ddg:HTML POST 请求形态 + uddg 解码 + 广告 y.js 过滤', async () => {
   const calls: CapturedCall[] = [];
-  initSearchSdk(mockHttpSeq([{ status: 200, headers: {}, body: DDG_LITE }], calls));
+  initSearchSdk(mockHttpSeq([{ status: 200, headers: {}, body: DDG_HTML }], calls));
   const r = await duckDuckGoSearch('test q', { resultSize: 10 });
-  assert.equal(calls.length, 1); // lite 命中即返,不走 html
-  assert.equal(calls[0].req.url, 'https://lite.duckduckgo.com/lite/?q=test+q');
-  assert.equal(calls[0].req.headers['Referer'], 'https://duckduckgo.com/');
-  assert.equal(r.items.length, 2); // sponsored 过滤
+  assert.equal(calls.length, 1); // 不再请求 Lite
+  assert.equal(calls[0].req.url, 'https://html.duckduckgo.com/html/');
+  assert.equal(calls[0].req.method, 'POST');
+  assert.equal(calls[0].req.body, 'q=test+q&b=&kl=wt-wt');
+  assert.equal(calls[0].req.headers['Content-Type'], 'application/x-www-form-urlencoded');
+  assert.equal(r.items.length, 2);
   assert.equal(r.items[0].title, 'DDG One');
   assert.equal(r.items[0].url, 'https://real.com/ddg1');
   assert.equal(r.items[0].text, 'snippet ddg1');
-  assert.equal(r.items[1].url, 'https://real.com/ddg2');
+  assert.equal(r.items[1].url, 'https://html.com/one');
 });
 
-test('ddg:lite 空 → html 兜底解析 .result/result__a/result__snippet', async () => {
-  const calls: CapturedCall[] = [];
-  initSearchSdk(mockHttpSeq([
-    { status: 200, headers: {}, body: '<html><body>empty</body></html>' },
-    { status: 200, headers: {}, body: DDG_HTML },
-  ], calls));
-  const r = await duckDuckGoSearch('q', { resultSize: 10 });
-  assert.equal(calls.length, 2);
-  assert.equal(calls[1].req.url, 'https://html.duckduckgo.com/html/?q=q');
-  assert.equal(r.items.length, 1);
-  assert.equal(r.items[0].title, 'HTML One');
-  assert.equal(r.items[0].url, 'https://html.com/one');
-  assert.equal(r.items[0].text, 'html snippet');
-});
-
-test('ddg:双空 + 风控词 → human verification;否则 no parseable 文案逐字', async () => {
-  initSearchSdk(mockHttpSeq([
-    { status: 200, headers: {}, body: '<html>empty1</html>' },
-    { status: 200, headers: {}, body: '<html>bots use DuckDuckGo too</html>' },
-  ], []));
+test('ddg:202 验证页 / 风控词 → human verification;空页 → no parseable', async () => {
+  initSearchSdk(mockHttpSeq([{ status: 202, headers: {}, body: '<html>anomaly</html>' }], []));
   await assert.rejects(
     duckDuckGoSearch('q', { resultSize: 10 }),
     (e: Error): boolean => e.message === 'DuckDuckGo requires human verification',
   );
-  initSearchSdk(mockHttpSeq([
-    { status: 200, headers: {}, body: '<html>empty1</html>' },
-    { status: 200, headers: {}, body: '<html>empty2</html>' },
-  ], []));
+  initSearchSdk(mockHttpSeq([{ status: 200, headers: {}, body: '<html>bots use DuckDuckGo too</html>' }], []));
+  await assert.rejects(
+    duckDuckGoSearch('q', { resultSize: 10 }),
+    (e: Error): boolean => e.message === 'DuckDuckGo requires human verification',
+  );
+  initSearchSdk(mockHttpSeq([{ status: 200, headers: {}, body: '<html>empty</html>' }], []));
   await assert.rejects(
     duckDuckGoSearch('q', { resultSize: 10 }),
     (e: Error): boolean => e.message === 'DuckDuckGo returned no parseable organic results',
   );
+});
+
+test('bing:国际版 /ck/a 跳转 u=a1<base64url> 解包(含中文路径)', async () => {
+  const target: string = 'https://example.com/路径?x=1';
+  const b64: string = Buffer.from(target, 'utf-8').toString('base64url');
+  const page: string = `<html><body><ol id="b_results">
+<li class="b_algo"><h2><a href="https://www.bing.com/ck/a?!&amp;&amp;p=abc&amp;u=a1${b64}&amp;ntb=1">Wrapped</a></h2>
+<div class="b_caption"><p>s</p></div></li></ol></body></html>`;
+  initSearchSdk(mockHttpSeq([{ status: 200, headers: {}, body: page }], []));
+  const r = await bingSearchService.search({ query: 'q' }, { resultSize: 10 }, bingOptions());
+  assert.equal(r.items.length, 1);
+  assert.equal(r.items[0].url, target);
 });
 
 // ===== Phase 6 回归:非 2xx 响应不得被当作结果页解析 =====

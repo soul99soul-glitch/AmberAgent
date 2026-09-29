@@ -54,6 +54,39 @@ interface CacheEntry {
 
 const TOP_SCRAPE_CANDIDATES = 20;
 
+// 直连抓正文带浏览器 UA:不带 UA 的请求常被站点直接 403 或返回精简页
+const BROWSER_FETCH_HEADERS: Record<string, string> = {
+  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+  'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+  'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+};
+
+// 直连失败/正文过短时用 Jina Reader(r.jina.ai,无需 Key)兜底;
+// 无 Key 有频率限制(约 20 次/分钟),每次 collect 最多兜底这么多条
+const READER_FALLBACK_MAX = 6;
+const JINA_READER_PREFIX = 'https://r.jina.ai/';
+
+interface ReaderBudget { remaining: number; }
+
+interface ReaderPage { text: string; publishedAt: string | null; }
+
+// Jina Reader 默认 Markdown 返回:Title/URL Source/Published Time 头 + "Markdown Content:" 正文
+// 无 "Markdown Content:" 标记(错误页/限流页)→ null,不把非正文当证据
+export const parseJinaReaderBody = (body: string): ReaderPage | null => {
+  const marker = body.indexOf('Markdown Content:');
+  if (marker < 0) return null;
+  const head = body.slice(0, marker);
+  const content = body.slice(marker + 'Markdown Content:'.length);
+  const published = /^Published Time:\s*(\S+)/m.exec(head);
+  const text = content
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, '')          // 图片
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')        // 链接留文字
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+  return { text, publishedAt: published !== null ? published[1] : null };
+};
+
 // factory — 闭包捕获 LRU cache + cacheOrder
 export const createSourcePrefetcher = (
   http: HttpClient,
@@ -75,23 +108,53 @@ export const createSourcePrefetcher = (
     cacheOrder.push(key);
   };
 
+  const readViaJina = async (
+    url: string, fallbackTitle: string, source: string, minChars: number,
+    budget: ReaderBudget, signal?: AbortSignalLike,
+  ): Promise<DeepReadSource | null> => {
+    if (budget.remaining <= 0 || isAborted(signal)) return null;
+    budget.remaining -= 1;
+    const resp = await http.fetch({ url: JINA_READER_PREFIX + url, method: 'GET', headers: {} }, { signal });
+    if (resp.status !== 200) return null;
+    const page = parseJinaReaderBody(resp.body);
+    if (page === null || page.text.length < minChars) return null;
+    return {
+      sourceId: makeSourceId(),
+      url,
+      title: fallbackTitle,
+      source,
+      evidenceText: page.text,
+      credibility: scoreCredibility(url),
+      freshness: 'unknown',
+      publishedAt: page.publishedAt,
+      imageCandidates: [],
+    };
+  };
+
   const fetchSource = async (
     url: string,
     fallbackTitle: string,
     source: string,
     minChars: number,
     fetchOpts: { autoApproveAll: boolean; autoApproveHighRisk: boolean },
+    budget: ReaderBudget,
     signal?: AbortSignalLike,
   ): Promise<DeepReadSource | null> => {
-    // 私网 gate(默认不允许;caller 控制 flags)
+    // 私网 gate(默认不允许;caller 控制 flags)— Reader 兜底同样受限,不把私网 URL 交给第三方
     if (!urlAllowedForBackgroundFetch(url, fetchOpts.autoApproveAll, fetchOpts.autoApproveHighRisk)) {
       return null;
     }
-    const resp = await http.fetch({ url, method: 'GET', headers: {} }, { signal });
-    if (resp.status !== 200) return null;
-    const html = resp.body;
-    const evidenceText = extractReadableText(html, url);
-    if (evidenceText.length < minChars) return null;
+    let html = '';
+    try {
+      const resp = await http.fetch({ url, method: 'GET', headers: BROWSER_FETCH_HEADERS }, { signal });
+      if (resp.status === 200) html = resp.body;
+    } catch (e) {
+      if (isAborted(signal)) throw e;
+    }
+    const evidenceText = html.length > 0 ? extractReadableText(html, url) : '';
+    if (evidenceText.length < minChars) {
+      return readViaJina(url, fallbackTitle, source, minChars, budget, signal);
+    }
 
     const imageCandidates = extractImgTags(html, url);
     const scored = scoreAndDedup(imageCandidates, fallbackTitle);
@@ -133,6 +196,7 @@ export const createSourcePrefetcher = (
 
     // 36s wall budget
     const deadline = Date.now() + PREFETCH_WALL_BUDGET_MS;
+    const readerBudget: ReaderBudget = { remaining: READER_FALLBACK_MAX };
 
     // 1. 多 provider 并行搜索(失败 provider → 空 bucket;signal 透传真实取消)
     const queries = buildDeepReadQueries(title, seedUrl);
@@ -150,7 +214,7 @@ export const createSourcePrefetcher = (
     if (seedUrl) {
       const seedSource = await withDeadline(
         deadline,
-        fetchSource(seedUrl, title, 'seed', MIN_SEED_SOURCE_CHARS, { autoApproveAll: false, autoApproveHighRisk: false }, signal),
+        fetchSource(seedUrl, title, 'seed', MIN_SEED_SOURCE_CHARS, { autoApproveAll: false, autoApproveHighRisk: false }, readerBudget, signal),
         signal,
       ).catch(() => null); // catch 在外:seed 超时只丢 seed,不中止整个 collect
       if (seedSource) sources.push(seedSource);
@@ -162,7 +226,7 @@ export const createSourcePrefetcher = (
       interleaved.slice(0, TOP_SCRAPE_CANDIDATES).map(hit =>
         withDeadline(
           deadline,
-          fetchSource(hit.url, hit.title, hit.source, MIN_SOURCE_CHARS, { autoApproveAll: false, autoApproveHighRisk: false }, signal),
+          fetchSource(hit.url, hit.title, hit.source, MIN_SOURCE_CHARS, { autoApproveAll: false, autoApproveHighRisk: false }, readerBudget, signal),
           signal,
         ).catch(() => null),
       ),

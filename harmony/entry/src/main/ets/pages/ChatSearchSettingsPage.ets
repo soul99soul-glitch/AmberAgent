@@ -513,14 +513,14 @@ struct ChatSearchSettingsPage {
   // 内置免费源卡内容:六行开关(iOS 基准顺序)
   @Builder
   builtinCardContent(): void {
-    this.builtinRow('Jina Search / Reader',
-      '可无 Key 使用，尽量以 Markdown 搜索和读取网页。', 'jina', false)
-    this.builtinRow('DuckDuckGo Lite',
-      '无需 API Key 的免费公共召回源。', 'duckduckgo', false)
+    this.builtinRow('Jina Reader',
+      '无需 Key 读取网页全文，供 scrape_web 工具使用。', 'jina', false)
+    this.builtinRow('免费网页聚合',
+      'DuckDuckGo、Brave、360、夸克并发查询，被拦截的引擎自动跳过。', 'duckduckgo', false)
     this.builtinRow('Bing HTML',
-      '免费公共兜底，遇到验证页会明确报错。', 'bing', false)
+      '免费公共兜底，遇到验证页会自动跳过。', 'bing', false)
     this.builtinRow('Wikipedia',
-      '实体和背景知识源，适合百科类问题。', 'wikipedia', false)
+      '实体和背景知识源，普通话题默认参与。', 'wikipedia', false)
     this.builtinRow('Hacker News',
       '技术、开源和 AI 工具生态讨论源。', 'hackernews', false)
     this.builtinRow('Google WebView 兜底',

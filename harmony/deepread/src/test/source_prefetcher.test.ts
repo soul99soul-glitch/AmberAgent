@@ -331,3 +331,52 @@ test('deadline exceeded: slow fetch rejected, others may still complete', async 
   assert.ok(!urls.includes('https://fail.example.com/x'), 'failed fetch dropped');
   assert.ok(urls.includes('https://ok.example.com/x'), 'ok fetch kept');
 });
+
+// ===== 直连 UA + Jina Reader 兜底 =====
+
+const jinaBody = (text: string): string =>
+  `Title: T\n\nURL Source: https://x\n\nPublished Time: 2026-09-01T08:00:00Z\n\nMarkdown Content:\n` +
+  `![Image 1](https://img/x.png)\n${text} 见[原文](https://link)`;
+
+const LONG_TEXT: string = '这是一段足够长的正文内容，用来模拟 Jina Reader 返回的页面文字。'.repeat(12);
+
+test('直连请求带浏览器 UA;直连 403 → Jina Reader 兜底(去图片/链接,解析发布时间)', async () => {
+  const hits: SearchHit[] = [{ title: 'Blocked', url: 'https://blocked.example.com/a', snippet: null, source: 'brave' }];
+  const { http, calls } = mockHttp((req) => {
+    if (req.url.startsWith('https://r.jina.ai/')) return ok(jinaBody(LONG_TEXT));
+    return { status: 403, headers: {}, body: 'forbidden' };
+  });
+  const { registry } = mockRegistry(hits);
+  const pf = createSourcePrefetcher(http, registry);
+  const sources = await pf.collect('topic-jina', 'Title', null, true);
+  const direct = calls.find((c) => c.url === 'https://blocked.example.com/a');
+  assert.ok(direct !== undefined && direct.headers['User-Agent'].startsWith('Mozilla/5.0'));
+  assert.ok(calls.some((c) => c.url === 'https://r.jina.ai/https://blocked.example.com/a'));
+  assert.equal(sources.length, 1);
+  assert.equal(sources[0].url, 'https://blocked.example.com/a'); // 来源仍记原 URL
+  assert.equal(sources[0].publishedAt, '2026-09-01T08:00:00Z');
+  assert.ok(!sources[0].evidenceText.includes('https://img/x.png'));
+  assert.ok(sources[0].evidenceText.endsWith('见原文'));
+});
+
+test('Jina Reader 兜底每次 collect 至多 6 次;无 Markdown 标记的返回不收', async () => {
+  const hits: SearchHit[] = Array.from({ length: 10 }, (_, i) => (
+    { title: `t${i}`, url: `https://blocked.example.com/${i}`, snippet: null, source: 'brave' }));
+  const { http, calls } = mockHttp((req) => (req.url.startsWith('https://r.jina.ai/')
+    ? ok('<html>rate limited</html>')
+    : { status: 403, headers: {}, body: '' }));
+  const { registry } = mockRegistry(hits);
+  const pf = createSourcePrefetcher(http, registry);
+  const sources = await pf.collect('topic-cap', 'Title', null, true);
+  assert.equal(calls.filter((c) => c.url.startsWith('https://r.jina.ai/')).length, 6);
+  assert.equal(sources.length, 0);
+});
+
+test('私网 URL 不直连也不交给 Jina Reader', async () => {
+  const hits: SearchHit[] = [{ title: 'lan', url: 'http://192.168.1.10/x', snippet: null, source: 'brave' }];
+  const { http, calls } = mockHttp(() => ok(jinaBody(LONG_TEXT)));
+  const { registry } = mockRegistry(hits);
+  const pf = createSourcePrefetcher(http, registry);
+  await pf.collect('topic-lan', 'Title', null, true);
+  assert.equal(calls.length, 0);
+});

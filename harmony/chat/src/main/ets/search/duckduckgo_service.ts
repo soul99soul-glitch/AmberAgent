@@ -1,16 +1,13 @@
 // duckduckgo_service — DuckDuckGo 内置源(D-067)
 // Android 基准: search/.../DuckDuckGoSearchService.kt(全文 109 行;普通 object 非 SearchService)
+// 偏差:Lite 端点已被 202 验证页拦截,改为仅走 HTML POST(对齐 iOS 免费搜索重做)
 // 偏差登记:Jsoup → mini-DOM;Jsoup timeout → HttpClient Port 默认
 import type { SearchCommonOptions, SearchResult, SearchResultItem } from './search_service.ts';
 import { searchSdkRuntime } from './search_service.ts';
 import { javaUrlEncodeForm, javaUrlDecodeForm } from './url_codec.ts';
 import type { HtmlDocument, HtmlElement } from './html_dom.ts';
-import {
-  parseHtml, select, selectFirst, elementText, attr, hasClass, parentsOf, nextElementSiblingOf,
-} from './html_dom.ts';
+import { parseHtml, select, selectFirst, elementText, attr } from './html_dom.ts';
 
-const DDG_LITE_UA: string =
-  'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Mobile Safari/537.36';
 const DDG_HTML_UA: string =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
 const DDG_ACCEPT: string = 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8';
@@ -40,27 +37,6 @@ const decodeDuckDuckGoUrl = (rawHref: string): string => {
   return normalized;
 };
 
-// Element.resultSnippet(:83-91):上两级行的后续 3 行内首个 td.result-snippet
-const resultSnippet = (anchor: HtmlElement): string => {
-  const row: HtmlElement | null =
-    anchor.parent !== null ? anchor.parent.parent : null;
-  let candidate: HtmlElement | null = row !== null ? nextElementSiblingOf(row) : null;
-  for (let i = 0; i < 3 && candidate !== null; i++) {
-    const hits: HtmlElement[] = select(candidate, 'td.result-snippet');
-    if (hits.length > 0) {
-      const t: string = elementText(hits[0]).trim();
-      if (t.length > 0) return t;
-    }
-    candidate = nextElementSiblingOf(candidate);
-  }
-  return '';
-};
-
-// 收集锚点(候选元素自身为 a 时也计入 — select 只看后代,parseLite 的
-//   a.result-link 在 tr 后代中;保持与 Jsoup doc.select 语义一致:对 doc 调用)
-const collectAnchors = (doc: HtmlDocument, selector: string): HtmlElement[] =>
-  select(doc, selector);
-
 const distinctTake = (items: SearchResultItem[], limit: number): SearchResultItem[] => {
   const seen: string[] = [];
   const out: SearchResultItem[] = [];
@@ -73,28 +49,6 @@ const distinctTake = (items: SearchResultItem[], limit: number): SearchResultIte
   return out;
 };
 
-// parseLite(:53-67)
-const parseLite = (doc: HtmlDocument, limit: number): SearchResultItem[] => {
-  const items: SearchResultItem[] = [];
-  for (const anchor of collectAnchors(doc, 'a.result-link')) {
-    // filterNot parents any hasClass('result-sponsored')
-    const sponsored: boolean = parentsOf(anchor)
-      .some((p: HtmlElement): boolean => hasClass(p, 'result-sponsored'));
-    if (sponsored) continue;
-    const title: string = elementText(anchor).trim();
-    const href: string = decodeDuckDuckGoUrl(attr(anchor, 'href')).trim();
-    if (title.length === 0 || !href.startsWith('http')) continue;
-    items.push({
-      title,
-      url: href,
-      text: resultSnippet(anchor),
-      publishedAt: null,
-      images: [],
-    });
-  }
-  return distinctTake(items, limit);
-};
-
 // parseHtml(:69-81)
 const parseHtmlResults = (doc: HtmlDocument, limit: number): SearchResultItem[] => {
   const items: SearchResultItem[] = [];
@@ -104,13 +58,14 @@ const parseHtmlResults = (doc: HtmlDocument, limit: number): SearchResultItem[] 
     const title: string = elementText(anchor).trim();
     const href: string = decodeDuckDuckGoUrl(attr(anchor, 'href')).trim();
     if (title.length === 0 || !href.startsWith('http')) continue;
-    const snippetEls: HtmlElement[] = select(result, '.result__snippet, .result__body');
+    // 广告位跳转(duckduckgo.com/y.js?...)不是自然结果
+    if (href.startsWith('https://duckduckgo.com/y.js')) continue;
+    // 只取 .result__snippet:真实页面的 .result__body 包着整条结果,会把标题重复拼进摘要
+    const snippetEl: HtmlElement | null = selectFirst(result, '.result__snippet');
     items.push({
       title,
       url: href,
-      text: snippetEls.length > 0
-        ? snippetEls.map((e: HtmlElement): string => elementText(e)).join(' ').trim()
-        : '',
+      text: snippetEl !== null ? elementText(snippetEl).trim() : '',
       publishedAt: null,
       images: [],
     });
@@ -118,18 +73,23 @@ const parseHtmlResults = (doc: HtmlDocument, limit: number): SearchResultItem[] 
   return distinctTake(items, limit);
 };
 
-const fetchDdg = (url: string, ua: string): Promise<string> =>
+// POST html.duckduckgo.com/html/(deedy5/ddgs 同款端点);Lite 端点现已对首个请求
+// 返回 202 验证页,不再使用
+const fetchDdgHtml = (query: string): Promise<string> =>
   searchSdkRuntime().http.fetch({
-    url,
-    method: 'GET',
+    url: 'https://html.duckduckgo.com/html/',
+    method: 'POST',
     headers: {
-      'User-Agent': ua,
+      'User-Agent': DDG_HTML_UA,
       'Accept': DDG_ACCEPT,
       'Accept-Language': DDG_ACCEPT_LANG,
-      'Referer': 'https://duckduckgo.com/',
+      'Content-Type': 'application/x-www-form-urlencoded',
+      'Referer': 'https://html.duckduckgo.com/',
     },
+    body: `q=${javaUrlEncodeForm(query)}&b=&kl=wt-wt`,
   }).then((r): string => {
-    // 429/403/5xx 的限流页/挑战页不得当结果页解析
+    // 202 = 反爬验证页;429/403/5xx 的限流页/挑战页不得当结果页解析
+    if (r.status === 202) throw new Error('DuckDuckGo requires human verification');
     if (r.status < 200 || r.status >= 300) {
       throw new Error(`DuckDuckGo request failed with HTTP ${r.status}`);
     }
@@ -139,23 +99,14 @@ const fetchDdg = (url: string, ua: string): Promise<string> =>
 export const duckDuckGoSearch = async (
   query: string, commonOptions: SearchCommonOptions,
 ): Promise<SearchResult> => {
-  const encoded: string = javaUrlEncodeForm(query);
-  const liteBody: string =
-    await fetchDdg(`https://lite.duckduckgo.com/lite/?q=${encoded}`, DDG_LITE_UA);
-  const liteDoc = parseHtml(liteBody);
-  const liteResults: SearchResultItem[] = parseLite(liteDoc, commonOptions.resultSize);
-  if (liteResults.length > 0) {
-    return { answer: null, items: liteResults };
+  const doc = parseHtml(await fetchDdgHtml(query));
+  const results: SearchResultItem[] = parseHtmlResults(doc, commonOptions.resultSize);
+  if (results.length > 0) {
+    return { answer: null, items: results };
   }
-  const htmlBody: string =
-    await fetchDdg(`https://html.duckduckgo.com/html/?q=${encoded}`, DDG_HTML_UA);
-  const htmlDoc = parseHtml(htmlBody);
-  const htmlResults: SearchResultItem[] = parseHtmlResults(htmlDoc, commonOptions.resultSize);
-  if (htmlResults.length > 0) {
-    return { answer: null, items: htmlResults };
-  }
-  const pageText: string = `${elementText(liteDoc)} ${elementText(htmlDoc)}`.toLowerCase();
-  if (pageText.includes('bots use duckduckgo') || pageText.includes('anomaly-modal')) {
+  const pageText: string = elementText(doc).toLowerCase();
+  if (pageText.includes('bots use duckduckgo') || pageText.includes('anomaly-modal')
+    || pageText.includes('select all squares')) {
     throw new Error('DuckDuckGo requires human verification');
   }
   throw new Error('DuckDuckGo returned no parseable organic results');

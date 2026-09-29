@@ -9,7 +9,7 @@ import type {
   SearchService, SearchServiceOptions,
 } from './search_service.ts';
 import { searchSdkRuntime } from './search_service.ts';
-import { javaUrlEncodeForm, javaUrlDecodeForm } from './url_codec.ts';
+import { javaUrlEncodeForm, javaUrlDecodeForm, base64UrlDecodeUtf8 } from './url_codec.ts';
 import type { HtmlElement } from './html_dom.ts';
 import { parseHtml, select, selectFirst, elementText, attr } from './html_dom.ts';
 
@@ -22,6 +22,7 @@ const asBingOptions = (o: SearchServiceOptions): BingLocalOptions => {
 };
 
 // decodeBingUrl(:115-124):query 首段 key ∈ {u,url} → URLDecoder;否则原文
+// 国际版 /ck/a 跳转的 u 值为 'a1' + base64url(目标 URL),需再解一层
 const decodeBingUrl = (raw: string): string => {
   const qIdx: number = raw.indexOf('?');
   if (qIdx < 0) return raw;
@@ -32,7 +33,12 @@ const decodeBingUrl = (raw: string): string => {
     if (key === 'u' || key === 'url') {
       const target: string = eq >= 0 ? seg.slice(eq + 1) : '';
       if (target.trim().length === 0) return raw;
-      return javaUrlDecodeForm(target);
+      const decoded: string = javaUrlDecodeForm(target);
+      if (decoded.startsWith('a1')) {
+        const unwrapped: string | null = base64UrlDecodeUtf8(decoded.substring(2));
+        if (unwrapped !== null && unwrapped.startsWith('http')) return unwrapped;
+      }
+      return decoded;
     }
   }
   return raw;

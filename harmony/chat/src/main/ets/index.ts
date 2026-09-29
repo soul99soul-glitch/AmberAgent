@@ -789,6 +789,11 @@ export {
   buildSources, buildQueryVariants, orchestratorCanonicalizeUrl,
   searchOrchestratorSearch, searchOrchestratorStatus, searchOrchestratorExplain,
 } from './search/search_orchestrator.ts';
+// 免费网页引擎(DDG/Brave/Bing/360/夸克 + Wikipedia/HN)+ 验证码熔断;深度阅读预抓复用
+export type { FreeEngineId } from './search/free_web_engines.ts';
+export {
+  FREE_ENGINE_NAMES, FREE_WEB_ENGINE_IDS, runFreeEngine, looksTechnicalQuery, freeEngineCoolingDown,
+} from './search/free_web_engines.ts';
 
 // ===== D-070:搜索工具组 + 搜索偏好持久化 + entry 接线面 =====
 export {

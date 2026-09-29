@@ -88,22 +88,30 @@ test('orchestrator:buildQueryVariants — quick 1/standard 3/deep 4 + news/marke
 
 // ===== buildSources(:238-283) =====
 
-test('orchestrator:buildSources — 内置五件优先级序/标志门/applicableFor/选择器/configured Bing 抑制', () => {
+const FREE_WEB = ['duckduckgo_builtin', 'brave_builtin', 'bing_builtin', 'so360_builtin', 'quark_builtin'];
+
+test('orchestrator:buildSources — 免费网页聚合/优先级序/标志门/applicableFor/选择器/configured Bing 抑制', () => {
   const all = makeSettings();
-  // 无关 query → wikipedia/hackernews 不适用;余三件按 priority 90/200/210
+  // general 话题:五个网页引擎 + wikipedia(230 垫底);Jina 无 Key 搜索已移除
   assert.deepEqual(
     buildSources(all, [], 'random query', 'general').map((s) => s.id),
-    ['jina_builtin', 'duckduckgo_builtin', 'bing_builtin'],
+    [...FREE_WEB, 'wikipedia_builtin'],
   );
-  // 百科 query → wikipedia 加入(230 垫底)
+  // news 话题:wikipedia 不适用
   assert.deepEqual(
-    buildSources(all, [], 'what is rust', 'general').map((s) => s.id),
-    ['jina_builtin', 'duckduckgo_builtin', 'bing_builtin', 'wikipedia_builtin'],
+    buildSources(all, [], 'random query', 'news').map((s) => s.id),
+    FREE_WEB,
   );
-  // 技术 query → hackernews 加入
+  // 技术 query → hackernews 加入(220 在 wikipedia 前)
   assert.deepEqual(
     buildSources(all, [], 'github mcp', 'general').map((s) => s.id),
-    ['jina_builtin', 'duckduckgo_builtin', 'bing_builtin', 'hackernews_builtin'],
+    [...FREE_WEB, 'hackernews_builtin', 'wikipedia_builtin'],
+  );
+  // DDG 开关即免费网页聚合总开关:关掉后只剩 bing
+  const noFreeWeb = makeSettings([], [], { searchBuiltinDuckDuckGoEnabled: false });
+  assert.deepEqual(
+    buildSources(noFreeWeb, [], 'random', 'news').map((s) => s.id),
+    ['bing_builtin'],
   );
   // technical topic → hackernews 恒适用
   assert.ok(buildSources(all, [], 'whatever', 'technical').some((s) => s.id === 'hackernews_builtin'));
@@ -116,11 +124,12 @@ test('orchestrator:buildSources — 内置五件优先级序/标志门/applicabl
     searchBuiltinHackerNewsEnabled: false,
   });
   assert.deepEqual(buildSources(none, [], 'what is x', 'general'), []);
-  // 选择器:name contains('jina' 命中 'Jina Search'?allowed 用 name='Jina' 判等/包含)
+  // 选择器:id 前缀/name 判等或包含
   assert.deepEqual(
-    buildSources(all, ['jina'], 'random', 'general').map((s) => s.id),
-    ['jina_builtin'],
+    buildSources(all, ['brave'], 'random', 'general').map((s) => s.id),
+    ['brave_builtin'],
   );
+  assert.deepEqual(buildSources(all, ['jina'], 'random', 'general'), []);
   // configured bing_local 抑制内置 bing(:262,270)
   const bing = svc('bing_local', 'cfg-bing');
   const withBing = makeSettings([bing], ['cfg-bing']);
@@ -161,7 +170,8 @@ test('orchestrator:search — 无源错误对象逐字', async () => {
 });
 
 test('orchestrator:search — ok 形状/perCallSize coerce/variant cap10/sources 状态', async () => {
-  const settings = makeSettings(); // 五内置;query 无关 → 3 源
+  // news 话题 → 五个网页引擎(wikipedia/HN 不适用)
+  const settings = makeSettings();
   const captured: SourceSearchRequest[] = [];
   const sizes: number[] = [];
   const exec: OrchestratorSearchExecutor = (req, common) => {
@@ -171,19 +181,19 @@ test('orchestrator:search — ok 形状/perCallSize coerce/variant cap10/sources
       item(`${req.source.name} t`, `https://a.com/${req.sourceIndex}`, 'text'),
     ]));
   };
-  const r = await searchOrchestratorSearch(settings, { query: 'q', max_results: 40 }, exec, DEPS);
+  const r = await searchOrchestratorSearch(
+    settings, { query: 'q', topic: 'news', time_range: 'any', max_results: 40 }, exec, DEPS);
   assert.equal(r['status'], 'ok');
-  // perCallSize = max(4, floor(42/3)+3=17) = 17
-  assert.ok(sizes.every((s) => s === 17));
-  // variants(standard, any, general) = ['q'] → 每源 1 调用
-  assert.equal(captured.length, 3);
+  // perCallSize = max(4, floor(44/5)+3=11) = 11
+  assert.ok(sizes.every((s) => s === 11));
+  // variants(standard, news, any) = ['q', 'q news'] → 每源 2 调用
+  assert.equal(captured.length, 10);
   const sources = r['sources'] as JsonObject[];
-  assert.deepEqual(sources.map((s) => s['status']), ['ok', 'ok', 'ok']);
-  assert.deepEqual(sources.map((s) => s['variant_count']), [1, 1, 1]);
-  assert.deepEqual(sources.map((s) => s['builtin']), [true, true, true]);
-  // query_variants 落出
-  assert.deepEqual(r['query_variants'], ['q']);
-  // cap10:deep + news → variants 3;5 源全启用(技术 query 使 HN 适用,百科 query 使 wiki 适用)
+  assert.deepEqual(sources.map((s) => s['status']), ['ok', 'ok', 'ok', 'ok', 'ok']);
+  assert.deepEqual(sources.map((s) => s['variant_count']), [2, 2, 2, 2, 2]);
+  assert.deepEqual(sources.map((s) => s['builtin']), [true, true, true, true, true]);
+  assert.deepEqual(r['query_variants'], ['q', 'q news']);
+  // cap16:deep + news → variants 3;技术 query 使 HN 适用
   const captured2: SourceSearchRequest[] = [];
   const exec2: OrchestratorSearchExecutor = (req) => {
     captured2.push(req);
@@ -194,11 +204,10 @@ test('orchestrator:search — ok 形状/perCallSize coerce/variant cap10/sources
     { query: 'what is github mcp', topic: 'news', depth: 'deep', max_results: 40 },
     exec2, DEPS,
   );
-  // cap10:deep + news → variants 3;topic news 排除 wikipedia → 4 源
-  // 4(v0) + 4(v1) = 8 < 10 → v2 再发 2 件截断(MAX_SOURCE_VARIANT_CALLS)
-  assert.equal(captured2.length, 10);
+  // topic news 排除 wikipedia → 6 源;6(v0) + 6(v1) = 12 < 16 → v2 再发 4 件截断
+  assert.equal(captured2.length, 16);
   const sources2 = r2['sources'] as JsonObject[];
-  assert.deepEqual(sources2.map((s) => s['variant_count']), [3, 3, 2, 2]);
+  assert.deepEqual(sources2.map((s) => s['variant_count']), [3, 3, 3, 3, 2, 2]);
 });
 
 test('orchestrator:search — partial/empty 状态机 + sanitizeError + message', async () => {
@@ -253,7 +262,9 @@ test('orchestrator:search — merge 评分公式/freshness/dup+12/publishedAt �
   };
   // depth quick → 单变体(否则多变体会产生额外 dup 计数)
   const r = await searchOrchestratorSearch(
-    settings, { query: 'rust', topic: 'news', time_range: 'week', depth: 'quick' }, exec, DEPS,
+    settings,
+    { query: 'rust', topic: 'news', time_range: 'week', depth: 'quick', services: ['duckduckgo', 'bing'] },
+    exec, DEPS,
   );
   const items = r['items'] as JsonObject[];
   assert.equal(items.length, 2);
@@ -354,7 +365,8 @@ test('orchestrator:status — 计数 + api_key_configured 分类型(brave bool/b
   assert.equal(braveSrc['builtin'], false);
   const bingSrc = sources.find((s) => s['id'] === 'id-bing') as JsonObject;
   assert.equal(bingSrc['api_key_configured'], null);
-  assert.ok(sources.some((s) => s['id'] === 'jina_builtin' && s['builtin'] === true));
+  assert.ok(sources.some((s) => s['id'] === 'brave_builtin' && s['builtin'] === true));
+  assert.ok(!sources.some((s) => s['id'] === 'jina_builtin')); // 无 Key Jina 搜索已移除
   assert.ok(!sources.some((s) => s['id'] === 'bing_builtin'));
   assert.ok(!sources.some((s) => s['id'] === 'id-searx')); // 未启用
 });
@@ -368,7 +380,8 @@ test('orchestrator:explain — 形状/空 query 无变体/webview 可用性判�
   assert.equal(r['topic'], 'news'); // lowercase 后校验
   assert.equal(r['time_range'], 'week');
   assert.equal(r['depth'], 'deep');
-  assert.ok((r['source_count'] as number) === 3); // topic news:wikipedia/HN 均不适用
+  // topic news:wikipedia 不适用;'rust' 命中技术词 → 五个网页引擎 + HN
+  assert.equal(r['source_count'], 6);
   const sources = r['sources'] as JsonObject[];
   assert.deepEqual(
     Object.keys(sources[0]).sort(),

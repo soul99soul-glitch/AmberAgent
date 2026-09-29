@@ -89,7 +89,7 @@ test('tools:search_web 描述模板 — 服务名/内置名/Today 替换逐字',
   assert.ok(d.startsWith('Search the web through AmberAgent Search Orchestrator.\n'));
   assert.ok(d.includes('Enabled configured services: Tavily.\n'));
   assert.ok(d.includes(
-    'Built-in sources: Jina Search/Reader, DuckDuckGo, Bing, Google WebView fallback.\n',
+    'Built-in sources: Jina Reader (scrape only), Free web (DuckDuckGo, Brave, 360, Quark), Bing, Google WebView fallback.\n',
   ));
   assert.ok(d.includes('Today is 2026-07-28.\n\nResponse format:'));
   assert.ok(d.endsWith(

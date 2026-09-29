@@ -149,8 +149,8 @@ export const createSearchTools = (settings: SearchSettings, deps: OrchestratorDe
   const enabledServiceNames: string =
     enabled.map((o: SearchServiceOptions) => SEARCH_SERVICE_TYPES[o.type] ?? 'Search').join(', ');
   const builtinList: string[] = [];
-  if (settings.searchBuiltinJinaEnabled) builtinList.push('Jina Search/Reader');
-  if (settings.searchBuiltinDuckDuckGoEnabled) builtinList.push('DuckDuckGo');
+  if (settings.searchBuiltinJinaEnabled) builtinList.push('Jina Reader (scrape only)');
+  if (settings.searchBuiltinDuckDuckGoEnabled) builtinList.push('Free web (DuckDuckGo, Brave, 360, Quark)');
   if (settings.searchBuiltinBingEnabled) builtinList.push('Bing');
   if (settings.searchBuiltinWikipediaEnabled) builtinList.push('Wikipedia');
   if (settings.searchBuiltinHackerNewsEnabled) builtinList.push('Hacker News');
@@ -162,7 +162,7 @@ export const createSearchTools = (settings: SearchSettings, deps: OrchestratorDe
   // :38-71 trimIndent 逐字
   const searchWebDescription: string = [
     'Search the web through AmberAgent Search Orchestrator.',
-    'It uses enabled API services first, then built-in public/vertical sources such as Jina, DuckDuckGo, Bing HTML fallback, Wikipedia, and Hacker News as fallback/cross-check.',
+    'It uses enabled API services first, then built-in free public/vertical sources such as DuckDuckGo, Brave, Bing, 360, Quark, Wikipedia, and Hacker News as fallback/cross-check. Blocked public engines are skipped automatically.',
     'Use this when the user asks for the latest news, current facts, or needs verification.',
     `Enabled configured services: ${namesPart}.`,
     `Built-in sources: ${builtinPart}.`,
