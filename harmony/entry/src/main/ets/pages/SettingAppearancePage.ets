@@ -1,6 +1,9 @@
 // SettingAppearancePage — 外观(iOS AppearanceSettingsView 对位,iOS 二级页骨架)
 // 颜色模式(浅色/深色/跟随系统)+ 强调色五选一 + 主题包(C2:
 //   内置三包/导入导出/AI 生成试穿,对齐 iOS AmberThemePack 体系)。
+// 主题包导入兼容三格式(theme_pack_import.ets):跨平台 amber.theme.pack v1(iOS/Android 互通)、
+//   Android 旧 token 包(schemaVersion=1,字体/布局 token 一并落 DisplaySetting)、鸿蒙原生;
+//   导出统一发跨平台 v1(带鸿蒙扩展段,iOS/Android 可导入,鸿蒙无损回读)。
 import {
   BG, INK, INK3, ACCENT, ACCENT_OPTIONS, setAccentColor, ERROR, TEXT_STYLES,
   SURFACE, LINE, LINE2, OVERLAY, MOTION_OVERLAY, lineHeightForSize,
@@ -11,9 +14,12 @@ import { CenteredTitleBar, PlainSection, PageSpacer, Seg, CardGroup, CardToggleR
 import { getChatKvStore } from '../di/AppContainer.ets';
 import { applyWindowTheme } from '../entryability/EntryAbility.ets';
 import {
-  ThemePack, themePackStore, applyThemePack, parseThemePackJson, themePackToJson,
+  ThemePack, themePackStore, applyThemePack, parseThemePackJson,
   isAmoledBlack, setAmoledBlack,
 } from '../design/theme_packs.ets';
+import {
+  ThemePackImportResult, ThemePackDisplayPatch, parseThemePackImport, themePackToPortableJson,
+} from '../design/theme_pack_import.ets';
 import { generateVisionText } from '../platform_impl/OcrSupport.ets';
 import { resolveEffectiveChatChoice } from '../platform_impl/ChatModelSelectionSupport.ets';
 import type { DisplaySetting } from '@amber/chat-domain';
@@ -175,15 +181,32 @@ struct SettingAppearancePage {
         fileIo.readSync(file.fd, buf);
         fileIo.closeSync(file.fd);
         const text: string = new util.TextDecoder('utf-8').decode(new Uint8Array(buf));
-        const pack: ThemePack | null = parseThemePackJson(text);
-        if (pack === null) {
-          promptAction.showToast({ message: '文件不是合法主题包', duration: 2000 });
+        const result: ThemePackImportResult = parseThemePackImport(text);
+        if (result.pack === null) {
+          const first: string = result.issues.length > 0 ? result.issues[0] : '文件不是合法主题包';
+          promptAction.showToast({ message: `导入失败:${first}`, duration: 2600 });
           return;
+        }
+        const pack: ThemePack = result.pack;
+        // Android 旧 token 包的字体/布局偏好一并落 DisplaySetting(聊天页下次进入生效)
+        const displayPatch: ThemePackDisplayPatch | null = result.display;
+        if (displayPatch !== null) {
+          const patch: ThemePackDisplayPatch = displayPatch;
+          loadDisplaySetting(getChatKvStore()).then((s: DisplaySetting): void => {
+            const next: DisplaySetting = s;
+            if (patch.chatFontFamily !== undefined) next.chatFontFamily = patch.chatFontFamily;
+            if (patch.fontSizeRatio !== undefined) next.fontSizeRatio = patch.fontSizeRatio;
+            if (patch.showUserAvatar !== undefined) next.showUserAvatar = patch.showUserAvatar;
+            if (patch.showAssistantBubble !== undefined) next.showAssistantBubble = patch.showAssistantBubble;
+            if (patch.amberBaseFamily !== undefined) next.amberBaseFamily = patch.amberBaseFamily;
+            saveDisplaySetting(getChatKvStore(), next).catch((): void => {});
+          }).catch((): void => {});
         }
         themePackStore.addImported(getChatKvStore(), pack).then((): void => {
           this.packs = themePackStore.all();
           this.applyPack(pack);
-          promptAction.showToast({ message: `已导入「${pack.displayName}」`, duration: 1800 });
+          const note: string = result.warnings.length > 0 ? `,已修正:${result.warnings[0]}` : '';
+          promptAction.showToast({ message: `已导入「${pack.displayName}」${note}`, duration: 2200 });
         }).catch((e: Error): void => {
           promptAction.showToast({ message: `导入失败:${e.message}`, duration: 2000 });
         });
@@ -195,8 +218,9 @@ struct SettingAppearancePage {
 
   private exportCurrent(): void {
     const pack: ThemePack = themePackStore.current();
-    const json: string = themePackToJson(pack);
-    const fileName: string = `theme-${pack.id}.json`;
+    // 统一导出跨平台 amber.theme.pack v1(iOS/Android 可直接导入;鸿蒙扩展段保无损回读)
+    const json: string = themePackToPortableJson(pack);
+    const fileName: string = `amber-theme-${pack.id}.json`;
     const ctx: common.Context = getContext(this) as common.Context;
     const docPicker = new picker.DocumentViewPicker(ctx);
     docPicker.save({ newFileNames: [fileName] }).then((uris: string[]): void => {

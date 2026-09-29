@@ -42,12 +42,71 @@ export let INFO_BG: string = '#E8F0FE';
 export let INFO_FG: string = '#114BA3';
 export const ACCENT_OPTIONS: string[] = ['#B8623A', '#5E9C6E', '#4F86D6', '#9277C4', '#C2607A'];
 
-// Android AmberTokens.accentInkFor:亮色 accent(如 Sage)上用深字,否则白
-const accentInkFor = (accent: string): string => {
+// ── 十六进制颜色工具(主题包导入/导出共用;接受 #RRGGBB / 0xRRGGBB / 裸 RRGGBB) ──
+// 与 Android ThemeDesignKt.themeRgb 同规则:不带 alpha,正好 6 位 hex
+export const parseHexRgb = (raw: string): number | null => {
+  if (typeof raw !== 'string') return null;
+  const value: string = raw.trim();
+  let digits: string = value;
+  if (value.startsWith('#')) {
+    digits = value.substring(1);
+  } else if (value.startsWith('0x') || value.startsWith('0X')) {
+    digits = value.substring(2);
+  }
+  if (digits.length !== 6 || !/^[0-9a-fA-F]{6}$/.test(digits)) return null;
+  return parseInt(digits, 16);
+};
+
+export const normalizeHexRgb = (raw: string): string | null => {
+  const rgb: number | null = parseHexRgb(raw);
+  if (rgb === null) return null;
+  return `#${rgb.toString(16).padStart(6, '0').toUpperCase()}`;
+};
+
+// WCAG 相对亮度对比度(iOS AmberColorContrast / Android themeContrast 同算法)
+const relativeLuminance = (rgb: number): number => {
+  const linear = (channel: number): number => {
+    const c: number = channel / 255;
+    return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+  };
+  return 0.2126 * linear((rgb >> 16) & 0xFF) + 0.7152 * linear((rgb >> 8) & 0xFF) + 0.0722 * linear(rgb & 0xFF);
+};
+
+export const contrastRatio = (first: number, second: number): number => {
+  const la: number = relativeLuminance(first);
+  const lb: number = relativeLuminance(second);
+  return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
+};
+
+// 双通道中点(iOS AmberThemeDesign.Palette.midpoint 同规则:逐通道整数平均)
+export const midpointHex = (a: string, b: string): string => {
+  const ra: number = parseHexRgb(a) ?? 0;
+  const rb: number = parseHexRgb(b) ?? 0;
+  const r: number = Math.floor((((ra >> 16) & 0xFF) + ((rb >> 16) & 0xFF)) / 2);
+  const g: number = Math.floor((((ra >> 8) & 0xFF) + ((rb >> 8) & 0xFF)) / 2);
+  const bl: number = Math.floor(((ra & 0xFF) + (rb & 0xFF)) / 2);
+  return `#${((r << 16) | (g << 8) | bl).toString(16).padStart(6, '0').toUpperCase()}`;
+};
+
+// accent 填充上的墨色(iOS AmberAccentOption.inkHex 配对:高明度色用深墨,
+// steelBlue 品牌规范用奶油墨;策展五色其余保持既定白墨,不随对比度公式翻转;
+// 非策展色如导入包 accent,按 WCAG 对比度在黑/白中取可读 —— Android accentInkFor 同规则)
+export const accentInkFor = (accent: string): string => {
   if (accent === '#5E9C6E') return '#0F150E'; // sage-green
-  if (accent === '#D9A441' || accent === '#C9A461') return '#1A1408'; // gold
+  if (accent === '#D9A441' || accent === '#C9A461') return '#1A1408'; // gold(旧配对)
+  if (accent === '#B9863A') return '#231602'; // amberGold(iOS)
+  if (accent === '#6B8CAD') return '#FAF9F7'; // steelBlue 奶油墨(brand-spec)
+  if (ACCENT_OPTIONS.indexOf(accent) >= 0) return '#FFFFFF';
+  const rgb: number | null = parseHexRgb(accent);
+  if (rgb !== null) {
+    return contrastRatio(rgb, 0x000000) >= contrastRatio(rgb, 0xFFFFFF) ? '#000000' : '#FFFFFF';
+  }
   return '#FFFFFF';
 };
+
+// 主题包 accentInk 覆写(跨平台 amber.theme.pack 的 inkHex;null = 按 accent 自动推导)。
+// setAccentColor 第二参显式给 ink 时确立覆写;裸调(色板五选一/无 ink 的包)清除覆写。
+let accentInkOverride: string | null = null;
 
 // ── 状态色(上下文用量/压缩等活动指示;中等明度,深浅主题通用) ──
 export const STATUS_BLUE: string = '#4F86D6';   // 压缩中/信息
@@ -139,18 +198,19 @@ export const applyTheme = (dark: boolean): void => {
     HOME_DOT = 'rgba(40, 31, 20, 0.08)';
   }
   ACCENT_LIGHT = accentLightFor(ACCENT, darkTheme);
-  // signal 随 accent(Android 别名决策);accentInk 按 accent 亮度
+  // signal 随 accent(Android 别名决策);accentInk 优先主题包覆写,否则按 accent 推导
   SIGNAL = ACCENT;
-  ACCENT_INK = accentInkFor(ACCENT);
+  ACCENT_INK = accentInkOverride ?? accentInkFor(ACCENT);
   bumpThemeEpoch();
 };
 
-// setAccentColor — 强调色切换(色板五选一)
-export const setAccentColor = (hex: string): void => {
+// setAccentColor — 强调色切换(色板五选一;主题包带 inkHex 时经第二参确立覆写)
+export const setAccentColor = (hex: string, ink?: string): void => {
   ACCENT = hex;
+  accentInkOverride = ink ?? null;
   ACCENT_LIGHT = accentLightFor(hex, darkTheme);
   SIGNAL = hex;
-  ACCENT_INK = accentInkFor(hex);
+  ACCENT_INK = accentInkOverride ?? accentInkFor(hex);
   bumpThemeEpoch();
 };
 

@@ -1,6 +1,8 @@
 // design/theme_packs.ets — 主题包系统(C2;iOS AmberThemePack 对齐)
 //
-// 模型:ThemePack = 纸色组(light/dark 各 10 槽)+ accent + 首页点阵开关。
+// 模型:ThemePack = 纸色组(light/dark 各 10 槽)+ accent(+ 可选 accentInk 上墨色)+ 首页点阵开关。
+// 跨平台兼容:iOS/Android 的 amber.theme.pack v1 与 Android 旧 token 包由
+//   design/theme_pack_import.ets 解析/映射为本模型(导入),并负责跨平台格式导出。
 // 应用:applyThemePack = 先 applyTheme 拿状态色/玻璃/HOME alpha 默认值,再经
 //   applyPaperPalette 覆写 pack 纸色;accent 走既有 setAccentColor。
 // 刷新:令牌变更收口(applyTheme/applyPaperPalette/setAccentColor/applyAmoledBlack)
@@ -45,6 +47,8 @@ export interface ThemePack {
   light: ThemePalette;
   dark: ThemePalette;
   accent: string;
+  // accent 填充上的墨色(跨平台 amber.theme.pack 的 inkHex;缺省 = 按 accent 对比度自动推导)
+  accentInk?: string;
   dotGrid: boolean; // 首页画布点阵(点阵·陶土/点阵·Pi);false = 平涂(Notion)
   builtin: boolean;
 }
@@ -52,12 +56,13 @@ export interface ThemePack {
 const THEME_PACK_ID_KEY: string = 'theme_pack_id';
 const THEME_CUSTOM_PACKS_KEY: string = 'theme_custom_packs';
 
-// ── 内置包(iOS AmberThemePack.builtins 逐值) ──
+// ── 内置包(iOS AmberThemePack.builtins 逐值;accentInk 取 iOS AmberAccentOption.inkHex) ──
 export const BUILTIN_PACKS: ThemePack[] = [
   {
     id: 'sit-terracotta',
     displayName: '点阵 · 陶土',
     accent: '#B8623A',
+    accentInk: '#FFFFFF',
     dotGrid: true,
     builtin: true,
     light: {
@@ -75,6 +80,7 @@ export const BUILTIN_PACKS: ThemePack[] = [
     id: 'pi-steel',
     displayName: '点阵 · Pi',
     accent: '#6B8CAD',
+    accentInk: '#FAF9F7',
     dotGrid: true,
     builtin: true,
     light: {
@@ -92,6 +98,7 @@ export const BUILTIN_PACKS: ThemePack[] = [
     id: 'notion-blue',
     displayName: 'Notion · 暖白',
     accent: '#0075DE',
+    accentInk: '#FFFFFF',
     dotGrid: false,
     builtin: true,
     light: {
@@ -131,7 +138,7 @@ export const applyThemePack = (pack: ThemePack, dark: boolean): void => {
     bgFadeEnd: p.bg,
     bgGlass: `#CC${p.bg.substring(1)}`,
   });
-  setAccentColor(pack.accent);
+  setAccentColor(pack.accent, pack.accentInk);
   // D0-11:AMOLED 纯黑覆写(仅深色;画布/渐隐/玻璃改纯黑,卡片面保持原色分层)
   if (dark && amoledBlack) {
     applyAmoledBlack();
@@ -139,8 +146,10 @@ export const applyThemePack = (pack: ThemePack, dark: boolean): void => {
 };
 
 // ── JSON 编解码(导入/导出;schema 校验,不合法返回 null 由调用方诚实报错) ──
+// PaletteDoc/readPalette/paletteToDoc 导出给 theme_pack_import.ets(跨平台文件里
+// harmony 扩展段的 9 槽无损回读用)
 
-interface PaletteDoc {
+export interface PaletteDoc {
   bg?: string;
   surface?: string;
   surface2?: string;
@@ -158,6 +167,7 @@ interface ThemePackDoc {
   id?: string;
   name?: string;
   accent?: string;
+  accent_ink?: string;
   dot_grid?: boolean;
   light?: PaletteDoc;
   dark?: PaletteDoc;
@@ -165,7 +175,7 @@ interface ThemePackDoc {
 
 const isHexColor = (v: string): boolean => /^#[0-9a-fA-F]{6}$/.test(v);
 
-const readPalette = (doc: PaletteDoc | undefined): ThemePalette | null => {
+export const readPalette = (doc: PaletteDoc | undefined): ThemePalette | null => {
   if (doc === undefined) return null;
   const values: string[] = [
     doc.bg ?? '', doc.surface ?? '', doc.surface2 ?? '',
@@ -182,7 +192,7 @@ const readPalette = (doc: PaletteDoc | undefined): ThemePalette | null => {
   };
 };
 
-const paletteToDoc = (p: ThemePalette): PaletteDoc => ({
+export const paletteToDoc = (p: ThemePalette): PaletteDoc => ({
   bg: p.bg, surface: p.surface, surface2: p.surface2,
   ink: p.ink, ink2: p.ink2, muted: p.muted, muted2: p.muted2,
   border: p.border, borderSoft: p.borderSoft,
@@ -199,7 +209,7 @@ export const parseThemePackJson = (text: string): ThemePack | null => {
     const id: string = doc.id !== undefined && doc.id.trim().length > 0
       ? doc.id.trim()
       : `custom-${Date.now()}`;
-    return {
+    const pack: ThemePack = {
       id,
       displayName: doc.name.trim(),
       accent: doc.accent,
@@ -208,6 +218,10 @@ export const parseThemePackJson = (text: string): ThemePack | null => {
       light,
       dark,
     };
+    if (doc.accent_ink !== undefined && isHexColor(doc.accent_ink)) {
+      pack.accentInk = doc.accent_ink;
+    }
+    return pack;
   } catch (_e) {
     return null;
   }
@@ -224,6 +238,9 @@ export const themePackToJson = (pack: ThemePack): string => {
     light: paletteToDoc(pack.light),
     dark: paletteToDoc(pack.dark),
   };
+  if (pack.accentInk !== undefined) {
+    doc.accent_ink = pack.accentInk;
+  }
   return JSON.stringify(doc);
 };
 

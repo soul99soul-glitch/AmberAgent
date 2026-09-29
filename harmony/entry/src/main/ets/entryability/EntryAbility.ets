@@ -15,6 +15,7 @@ import { loadDisplaySetting } from '@amber/chat-domain';
 import type { DisplaySetting } from '@amber/chat-domain';
 import { ACCENT, applyTheme, setAccentColor, BG } from '../design/tokens.ets';
 import { themePackStore, applyCurrentTheme } from '../design/theme_packs.ets';
+import type { ThemePack } from '../design/theme_packs.ets';
 import { registerAmberFonts, registerAmberFontsFor } from '../design/fonts.ets';
 import { syncMacGatewayPushTokenOnLaunch } from '../platform_impl/MacGatewayClient.ets';
 import { setGenerationKeepAliveBackground, disposeGenerationKeepAlive } from '../platform_impl/BackgroundGenerationKeepAlive.ets';
@@ -318,7 +319,7 @@ export default class EntryAbility extends UIAbility {
         })
         .catch((): void => {});
       // 主题包:先 hydrate(KV 选中包/导入库),再按包应用;applyCurrentTheme 内含 applyTheme 全套
-      themePackStore.hydrate(getChatKvStore()).then((): void => {
+      const packReady: Promise<void> = themePackStore.hydrate(getChatKvStore()).then((): void => {
         applyCurrentTheme(resolvedDark);
         AppStorage.setOrCreate<string>('themePackId', themePackStore.current().id);
         AppStorage.setOrCreate<boolean>('homeDotGrid', themePackStore.current().dotGrid);
@@ -330,10 +331,14 @@ export default class EntryAbility extends UIAbility {
       AppStorage.setOrCreate<string>('uiColorMode', mode === 'dark' || mode === 'light' || mode === 'system' ? mode : 'system');
       AppStorage.setOrCreate<boolean>('darkMode', resolvedDark);
       applyWindowTheme(resolvedDark);
-      return loadDisplaySetting(getChatKvStore());
+      // accent 恢复排在包 hydrate 之后:accent 即当前包 accent 时沿用包 accentInk 覆写
+      // (否则裸 setAccentColor 会清掉导入包的上墨色,重启后按钮字色退化)
+      return loadDisplaySetting(getChatKvStore())
+        .then((s: DisplaySetting): Promise<DisplaySetting> => packReady.then((): DisplaySetting => s));
     }).then((s: DisplaySetting): void => {
       const accent: string = s.accentColor.length > 0 ? s.accentColor : ACCENT;
-      setAccentColor(accent);
+      const currentPack: ThemePack = themePackStore.current();
+      setAccentColor(accent, accent === currentPack.accent ? currentPack.accentInk : undefined);
       AppStorage.setOrCreate<string>('accentColor', accent);
       start();
     }).catch((): void => { start(); });
