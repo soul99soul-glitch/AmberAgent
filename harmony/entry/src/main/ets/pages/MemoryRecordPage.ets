@@ -2,9 +2,11 @@ import { router, KeyboardAvoidMode } from '@kit.ArkUI';
 import type { Conversation, MemoryRecord, MessageNode } from '@amber/chat-domain';
 import { getChatRepository } from '../di/AppContainer.ets';
 import { getMemoryLibraryOps, getMemoryTopicStoreOps } from '../platform_impl/MemoryStore.ets';
-import { CenteredTitleBar, CardGroup } from '../components/PageTemplate.ets';
+import { CenteredTitleBar, PlainSection, CardGroup, PageSpacer } from '../components/PageTemplate.ets';
+import { Icon } from '../components/ui/Icon.ets';
 import { SSHUIColors } from '../components/SSHUIColors.ets';
 import { ACCENT } from '../design/tokens.ets';
+import { FONT_MONO, FONT_SANS_MEDIUM } from '../design/fonts.ets';
 
 interface MemoryRecordParams { memoryId?: string; }
 interface MemorySourceMessage { messageId: string; nodeId: string | null; }
@@ -154,84 +156,110 @@ struct MemoryRecordPage {
     return `#${this.record.id} · ${this.record.scope} / ${this.record.kind} · ${status}`;
   }
 
+  // 编辑卡:标识行 + 圆角文本域(r12 内边距)+ 时间戳 + 文本动作(保存/删除)
   @Builder
   private EditorCard(): void {
-    Column({ space: 10 }) {
-      Text(this.recordLabel()).fontSize(13).fontColor(this.colors.secondary).width('100%')
+    Column({ space: 8 }) {
+      Text(this.recordLabel()).fontSize(12).fontFamily(FONT_MONO).fontColor(this.colors.secondary).width('100%')
       if (this.record?.kind === 'topic') {
         Text('主题由整理模型维护，不能通过源记忆编辑器改写。').fontSize(14).fontColor(this.colors.secondary).width('100%')
-        Button('打开只读主题详情').type(ButtonType.Normal).height(44).width('100%').fontSize(14)
-          .fontColor(this.accentColor).backgroundColor(this.colors.inset)
-          .onClick((): void => { router.replaceUrl({ url: 'pages/MemoryTopicDetailPage', params: { topicId: this.memoryId.toString() } }); })
+        Row() {
+          Text('打开只读主题详情').fontSize(14).fontWeight(FontWeight.Medium).fontFamily(FONT_SANS_MEDIUM)
+            .fontColor(this.accentColor).constraintSize({ minHeight: 44 })
+            .onClick((): void => { router.replaceUrl({ url: 'pages/MemoryTopicDetailPage', params: { topicId: this.memoryId.toString() } }); })
+          Blank()
+        }.width('100%')
       } else {
         TextArea({ text: this.draft, placeholder: '源记忆内容' }).width('100%').height(240)
-          .fontSize(15).fontColor(this.colors.ink).placeholderColor(this.colors.secondary).backgroundColor(this.colors.inset)
+          .fontSize(15).fontColor(this.colors.ink).placeholderColor(this.colors.muted)
+          .backgroundColor(this.colors.inset).borderRadius(12).padding(12)
           .enabled(!this.saving && !this.removing).onChange((value: string): void => { this.draft = value; })
         Text(`创建：${new Date(this.record?.createdAt ?? 0).toLocaleString()}\n更新：${new Date(this.record?.updatedAt ?? 0).toLocaleString()}`)
           .fontSize(12).fontColor(this.colors.secondary).width('100%')
-        Row({ space: 8 }) {
-          Button(this.saving ? '保存中' : '保存源记忆').type(ButtonType.Normal).height(44).layoutWeight(1).fontSize(14)
-            .fontColor(this.accentColor).backgroundColor(this.colors.inset).enabled(!this.saving && !this.removing)
-            .onClick((): void => { this.save(); })
-          Button(this.removing ? '删除中' : '删除').type(ButtonType.Normal).height(44).constraintSize({ minWidth: 72 }).fontSize(14)
-            .fontColor(this.colors.error).backgroundColor(this.colors.inset).enabled(!this.saving && !this.removing)
-            .onClick((): void => { this.remove(); })
+        Row() {
+          Text(this.saving ? '保存中' : '保存源记忆').fontSize(14).fontWeight(FontWeight.Medium)
+            .fontFamily(FONT_SANS_MEDIUM)
+            .fontColor(this.saving || this.removing ? this.colors.muted : this.accentColor)
+            .constraintSize({ minHeight: 44 })
+            .enabled(!this.saving && !this.removing).onClick((): void => { this.save(); })
+          Blank()
+          Text(this.removing ? '删除中' : '删除').fontSize(14).fontWeight(FontWeight.Medium)
+            .fontFamily(FONT_SANS_MEDIUM)
+            .fontColor(this.saving || this.removing ? this.colors.muted : this.colors.error)
+            .constraintSize({ minHeight: 44 })
+            .enabled(!this.saving && !this.removing).onClick((): void => { this.remove(); })
         }.width('100%')
       }
-    }.width('100%').padding(16)
+    }.width('100%').padding({ left: 14, right: 14, top: 12, bottom: 10 })
   }
 
+  // 来源卡:会话出处 + 可定位的来源消息(行式 + 箭头)
   @Builder
   private SourceCard(): void {
-    Column({ space: 10 }) {
-      Text('真实来源').fontSize(15).fontColor(this.colors.ink).width('100%')
+    Column({ space: 8 }) {
       Text(this.sourceStatus).fontSize(13).fontColor(this.colors.secondary).width('100%').wordBreak(WordBreak.BREAK_ALL)
       if (this.record?.sourceConversationId !== null) {
-        Text(this.record?.sourceConversationId ?? '').fontSize(12).fontColor(this.colors.secondary).width('100%')
-          .wordBreak(WordBreak.BREAK_ALL).copyOption(CopyOptions.LocalDevice)
+        Text(this.record?.sourceConversationId ?? '').fontSize(12).fontFamily(FONT_MONO).fontColor(this.colors.secondary)
+          .width('100%').wordBreak(WordBreak.BREAK_ALL).copyOption(CopyOptions.LocalDevice)
       }
       if (this.sourceAvailable) {
-        Button('打开来源会话').type(ButtonType.Normal).height(44).width('100%').fontSize(14)
-          .fontColor(this.accentColor).backgroundColor(this.colors.inset).onClick((): void => { this.openSource(); })
+        Row() {
+          Text('打开来源会话').fontSize(14).fontWeight(FontWeight.Medium).fontFamily(FONT_SANS_MEDIUM)
+            .fontColor(this.accentColor).constraintSize({ minHeight: 44 })
+            .onClick((): void => { this.openSource(); })
+          Blank()
+        }.width('100%')
       }
       if (this.record?.sourceMessageIds.length === 0) {
         Text('没有来源消息 ID。').fontSize(12).fontColor(this.colors.secondary).width('100%')
       }
-      ForEach(this.sourceMessages, (source: MemorySourceMessage): void => {
+      ForEach(this.sourceMessages, (source: MemorySourceMessage, idx: number): void => {
+        if (idx > 0) {
+          Row() {
+            Row().width('100%').height(1).backgroundColor(this.colors.line)
+          }.width('100%').padding({ top: 4, bottom: 4 })
+        }
         Column({ space: 4 }) {
-          Text(source.messageId).fontSize(12).fontColor(this.colors.secondary).width('100%')
+          Text(source.messageId).fontSize(12).fontFamily(FONT_MONO).fontColor(this.colors.secondary).width('100%')
             .wordBreak(WordBreak.BREAK_ALL).copyOption(CopyOptions.LocalDevice)
           if (source.nodeId !== null) {
-            Button('定位来源消息所在节点').type(ButtonType.Normal).height(44).width('100%').fontSize(14)
-              .fontColor(this.accentColor).backgroundColor(this.colors.inset)
-              .onClick((): void => { this.openSource(source.messageId); })
+            Row({ space: 10 }) {
+              Text('定位来源消息所在节点').fontSize(14).fontWeight(FontWeight.Medium).fontFamily(FONT_SANS_MEDIUM)
+                .fontColor(this.accentColor).layoutWeight(1).constraintSize({ minHeight: 44 })
+              Icon({ name: 'chevron_right', iconSize: 16, color: this.colors.muted })
+            }.width('100%').alignItems(VerticalAlign.Center)
+            .onClick((): void => { this.openSource(source.messageId); })
             Text('会话显示该节点当前选中的分支，可能与此来源消息不同。').fontSize(12)
               .fontColor(this.colors.secondary).width('100%')
-          } else Text('此来源消息已不可用。').fontSize(12).fontColor(this.colors.secondary).width('100%')
+          } else {
+            Text('此来源消息已不可用。').fontSize(12).fontColor(this.colors.secondary).width('100%')
+          }
         }.width('100%')
       }, (source: MemorySourceMessage): string => `${source.messageId}-${source.nodeId ?? ''}`)
-    }.width('100%').padding(16)
+    }.width('100%').padding({ left: 14, right: 14, top: 12, bottom: 10 })
   }
 
   build(): void {
     Column() {
       CenteredTitleBar({ title: '源记忆' })
       Scroll() {
-        Column({ space: 12 }) {
+        Column() {
           if (this.error.length > 0) Text(this.error).fontSize(13).fontColor(this.colors.error).width('100%').wordBreak(WordBreak.BREAK_ALL)
           if (this.notice.length > 0) Text(this.notice).fontSize(13).fontColor(this.colors.secondary).width('100%')
           if (!this.loaded) {
-            Text('正在读取源记忆…').fontSize(14).fontColor(this.colors.secondary).width('100%')
+            Text('正在读取源记忆…').fontSize(13).fontColor(this.colors.secondary).width('100%')
+              .textAlign(TextAlign.Center).padding({ top: 44 })
           } else if (this.record === null) {
-            Text('源记忆不存在或已删除。').fontSize(14).fontColor(this.colors.secondary).width('100%')
+            Text('源记忆不存在或已删除。').fontSize(13).fontColor(this.colors.secondary).width('100%')
+              .textAlign(TextAlign.Center).padding({ top: 44 })
           } else {
-            CardGroup({ content: (): void => { this.EditorCard(); } })
-            CardGroup({ content: (): void => { this.SourceCard(); } })
+            PlainSection({ label: '源记忆' })
+            CardGroup({ radius: 18, stroke: true, content: (): void => { this.EditorCard(); } })
+            PlainSection({ label: '真实来源' })
+            CardGroup({ radius: 18, stroke: true, content: (): void => { this.SourceCard(); } })
           }
-          Button('重新读取').type(ButtonType.Normal).height(44).width('100%').fontSize(14)
-            .fontColor(this.accentColor).backgroundColor(this.colors.inset).enabled(!this.saving && !this.removing)
-            .onClick((): void => { this.reload(true); })
-        }.width('100%').padding({ left: 16, right: 16, top: 12, bottom: 16 + this.navBarHeight }).justifyContent(FlexAlign.Start)
+          PageSpacer()
+        }.width('100%').padding({ left: 16, right: 16, top: 2, bottom: 16 + this.navBarHeight }).justifyContent(FlexAlign.Start)
       }.width('100%').layoutWeight(1).align(Alignment.TopStart)
     }.width('100%').height('100%').backgroundColor(this.colors.background)
   }

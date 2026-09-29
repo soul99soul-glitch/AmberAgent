@@ -1,9 +1,11 @@
 import { router } from '@kit.ArkUI';
 import type { MemoryRecord, MemoryDerivedDocument } from '@amber/chat-domain';
 import { getMemoryTopicStoreOps } from '../platform_impl/MemoryStore.ets';
-import { CenteredTitleBar, CardGroup } from '../components/PageTemplate.ets';
+import { CenteredTitleBar, PlainSection, CardGroup, PageSpacer } from '../components/PageTemplate.ets';
+import { Icon } from '../components/ui/Icon.ets';
 import { SSHUIColors } from '../components/SSHUIColors.ets';
 import { ACCENT } from '../design/tokens.ets';
+import { FONT_SANS_MEDIUM } from '../design/fonts.ets';
 
 interface MemoryTopicParams { topicId?: string; }
 interface MemoryTopicMember { id: number; record: MemoryRecord | null; }
@@ -92,11 +94,12 @@ struct MemoryTopicDetailPage {
     return `#${record.id} · ${record.scope} / ${record.kind} · ${state}`;
   }
 
+  // 摘要卡:标题/状态/正文 + 派生文档导航(文本动作)
   @Builder
   private SummaryCard(): void {
-    Column({ space: 10 }) {
+    Column({ space: 8 }) {
       Text(this.topic?.topicTitle ?? `主题 #${this.topicId}`).fontSize(18).fontWeight(FontWeight.Medium)
-        .fontColor(this.colors.ink).width('100%').wordBreak(WordBreak.BREAK_ALL)
+        .fontFamily(FONT_SANS_MEDIUM).fontColor(this.colors.ink).width('100%').wordBreak(WordBreak.BREAK_ALL)
       Text(this.topic?.archived ? '已归档 · 摘要已失效' : '自动维护 · 只读摘要')
         .fontSize(13).fontColor(this.topic?.archived ? this.colors.warning : this.colors.secondary).width('100%')
       if (this.topic?.archived) {
@@ -108,57 +111,88 @@ struct MemoryTopicDetailPage {
       Text(`主题 #${this.topicId} · ${this.members.length} 个成员 ID`)
         .fontSize(12).fontColor(this.colors.secondary).width('100%')
       if (this.documentPath.length > 0) {
-        Button('查看只读文档').type(ButtonType.Normal).height(44).width('100%').fontSize(14)
-          .fontColor(this.accentColor).backgroundColor(this.colors.inset)
-          .onClick((): void => { router.pushUrl({ url: 'pages/MemoryDocumentPage', params: { relativePath: this.documentPath } }); })
+        Row() {
+          Text('查看只读文档').fontSize(14).fontWeight(FontWeight.Medium).fontFamily(FONT_SANS_MEDIUM)
+            .fontColor(this.accentColor).constraintSize({ minHeight: 44 })
+            .onClick((): void => { router.pushUrl({ url: 'pages/MemoryDocumentPage', params: { relativePath: this.documentPath } }); })
+          Blank()
+        }.width('100%').margin({ top: 2 })
       } else {
         Text('该主题当前没有有效派生文档。').fontSize(12).fontColor(this.colors.secondary).width('100%')
       }
-    }.width('100%').padding(16)
+    }.width('100%').padding({ left: 14, right: 14, top: 12, bottom: 10 })
   }
 
+  // 成员行组:状态行 + 内容摘要 + 箭头(整行点进源记忆编辑);失效成员不可点
   @Builder
   private MembersCard(): void {
-    Column({ space: 10 }) {
-      Text('源记忆成员').fontSize(15).fontColor(this.colors.ink).width('100%')
-      ForEach(this.members, (member: MemoryTopicMember): void => {
-        Column({ space: 6 }) {
-          Text(this.memberStatus(member)).fontSize(12).fontColor(this.colors.secondary).width('100%')
+    Column() {
+      ForEach(this.members, (member: MemoryTopicMember, idx: number): void => {
+        Row({ space: 10 }) {
+          Column({ space: 6 }) {
+            Text(this.memberStatus(member)).fontSize(12).fontColor(this.colors.secondary).width('100%')
+            if (member.record !== null) {
+              Text(member.record.content).fontSize(14).fontColor(this.colors.ink).width('100%')
+                .maxLines(4).textOverflow({ overflow: TextOverflow.Ellipsis })
+            }
+          }.alignItems(HorizontalAlign.Start).layoutWeight(1)
           if (member.record !== null) {
-            Text(member.record.content).fontSize(14).fontColor(this.colors.ink).width('100%')
-              .maxLines(4).textOverflow({ overflow: TextOverflow.Ellipsis })
-            Button('查看 / 编辑源记忆').type(ButtonType.Normal).height(44).width('100%').fontSize(14)
-              .fontColor(this.accentColor).backgroundColor(this.colors.inset)
-              .onClick((): void => { router.pushUrl({ url: 'pages/MemoryRecordPage', params: { memoryId: member.id.toString() } }); })
+            Icon({ name: 'chevron_right', iconSize: 16, color: this.colors.muted })
           }
-        }.width('100%').padding(12).backgroundColor(this.colors.surface).borderRadius(12)
-          .border({ width: 1, color: this.colors.line })
+        }
+        .width('100%').alignItems(VerticalAlign.Center).constraintSize({ minHeight: 52 })
+        .padding({ left: 14, right: 14, top: 12, bottom: 12 })
+        .enabled(member.record !== null)
+        .onClick((): void => {
+          if (member.record === null) return;
+          router.pushUrl({ url: 'pages/MemoryRecordPage', params: { memoryId: member.id.toString() } });
+        })
+        if (idx < this.members.length - 1) {
+          Row() {
+            Row().width('100%').height(1).backgroundColor(this.colors.line)
+          }.width('100%').padding({ left: 14, right: 14 })
+        }
       }, (member: MemoryTopicMember): string => `${member.id}-${member.record?.updatedAt ?? 0}-${member.record?.archived ?? false}`)
-      Button(this.deleting ? '删除中' : '删除主题').type(ButtonType.Normal).height(44).width('100%').fontSize(14)
-        .fontColor(this.colors.error).backgroundColor(this.colors.inset).enabled(!this.deleting)
-        .onClick((): void => { this.remove(); })
     }.width('100%')
+  }
+
+  // 操作卡:删除主题(危险文本行)
+  @Builder
+  private DangerCard(): void {
+    Row() {
+      Text(this.deleting ? '删除中' : '删除主题').fontSize(15).fontWeight(FontWeight.Medium)
+        .fontFamily(FONT_SANS_MEDIUM).fontColor(this.deleting ? this.colors.muted : this.colors.error)
+        .constraintSize({ minHeight: 44 })
+        .enabled(!this.deleting).onClick((): void => { this.remove(); })
+    }
+    .width('100%').justifyContent(FlexAlign.Center)
+    .padding({ left: 14, right: 14, top: 8, bottom: 8 })
   }
 
   build(): void {
     Column() {
       CenteredTitleBar({ title: '主题详情' })
       Scroll() {
-        Column({ space: 12 }) {
+        Column() {
           if (this.error.length > 0) {
             Text(this.error).fontSize(13).fontColor(this.colors.error).width('100%').wordBreak(WordBreak.BREAK_ALL)
           }
           if (!this.loaded) {
-            Text('正在读取主题…').fontSize(14).fontColor(this.colors.secondary).width('100%')
+            Text('正在读取主题…').fontSize(13).fontColor(this.colors.secondary).width('100%')
+              .textAlign(TextAlign.Center).padding({ top: 44 })
           } else if (this.topic === null) {
-            Text('主题不存在或已删除。').fontSize(14).fontColor(this.colors.secondary).width('100%')
+            Text('主题不存在或已删除。').fontSize(13).fontColor(this.colors.secondary).width('100%')
+              .textAlign(TextAlign.Center).padding({ top: 44 })
           } else {
-            CardGroup({ content: (): void => { this.SummaryCard(); } })
-            this.MembersCard()
+            PlainSection({ label: '主题' })
+            CardGroup({ radius: 18, stroke: true, content: (): void => { this.SummaryCard(); } })
+            PlainSection({ label: `源记忆成员 · ${this.members.length}` })
+            CardGroup({ radius: 18, stroke: true, content: (): void => { this.MembersCard(); } })
+            PlainSection({ label: '操作' })
+            CardGroup({ radius: 18, stroke: true, content: (): void => { this.DangerCard(); } })
           }
-          Button('重新读取').type(ButtonType.Normal).height(44).width('100%').fontSize(14)
-            .fontColor(this.accentColor).backgroundColor(this.colors.inset).onClick((): void => { this.reload(); })
-        }.width('100%').padding({ left: 16, right: 16, top: 12, bottom: 16 + this.navBarHeight }).justifyContent(FlexAlign.Start)
+          PageSpacer()
+        }.width('100%').padding({ left: 16, right: 16, top: 2, bottom: 16 + this.navBarHeight }).justifyContent(FlexAlign.Start)
       }.width('100%').layoutWeight(1).align(Alignment.TopStart)
     }.width('100%').height('100%').backgroundColor(this.colors.background)
   }

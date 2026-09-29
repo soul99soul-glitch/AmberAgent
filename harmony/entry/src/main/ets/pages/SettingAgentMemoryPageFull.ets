@@ -14,7 +14,7 @@ import {
 } from '../design/tokens.ets';
 import { FONT_MONO, FONT_SANS_MEDIUM } from '../design/fonts.ets';
 import {
-  CenteredTitleBar, PlainSection, CardGroup, CardToggleRow, FooterNote, NavRow, PageSpacer, StatusChip,
+  CenteredTitleBar, PlainSection, CardGroup, CardRow, CardToggleRow, FooterNote, PageSpacer, StatusChip,
 } from '../components/PageTemplate.ets';
 import { router } from '@kit.ArkUI';
 import { Icon } from '../components/ui/Icon.ets';
@@ -249,12 +249,14 @@ struct SettingAgentMemoryPageFull {
       onToggle: (): void => { this.toggleAutoMemory(); } })
   }
 
-  // 专题与文档入口(此前 MemoryPage 下线后两页失去入口)
+  // 专题与文档入口(此前 MemoryPage 下线后两页失去入口);iOS 族 CardRow(28 着色方座)
   @Builder
   private MemoryEntryCard(): void {
-    NavRow({ label: '记忆主题与源记忆', desc: '自动归并的主题及其来源条目', iconName: 'brain',
+    CardRow({ label: '记忆主题', desc: '自动归并的主题及其源记忆成员', iconName: 'brain',
+      plateStyle: 'accent', plateSize: 28,
       onRowClick: (): void => { router.pushUrl({ url: 'pages/MemoryTopicsPage' }); } })
-    NavRow({ label: '只读记忆文档', desc: '由记忆蒸馏出的只读文档', iconName: 'doc', isLast: true,
+    CardRow({ label: '记忆文档', desc: '由源记忆蒸馏出的只读 Markdown', iconName: 'doc',
+      plateStyle: 'accent', plateSize: 28, isLast: true,
       onRowClick: (): void => { router.pushUrl({ url: 'pages/MemoryDocumentPage' }); } })
   }
 
@@ -342,7 +344,7 @@ struct SettingAgentMemoryPageFull {
   build(): void {
     Stack() {
       Column() {
-        CenteredTitleBar({ title: '灵魂与记忆' })
+        CenteredTitleBar({ title: '灵魂与记忆', subtitle: 'Amber 的核心指令与长期记忆' })
         Scroll() {
           Column() {
             PlainSection({ label: '灵魂' })

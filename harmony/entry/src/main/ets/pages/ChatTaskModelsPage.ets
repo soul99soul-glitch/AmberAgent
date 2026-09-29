@@ -20,10 +20,11 @@ import { resolveImageGenChoice } from '../platform_impl/ImageGenTool.ets';
 import {
   loadAgentRuntimeSnapshot, updateMemoryWorkerModels, MemoryWorkerModelPatch, MemoryWorkerGateSnapshot,
 } from '../platform_impl/AgentRuntimePrefs.ets';
-import { CenteredTitleBar, PlainSection, CardGroup } from '../components/PageTemplate.ets';
+import { CenteredTitleBar, PlainSection, CardGroup, FooterNote } from '../components/PageTemplate.ets';
 import { Icon } from '../components/ui/Icon.ets';
 import { SSHUIColors } from '../components/SSHUIColors.ets';
-import { ACCENT } from '../design/tokens.ets';
+import { ACCENT, accentSoftBg, TEXT_STYLES } from '../design/tokens.ets';
+import { FONT_MONO, FONT_MONO_MEDIUM, FONT_SANS_MEDIUM } from '../design/fonts.ets';
 
 interface TaskSlotView {
   task: string;
@@ -286,54 +287,69 @@ struct ChatTaskModelsPage {
     return task === 'image' ? '恢复为未配置' : task === 'worker' || task === 'daydream' ? '恢复跟随压缩模型' : '恢复跟随当前聊天模型';
   }
 
+  // 任务行(iOS AmberFormRow 结构):着色图标座 + 标题/简述 + 当前模型(mono 值)+ 箭头;
+  // 行下小字区放诊断信息,动作走文本(提示词/恢复跟随),不再用方角灰块按钮
   @Builder
   private TaskRow(task: string, last: boolean): void {
-    Column({ space: 8 }) {
+    Column() {
       Row({ space: 12 }) {
-        Row() { Icon({ name: taskText(TASK_ICONS, task), iconSize: 16, color: this.accentColor }) }
-          .width(28).height(28).borderRadius(7).backgroundColor(this.colors.inset).justifyContent(FlexAlign.Center)
-        Text(taskText(TASK_TITLES, task)).fontSize(16).fontWeight(FontWeight.Medium).fontColor(this.colors.ink).layoutWeight(1)
+        Row() { Icon({ name: taskText(TASK_ICONS, task), iconSize: 15, color: this.accentColor }) }
+          .width(28).height(28).borderRadius(7).backgroundColor(accentSoftBg(this.accentColor))
+          .justifyContent(FlexAlign.Center).alignItems(VerticalAlign.Center)
+        Column({ space: 2 }) {
+          Text(taskText(TASK_TITLES, task)).fontSize(16).fontWeight(FontWeight.Medium)
+            .fontFamily(FONT_SANS_MEDIUM).fontColor(this.colors.ink).maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+          Text(taskText(TASK_DESCRIPTIONS, task)).fontSize(12).fontColor(this.colors.secondary)
+            .maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis })
+        }.alignItems(HorizontalAlign.Start).layoutWeight(1)
+        Text(this.slot(task).current).fontSize(TEXT_STYLES.meta.size).fontFamily(FONT_MONO_MEDIUM)
+          .fontColor(this.colors.muted).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+          .textAlign(TextAlign.End).constraintSize({ maxWidth: '38%' })
         Icon({ name: 'chevron_right', iconSize: 16, color: this.colors.muted })
-      }.width('100%').constraintSize({ minHeight: 52 }).enabled(!this.saving).onClick((): void => { this.openPicker(task); })
+      }.width('100%').alignItems(VerticalAlign.Center).constraintSize({ minHeight: 52 })
+      .enabled(!this.saving).onClick((): void => { this.openPicker(task); })
       Column({ space: 6 }) {
-        Text(this.slot(task).current).fontSize(14).fontColor(this.colors.ink).width('100%').wordBreak(WordBreak.BREAK_ALL)
-        Text(taskText(TASK_DESCRIPTIONS, task)).fontSize(12).fontColor(this.colors.secondary).width('100%')
         Text(this.slot(task).detail).fontSize(12).fontColor(this.colors.secondary).width('100%').wordBreak(WordBreak.BREAK_ALL)
         if (task === 'ocr') Text(`健康检测：${this.ocrHealthLabel}`).fontSize(12).fontColor(this.colors.secondary).width('100%')
         if (this.slot(task).identity.length > 0) Text(this.slot(task).identity).fontSize(11).fontColor(this.colors.muted)
           .width('100%').wordBreak(WordBreak.BREAK_ALL).copyOption(CopyOptions.LocalDevice)
         if (this.hasPrompt(task) || this.slot(task).canClear) {
-          Row({ space: 8 }) {
-            if (this.hasPrompt(task)) Button('提示词').type(ButtonType.Normal).height(44).constraintSize({ minWidth: 64 }).fontSize(13)
-              .fontColor(this.accentColor).backgroundColor(this.colors.inset).enabled(!this.saving)
-              .onClick((): void => { this.openPromptEditor(task); })
-            if (this.slot(task).canClear) Button(this.clearLabel(task)).type(ButtonType.Normal).height(44).layoutWeight(1).fontSize(12)
-              .fontColor(this.colors.secondary).backgroundColor(this.colors.inset).enabled(!this.saving)
-              .onClick((): void => { this.clearTaskModel(task); })
-          }.width('100%')
+          Row({ space: 20 }) {
+            if (this.hasPrompt(task)) Text('提示词').fontSize(14).fontWeight(FontWeight.Medium)
+              .fontFamily(FONT_SANS_MEDIUM).fontColor(this.accentColor).constraintSize({ minHeight: 44 })
+              .enabled(!this.saving).onClick((): void => { this.openPromptEditor(task); })
+            if (this.slot(task).canClear) Text(this.clearLabel(task)).fontSize(14).fontFamily(FONT_SANS_MEDIUM)
+              .fontColor(this.colors.muted).constraintSize({ minHeight: 44 })
+              .enabled(!this.saving).onClick((): void => { this.clearTaskModel(task); })
+            Blank()
+          }.width('100%').alignItems(VerticalAlign.Center)
         }
       }.width('100%').padding({ left: 40 })
       if (!last) Row().width('100%').height(1).backgroundColor(this.colors.line).margin({ top: 8 })
-    }.width('100%').padding({ left: 14, right: 14, top: 2, bottom: 10 })
+    }.width('100%').padding({ left: 14, right: 14, top: 10, bottom: 10 })
   }
   @Builder
   private ChatModelCard(): void {
     // iOS ModelDefaultsView 聊天段:当前聊天模型(进入选择器固定 Provider+模型)
-    Column({ space: 8 }) {
-      Row({ space: 12 }) {
-        Row() { Icon({ name: 'cpu', iconSize: 16, color: this.accentColor }) }
-          .width(28).height(28).borderRadius(7).backgroundColor(this.colors.inset).justifyContent(FlexAlign.Center)
-        Text('聊天模型').fontSize(16).fontWeight(FontWeight.Medium).fontColor(this.colors.ink).layoutWeight(1)
-        Icon({ name: 'chevron_right', iconSize: 16, color: this.colors.muted })
-      }.width('100%').constraintSize({ minHeight: 52 }).enabled(!this.saving)
-      .onClick((): void => { router.pushUrl({ url: 'pages/ChatModelPickerPage' }); })
-      Column({ space: 6 }) {
-        Text(this.chatModelLabel.length > 0 ? this.chatModelLabel : '未选择')
-          .fontSize(14).fontColor(this.colors.ink).width('100%').wordBreak(WordBreak.BREAK_ALL)
+    Row({ space: 12 }) {
+      Row() { Icon({ name: 'cpu', iconSize: 15, color: this.accentColor }) }
+        .width(28).height(28).borderRadius(7).backgroundColor(accentSoftBg(this.accentColor))
+        .justifyContent(FlexAlign.Center).alignItems(VerticalAlign.Center)
+      Column({ space: 2 }) {
+        Text('聊天模型').fontSize(16).fontWeight(FontWeight.Medium).fontFamily(FONT_SANS_MEDIUM)
+          .fontColor(this.colors.ink).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
         Text('来自已启用服务商的聊天模型;已有会话保留当时的模型记录')
-          .fontSize(12).fontColor(this.colors.secondary).width('100%')
-      }.width('100%').padding({ left: 40 })
-    }.width('100%').padding({ left: 14, right: 14, top: 2, bottom: 10 })
+          .fontSize(12).fontColor(this.colors.secondary).maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis })
+      }.alignItems(HorizontalAlign.Start).layoutWeight(1)
+      Text(this.chatModelLabel.length > 0 ? this.chatModelLabel : '未选择')
+        .fontSize(TEXT_STYLES.meta.size).fontFamily(FONT_MONO_MEDIUM)
+        .fontColor(this.colors.muted).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+        .textAlign(TextAlign.End).constraintSize({ maxWidth: '38%' })
+      Icon({ name: 'chevron_right', iconSize: 16, color: this.colors.muted })
+    }.width('100%').alignItems(VerticalAlign.Center).constraintSize({ minHeight: 52 })
+    .padding({ left: 14, right: 14, top: 10, bottom: 10 }).enabled(!this.saving)
+    .onClick((): void => { router.pushUrl({ url: 'pages/ChatModelPickerPage' }); })
   }
 
   @Builder
@@ -346,31 +362,37 @@ struct ChatTaskModelsPage {
     this.TaskRow('daydream', false)
     this.TaskRow('ocr', true)
   }
+  // 提示词编辑 sheet:与灵魂编辑器同族(顶角 r20、mono 文本域 r12、文本动作)
   @Builder
   private PromptEditor(): void {
     Column() {
       Blank().onClick((): void => { if (!this.saving) this.editingPrompt = ''; })
       Column({ space: 10 }) {
         Row() {
-          Text(taskText(TASK_TITLES, this.editingPrompt)).fontSize(16).fontWeight(FontWeight.Medium).fontColor(this.colors.ink).layoutWeight(1)
-          Button('重置为默认').type(ButtonType.Normal).height(44).fontSize(13).fontColor(this.colors.secondary)
-            .backgroundColor(this.colors.inset).enabled(!this.saving).onClick((): void => { this.resetPrompt(); })
-        }.width('100%')
+          Text(taskText(TASK_TITLES, this.editingPrompt)).fontSize(16).fontWeight(FontWeight.Medium)
+            .fontFamily(FONT_SANS_MEDIUM).fontColor(this.colors.ink).layoutWeight(1)
+          Text('重置为默认').fontSize(13).fontFamily(FONT_SANS_MEDIUM).fontColor(this.colors.muted)
+            .constraintSize({ minHeight: 44 }).padding({ left: 12 })
+            .enabled(!this.saving).onClick((): void => { this.resetPrompt(); })
+        }.width('100%').alignItems(VerticalAlign.Center)
         Text(this.editingPrompt === 'compress' ? '变量：{content}、{target_tokens}、{additional_context}'
           : this.editingPrompt === 'ocr' ? '变量：图片数据：{images}' : '变量：对话内容 {content}，语言 {locale}')
           .fontSize(12).fontColor(this.colors.secondary).width('100%')
         if (this.error.length > 0) Text(this.error).fontSize(13).fontColor(this.colors.error).width('100%')
-        TextArea({ text: this.promptDraft }).width('100%').height(220).fontSize(13).fontColor(this.colors.ink)
-          .backgroundColor(this.colors.inset).borderRadius(8).enabled(!this.saving).onChange((value: string): void => { this.promptDraft = value; })
-        Row({ space: 8 }) {
-          Button('取消').type(ButtonType.Normal).height(44).layoutWeight(1).fontSize(14).fontColor(this.colors.secondary)
-            .backgroundColor(this.colors.inset).enabled(!this.saving).onClick((): void => { this.editingPrompt = ''; })
-          Button(this.saving ? '保存中' : '保存').type(ButtonType.Normal).height(44).layoutWeight(1).fontSize(14).fontColor(this.accentColor)
-            .backgroundColor(this.colors.inset).enabled(!this.saving).onClick((): void => { this.savePrompt(); })
+        TextArea({ text: this.promptDraft }).width('100%').height(220).fontSize(13).fontFamily(FONT_MONO)
+          .fontColor(this.colors.ink).backgroundColor(this.colors.inset).borderRadius(12).padding(12)
+          .enabled(!this.saving).onChange((value: string): void => { this.promptDraft = value; })
+        Row() {
+          Text('取消').fontSize(14).fontFamily(FONT_SANS_MEDIUM).fontColor(this.colors.muted)
+            .layoutWeight(1).textAlign(TextAlign.Center).constraintSize({ minHeight: 44 })
+            .enabled(!this.saving).onClick((): void => { this.editingPrompt = ''; })
+          Text(this.saving ? '保存中' : '保存').fontSize(14).fontWeight(FontWeight.Medium).fontFamily(FONT_SANS_MEDIUM)
+            .fontColor(this.accentColor).layoutWeight(1).textAlign(TextAlign.Center).constraintSize({ minHeight: 44 })
+            .enabled(!this.saving).onClick((): void => { this.savePrompt(); })
         }.width('100%')
-      }.width('100%').padding({ left: 16, right: 16, top: 16, bottom: 16 + this.navBarHeight })
-        .backgroundColor(this.colors.surface).borderRadius({ topLeft: 16, topRight: 16 })
-    }.width('100%').height('100%').backgroundColor('#66000000')
+      }.width('100%').padding({ left: 18, right: 18, top: 16, bottom: 14 + this.navBarHeight })
+        .backgroundColor(this.colors.surface).borderRadius({ topLeft: 20, topRight: 20 })
+    }.width('100%').height('100%').backgroundColor('#66000000').justifyContent(FlexAlign.End)
   }
 
   build(): void {
@@ -386,8 +408,7 @@ struct ChatTaskModelsPage {
               CardGroup({ radius: 18, stroke: true, content: (): void => { this.ChatModelCard(); } })
               PlainSection({ label: '辅助任务' })
               CardGroup({ radius: 18, stroke: true, content: (): void => { this.TaskCard(); } })
-              Text('固定选择绑定服务商配置与模型 UUID。旧 UUID 保持兼容，重新选择后固定；辅助任务的聊天回退以实际运行轮次为准。')
-                .fontSize(12).fontColor(this.colors.secondary).width('100%')
+              FooterNote({ text: '固定选择绑定服务商配置与模型 UUID。旧 UUID 保持兼容，重新选择后固定；辅助任务的聊天回退以实际运行轮次为准。' })
             }
           }.width('100%').padding({ left: 16, right: 16, top: 2, bottom: 16 + this.navBarHeight }).justifyContent(FlexAlign.Start)
         }.width('100%').layoutWeight(1).align(Alignment.TopStart)

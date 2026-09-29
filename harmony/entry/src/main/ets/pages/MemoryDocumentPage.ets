@@ -1,11 +1,12 @@
 import { router } from '@kit.ArkUI';
 import type { MemoryDerivedDocument } from '@amber/chat-domain';
 import { getMemoryTopicStoreOps } from '../platform_impl/MemoryStore.ets';
-import { CenteredTitleBar } from '../components/PageTemplate.ets';
+import { CenteredTitleBar, PlainSection, CardGroup, CardRow, FooterNote, PageSpacer } from '../components/PageTemplate.ets';
+import { Icon } from '../components/ui/Icon.ets';
 import { MarkdownText } from '../components/MarkdownText.ets';
 import { SSHUIColors } from '../components/SSHUIColors.ets';
 import { ACCENT } from '../design/tokens.ets';
-import { FONT_MONO } from '../design/fonts.ets';
+import { FONT_MONO, FONT_MONO_MEDIUM, FONT_SANS_MEDIUM } from '../design/fonts.ets';
 
 interface MemoryDocumentParams { relativePath?: string; }
 
@@ -83,84 +84,143 @@ struct MemoryDocumentPage {
     return (this.content ?? '').replace(/\[([^\]]+)\]\((?:topics\/[^)\s]+\.md|index\.md)\)/g, '$1');
   }
 
+  private visibleDocuments(): MemoryDerivedDocument[] {
+    return this.documents.filter(
+      (item: MemoryDerivedDocument): boolean => item.relativePath !== this.relativePath);
+  }
+
+  // 文档行组:白卡内行式条目(标题/预览/体积·时间 + 箭头),发丝线内缩
   @Builder
-  private DocumentLinks(): void {
-    Column({ space: 10 }) {
-      ForEach(this.documents, (item: MemoryDerivedDocument): void => {
-        if (item.relativePath !== this.relativePath) {
+  private DocumentRows(): void {
+    Column() {
+      ForEach(this.visibleDocuments(), (item: MemoryDerivedDocument, idx: number): void => {
+        Row({ space: 10 }) {
           Column({ space: 6 }) {
-            Text(item.title).fontSize(15).fontWeight(FontWeight.Medium).fontColor(this.colors.ink).width('100%')
-              .maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis })
-            Text(item.relativePath).fontSize(12).fontFamily(FONT_MONO).fontColor(this.colors.secondary).width('100%')
-              .wordBreak(WordBreak.BREAK_ALL)
+            Text(item.title).fontSize(15).fontWeight(FontWeight.Medium).fontFamily(FONT_SANS_MEDIUM)
+              .fontColor(this.colors.ink).width('100%').maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis })
             Text(item.preview).fontSize(13).fontColor(this.colors.secondary).width('100%')
               .maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis })
             Text(`${item.sizeBytes} bytes · ${new Date(item.modifiedAt).toLocaleString()}`)
-              .fontSize(12).fontColor(this.colors.secondary).width('100%')
-          }.width('100%').padding(16).constraintSize({ minHeight: 52 }).backgroundColor(this.colors.surface)
-            .borderRadius(14).border({ width: 1, color: this.colors.line })
-            .onClick((): void => { this.openDocument(item.relativePath); })
+              .fontSize(12).fontFamily(FONT_MONO_MEDIUM).fontColor(this.colors.muted).width('100%')
+          }.alignItems(HorizontalAlign.Start).layoutWeight(1)
+          Icon({ name: 'chevron_right', iconSize: 16, color: this.colors.muted })
+        }
+        .width('100%').alignItems(VerticalAlign.Center).constraintSize({ minHeight: 52 })
+        .padding({ left: 14, right: 14, top: 12, bottom: 12 })
+        .onClick((): void => { this.openDocument(item.relativePath); })
+        if (idx < this.visibleDocuments().length - 1) {
+          Row() {
+            Row().width('100%').height(1).backgroundColor(this.colors.line)
+          }.width('100%').padding({ left: 14, right: 14 })
         }
       }, (item: MemoryDerivedDocument): string => `${item.relativePath}-${item.modifiedAt}-${item.sizeBytes}`)
     }.width('100%')
   }
 
+  // 详情头卡:标题/路径(mono 可复制)/只读说明 + 主题导航(文本动作)
   @Builder
-  private DocumentBody(): void {
-    Column({ space: 12 }) {
-      Text(this.selected?.title ?? '').fontSize(18).fontWeight(FontWeight.Medium).fontColor(this.colors.ink).width('100%')
-        .wordBreak(WordBreak.BREAK_ALL)
+  private DocumentHeaderCard(): void {
+    Column({ space: 8 }) {
+      Text(this.selected?.title ?? '').fontSize(18).fontWeight(FontWeight.Medium).fontFamily(FONT_SANS_MEDIUM)
+        .fontColor(this.colors.ink).width('100%').wordBreak(WordBreak.BREAK_ALL)
       Text(this.relativePath).fontSize(12).fontFamily(FONT_MONO).fontColor(this.colors.secondary).width('100%')
         .wordBreak(WordBreak.BREAK_ALL).copyOption(CopyOptions.LocalDevice)
-      Text('由真实源记忆派生，只读。内部文档通过下方列表打开；源记忆可在主题成员中编辑。')
+      Text('由真实源记忆派生，只读。源记忆可在主题成员中编辑。')
         .fontSize(12).fontColor(this.colors.secondary).width('100%')
       if (this.selected?.topicId !== null && this.selected !== null) {
-        Button('查看主题和源成员').type(ButtonType.Normal).height(44).width('100%').fontSize(14)
-          .fontColor(this.accentColor).backgroundColor(this.colors.inset)
-          .onClick((): void => { router.pushUrl({ url: 'pages/MemoryTopicDetailPage', params: { topicId: this.selected?.topicId?.toString() ?? '' } }); })
+        Row() {
+          Text('查看主题和源成员').fontSize(14).fontWeight(FontWeight.Medium).fontFamily(FONT_SANS_MEDIUM)
+            .fontColor(this.accentColor).constraintSize({ minHeight: 44 })
+            .onClick((): void => { router.pushUrl({ url: 'pages/MemoryTopicDetailPage', params: { topicId: this.selected?.topicId?.toString() ?? '' } }); })
+          Blank()
+        }.width('100%').margin({ top: 2 })
       }
-      MarkdownText({ content: this.renderedContent(), fontColor: this.colors.ink, readingMode: true,
-        enableLatexRendering: false, codeBlockAutoCollapse: true })
-      Button(this.rawExpanded ? '收起 Markdown 原文' : '查看 / 复制完整 Markdown 原文')
-        .type(ButtonType.Normal).height(44).width('100%').fontSize(14).fontColor(this.accentColor).backgroundColor(this.colors.inset)
-        .onClick((): void => { this.rawExpanded = !this.rawExpanded; })
+    }.width('100%').padding({ left: 14, right: 14, top: 12, bottom: 10 })
+  }
+
+  // 正文卡:Markdown 渲染 + 底部「Markdown 原文」展开行(mono 可复制)
+  @Builder
+  private DocumentBodyCard(): void {
+    Column() {
+      Column() {
+        MarkdownText({ content: this.renderedContent(), fontColor: this.colors.ink, readingMode: true,
+          enableLatexRendering: false, codeBlockAutoCollapse: true })
+      }.width('100%').padding({ left: 14, right: 14, top: 12, bottom: 12 })
+      Row() {
+        Row().width('100%').height(1).backgroundColor(this.colors.line)
+      }.width('100%').padding({ left: 14, right: 14 })
+      Row({ space: 12 }) {
+        Text('Markdown 原文').fontSize(14).fontWeight(FontWeight.Medium).fontFamily(FONT_SANS_MEDIUM)
+          .fontColor(this.colors.ink).layoutWeight(1)
+        Text(this.rawExpanded ? '收起' : '查看 / 复制').fontSize(12).fontFamily(FONT_MONO_MEDIUM).fontColor(this.colors.muted)
+        Icon({ name: 'chevron_down', iconSize: 16, color: this.colors.muted })
+          .rotate({ angle: this.rawExpanded ? 180 : 0 })
+      }
+      .width('100%').alignItems(VerticalAlign.Center).constraintSize({ minHeight: 52 })
+      .padding({ left: 14, right: 14, top: 10, bottom: 10 })
+      .onClick((): void => { this.rawExpanded = !this.rawExpanded; })
       if (this.rawExpanded) {
         Text(this.content ?? '').fontSize(13).fontFamily(FONT_MONO).fontColor(this.colors.ink).width('100%')
           .wordBreak(WordBreak.BREAK_ALL).copyOption(CopyOptions.LocalDevice)
+          .padding({ left: 14, right: 14, bottom: 14 })
       }
     }.width('100%')
   }
 
+  // 操作卡:重新生成(动作行,无箭头)
+  @Builder
+  private SyncCard(): void {
+    CardRow({ label: this.syncing ? '正在重新生成…' : '重新生成文档', desc: '按当前源记忆刷新派生文档',
+      iconName: 'retry', plateStyle: 'accent', plateSize: 28, isLast: true, showChevron: false,
+      onRowClick: (): void => { if (!this.syncing) this.sync(); } })
+  }
+
   build(): void {
     Column() {
-      CenteredTitleBar({ title: '记忆文档' })
+      CenteredTitleBar({ title: '记忆文档', subtitle: this.relativePath.length > 0 ? this.selected?.title ?? '' : '' })
       Scroll() {
-        Column({ space: 12 }) {
+        Column() {
           if (this.error.length > 0) Text(this.error).fontSize(13).fontColor(this.colors.error).width('100%').wordBreak(WordBreak.BREAK_ALL)
           if (!this.loaded) {
-            Text('正在读取记忆文档…').fontSize(14).fontColor(this.colors.secondary).width('100%')
+            Text('正在读取记忆文档…').fontSize(13).fontColor(this.colors.secondary).width('100%')
+              .textAlign(TextAlign.Center).padding({ top: 44 })
           } else if (this.relativePath.length > 0) {
             if (this.selected === null || this.content === null) {
+              PlainSection({ label: '文档' })
               Text('文档不存在或已失效。源记忆变化后，旧主题文档会被移除。')
-                .fontSize(14).fontColor(this.colors.secondary).width('100%')
-            } else this.DocumentBody()
-            Text('其他记忆文档').fontSize(15).fontColor(this.colors.ink).width('100%')
-            this.DocumentLinks()
-          } else {
-            Text('只读 Markdown 文档，内容来自当前真实源记忆。').fontSize(13).fontColor(this.colors.secondary).width('100%')
-            if (this.documents.length === 0) {
-              Text('当前没有记忆文档。没有有效的非核心源记忆时，不会生成索引。')
-                .fontSize(14).fontColor(this.colors.secondary).width('100%')
+                .fontSize(13).fontColor(this.colors.secondary).width('100%')
+                .textAlign(TextAlign.Center).padding({ top: 24, bottom: 12 })
+            } else {
+              PlainSection({ label: '文档' })
+              CardGroup({ radius: 18, stroke: true, content: (): void => { this.DocumentHeaderCard(); } })
+              PlainSection({ label: '内容' })
+              CardGroup({ radius: 18, stroke: true, content: (): void => { this.DocumentBodyCard(); } })
             }
-            this.DocumentLinks()
+            if (this.visibleDocuments().length > 0) {
+              PlainSection({ label: '其他记忆文档' })
+              CardGroup({ radius: 18, stroke: true, content: (): void => { this.DocumentRows(); } })
+            }
+            PlainSection({ label: '操作' })
+            CardGroup({ radius: 18, stroke: true, content: (): void => { this.SyncCard(); } })
+          } else {
+            PlainSection({ label: '记忆文档' })
+            if (this.documents.length === 0) {
+              Column() {
+                Text('当前没有记忆文档')
+                  .fontSize(14).fontColor(this.colors.secondary)
+                Text('没有有效的非核心源记忆时，不会生成索引。')
+                  .fontSize(12).fontColor(this.colors.muted).margin({ top: 8 })
+              }
+              .width('100%').padding({ top: 44, bottom: 24 }).alignItems(HorizontalAlign.Center)
+            } else {
+              CardGroup({ radius: 18, stroke: true, content: (): void => { this.DocumentRows(); } })
+              FooterNote({ text: '只读 Markdown 文档，内容来自当前真实源记忆。' })
+            }
+            PlainSection({ label: '操作' })
+            CardGroup({ radius: 18, stroke: true, content: (): void => { this.SyncCard(); } })
           }
-          Row({ space: 8 }) {
-            Button('重新读取').type(ButtonType.Normal).height(44).layoutWeight(1).fontSize(14)
-              .fontColor(this.accentColor).backgroundColor(this.colors.inset).onClick((): void => { this.reload(); })
-            Button(this.syncing ? '刷新中' : '重新生成文档').type(ButtonType.Normal).height(44).layoutWeight(1).fontSize(14)
-              .fontColor(this.accentColor).backgroundColor(this.colors.inset).enabled(!this.syncing).onClick((): void => { this.sync(); })
-          }.width('100%')
-        }.width('100%').padding({ left: 16, right: 16, top: 12, bottom: 16 + this.navBarHeight }).justifyContent(FlexAlign.Start)
+          PageSpacer()
+        }.width('100%').padding({ left: 16, right: 16, top: 2, bottom: 16 + this.navBarHeight }).justifyContent(FlexAlign.Start)
       }.width('100%').layoutWeight(1).align(Alignment.TopStart)
     }.width('100%').height('100%').backgroundColor(this.colors.background)
   }
