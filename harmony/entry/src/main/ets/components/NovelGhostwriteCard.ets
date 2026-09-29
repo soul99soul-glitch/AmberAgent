@@ -4,7 +4,7 @@
 
 import { MOTION_OVERLAY,
   ACCENT, ACCENT_INK, ACCENT_LIGHT, ERROR, INK, INK2, INK3, INK4,
-  LINE, RAISED, SURFACE, SURFACE2,
+  LINE, LINE2, RAISED, SURFACE, SURFACE2,
 } from '../design/tokens.ets';
 import {
   DEFAULT_GHOSTWRITE_CHAPTER_COUNT, MAX_GHOSTWRITE_CHAPTER_COUNT,
@@ -36,14 +36,14 @@ export struct NovelGhostwriteCard {
   @State private candidateExpanded: boolean = false;
 
   build(): void {
-    Scroll() {
-      Column() {
-        if (this.job === null) this.startBody();
-        else this.jobBody(this.job);
-      }
-      .width('100%').padding({ left: 16, right: 16, top: 10, bottom: 18 })
-      .alignItems(HorizontalAlign.Start)
+    // 根容器不内滚:内容各段已 maxLines 封顶,滚动一律交给宿主(聊天顶/项目控制 sheet);
+    // 此前根 Scroll 嵌在宿主滚动里,部分机型手势嵌套卡顿、无法下滑
+    Column() {
+      if (this.job === null) this.startBody();
+      else this.jobBody(this.job);
     }
+    .width('100%').padding({ left: 16, right: 16, top: 10, bottom: 18 })
+    .alignItems(HorizontalAlign.Start)
       .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .width('100%').backgroundColor(SURFACE)
   }
@@ -52,22 +52,32 @@ export struct NovelGhostwriteCard {
   private startBody(): void {
     Column() {
       this.header('批量代笔', '按冻结计划逐章写作、审稿并收录。')
-      Text('目标章节').fontSize(13).fontWeight(FontWeight.Medium).fontColor(INK)
-        .margin({ top: 14, bottom: 8 })
+      // 目标章节滑杆(规范:蓝轨道要 accent 选中色 + LINE2 轨道;原自绘步进盒已撤)
       Row() {
-        this.numberButton('−', this.targetChapterCount > MIN_GHOSTWRITE_CHAPTER_COUNT,
-          -1, '减少目标章节')
-        Column() {
-          Text(`${this.targetChapterCount}`).fontSize(24).fontWeight(FontWeight.Bold).fontColor(INK)
-          Text('章').fontSize(11).fontColor(INK3).margin({ top: 1 })
-        }
-        .layoutWeight(1).alignItems(HorizontalAlign.Center)
-        this.numberButton('+', this.targetChapterCount < MAX_GHOSTWRITE_CHAPTER_COUNT,
-          1, '增加目标章节')
+        Text('目标章节').fontSize(13).fontWeight(FontWeight.Medium).fontColor(INK).layoutWeight(1)
+        Text(`${this.targetChapterCount} 章`).fontSize(13).fontWeight(FontWeight.Medium)
+          .fontColor(INK).textAlign(TextAlign.End)
+      }
+      .width('100%').margin({ top: 14 })
+      Row({ space: 12 }) {
+        Slider({
+          value: this.targetChapterCount,
+          min: MIN_GHOSTWRITE_CHAPTER_COUNT,
+          max: MAX_GHOSTWRITE_CHAPTER_COUNT,
+          step: 1,
+          style: SliderStyle.OutSet,
+        })
+          .layoutWeight(1)
+          .selectedColor(ACCENT)
+          .trackColor(LINE2)
+          .onChange((value: number): void => {
+            this.targetChapterCount = Math.round(value);
+          })
+          .accessibilityText('目标章节数')
       }
       .width('100%').alignItems(VerticalAlign.Center)
       Text(`每批 ${MIN_GHOSTWRITE_CHAPTER_COUNT}–${MAX_GHOSTWRITE_CHAPTER_COUNT} 章，默认 ${DEFAULT_GHOSTWRITE_CHAPTER_COUNT} 章。`)
-        .fontSize(12).fontColor(INK3).lineHeight(18).margin({ top: 8 })
+        .fontSize(12).fontColor(INK3).lineHeight(18).margin({ top: 4 })
       this.startGate('本章计划', this.planReady, this.planDisabledReason)
       this.startGate('职责模型', this.modelReady, this.modelDisabledReason)
       this.primaryButton('开始代笔', this.canStart(), (): void => {
@@ -218,18 +228,6 @@ export struct NovelGhostwriteCard {
   }
 
   @Builder
-  private numberButton(label: string, enabled: boolean, direction: number, accessibility: string): void {
-    Text(label).fontSize(23).fontColor(enabled ? ACCENT : INK4).width(52).height(44).textAlign(TextAlign.Center)
-      .padding({ top: 8, bottom: 8 }).backgroundColor(enabled ? RAISED : SURFACE).borderRadius(12)
-      .border({ width: 1, color: enabled ? LINE : SURFACE2 }).opacity(enabled ? 1 : 0.5)
-      .accessibilityText(accessibility).onClick((): void => {
-        if (!enabled) return;
-        if (direction < 0) this.decreaseTargetChapterCount();
-        else this.increaseTargetChapterCount();
-      })
-  }
-
-  @Builder
   private primaryButton(label: string, enabled: boolean, action: () => void): void {
     Text(label).fontSize(14).fontWeight(FontWeight.Medium).fontColor(enabled ? ACCENT_INK : INK3)
       .width('100%').height(44).textAlign(TextAlign.Center).padding({ top: 12, bottom: 12 })
@@ -267,14 +265,6 @@ export struct NovelGhostwriteCard {
 
   private canStart(): boolean {
     return !this.busy && this.planReady && this.modelReady;
-  }
-
-  private decreaseTargetChapterCount(): void {
-    if (this.targetChapterCount > MIN_GHOSTWRITE_CHAPTER_COUNT) this.targetChapterCount -= 1;
-  }
-
-  private increaseTargetChapterCount(): void {
-    if (this.targetChapterCount < MAX_GHOSTWRITE_CHAPTER_COUNT) this.targetChapterCount += 1;
   }
 
   private progressPercent(done: number, total: number): number {

@@ -544,7 +544,7 @@ struct NovelProjectsPage {
       .width('100%').height('100%').backgroundColor(BG)
       .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
 
-      if (!this.loading && !this.createSheetOpen) {
+      if (!this.loading && !this.createSheetOpen && this.projects.length > 0) {
         this.Fab()
       }
 

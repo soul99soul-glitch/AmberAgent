@@ -2011,7 +2011,6 @@ struct NovelWorkspacePage {
           onRetry: (): void => { this.retryGhostwrite(); },
           onCancel: (): void => { this.cancelGhostwrite(); },
         })
-        .constraintSize({ maxHeight: 404 })
         .margin({ left: 16, right: 16, bottom: 8 })
         .borderRadius(14)
         .clip(true)
