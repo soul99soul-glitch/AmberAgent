@@ -44,3 +44,6 @@ BuildProfile.ets
 
 # hvigor module-level build state
 harmony/*/.hvigor/
+
+# Local ZCode workflow review artifacts (screens/logs, large, regeneratable)
+.workflow/
