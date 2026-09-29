@@ -4,10 +4,13 @@
 //   blocking → 阻断优先;非 blocking + rewriteRequired → 需重写;否则审稿通过。
 // 「审稿通过」不声称已收录 — 收录只由 job stage/receipt 证明。
 // 展开后全文可读(不再用 maxLines 冒充全文);不加强制通过/收录按钮或模型请求。
+// 容器走 NovelApprovalShell(iOS 审批卡规格),裁决态 = 图标+色字 Label。
 
 import { MOTION_OVERLAY,
-  ACCENT, ACCENT_INK, ACCENT_LIGHT, ERROR, INK, INK2, INK3, LINE, RAISED, SURFACE,
+  ACCENT, ERROR, INK, INK2, INK3, LINE,
 } from '../design/tokens.ets';
+import { FONT_SANS_MEDIUM } from '../design/fonts.ets';
+import { NovelApprovalShell } from './NovelApprovalShell.ets';
 import type {
   FrozenPlan, GhostwriteCandidate, GhostwriteFinding, GhostwriteReview,
 } from '@amber/deepread-domain';
@@ -26,8 +29,14 @@ export struct NovelChapterVerdictCard {
     return '审稿通过';
   }
 
-  private verdictColor(review: GhostwriteReview): string {
-    return review.blocking || review.rewriteRequired ? ERROR : ACCENT;
+  private verdictIcon(review: GhostwriteReview): string {
+    if (review.blocking) return 'ban';
+    if (review.rewriteRequired) return 'retry';
+    return 'check';
+  }
+
+  private verdictTone(review: GhostwriteReview): string {
+    return review.blocking || review.rewriteRequired ? 'error' : 'success';
   }
 
   private findingLabel(finding: GhostwriteFinding): string {
@@ -96,21 +105,28 @@ export struct NovelChapterVerdictCard {
   @Builder
   private reviewCard(review: GhostwriteReview, candidate: GhostwriteCandidate | null, frozenPlan: FrozenPlan | null): void {
     Column() {
+      NovelApprovalShell({
+        iconName: 'ph_gavel',
+        title: candidate !== null ? `第 ${candidate.chapterOrdinal} 章 · 第 ${candidate.attempt + 1} 稿` : '章节裁决',
+        subtitle: this.summaryLine(review, frozenPlan),
+        statusLabel: this.verdictLabel(review),
+        statusIcon: this.verdictIcon(review),
+        statusTone: this.verdictTone(review),
+        content: (): void => { this.Body(review); },
+      })
+    }
+    .width('100%')
+    // 挂在代笔卡内的分隔(壳自带描边,顶部分发丝线取消)
+    .margin({ top: 12 })
+  }
+
+  @Builder
+  private Body(review: GhostwriteReview): void {
+    Column() {
       Row() {
-        Text(this.verdictLabel(review))
-          .fontSize(11)
-          .fontColor(review.blocking || review.rewriteRequired ? ERROR : ACCENT_INK)
-          .padding({ left: 8, right: 8, top: 3, bottom: 3 })
-          .borderRadius(12)
-          .backgroundColor(review.blocking || review.rewriteRequired ? SURFACE : ACCENT_LIGHT)
-        if (candidate !== null) {
-          Text(`第 ${candidate.chapterOrdinal} 章 · 第 ${candidate.attempt + 1} 稿`)
-            .fontSize(13).fontWeight(FontWeight.Medium).fontColor(INK).margin({ left: 10 })
-        }
-        Blank().layoutWeight(1)
-        Text(this.expanded ? '收起' : '查看')
-          .fontSize(12).fontColor(ACCENT).width(52).height(44)
-          .textAlign(TextAlign.Center).padding({ top: 13, bottom: 13 })
+        Blank()
+        Text(this.expanded ? '收起' : '查看').fontSize(12).fontFamily(FONT_SANS_MEDIUM).fontColor(ACCENT)
+          .constraintSize({ minHeight: 44 }).padding({ left: 12 })
           .accessibilityText(`${this.expanded ? '收起' : '查看'}章节裁决`)
           .onClick((): void => {
             this.getUIContext().animateTo({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }, (): void => {
@@ -118,18 +134,12 @@ export struct NovelChapterVerdictCard {
             });
           })
       }
-      .width('100%').constraintSize({ minHeight: 44 }).alignItems(VerticalAlign.Center)
-
-      Text(this.summaryLine(review, frozenPlan))
-        .fontSize(11).fontColor(INK3).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
-        .width('100%').margin({ top: 2 })
-
+      .width('100%')
       if (this.expanded) {
         this.reviewDetails(review)
       }
     }
-    .width('100%').padding({ top: 11, bottom: 3 }).clip(true)
-    .border({ width: { top: 0.5 }, color: { top: LINE } }).margin({ top: 12 })
+    .width('100%')
   }
 
   build(): void {

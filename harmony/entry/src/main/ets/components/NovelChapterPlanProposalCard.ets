@@ -4,8 +4,11 @@
 //   全部 patch(写入=完整计划内容可展开读全;delete=「清空本章计划」)。
 // 批准/拒绝不走本卡 — 原胶囊按钮仍调 ChatMessageTools 的 onApprove/onDeny
 //   (同一 toolCallId/locator/continueTool 路由);本卡不含任何新写回路径。
+// 容器走 NovelApprovalShell(iOS 审批卡规格)。
 
-import { MOTION_OVERLAY, ACCENT, ERROR, INK, INK2, INK3, LINE, SURFACE } from '../design/tokens.ets';
+import { MOTION_OVERLAY, ACCENT, ERROR, INK, INK2, INK3, LINE } from '../design/tokens.ets';
+import { FONT_SANS_MEDIUM, FONT_SANS_SEMIBOLD } from '../design/fonts.ets';
+import { NovelApprovalShell } from './NovelApprovalShell.ets';
 import type { NovelChapterPlanPatchView, NovelChapterPlanProposalView } from '../platform_impl/NovelPlanProposalProjection.ets';
 
 @Component
@@ -47,20 +50,32 @@ export struct NovelChapterPlanProposalCard {
       .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
   }
 
+  build(): void {
+    if (this.themeEpoch >= 0 && this.view !== null) {
+      this.ShellFor(this.view)
+    }
+  }
+
   @Builder
-  private proposalCard(view: NovelChapterPlanProposalView): void {
+  private ShellFor(view: NovelChapterPlanProposalView): void {
+    Column() {
+      NovelApprovalShell({
+        iconName: 'ph_notebook',
+        title: '本章计划提案',
+        subtitle: `提案 ${view.proposalId} · ${this.writeCount(view)} 次写入 · ${this.deleteCount(view)} 次清空`,
+        content: (): void => { this.Body(); },
+      })
+    }
+    .width('100%').margin({ bottom: 6 })
+  }
+
+  @Builder
+  private Body(): void {
     Column() {
       Row() {
-        Column() {
-          Text('本章计划提案').fontSize(13).fontWeight(FontWeight.Medium).fontColor(INK)
-          Text(`提案 ${view.proposalId} · ${this.writeCount(view)} 次写入 · ${this.deleteCount(view)} 次清空`)
-            .fontSize(11).fontColor(INK3).maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis })
-            .width('100%').margin({ top: 2 })
-        }
-        .layoutWeight(1).alignItems(HorizontalAlign.Start)
-        Text(this.expanded ? '收起' : '查看')
-          .fontSize(12).fontColor(ACCENT).width(52).height(44)
-          .textAlign(TextAlign.Center).padding({ top: 13, bottom: 13 })
+        Blank()
+        Text(this.expanded ? '收起' : '查看').fontSize(12).fontFamily(FONT_SANS_MEDIUM).fontColor(ACCENT)
+          .constraintSize({ minHeight: 44 }).padding({ left: 12 })
           .accessibilityText(`${this.expanded ? '收起' : '查看'}本章计划提案`)
           .onClick((): void => {
             this.getUIContext().animateTo({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }, (): void => {
@@ -68,23 +83,11 @@ export struct NovelChapterPlanProposalCard {
             });
           })
       }
-      .width('100%').constraintSize({ minHeight: 44 }).alignItems(VerticalAlign.Center)
-
-      if (this.expanded) {
-        this.proposalDetails(view)
+      .width('100%')
+      if (this.expanded && this.view !== null) {
+        this.proposalDetails(this.view)
       }
     }
     .width('100%')
-    .padding({ left: 12, right: 12, top: 10, bottom: 10 })
-    .backgroundColor(SURFACE)
-    .borderRadius(8)
-    .clip(true)
-    .margin({ bottom: 6 })
-  }
-
-  build(): void {
-    if (this.themeEpoch >= 0 && this.view !== null) {
-      this.proposalCard(this.view)
-    }
   }
 }

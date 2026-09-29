@@ -2,7 +2,7 @@
 // 单文件承载三个 pane(@Builder)与对话框(Stack 叠层),状态集中于本页 @State。
 import {
   ACCENT, ACCENT_INK, BG, ERROR, INK, INK2, INK3, INK4, LINE, MOTION_ENTER, MOTION_OVERLAY,
-  MOTION_PRESS, OVERLAY, SURFACE, SURFACE2,
+  MOTION_PRESS, OVERLAY, SUCCESS_FG, SURFACE, SURFACE2,
 } from '../design/tokens.ets';
 import { FONT_SERIF, FONT_MONO, FONT_SANS_MEDIUM } from '../design/fonts.ets';
 import { Icon } from '../components/ui/Icon.ets';
@@ -50,7 +50,6 @@ import {
 } from '@amber/chat-domain';
 import type { FollowMode, ToolApprovalPartLocator } from '@amber/chat-domain';
 
-const GREEN: string = '#43A047';
 
 const NOVEL_AGENT_MESSAGE_CAPABILITIES: AgentMessageRowHostCapabilities = {
   copy: false,
@@ -1597,20 +1596,26 @@ struct NovelWorkspacePage {
     if (message.mode === 'write' && message.collectedChapterId === null &&
       novelMessageText(message).trim().length > 0) {
       Row() {
+        Icon({ name: 'ph_bookOpen', iconSize: 14, color: ACCENT_INK })
         Text(message.interrupted ? '收进章节（部分）' : '收进章节')
-          .fontSize(12)
-          .fontColor(ACCENT)
+          .fontSize(12).fontWeight(FontWeight.Medium).fontFamily(FONT_SANS_MEDIUM)
+          .fontColor(ACCENT_INK).margin({ left: 6 })
       }
       .constraintSize({ minHeight: 44 })
-      .padding({ left: 12, right: 12 })
+      .padding({ left: 16, right: 16 })
       .borderRadius(22)
-      .backgroundColor(SURFACE2)
+      .backgroundColor(ACCENT)
       .margin({ top: 6 })
       .alignItems(VerticalAlign.Center)
       .onClick((): void => { this.openCollect(message.id); })
       .accessibilityText(message.interrupted ? '收进章节，部分内容' : '收进章节')
     } else if (message.collectedChapterId !== null) {
-      Text('已收进章节').fontSize(12).fontColor(GREEN).margin({ top: 10 })
+      Row() {
+        Icon({ name: 'check', iconSize: 13, color: SUCCESS_FG })
+        Text('已收进章节').fontSize(12).fontFamily(FONT_SANS_MEDIUM).fontColor(SUCCESS_FG)
+          .margin({ left: 5 })
+      }
+      .alignItems(VerticalAlign.Center).margin({ top: 10 })
     }
   }
 
@@ -2276,33 +2281,6 @@ struct NovelWorkspacePage {
     .border({ width: 1, color: LINE }).margin({ bottom: 10 })
   }
 
-  // 待确认建议卡(分区共用):采用后写入资料库
-  @Builder
-  private SuggestionCard(s: NovelMaterialSuggestion): void {
-    Column() {
-      Row() {
-        Text(MATERIAL_KIND_LABELS[s.kind]).fontSize(11).fontColor(ACCENT)
-          .padding({ left: 8, right: 8, top: 3, bottom: 3 }).borderRadius(8).backgroundColor(SURFACE2)
-        Text(s.title).fontSize(14).fontFamily(FONT_SANS_MEDIUM).fontColor(INK).margin({ left: 8 }).layoutWeight(1)
-      }
-      .width('100%')
-      Text(s.content).fontSize(13).fontColor(INK2).lineHeight(20).margin({ top: 8 }).width('100%')
-      Row() {
-        Blank()
-        Text('忽略').fontSize(13).fontColor(INK3)
-          .constraintSize({ minWidth: 44, minHeight: 44 }).textAlign(TextAlign.Center).margin({ right: 8 })
-          .onClick(() => { this.resolveSuggestion(s.id, false); })
-        Text('采用').fontSize(13).fontColor(ACCENT_INK)
-          .constraintSize({ minHeight: 44 })
-          .padding({ left: 16, right: 16 }).borderRadius(22).backgroundColor(ACCENT)
-          .onClick(() => { this.resolveSuggestion(s.id, true); })
-      }
-      .width('100%').margin({ top: 10 })
-    }
-    .width('100%').padding(14).backgroundColor(SURFACE).borderRadius(12)
-    .border({ width: 1, color: LINE }).margin({ bottom: 12 })
-  }
-
   // 资料分区页(iOS Compendium 角色/世界观):待确认建议 + 资料列表 + 新增
   @Builder
   private MaterialKindPane(kinds: NovelMaterialKind[], addLabel: string, addKind: NovelMaterialKind,
@@ -2327,7 +2305,12 @@ struct NovelWorkspacePage {
           Text('Amber 从正文中发现了资料变化，采用后才会写入资料库。')
             .fontSize(11).fontColor(INK3).margin({ bottom: 10 })
           ForEach(this.pendingSuggestionsIn(kinds), (s: NovelMaterialSuggestion): void => {
-            this.SuggestionCard(s)
+            NovelSettingProposalCard({
+              title: s.title,
+              content: s.content,
+              kindLabel: MATERIAL_KIND_LABELS[s.kind],
+              onResolve: (accept: boolean): void => { this.resolveSuggestion(s.id, accept); },
+            })
           }, (s: NovelMaterialSuggestion): string => s.id)
         }
 

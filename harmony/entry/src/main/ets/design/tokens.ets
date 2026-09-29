@@ -77,6 +77,9 @@ let darkTheme: boolean = false;
 // 图标座/状态 chip 在卡内改用 accent 12% alpha(深浅主题在卡上均成立,随 accent 五色动态)
 export const accentSoftBg = (accent: string): string => `#1F${accent.substring(1)}`;
 
+// 审批卡描边:iOS 琥珀玻璃卡 accent 18% alpha 0.75pt 连续圆角描边(ProposalCard 族)
+export const accentEdge = (accent: string): string => `#2E${accent.substring(1)}`;
+
 const accentLightFor = (hex: string, dark: boolean): string => {
   if (dark) {
     if (hex === '#5E9C6E') return '#1D2B22';
