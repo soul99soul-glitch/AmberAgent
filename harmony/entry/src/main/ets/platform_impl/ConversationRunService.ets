@@ -5,7 +5,7 @@ import type {
   PendingUserMessage, PendingUserMessageMode, ConversationCompact, KernelPhase,
   SandboxActivityUiState, ToolApprovalVerdict, ToolApprovalPartLocator, AgentTool,
   ToolLoopOptions, ChatTurnDeps, ChatKernelHost, DeepReadOpenEvent,
-  SearchSettings, MiniAppSetting, PromptInjection, Lorebook,
+  SearchSettings, MiniAppSetting,
 } from '@amber/chat-domain';
 import {
   newId, nowIso, currentMessages, nodeRole, makeUIMessage, makeUserMessage,
@@ -62,7 +62,7 @@ export interface PreparedConversationSeed {
   runtime: ChatRuntime; agentRuntime: AgentRuntimeSnapshot;
   compressChoice: ChatProviderChoice | null; taskPrompts: TaskPrompts;
   searchSettings: SearchSettings; ocrSeed: OcrSeed | null; miniAppSetting: MiniAppSetting;
-  userNickname: string; modeInjections: PromptInjection[]; lorebooks: Lorebook[];
+  userNickname: string;
   webmountGlobalEnabled: boolean; webmountEvalEnabled: boolean; imageGenConfigured: boolean;
   subAgentEnabled: boolean; subAgentMode: string;
   agentTaskTools: AgentTool[]; agentCronTools: AgentTool[];

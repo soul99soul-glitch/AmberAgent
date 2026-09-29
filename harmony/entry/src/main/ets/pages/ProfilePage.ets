@@ -15,7 +15,7 @@ import type { common } from '@kit.AbilityKit';
 import type { DisplaySetting, ConversationSummary, Conversation, UIMessage } from '@amber/chat-domain';
 import { getChatKvStore, getChatRepository } from '../di/AppContainer.ets';
 import { compressImageAsDataUrl } from '../platform_impl/ImageCompress.ets';
-import { CenteredTitleBar, PlainSection, CardGroup, NavRow, PageSpacer } from '../components/PageTemplate.ets';
+import { CenteredTitleBar, PlainSection, CardGroup, PageSpacer } from '../components/PageTemplate.ets';
 import { UIAvatar } from '../components/UIAvatar.ets';
 import { Icon } from '../components/ui/Icon.ets';
 import { FONT_MONO } from '../design/fonts.ets';
@@ -531,9 +531,6 @@ struct ProfilePage {
             PlainSection({ label: '活跃' })
             this.HeatmapCard()
 
-            // ── 助手管理入口(助手体系唯一 UI 入口:列表/编辑/扩展/工具/MCP/记忆) ──
-            PlainSection({ label: '助手' })
-            CardGroup({ radius: 18, stroke: true, content: (): void => { this.AssistantRow(); } })
           } else {
             Column() {
               Text('统计加载中…')
@@ -563,12 +560,6 @@ struct ProfilePage {
     }
     .width('100%').height('100%').backgroundColor(BG)
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
-  }
-
-  @Builder
-  AssistantRow(): void {
-    NavRow({ label: '助手管理', desc: '列表 / 编辑 / 扩展 / 工具 / MCP / 记忆', iconName: 'person',
-      isLast: true, onRowClick: (): void => { router.pushUrl({ url: 'pages/ChatAssistantsPage' }); } })
   }
 
   @Builder

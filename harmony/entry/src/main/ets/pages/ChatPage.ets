@@ -39,7 +39,7 @@ import {
   invalidateCompacts, copyValidCompactsToConversation, ContextCompactionFailedError, recoverInterruptedRecipes,
   recoverInterruptedPlugins, recoverInterruptedWebMountGoals, parseDeepReadSlashCommand, estimateConversationInputTokens, formatNumberInt,
   formatContextTokens, nativeTokenizerForModel, loadSearchPrefs, updateSearchPrefs, SearchSettings,
-  buildMentionRoleItems, MentionRoleItem, PromptInjection, Lorebook, ConversationSummary, toChatModel,
+  buildMentionRoleItems, MentionRoleItem, ConversationSummary, toChatModel,
   firstImageBlockingIssueForSend, inspectImageAttachment, imageAttachmentBlocksSend,
   reasoningLevelForModel, withReasoningLevelForModel, defaultReasoningLevelForModel, reasoningLevelsForModel,
   deriveSandboxActivities, mergeSandboxTimeline, idleSandboxActivity, withStepProgress, isActiveOperation,
@@ -112,7 +112,6 @@ import {
 } from '../platform_impl/AgentRuntimePrefs.ets';
 
 import { readDocumentPreview } from '../platform_impl/DocumentSupport.ets';
-import { loadLorebooks, loadModeInjections } from '../platform_impl/ExtensionPrefs.ets';
 
 import type { MiniAppPlatform } from '../platform_impl/MiniAppPlatform.ets';
 import { imageGenToolAvailable, EditSourceImage } from '../platform_impl/ImageGenTool.ets';
@@ -493,9 +492,6 @@ struct ChatPage {
   // D-073:display_setting 用户信息快照(抽屉与 placeholder 共用)
   @State userNickname: string = '';
   @State userAvatar: string = '';
-  // D-075:mode_injections/lorebooks 快照(transform 调用时读 = settingsFlow.value 语义)
-  private modeInjections: PromptInjection[] = [];
-  private lorebooks: Lorebook[] = [];
 
   // MiniApp:repository 惰性单例(output transformer 依赖;Android Koin inject 等价)
 
@@ -1012,15 +1008,6 @@ struct ChatPage {
       this.loadWebMountGlobalToggles();
       this.autoCloseThinking = setting.autoCloseThinking;
       if (!this.enableAutoScroll) this.followMode = 'idle';
-    });
-    // D-075:mode_injections/lorebooks 快照(缺失/损坏 → [])
-    loadModeInjections(getChatKvStore()).then((list: PromptInjection[]): void => {
-      if (!this.pageAlive) return;
-      this.modeInjections = list;
-    });
-    loadLorebooks(getChatKvStore()).then((list: Lorebook[]): void => {
-      if (!this.pageAlive) return;
-      this.lorebooks = list;
     });
     this.refreshMentionRoles();
     const params = router.getParams() as Record<string, string>;

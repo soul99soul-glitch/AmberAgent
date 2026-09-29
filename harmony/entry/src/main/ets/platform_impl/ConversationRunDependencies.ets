@@ -10,7 +10,7 @@ import {
   asChatStreamProvider, buildAgentSoulPrompt, buildMemoryRecallPrompt,
   buildRecentChatsPrompt, conversationWithMessagesAsNodes, createDocumentTransformer,
   createMiniAppOutputTransformer, createMiniAppPromptTransformer,
-  createPlaceholderTransformer, createPromptInjectionTransformer, createTemplateTransformer,
+  createPlaceholderTransformer, createTemplateTransformer,
   createTimeReminderTransformer, currentMessages, dayOfWeekFullName, estimateContextWindow,
   javaLocalDateTimeString, loadDisplaySetting, loadMiniAppSetting, loadSearchPrefs,
   makeCompactPolicy, makeGenerationRetrySetting, makeSubAgentRuntimeSetting,
@@ -29,7 +29,6 @@ import type {
 import { loadAgentRuntimeSnapshot, systemLanguage } from './AgentRuntimePrefs.ets';
 import { createEntryBase64ImageTransformer } from './Base64ImageSupport.ets';
 import { createEntryDocumentReader } from './DocumentSupport.ets';
-import { loadLorebooks, loadModeInjections } from './ExtensionPrefs.ets';
 import { imageGenToolAvailable } from './ImageGenTool.ets';
 import { jevNoulBatch } from './JevSupport.ets';
 import type { JevNoulBatchResult } from './JevSupport.ets';
@@ -77,8 +76,6 @@ export const prepareConversationSeed = async (
     ocrSeed: ocr,
     miniAppSetting: await loadMiniAppSetting(kv),
     userNickname: display.userNickname,
-    modeInjections: await loadModeInjections(kv),
-    lorebooks: await loadLorebooks(kv),
     webmountGlobalEnabled: (await kv.get('webmount_global_enabled')) === 'true',
     webmountEvalEnabled: (await kv.get('webmount_eval_enabled')) === 'true',
     imageGenConfigured: await imageGenToolAvailable().catch((): boolean => false),
@@ -98,10 +95,6 @@ const inputTransformers = (ctx: DetachedConversationContext): MessageTransformer
       enabled: (): boolean => seed.agentRuntime.enableTimeReminder,
       formatDayOfWeek: (ms: number): string => dayOfWeekFullName(systemLanguage(), ms),
       formatLocalDateTime: javaLocalDateTimeString,
-    }),
-    createPromptInjectionTransformer({
-      modeInjections: () => seed.modeInjections,
-      lorebooks: () => seed.lorebooks,
     }),
     createMiniAppPromptTransformer({
       enabled: (): boolean => seed.miniAppSetting.enabled,

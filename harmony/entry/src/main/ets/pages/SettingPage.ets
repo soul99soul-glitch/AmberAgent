@@ -136,8 +136,6 @@ struct SettingPage {
       onRowClick: (): void => { this.go('pages/ChatProviderSettingsPage'); } })
     CardRow({ label: '模型与提示词', valueText: this.modelLabel, iconName: 'spark',
       onRowClick: (): void => { this.go('pages/ChatTaskModelsPage'); } })
-    CardRow({ label: '提示词注入', iconName: 'doc',
-      onRowClick: (): void => { this.go('pages/ChatPromptsPage'); } })
     CardRow({ label: '搜索服务', iconName: 'search',
       onRowClick: (): void => { this.go('pages/ChatSearchSettingsPage'); } })
     CardRow({ label: 'Jev 快速判断', iconName: 'brain', isLast: true,
@@ -169,8 +167,10 @@ struct SettingPage {
     // 历史/收藏在别处无入口(基准截图虽无此两行,鸿蒙不能静默丢功能)
     CardRow({ label: '历史记录', iconName: 'history',
       onRowClick: (): void => { this.go('pages/HistoryPage'); } })
-    CardRow({ label: '收藏', iconName: 'star', isLast: true,
+    CardRow({ label: '收藏', iconName: 'star',
       onRowClick: (): void => { this.go('pages/FavoritePage'); } })
+    CardRow({ label: '快捷消息', iconName: 'hi_message', isLast: true,
+      onRowClick: (): void => { this.go('pages/QuickMessagesPage'); } })
   }
 
   @Builder
