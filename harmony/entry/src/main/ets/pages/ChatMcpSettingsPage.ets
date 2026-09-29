@@ -542,7 +542,8 @@ struct ChatMcpSettingsPage {
       }
       .width('100%').justifyContent(FlexAlign.End).padding({ top: 8 })
     }
-    .width('100%').height('90%').padding(16)
+      .width('100%').height('90%').padding(16)
+      .backgroundColor(BG)
   }
 
   @Builder
@@ -594,7 +595,8 @@ struct ChatMcpSettingsPage {
       }
       .width('100%').justifyContent(FlexAlign.End).margin({ top: 12 })
     }
-    .width('100%').height('70%').padding(16)
+      .width('100%').height('70%').padding(16)
+      .backgroundColor(BG)
   }
 
   build() {
@@ -605,6 +607,7 @@ struct ChatMcpSettingsPage {
         .hitTestBehavior(HitTestMode.None)
         .bindSheet(this.draft !== null, this.editSheet(), {
           height: SheetSize.LARGE,
+          backgroundColor: BG,
           onDisappear: (): void => { this.draft = null; },
         })
       Column() {}
@@ -612,6 +615,7 @@ struct ChatMcpSettingsPage {
         .hitTestBehavior(HitTestMode.None)
         .bindSheet(this.showImport, this.importSheet(), {
           height: SheetSize.LARGE,
+          backgroundColor: BG,
           onDisappear: (): void => { this.showImport = false; },
         })
       // 顶栏(:126-147)— 返回 + MCP 设置 + 导入/添加(双 trailing → 保留 inline,对齐 PageTitleBar 样式)
