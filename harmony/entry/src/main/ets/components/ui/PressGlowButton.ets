@@ -117,14 +117,8 @@ export struct PressGlowButton {
     }
   }
 
-  // 本色亮场资源(accent 五色一一对应;整面 = 提亮 30% 的 accent 本色,不是白)
-  private spotImage(): Resource {
-    if (this.accentColor === '#5E9C6E') return $r('app.media.glow_flat_5e9c6e');
-    if (this.accentColor === '#4F86D6') return $r('app.media.glow_flat_4f86d6');
-    if (this.accentColor === '#9277C4') return $r('app.media.glow_flat_9277c4');
-    if (this.accentColor === '#C2607A') return $r('app.media.glow_flat_c2607a');
-    return $r('app.media.glow_flat_b8623a');
-  }
+  // 本色亮场 = HSV 高明度化的 accent(整面提亮 30% 的 accent 本色,不是白);
+  // 任意强调色现场派生,不再依赖写死位图
 
   build(): void {
     // 单 Stack(尺寸 = btnWidth/btnHeight 或内容):底/边/影全挂容器自身。
@@ -133,12 +127,14 @@ export struct PressGlowButton {
     Stack() {
       if (this.held) {
         if (this.isSolid()) {
-          // solid(新对话):整面本色提亮 — 满幅「更亮的 accent 本色」光场贴合
-          // 按钮剪影,媒体通道 HDR 加成;整个按钮变成更亮的颜色,无斑无白
-          Image(this.spotImage())
+          // solid(新对话):整面本色提亮 — 同色高明度(HSV 拉明度 30%)光场贴合
+          // 按钮剪影,媒体通道 HDR 加成;颜色由 accent 现场派生,任意强调色成立
+          // (原实现 = 五张写死位图按 hex 精确匹配,非预设 accent 落陶土兜底错色)
+          Column()
             .width(this.glowW > 0 ? this.glowW : 1)
             .height(this.glowH > 0 ? this.glowH : 1)
             .borderRadius(this.radius)
+            .backgroundColor(hsvBoost(this.accentColor, 1.3, 1.05))
             .foregroundFilter(this.heldFilter())
             .hitTestBehavior(HitTestMode.None)
         } else {
