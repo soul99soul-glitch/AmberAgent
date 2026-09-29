@@ -883,26 +883,6 @@ export {
 } from './chat/base64_image_transformer.ts';
 export type { Base64ImageDeps } from './chat/base64_image_transformer.ts';
 
-// ===== D-075:提示词注入(PromptInjectionTransformer.kt 全文 + Assistant.kt:140-287) =====
-// (SYSTEM_PROMPT_CACHE_* 常量已在 context_assembly.ts 导出块,D-045)
-export {
-  applyInjections, cacheDisabledMetadata, collectInjections,
-  createMergedInjectionMessages, createPromptInjectionTransformer,
-  extractContextForMatching, findSafeInsertIndex, isTriggered,
-  makeLorebook, makeModeInjection, makeRegexInjection, transformMessages,
-} from './chat/prompt_injection_transformer.ts';
-export type {
-  InjectionPosition, InjectionRole, Lorebook, PromptInjection,
-  PromptInjectionDeps, RegexInjection,
-} from './chat/prompt_injection_transformer.ts';
-
-// ===== D-100:注入序列化 + mode_injections/lorebooks 写路径 =====
-export {
-  decodeLorebooks, decodeModeInjections, encodeLorebooks, encodeModeInjections,
-  lorebookFromJson, lorebookToJson, modeInjectionFromJson, modeInjectionToJson,
-  regexInjectionFromJson, regexInjectionToJson,
-} from './chat/injection_serialize.ts';
-
 // ===== D-079a:图片压缩纯函数(FileEncoder.kt:14-30,53-66,236-303) =====
 // PixelMap 解码/EXIF 归一化在 entry(ImageKit),HAR 只承载无平台依赖的部分。
 export {

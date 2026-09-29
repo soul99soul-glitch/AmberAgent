@@ -115,10 +115,6 @@ checks.push(() => {
   const regex = readJson('transformers/regex_input_output.json');
   assert(regex.expected.parts.some((part) => part.type === 'text' && part.text === 'hi '), 'regex fixture should replace hello with hi');
   assert(regex.expected.parts.some((part) => part.type === 'reasoning' && part.reasoning === 'reasoning' && part.finishedAt === null), 'think fixture should expose unfinished reasoning');
-
-  const promptExpected = readJson('transformers/prompt_injection_expected.json');
-  assert(promptExpected.expectedSystemContains.includes('Base system prompt.'), 'prompt injection expected base system prompt missing');
-  assert(promptExpected.expectedSystemContains.length >= 3, 'prompt injection expected should include injected content');
 });
 
 checks.push(() => {

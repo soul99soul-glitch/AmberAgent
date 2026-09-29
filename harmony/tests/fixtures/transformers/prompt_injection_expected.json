@@ -1,8 +1,0 @@
-{
-  "expectedSystemContains": [
-    "Base system prompt.",
-    "Prioritize HarmonyOS NEXT native constraints.",
-    "AmberAgent should preserve visible tool calls."
-  ],
-  "orderingRule": "Base system prompt remains first; triggered injections are inserted deterministically by depth and configured priority."
-}

@@ -96,8 +96,6 @@ export interface Assistant {
   toolProfile: MainAgentToolProfile;
   background: string | null;
   backgroundOpacity: number;
-  modeInjectionIds: string[];
-  lorebookIds: string[];
   enabledSkills: string[];
   enableTimeReminder: boolean;
   rememberedReasoningLevelsByModelId: Record<string, ReasoningLevel>;
@@ -140,8 +138,6 @@ export const makeAssistant = (opts: Partial<Assistant> = {}): Assistant => ({
   toolProfile: opts.toolProfile ?? 'full',
   background: opts.background ?? null,
   backgroundOpacity: opts.backgroundOpacity ?? 1,
-  modeInjectionIds: opts.modeInjectionIds ?? [],
-  lorebookIds: opts.lorebookIds ?? [],
   enabledSkills: opts.enabledSkills ?? [],
   enableTimeReminder: opts.enableTimeReminder ?? false,
   rememberedReasoningLevelsByModelId: opts.rememberedReasoningLevelsByModelId ?? {},

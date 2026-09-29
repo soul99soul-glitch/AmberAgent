@@ -168,8 +168,6 @@ export const serializeAssistant = (a: Assistant): string => {
   parts.push(`"toolProfile":${esc(a.toolProfile)}`);
   if (a.background !== null) parts.push(`"background":${esc(a.background)}`);
   parts.push(`"backgroundOpacity":${floatStr(a.backgroundOpacity)}`);
-  parts.push(`"modeInjectionIds":[${a.modeInjectionIds.map(esc).join(',')}]`);
-  parts.push(`"lorebookIds":[${a.lorebookIds.map(esc).join(',')}]`);
   parts.push(`"enabledSkills":[${a.enabledSkills.map(esc).join(',')}]`);
   parts.push(`"enableTimeReminder":${a.enableTimeReminder}`);
   const remembered = Object.keys(a.rememberedReasoningLevelsByModelId).map(
@@ -254,8 +252,6 @@ const parseAssistantFromObject = (o: JsonObject): Assistant => {
     toolProfile: rawProfile as MainAgentToolProfile,
     background: nullableStr(o, 'background'),
     backgroundOpacity: numOr(o, 'backgroundOpacity', 1),
-    modeInjectionIds: strArrOr(o, 'modeInjectionIds'),
-    lorebookIds: strArrOr(o, 'lorebookIds'),
     enabledSkills: strArrOr(o, 'enabledSkills'),
     enableTimeReminder: boolOr(o, 'enableTimeReminder', false),
     rememberedReasoningLevelsByModelId: remembered,

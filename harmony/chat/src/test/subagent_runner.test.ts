@@ -96,8 +96,6 @@ const parentAssistant = (): Assistant => makeAssistant({
   toolProfile: 'coding',
   background: 'parent-bg',
   backgroundOpacity: 0.4,
-  modeInjectionIds: ['mode-1'],
-  lorebookIds: ['lore-1'],
   enabledSkills: ['workspace-writer'],
   enableTimeReminder: true,
   rememberedReasoningLevelsByModelId: { 'model-a': 'xhigh' },
@@ -562,8 +560,6 @@ describe('GenerationSubAgentRunner model resolution and isolation', () => {
     assert.deepEqual(assistant.regexes, []);
     assert.deepEqual(assistant.mcpServers, []);
     assert.deepEqual(assistant.localTools, []);
-    assert.deepEqual(assistant.modeInjectionIds, []);
-    assert.deepEqual(assistant.lorebookIds, []);
     assert.deepEqual(assistant.enabledSkills, []);
     assert.equal(assistant.enableTimeReminder, false);
     assert.equal(assistant.messageTemplate, '{{ message }}');

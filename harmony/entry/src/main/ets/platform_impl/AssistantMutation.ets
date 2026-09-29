@@ -10,9 +10,8 @@
 // 「load 最新 → 在锁内 transform 目标助手 → 覆盖写回该条」整体串行化。锁内读的
 // 一定是最新列表,绝不基于旧 snapshot 写回整表。
 //
-// 语义对齐 ExtensionPrefs.updateModeInjections(updateLorebooks):锁即事务,
-// mutator 抛错则不落盘并向上抛;未找到目标助手 → 返回 null(调用方可判定),
-// 不新建、不整表覆盖。
+// 语义:锁即事务,mutator 抛错则不落盘并向上抛;未找到目标助手 → 返回 null
+// (调用方可判定),不新建、不整表覆盖。
 import type { Assistant, KeyValueStore } from '@amber/chat-domain';
 import { ASSISTANTS_KEY, loadAssistants, saveAssistants } from '@amber/chat-domain';
 import { sharedKvMutex } from './AtomicJsonFile.ets';

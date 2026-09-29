@@ -49,8 +49,6 @@ test('golden: 默认 Assistant 全字段线格式(键序=声明序,defaults 编�
     + '"localTools":[{"type":"time_info"}],'
     + '"toolProfile":"full",'
     + '"backgroundOpacity":1.0,'
-    + '"modeInjectionIds":[],'
-    + '"lorebookIds":[],'
     + '"enabledSkills":[],'
     + '"enableTimeReminder":false,'
     + '"rememberedReasoningLevelsByModelId":{}'
@@ -91,8 +89,6 @@ test('golden: 全字段填充(空值字段出现/Float 整数 → 1.0/枚举大�
     toolProfile: 'coding',
     background: 'file://bg.png',
     backgroundOpacity: 0.8,
-    modeInjectionIds: ['mi1'],
-    lorebookIds: ['lb1'],
     enabledSkills: ['skill-a'],
     enableTimeReminder: true,
     rememberedReasoningLevelsByModelId: { 'm-1': 'max', 'm-2': 'off' },

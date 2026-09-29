@@ -5,7 +5,6 @@ Message transformers are part of AmberAgent's product semantics. ArkTS rewrites 
 ## Input Transformers
 
 - Template transformation wraps or rewrites the current user message using assistant template variables.
-- Prompt injection inserts mode/lorebook/regex-triggered context at deterministic depths.
 - Document-as-prompt replaces document parts with bounded extracted text blocks.
 - OCR transforms image input into text only when an OCR provider is configured; otherwise fallback must be explicit.
 
@@ -26,5 +25,3 @@ Message transformers are part of AmberAgent's product semantics. ArkTS rewrites 
 - `../transformers/document_as_prompt_input.json`
 - `../transformers/document_as_prompt_expected.md`
 - `../transformers/ocr_image_prompt.json`
-- `../transformers/prompt_injection_input.json`
-- `../transformers/prompt_injection_expected.json`

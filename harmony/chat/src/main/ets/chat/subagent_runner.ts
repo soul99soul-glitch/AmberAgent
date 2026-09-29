@@ -242,8 +242,6 @@ const isolatedAssistant = (
     toolProfile: parent.toolProfile,
     background: parent.background,
     backgroundOpacity: parent.backgroundOpacity,
-    modeInjectionIds: [],
-    lorebookIds: [],
     enabledSkills: [],
     enableTimeReminder: false,
     rememberedReasoningLevelsByModelId: parent.rememberedReasoningLevelsByModelId,
