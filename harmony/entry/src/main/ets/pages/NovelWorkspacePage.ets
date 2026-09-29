@@ -2340,24 +2340,8 @@ struct NovelWorkspacePage {
       Column() {
         // 顶栏(iOS NovelProjectWorkspaceView):返回玻璃圆 + 居中 principal
         // (项目名 + 模式·分支·模型,点开「项目控制」)+ 右侧导出玻璃圆。
-        // 可点胶囊必须先声明(下层),整宽按钮行后声明覆盖边缘热区(Stack 点击拦截坑)
+        // Stack 点击拦截坑:整宽按钮行先声明(下层),可点胶囊后声明(上层)且内容宽
         Stack({ alignContent: Alignment.Center }) {
-          Column() {
-            Text(this.project !== null ? this.project.name : '小说创作')
-              .fontSize(17).fontWeight(FontWeight.Bold).fontColor(INK).fontFamily(FONT_SERIF)
-              .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
-            Text(this.workspaceSubtitle())
-              .fontSize(11).fontColor(INK3).fontFamily(FONT_SANS_MEDIUM)
-              .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
-              .margin({ top: 2 })
-          }
-          .alignItems(HorizontalAlign.Center)
-          .padding({ left: 60, right: 60 })
-          .width('100%')
-          .constraintSize({ minHeight: 44 })
-          .enabled(this.project !== null)
-          .onClick((): void => { this.openControlSheet(); })
-          .accessibilityText('项目控制')
           Row() {
             Row() {
               Icon({ name: 'back', iconSize: 18, color: INK })
@@ -2379,6 +2363,21 @@ struct NovelWorkspacePage {
             .accessibilityText('导出')
           }
           .width('100%')
+          Column() {
+            Text(this.project !== null ? this.project.name : '小说创作')
+              .fontSize(17).fontWeight(FontWeight.Bold).fontColor(INK).fontFamily(FONT_SERIF)
+              .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+            Text(this.workspaceSubtitle())
+              .fontSize(11).fontColor(INK3).fontFamily(FONT_SANS_MEDIUM)
+              .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+              .margin({ top: 2 })
+          }
+          .alignItems(HorizontalAlign.Center)
+          .constraintSize({ minHeight: 44, maxWidth: '62%' })
+          .padding({ left: 12, right: 12 })
+          .enabled(this.project !== null)
+          .onClick((): void => { this.openControlSheet(); })
+          .accessibilityText('项目控制')
         }
         .width('100%').padding({ left: 16, right: 16, top: this.statusBarHeight + 10, bottom: 10 })
         .backgroundColor(BG)
