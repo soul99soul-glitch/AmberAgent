@@ -4,7 +4,7 @@
 // 整章润色/重生成属工作区聊天流任务:此处触发后退回工作区由 reload 重挂进度。
 import { router, promptAction, KeyboardAvoidMode } from '@kit.ArkUI';
 import {
-  ACCENT, BG, ERROR, INK, INK3, INK4, LINE, MOTION_OVERLAY, OVERLAY, SURFACE, SURFACE2,
+  ACCENT, BG, ERROR, INK, INK3, INK4, LINE, MOTION_ENTER, MOTION_OVERLAY, OVERLAY, SURFACE, SURFACE2,
   WARNING_FG,
 } from '../design/tokens.ets';
 import { FONT_SERIF, FONT_SANS_MEDIUM } from '../design/fonts.ets';
@@ -104,8 +104,10 @@ struct NovelChapterReaderPage {
   private jumpTo(idx: number): void {
     const p: NovelProject | null = this.project;
     if (p === null || idx < 0 || idx >= p.chapters.length) return;
-    this.chapterId = p.chapters[idx].id;
-    this.notice = '';
+    animateTo({ duration: MOTION_ENTER, curve: Curve.EaseOut }, (): void => {
+      this.chapterId = p.chapters[idx].id;
+      this.notice = '';
+    });
   }
 
   private versionKindLabel(kind: NovelChapterVersionKind): string {
@@ -463,12 +465,23 @@ struct NovelChapterReaderPage {
           }
           Scroll() {
             Column() {
-              MarkdownText({
-                content: (this.chapter()?.content ?? '').length > 0
-                  ? this.chapter()?.content ?? '' : '这一章还没有正文。',
-                fontColor: INK, readingMode: true, enableLatexRendering: false,
-                codeBlockAutoCollapse: true,
-              })
+              // 章节切换重挂载(与主题纪元同款):chapterId 变 → 内容销毁重建,
+              // 进场透明+轻位移,换章不生硬跳变
+              ForEach([this.chapterId], (id: string): void => {
+                Column() {
+                  MarkdownText({
+                    content: (this.chapter()?.content ?? '').length > 0
+                      ? this.chapter()?.content ?? '' : '这一章还没有正文。',
+                    fontColor: INK, readingMode: true, enableLatexRendering: false,
+                    codeBlockAutoCollapse: true,
+                  })
+                }
+                .width('100%')
+                .alignItems(HorizontalAlign.Start)
+                .transition(TransitionEffect.OPACITY
+                  .combine(TransitionEffect.translate({ y: 8 }))
+                  .animation({ duration: MOTION_ENTER, curve: Curve.EaseOut }))
+              }, (id: string): string => id)
             }
             .width('100%').padding({ left: 20, right: 20, top: 8, bottom: 24 })
             .alignItems(HorizontalAlign.Start)

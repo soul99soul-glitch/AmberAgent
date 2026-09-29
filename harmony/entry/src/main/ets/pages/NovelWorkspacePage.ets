@@ -2531,18 +2531,45 @@ struct NovelWorkspacePage {
     Column() {
       // 设定分类(iOS Compendium segmented:角色/世界观/剧情/更多)
       Seg({ options: ['角色', '世界观', '剧情', '更多'], selected: this.settingTab,
-        onSelect: (idx: number): void => { this.settingTab = idx; } })
+        onSelect: (idx: number): void => {
+          if (idx === this.settingTab) return;
+          animateTo({ duration: MOTION_ENTER, curve: Curve.EaseOut }, (): void => { this.settingTab = idx; });
+        } })
         .margin({ left: 16, right: 16, top: 2, bottom: 8 })
       if (this.project === null) {
         Column() {}.layoutWeight(1)
       } else if (this.settingTab === 0) {
-        this.MaterialKindPane(['character'], '新增角色', 'character', false)
+        Column() {
+          this.MaterialKindPane(['character'], '新增角色', 'character', false)
+        }
+        .width('100%').layoutWeight(1)
+        .transition(TransitionEffect.OPACITY
+          .combine(TransitionEffect.translate({ y: 10 }))
+          .animation({ duration: MOTION_ENTER, curve: Curve.EaseOut }))
       } else if (this.settingTab === 1) {
-        this.MaterialKindPane(['world', 'requirement', 'other'], '新增资料', 'world', true)
+        Column() {
+          this.MaterialKindPane(['world', 'requirement', 'other'], '新增资料', 'world', true)
+        }
+        .width('100%').layoutWeight(1)
+        .transition(TransitionEffect.OPACITY
+          .combine(TransitionEffect.translate({ y: 10 }))
+          .animation({ duration: MOTION_ENTER, curve: Curve.EaseOut }))
       } else if (this.settingTab === 2) {
-        this.StoryPane()
+        Column() {
+          this.StoryPane()
+        }
+        .width('100%').layoutWeight(1)
+        .transition(TransitionEffect.OPACITY
+          .combine(TransitionEffect.translate({ y: 10 }))
+          .animation({ duration: MOTION_ENTER, curve: Curve.EaseOut }))
       } else {
-        this.MorePane()
+        Column() {
+          this.MorePane()
+        }
+        .width('100%').layoutWeight(1)
+        .transition(TransitionEffect.OPACITY
+          .combine(TransitionEffect.translate({ y: 10 }))
+          .animation({ duration: MOTION_ENTER, curve: Curve.EaseOut }))
       }
     }
     .width('100%').height('100%')
@@ -2599,7 +2626,10 @@ struct NovelWorkspacePage {
 
           // 页签(iOS segmented:灰轨 + 白 pill)
           Seg({ options: ['创作', '正文', '设定'], selected: this.tab,
-            onSelect: (idx: number): void => { this.tab = idx; } })
+            onSelect: (idx: number): void => {
+              if (idx === this.tab) return;
+              animateTo({ duration: MOTION_ENTER, curve: Curve.EaseOut }, (): void => { this.tab = idx; });
+            } })
             .margin({ left: 16, right: 16, top: 2, bottom: 8 })
 
           if (this.errorMsg.length > 0) {
@@ -2613,11 +2643,29 @@ struct NovelWorkspacePage {
             }
             .width('100%').layoutWeight(1).justifyContent(FlexAlign.Center)
           } else if (this.tab === 0) {
-            this.chatPane()
+            Column() {
+              this.chatPane()
+            }
+            .width('100%').layoutWeight(1)
+            .transition(TransitionEffect.OPACITY
+              .combine(TransitionEffect.translate({ y: 10 }))
+              .animation({ duration: MOTION_ENTER, curve: Curve.EaseOut }))
           } else if (this.tab === 1) {
-            this.chapterPane()
+            Column() {
+              this.chapterPane()
+            }
+            .width('100%').layoutWeight(1)
+            .transition(TransitionEffect.OPACITY
+              .combine(TransitionEffect.translate({ y: 10 }))
+              .animation({ duration: MOTION_ENTER, curve: Curve.EaseOut }))
           } else {
-            this.settingsPane()
+            Column() {
+              this.settingsPane()
+            }
+            .width('100%').layoutWeight(1)
+            .transition(TransitionEffect.OPACITY
+              .combine(TransitionEffect.translate({ y: 10 }))
+              .animation({ duration: MOTION_ENTER, curve: Curve.EaseOut }))
           }
         }
         .width('100%').height('100%').backgroundColor(BG)

@@ -348,7 +348,8 @@ struct NovelProjectsPage {
 
   // 列表尾注:恢复删除的项目(鸿蒙独有救命入口,iOS 无对等行)
   @Builder
-  RestoreFooter(): void {Text(this.restoring ? '正在恢复…' : '恢复删除的项目')
+  RestoreFooter(): void {
+    Text(this.restoring ? '正在恢复…' : '恢复删除的项目')
       .fontSize(13)
       .fontFamily(FONT_SANS_MEDIUM)
       .fontColor(this.restoring ? INK4 : ACCENT)
@@ -378,6 +379,9 @@ struct NovelProjectsPage {
       .margin({ bottom: 24 + Math.max(this.navBarHeight, 24) })
       .onClick((): void => { this.openCreateSheet(); })
       .accessibilityText('新建小说项目')
+      .transition(TransitionEffect.OPACITY
+        .combine(TransitionEffect.translate({ y: 10 }))
+        .animation({ duration: MOTION_ENTER, curve: Curve.EaseOut }))
     }
     .width('100%').height('100%')
     .alignItems(HorizontalAlign.Center)
