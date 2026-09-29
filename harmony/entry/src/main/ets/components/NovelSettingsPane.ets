@@ -30,6 +30,12 @@ export struct NovelSettingsPane {
     (_settings: NovelBranchSettings): void => {};
   onNewMaterial: () => void = (): void => {};
 
+  // 设定 tab 重组(iOS Compendium 分段):计划偏好已入项目控制 sheet,伏笔/决定入剧情区,
+  // 资料由各分类页自理;「更多」页传 false 只留模型职责
+  @Prop showPlanSections: boolean = true;
+  @Prop showStorySections: boolean = true;
+  @Prop showMaterialsEntry: boolean = true;
+
   @State private writingTarget: NovelModelTarget = { kind: 'global' };
   @State private reviewTarget: NovelModelTarget | null = null;
   @State private stateSyncTarget: NovelModelTarget | null = null;
@@ -314,10 +320,16 @@ export struct NovelSettingsPane {
     Scroll() {
       Column() {
         this.modelPolicySection();
-        this.planFilesSection();
-        this.foreshadowSection();
-        this.decisionSection();
-        this.materialLibrarySection();
+        if (this.showPlanSections) {
+          this.planFilesSection();
+        }
+        if (this.showStorySections) {
+          this.foreshadowSection();
+          this.decisionSection();
+        }
+        if (this.showMaterialsEntry) {
+          this.materialLibrarySection();
+        }
       }
       .width('100%')
       .padding({ left: 16, right: 16, top: 12, bottom: 28 })

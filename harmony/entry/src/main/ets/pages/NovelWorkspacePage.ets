@@ -36,10 +36,11 @@ import {
   NovelProject, NovelMessage, NovelChapter, NovelMaterial, NovelMaterialSuggestion,
   NovelChatMode, NovelGenerationGranularity, NovelMaterialKind, NovelCollectionTarget,
   NovelRunKind, NovelRun, NovelActiveRun, NovelRunEvent,
-  NovelSettingProposal,
+  NovelSettingProposal, NovelForeshadow, NovelConfirmedDecision,
   NovelWorkspaceStatus, StreamTransportState, UIMessage, makeUIMessage,
   UIMessagePart, novelMessageUi, novelMessageText, NovelToolContinuationVerdict,
   NovelModelPolicy, NovelModelTarget, NovelBranchSettings, NovelConsistencyReport,
+  emptyNovelBranchSettings,
   NovelAuditIssue, NovelAuditReport,
   DurableGhostwriteJob, GhostwriteStage, DurablePolishJob, PolishContextOptions, PolishStage,
 } from '@amber/deepread-domain';
@@ -117,7 +118,12 @@ struct NovelWorkspacePage {
   @State planPreferences: string = '';
   @State controlNotice: string = '';
   @State tab: number = 0;
-  @State settingsSection: number = 0;
+  // 设定 tab 分类(iOS Compendium segmented):0 角色 / 1 世界观 / 2 剧情 / 3 更多
+  @State settingTab: number = 0;
+  @State fsTitle: string = '';
+  @State fsContent: string = '';
+  @State decTitle: string = '';
+  @State decContent: string = '';
   @State errorMsg: string = '';
   @State consistencyMessage: string = '';
   @State auditRunning: boolean = false;
@@ -177,7 +183,6 @@ struct NovelWorkspacePage {
   @State chapterTitle: string = '';
   @State chapterContent: string = '';
   // 素材
-  @State matFilter: MaterialFilter = 'all';
   @State expandedMaterialId: string = '';
   @State materialEditorOpen: boolean = false;
   @State editingMaterialId: string = '';
@@ -400,7 +405,7 @@ struct NovelWorkspacePage {
         this.workspaceStatus = status;
         this.ghostwriteJob = ghostwrite;
         this.polishJob = polish;
-        if (ghostwrite !== null) this.settingsSection = 0;
+        if (ghostwrite !== null) this.settingTab = 3;
         this.ghostwriteModelAvailable = modelAvailable;
         this.ghostwriteModelIssue = modelIssue;
         // 等 List 收到新 rows 的可见范围回调再落底；Promise 返回后的
@@ -450,7 +455,7 @@ struct NovelWorkspacePage {
       const next: DurableGhostwriteJob | null = await getNovelCreation().ghostwriteJob(this.projectId);
       if (!this.pageAlive || token !== this.ghostwritePollToken) return;
       this.ghostwriteJob = next;
-      if (next !== null) this.settingsSection = 0;
+      if (next !== null) this.settingTab = 3;
       const previousProgress: number = previous?.progress.length ?? 0;
       const nextProgress: number = next?.progress.length ?? 0;
       if (previousProgress !== nextProgress || (previous !== null && next === null)) {
@@ -583,7 +588,7 @@ struct NovelWorkspacePage {
     this.ghostwriteBusy = true;
     try {
       this.ghostwriteJob = await getNovelCreation().startGhostwrite(this.projectId, targetChapterCount);
-      this.settingsSection = 0;
+      this.settingTab = 3;
       this.errorMsg = '';
       this.scheduleGhostwritePoll();
     } catch (error) {
@@ -614,7 +619,7 @@ struct NovelWorkspacePage {
     this.ghostwriteBusy = true;
     try {
       this.ghostwriteJob = await getNovelCreation().resumeGhostwrite(this.projectId, job.jobId);
-      this.settingsSection = 0;
+      this.settingTab = 3;
       this.errorMsg = '';
       this.scheduleGhostwritePoll();
     } catch (error) {
@@ -630,7 +635,7 @@ struct NovelWorkspacePage {
     this.ghostwriteBusy = true;
     try {
       this.ghostwriteJob = await getNovelCreation().retryGhostwrite(this.projectId, job.jobId);
-      this.settingsSection = 0;
+      this.settingTab = 3;
       this.errorMsg = '';
       this.scheduleGhostwritePoll();
     } catch (error) {
@@ -896,7 +901,6 @@ struct NovelWorkspacePage {
     promptAction.showActionMenu({
       buttons: [
         { text: '一致性检查', color: INK },
-        { text: '深度审计', color: INK },
         { text: this.workspaceStatus?.canUndo && !this.novelJobLocksWorkspace() ? '撤销上次工作区操作' : '撤销（当前不可用）',
           color: this.workspaceStatus?.canUndo && !this.novelJobLocksWorkspace() ? INK : INK4 },
         { text: this.polishConflictReason().length > 0 ? `批量润色（${this.polishConflictReason()}）` : '批量润色',
@@ -904,10 +908,9 @@ struct NovelWorkspacePage {
       ],
     }).then((result: ExportMenuResult): void => {
       if (result.index === 0) this.runConsistencyCheck();
-      else if (result.index === 1) this.runLlmContinuityAudit();
-      else if (result.index === 2) {
+      else if (result.index === 1) {
         if (this.workspaceStatus?.canUndo && !this.novelJobLocksWorkspace()) this.undoWorkspace();
-      } else if (result.index === 3) {
+      } else if (result.index === 2) {
         if (this.polishConflictReason().length === 0) {
           this.requestedPolishJobId = '';
           this.polishCreateOpen = true;
@@ -1398,9 +1401,107 @@ struct NovelWorkspacePage {
   }
 
   // ===== 素材 =====
-  openNewMaterial(): void {
+  // ===== 剧情区读写(伏笔/已确认决定随当前分支 branchSettings 保存) =====
+  private materialsIn(kinds: NovelMaterialKind[]): NovelMaterial[] {
+    const p: NovelProject | null = this.project;
+    if (p === null) return [];
+    return p.materials.filter((m: NovelMaterial): boolean => kinds.indexOf(m.kind) >= 0);
+  }
+
+  private pendingSuggestionsIn(kinds: NovelMaterialKind[]): NovelMaterialSuggestion[] {
+    const p: NovelProject | null = this.project;
+    if (p === null) return [];
+    return p.materialSuggestions.filter(
+      (s: NovelMaterialSuggestion): boolean => s.status === 'pending' && kinds.indexOf(s.kind) >= 0);
+  }
+
+  private branchSettingsWith(foreshadows: NovelForeshadow[], decisions: NovelConfirmedDecision[]): NovelBranchSettings {
+    const p: NovelProject | null = this.project;
+    if (p === null) return emptyNovelBranchSettings();
+    return {
+      thisChapterPlan: p.branchSettings.thisChapterPlan,
+      futurePlan: p.branchSettings.futurePlan,
+      preferences: p.branchSettings.preferences,
+      foreshadows: foreshadows,
+      confirmedDecisions: decisions,
+    };
+  }
+
+  private async addStoryForeshadow(): Promise<void> {
+    const p: NovelProject | null = this.project;
+    if (p === null || this.busy) return;
+    const title: string = this.fsTitle.trim();
+    const content: string = this.fsContent.trim();
+    if (title.length === 0 || content.length === 0) {
+      this.errorMsg = '请填写伏笔标题和内容后再新增。';
+      return;
+    }
+    const now: number = Date.now();
+    const added: NovelForeshadow = {
+      id: `foreshadow-${now}-${p.branchSettings.foreshadows.length + 1}`,
+      title: title, content: content, status: 'open', createdAt: now, resolvedAt: null,
+    };
+    await this.saveNovelBranchSettings(this.branchSettingsWith(
+      p.branchSettings.foreshadows.concat([added]), p.branchSettings.confirmedDecisions));
+    if (this.errorMsg.length === 0) {
+      this.fsTitle = '';
+      this.fsContent = '';
+    }
+  }
+
+  private async toggleStoryForeshadow(id: string): Promise<void> {
+    const p: NovelProject | null = this.project;
+    if (p === null || this.busy) return;
+    const now: number = Date.now();
+    const updated: NovelForeshadow[] = p.branchSettings.foreshadows.map((item: NovelForeshadow): NovelForeshadow => {
+      if (item.id !== id) return item;
+      if (item.status === 'open') {
+        return { id: item.id, title: item.title, content: item.content, status: 'resolved',
+          createdAt: item.createdAt, resolvedAt: now };
+      }
+      return { id: item.id, title: item.title, content: item.content, status: 'open',
+        createdAt: item.createdAt, resolvedAt: null };
+    });
+    await this.saveNovelBranchSettings(this.branchSettingsWith(updated, p.branchSettings.confirmedDecisions));
+  }
+
+  private async addStoryDecision(): Promise<void> {
+    const p: NovelProject | null = this.project;
+    if (p === null || this.busy) return;
+    const title: string = this.decTitle.trim();
+    const content: string = this.decContent.trim();
+    if (title.length === 0 || content.length === 0) {
+      this.errorMsg = '请填写决定标题和内容后再确认。';
+      return;
+    }
+    const now: number = Date.now();
+    const added: NovelConfirmedDecision = {
+      id: `decision-${now}-${p.branchSettings.confirmedDecisions.length + 1}`,
+      title: title, content: content, confirmedAt: now,
+    };
+    await this.saveNovelBranchSettings(this.branchSettingsWith(
+      p.branchSettings.foreshadows, p.branchSettings.confirmedDecisions.concat([added])));
+    if (this.errorMsg.length === 0) {
+      this.decTitle = '';
+      this.decContent = '';
+    }
+  }
+
+  private openForeshadows(): NovelForeshadow[] {
+    const p: NovelProject | null = this.project;
+    if (p === null) return [];
+    return p.branchSettings.foreshadows.filter((f: NovelForeshadow): boolean => f.status === 'open');
+  }
+
+  private resolvedForeshadows(): NovelForeshadow[] {
+    const p: NovelProject | null = this.project;
+    if (p === null) return [];
+    return p.branchSettings.foreshadows.filter((f: NovelForeshadow): boolean => f.status === 'resolved');
+  }
+
+  openNewMaterial(kind: NovelMaterialKind = 'world'): void {
     this.editingMaterialId = '';
-    this.materialKind = 'world';
+    this.materialKind = kind;
     this.materialTitle = '';
     this.materialContent = '';
     this.materialEnabled = true;
@@ -2076,33 +2177,6 @@ struct NovelWorkspacePage {
           .width('100%').padding({ left: 20, right: 20, bottom: 10 })
       }
 
-      if (this.auditMessage.length > 0 || this.auditIssues.length > 0) {
-        Column() {
-          Text(this.auditMessage).fontSize(12).fontColor(INK3).lineHeight(18)
-          ForEach(this.auditIssues, (issue: NovelAuditIssue): void => {
-            Column() {
-              Row() {
-                Text(issue.severity).fontSize(11).fontColor(this.auditSeverityColor(issue.severity))
-                  .padding({ left: 6, right: 6, top: 2, bottom: 2 }).borderRadius(6)
-                  .backgroundColor(SURFACE2)
-                Text(issue.chapterRef).fontSize(12).fontColor(INK3).margin({ left: 6 })
-              }
-              Text(issue.summary).fontSize(13).fontColor(INK).lineHeight(18).margin({ top: 4 })
-              if (issue.suggestion.length > 0) {
-                Text(`建议：${issue.suggestion}`).fontSize(12).fontColor(INK3).lineHeight(17).margin({ top: 2 })
-              }
-            }
-            .width('100%').alignItems(HorizontalAlign.Start)
-            .padding({ left: 12, right: 12, top: 10, bottom: 10 })
-            .backgroundColor(SURFACE).borderRadius(10)
-            .margin({ top: 8 })
-          }, (issue: NovelAuditIssue): string =>
-            `${issue.severity}|${issue.chapterRef}|${issue.summary}`)
-        }
-        .width('100%').alignItems(HorizontalAlign.Start)
-        .padding({ left: 20, right: 20, bottom: 12 })
-      }
-
       if (this.polishJob !== null) {
         NovelPolishJobCard({
           job: this.polishJob,
@@ -2159,305 +2233,450 @@ struct NovelWorkspacePage {
     return s.replace(/\s/g, '').length;
   }
 
+  // 资料卡(各分区共用):展开读全文,展开态露编辑/删除
   @Builder
-  materialLibraryPane(): void {
+  private MaterialCard(m: NovelMaterial): void {
     Column() {
       Row() {
-        Text('活资料').fontSize(15).fontWeight(FontWeight.Bold).fontColor(INK2)
-        Blank()
-        Text('重新分析').fontSize(12).fontColor(INK3)
-          .height(44).padding({ left: 8, right: 8 }).textAlign(TextAlign.Center).margin({ right: 4 })
-          .onClick(() => { this.reanalyze(); })
-        Text('新建资料').fontSize(12).fontColor(ACCENT)
-          .height(44).padding({ left: 8, right: 8 }).textAlign(TextAlign.Center)
-          .onClick(() => { this.openNewMaterial(); })
-      }
-      .width('100%').padding({ left: 20, right: 20, top: 12, bottom: 10 })
-
-      Scroll() {
-        Column() {
-          // 待确认建议
-          if (this.project !== null && this.project.materialSuggestions.some(s => s.status === 'pending')) {
-            Text('待确认').fontSize(13).fontColor(INK2).margin({ bottom: 8 })
-            Text('Amber 从正文中发现了资料变化，采用后才会写入资料库。')
-              .fontSize(11).fontColor(INK3).margin({ bottom: 10 })
-            ForEach(this.project.materialSuggestions.filter(s => s.status === 'pending'), (s: NovelMaterialSuggestion) => {
-              Column() {
-                Row() {
-                  Text(MATERIAL_KIND_LABELS[s.kind]).fontSize(11).fontColor(ACCENT)
-                    .padding({ left: 8, right: 8, top: 3, bottom: 3 }).borderRadius(8).backgroundColor(SURFACE2)
-                  Text(s.title).fontSize(14).fontColor(INK).margin({ left: 8 }).layoutWeight(1)
-                }
-                .width('100%')
-                Text(s.content).fontSize(13).fontColor(INK2).lineHeight(20).margin({ top: 8 })
-                Row() {
-                  Blank()
-                  Text('忽略').fontSize(13).fontColor(INK3)
-                    .constraintSize({ minWidth: 44 }).height(44).textAlign(TextAlign.Center).margin({ right: 8 })
-                    .onClick(() => { this.resolveSuggestion(s.id, false); })
-                  Text('采用').fontSize(13).fontColor(ACCENT_INK)
-                    .constraintSize({ minWidth: 44 }).height(44).textAlign(TextAlign.Center)
-                    .padding({ left: 16, right: 16 }).borderRadius(22).backgroundColor(ACCENT)
-                    .onClick(() => { this.resolveSuggestion(s.id, true); })
-                }
-                .width('100%').margin({ top: 10 })
-              }
-              .width('100%').padding(14).backgroundColor(SURFACE).borderRadius(12).clip(true)
-              .border({ width: 1, color: LINE }).margin({ bottom: 12 })
-            }, (s: NovelMaterialSuggestion) => s.id)
-          }
-
-          // 过滤 chips
-          Row() {
-            ForEach(KIND_FILTERS, (f: MaterialFilter) => {
-              Text(filterLabel(f))
-                .fontSize(12).height(44).padding({ left: 12, right: 12 }).borderRadius(22)
-                .textAlign(TextAlign.Center)
-                .fontColor(this.matFilter === f ? ACCENT_INK : INK2)
-                .backgroundColor(this.matFilter === f ? ACCENT : SURFACE2)
-                .margin({ right: 8 })
-                .onClick(() => { this.matFilter = f; })
-            }, (f: MaterialFilter) => f)
-          }
-          .width('100%').margin({ top: 8, bottom: 12 })
-
-          // 素材库
-          if (this.project !== null) {
-            ForEach(this.filteredMaterials(), (m: NovelMaterial) => {
-              Column() {
-                Row() {
-                  Text(MATERIAL_KIND_LABELS[m.kind]).fontSize(11).fontColor(ACCENT)
-                    .padding({ left: 8, right: 8, top: 3, bottom: 3 }).borderRadius(8).backgroundColor(SURFACE2)
-                  Text(m.title).fontSize(14).fontColor(INK).margin({ left: 8 }).layoutWeight(1)
-                  if (!m.enabled) Text('· 不参与写作').fontSize(11).fontColor(ERROR)
-                  Text(this.expandedMaterialId === m.id ? '收起' : '展开').fontSize(12).fontColor(INK3)
-                    .margin({ left: 8 })
-                }
-                .width('100%').constraintSize({ minHeight: 44 })
-                .onClick(() => {
-                  animateTo({ duration: MOTION_ENTER, curve: Curve.EaseOut }, (): void => {
-                    this.expandedMaterialId = this.expandedMaterialId === m.id ? '' : m.id;
-                  });
-                })
-                if (this.expandedMaterialId === m.id) {
-                  Column() {
-                    Text(m.content).fontSize(13).fontColor(INK2).lineHeight(20).margin({ top: 10 })
-                    Row() {
-                      Blank()
-                      Text('删除').fontSize(12).fontColor(ERROR)
-                        .constraintSize({ minWidth: 44 }).height(44).textAlign(TextAlign.Center).margin({ right: 8 })
-                        .onClick(() => { this.deleteMaterial(m.id); })
-                      Text('编辑').fontSize(12).fontColor(ACCENT)
-                        .constraintSize({ minWidth: 44 }).height(44).textAlign(TextAlign.Center)
-                        .onClick(() => { this.openEditMaterial(m); })
-                    }
-                    .width('100%').margin({ top: 10 })
-                  }
-                  .width('100%')
-                  .transition(TransitionEffect.OPACITY
-                    .combine(TransitionEffect.translate({ y: -8 }))
-                    .animation({ duration: MOTION_ENTER, curve: Curve.EaseOut }))
-                }
-              }
-              .width('100%').padding(14).backgroundColor(SURFACE).borderRadius(12).clip(true)
-              .border({ width: 1, color: LINE }).margin({ bottom: 10 })
-            }, (m: NovelMaterial) => m.id)
-          }
+        Text(MATERIAL_KIND_LABELS[m.kind]).fontSize(11).fontColor(ACCENT)
+          .padding({ left: 8, right: 8, top: 3, bottom: 3 }).borderRadius(8).backgroundColor(SURFACE2)
+        Text(m.title).fontSize(14).fontFamily(FONT_SANS_MEDIUM).fontColor(INK)
+          .margin({ left: 8 }).layoutWeight(1).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+        if (!m.enabled) {
+          Text('· 不参与写作').fontSize(11).fontColor(ERROR)
         }
-        .width('100%').padding({ left: 20, right: 20, bottom: 24 })
-        .alignItems(HorizontalAlign.Start)
+        Text(this.expandedMaterialId === m.id ? '收起' : '展开').fontSize(12).fontColor(INK3)
+          .margin({ left: 8 })
       }
-        .align(Alignment.TopStart)
-      .layoutWeight(1)
+      .width('100%').constraintSize({ minHeight: 44 })
+      .onClick(() => {
+        animateTo({ duration: MOTION_ENTER, curve: Curve.EaseOut }, (): void => {
+          this.expandedMaterialId = this.expandedMaterialId === m.id ? '' : m.id;
+        });
+      })
+      if (this.expandedMaterialId === m.id) {
+        Column() {
+          Text(m.content).fontSize(13).fontColor(INK2).lineHeight(20).width('100%')
+          Row() {
+            Blank()
+            Text('删除').fontSize(12).fontColor(ERROR)
+              .constraintSize({ minWidth: 44, minHeight: 44 }).textAlign(TextAlign.Center).margin({ right: 8 })
+              .onClick(() => { this.deleteMaterial(m.id); })
+            Text('编辑').fontSize(12).fontColor(ACCENT)
+              .constraintSize({ minWidth: 44, minHeight: 44 }).textAlign(TextAlign.Center)
+              .onClick(() => { this.openEditMaterial(m); })
+          }.width('100%').margin({ top: 10 })
+        }
+        .width('100%')
+        .transition(TransitionEffect.OPACITY
+          .combine(TransitionEffect.translate({ y: -8 }))
+          .animation({ duration: MOTION_ENTER, curve: Curve.EaseOut }))
+      }
     }
-    .width('100%').height('100%')
+    .width('100%').padding(14).backgroundColor(SURFACE).borderRadius(12)
+    .border({ width: 1, color: LINE }).margin({ bottom: 10 })
+  }
+
+  // 待确认建议卡(分区共用):采用后写入资料库
+  @Builder
+  private SuggestionCard(s: NovelMaterialSuggestion): void {
+    Column() {
+      Row() {
+        Text(MATERIAL_KIND_LABELS[s.kind]).fontSize(11).fontColor(ACCENT)
+          .padding({ left: 8, right: 8, top: 3, bottom: 3 }).borderRadius(8).backgroundColor(SURFACE2)
+        Text(s.title).fontSize(14).fontFamily(FONT_SANS_MEDIUM).fontColor(INK).margin({ left: 8 }).layoutWeight(1)
+      }
+      .width('100%')
+      Text(s.content).fontSize(13).fontColor(INK2).lineHeight(20).margin({ top: 8 }).width('100%')
+      Row() {
+        Blank()
+        Text('忽略').fontSize(13).fontColor(INK3)
+          .constraintSize({ minWidth: 44, minHeight: 44 }).textAlign(TextAlign.Center).margin({ right: 8 })
+          .onClick(() => { this.resolveSuggestion(s.id, false); })
+        Text('采用').fontSize(13).fontColor(ACCENT_INK)
+          .constraintSize({ minHeight: 44 })
+          .padding({ left: 16, right: 16 }).borderRadius(22).backgroundColor(ACCENT)
+          .onClick(() => { this.resolveSuggestion(s.id, true); })
+      }
+      .width('100%').margin({ top: 10 })
+    }
+    .width('100%').padding(14).backgroundColor(SURFACE).borderRadius(12)
+    .border({ width: 1, color: LINE }).margin({ bottom: 12 })
+  }
+
+  // 资料分区页(iOS Compendium 角色/世界观):待确认建议 + 资料列表 + 新增
+  @Builder
+  private MaterialKindPane(kinds: NovelMaterialKind[], addLabel: string, addKind: NovelMaterialKind,
+    showReanalyze: boolean): void {
+    Scroll() {
+      Column() {
+        Row() {
+          if (showReanalyze) {
+            Text('重新分析').fontSize(12).fontColor(INK3)
+              .constraintSize({ minHeight: 44 }).padding({ left: 8, right: 8 }).textAlign(TextAlign.Center)
+              .onClick(() => { this.reanalyze(); })
+          }
+          Blank()
+          Text(addLabel).fontSize(12).fontFamily(FONT_SANS_MEDIUM).fontColor(ACCENT)
+            .constraintSize({ minHeight: 44 }).padding({ left: 8, right: 8 }).textAlign(TextAlign.Center)
+            .onClick(() => { this.openNewMaterial(addKind); })
+        }
+        .width('100%').padding({ left: 20, right: 20, top: 4, bottom: 10 })
+
+        if (this.pendingSuggestionsIn(kinds).length > 0) {
+          Text('待确认').fontSize(13).fontFamily(FONT_SANS_MEDIUM).fontColor(INK2).margin({ bottom: 8 })
+          Text('Amber 从正文中发现了资料变化，采用后才会写入资料库。')
+            .fontSize(11).fontColor(INK3).margin({ bottom: 10 })
+          ForEach(this.pendingSuggestionsIn(kinds), (s: NovelMaterialSuggestion): void => {
+            this.SuggestionCard(s)
+          }, (s: NovelMaterialSuggestion): string => s.id)
+        }
+
+        if (this.materialsIn(kinds).length === 0) {
+          Text('暂无资料。').fontSize(13).fontColor(INK3)
+            .width('100%').padding({ top: 12 })
+        }
+        ForEach(this.materialsIn(kinds), (m: NovelMaterial): void => {
+          this.MaterialCard(m)
+        }, (m: NovelMaterial): string => m.id)
+      }
+      .width('100%').padding({ left: 20, right: 20, bottom: 24 })
+      .alignItems(HorizontalAlign.Start)
+    }
+    .align(Alignment.TopStart)
+    .layoutWeight(1)
+  }
+
+  // 伏笔卡:标为已解/重新打开
+  @Builder
+  private ForeshadowCard(item: NovelForeshadow): void {
+    Column() {
+      Row() {
+        Text(item.title).fontSize(13).fontWeight(FontWeight.Medium).fontFamily(FONT_SANS_MEDIUM)
+          .fontColor(INK).layoutWeight(1)
+        Text(item.status === 'open' ? '标为已解' : '重新打开').fontSize(12).fontColor(ACCENT)
+          .constraintSize({ minHeight: 44 }).padding({ left: 10 })
+          .enabled(!this.busy)
+          .onClick((): void => { this.toggleStoryForeshadow(item.id); })
+      }
+      .width('100%')
+      Text(item.content).fontSize(12).fontColor(INK2).lineHeight(18).maxLines(3)
+        .width('100%').margin({ top: 4 })
+    }
+    .width('100%').padding(14).backgroundColor(SURFACE).borderRadius(12)
+    .border({ width: 1, color: LINE }).margin({ bottom: 10 })
+  }
+
+  // 剧情分区(iOS 设定→剧情):总纲 + 伏笔 + 已确认决定 + 连续性审计
+  @Builder
+  private StoryPane(): void {
+    Scroll() {
+      Column() {
+        Row() {
+          this.SheetLabel('总纲')
+          Blank()
+          Text('新增总纲').fontSize(12).fontFamily(FONT_SANS_MEDIUM).fontColor(ACCENT)
+            .constraintSize({ minHeight: 44 }).padding({ left: 8, right: 8 }).textAlign(TextAlign.Center)
+            .onClick(() => { this.openNewMaterial('outline'); })
+        }
+        .width('100%').alignItems(VerticalAlign.Center)
+        ForEach(this.materialsIn(['outline']), (m: NovelMaterial): void => {
+          this.MaterialCard(m)
+        }, (m: NovelMaterial): string => m.id)
+        if (this.materialsIn(['outline']).length === 0) {
+          Text('暂无总纲资料。').fontSize(12).fontColor(INK3).width('100%').margin({ bottom: 8 })
+        }
+
+        Column() {}.height(12)
+        this.SheetLabel('伏笔')
+        Text('未解决与已解决状态都随当前分支保存。').fontSize(11).fontColor(INK3).margin({ bottom: 8 })
+        TextInput({ text: this.fsTitle, placeholder: '伏笔标题' })
+          .height(44).fontSize(13).fontColor(INK).placeholderColor(INK4)
+          .backgroundColor(SURFACE2).borderRadius(10).padding({ left: 14, right: 14 })
+          .enabled(!this.busy)
+          .onChange((v: string): void => { this.fsTitle = v; })
+        TextArea({ text: this.fsContent, placeholder: '伏笔内容与预计回收方式' })
+          .width('100%').height(80).fontSize(13).fontColor(INK).placeholderColor(INK4)
+          .backgroundColor(SURFACE2).borderRadius(10).padding(12).margin({ top: 8 })
+          .enabled(!this.busy)
+          .onChange((v: string): void => { this.fsContent = v; })
+        Row() {
+          Blank()
+          Text('新增伏笔').fontSize(13).fontFamily(FONT_SANS_MEDIUM).fontColor(this.busy ? INK4 : ACCENT)
+            .constraintSize({ minHeight: 44 })
+            .enabled(!this.busy)
+            .onClick((): void => { this.addStoryForeshadow(); })
+        }.width('100%')
+        Text(`未解决 · ${this.openForeshadows().length}`).fontSize(12).fontFamily(FONT_SANS_MEDIUM)
+          .fontColor(INK2).width('100%').margin({ top: 8, bottom: 6 })
+        if (this.openForeshadows().length === 0) {
+          Text('暂无未解决伏笔。').fontSize(12).fontColor(INK3).width('100%').margin({ bottom: 8 })
+        }
+        ForEach(this.openForeshadows(), (item: NovelForeshadow): void => {
+          this.ForeshadowCard(item)
+        }, (item: NovelForeshadow): string => item.id)
+        if (this.resolvedForeshadows().length > 0) {
+          Text(`已解决 · ${this.resolvedForeshadows().length}`).fontSize(12).fontFamily(FONT_SANS_MEDIUM)
+            .fontColor(INK2).width('100%').margin({ top: 8, bottom: 6 })
+          ForEach(this.resolvedForeshadows(), (item: NovelForeshadow): void => {
+            this.ForeshadowCard(item)
+          }, (item: NovelForeshadow): string => item.id)
+        }
+
+        Column() {}.height(12)
+        this.SheetLabel('已确认决定')
+        Text('确认后的决定会进入当前分支的活资料。').fontSize(11).fontColor(INK3).margin({ bottom: 8 })
+        TextInput({ text: this.decTitle, placeholder: '决定标题' })
+          .height(44).fontSize(13).fontColor(INK).placeholderColor(INK4)
+          .backgroundColor(SURFACE2).borderRadius(10).padding({ left: 14, right: 14 })
+          .enabled(!this.busy)
+          .onChange((v: string): void => { this.decTitle = v; })
+        TextArea({ text: this.decContent, placeholder: '已确认的事实、约束或创作决定' })
+          .width('100%').height(80).fontSize(13).fontColor(INK).placeholderColor(INK4)
+          .backgroundColor(SURFACE2).borderRadius(10).padding(12).margin({ top: 8 })
+          .enabled(!this.busy)
+          .onChange((v: string): void => { this.decContent = v; })
+        Row() {
+          Blank()
+          Text('新增决定').fontSize(13).fontFamily(FONT_SANS_MEDIUM).fontColor(this.busy ? INK4 : ACCENT)
+            .constraintSize({ minHeight: 44 })
+            .enabled(!this.busy)
+            .onClick((): void => { this.addStoryDecision(); })
+        }.width('100%')
+        if (this.project !== null && this.project.branchSettings.confirmedDecisions.length === 0) {
+          Text('尚未记录已确认决定。').fontSize(12).fontColor(INK3).width('100%').margin({ top: 8 })
+        }
+        if (this.project !== null) {
+          ForEach(this.project.branchSettings.confirmedDecisions, (item: NovelConfirmedDecision): void => {
+            Column() {
+              Text(item.title).fontSize(13).fontWeight(FontWeight.Medium).fontFamily(FONT_SANS_MEDIUM).fontColor(INK)
+              Text(item.content).fontSize(12).fontColor(INK2).lineHeight(18).margin({ top: 3 })
+            }
+            .width('100%').alignItems(HorizontalAlign.Start)
+            .padding(14).backgroundColor(SURFACE).borderRadius(12)
+            .border({ width: 1, color: LINE }).margin({ bottom: 10 })
+          }, (item: NovelConfirmedDecision): string => item.id)
+        }
+
+        Column() {}.height(12)
+        // 连续性审计(自正文 tab「更多」迁入;iOS 剧情 Section)
+        this.SheetLabel('连续性审计')
+        Text('通读全部章节，检查情节、人名与时间线矛盾；需要已配置「内部职责」模型。')
+          .fontSize(11).fontColor(INK3).margin({ bottom: 8 })
+        Row() {
+          Blank()
+          Text(this.auditRunning ? '审计中…' : '开始连续性审计')
+            .fontSize(13).fontFamily(FONT_SANS_MEDIUM)
+            .fontColor(this.auditRunning || this.busy ? INK4 : ACCENT)
+            .constraintSize({ minHeight: 44 })
+            .enabled(!this.auditRunning && !this.busy)
+            .onClick((): void => { this.runLlmContinuityAudit(); })
+        }.width('100%')
+        if (this.auditMessage.length > 0) {
+          Text(this.auditMessage).fontSize(12).fontColor(INK3).lineHeight(18).width('100%')
+        }
+        ForEach(this.auditIssues, (issue: NovelAuditIssue): void => {
+          Column() {
+            Row() {
+              Text(issue.severity).fontSize(11).fontColor(this.auditSeverityColor(issue.severity))
+                .padding({ left: 6, right: 6, top: 2, bottom: 2 }).borderRadius(6)
+                .backgroundColor(SURFACE2)
+              Text(issue.chapterRef).fontSize(12).fontColor(INK3).margin({ left: 6 })
+            }
+            Text(issue.summary).fontSize(13).fontColor(INK).lineHeight(18).margin({ top: 4 })
+            if (issue.suggestion.length > 0) {
+              Text(`建议：${issue.suggestion}`).fontSize(12).fontColor(INK3).lineHeight(17).margin({ top: 2 })
+            }
+          }
+          .width('100%').alignItems(HorizontalAlign.Start)
+          .padding({ left: 12, right: 12, top: 10, bottom: 10 })
+          .backgroundColor(SURFACE).borderRadius(10)
+          .margin({ top: 8 })
+        }, (issue: NovelAuditIssue): string =>
+          `${issue.severity}|${issue.chapterRef}|${issue.summary}`)
+      }
+      .width('100%').padding({ left: 20, right: 20, bottom: 24 })
+      .alignItems(HorizontalAlign.Start)
+    }
+    .align(Alignment.TopStart)
+    .layoutWeight(1)
+  }
+
+  // 更多分区:审稿/内部职责模型(NovelSettingsPane 的计划/伏笔/决定段已各归其位)
+  @Builder
+  private MorePane(): void {
+    if (this.project !== null) {
+      NovelSettingsPane({
+        project: this.project,
+        modelOptions: this.modelOptions,
+        busy: this.busy || this.novelJobLocksWorkspace(),
+        showPlanSections: false,
+        showStorySections: false,
+        showMaterialsEntry: false,
+        onSaveModelPolicy: (policy: NovelModelPolicy): void => {
+          this.saveNovelModelPolicy(policy);
+        },
+        onSaveBranchSettings: (settings: NovelBranchSettings): void => {
+          this.saveNovelBranchSettings(settings);
+        },
+        onNewMaterial: (): void => {
+          this.openNewMaterial('other');
+        },
+      })
+    }
   }
 
   @Builder
   settingsPane(): void {
     Column() {
-      Row() {
-        this.settingsSectionChip('工作区设定', 0)
-        this.settingsSectionChip('资料库', 1)
-      }
-      .width('100%').padding({ left: 16, right: 16, top: 4, bottom: 6 })
-      if (this.settingsSection === 0 && this.project !== null) {
-        NovelSettingsPane({
-          project: this.project,
-          modelOptions: this.modelOptions,
-          busy: this.busy || this.novelJobLocksWorkspace(),
-          onSaveModelPolicy: (policy: NovelModelPolicy): void => {
-            this.saveNovelModelPolicy(policy);
-          },
-          onSaveBranchSettings: (settings: NovelBranchSettings): void => {
-            this.saveNovelBranchSettings(settings);
-          },
-          onNewMaterial: (): void => {
-            this.settingsSection = 1;
-            this.openNewMaterial();
-          },
-        })
+      // 设定分类(iOS Compendium segmented:角色/世界观/剧情/更多)
+      Seg({ options: ['角色', '世界观', '剧情', '更多'], selected: this.settingTab,
+        onSelect: (idx: number): void => { this.settingTab = idx; } })
+        .margin({ left: 16, right: 16, top: 2, bottom: 8 })
+      if (this.project === null) {
+        Column() {}.layoutWeight(1)
+      } else if (this.settingTab === 0) {
+        this.MaterialKindPane(['character'], '新增角色', 'character', false)
+      } else if (this.settingTab === 1) {
+        this.MaterialKindPane(['world', 'requirement', 'other'], '新增资料', 'world', true)
+      } else if (this.settingTab === 2) {
+        this.StoryPane()
       } else {
-        this.materialLibraryPane()
+        this.MorePane()
       }
     }
     .width('100%').height('100%')
-  }
-
-  @Builder
-  settingsSectionChip(label: string, section: number): void {
-    Text(label).fontSize(13)
-      .fontColor(section === 1 && this.novelJobLocksWorkspace()
-        ? INK4 : (this.settingsSection === section ? ACCENT : INK3))
-      .layoutWeight(1).height(44).textAlign(TextAlign.Center)
-      .backgroundColor(this.settingsSection === section ? SURFACE : SURFACE2)
-      .borderRadius(12)
-      .border({ width: 1, color: this.settingsSection === section ? ACCENT : LINE })
-      .margin({ left: 4, right: 4 })
-      .opacity(section === 1 && this.novelJobLocksWorkspace() ? 0.55 : 1)
-      .onClick((): void => {
-        if (section !== 1 || !this.novelJobLocksWorkspace()) this.settingsSection = section;
-      })
-  }
-
-  filteredMaterials(): NovelMaterial[] {
-    const p: NovelProject | null = this.project;
-    if (p === null) return [];
-    if (this.matFilter === 'all') return p.materials;
-    return p.materials.filter(m => m.kind === this.matFilter);
   }
 
   build(): void {
     Stack() {
       // 主题纪元重挂载(勿拆):epoch 变化 → 整页子树销毁重建,全量重读令牌
       ForEach([this.themeEpoch], (_e: number): void => {
-      Column() {
-        // 顶栏(iOS NovelProjectWorkspaceView):返回玻璃圆 + 居中 principal
-        // (项目名 + 模式·分支·模型,点开「项目控制」)+ 右侧导出玻璃圆。
-        // Stack 点击拦截坑:整宽按钮行先声明(下层),可点胶囊后声明(上层)且内容宽
-        Stack({ alignContent: Alignment.Center }) {
-          Row() {
+        Column() {
+          // 顶栏(iOS NovelProjectWorkspaceView):返回玻璃圆 + 居中 principal
+          // (项目名 + 模式·分支·模型,点开「项目控制」)+ 右侧导出玻璃圆。
+          // Stack 点击拦截坑:整宽按钮行先声明(下层),可点胶囊后声明(上层)且内容宽
+          Stack({ alignContent: Alignment.Center }) {
             Row() {
-              Icon({ name: 'back', iconSize: 18, color: INK })
+              Row() {
+                Icon({ name: 'back', iconSize: 18, color: INK })
+              }
+              .width(44).height(44).borderRadius(22).backgroundColor(SURFACE)
+              .border({ width: 0.5, color: LINE })
+              .justifyContent(FlexAlign.Center).alignItems(VerticalAlign.Center)
+              .onClick((): void => { this.handleBack(); })
+              .accessibilityText('返回')
+              Blank()
+              Row() {
+                Icon({ name: 'share', iconSize: 17, color: INK2 })
+              }
+              .width(44).height(44).borderRadius(22).backgroundColor(SURFACE)
+              .border({ width: 0.5, color: LINE })
+              .justifyContent(FlexAlign.Center).alignItems(VerticalAlign.Center)
+              .enabled(!this.busy && this.project !== null)
+              .onClick((): void => { this.showExportMenu(); })
+              .accessibilityText('导出')
             }
-            .width(44).height(44).borderRadius(22).backgroundColor(SURFACE)
-            .border({ width: 0.5, color: LINE })
-            .justifyContent(FlexAlign.Center).alignItems(VerticalAlign.Center)
-            .onClick((): void => { this.handleBack(); })
-            .accessibilityText('返回')
-            Blank()
-            Row() {
-              Icon({ name: 'share', iconSize: 17, color: INK2 })
+            .width('100%')
+            Column() {
+              Text(this.project !== null ? this.project.name : '小说创作')
+                .fontSize(17).fontWeight(FontWeight.Bold).fontColor(INK).fontFamily(FONT_SERIF)
+                .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+              Text(this.workspaceSubtitle())
+                .fontSize(11).fontColor(INK3).fontFamily(FONT_SANS_MEDIUM)
+                .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+                .margin({ top: 2 })
             }
-            .width(44).height(44).borderRadius(22).backgroundColor(SURFACE)
-            .border({ width: 0.5, color: LINE })
-            .justifyContent(FlexAlign.Center).alignItems(VerticalAlign.Center)
-            .enabled(!this.busy && this.project !== null)
-            .onClick((): void => { this.showExportMenu(); })
-            .accessibilityText('导出')
+            .alignItems(HorizontalAlign.Center)
+            .constraintSize({ minHeight: 44, maxWidth: '62%' })
+            .padding({ left: 12, right: 12 })
+            .enabled(this.project !== null)
+            .onClick((): void => { this.openControlSheet(); })
+            .accessibilityText('项目控制')
           }
-          .width('100%')
-          Column() {
-            Text(this.project !== null ? this.project.name : '小说创作')
-              .fontSize(17).fontWeight(FontWeight.Bold).fontColor(INK).fontFamily(FONT_SERIF)
-              .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
-            Text(this.workspaceSubtitle())
-              .fontSize(11).fontColor(INK3).fontFamily(FONT_SANS_MEDIUM)
-              .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
-              .margin({ top: 2 })
+          .width('100%').padding({ left: 16, right: 16, top: this.statusBarHeight + 10, bottom: 10 })
+          .backgroundColor(BG)
+
+          // 页签(iOS segmented:灰轨 + 白 pill)
+          Seg({ options: ['创作', '正文', '设定'], selected: this.tab,
+            onSelect: (idx: number): void => { this.tab = idx; } })
+            .margin({ left: 16, right: 16, top: 2, bottom: 8 })
+
+          if (this.errorMsg.length > 0) {
+            Text(this.errorMsg).fontSize(12).fontColor(ERROR).lineHeight(18)
+              .width('100%').padding({ left: 20, right: 20, bottom: 8 })
           }
-          .alignItems(HorizontalAlign.Center)
-          .constraintSize({ minHeight: 44, maxWidth: '62%' })
-          .padding({ left: 12, right: 12 })
-          .enabled(this.project !== null)
-          .onClick((): void => { this.openControlSheet(); })
-          .accessibilityText('项目控制')
-        }
-        .width('100%').padding({ left: 16, right: 16, top: this.statusBarHeight + 10, bottom: 10 })
-        .backgroundColor(BG)
 
-        // 页签(iOS segmented:灰轨 + 白 pill)
-        Seg({ options: ['创作', '正文', '设定'], selected: this.tab,
-          onSelect: (idx: number): void => { this.tab = idx; } })
-          .margin({ left: 16, right: 16, top: 2, bottom: 8 })
-
-        if (this.errorMsg.length > 0) {
-          Text(this.errorMsg).fontSize(12).fontColor(ERROR).lineHeight(18)
-            .width('100%').padding({ left: 20, right: 20, bottom: 8 })
-        }
-
-        if (this.project === null) {
-          Column() {
-            Text('项目无法打开').fontSize(15).fontColor(INK3)
+          if (this.project === null) {
+            Column() {
+              Text('项目无法打开').fontSize(15).fontColor(INK3)
+            }
+            .width('100%').layoutWeight(1).justifyContent(FlexAlign.Center)
+          } else if (this.tab === 0) {
+            this.chatPane()
+          } else if (this.tab === 1) {
+            this.chapterPane()
+          } else {
+            this.settingsPane()
           }
-          .width('100%').layoutWeight(1).justifyContent(FlexAlign.Center)
-        } else if (this.tab === 0) {
-          this.chatPane()
-        } else if (this.tab === 1) {
-          this.chapterPane()
-        } else {
-          this.settingsPane()
         }
-      }
-      .width('100%').height('100%').backgroundColor(BG)
+        .width('100%').height('100%').backgroundColor(BG)
 
-      // 收录对话框
-      if (this.collectMessageId.length > 0) {
-        this.collectSheet()
-      }
-      // 章节编辑器
-      if (this.chapterEditorOpen) {
-        this.chapterEditor()
-      }
-      // 素材编辑器
-      if (this.materialEditorOpen) {
-        this.materialEditor()
-      }
-      if (this.branchSheetOpen && this.workspaceStatus !== null) {
-        NovelBranchSheet({
-          visible: this.branchSheetOpen,
-          activeBranchId: this.workspaceStatus.activeBranchId,
-          branches: this.workspaceStatus.branches,
-          busy: this.busy || this.novelJobLocksWorkspace(),
-          canUndo: this.workspaceStatus.canUndo,
-          unresolvedFromOrdinal: this.workspaceStatus.unresolvedFromOrdinal,
-          plotStale: this.workspaceStatus.plotStale,
-          onClose: (): void => { this.branchSheetOpen = false; },
-          onCreate: (name: string): void => { this.createWorkspaceBranch(name); },
-          onSelect: (branchId: string): void => { this.selectWorkspaceBranch(branchId); },
-          onUndo: (): void => { this.undoWorkspace(); },
-          onSyncPlot: (): void => { this.syncWorkspacePlot(); },
-          onResolveUnresolved: (): void => { this.resolveWorkspaceUnresolved(); },
-        })
-      }
-      if (this.polishCreateOpen) {
-        NovelPolishCreateSheet({
-          visible: this.polishCreateOpen,
-          chapters: this.polishSheetChapters(),
-          modelReady: this.ghostwriteModelsReady(),
-          modelDisabledReason: this.ghostwriteModelReason(),
-          conflictReason: this.polishConflictReason(),
-          busy: this.polishBusy,
-          bottomPadding: Math.max(this.navBarHeight, 12),
-          onStart: (
-            startOrdinal: number, endOrdinal: number, contextOptions: PolishContextOptions,
-          ): void => { this.startPolish(startOrdinal, endOrdinal, contextOptions); },
-          onClose: (): void => { if (!this.polishBusy) this.polishCreateOpen = false; },
-        })
-      }
-      // 项目控制 sheet(顶栏 principal 触发,渲染最上层)
-      if (this.controlSheetOpen) {
-        this.ControlSheet()
-      }
-    
+        // 收录 sheet(四段式)
+        if (this.collectMessageId.length > 0) {
+          this.collectSheet()
+        }
+        // 章节编辑器
+        if (this.chapterEditorOpen) {
+          this.chapterEditor()
+        }
+        // 素材编辑器
+        if (this.materialEditorOpen) {
+          this.materialEditor()
+        }
+        if (this.branchSheetOpen && this.workspaceStatus !== null) {
+          NovelBranchSheet({
+            visible: this.branchSheetOpen,
+            activeBranchId: this.workspaceStatus.activeBranchId,
+            branches: this.workspaceStatus.branches,
+            busy: this.busy || this.novelJobLocksWorkspace(),
+            canUndo: this.workspaceStatus.canUndo,
+            unresolvedFromOrdinal: this.workspaceStatus.unresolvedFromOrdinal,
+            plotStale: this.workspaceStatus.plotStale,
+            onClose: (): void => { this.branchSheetOpen = false; },
+            onCreate: (name: string): void => { this.createWorkspaceBranch(name); },
+            onSelect: (branchId: string): void => { this.selectWorkspaceBranch(branchId); },
+            onUndo: (): void => { this.undoWorkspace(); },
+            onSyncPlot: (): void => { this.syncWorkspacePlot(); },
+            onResolveUnresolved: (): void => { this.resolveWorkspaceUnresolved(); },
+          })
+        }
+        if (this.polishCreateOpen) {
+          NovelPolishCreateSheet({
+            visible: this.polishCreateOpen,
+            chapters: this.polishSheetChapters(),
+            modelReady: this.ghostwriteModelsReady(),
+            modelDisabledReason: this.ghostwriteModelReason(),
+            conflictReason: this.polishConflictReason(),
+            busy: this.polishBusy,
+            bottomPadding: Math.max(this.navBarHeight, 12),
+            onStart: (
+              startOrdinal: number, endOrdinal: number, contextOptions: PolishContextOptions,
+            ): void => { this.startPolish(startOrdinal, endOrdinal, contextOptions); },
+            onClose: (): void => { if (!this.polishBusy) this.polishCreateOpen = false; },
+          })
+        }
+        // 项目控制 sheet(顶栏 principal 触发,渲染最上层)
+        if (this.controlSheetOpen) {
+          this.ControlSheet()
+        }
       }, (e: number): string => `theme-${e}`)
-}
+    }
       .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .width('100%').height('100%')
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
   }
 
-  // 收录 sheet(iOS NovelCollectCandidateSheet 四段式:选段落 → 收录前编辑 → 章节位置)
   @Builder
   private collectSheet(): void {
     Column() {
