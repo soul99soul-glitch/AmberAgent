@@ -1,7 +1,7 @@
 // NovelWorkspacePage — 小说工作区:三页签(聊天写作 / 章节正文 / 活资料)
 // 单文件承载三个 pane(@Builder)与对话框(Stack 叠层),状态集中于本页 @State。
 import {
-  ACCENT, ACCENT_INK, BG, ERROR, INK, INK2, INK3, INK4, LINE, OVERLAY, SURFACE, SURFACE2,
+  ACCENT, ACCENT_INK, BG, ERROR, INK, INK2, INK3, INK4, LINE, MOTION_OVERLAY, OVERLAY, SURFACE, SURFACE2,
 } from '../design/tokens.ets';
 import { FONT_SERIF } from '../design/fonts.ets';
 import { Icon } from '../components/ui/Icon.ets';
@@ -2210,35 +2210,44 @@ struct NovelWorkspacePage {
     Column() {
       Column() {
         Text('收进章节').fontSize(17).fontWeight(FontWeight.Bold).fontColor(INK).margin({ bottom: 16 })
-        // 新开
-        Text(`新开第 ${this.project !== null ? this.project.chapters.length + 1 : 1} 章`)
-          .fontSize(14).fontColor(ACCENT).height(44).textAlign(TextAlign.Start)
-          .margin({ bottom: 4 })
-          .onClick(() => { this.doCollect({ kind: 'new_chapter', title: this.collectTitle }); })
-        // 并入/替换已有章节
-        if (this.project !== null) {
-          ForEach(this.project.chapters, (c: NovelChapter, idx: number) => {
-            Column() {
-              Text(`并入第 ${idx + 1} 章《${c.title}》`).fontSize(13).fontColor(INK2)
-                .height(44).textAlign(TextAlign.Start)
-                .onClick(() => { this.doCollect({ kind: 'append', chapterId: c.id }); })
-              Text(`替换第 ${idx + 1} 章《${c.title}》`).fontSize(12).fontColor(ERROR)
-                .height(44).textAlign(TextAlign.Start)
-                .onClick(() => { this.doCollect({ kind: 'replace', chapterId: c.id }); })
+        Scroll() {
+          Column() {
+            // 新开
+            Text(`新开第 ${this.project !== null ? this.project.chapters.length + 1 : 1} 章`)
+              .fontSize(14).fontColor(ACCENT).height(44).textAlign(TextAlign.Start)
+              .margin({ bottom: 4 })
+              .onClick(() => { this.doCollect({ kind: 'new_chapter', title: this.collectTitle }); })
+            // 并入/替换已有章节
+            if (this.project !== null) {
+              ForEach(this.project.chapters, (c: NovelChapter, idx: number) => {
+                Column() {
+                  Text(`并入第 ${idx + 1} 章《${c.title}》`).fontSize(13).fontColor(INK2)
+                    .height(44).textAlign(TextAlign.Start)
+                    .onClick(() => { this.doCollect({ kind: 'append', chapterId: c.id }); })
+                  Text(`替换第 ${idx + 1} 章《${c.title}》`).fontSize(12).fontColor(ERROR)
+                    .height(44).textAlign(TextAlign.Start)
+                    .onClick(() => { this.doCollect({ kind: 'replace', chapterId: c.id }); })
+                }
+                .width('100%').padding({ top: 8, bottom: 8 })
+                .border({ width: { bottom: 0.5 }, color: { bottom: LINE } })
+              }, (c: NovelChapter) => c.id)
             }
-            .width('100%').padding({ top: 8, bottom: 8 })
-            .border({ width: { bottom: 0.5 }, color: { bottom: LINE } })
-          }, (c: NovelChapter) => c.id)
+          }.width('100%')
         }
+        .width('100%').layoutWeight(1).align(Alignment.TopStart).scrollBar(BarState.Auto)
         Text('取消').fontSize(14).fontColor(INK3)
           .constraintSize({ minWidth: 44 }).height(44).textAlign(TextAlign.Center).margin({ top: 8 })
           .onClick(() => { this.collectMessageId = ''; })
       }
-      .width('84%').padding(22).backgroundColor(SURFACE).borderRadius(16)
+      .width('84%').height('80%').padding(22).backgroundColor(SURFACE).borderRadius(16)
+      .onClick((): void => {})
+      .transition(TransitionEffect.translate({ y: 24 })
+        .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
     }
     .width('100%').height('100%').backgroundColor(OVERLAY)
     .justifyContent(FlexAlign.Center)
     .onClick(() => { this.collectMessageId = ''; })
+    .transition(TransitionEffect.OPACITY.animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
   }
 
   @Builder

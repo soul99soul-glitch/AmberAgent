@@ -20,7 +20,7 @@
 //   逻辑(加载/启停/排序/key 编辑/删除)零改动,编辑器 overlay 原样保留。
 import {
   ACCENT, ACCENT_INK, BG, INK, INK3, INK4, LINE, LINE2, OVERLAY, RAISED, SURFACE, SURFACE2,
-  SUCCESS_FG, TEXT_STYLES, lineHeightForSize, accentSoftBg,
+  SUCCESS_FG, TEXT_STYLES, MOTION_OVERLAY, lineHeightForSize, accentSoftBg,
 } from '../design/tokens.ets';
 import {
   CenteredTitleBar, PlainSection, CardGroup, CardToggleRow, FooterNote, BtnFill, BtnGhost,
@@ -29,7 +29,7 @@ import {
   FONT_MONO, FONT_MONO_MEDIUM, FONT_SANS_MEDIUM, FONT_SANS_SEMIBOLD,
 } from '../design/fonts.ets';
 import { Icon } from '../components/ui/Icon.ets';
-import { router } from '@kit.ArkUI';
+import { KeyboardAvoidMode, router } from '@kit.ArkUI';
 import {
   defaultSearchPrefs, loadSearchPrefs, updateSearchPrefs,
   makeSearchServiceOptions, searchServiceOptionsToJson, searchServiceOptionsFromJson,
@@ -121,9 +121,33 @@ struct ChatSearchSettingsPage {
   @State dMaxTokens: string = '';
   @State dMaxTokensPerPage: string = '';
   @State dSummary: boolean = true;
+  private previousKeyboardAvoidMode: KeyboardAvoidMode = KeyboardAvoidMode.OFFSET;
+  private keyboardAvoidanceActive: boolean = false;
 
   aboutToAppear(): void {
+    this.enableKeyboardAvoidance();
     this.refresh();
+  }
+
+  onPageShow(): void { this.enableKeyboardAvoidance(); }
+  onPageHide(): void { this.restoreKeyboardAvoidance(); }
+  aboutToDisappear(): void { this.restoreKeyboardAvoidance(); }
+  onBackPress(): boolean {
+    if (!this.editorVisible) return false;
+    if (this.typeMenuOpen) this.typeMenuOpen = false;
+    else this.editorVisible = false;
+    return true;
+  }
+  private enableKeyboardAvoidance(): void {
+    if (this.keyboardAvoidanceActive) return;
+    this.previousKeyboardAvoidMode = this.getUIContext().getKeyboardAvoidMode();
+    this.getUIContext().setKeyboardAvoidMode(KeyboardAvoidMode.RESIZE);
+    this.keyboardAvoidanceActive = true;
+  }
+  private restoreKeyboardAvoidance(): void {
+    if (!this.keyboardAvoidanceActive) return;
+    this.getUIContext().setKeyboardAvoidMode(this.previousKeyboardAvoidMode);
+    this.keyboardAvoidanceActive = false;
   }
 
   private async refresh(): Promise<void> {
@@ -820,8 +844,11 @@ struct ChatSearchSettingsPage {
       .width('100%').height('86%').padding(16)
       .backgroundColor(SURFACE)
       .borderRadius({ topLeft: 16, topRight: 16 })
+      .transition(TransitionEffect.translate({ y: 160 })
+        .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
     }
     .width('100%').height('100%').backgroundColor(OVERLAY)
+    .transition(TransitionEffect.OPACITY.animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
   }
 
   build() {

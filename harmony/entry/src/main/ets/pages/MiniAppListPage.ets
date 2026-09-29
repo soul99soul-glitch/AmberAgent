@@ -11,7 +11,7 @@ import { fileIo, picker } from '@kit.CoreFileKit';
 import { util } from '@kit.ArkTS';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import type { MiniAppRecord, MiniAppVersionRecord } from '@amber/chat-domain';
-import { ACCENT, ACCENT_LIGHT, BG, BODY, BODY2, INK, INK2, INK3, INK4, LINE, META, OVERLAY, SURFACE, SURFACE2, TITLE } from '../design/tokens.ets';
+import { ACCENT, ACCENT_LIGHT, BG, BODY, BODY2, INK, INK2, INK3, INK4, LINE, META, MOTION_OVERLAY, OVERLAY, SURFACE, SURFACE2, TITLE } from '../design/tokens.ets';
 import { CenteredTitleBar } from '../components/PageTemplate.ets';
 import { getMiniAppPlatform } from '../platform_impl/MiniAppPlatform.ets';
 import type { MiniAppPlatform } from '../platform_impl/MiniAppPlatform.ets';
@@ -62,6 +62,26 @@ struct MiniAppListPage {
 
   aboutToDisappear(): void {
     this.alive = false;
+  }
+
+  onBackPress(): boolean {
+    if (this.deleteTarget !== null) {
+      this.deleteTarget = null;
+      return true;
+    }
+    if (this.versionTarget !== null) {
+      this.versionTarget = null;
+      return true;
+    }
+    if (this.renameTarget !== null) {
+      this.renameTarget = null;
+      return true;
+    }
+    return false;
+  }
+
+  private handleBack(): void {
+    if (!this.onBackPress()) router.back();
   }
 
   private toast(message: string): void {
@@ -214,6 +234,7 @@ struct MiniAppListPage {
   @Builder
   topBar(): void {
     CenteredTitleBar({ title: '小应用', actionText: '设置',
+      onBack: (): void => { this.handleBack(); },
       onAction: (): void => { this.openSettings(); } })
   }
 
@@ -387,10 +408,15 @@ struct MiniAppListPage {
       .backgroundColor(SURFACE)
       .borderRadius(14)
       .border({ width: 1, color: LINE })
+      .onClick((): void => {})
+      .transition(TransitionEffect.scale({ x: 0.96, y: 0.96 })
+        .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
     }
     .width('100%').height('100%')
     .backgroundColor(OVERLAY)
     .onClick((): void => { this.renameTarget = null; })
+    .transition(TransitionEffect.OPACITY
+      .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
   }
 
   @Builder
@@ -451,10 +477,29 @@ struct MiniAppListPage {
       .backgroundColor(SURFACE)
       .borderRadius(14)
       .border({ width: 1, color: LINE })
+      .onClick((): void => {})
+      .transition(TransitionEffect.scale({ x: 0.96, y: 0.96 })
+        .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
     }
     .width('100%').height('100%')
     .backgroundColor(OVERLAY)
     .onClick((): void => { this.versionTarget = null; })
+    .transition(TransitionEffect.OPACITY
+      .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
+  }
+
+  @Builder
+  deleteDialog(target: MiniAppRecord): void {
+    // 退场动画仍可能刷新子组件，文案使用打开时的对象快照。
+    ConfirmDialog({
+      show: true,
+      title: '删除小应用',
+      message: `确定删除「${target.title}」吗?历史聊天里的小应用卡片会保留,但再次运行时会显示小应用不存在。`,
+      confirmText: '删除',
+      dismissText: '取消',
+      onConfirm: (): void => { this.confirmDelete(); },
+      onDismiss: (): void => { this.deleteTarget = null; },
+    })
   }
 
   build(): void {
@@ -499,15 +544,7 @@ struct MiniAppListPage {
         this.versionHistoryDialog(this.versionTarget)
       }
       if (this.deleteTarget !== null) {
-        ConfirmDialog({
-          show: this.deleteTarget !== null,
-          title: '删除小应用',
-          message: `确定删除「${this.deleteTarget.title}」吗?历史聊天里的小应用卡片会保留,但再次运行时会显示小应用不存在。`,
-          confirmText: '删除',
-          dismissText: '取消',
-          onConfirm: (): void => { this.confirmDelete(); },
-          onDismiss: (): void => { this.deleteTarget = null; },
-        })
+        this.deleteDialog(this.deleteTarget)
       }
     }
     .width('100%').height('100%')

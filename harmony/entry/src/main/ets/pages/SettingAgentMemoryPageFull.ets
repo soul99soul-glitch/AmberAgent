@@ -10,13 +10,13 @@ import { loadAgentRuntimeSnapshot, updateAgentSoulMarkdown, updateRecallToggles 
 import type { AgentRuntimeSnapshot } from '../platform_impl/AgentRuntimePrefs.ets';
 import { readPreviousSoulMarkdown, rollbackSoulToPrevious } from '../platform_impl/SoulTools.ets';
 import {
-  BG, INK, INK3, INK4, LINE, ACCENT, ERROR, OVERLAY, SURFACE, SURFACE2, TEXT_STYLES, GUTTER,
+  BG, INK, INK3, INK4, LINE, ACCENT, ERROR, OVERLAY, SURFACE, SURFACE2, TEXT_STYLES, GUTTER, MOTION_OVERLAY,
 } from '../design/tokens.ets';
 import { FONT_MONO, FONT_SANS_MEDIUM } from '../design/fonts.ets';
 import {
   CenteredTitleBar, PlainSection, CardGroup, CardRow, CardToggleRow, FooterNote, PageSpacer, StatusChip,
 } from '../components/PageTemplate.ets';
-import { router } from '@kit.ArkUI';
+import { router, KeyboardAvoidMode } from '@kit.ArkUI';
 import { Icon } from '../components/ui/Icon.ets';
 
 @Entry
@@ -33,11 +33,15 @@ struct SettingAgentMemoryPageFull {
   @State soulEditorOpen: boolean = false;
   @State soulDraft: string = '';
   @State soulNotice: string = '';
+  @State soulSaving: boolean = false;
+  @State soulSaveError: string = '';
   @State autoMemory: boolean = true;
   @StorageProp('accentColor') accentColorStore: string = ACCENT;
+  @StorageProp('navBarHeight') navBarHeight: number = 0;
   private ops: MemoryLibraryOps = getMemoryLibraryOps();
   private reloadInFlight: boolean = false;
   private reloadRequested: boolean = false;
+  private previousKeyboardMode: KeyboardAvoidMode | null = null;
 
   aboutToAppear(): void {
     this.reload();
@@ -45,8 +49,27 @@ struct SettingAgentMemoryPageFull {
   }
 
   onPageShow(): void {
+    if (this.previousKeyboardMode === null) {
+      this.previousKeyboardMode = this.getUIContext().getKeyboardAvoidMode();
+    }
+    this.getUIContext().setKeyboardAvoidMode(KeyboardAvoidMode.RESIZE);
     this.reload();
     this.reloadSoul();
+  }
+
+  onPageHide(): void {
+    if (this.previousKeyboardMode !== null) {
+      this.getUIContext().setKeyboardAvoidMode(this.previousKeyboardMode);
+      this.previousKeyboardMode = null;
+    }
+  }
+
+  aboutToDisappear(): void { this.onPageHide(); }
+
+  onBackPress(): boolean {
+    if (!this.soulEditorOpen) return false;
+    if (!this.soulSaving) this.soulEditorOpen = false;
+    return true;
   }
 
   private reloadSoul(): void {
@@ -62,17 +85,21 @@ struct SettingAgentMemoryPageFull {
 
   private openSoulEditor(): void {
     this.soulDraft = this.soulMarkdown;
+    this.soulSaveError = '';
     this.soulEditorOpen = true;
   }
 
   private saveSoul(): void {
+    if (this.soulSaving) return;
+    this.soulSaving = true;
+    this.soulSaveError = '';
     updateAgentSoulMarkdown(getChatKvStore(), this.soulDraft).then((): void => {
       this.soulEditorOpen = false;
       this.soulNotice = '核心指令已保存 ✓';
       this.reloadSoul();
     }).catch((): void => {
-      this.soulNotice = '保存失败，请重试';
-    });
+      this.soulSaveError = '保存失败，请重试';
+    }).finally((): void => { this.soulSaving = false; });
   }
 
   private rollbackSoul(): void {
@@ -304,41 +331,55 @@ struct SettingAgentMemoryPageFull {
   private SoulEditor(): void {
     Column() {
       Blank()
-        .onClick((): void => { this.soulEditorOpen = false; })
+        .width('100%')
+        .onClick((): void => { if (!this.soulSaving) this.soulEditorOpen = false; })
       Column() {
         Text('编辑核心指令')
           .fontSize(16).fontWeight(FontWeight.Medium).fontFamily(FONT_SANS_MEDIUM).fontColor(INK)
-          .width('100%').padding({ left: 18, right: 18, top: 16, bottom: 10 })
+          .width('100%').padding({ top: 16, bottom: 10 })
+        if (this.soulSaveError.length > 0) {
+          Text(this.soulSaveError).fontSize(13).fontColor(ERROR)
+            .width('100%').padding({ bottom: 8 })
+        }
         TextArea({ text: this.soulDraft, placeholder: '每次对话都会注入的核心行为指令…' })
+          .id('soul-editor-input')
           .width('100%')
-          .height(320)
+          .layoutWeight(1)
           .fontSize(13).fontColor(INK).fontFamily(FONT_MONO)
           .placeholderColor(INK4)
           .backgroundColor(SURFACE2)
           .borderRadius(10)
           .padding(12)
-          .margin({ left: 18, right: 18 })
+          .enabled(!this.soulSaving)
           .onChange((v: string): void => { this.soulDraft = v; })
         Row() {
           Text('取消')
             .fontSize(14).fontFamily(FONT_SANS_MEDIUM).fontColor(INK3)
             .layoutWeight(1).textAlign(TextAlign.Center).constraintSize({ minHeight: 44 })
+            .enabled(!this.soulSaving)
             .onClick((): void => { this.soulEditorOpen = false; })
-          Text('保存')
+          Text(this.soulSaving ? '保存中…' : '保存')
+            .id('soul-editor-save')
             .fontSize(14).fontWeight(FontWeight.Medium).fontFamily(FONT_SANS_MEDIUM).fontColor(this.accentColorStore)
             .layoutWeight(1).textAlign(TextAlign.Center).constraintSize({ minHeight: 44 })
+            .enabled(!this.soulSaving)
             .onClick((): void => { this.saveSoul(); })
         }
         .width('100%')
-        .padding({ left: 18, right: 18, top: 10, bottom: 14 })
+        .padding({ top: 10, bottom: 14 })
       }
-      .width('100%')
+      .width('100%').height('85%')
+      .padding({ left: 18, right: 18, bottom: this.navBarHeight })
       .backgroundColor(SURFACE)
       .borderRadius({ topLeft: 20, topRight: 20 })
+      .transition(TransitionEffect.translate({ y: 160 })
+        .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
     }
     .width('100%').height('100%')
     .backgroundColor(OVERLAY)
     .justifyContent(FlexAlign.End)
+    .transition(TransitionEffect.OPACITY
+      .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
   }
 
   build(): void {

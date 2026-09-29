@@ -7,7 +7,7 @@
 //   - 不用 CustomDialogController(需 @CustomDialog 装饰器 + controller 传递),
 //     改用 @Prop show 条件渲染,对齐本仓库 ConfirmDialog.ets 的成熟写法。
 //   - @Prop 不用保留名(size/enabled/Select)。
-import { ACCENT, BODY, INK, INK2, INK3, LINE, META, OVERLAY, SURFACE, TITLE } from '../design/tokens.ets';
+import { ACCENT, BODY, INK, INK2, INK3, LINE, META, MOTION_OVERLAY, OVERLAY, SURFACE, TITLE } from '../design/tokens.ets';
 
 @Component
 export struct DeepReadConfirmationDialog {
@@ -71,11 +71,15 @@ export struct DeepReadConfirmationDialog {
         .backgroundColor(SURFACE)
         .borderRadius(14)
         .padding({ left: 22, right: 22, top: 22, bottom: 0 })
+        .transition(TransitionEffect.scale({ x: 0.96, y: 0.96 })
+          .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
       }
       .width('100%')
       .height('100%')
       .backgroundColor(OVERLAY)
       .alignContent(Alignment.Center)
+      .transition(TransitionEffect.OPACITY
+        .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
     }
   }
 }

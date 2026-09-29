@@ -10,12 +10,6 @@ export struct ConfirmDialog {
   @Prop dismissText: string = '取消';
   onConfirm: () => void = (): void => {};
   onDismiss: () => void = (): void => {};
-  @State private entered: boolean = false;
-
-  aboutToAppear(): void {
-    this.entered = false;
-    animateTo({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }, (): void => { this.entered = true; });
-  }
 
   build(): void {
     if (this.show) {
@@ -69,14 +63,15 @@ export struct ConfirmDialog {
         .backgroundColor(SURFACE)
         .borderRadius(14)
         .padding({ left: 20, right: 20, top: 20, bottom: 0 })
-        .scale({ x: this.entered ? 1 : 0.96, y: this.entered ? 1 : 0.96 })
-        .opacity(this.entered ? 1 : 0)
         .onClick((): void => {})
+        .transition(TransitionEffect.scale({ x: 0.96, y: 0.96 })
+          .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
       }
       .width('100%')
       .height('100%')
-      .backgroundColor(OVERLAY)
       .alignContent(Alignment.Center)
+      .transition(TransitionEffect.OPACITY
+        .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
     }
   }
 }

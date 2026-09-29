@@ -132,6 +132,16 @@ struct DeepReadArticlePage {
     }
   }
 
+  onBackPress(): boolean {
+    if (!this.showRegenerateDialog) return false;
+    this.showRegenerateDialog = false;
+    return true;
+  }
+
+  private handleBack(): void {
+    if (!this.onBackPress()) router.back();
+  }
+
   private async loadArticle(token: number, force: boolean): Promise<void> {
     const repository = getRepository();
     const cached: DeepReadCacheEntry | null = await repository.get(this.topicId);
@@ -491,7 +501,7 @@ struct DeepReadArticlePage {
         // ── 顶栏:返回 + 标题(衬线) + 字号缩放按钮 ──
         Row() {
           Icon({ name: 'back', iconSize: 20, color: INK3 })
-            .onClick(() => { router.back(); })
+            .onClick((): void => { this.handleBack(); })
           Text('深度阅读').fontSize(18).fontWeight(FontWeight.Bold).fontColor(INK)
             .fontFamily(FONT_SERIF).margin({ left: 12 }).layoutWeight(1)
 

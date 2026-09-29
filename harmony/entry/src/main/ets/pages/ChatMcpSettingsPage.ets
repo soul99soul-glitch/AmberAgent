@@ -49,6 +49,9 @@ struct ChatMcpSettingsPage {
   @State draft: McpServerConfig | null = null;
   @State creating: boolean = false;
   @State draftTab: number = 0;
+  // 输入和删除其他行时保留请求头输入框身份；ID 不写入服务器配置。
+  @State draftHeaderIds: number[] = [];
+  private nextDraftHeaderId: number = 0;
   // F23:空名称「保存」原本静默 no-op;现在以行内错误反馈(清空即消失)
   @State nameError: string = '';
   @State expandedTools: string[] = [];
@@ -109,14 +112,22 @@ struct ChatMcpSettingsPage {
       return;
     }
     this.nameError = '';
+    const common: McpCommonOptions = {
+      enable: draft.commonOptions.enable,
+      name: draft.commonOptions.name,
+      headers: draft.commonOptions.headers.map((header: [string, string]): [string, string] =>
+        [header[0].trim(), header[1].trim()]),
+      tools: draft.commonOptions.tools,
+    };
+    const saved: McpServerConfig = cloneMcpServerConfig(draft, draft.id, common);
     if (this.creating) {
       getMcpSettingsStore().updateMcpServers(
-        (old: McpServerConfig[]): McpServerConfig[] => [...old, draft]);
+        (old: McpServerConfig[]): McpServerConfig[] => [...old, saved]);
     } else {
       getMcpSettingsStore().updateMcpServers(
         (old: McpServerConfig[]): McpServerConfig[] =>
           old.map((c: McpServerConfig): McpServerConfig =>
-            c.id === draft.id ? draft : c));
+            c.id === saved.id ? saved : c));
     }
     this.draft = null;
   }
@@ -124,6 +135,7 @@ struct ChatMcpSettingsPage {
   private openCreate(): void {
     // :140 — 新建默认 StreamableHTTPServer()
     this.draft = makeMcpStreamableHttpServer({});
+    this.draftHeaderIds = [];
     this.creating = true;
     this.draftTab = 0;
     this.expandedTools = [];
@@ -132,6 +144,7 @@ struct ChatMcpSettingsPage {
 
   private openEdit(config: McpServerConfig): void {
     this.draft = cloneMcpServerConfig(config);
+    this.draftHeaderIds = config.commonOptions.headers.map((): number => this.nextDraftHeaderId++);
     this.creating = false;
     this.draftTab = 0;
     this.expandedTools = [];
@@ -150,6 +163,31 @@ struct ChatMcpSettingsPage {
       tools: patch.tools !== undefined ? patch.tools : c.tools,
     };
     this.draft = cloneMcpServerConfig(draft, draft.id, common);
+  }
+
+  private draftHeaderValue(id: number, column: number): string {
+    const draft: McpServerConfig | null = this.draft;
+    const index: number = this.draftHeaderIds.indexOf(id);
+    return draft !== null && index >= 0 ? draft.commonOptions.headers[index][column] : '';
+  }
+
+  private patchHeader(id: number, column: number, value: string): void {
+    const draft: McpServerConfig | null = this.draft;
+    const index: number = this.draftHeaderIds.indexOf(id);
+    if (draft === null || index < 0) return;
+    const headers: Array<[string, string]> = [...draft.commonOptions.headers];
+    headers[index] = column === 0 ? [value, headers[index][1]] : [headers[index][0], value];
+    this.patchCommon({ headers: headers });
+  }
+
+  private removeHeader(id: number): void {
+    const draft: McpServerConfig | null = this.draft;
+    const index: number = this.draftHeaderIds.indexOf(id);
+    if (draft === null || index < 0) return;
+    const headers: Array<[string, string]> = draft.commonOptions.headers
+      .filter((_header: [string, string], i: number): boolean => i !== index);
+    this.draftHeaderIds = this.draftHeaderIds.filter((headerId: number): boolean => headerId !== id);
+    this.patchCommon({ headers: headers });
   }
 
   // :573-595 — 传输类型切换(保 id/commonOptions/url)
@@ -373,30 +411,24 @@ struct ChatMcpSettingsPage {
 
         // 请求头(:650-769)
         this.formLabel('自定义请求头', '为MCP服务器请求添加自定义HTTP头')
-        ForEach(draft.commonOptions.headers, (header: [string, string], index: number) => {
+        ForEach(this.draftHeaderIds, (headerId: number) => {
           Row() {
             Column() {
-              TextInput({ text: header[0], placeholder: '例如：Authorization' })
+              TextInput({ text: this.draftHeaderValue(headerId, 0), placeholder: '例如：Authorization' })
+                .id(`mcp-header-name-${headerId}`)
+                .accessibilityText('请求头名称')
                 .fontSize(13).fontWeight(400).lineHeight(lineHeightForSize(13)).fontFamily(FONT_MONO_MEDIUM)
                 .backgroundColor(RAISED)
                 .onChange((v: string): void => {
-                  const d: McpServerConfig | null = this.draft;
-                  if (d === null) return;
-                  const headers: Array<[string, string]> = [...d.commonOptions.headers];
-                  // :678 — name trim 写入
-                  headers[index] = [v.trim(), headers[index][1]];
-                  this.patchCommon({ headers: headers });
+                  this.patchHeader(headerId, 0, v);
                 })
-              TextInput({ text: header[1], placeholder: '例如：Bearer token123' })
+              TextInput({ text: this.draftHeaderValue(headerId, 1), placeholder: '例如：Bearer token123' })
+                .id(`mcp-header-value-${headerId}`)
+                .accessibilityText('请求头值')
                 .fontSize(13).fontWeight(400).lineHeight(lineHeightForSize(13)).fontFamily(FONT_MONO_MEDIUM)
                 .backgroundColor(RAISED).margin({ top: 8 })
                 .onChange((v: string): void => {
-                  const d: McpServerConfig | null = this.draft;
-                  if (d === null) return;
-                  const headers: Array<[string, string]> = [...d.commonOptions.headers];
-                  // :702 — value trim 写入
-                  headers[index] = [headers[index][0], v.trim()];
-                  this.patchCommon({ headers: headers });
+                  this.patchHeader(headerId, 1, v);
                 })
             }
             .layoutWeight(1)
@@ -407,22 +439,19 @@ struct ChatMcpSettingsPage {
             .justifyContent(FlexAlign.Center)
             .alignItems(VerticalAlign.Center)
             .margin({ left: 8 })
-            .onClick((): void => {
-                const d: McpServerConfig | null = this.draft;
-                if (d === null) return;
-                const headers: Array<[string, string]> = d.commonOptions.headers
-                  .filter((_h: [string, string], i: number): boolean => i !== index);
-                this.patchCommon({ headers: headers });
-              })
+            .id(`mcp-header-remove-${headerId}`)
+            .accessibilityText('删除请求头')
+            .onClick((): void => { this.removeHeader(headerId); })
           }
           .width('100%').margin({ bottom: 8 })
-        }, (header: [string, string], index: number): string => `${index}:${header[0]}`)
+        }, (headerId: number): string => String(headerId))
         Row() {
           BtnGhost({ label: '添加请求头', onTap: (): void => {
             const d: McpServerConfig | null = this.draft;
             if (d === null) return;
             // :746 — '' to ''
             const headers: Array<[string, string]> = [...d.commonOptions.headers, ['', '']];
+            this.draftHeaderIds = [...this.draftHeaderIds, this.nextDraftHeaderId++];
             this.patchCommon({ headers: headers });
           } })
         }
@@ -570,6 +599,21 @@ struct ChatMcpSettingsPage {
 
   build() {
     Column() {
+      // bindSheet 以宿主节点区分面板；独立宿主避免导入的 false 收起编辑面板。
+      Column() {}
+        .width(0).height(0)
+        .hitTestBehavior(HitTestMode.None)
+        .bindSheet(this.draft !== null, this.editSheet(), {
+          height: SheetSize.LARGE,
+          onDisappear: (): void => { this.draft = null; },
+        })
+      Column() {}
+        .width(0).height(0)
+        .hitTestBehavior(HitTestMode.None)
+        .bindSheet(this.showImport, this.importSheet(), {
+          height: SheetSize.LARGE,
+          onDisappear: (): void => { this.showImport = false; },
+        })
       // 顶栏(:126-147)— 返回 + MCP 设置 + 导入/添加(双 trailing → 保留 inline,对齐 PageTitleBar 样式)
       Row() {
         Row() {
@@ -605,6 +649,8 @@ struct ChatMcpSettingsPage {
         .width(44).height(44)
         .justifyContent(FlexAlign.Center)
         .alignItems(VerticalAlign.Center)
+        .id('mcp-add-server')
+        .accessibilityText('添加 MCP 服务器')
         .onClick((): void => { this.openCreate(); })
       }
       .width('100%').padding({ left: 16, right: 16, top: this.statusBarHeight + 2, bottom: 11 })
@@ -656,14 +702,5 @@ struct ChatMcpSettingsPage {
       }
     }
     .width('100%').height('100%').backgroundColor(BG)
-    .bindSheet(this.draft !== null, this.editSheet(), {
-      height: SheetSize.LARGE,
-      // 手势下滑关闭时复位状态(onDisappear 手势/程序化两条路径都触发)
-      onDisappear: (): void => { this.draft = null; },
-    })
-    .bindSheet(this.showImport, this.importSheet(), {
-      height: SheetSize.LARGE,
-      onDisappear: (): void => { this.showImport = false; },
-    })
   }
 }

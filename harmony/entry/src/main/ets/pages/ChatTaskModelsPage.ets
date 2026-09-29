@@ -1,4 +1,4 @@
-import { router } from '@kit.ArkUI';
+import { KeyboardAvoidMode, router } from '@kit.ArkUI';
 import {
   loadProviders, DEFAULT_AUTO_MODEL_ID, DEFAULT_TITLE_PROMPT, DEFAULT_SUGGESTION_PROMPT,
   DEFAULT_COMPRESS_PROMPT, DEFAULT_OCR_PROMPT, resolveVisionRecognitionPrompt,
@@ -23,7 +23,7 @@ import {
 import { CenteredTitleBar, PlainSection, CardGroup, FooterNote } from '../components/PageTemplate.ets';
 import { Icon } from '../components/ui/Icon.ets';
 import { SSHUIColors } from '../components/SSHUIColors.ets';
-import { ACCENT, accentSoftBg, TEXT_STYLES } from '../design/tokens.ets';
+import { ACCENT, accentSoftBg, MOTION_OVERLAY, TEXT_STYLES } from '../design/tokens.ets';
 import { FONT_MONO, FONT_MONO_MEDIUM, FONT_SANS_MEDIUM } from '../design/fonts.ets';
 
 interface TaskSlotView {
@@ -91,16 +91,41 @@ struct ChatTaskModelsPage {
   private alive: boolean = false;
   private visible: boolean = false;
   private loadSeq: number = 0;
+  private previousKeyboardAvoidMode: KeyboardAvoidMode = KeyboardAvoidMode.OFFSET;
+  private keyboardAvoidanceActive: boolean = false;
 
   aboutToAppear(): void {
+    this.enableKeyboardAvoidance();
     this.alive = true; this.visible = true; this.refresh();
     describeChatModel().then((label: string): void => {
       if (this.alive) this.chatModelLabel = label;
     }).catch((): void => {});
   }
-  onPageShow(): void { if (!this.visible) { this.visible = true; this.refresh(); } }
-  onPageHide(): void { this.visible = false; this.loadSeq++; }
+  onPageShow(): void {
+    this.enableKeyboardAvoidance();
+    if (!this.visible) { this.visible = true; this.refresh(); }
+  }
+  onPageHide(): void {
+    this.restoreKeyboardAvoidance();
+    this.visible = false; this.loadSeq++;
+  }
   aboutToDisappear(): void { this.alive = false; this.onPageHide(); }
+  onBackPress(): boolean {
+    if (this.editingPrompt.length === 0) return false;
+    if (!this.saving) this.editingPrompt = '';
+    return true;
+  }
+  private enableKeyboardAvoidance(): void {
+    if (this.keyboardAvoidanceActive) return;
+    this.previousKeyboardAvoidMode = this.getUIContext().getKeyboardAvoidMode();
+    this.getUIContext().setKeyboardAvoidMode(KeyboardAvoidMode.RESIZE);
+    this.keyboardAvoidanceActive = true;
+  }
+  private restoreKeyboardAvoidance(): void {
+    if (!this.keyboardAvoidanceActive) return;
+    this.getUIContext().setKeyboardAvoidMode(this.previousKeyboardAvoidMode);
+    this.keyboardAvoidanceActive = false;
+  }
   private refreshColors(): void { this.colors = new SSHUIColors(); }
   private taskKey(task: string): string {
     return task === 'title' ? TASK_TITLE_MODEL_KEY : task === 'suggestion' ? TASK_SUGGESTION_MODEL_KEY
@@ -375,11 +400,17 @@ struct ChatTaskModelsPage {
             .constraintSize({ minHeight: 44 }).padding({ left: 12 })
             .enabled(!this.saving).onClick((): void => { this.resetPrompt(); })
         }.width('100%').alignItems(VerticalAlign.Center)
-        Text(this.editingPrompt === 'compress' ? '变量：{content}、{target_tokens}、{additional_context}'
-          : this.editingPrompt === 'ocr' ? '变量：图片数据：{images}' : '变量：对话内容 {content}，语言 {locale}')
-          .fontSize(12).fontColor(this.colors.secondary).width('100%')
-        if (this.error.length > 0) Text(this.error).fontSize(13).fontColor(this.colors.error).width('100%')
-        TextArea({ text: this.promptDraft }).width('100%').height(220).fontSize(13).fontFamily(FONT_MONO)
+        Scroll() {
+          Column({ space: 6 }) {
+            Text(this.editingPrompt === 'compress' ? '变量：{content}、{target_tokens}、{additional_context}'
+              : this.editingPrompt === 'ocr' ? '变量：图片数据：{images}' : '变量：对话内容 {content}，语言 {locale}')
+              .fontSize(12).fontColor(this.colors.secondary).width('100%')
+            if (this.error.length > 0) {
+              Text(this.error).fontSize(13).fontColor(this.colors.error).width('100%').wordBreak(WordBreak.BREAK_ALL)
+            }
+          }.width('100%')
+        }.width('100%').constraintSize({ maxHeight: 64 }).align(Alignment.TopStart).scrollBar(BarState.Auto)
+        TextArea({ text: this.promptDraft }).width('100%').layoutWeight(1).fontSize(13).fontFamily(FONT_MONO)
           .fontColor(this.colors.ink).backgroundColor(this.colors.inset).borderRadius(12).padding(12)
           .enabled(!this.saving).onChange((value: string): void => { this.promptDraft = value; })
         Row() {
@@ -390,9 +421,12 @@ struct ChatTaskModelsPage {
             .fontColor(this.accentColor).layoutWeight(1).textAlign(TextAlign.Center).constraintSize({ minHeight: 44 })
             .enabled(!this.saving).onClick((): void => { this.savePrompt(); })
         }.width('100%')
-      }.width('100%').padding({ left: 18, right: 18, top: 16, bottom: 14 + this.navBarHeight })
+      }.width('100%').height('85%').padding({ left: 18, right: 18, top: 16, bottom: 14 + this.navBarHeight })
         .backgroundColor(this.colors.surface).borderRadius({ topLeft: 20, topRight: 20 })
+        .transition(TransitionEffect.translate({ y: 160 })
+          .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
     }.width('100%').height('100%').backgroundColor('#66000000').justifyContent(FlexAlign.End)
+      .transition(TransitionEffect.OPACITY.animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
   }
 
   build(): void {

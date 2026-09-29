@@ -22,7 +22,7 @@
 //   图片字节入缓存(externalImages 权限门),随后刷新页面,onInterceptRequest
 //   命中缓存返回字节流;未授权/失败 → 空响应(Android blockedResponse 语义)。
 
-import { router, promptAction } from '@kit.ArkUI';
+import { router, promptAction, KeyboardAvoidMode } from '@kit.ArkUI';
 import { Icon } from '../components/ui/Icon.ets';
 import { webview } from '@kit.ArkWeb';
 import { fileIo, picker } from '@kit.CoreFileKit';
@@ -34,7 +34,7 @@ import {
   MINI_APP_MAX_IMAGE_BYTES, MINI_APP_IMAGE_ACCEPT_HEADER,
 } from '@amber/chat-domain';
 import type { MiniAppRecord, MiniAppGeneratedOutput } from '@amber/chat-domain';
-import { ACCENT, BG, BODY, ERROR, INK, INK2, INK3, LINE, OVERLAY, SURFACE, TITLE } from '../design/tokens.ets';
+import { ACCENT, BG, BODY, ERROR, INK, INK2, INK3, LINE, MOTION_OVERLAY, OVERLAY, SURFACE, TITLE } from '../design/tokens.ets';
 import { FONT_MONO } from '../design/fonts.ets';
 import { getMiniAppPlatform } from '../platform_impl/MiniAppPlatform.ets';
 import type { MiniAppPlatform } from '../platform_impl/MiniAppPlatform.ets';
@@ -129,6 +129,8 @@ struct MiniAppRunnerPage {
   private prefetchStarted: boolean = false;
   // 离页守卫:预取完成等异步回调不再触碰已销毁的 controller/@State
   private alive: boolean = false;
+  private previousKeyboardAvoidMode: KeyboardAvoidMode = KeyboardAvoidMode.OFFSET;
+  private keyboardAvoidanceActive: boolean = false;
 
   aboutToAppear(): void {
     this.alive = true;
@@ -145,13 +147,51 @@ struct MiniAppRunnerPage {
     });
   }
 
+  onPageShow(): void {
+    if (this.sourceDialogOpen) this.enableKeyboardAvoidance();
+  }
+
+  onPageHide(): void {
+    this.restoreKeyboardAvoidance();
+  }
+
   aboutToDisappear(): void {
+    this.restoreKeyboardAvoidance();
     this.alive = false;
     if (this.bridge !== null) {
       this.bridge.close();
       this.bridge = null;
     }
     this.imageCache.clear();
+  }
+
+  private enableKeyboardAvoidance(): void {
+    if (this.keyboardAvoidanceActive) return;
+    this.previousKeyboardAvoidMode = this.getUIContext().getKeyboardAvoidMode();
+    this.getUIContext().setKeyboardAvoidMode(KeyboardAvoidMode.RESIZE);
+    this.keyboardAvoidanceActive = true;
+  }
+
+  private restoreKeyboardAvoidance(): void {
+    if (!this.keyboardAvoidanceActive) return;
+    this.getUIContext().setKeyboardAvoidMode(this.previousKeyboardAvoidMode);
+    this.keyboardAvoidanceActive = false;
+  }
+
+  onBackPress(): boolean {
+    if (!this.sourceDialogOpen) return false;
+    this.dismissSourceDialog();
+    return true;
+  }
+
+  private handleBack(): void {
+    if (!this.onBackPress()) router.back();
+  }
+
+  private dismissSourceDialog(): void {
+    if (this.sourceSaving) return;
+    this.sourceDialogOpen = false;
+    this.restoreKeyboardAvoidance();
   }
 
   private loadApp(): void {
@@ -389,8 +429,7 @@ struct MiniAppRunnerPage {
     buttons.push({ text: '取消', color: INK3 });
     const menuButtons: [promptAction.Button, promptAction.Button?,
       promptAction.Button?, promptAction.Button?, promptAction.Button?, promptAction.Button?] =
-      [buttons[0], buttons.length > 1 ? buttons[1] : undefined,
-        buttons.length > 2 ? buttons[2] : undefined, undefined, undefined, undefined];
+      showSource ? [buttons[0], buttons[1], buttons[2]] : [buttons[0], buttons[1]];
     promptAction.showActionMenu({
       title: app.title,
       buttons: menuButtons,
@@ -400,6 +439,7 @@ struct MiniAppRunnerPage {
         this.sourceEdit = app.htmlContent;
         this.sourceError = '';
         this.sourceTabPreview = false;
+        this.enableKeyboardAvoidance();
         this.sourceDialogOpen = true;
       } else if ((showSource && index === 1) || (!showSource && index === 0)) {
         this.exportHtml(app);
@@ -432,6 +472,7 @@ struct MiniAppRunnerPage {
         await platform.repository.saveRevision(app.id, output, null, null, '手动编辑源码');
       if (updated === null) throw new Error('保存失败(记录不存在)');
       this.sourceDialogOpen = false;
+      this.restoreKeyboardAvoidance();
       this.loadApp();
       promptAction.showToast({ message: '已保存并重新运行', duration: 1500 });
     } catch (e) {
@@ -517,7 +558,7 @@ struct MiniAppRunnerPage {
       .justifyContent(FlexAlign.Center)
       .alignItems(VerticalAlign.Center)
       .accessibilityText('返回')
-      .onClick((): void => { router.back(); })
+      .onClick((): void => { this.handleBack(); })
 
       Text(app.title)
         .fontSize(TITLE)
@@ -634,9 +675,9 @@ struct MiniAppRunnerPage {
               .padding({ left: 12, right: 12, top: 8, bottom: 8 })
               .onClick((): void => { this.saveSourceEdit().catch((): void => {}); })
             Text('关闭')
-              .fontSize(14).fontColor(this.accentColorStore)
+              .fontSize(14).fontColor(this.sourceSaving ? INK3 : this.accentColorStore)
               .padding({ left: 12, right: 4, top: 8, bottom: 8 })
-              .onClick((): void => { this.sourceDialogOpen = false; })
+              .onClick((): void => { this.dismissSourceDialog(); })
           }
           .width('100%')
           if (this.sourceError.length > 0) {
@@ -664,6 +705,7 @@ struct MiniAppRunnerPage {
               .width('100%')
               .padding({ top: 2, bottom: 4 })
             TextArea({ text: this.sourceEdit, placeholder: '' })
+              .enabled(!this.sourceSaving)
               .fontSize(11)
               .fontColor(INK)
               .fontFamily(FONT_MONO)
@@ -678,10 +720,15 @@ struct MiniAppRunnerPage {
         .backgroundColor(SURFACE)
         .borderRadius(14)
         .border({ width: 1, color: LINE })
+        .onClick((): void => {})
+        .transition(TransitionEffect.scale({ x: 0.96, y: 0.96 })
+          .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
       }
       .width('100%').height('100%')
       .backgroundColor(OVERLAY)
-      .onClick((): void => { this.sourceDialogOpen = false; })
+      .onClick((): void => { this.dismissSourceDialog(); })
+      .transition(TransitionEffect.OPACITY
+        .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
     }
   }
 
