@@ -20,6 +20,7 @@ export interface NovelModelOptionView {
 
 @Component
 export struct NovelSettingsPane {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop @Watch('onProjectChanged') project: NovelProject;
   @Prop modelOptions: NovelModelOptionView[] = [];
   @Prop busy: boolean = false;
@@ -322,6 +323,7 @@ export struct NovelSettingsPane {
       .padding({ left: 16, right: 16, top: 12, bottom: 28 })
       .alignItems(HorizontalAlign.Start)
     }
+      .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .width('100%')
     .height('100%')
     .backgroundColor(SURFACE)

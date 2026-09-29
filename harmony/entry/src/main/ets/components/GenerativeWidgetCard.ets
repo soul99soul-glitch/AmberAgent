@@ -10,6 +10,7 @@ import { INK3, SURFACE2, META } from '../design/tokens.ets';
 
 @Component
 export struct GenerativeWidgetCard {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop widgetType: string = ''; // 'svg' | 'html' | 'vchart' | 'unknown'
   @Prop widgetTitle: string = '';
   build(): void {
@@ -25,6 +26,7 @@ export struct GenerativeWidgetCard {
           .margin({ top: 2 })
       }
     }
+      .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .width('100%')
     .padding({ left: 12, right: 12, top: 10, bottom: 10 })
     .backgroundColor(SURFACE2)

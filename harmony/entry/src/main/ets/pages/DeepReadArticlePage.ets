@@ -53,6 +53,7 @@ interface ArticleParams {
 @Entry
 @Component
 struct DeepReadArticlePage {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @StorageProp('statusBarHeight') statusBarHeight: number = 44;
   @State topicId: string = '';
   @State title: string = '';
@@ -497,6 +498,8 @@ struct DeepReadArticlePage {
 
   build(): void {
     Stack() {
+      // 主题纪元重挂载(勿拆):epoch 变化 → 整页子树销毁重建,全量重读令牌
+      ForEach([this.themeEpoch], (_e: number): void => {
       Column() {
         // ── 顶栏:返回 + 标题(衬线) + 字号缩放按钮 ──
         Row() {
@@ -784,7 +787,10 @@ struct DeepReadArticlePage {
           this.showRegenerateDialog = false;
         },
       })
-    }
+    
+      }, (e: number): string => `theme-${e}`)
+}
+      .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .width('100%').height('100%')
   }
 

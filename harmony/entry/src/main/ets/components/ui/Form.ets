@@ -4,6 +4,7 @@ import { INK, INK2, INK3, BODY, META } from '../../design/tokens.ets';
 
 @Component
 export struct FormItem {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop label: string = '';
   @Prop description: string = '';
   @BuilderParam content: () => void;
@@ -32,6 +33,7 @@ export struct FormItem {
       // 右侧: tail
       this.tail()
     }
+      .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .width('100%')
     .justifyContent(FlexAlign.SpaceBetween)
     .alignItems(VerticalAlign.Center)

@@ -13,6 +13,7 @@ import { Icon } from './ui/Icon.ets';
 
 @Component
 export struct SubAgentActivityStrip {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @StorageProp('accentColor') accentColorStore: string = ACCENT;
   @State runs: SubAgentRun[] = [];
   @State nowMs: number = Date.now();
@@ -88,7 +89,7 @@ export struct SubAgentActivityStrip {
   }
 
   build(): void {
-    if (this.runs.length > 0) {
+    if (this.themeEpoch >= 0 && this.runs.length > 0) {
       Row() {
         if (this.completedAtMs > 0) {
           Icon({ name: this.terminalPresentation().icon, iconSize: 12, color: this.terminalColor() })

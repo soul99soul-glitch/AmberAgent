@@ -35,7 +35,7 @@ import {
 import { pasteboard } from '@kit.BasicServicesKit';
 import {
   ACCENT, BG, INK, INK2, INK3, INK4, SURFACE, SURFACE2, RAISED, LINE, BODY, BODY2, META, MONO_SMALL, LABEL, ERROR, RADIUS,
-  TEXT_STYLES, lineHeightForSize, OVERLAY,
+  TEXT_STYLES, lineHeightForSize, OVERLAY, MOTION_OVERLAY,
 } from '../design/tokens.ets';
 import { FlatTextField } from '../components/ui/FlatTextField.ets';
 import { Icon } from '../components/ui/Icon.ets';
@@ -78,6 +78,7 @@ interface ProviderExportPayload {
 @Entry
 @Component
 struct ChatProviderDetailPage {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @StorageProp('accentColor') accentColorStore: string = ACCENT;
   @StorageProp('statusBarHeight') statusBarHeight: number = 44;
   @State provider: ProviderSetting | null = null;
@@ -662,9 +663,12 @@ struct ChatProviderDetailPage {
       }
       .width('80%').padding(22).backgroundColor(SURFACE).borderRadius(16)
       .shadow({ radius: 24, color: OVERLAY, offsetY: 8 })
+      .transition(TransitionEffect.scale({ x: 0.96, y: 0.96 })
+        .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
     }
     .width('100%').height('100%').backgroundColor(OVERLAY)
     .justifyContent(FlexAlign.Center)
+    .transition(TransitionEffect.OPACITY.animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
   }
 
   private copyCodexUserCode(): void {
@@ -728,9 +732,12 @@ struct ChatProviderDetailPage {
       }
       .width('80%').padding(22).backgroundColor(SURFACE).borderRadius(16)
       .shadow({ radius: 24, color: OVERLAY, offsetY: 8 })
+      .transition(TransitionEffect.scale({ x: 0.96, y: 0.96 })
+        .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
     }
     .width('100%').height('100%').backgroundColor(OVERLAY)
     .justifyContent(FlexAlign.Center)
+    .transition(TransitionEffect.OPACITY.animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
   }
 
   // Provider 导出(脱敏 JSON,不含 apiKey;Android 导出分享对齐)
@@ -897,7 +904,9 @@ struct ChatProviderDetailPage {
           .margin({ top: 6, left: 12, right: 12 })
       }
       .layoutWeight(1)
-      .onClick((): void => { this.tab = 0; })
+      .onClick((): void => {
+        animateTo({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }, (): void => { this.tab = 0; });
+      })
 
       Column() {
         Text('模型')
@@ -913,7 +922,9 @@ struct ChatProviderDetailPage {
           .margin({ top: 6, left: 12, right: 12 })
       }
       .layoutWeight(1)
-      .onClick((): void => { this.tab = 1; })
+      .onClick((): void => {
+        animateTo({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }, (): void => { this.tab = 1; });
+      })
     }
     .width('100%')
     .padding({ left: 18, right: 18 })
@@ -922,6 +933,8 @@ struct ChatProviderDetailPage {
 
   build() {
     Stack() {
+      // 主题纪元重挂载(勿拆):epoch 变化 → 整页子树销毁重建,全量重读令牌
+      ForEach([this.themeEpoch], (_e: number): void => {
       Column() {
       // 头部:back + // PROVIDERS + slug16 Bold/点/摘要 + (占位)
       Row() {
@@ -1271,7 +1284,10 @@ struct ChatProviderDetailPage {
     if (this.grokLoginOpen) {
       this.GrokLoginOverlay()
     }
-    }
+    
+      }, (e: number): string => `theme-${e}`)
+}
+      .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .width('100%').height('100%')
   }
 }

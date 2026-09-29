@@ -4,11 +4,13 @@
 // ArkUI: Column with content slot(样式由调用方在 content 内设定)
 @Component
 export struct StickyHeader {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @BuilderParam content: () => void;
   build(): void {
     Column() {
       this.content();
     }
+      .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .width('100%')
   }
 }

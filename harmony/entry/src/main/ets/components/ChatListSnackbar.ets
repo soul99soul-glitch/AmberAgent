@@ -12,6 +12,7 @@ const SNACK_DURATION_MS: number = 4000;
 
 @Component
 export struct ChatListSnackbar {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop show: boolean = false;
   @Prop message: string = '对话已删除';
   onUndo: () => void = (): void => {};
@@ -40,7 +41,7 @@ export struct ChatListSnackbar {
   }
 
   build(): void {
-    if (this.show) {
+    if (this.themeEpoch >= 0 && this.show) {
       Row() {
         Text(this.message)
           .fontSize(13)

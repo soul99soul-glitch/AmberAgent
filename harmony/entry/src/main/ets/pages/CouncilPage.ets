@@ -33,6 +33,7 @@ const relativeTime = (ms: number): string => {
 @Entry
 @Component
 struct CouncilPage {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @State runs: ModelCouncilRun[] = [];
   @State tick: number = 0;
   private timer: number = -1;
@@ -101,6 +102,8 @@ struct CouncilPage {
 
   build(): void {
     Column() {
+      // 主题纪元重挂载(勿拆):epoch 变化 → 整页子树销毁重建,全量重读令牌
+      ForEach([this.themeEpoch], (_e: number): void => {
       CenteredTitleBar({ title: '模型议会', subtitle: '多模型协作评审', actionText: '设置',
         onAction: (): void => { router.pushUrl({ url: 'pages/SettingModelCouncilPage' }); } })
       Scroll() {
@@ -118,7 +121,10 @@ struct CouncilPage {
       }
       .align(Alignment.TopStart)
       .layoutWeight(1)
-    }
+    
+      }, (e: number): string => `theme-${e}`)
+}
+      .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .width('100%').height('100%').backgroundColor(BG)
   }
 }

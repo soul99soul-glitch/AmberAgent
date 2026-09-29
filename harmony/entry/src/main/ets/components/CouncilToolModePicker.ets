@@ -11,6 +11,7 @@ const OPTIONS: CouncilToolModeOption[] = [
 
 @Component
 export struct CouncilToolModePicker {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop mode: CouncilToolMode = 'off';
   @Prop disabled: boolean = false;
   onSelect: (mode: CouncilToolMode) => void = (_mode: CouncilToolMode): void => {};
@@ -33,6 +34,7 @@ export struct CouncilToolModePicker {
           .padding({ left: 14, right: 14, top: 10, bottom: 10 })
           .enabled(!this.disabled).onClick((): void => { this.onSelect(option.mode); })
       }, (option: CouncilToolModeOption): string => option.mode)
-    }.width('100%')
+    }
+      .opacity(this.themeEpoch >= 0 ? 1 : 1).width('100%')
   }
 }

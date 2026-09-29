@@ -6,6 +6,7 @@ import { INK, INK2, INK3, ACCENT, SURFACE, SURFACE2, LABEL } from '../design/tok
 
 @Component
 export struct UIAvatar {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop name: string = '';
   @Prop emoji: string = '';
   @Prop imageUrl: string = '';
@@ -14,7 +15,7 @@ export struct UIAvatar {
   // 可选强调色覆盖:传入则用强调色而非按名字派生的调色板
   @Prop accentColor: string = '';
   build(): void {
-    if (this.imageUrl.length > 0) {
+    if (this.themeEpoch >= 0 && this.imageUrl.length > 0) {
       Image(this.imageSrc())
         .width(this.avatarSize).height(this.avatarSize)
         .borderRadius(this.circular ? this.avatarSize / 2 : 8)

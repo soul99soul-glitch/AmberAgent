@@ -20,6 +20,7 @@ import { Icon } from '../components/ui/Icon.ets';
 @Entry
 @Component
 struct SettingCronTasksPage {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @StorageProp('accentColor') accentColorStore: string = ACCENT;
   @State tasks: AgentCronTask[] = [];
   @State loaded: boolean = false;
@@ -235,6 +236,8 @@ struct SettingCronTasksPage {
 
   build(): void {
     Column() {
+      // 主题纪元重挂载(勿拆):epoch 变化 → 整页子树销毁重建,全量重读令牌
+      ForEach([this.themeEpoch], (_e: number): void => {
       PageTitleBar({ title: '定时任务' })
 
       if (!this.executionAvailable) {
@@ -268,7 +271,10 @@ struct SettingCronTasksPage {
         .layoutWeight(1)
         .align(Alignment.TopStart)
       }
-    }
+    
+      }, (e: number): string => `theme-${e}`)
+}
+      .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .width('100%').height('100%').backgroundColor(BG)
   }
 }

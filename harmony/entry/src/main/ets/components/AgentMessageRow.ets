@@ -1,7 +1,7 @@
 // AgentMessageRow — chat/novel 共用的完整 agent 消息行。
 // host 通过静态 capabilities 决定可交互入口，并用具名 hostFooter slot 注入宿主尾部。
 
-import { INK, INK3, META, SURFACE2, USER_BG, USER_INK, ACCENT } from '../design/tokens.ets';
+import { MOTION_OVERLAY, INK, INK3, META, SURFACE2, USER_BG, USER_INK, ACCENT } from '../design/tokens.ets';
 import type {
   AskUserQuestion, MessagePartBlock, ReasoningCardState, ThinkingStep, UIMessage,
   UIMessagePartDocument, UIMessagePartReasoning, UIMessagePartTool,
@@ -67,6 +67,7 @@ export const NO_AGENT_MESSAGE_ROW_CAPABILITIES: AgentMessageRowHostCapabilities 
 
 @Component
 export struct AgentMessageRow {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @StorageProp('darkMode') darkMode: boolean = false;
   @Prop message: UIMessage;
   @Prop capabilities: AgentMessageRowHostCapabilities = NO_AGENT_MESSAGE_ROW_CAPABILITIES;
@@ -296,7 +297,9 @@ export struct AgentMessageRow {
     const keys: string[] = Object.keys(this.thinkingExpandedStates);
     for (const k of keys) copy[k] = this.thinkingExpandedStates[k];
     copy[key] = !cur;
-    this.thinkingExpandedStates = copy;
+    this.getUIContext().animateTo({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }, (): void => {
+      this.thinkingExpandedStates = copy;
+    });
   }
 
   private hasPendingToolInBlock(bi: number): boolean {
@@ -340,85 +343,96 @@ export struct AgentMessageRow {
   private MessageBlocks(): void {
     ForEach(this.getBlocks(), (block: MessagePartBlock, bi: number): void => {
       if (block.kind === 'thinking' && this.hasVisibleThinkingSteps(block)) {
-        Row() {
-          Text(this.thinkingExpanded(bi) ? '▾' : '▸').fontSize(11).fontColor(INK3)
-          Text(this.thinkingSummary(block.steps))
-            .fontSize(META).fontColor(INK3)
-            .margin({ left: 6 })
-            .layoutWeight(1)
+        Column() {
+          Row() {
+            Text('▸').fontSize(11).fontColor(INK3)
+              .rotate({ angle: this.thinkingExpanded(bi) ? 90 : 0 })
+              .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut })
+            Text(this.thinkingSummary(block.steps))
+              .fontSize(META).fontColor(INK3)
+              .margin({ left: 6 })
+              .layoutWeight(1)
+          }
+          .width('100%')
+          .padding({ left: 8, right: 8, top: 4, bottom: 4 })
+          .backgroundColor(SURFACE2)
+          .borderRadius(6)
+          .margin({ bottom: 2 })
+          .onClick((): void => { this.toggleThinkingExpanded(bi); })
+
+          if (this.thinkingExpanded(bi)) {
+            Column() {
+              ForEach(block.steps, (step: ThinkingStep, si: number): void => {
+                if (step.kind === 'reasoning') {
+                  if (this.showThinkingContent) {
+                    ChatMessageReasoning({
+                      part: step.reasoning,
+                      state: this.reasoningStateAt(`${bi}-${si}`),
+                      loading: this.reasoningLoading(step.reasoning),
+                      autoCloseThinking: this.autoCloseThinking,
+                      onToggle: (): void => {
+                        this.toggleReasoning(`${bi}-${si}`, this.reasoningLoading(step.reasoning));
+                      },
+                      onAutoCollapse: (): void => { this.autoCollapseReasoning(`${bi}-${si}`); },
+                    })
+                  }
+                } else if (step.kind === 'tool') {
+                  if (step.tool.toolName === ASK_USER_TOOL_NAME) {
+                    ChatMessageAskUserStep({
+                      part: step.tool,
+                      answers: this.askAnswers,
+                      multiAnswers: this.askMultiAnswers,
+                      interactive: this.capabilities.answerTool,
+                      onSubmit: (_a: Record<string, string>, _m: Record<string, string[]>): void => {
+                        this.submitAskAnswers(step.tool);
+                      },
+                      onAnswer: (qid: string, value: string): void => { this.setAskAnswer(qid, value); },
+                      onToggleMulti: (qid: string, opt: string): void => { this.toggleAskMulti(qid, opt); },
+                      onClear: (): void => { this.clearAskDrafts(); },
+                    })
+                  } else {
+                    ChatMessageTools({
+                      part: step.tool,
+                      jevSubjectHash: this.jevSubjectHashForPart(step.tool, this.locatorFor(step.tool)),
+                      canApprove: this.capabilities.approveTool && this.packageAskUserPart(step.tool) === null,
+                      canDeny: this.capabilities.denyTool,
+                      canOpenPreview: this.capabilities.openToolPreview,
+                      streaming: this.streaming,
+                      onModifyImage: (url: string): void => { this.onModifyGeneratedImage(url); },
+                      onApprove: (toolCallId: string): void => {
+                        this.onApproveTool(toolCallId, this.locatorFor(step.tool));
+                      },
+                      onDeny: (toolCallId: string): void => {
+                        this.onDenyTool(toolCallId, this.locatorFor(step.tool));
+                      },
+                      onOpenPreview: (): void => { this.onOpenToolPreview(step.tool, this.locatorFor(step.tool)); },
+                      deniedLabel: step.tool.approvalState.type === 'denied' ? this.deniedLabel(step.tool) : '',
+                    })
+                    if (this.packageAskUserPart(step.tool) !== null) {
+                      ChatMessageAskUserStep({
+                        part: this.packageAskUserPart(step.tool)!,
+                        answers: this.askAnswers,
+                        multiAnswers: this.askMultiAnswers,
+                        interactive: this.capabilities.answerTool,
+                        onSubmit: (_a: Record<string, string>, _m: Record<string, string[]>): void => {
+                          this.submitAskAnswers(step.tool);
+                        },
+                        onAnswer: (qid: string, value: string): void => { this.setAskAnswer(qid, value); },
+                        onToggleMulti: (qid: string, opt: string): void => { this.toggleAskMulti(qid, opt); },
+                        onClear: (): void => { this.clearAskDrafts(); },
+                      })
+                    }
+                  }
+                }
+              }, (step: ThinkingStep, si: number): string => `${bi}-${si}-${step.kind}`)
+            }
+            .width('100%')
+            .transition(TransitionEffect.OPACITY.combine(TransitionEffect.translate({ y: -8 }))
+              .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
+          }
         }
         .width('100%')
-        .padding({ left: 8, right: 8, top: 4, bottom: 4 })
-        .backgroundColor(SURFACE2)
-        .borderRadius(6)
-        .margin({ bottom: 2 })
-        .onClick((): void => { this.toggleThinkingExpanded(bi); })
-
-        if (this.thinkingExpanded(bi)) {
-          ForEach(block.steps, (step: ThinkingStep, si: number): void => {
-            if (step.kind === 'reasoning') {
-              if (this.showThinkingContent) {
-                ChatMessageReasoning({
-                  part: step.reasoning,
-                  state: this.reasoningStateAt(`${bi}-${si}`),
-                  loading: this.reasoningLoading(step.reasoning),
-                  autoCloseThinking: this.autoCloseThinking,
-                  onToggle: (): void => {
-                    this.toggleReasoning(`${bi}-${si}`, this.reasoningLoading(step.reasoning));
-                  },
-                  onAutoCollapse: (): void => { this.autoCollapseReasoning(`${bi}-${si}`); },
-                })
-              }
-            } else if (step.kind === 'tool') {
-              if (step.tool.toolName === ASK_USER_TOOL_NAME) {
-                ChatMessageAskUserStep({
-                  part: step.tool,
-                  answers: this.askAnswers,
-                  multiAnswers: this.askMultiAnswers,
-                  interactive: this.capabilities.answerTool,
-                  onSubmit: (_a: Record<string, string>, _m: Record<string, string[]>): void => {
-                    this.submitAskAnswers(step.tool);
-                  },
-                  onAnswer: (qid: string, value: string): void => { this.setAskAnswer(qid, value); },
-                  onToggleMulti: (qid: string, opt: string): void => { this.toggleAskMulti(qid, opt); },
-                  onClear: (): void => { this.clearAskDrafts(); },
-                })
-              } else {
-                ChatMessageTools({
-                  part: step.tool,
-                  jevSubjectHash: this.jevSubjectHashForPart(step.tool, this.locatorFor(step.tool)),
-                  canApprove: this.capabilities.approveTool && this.packageAskUserPart(step.tool) === null,
-                  canDeny: this.capabilities.denyTool,
-                  canOpenPreview: this.capabilities.openToolPreview,
-                  streaming: this.streaming,
-                  onModifyImage: (url: string): void => { this.onModifyGeneratedImage(url); },
-                  onApprove: (toolCallId: string): void => {
-                    this.onApproveTool(toolCallId, this.locatorFor(step.tool));
-                  },
-                  onDeny: (toolCallId: string): void => {
-                    this.onDenyTool(toolCallId, this.locatorFor(step.tool));
-                  },
-                  onOpenPreview: (): void => { this.onOpenToolPreview(step.tool, this.locatorFor(step.tool)); },
-                  deniedLabel: step.tool.approvalState.type === 'denied' ? this.deniedLabel(step.tool) : '',
-                })
-                if (this.packageAskUserPart(step.tool) !== null) {
-                  ChatMessageAskUserStep({
-                    part: this.packageAskUserPart(step.tool)!,
-                    answers: this.askAnswers,
-                    multiAnswers: this.askMultiAnswers,
-                    interactive: this.capabilities.answerTool,
-                    onSubmit: (_a: Record<string, string>, _m: Record<string, string[]>): void => {
-                      this.submitAskAnswers(step.tool);
-                    },
-                    onAnswer: (qid: string, value: string): void => { this.setAskAnswer(qid, value); },
-                    onToggleMulti: (qid: string, opt: string): void => { this.toggleAskMulti(qid, opt); },
-                    onClear: (): void => { this.clearAskDrafts(); },
-                  })
-                }
-              }
-            }
-          }, (step: ThinkingStep, si: number): string => `${bi}-${si}-${step.kind}`)
-        }
+        .clip(true)
       } else if (block.kind === 'content') {
         if (block.part.type === 'text') {
           if (this.message.role === 'user') {
@@ -593,6 +607,7 @@ export struct AgentMessageRow {
       })
       this.hostFooter()
     }
+      .enabled(this.themeEpoch >= 0)
     .width('100%')
     .alignItems(this.message.role === 'user' ? HorizontalAlign.End : HorizontalAlign.Start)
     .padding({ top: 8, bottom: 8 })

@@ -34,6 +34,7 @@ interface VersionTarget {
 @Entry
 @Component
 struct MiniAppListPage {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @State apps: MiniAppRecord[] = [];
   @State loaded: boolean = false;
   @State renameTarget: RenameTarget | null = null;
@@ -504,6 +505,8 @@ struct MiniAppListPage {
 
   build(): void {
     Stack() {
+      // 主题纪元重挂载(勿拆):epoch 变化 → 整页子树销毁重建,全量重读令牌
+      ForEach([this.themeEpoch], (_e: number): void => {
       Column() {
         this.topBar()
 
@@ -546,7 +549,10 @@ struct MiniAppListPage {
       if (this.deleteTarget !== null) {
         this.deleteDialog(this.deleteTarget)
       }
-    }
+    
+      }, (e: number): string => `theme-${e}`)
+}
+      .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .width('100%').height('100%')
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
   }

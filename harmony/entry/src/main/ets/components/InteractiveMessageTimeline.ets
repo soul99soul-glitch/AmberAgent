@@ -6,6 +6,7 @@ import { DotLoading } from './ui/DotLoading.ets';
 
 @Component
 export struct InteractiveMessageTimeline {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   scroller: Scroller = new Scroller();
   @Prop horizontalGutter: number = 20;
   @Prop topPadding: number = 0;
@@ -46,6 +47,7 @@ export struct InteractiveMessageTimeline {
       this.activeTail()
       this.hostTail()
     }
+      .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .width('100%')
     .layoutWeight(1)
     .cachedCount(this.cachedItems)

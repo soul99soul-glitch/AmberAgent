@@ -101,6 +101,7 @@ class TerminalBridge {
 
 @Component
 export struct TerminalView {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   viewController: TerminalViewController = new TerminalViewController();
   onReady: (columns: number, rows: number) => void = (_columns: number, _rows: number): void => {};
   onInput: (bytes: Uint8Array) => void = (_bytes: Uint8Array): void => {};
@@ -152,7 +153,8 @@ export struct TerminalView {
 
   build(): void {
     Web({ src: $rawfile('terminal/host.html'), controller: this.webController })
-      .width('100%').height('100%').backgroundColor(BG)
+      
+      .opacity(this.themeEpoch >= 0 ? 1 : 1).width('100%').height('100%').backgroundColor(BG)
       .javaScriptAccess(true)
       .domStorageAccess(false)
       .verticalScrollBarAccess(false)

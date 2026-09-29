@@ -6,6 +6,7 @@ import { INK, INK3, ACCENT, SURFACE, SIGNAL, ERROR } from '../design/tokens.ets'
 
 @Component
 export struct SubAgentAvatar {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop subagentId: string = '';
   @Prop name: string = '';
   @Prop avatarSize: number = 24;
@@ -29,6 +30,7 @@ export struct SubAgentAvatar {
           .strokeWidth(1.5)
       }
     }
+      .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .width(this.avatarSize + 2).height(this.avatarSize + 2)
   }
 

@@ -73,6 +73,7 @@ interface DynamicSeatDoc {
 @Entry
 @Component
 struct CouncilRunPage {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @StorageProp('statusBarHeight') statusBarHeight: number = 44;
   @StorageProp('accentColor') accentColorStore: string = ACCENT;
   // ── 议题与设置(setup 阶段可改) ──
@@ -886,10 +887,15 @@ struct CouncilRunPage {
 
   build(): void {
     Column() {
+      // 主题纪元重挂载(勿拆):epoch 变化 → 整页子树销毁重建,全量重读令牌
+      ForEach([this.themeEpoch], (_e: number): void => {
       this.Header()
       this.Transcript()
       this.Composer()
-    }
+    
+      }, (e: number): string => `theme-${e}`)
+}
+      .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .width('100%').height('100%').backgroundColor(BG)
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
   }

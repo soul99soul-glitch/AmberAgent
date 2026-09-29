@@ -56,6 +56,7 @@ const checkPermGranted = async (perm: Permissions): Promise<boolean> => {
 @Entry
 @Component
 struct SettingSystemAccessPage {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @StorageProp('accentColor') accentColorStore: string = ACCENT;
   @State items: PermissionItem[] = [];
   @State loaded: boolean = false;
@@ -191,6 +192,8 @@ struct SettingSystemAccessPage {
 
   build(): void {
     Column() {
+      // 主题纪元重挂载(勿拆):epoch 变化 → 整页子树销毁重建,全量重读令牌
+      ForEach([this.themeEpoch], (_e: number): void => {
       CenteredTitleBar({
         title: '系统访问',
         actionText: '完成',
@@ -219,7 +222,10 @@ struct SettingSystemAccessPage {
         .align(Alignment.TopStart)
         .layoutWeight(1)
       }
-    }
+    
+      }, (e: number): string => `theme-${e}`)
+}
+      .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .width('100%').height('100%').backgroundColor(BG)
   }
 }

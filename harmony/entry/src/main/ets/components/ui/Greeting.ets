@@ -13,10 +13,12 @@ export const greetingMessage = (): string => {
 
 @Component
 export struct Greeting {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop fontSize: number = BODY;
   @Prop color: string = INK;
   build(): void {
     Text(greetingMessage())
-      .fontSize(this.fontSize).fontColor(this.color)
+      
+      .opacity(this.themeEpoch >= 0 ? 1 : 1).fontSize(this.fontSize).fontColor(this.color)
   }
 }

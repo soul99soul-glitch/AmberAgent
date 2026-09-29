@@ -8,6 +8,7 @@ import { Icon } from './Icon.ets';
 
 @Component
 export struct SearchField {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop value: string = '';
   @Prop placeholder: string = '';
   onChange: (value: string) => void = (_v: string): void => {};
@@ -36,6 +37,7 @@ export struct SearchField {
         .onClick((): void => { this.onChange(''); })
       }
     }
+      .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .width('100%')
     .padding({ left: 14, right: 14, top: 10, bottom: 10 })
     .backgroundColor(SURFACE2)

@@ -5,7 +5,7 @@ import { router } from '@kit.ArkUI';
 import { Icon } from '../components/ui/Icon.ets';
 import type { KeyValueStore } from '@amber/chat-domain';
 import { getChatKvStore } from '../di/AppContainer.ets';
-import { INK, INK2, INK3, SURFACE, SURFACE2, LINE, BG, ACCENT, ACCENT_LIGHT, BODY, META, TITLE, GUTTER, RADIUS } from '../design/tokens.ets';
+import { INK, INK2, INK3, SURFACE, SURFACE2, LINE, BG, ACCENT, ACCENT_LIGHT, BODY, META, TITLE, GUTTER, RADIUS, MOTION_OVERLAY } from '../design/tokens.ets';
 
 const DANGER: string = 'ERROR';
 const QUICK_MESSAGES_KEY: string = 'quick_messages';
@@ -50,6 +50,7 @@ const decodeMessages = (raw: string): QuickMessage[] | null => {
 @Entry
 @Component
 struct QuickMessagesPage {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @StorageProp('statusBarHeight') statusBarHeight: number = 44;
   @State items: QuickMessage[] = [];
   @State loaded: boolean = false;
@@ -160,6 +161,8 @@ struct QuickMessagesPage {
 
   build(): void {
     Column() {
+      // 主题纪元重挂载(勿拆):epoch 变化 → 整页子树销毁重建,全量重读令牌
+      ForEach([this.themeEpoch], (_e: number): void => {
       CenteredTitleBar({ title: '快捷消息', actionIcon: this.editing ? '' : 'plus',
         onAction: (): void => { this.startNew(); } })
 
@@ -194,6 +197,8 @@ struct QuickMessagesPage {
           }.width('100%').padding({ left: GUTTER, right: GUTTER, top: 16 })
         }
         .align(Alignment.TopStart).layoutWeight(1)
+        .transition(TransitionEffect.OPACITY.combine(TransitionEffect.translate({ x: 12 }))
+          .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
       } else if (!this.loaded) {
         Column() {
           Text('加载中…').fontSize(BODY).fontColor(INK3)
@@ -211,6 +216,7 @@ struct QuickMessagesPage {
             .margin({ top: 18 })
           Text('点右上角新建一条').fontSize(META).fontColor(INK3).margin({ top: 8 })
         }.width('100%').padding({ top: 64, bottom: 64 }).alignItems(HorizontalAlign.Center)
+          .transition(TransitionEffect.OPACITY.animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
       } else {
         List() {
           ForEach(this.items, (item: QuickMessage): void => {
@@ -226,7 +232,11 @@ struct QuickMessagesPage {
             }.swipeAction({ end: this.swipeActions(item) });
           }, (item: QuickMessage): string => item.id)
         }.width('100%').layoutWeight(1).divider({ strokeWidth: 1, color: LINE })
+          .transition(TransitionEffect.OPACITY.animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
       }
-    }.width('100%').height('100%').backgroundColor(BG)
+    
+      }, (e: number): string => `theme-${e}`)
+}
+      .opacity(this.themeEpoch >= 0 ? 1 : 1).width('100%').height('100%').backgroundColor(BG)
   }
 }

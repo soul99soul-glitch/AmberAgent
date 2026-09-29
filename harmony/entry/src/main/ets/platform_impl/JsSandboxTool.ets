@@ -140,11 +140,13 @@ export const getJsSandboxSession = (): JsSandboxSession => {
 // JsSandboxHost — 沙箱宿主(1x1 移出屏;不需要真实渲染,JS 与渲染树无关)
 @Component
 export struct JsSandboxHost {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   private session: JsSandboxSession = getJsSandboxSession();
 
   build(): void {
     Web({ src: 'about:blank', controller: this.session.getController() })
-      .width(1).height(1)
+      
+      .opacity(this.themeEpoch >= 0 ? 1 : 1).width(1).height(1)
       .position({ x: -2000, y: -2000 })
       .onControllerAttached((): void => {
         this.session.markAttached();

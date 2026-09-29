@@ -6,6 +6,7 @@ import { Icon } from './Icon.ets';
 
 @Component
 export struct ExportDialog {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop show: boolean = false;
   @Prop title: string = '导出';
   onExportToFile: () => void = (): void => {};
@@ -50,6 +51,7 @@ export struct ExportDialog {
         .padding({ left: 20, top: 14, bottom: 14 })
         .onClick((): void => { this.onDismiss(); })
     }
+      .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .width('100%')
     .backgroundColor(SURFACE)
   }

@@ -21,6 +21,7 @@ const TEST_ERROR: string = 'error';
 
 @Component
 export struct ProviderConnectionTester {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop baseUrl: string = '';
   @Prop apiKey: string = '';
   @State testState: string = TEST_IDLE;
@@ -138,6 +139,7 @@ export struct ProviderConnectionTester {
         .alignItems(VerticalAlign.Top)
       }
     }
+      .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .width('100%')
     .alignItems(HorizontalAlign.Start)
   }

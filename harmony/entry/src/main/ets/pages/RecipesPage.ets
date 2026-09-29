@@ -3,7 +3,7 @@ import type { AgentTool, JsonObject, InstalledRecipe, RecipeDescriptor, RecipeIm
   RecipeInputType, RecipeStore } from '@amber/chat-domain';
 import { getRecipeStore, getRecipePrimitives, startRecipeFromPage } from '../di/AppContainer.ets';
 import { CenteredTitleBar, CardGroup } from '../components/PageTemplate.ets';
-import { BG, SURFACE, SURFACE2, INK, INK2, INK3, LINE, ERROR, ACCENT, GUTTER } from '../design/tokens.ets';
+import { BG, SURFACE, SURFACE2, INK, INK2, INK3, LINE, ERROR, ACCENT, GUTTER, MOTION_OVERLAY } from '../design/tokens.ets';
 import { FONT_MONO } from '../design/fonts.ets';
 
 class RecipeColors {
@@ -31,6 +31,7 @@ class RecipeInputField {
 @Entry
 @Component
 struct RecipesPage {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @State installed: InstalledRecipe[] = [];
   @State primitives: AgentTool[] = [];
   @State workspacePath: string = '';
@@ -118,7 +119,8 @@ struct RecipesPage {
 
   private closeDetail(): void {
     if (this.busy.length > 0) return;
-    this.preview = null; this.detail = null; this.inputFields = [];
+    this.preview = null; this.detail = null;
+    // 输入在下次选择时重建，退出过渡保留当前编辑内容。
     this.error = ''; this.notice = '';
   }
 
@@ -305,52 +307,52 @@ struct RecipesPage {
   }
 
   @Builder
-  private ManifestCard(): void {
+  private ManifestCard(detail: RecipeDescriptor | null): void {
     Column({ space: 8 }) {
-      if (this.detail !== null) {
+      if (detail !== null) {
         Row({ space: 8 }) {
-          Text(this.detail.manifest.name).fontSize(16).fontColor(this.colors.ink).layoutWeight(1)
+          Text(detail.manifest.name).fontSize(16).fontColor(this.colors.ink).layoutWeight(1)
             .wordBreak(WordBreak.BREAK_ALL)
           Button('关闭').type(ButtonType.Normal).height(44).constraintSize({ minWidth: 56 }).fontSize(13)
             .fontColor(this.colors.secondary).backgroundColor(this.colors.inset).enabled(this.busy.length === 0)
             .onClick((): void => { this.closeDetail(); })
         }.width('100%')
-        Text(`版本 ${this.detail.manifest.version}`).fontSize(12).fontColor(this.colors.secondary).width('100%')
+        Text(`版本 ${detail.manifest.version}`).fontSize(12).fontColor(this.colors.secondary).width('100%')
           .wordBreak(WordBreak.BREAK_ALL)
-        Text(this.detail.manifest.description).fontSize(13).fontColor(this.colors.ink).width('100%')
+        Text(detail.manifest.description).fontSize(13).fontColor(this.colors.ink).width('100%')
           .wordBreak(WordBreak.BREAK_ALL)
         Text('内容 SHA-256').fontSize(12).fontColor(this.colors.secondary).width('100%')
-        Text(this.detail.hash).fontSize(12).fontFamily(FONT_MONO).fontColor(this.colors.ink).width('100%')
+        Text(detail.hash).fontSize(12).fontFamily(FONT_MONO).fontColor(this.colors.ink).width('100%')
           .wordBreak(WordBreak.BREAK_ALL).copyOption(CopyOptions.LocalDevice)
-        if (this.missingTools(this.detail).length > 0) {
-          Text(`默认助手本地目录缺失工具：${this.missingTools(this.detail).join('、')}`)
+        if (this.missingTools(detail).length > 0) {
+          Text(`默认助手本地目录缺失工具：${this.missingTools(detail).join('、')}`)
             .fontSize(12).fontColor(this.colors.error).width('100%').wordBreak(WordBreak.BREAK_ALL)
         }
         Text('完整清单（输入类型、步骤参数与输出绑定）').fontSize(12).fontColor(this.colors.secondary).width('100%')
-        Text(this.detail.canonicalJSON).fontSize(12).fontFamily(FONT_MONO).fontColor(this.colors.ink).width('100%')
+        Text(detail.canonicalJSON).fontSize(12).fontFamily(FONT_MONO).fontColor(this.colors.ink).width('100%')
           .wordBreak(WordBreak.BREAK_ALL).copyOption(CopyOptions.LocalDevice)
       }
     }.width('100%').padding(14)
   }
 
   @Builder
-  private PreviewCard(): void {
+  private PreviewCard(preview: RecipeImportPreview | null): void {
     Column({ space: 8 }) {
-      if (this.preview !== null) {
-        Text(this.preview.baseHash === null ? '安装预览 · 新 Recipe' : '安装预览 · 更新已安装 Recipe')
+      if (preview !== null) {
+        Text(preview.baseHash === null ? '安装预览 · 新 Recipe' : '安装预览 · 更新已安装 Recipe')
           .fontSize(14).fontColor(this.colors.ink).width('100%')
-        Text(`Workspace：${this.preview.workspacePath}`).fontSize(12).fontColor(this.colors.secondary).width('100%')
+        Text(`Workspace：${preview.workspacePath}`).fontSize(12).fontColor(this.colors.secondary).width('100%')
           .wordBreak(WordBreak.BREAK_ALL).copyOption(CopyOptions.LocalDevice)
-        if (this.preview.baseHash !== null) {
-          Text(`已安装基线 SHA-256：${this.preview.baseHash}`).fontSize(12).fontFamily(FONT_MONO)
+        if (preview.baseHash !== null) {
+          Text(`已安装基线 SHA-256：${preview.baseHash}`).fontSize(12).fontFamily(FONT_MONO)
             .fontColor(this.colors.secondary).width('100%').wordBreak(WordBreak.BREAK_ALL)
             .copyOption(CopyOptions.LocalDevice)
         }
-        Text(`涉及工具：${this.preview.envelope.tools.join('、')}`).fontSize(12).fontColor(this.colors.ink)
+        Text(`涉及工具：${preview.envelope.tools.join('、')}`).fontSize(12).fontColor(this.colors.ink)
           .width('100%').wordBreak(WordBreak.BREAK_ALL)
-        Text(`风险：${this.preview.envelope.risk === 'high' ? '高' : this.preview.envelope.risk === 'sensitive' ? '敏感' : '常规'} · ${
-          this.preview.envelope.mutates ? '会修改数据' : '无声明的数据修改'} · ${
-          this.preview.envelope.needsApproval ? '步骤包含审批' : '仍按当前步骤权限执行'}`)
+        Text(`风险：${preview.envelope.risk === 'high' ? '高' : preview.envelope.risk === 'sensitive' ? '敏感' : '常规'} · ${
+          preview.envelope.mutates ? '会修改数据' : '无声明的数据修改'} · ${
+          preview.envelope.needsApproval ? '步骤包含审批' : '仍按当前步骤权限执行'}`)
           .fontSize(12).fontColor(this.colors.secondary).width('100%')
         Text('确认只安装清单；运行时每个步骤仍使用当前助手的工具与审批。候选文件或已安装版本变化会拒绝此次安装。')
           .fontSize(12).fontColor(this.colors.secondary).width('100%')
@@ -359,9 +361,9 @@ struct RecipesPage {
   }
 
   @Builder
-  private RunCard(): void {
+  private RunCard(detail: RecipeDescriptor | null, preview: RecipeImportPreview | null): void {
     Column({ space: 8 }) {
-      if (this.detail !== null && this.preview === null) {
+      if (detail !== null && preview === null) {
         Row({ space: 8 }) {
           Text(this.detailEnabled ? '已启用' : '已停用').fontSize(13).fontColor(this.colors.secondary).layoutWeight(1)
           Button(this.detailEnabled ? '停用' : '启用').type(ButtonType.Normal).height(44).fontSize(13)
@@ -399,20 +401,43 @@ struct RecipesPage {
                 .onChange((value: string): void => { this.changeInput(field.name, value, this.inputChecked(field.name)); })
             }
           }.width('100%')
-        }, (field: RecipeInputField): string => `${this.detail === null ? '' : this.detail.hash}:${field.name}`)
+        }, (field: RecipeInputField): string => `${detail === null ? '' : detail.hash}:${field.name}`)
         Text('使用当前默认助手的本地工具配置，提交固定名称、内容 hash 与输入到对话。逐步审批、进度和最终结果都在对话中查看。')
           .fontSize(12).fontColor(this.colors.secondary).width('100%')
         Button('在对话中运行').type(ButtonType.Normal).height(44).width('100%').fontSize(14)
           .fontColor(this.accentColor).backgroundColor(this.colors.inset)
-          .enabled(this.detailEnabled && this.missingTools(this.detail).length === 0 &&
+          .enabled(this.detailEnabled && this.missingTools(detail).length === 0 &&
             this.busy.length === 0 && !this.backgrounded)
           .onClick((): void => { this.runRecipe(); })
       }
     }.width('100%').padding(14)
   }
 
+  // Builder 参数保留当前详情，关闭时 nullable 状态清空不会影响退出帧。
+  @Builder
+  private DetailPanel(detail: RecipeDescriptor, preview: RecipeImportPreview | null): void {
+    Column({ space: 12 }) {
+      if (preview !== null) {
+        CardGroup({ content: (): void => { this.PreviewCard(preview); } })
+      }
+      CardGroup({ content: (): void => { this.ManifestCard(detail); } })
+      if (preview !== null) {
+        Button(preview.baseHash === null ? '确认安装' : '确认更新').type(ButtonType.Normal).height(44)
+          .width('100%').fontSize(14).fontColor(this.accentColor).backgroundColor(this.colors.surface)
+          .enabled(this.busy.length === 0 && !this.backgrounded)
+          .onClick((): void => { this.applyImport(); })
+      } else {
+        CardGroup({ content: (): void => { this.RunCard(detail, preview); } })
+      }
+    }.width('100%').alignItems(HorizontalAlign.Start)
+      .transition(TransitionEffect.OPACITY.combine(TransitionEffect.translate({ y: 8 }))
+        .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
+  }
+
   build(): void {
     Column() {
+      // 主题纪元重挂载(勿拆):epoch 变化 → 整页子树销毁重建,全量重读令牌
+      ForEach([this.themeEpoch], (_e: number): void => {
       CenteredTitleBar({ title: 'Recipes', actionText: '刷新', onAction: (): void => { this.load(); } })
       Scroll() {
         Column({ space: 12 }) {
@@ -429,25 +454,20 @@ struct RecipesPage {
             Text(this.notice).fontSize(12).fontColor(this.colors.secondary).width('100%')
           }
           if (this.detail !== null) {
-            if (this.preview !== null) {
-              CardGroup({ content: (): void => { this.PreviewCard(); } })
-            }
-            CardGroup({ content: (): void => { this.ManifestCard(); } })
-            if (this.preview !== null) {
-              Button(this.preview.baseHash === null ? '确认安装' : '确认更新').type(ButtonType.Normal).height(44)
-                .width('100%').fontSize(14).fontColor(this.accentColor).backgroundColor(this.colors.surface)
-                .enabled(this.busy.length === 0 && !this.backgrounded)
-                .onClick((): void => { this.applyImport(); })
-            } else {
-              CardGroup({ content: (): void => { this.RunCard(); } })
-            }
+            this.DetailPanel(this.detail, this.preview)
           } else {
-            Text('已安装').fontSize(14).fontColor(this.colors.secondary).width('100%')
-            CardGroup({ content: (): void => { this.InstalledCard(); } })
+            Column({ space: 12 }) {
+              Text('已安装').fontSize(14).fontColor(this.colors.secondary).width('100%')
+              CardGroup({ content: (): void => { this.InstalledCard(); } })
+            }.width('100%').alignItems(HorizontalAlign.Start)
+              .transition(TransitionEffect.OPACITY.animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
           }
         }.width('100%').padding({ left: GUTTER, right: GUTTER, top: 12, bottom: 16 + this.navBarHeight })
           .justifyContent(FlexAlign.Start)
       }.width('100%').layoutWeight(1).align(Alignment.TopStart).scrollBar(BarState.Auto)
-    }.width('100%').height('100%').backgroundColor(this.colors.background)
+    
+      }, (e: number): string => `theme-${e}`)
+}
+      .opacity(this.themeEpoch >= 0 ? 1 : 1).width('100%').height('100%').backgroundColor(this.colors.background)
   }
 }

@@ -18,6 +18,7 @@ export interface NovelBranchSheetBranch {
 
 @Component
 export struct NovelBranchSheet {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop visible: boolean = false;
   @Prop activeBranchId: string = '';
   @Prop branches: NovelBranchSheetBranch[] = [];
@@ -35,7 +36,7 @@ export struct NovelBranchSheet {
   onResolveUnresolved: () => void = (): void => {};
 
   build(): void {
-    if (this.visible) {
+    if (this.themeEpoch >= 0 && this.visible) {
       Stack() {
         Row() {}
           .width('100%').height('100%').backgroundColor(OVERLAY)

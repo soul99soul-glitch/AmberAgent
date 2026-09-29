@@ -7,6 +7,7 @@ import { INK, INK2, INK3, INK4, SURFACE, SURFACE2, LINE, ACCENT, BODY, META, LAB
 
 @Component
 export struct DataTable {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop headers: string[] = [];
   @Prop rows: string[][] = [];
   @Prop sortable: boolean = false;
@@ -59,7 +60,7 @@ export struct DataTable {
   }
 
   build(): void {
-    if (this.headers.length === 0) {
+    if (this.themeEpoch >= 0 && this.headers.length === 0) {
       Column() {
         Text('暂无数据').fontSize(META).fontColor(INK3)
       }

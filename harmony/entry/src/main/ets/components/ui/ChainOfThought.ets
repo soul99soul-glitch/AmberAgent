@@ -17,6 +17,7 @@ export interface CotStep {
 
 @Component
 export struct ChainOfThought {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop steps: CotStep[] = [];
   @Prop collapsedVisibleCount: number = 2;
   @Prop title: string = '思维链';
@@ -69,6 +70,7 @@ export struct ChainOfThought {
       .width('100%')
       .alignItems(VerticalAlign.Top)
     }
+      .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .width('100%')
   }
 

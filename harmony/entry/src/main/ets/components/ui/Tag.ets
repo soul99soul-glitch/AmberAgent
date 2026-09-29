@@ -12,6 +12,7 @@ export enum TagType {
 
 @Component
 export struct Tag {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop type: TagType = TagType.Default;
   @Prop text: string = '';
   onClick: () => void = (): void => {};
@@ -33,7 +34,8 @@ export struct Tag {
 
   build(): void {
     Text(this.text)
-      .fontSize(11)
+      
+      .opacity(this.themeEpoch >= 0 ? 1 : 1).fontSize(11)
       .fontWeight(FontWeight.Medium)
       .fontColor(this.fgColor())
       .padding({ left: 6, right: 6, top: 3, bottom: 3 })

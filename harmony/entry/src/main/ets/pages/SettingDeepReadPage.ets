@@ -7,7 +7,7 @@
 //   FooterNote 组下脚注,逻辑零改动(读写/测试连通/保存/模型库增删全原样)。
 import {
   ACCENT, BG, INK, INK3, INK4, SURFACE, SURFACE2, ERROR, SIGNAL, LINE,
-  TEXT_STYLES, GUTTER, accentSoftBg, lineHeightForSize,
+  TEXT_STYLES, GUTTER, MOTION_OVERLAY, accentSoftBg, lineHeightForSize,
 } from '../design/tokens.ets';
 import { FONT_SANS_MEDIUM, FONT_MONO_MEDIUM } from '../design/fonts.ets';
 import {
@@ -55,6 +55,7 @@ const KEYED_SOURCES: SearchSourceDef[] = [
 @Entry
 @Component
 struct SettingDeepReadPage {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @StorageProp('accentColor') accentColorStore: string = ACCENT;
   @State aiKey: string = '';
   @State aiBaseUrl: string = 'https://api.deepseek.com';
@@ -86,10 +87,17 @@ struct SettingDeepReadPage {
   @State newModel: string = 'deepseek-chat';
   @State modelSaved: string = '';
   @State modelSheetOpen: boolean = false;
+
   private storage: Storage | null = null;
   private pageAlive: boolean = false;
   private loadToken: number = 0;
   private pageLoad: Promise<void> = Promise.resolve();
+
+  onBackPress(): boolean {
+    if (!this.modelSheetOpen) return false;
+    this.modelSheetOpen = false;
+    return true;
+  }
 
   aboutToAppear(): void {
     this.pageAlive = true;
@@ -265,10 +273,13 @@ struct SettingDeepReadPage {
       .padding({ bottom: 12 })
       .backgroundColor(SURFACE)
       .borderRadius({ topLeft: 20, topRight: 20 })
+      .transition(TransitionEffect.translate({ y: 160 })
+        .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
     }
     .width('100%').height('100%')
     .backgroundColor('#66000000')
     .justifyContent(FlexAlign.End)
+    .transition(TransitionEffect.OPACITY.animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
   }
 
   @Builder
@@ -435,6 +446,8 @@ struct SettingDeepReadPage {
 
   build(): void {
     Stack() {
+      // 主题纪元重挂载(勿拆):epoch 变化 → 整页子树销毁重建,全量重读令牌
+      ForEach([this.themeEpoch], (_e: number): void => {
       Column() {
         CenteredTitleBar({ title: '深度阅读设置' })
       Scroll() {
@@ -498,7 +511,10 @@ struct SettingDeepReadPage {
       if (this.modelSheetOpen) {
         this.ModelSheet()
       }
-    }
+    
+      }, (e: number): string => `theme-${e}`)
+}
+      .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .width('100%').height('100%')
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
   }
@@ -814,38 +830,50 @@ struct SettingDeepReadPage {
   @Builder
   SourceCard(): void {
     Column() {
-      CardRow({
-        label: '选择搜索源',
-        valueText: KEYED_SOURCES.find((s) => s.id === this.selectedSource)?.displayName ?? '选择',
-        onRowClick: (): void => { this.showSourcePicker = !this.showSourcePicker; },
-      })
-      if (this.showSourcePicker) {
-        Column() {
-          ForEach(KEYED_SOURCES, (s: SearchSourceDef, idx: number): void => {
-            Column() {
-              Row() {
-                Text(s.displayName)
-                  .fontSize(16).fontWeight(FontWeight.Medium).lineHeight(lineHeightForSize(16))
-                  .fontFamily(FONT_SANS_MEDIUM)
-                  .fontColor(s.id === this.selectedSource ? this.accentColorStore : INK)
+      Column() {
+        CardRow({
+          label: '选择搜索源',
+          valueText: KEYED_SOURCES.find((s) => s.id === this.selectedSource)?.displayName ?? '选择',
+          onRowClick: (): void => {
+            this.getUIContext().animateTo({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }, (): void => {
+              this.showSourcePicker = !this.showSourcePicker;
+            });
+          },
+        })
+        if (this.showSourcePicker) {
+          Column() {
+            ForEach(KEYED_SOURCES, (s: SearchSourceDef, idx: number): void => {
+              Column() {
+                Row() {
+                  Text(s.displayName)
+                    .fontSize(16).fontWeight(FontWeight.Medium).lineHeight(lineHeightForSize(16))
+                    .fontFamily(FONT_SANS_MEDIUM)
+                    .fontColor(s.id === this.selectedSource ? this.accentColorStore : INK)
+                }
+                .width('100%').alignItems(VerticalAlign.Center)
+                .constraintSize({ minHeight: 44 })
+                .padding({ left: 32, right: 14, top: 8, bottom: 8 })
+                .onClick((): void => {
+                  this.selectSource(s.id);
+                  this.getUIContext().animateTo({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }, (): void => {
+                    this.showSourcePicker = false;
+                  });
+                })
+                if (idx < KEYED_SOURCES.length - 1) {
+                  this.CardHairline(32)
+                }
               }
-              .width('100%').alignItems(VerticalAlign.Center)
-              .constraintSize({ minHeight: 44 })
-              .padding({ left: 32, right: 14, top: 8, bottom: 8 })
-              .onClick((): void => {
-                this.selectSource(s.id);
-                this.showSourcePicker = false;
-              })
-              if (idx < KEYED_SOURCES.length - 1) {
-                this.CardHairline(32)
-              }
-            }
-            .width('100%')
-          }, (s: SearchSourceDef): string => s.id)
+              .width('100%')
+            }, (s: SearchSourceDef): string => s.id)
+            this.CardHairline(14)
+          }
+          .width('100%')
+          .transition(TransitionEffect.OPACITY.combine(TransitionEffect.translate({ y: -8 }))
+            .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
         }
-        .width('100%')
-        this.CardHairline(14)
       }
+      .width('100%')
+      .clip(true)
       Column() {
         this.FieldLabel('API Key', 0)
         TextInput({

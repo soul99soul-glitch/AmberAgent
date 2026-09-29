@@ -70,6 +70,7 @@ const ADVANCED_ROWS: SwitchRowData[] = [
 @Entry
 @Component
 struct MiniAppSettingsPage {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @State setting: MiniAppSetting = makeMiniAppSetting();
   @State loaded: boolean = false;
   @StorageProp('accentColor') accentColorStore: string = ACCENT;
@@ -262,6 +263,8 @@ struct MiniAppSettingsPage {
 
   build(): void {
     Column() {
+      // 主题纪元重挂载(勿拆):epoch 变化 → 整页子树销毁重建,全量重读令牌
+      ForEach([this.themeEpoch], (_e: number): void => {
       CenteredTitleBar({ title: this.group !== null ? groupTitle(this.group) : '小应用设置' })
 
       Scroll() {
@@ -288,7 +291,10 @@ struct MiniAppSettingsPage {
       .layoutWeight(1)
       .align(Alignment.TopStart)
       .backgroundColor(BG)
-    }
+    
+      }, (e: number): string => `theme-${e}`)
+}
+      .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .width('100%').height('100%')
     .backgroundColor(BG)
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])

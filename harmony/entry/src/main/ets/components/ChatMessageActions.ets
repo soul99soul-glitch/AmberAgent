@@ -9,6 +9,7 @@ import { Icon } from './ui/Icon.ets';
 
 @Component
 export struct ChatMessageActions {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @StorageProp('darkMode') darkMode: boolean = false;
   @Prop isUser: boolean = false;
   @Prop isLastAssistant: boolean = false;
@@ -78,6 +79,7 @@ export struct ChatMessageActions {
           .onClick((): void => this.onFavorite())
       }
     }
+      .opacity(this.themeEpoch >= 0 ? 1 : 1)
       .padding({ top: 4, bottom: 4 })
   }
 }

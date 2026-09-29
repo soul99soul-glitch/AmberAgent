@@ -43,6 +43,7 @@ function extBadgeColor(name: string): string {
 
 @Component
 export struct WorkspaceFileSheet {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop files: WorkspaceFileInfo[] = [];
   @Prop show: boolean = false;
   onDismiss: () => void = (): void => {};
@@ -305,7 +306,7 @@ export struct WorkspaceFileSheet {
   }
 
   build(): void {
-    if (this.show) {
+    if (this.themeEpoch >= 0 && this.show) {
       Stack() {
         // 底层 sheet
         Column() {

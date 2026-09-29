@@ -7,6 +7,7 @@ import { UIAvatar } from '../UIAvatar.ets';
 
 @Component
 export struct AssistantPicker {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop assistants: Assistant[] = [];
   @Prop currentAssistantId: string = '';
   @State sheetOpen: boolean = false;
@@ -30,6 +31,7 @@ export struct AssistantPicker {
         .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
       Text('▾').fontSize(LABEL).fontColor(INK3)
     }
+      .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .width('100%')
     .padding({ left: 12, right: 12, top: 10, bottom: 10 })
     .backgroundColor(SURFACE)

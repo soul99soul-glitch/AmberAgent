@@ -13,6 +13,7 @@ import { INK2, INK3, INK4, SURFACE2, BODY, META, LABEL } from '../design/tokens.
 
 @Component
 export struct ContentAttachmentChip {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop icon: string = '📄';
   @Prop label: string = '';
   @Prop sublabel: string = '';
@@ -21,7 +22,7 @@ export struct ContentAttachmentChip {
   onOpen: () => void = (): void => {};
 
   build(): void {
-    if (this.openable) {
+    if (this.themeEpoch >= 0 && this.openable) {
       Row() { this.ChipContent(); }
         .width('100%')
         .padding({ left: 12, right: 12, top: 8, bottom: 8 })

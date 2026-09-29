@@ -5,6 +5,7 @@ import { Icon } from './Icon.ets';
 
 @Component
 export struct WorkspaceSearchField {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop placeholder: string = '搜索';
   @State searchText: string = '';
   onSearch: (text: string) => void = (_t: string): void => {};
@@ -38,6 +39,7 @@ export struct WorkspaceSearchField {
           })
       }
     }
+      .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .width('100%')
     .padding({ left: 12, right: 12, top: 8, bottom: 8 })
     .backgroundColor(SURFACE2)

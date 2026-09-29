@@ -9,6 +9,7 @@ import { INK2, INK3, ACCENT, SURFACE, BODY, META, LABEL } from '../../design/tok
 
 @Component
 export struct NotionSlider {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop value: number = 0;
   @Prop min: number = 0;
   @Prop max: number = 1;
@@ -49,6 +50,7 @@ export struct NotionSlider {
           .textAlign(TextAlign.End)
       }
     }
+      .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .width('100%')
   }
 }

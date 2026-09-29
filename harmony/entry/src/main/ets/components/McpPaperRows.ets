@@ -1,4 +1,4 @@
-import {
+import { MOTION_OVERLAY,
   ACCENT, ACCENT_LIGHT, INK, INK3, LINE, LINE2, SURFACE2, TEXT_STYLES,
 } from '../design/tokens.ets';
 import { FONT_SANS_SEMIBOLD } from '../design/fonts.ets';
@@ -7,6 +7,7 @@ import { Icon } from './ui/Icon.ets';
 
 @Component
 export struct McpToolPaperRow {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop toolName: string = '';
   @Prop description: string = '';
   @Prop expanded: boolean = false;
@@ -65,10 +66,16 @@ export struct McpToolPaperRow {
         .onClick((): void => { this.onEnableChange(!this.enabledState); })
         .accessibilityText(this.enabledState ? '已开启' : '已关闭')
         Row() {
-          Icon({ name: this.expanded ? 'chevron_down' : 'chevron_right', iconSize: 16, color: INK3 })
+          Icon({ name: 'chevron_right', iconSize: 16, color: INK3 })
+            .rotate({ angle: this.expanded ? 90 : 0 })
+            .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut })
         }
         .width(32).height(44).justifyContent(FlexAlign.Center).alignItems(VerticalAlign.Center)
-        .onClick((): void => { this.onExpand(); })
+        .onClick((): void => {
+          this.getUIContext().animateTo({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }, (): void => {
+            this.onExpand();
+          });
+        })
       }
       .width('100%').constraintSize({ minHeight: 64 })
       .padding({ left: 16, right: 16, top: 12, bottom: 12 })
@@ -101,11 +108,15 @@ export struct McpToolPaperRow {
           }
         }
         .width('100%').padding({ left: 16, right: 16, bottom: 12 }).alignItems(HorizontalAlign.Start)
+        .transition(TransitionEffect.OPACITY.combine(TransitionEffect.translate({ y: -8 }))
+          .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
       }
       if (!this.isLast) {
         PaperSeparator()
       }
     }
+      .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .width('100%')
+    .clip(true)
   }
 }

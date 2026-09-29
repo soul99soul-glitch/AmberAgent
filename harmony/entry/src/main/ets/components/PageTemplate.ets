@@ -21,6 +21,7 @@ import { Icon } from './ui/Icon.ets';
 // ===== Page Header (对齐 PageHeader / SettingsHeader) =====
 @Component
 export struct PageTitleBar {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop title: string = '';
   @Prop showBack: boolean = true;
   @Prop actionText: string = '';
@@ -68,6 +69,7 @@ export struct PageTitleBar {
         .onClick((): void => { this.onAction(); })
       }
     }
+      .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .width('100%')
     // amber-zhenji topbar:高 64,返回钮 48 热区、贴边 4px
     .constraintSize({ minHeight: 64 })
@@ -81,6 +83,7 @@ export struct PageTitleBar {
 // 2026-09-29:右侧发丝线移除(用户裁定对齐 iOS 素组标;分隔线过多)
 @Component
 export struct SectionHeader {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop label: string = '';
   @StorageProp('accentColor') accentColorStore: string = ACCENT;
   build(): void {
@@ -100,6 +103,7 @@ export struct SectionHeader {
         .maxLines(1)
         .textOverflow({ overflow: TextOverflow.Ellipsis })
     }
+      .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .width('100%')
     .alignItems(VerticalAlign.Center)
     // 对齐行内文字(行 padding 左 16):包边页 18+16=34,全出血页 16,两族一致成立
@@ -112,9 +116,11 @@ export struct SectionHeader {
 // 纸面行通用:内容行 + 非末行时追加左右内缩 16 的 1px 分隔线
 @Component
 export struct PaperSeparator {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   build(): void {
     Row()
-      .width('100%')
+      
+      .opacity(this.themeEpoch >= 0 ? 1 : 1).width('100%')
       .height(1)
       .backgroundColor(LINE)
       .margin({ left: 16, right: 16 })
@@ -124,11 +130,13 @@ export struct PaperSeparator {
 // youhua .set-ico:40 圆形图标座(LINE 描边 + SURFACE 底 + INK2 图标)
 @Component
 export struct IconSeat {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop iconName: string = '';
   build(): void {
     Row() {
       Icon({ name: this.iconName, iconSize: 18, color: INK2 })
     }
+      .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .width(40).height(40)
     .borderRadius(20)
     .border({ width: 1, color: LINE })
@@ -141,6 +149,7 @@ export struct IconSeat {
 // youhua .chip:mono 10.5 药丸(SURFACE 底 + LINE2 描边),可带下拉箭头
 @Component
 export struct Chip {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop text: string = '';
   @Prop withChevron: boolean = false;
   @Prop danger: boolean = false;
@@ -156,6 +165,7 @@ export struct Chip {
         Icon({ name: 'chevron_down', iconSize: 12, color: INK3 }).margin({ left: 4 })
       }
     }
+      .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .alignItems(VerticalAlign.Center)
     .constraintSize({ minHeight: 22 })
     .padding({ left: 8, right: this.withChevron ? 6 : 8, top: 3, bottom: 3 })
@@ -168,6 +178,7 @@ export struct Chip {
 // youhua .btn-fill:accent 实底主按钮(minH44 r8)
 @Component
 export struct BtnFill {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop label: string = '';
   @StorageProp('accentColor') accentColorStore: string = ACCENT;
   onTap: () => void = (): void => {};
@@ -182,6 +193,7 @@ export struct BtnFill {
         .fontFamily(FONT_SANS_SEMIBOLD)
         .fontColor(ACCENT_INK)
     }
+      .enabled(this.themeEpoch >= 0)
     .justifyContent(FlexAlign.Center)
     .alignItems(VerticalAlign.Center)
     .constraintSize({ minHeight: 44 })
@@ -203,6 +215,7 @@ export struct BtnFill {
 // youhua .btn-ghost:LINE 描边次按钮(minH44 r8)
 @Component
 export struct BtnGhost {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop label: string = '';
   onTap: () => void = (): void => {};
   @State private pressed: boolean = false;
@@ -215,6 +228,7 @@ export struct BtnGhost {
         .fontFamily(FONT_SANS_MEDIUM)
         .fontColor(INK)
     }
+      .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .justifyContent(FlexAlign.Center)
     .alignItems(VerticalAlign.Center)
     .constraintSize({ minHeight: 44 })
@@ -238,6 +252,7 @@ export struct BtnGhost {
 //   修复「点击没即时反应,退出重进才发现变了」— 控件级即时响应不依赖页面渲染链
 @Component
 export struct Seg {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop options: string[] = [];
   @Prop @Watch('syncFromProp') selected: number = 0;
   @State private optimisticSelected: number = -1;
@@ -276,6 +291,7 @@ export struct Seg {
           })
       }, (opt: string, idx: number): string => `seg-${idx}-${opt}`)
     }
+      .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .width('100%')
     .borderRadius(10)
     .backgroundColor(SURFACE2)
@@ -286,6 +302,7 @@ export struct Seg {
 // youhua .set-row 导航行:图标座 + 标题/描述 + 值(chip/文本/链接动作)+ 箭头
 @Component
 export struct NavRow {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop label: string = '';
   @Prop desc: string = '';
   @Prop valueText: string = '';
@@ -372,6 +389,7 @@ export struct NavRow {
         PaperSeparator()
       }
     }
+      .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .width('100%')
   }
 }
@@ -381,6 +399,7 @@ export struct NavRow {
 // radius/stroke 可选:设置根页 r16 无描边(Android);二级页 r18+0.5 发丝描边(iOS AmberFormGroup)
 @Component
 export struct CardGroup {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop radius: number = 16;
   @Prop stroke: boolean = false;
   @BuilderParam content: () => void;
@@ -388,6 +407,7 @@ export struct CardGroup {
     Column() {
       this.content();
     }
+      .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .width('100%')
     .borderRadius(this.radius)
     .backgroundColor(SURFACE)
@@ -401,6 +421,7 @@ export struct CardGroup {
 // plateSize: 32(根页)| 28(iOS AmberFormRow)
 @Component
 export struct CardRow {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop label: string = '';
   @Prop desc: string = '';
   @Prop valueText: string = '';
@@ -496,6 +517,7 @@ export struct CardRow {
         .padding({ left: this.iconName.length > 0 ? 14 + this.plateSize + 12 : 14, right: 14 })
       }
     }
+      .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .width('100%')
   }
 }
@@ -506,6 +528,7 @@ export struct CardRow {
 //   规格: AmberGlassCircleButton(44,symbol 17 semibold,ink)+ .title2 bold 居中;无底部发丝线
 @Component
 export struct CenteredTitleBar {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop title: string = '';
   @Prop subtitle: string = '';
   // 右侧文本动作(如「管理」),accent 色
@@ -586,6 +609,7 @@ export struct CenteredTitleBar {
       }
       .width('100%')
     }
+      .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .width('100%')
     .padding({ left: 16, right: 16, top: this.statusBarHeight + 10, bottom: 14 })
     .backgroundColor(BG)
@@ -595,10 +619,12 @@ export struct CenteredTitleBar {
 // iOS 组标(AmberSectionLabel):caption 12 semibold muted,拉丁大写,tracking 0.4;无 // 无发丝线
 @Component
 export struct PlainSection {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop label: string = '';
   build(): void {
     Text(this.label.toUpperCase())
-      .fontSize(12)
+      
+      .opacity(this.themeEpoch >= 0 ? 1 : 1).fontSize(12)
       .fontWeight(600)
       .lineHeight(lineHeightForSize(12))
       .fontFamily(FONT_SANS_SEMIBOLD)
@@ -613,6 +639,7 @@ export struct PlainSection {
 // 乐观翻转:点击先翻本地开关态(即时反馈),onToggle 持久化后由 checked 重同步
 @Component
 export struct CardToggleRow {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop label: string = '';
   @Prop desc: string = '';
   @Prop @Watch('syncFromProp') checked: boolean = false;
@@ -695,6 +722,7 @@ export struct CardToggleRow {
         .padding({ left: 14, right: 14 })
       }
     }
+      .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .width('100%')
   }
 }
@@ -703,6 +731,7 @@ export struct CardToggleRow {
 // tone: success(SUCCESS_BG/FG 绿)| accent(ACCENT_LIGHT 浅底)| warn(高风险)| error | muted(SURFACE2 灰)
 @Component
 export struct StatusChip {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop text: string = '';
   @Prop tone: string = 'muted';
   @StorageProp('accentColor') accentColorStore: string = ACCENT;
@@ -725,7 +754,8 @@ export struct StatusChip {
 
   build(): void {
     Text(this.text)
-      .fontSize(12)
+      
+      .opacity(this.themeEpoch >= 0 ? 1 : 1).fontSize(12)
       .fontWeight(FontWeight.Medium)
       .lineHeight(lineHeightForSize(12))
       .fontFamily(FONT_SANS_MEDIUM)
@@ -740,10 +770,12 @@ export struct StatusChip {
 // iOS 组下脚注:caption 12 muted(解释行为/回退规则)
 @Component
 export struct FooterNote {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop text: string = '';
   build(): void {
     Text(this.text)
-      .fontSize(12)
+      
+      .opacity(this.themeEpoch >= 0 ? 1 : 1).fontSize(12)
       .lineHeight(17)
       .fontFamily(FONT_SANS_MEDIUM)
       .fontColor(INK3)
@@ -755,6 +787,7 @@ export struct FooterNote {
 // youhua .set-row 开关行:标题/描述 + 42×24 自绘药丸开关(150ms)
 @Component
 export struct ToggleRow {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop label: string = '';
   @Prop desc: string = '';
   @Prop checked: boolean = false;
@@ -815,6 +848,7 @@ export struct ToggleRow {
         PaperSeparator()
       }
     }
+      .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .width('100%')
   }
 }
@@ -822,6 +856,7 @@ export struct ToggleRow {
 // youhua .set-row 选择行:标题 + 等宽值
 @Component
 export struct SelectRow {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop label: string = '';
   @Prop desc: string = '';
   @Prop valueText: string = '';
@@ -881,6 +916,7 @@ export struct SelectRow {
         PaperSeparator()
       }
     }
+      .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .width('100%')
   }
 }
@@ -888,6 +924,7 @@ export struct SelectRow {
 // 会话行(对齐 SessionRow): title + snippet + modelId + time
 @Component
 export struct SessionRowItem {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop title: string = '';
   @Prop snippet: string = '';
   @Prop modelId: string = '';
@@ -948,6 +985,7 @@ export struct SessionRowItem {
         .textOverflow({ overflow: TextOverflow.Ellipsis })
         .margin({ left: 11, top: 2 })
     }
+      .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .width('100%')
     .padding({ left: 16, right: 16, top: 14, bottom: 14 })
     .backgroundColor(SURFACE)
@@ -959,7 +997,9 @@ export struct SessionRowItem {
 // 页面尾部 spacer
 @Component
 export struct PageSpacer {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   build(): void {
-    Column() {}.height(40)
+    Column() {}
+      .opacity(this.themeEpoch >= 0 ? 1 : 1).height(40)
   }
 }

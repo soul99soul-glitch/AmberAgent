@@ -7,7 +7,7 @@ import { CenteredTitleBar, CardGroup } from '../components/PageTemplate.ets';
 import { PluginJSONEditor } from '../components/PluginJSONEditor.ets';
 import { pluginPublicKeyFingerprint } from '../platform_impl/PluginArchive.ets';
 import { pluginCapabilityRows, pluginRuntimeLabel, pluginStatusLabel, pluginTrustLabel } from '../components/PluginPageProjection.ets';
-import { BG, SURFACE, SURFACE2, INK, INK2, INK3, LINE, ERROR, ACCENT, GUTTER } from '../design/tokens.ets';
+import { BG, SURFACE, SURFACE2, INK, INK2, INK3, LINE, ERROR, ACCENT, GUTTER, MOTION_OVERLAY } from '../design/tokens.ets';
 import { FONT_MONO } from '../design/fonts.ets';
 
 class PluginPageColors {
@@ -26,6 +26,7 @@ type PluginManagementAction = 'enable' | 'disable' | 'remove' | 'rollback' | 're
 @Entry
 @Component
 struct PluginsPage {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @State installed: InstalledPlugin[] = [];
   @State primitives: AgentTool[] = [];
   @State trustedKeys: PluginTrustedKey[] = [];
@@ -117,7 +118,10 @@ struct PluginsPage {
     finally { if (this.alive) this.busy = ''; }
   }
 
-  private selectedPackage(): PluginPackage | null { return this.preview?.candidate ?? this.detail?.package ?? null; }
+  private selectedPackage(preview: PluginImportPreview | null = this.preview,
+    detail: InstalledPlugin | null = this.detail): PluginPackage | null {
+    return preview?.candidate ?? detail?.package ?? null;
+  }
   private selectedTool(): PluginDescriptor | null {
     const candidate: PluginPackage | null = this.selectedPackage();
     return candidate?.tools.find((tool: PluginDescriptor): boolean => tool.toolId === this.selectedToolId) ?? null;
@@ -146,8 +150,8 @@ struct PluginsPage {
   }
 
   private closeSelection(): void {
-    this.preview = null; this.detail = null; this.selectedToolId = ''; this.showToolChoices = false;
-    this.inputIssue = ''; this.expectedIssue = ''; this.receiptJSON = '';
+    this.preview = null; this.detail = null;
+    // 工具选择和输入在下次打开时初始化，退出期间保留面板内容。
   }
 
   private sourceChanged(path: string, kind: string): void {
@@ -376,19 +380,19 @@ struct PluginsPage {
   }
 
   @Builder
-  private PreviewCard(): void {
+  private PreviewCard(preview: PluginImportPreview | null): void {
     Column({ space: 8 }) {
-      if (this.preview !== null) {
-        Text(this.preview.baseHash === null ? '新插件导入预览' : '插件更新预览').fontSize(15).fontColor(this.colors.ink).width('100%')
-        Text(`来源：${this.preview.source.workspacePath}`).fontSize(12).fontColor(this.colors.secondary).width('100%')
+      if (preview !== null) {
+        Text(preview.baseHash === null ? '新插件导入预览' : '插件更新预览').fontSize(15).fontColor(this.colors.ink).width('100%')
+        Text(`来源：${preview.source.workspacePath}`).fontSize(12).fontColor(this.colors.secondary).width('100%')
           .wordBreak(WordBreak.BREAK_ALL).copyOption(CopyOptions.LocalDevice)
-        Text(`批准后${this.preview.enable ? '启用' : '保持停用'} · ${this.preview.permissionExpanded ? '权限扩大，须核对差异' : '无新增权限'}`)
+        Text(`批准后${preview.enable ? '启用' : '保持停用'} · ${preview.permissionExpanded ? '权限扩大，须核对差异' : '无新增权限'}`)
           .fontSize(13).fontColor(this.colors.ink).width('100%')
-        if (this.preview.baseHash !== null) {
-          Text(`已安装基线 SHA-256：${this.preview.baseHash}`).fontSize(12).fontFamily(FONT_MONO).fontColor(this.colors.secondary)
+        if (preview.baseHash !== null) {
+          Text(`已安装基线 SHA-256：${preview.baseHash}`).fontSize(12).fontFamily(FONT_MONO).fontColor(this.colors.secondary)
             .width('100%').wordBreak(WordBreak.BREAK_ALL).copyOption(CopyOptions.LocalDevice)
         }
-        ForEach(this.preview.permissionDiff, (difference: string): void => {
+        ForEach(preview.permissionDiff, (difference: string): void => {
           Text(`新增或变化：${difference}`).fontSize(12).fontColor(this.colors.error).width('100%').wordBreak(WordBreak.BREAK_ALL)
         }, (difference: string): string => difference)
         Text('测试执行此候选内容，按当前助手权限审批，不影响已安装版本的健康状态。验证成功只代表包结构有效。')
@@ -401,53 +405,65 @@ struct PluginsPage {
   }
 
   @Builder
-  private PackageCard(): void {
+  private PackageCard(preview: PluginImportPreview | null, detail: InstalledPlugin | null): void {
     Column({ space: 8 }) {
       Row({ space: 8 }) {
-        Text(this.selectedPackage()?.manifest.name ?? this.detail?.id ?? '').fontSize(16).fontColor(this.colors.ink)
+        Text(this.selectedPackage(preview, detail)?.manifest.name ?? detail?.id ?? '').fontSize(16).fontColor(this.colors.ink)
           .layoutWeight(1).wordBreak(WordBreak.BREAK_ALL)
         Button('关闭').type(ButtonType.Normal).height(44).fontSize(13).fontColor(this.colors.secondary)
           .backgroundColor(this.colors.inset).enabled(this.busy.length === 0).onClick((): void => { this.closeSelection(); })
       }.width('100%')
-      if (this.selectedPackage() !== null) {
-        Text(`版本 ${this.selectedPackage()!.manifest.version} · ${this.selectedPackage()!.manifest.id}`)
+      if (this.selectedPackage(preview, detail) !== null) {
+        Text(`版本 ${this.selectedPackage(preview, detail)!.manifest.version} · ${this.selectedPackage(preview, detail)!.manifest.id}`)
           .fontSize(12).fontColor(this.colors.secondary).width('100%').wordBreak(WordBreak.BREAK_ALL)
-        Text(this.selectedPackage()!.manifest.description).fontSize(13).fontColor(this.colors.ink).width('100%').wordBreak(WordBreak.BREAK_ALL)
+        Text(this.selectedPackage(preview, detail)!.manifest.description).fontSize(13).fontColor(this.colors.ink).width('100%').wordBreak(WordBreak.BREAK_ALL)
         Text('包内容 SHA-256').fontSize(12).fontColor(this.colors.secondary).width('100%')
-        Text(this.selectedPackage()!.hash).fontSize(12).fontFamily(FONT_MONO).fontColor(this.colors.ink).width('100%')
+        Text(this.selectedPackage(preview, detail)!.hash).fontSize(12).fontFamily(FONT_MONO).fontColor(this.colors.ink).width('100%')
           .wordBreak(WordBreak.BREAK_ALL).copyOption(CopyOptions.LocalDevice)
-        Text(pluginTrustLabel(this.preview?.trust ?? this.detail!.trust)).fontSize(13).fontColor(this.colors.ink).width('100%')
-        if ((this.preview?.trust ?? this.detail!.trust).fingerprint !== null) {
-          Text(`发布者完整 SHA-256：${(this.preview?.trust ?? this.detail!.trust).fingerprint}`)
+        Text(pluginTrustLabel(preview?.trust ?? detail!.trust)).fontSize(13).fontColor(this.colors.ink).width('100%')
+        if ((preview?.trust ?? detail!.trust).fingerprint !== null) {
+          Text(`发布者完整 SHA-256：${(preview?.trust ?? detail!.trust).fingerprint}`)
             .fontSize(12).fontFamily(FONT_MONO).fontColor(this.colors.ink).width('100%')
             .wordBreak(WordBreak.BREAK_ALL).copyOption(CopyOptions.LocalDevice)
         }
-        ForEach(pluginCapabilityRows(this.selectedPackage()!.manifest.capabilities), (capability: string): void => {
+        ForEach(pluginCapabilityRows(this.selectedPackage(preview, detail)!.manifest.capabilities), (capability: string): void => {
           Text(capability).fontSize(12).fontColor(this.colors.secondary).width('100%').wordBreak(WordBreak.BREAK_ALL)
         }, (capability: string): string => capability)
-        Text(this.selectedPackage()!.manifest.backgroundAllowed ? '清单申请后台资格；仍受宿主实际后台工具与运行环境限制' : '清单未申请后台运行')
+        Text(this.selectedPackage(preview, detail)!.manifest.backgroundAllowed ? '清单申请后台资格；仍受宿主实际后台工具与运行环境限制' : '清单未申请后台运行')
           .fontSize(12).fontColor(this.colors.secondary).width('100%')
-        Button(this.showManifest ? '收起完整清单' : '完整清单 / Schema').type(ButtonType.Normal).height(44).width('100%')
-          .fontSize(13).fontColor(this.accentColor).backgroundColor(this.colors.inset)
-          .onClick((): void => { this.showManifest = !this.showManifest; })
-        if (this.showManifest) {
-          Text(JSON.stringify(this.selectedPackage()!.manifest, null, 2)).fontSize(12).fontFamily(FONT_MONO)
-            .fontColor(this.colors.ink).width('100%').wordBreak(WordBreak.BREAK_ALL).copyOption(CopyOptions.LocalDevice)
-        }
-        Button(this.showFiles ? '收起文件摘要' : '查看所有文件 SHA-256').type(ButtonType.Normal).height(44).width('100%')
-          .fontSize(13).fontColor(this.accentColor).backgroundColor(this.colors.inset)
-          .onClick((): void => { this.showFiles = !this.showFiles; })
-        if (this.showFiles) {
-          Text(JSON.stringify(this.selectedPackage()!.fileHashes, null, 2)).fontSize(12).fontFamily(FONT_MONO)
-            .fontColor(this.colors.ink).width('100%').wordBreak(WordBreak.BREAK_ALL).copyOption(CopyOptions.LocalDevice)
-        }
-      } else if (this.detail !== null) {
-        Text(`无效包：${this.detail.errorCode ?? ''}\n${this.detail.errorMessage ?? ''}`).fontSize(13)
+        Column({ space: 8 }) {
+          Button(this.showManifest ? '收起完整清单' : '完整清单 / Schema').type(ButtonType.Normal).height(44).width('100%')
+            .fontSize(13).fontColor(this.accentColor).backgroundColor(this.colors.inset)
+            .onClick((): void => {
+              animateTo({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }, (): void => {
+                this.showManifest = !this.showManifest;
+              });
+            })
+          if (this.showManifest) {
+            Text(JSON.stringify(this.selectedPackage(preview, detail)!.manifest, null, 2)).fontSize(12).fontFamily(FONT_MONO)
+              .fontColor(this.colors.ink).width('100%').wordBreak(WordBreak.BREAK_ALL).copyOption(CopyOptions.LocalDevice)
+          }
+        }.width('100%').alignItems(HorizontalAlign.Start).clip(true)
+        Column({ space: 8 }) {
+          Button(this.showFiles ? '收起文件摘要' : '查看所有文件 SHA-256').type(ButtonType.Normal).height(44).width('100%')
+            .fontSize(13).fontColor(this.accentColor).backgroundColor(this.colors.inset)
+            .onClick((): void => {
+              animateTo({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }, (): void => {
+                this.showFiles = !this.showFiles;
+              });
+            })
+          if (this.showFiles) {
+            Text(JSON.stringify(this.selectedPackage(preview, detail)!.fileHashes, null, 2)).fontSize(12).fontFamily(FONT_MONO)
+              .fontColor(this.colors.ink).width('100%').wordBreak(WordBreak.BREAK_ALL).copyOption(CopyOptions.LocalDevice)
+          }
+        }.width('100%').alignItems(HorizontalAlign.Start).clip(true)
+      } else if (detail !== null) {
+        Text(`无效包：${detail.errorCode ?? ''}\n${detail.errorMessage ?? ''}`).fontSize(13)
           .fontColor(this.colors.error).width('100%').wordBreak(WordBreak.BREAK_ALL).copyOption(CopyOptions.LocalDevice)
         Text('无有效包内容，无法运行或导出。重新预览 Workspace 中修正的包后可发起更新。')
           .fontSize(12).fontColor(this.colors.secondary).width('100%')
-        if (this.detail.currentHash !== null) {
-          Text(`当前指针 SHA-256：${this.detail.currentHash}`).fontSize(12).fontFamily(FONT_MONO).fontColor(this.colors.ink)
+        if (detail.currentHash !== null) {
+          Text(`当前指针 SHA-256：${detail.currentHash}`).fontSize(12).fontFamily(FONT_MONO).fontColor(this.colors.ink)
             .width('100%').wordBreak(WordBreak.BREAK_ALL).copyOption(CopyOptions.LocalDevice)
         } else {
           Text('当前指针已损坏，无法确认版本 hash，不能进行版本管理。').fontSize(12).fontColor(this.colors.error).width('100%')
@@ -457,73 +473,91 @@ struct PluginsPage {
   }
 
   @Builder
-  private ToolCard(): void {
+  private ToolCard(preview: PluginImportPreview | null, detail: InstalledPlugin | null, tool: PluginDescriptor | null): void {
     Column({ space: 8 }) {
-      if (this.selectedPackage() !== null && this.selectedTool() !== null) {
-        Button(`工具：${this.selectedTool()!.name} · 更换`).type(ButtonType.Normal).constraintSize({ minHeight: 52 })
-          .width('100%').fontSize(14).fontColor(this.accentColor).backgroundColor(this.colors.inset).enabled(this.busy.length === 0)
-          .onClick((): void => { this.showToolChoices = !this.showToolChoices; })
-        if (this.showToolChoices) {
-          ForEach(this.selectedPackage()!.tools, (tool: PluginDescriptor): void => {
-            Button(`${tool.name} · ${pluginRuntimeLabel(tool)}`).type(ButtonType.Normal).constraintSize({ minHeight: 44 })
-              .width('100%').fontSize(13).fontColor(this.colors.ink).backgroundColor(this.colors.inset)
-              .onClick((): void => { this.selectTool(tool); })
-          }, (tool: PluginDescriptor): string => tool.toolId)
-        }
-        Text(this.selectedTool()!.description).fontSize(13).fontColor(this.colors.secondary).width('100%').wordBreak(WordBreak.BREAK_ALL)
-        Text(`${pluginRuntimeLabel(this.selectedTool()!)} · ${this.selectedTool()!.timeoutMs} ms · 输出上限 ${this.selectedTool()!.maxOutputChars} 字符`)
+      if (this.selectedPackage(preview, detail) !== null && tool !== null) {
+        Column({ space: 8 }) {
+          Button(`工具：${tool!.name} · 更换`).type(ButtonType.Normal).constraintSize({ minHeight: 52 })
+            .width('100%').fontSize(14).fontColor(this.accentColor).backgroundColor(this.colors.inset).enabled(this.busy.length === 0)
+            .onClick((): void => {
+              animateTo({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }, (): void => {
+                this.showToolChoices = !this.showToolChoices;
+              });
+            })
+          if (this.showToolChoices) {
+            ForEach(this.selectedPackage(preview, detail)!.tools, (tool: PluginDescriptor): void => {
+              Button(`${tool.name} · ${pluginRuntimeLabel(tool)}`).type(ButtonType.Normal).constraintSize({ minHeight: 44 })
+                .width('100%').fontSize(13).fontColor(this.colors.ink).backgroundColor(this.colors.inset)
+                .onClick((): void => { this.selectTool(tool); })
+            }, (tool: PluginDescriptor): string => tool.toolId)
+          }
+        }.width('100%').alignItems(HorizontalAlign.Start).clip(true)
+        Text(tool!.description).fontSize(13).fontColor(this.colors.secondary).width('100%').wordBreak(WordBreak.BREAK_ALL)
+        Text(`${pluginRuntimeLabel(tool!)} · ${tool!.timeoutMs} ms · 输出上限 ${tool!.maxOutputChars} 字符`)
           .fontSize(12).fontColor(this.colors.secondary).width('100%')
-        Text(`注册名：${this.selectedTool()!.toolId}\n宿主工具：${this.selectedTool()!.primitiveTools.join('、') || '无'}`)
+        Text(`注册名：${tool!.toolId}\n宿主工具：${tool!.primitiveTools.join('、') || '无'}`)
           .fontSize(12).fontFamily(FONT_MONO).fontColor(this.colors.secondary).width('100%').wordBreak(WordBreak.BREAK_ALL)
           .copyOption(CopyOptions.LocalDevice)
-        Text(`风险 ${this.selectedTool()!.envelope.risk} · ${this.selectedTool()!.envelope.mutates ? '会修改数据' : '无声明的数据修改'} · ${this.selectedTool()!.envelope.needsApproval ? '包含审批' : '仍按当前工具权限执行'}`)
+        Text(`风险 ${tool!.envelope.risk} · ${tool!.envelope.mutates ? '会修改数据' : '无声明的数据修改'} · ${tool!.envelope.needsApproval ? '包含审批' : '仍按当前工具权限执行'}`)
           .fontSize(12).fontColor(this.colors.secondary).width('100%')
-        Button(this.showSource ? '收起固定实现' : '查看固定源码 / 实现').type(ButtonType.Normal).height(44).width('100%')
-          .fontSize(13).fontColor(this.accentColor).backgroundColor(this.colors.inset)
-          .onClick((): void => { this.showSource = !this.showSource; })
-        if (this.showSource) {
-          Text(this.sourceText).fontSize(12).fontFamily(FONT_MONO).fontColor(this.colors.ink).width('100%')
-            .wordBreak(WordBreak.BREAK_ALL).copyOption(CopyOptions.LocalDevice)
-        }
-        if (this.missingTools(this.selectedTool()!).length > 0) {
-          Text(`当前助手缺失工具：${this.missingTools(this.selectedTool()!).join('、')}`).fontSize(12)
+        Column({ space: 8 }) {
+          Button(this.showSource ? '收起固定实现' : '查看固定源码 / 实现').type(ButtonType.Normal).height(44).width('100%')
+            .fontSize(13).fontColor(this.accentColor).backgroundColor(this.colors.inset)
+            .onClick((): void => {
+              animateTo({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }, (): void => {
+                this.showSource = !this.showSource;
+              });
+            })
+          if (this.showSource) {
+            Text(this.sourceText).fontSize(12).fontFamily(FONT_MONO).fontColor(this.colors.ink).width('100%')
+              .wordBreak(WordBreak.BREAK_ALL).copyOption(CopyOptions.LocalDevice)
+          }
+        }.width('100%').alignItems(HorizontalAlign.Start).clip(true)
+        if (this.missingTools(tool!).length > 0) {
+          Text(`当前助手缺失工具：${this.missingTools(tool!).join('、')}`).fontSize(12)
             .fontColor(this.colors.error).width('100%').wordBreak(WordBreak.BREAK_ALL)
         }
-        if (this.selectedTool()!.implementation.kind === 'javascript') {
+        if (tool!.implementation.kind === 'javascript') {
           Text('JSVM 没有浏览器 DOM 或直接网络、文件 API。取消会关闭宿主调用并放弃结果；无限循环可能仍占用 CPU，旧 VM 结束前无法再启动 JS 插件。')
             .fontSize(12).fontColor(this.colors.secondary).width('100%')
-        } else if (this.selectedTool()!.implementation.kind === 'command') {
+        } else if (tool!.implementation.kind === 'command') {
           Text('使用本机 embedded_python；不支持 sys、os、pip。取消须等待实际执行结束，C 阻塞调用不能保证立即停止。')
             .fontSize(12).fontColor(this.colors.secondary).width('100%')
         }
         PluginJSONEditor({ text: this.inputsText, label: '输入 JSON（按 Schema 填必需、可选及嵌套字段）',
-          schemaJSON: JSON.stringify(this.selectedTool()!.inputSchema, null, 2), issue: this.inputIssue,
+          schemaJSON: JSON.stringify(tool!.inputSchema, null, 2), issue: this.inputIssue,
           editable: this.busy.length === 0, foreground: this.colors.ink, secondary: this.colors.secondary,
           muted: this.colors.muted, inset: this.colors.inset, accent: this.accentColor, errorColor: this.colors.error,
           onTextChange: (value: string): void => { this.inputsText = value; this.inputIssue = ''; } })
-        Text(`输出：${this.selectedTool()!.output}\n${JSON.stringify(this.selectedTool()!.outputSchema, null, 2)}`)
+        Text(`输出：${tool!.output}\n${JSON.stringify(tool!.outputSchema, null, 2)}`)
           .fontSize(12).fontFamily(FONT_MONO).fontColor(this.colors.secondary).width('100%')
           .wordBreak(WordBreak.BREAK_ALL).copyOption(CopyOptions.LocalDevice)
-        if (this.preview !== null) {
-          Row() {
-            Text('指定 expected_result').fontSize(13).fontColor(this.colors.ink).layoutWeight(1)
-            Toggle({ type: ToggleType.Switch, isOn: this.expectedProvided }).selectedColor(this.accentColor)
-              .enabled(this.busy.length === 0).onChange((value: boolean): void => { this.expectedProvided = value; })
-          }.width('100%').height(52)
-          if (this.expectedProvided) {
-            PluginJSONEditor({ text: this.expectedText, label: '预期结果 JSON（包括明确的 null）', issue: this.expectedIssue,
-              editable: this.busy.length === 0, foreground: this.colors.ink, secondary: this.colors.secondary,
-              muted: this.colors.muted, inset: this.colors.inset, accent: this.accentColor, errorColor: this.colors.error,
-              onTextChange: (value: string): void => { this.expectedText = value; this.expectedIssue = ''; } })
-          }
+        if (preview !== null) {
+          Column({ space: 8 }) {
+            Row() {
+              Text('指定 expected_result').fontSize(13).fontColor(this.colors.ink).layoutWeight(1)
+              Toggle({ type: ToggleType.Switch, isOn: this.expectedProvided }).selectedColor(this.accentColor)
+                .enabled(this.busy.length === 0).onChange((value: boolean): void => {
+                  animateTo({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }, (): void => {
+                    this.expectedProvided = value;
+                  });
+                })
+            }.width('100%').height(52)
+            if (this.expectedProvided) {
+              PluginJSONEditor({ text: this.expectedText, label: '预期结果 JSON（包括明确的 null）', issue: this.expectedIssue,
+                editable: this.busy.length === 0, foreground: this.colors.ink, secondary: this.colors.secondary,
+                muted: this.colors.muted, inset: this.colors.inset, accent: this.accentColor, errorColor: this.colors.error,
+                onTextChange: (value: string): void => { this.expectedText = value; this.expectedIssue = ''; } })
+            }
+          }.width('100%').alignItems(HorizontalAlign.Start).clip(true)
           Button('进入对话真实测试').type(ButtonType.Normal).height(44).width('100%').fontSize(14)
             .fontColor(this.accentColor).backgroundColor(this.colors.inset)
-            .enabled(this.available() && this.missingTools(this.selectedTool()!).length === 0)
+            .enabled(this.available() && this.missingTools(tool!).length === 0)
             .onClick((): void => { this.launch('test'); })
         } else {
           Button('在对话中运行').type(ButtonType.Normal).height(44).width('100%').fontSize(14)
             .fontColor(this.accentColor).backgroundColor(this.colors.inset)
-            .enabled(this.available() && this.detail?.enabled === true && this.missingTools(this.selectedTool()!).length === 0)
+            .enabled(this.available() && detail?.enabled === true && this.missingTools(tool!).length === 0)
             .onClick((): void => { this.launch('run'); })
         }
         Text('使用当前默认助手的真实工具和模型配置。保存固定版本及输入后进入聊天；执行、审批、日志与最终结果均在同一父工具中查看。')
@@ -533,15 +567,15 @@ struct PluginsPage {
   }
 
   @Builder
-  private ManagementCard(): void {
+  private ManagementCard(detail: InstalledPlugin | null): void {
     Column({ space: 8 }) {
-      if (this.detail !== null && this.detail.package !== null) {
-        Text(`${pluginStatusLabel(this.detail)} · 配置${this.detail.configuredEnabled ? '启用' : '停用'}`)
+      if (detail !== null && detail.package !== null) {
+        Text(`${pluginStatusLabel(detail)} · 配置${detail.configuredEnabled ? '启用' : '停用'}`)
           .fontSize(14).fontColor(this.colors.ink).width('100%')
         Row({ space: 8 }) {
-          Button(this.detail.configuredEnabled ? '停用' : '启用').type(ButtonType.Normal).height(44).layoutWeight(1)
+          Button(detail.configuredEnabled ? '停用' : '启用').type(ButtonType.Normal).height(44).layoutWeight(1)
             .fontSize(13).fontColor(this.accentColor).backgroundColor(this.colors.inset).enabled(this.available())
-            .onClick((): void => { this.confirmManagement(this.detail!.configuredEnabled ? 'disable' : 'enable'); })
+            .onClick((): void => { this.confirmManagement(detail!.configuredEnabled ? 'disable' : 'enable'); })
           Button('删除').type(ButtonType.Normal).height(44).layoutWeight(1).fontSize(13)
             .fontColor(this.colors.error).backgroundColor(this.colors.inset).enabled(this.available())
             .onClick((): void => { this.confirmManagement('remove'); })
@@ -549,8 +583,8 @@ struct PluginsPage {
         Button('回退上一版本').type(ButtonType.Normal).height(44).width('100%').fontSize(13)
           .fontColor(this.accentColor).backgroundColor(this.colors.inset).enabled(this.available())
           .onClick((): void => { this.confirmManagement('rollback'); })
-        if (this.detail.health?.quarantinedAt !== null && this.detail.health?.quarantinedAt !== undefined) {
-          Text(`隔离原因：${this.detail.health.quarantineReason ?? ''}`).fontSize(12).fontColor(this.colors.error).width('100%')
+        if (detail.health?.quarantinedAt !== null && detail.health?.quarantinedAt !== undefined) {
+          Text(`隔离原因：${detail.health.quarantineReason ?? ''}`).fontSize(12).fontColor(this.colors.error).width('100%')
             .wordBreak(WordBreak.BREAK_ALL)
           Button('解除当前版本隔离').type(ButtonType.Normal).height(44).width('100%').fontSize(13)
             .fontColor(this.accentColor).backgroundColor(this.colors.inset).enabled(this.available())
@@ -563,18 +597,24 @@ struct PluginsPage {
         Button('导出到 Workspace').type(ButtonType.Normal).height(44).width('100%').fontSize(13)
           .fontColor(this.accentColor).backgroundColor(this.colors.inset).enabled(this.available())
           .onClick((): void => { this.exportPlugin(); })
-        Button(this.showDiagnostics ? '收起诊断' : '查看当前版本诊断').type(ButtonType.Normal).height(44).width('100%')
-          .fontSize(13).fontColor(this.accentColor).backgroundColor(this.colors.inset)
-          .onClick((): void => { this.showDiagnostics = !this.showDiagnostics; })
-        if (this.showDiagnostics) {
-          Text(JSON.stringify(this.detail.health, null, 2)).fontSize(12).fontFamily(FONT_MONO).fontColor(this.colors.ink)
-            .width('100%').wordBreak(WordBreak.BREAK_ALL).copyOption(CopyOptions.LocalDevice)
-        }
+        Column({ space: 8 }) {
+          Button(this.showDiagnostics ? '收起诊断' : '查看当前版本诊断').type(ButtonType.Normal).height(44).width('100%')
+            .fontSize(13).fontColor(this.accentColor).backgroundColor(this.colors.inset)
+            .onClick((): void => {
+              animateTo({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }, (): void => {
+                this.showDiagnostics = !this.showDiagnostics;
+              });
+            })
+          if (this.showDiagnostics) {
+            Text(JSON.stringify(detail.health, null, 2)).fontSize(12).fontFamily(FONT_MONO).fontColor(this.colors.ink)
+              .width('100%').wordBreak(WordBreak.BREAK_ALL).copyOption(CopyOptions.LocalDevice)
+          }
+        }.width('100%').alignItems(HorizontalAlign.Start).clip(true)
         if (this.receiptJSON.length > 0) {
           Text(`真实操作回执\n${this.receiptJSON}`).fontSize(12).fontFamily(FONT_MONO).fontColor(this.colors.ink)
             .width('100%').wordBreak(WordBreak.BREAK_ALL).copyOption(CopyOptions.LocalDevice)
         }
-      } else if (this.detail !== null && this.detail.currentHash !== null) {
+      } else if (detail !== null && detail.currentHash !== null) {
         Text('损坏包仍可按当前指针 hash 删除或回退上一版本。').fontSize(12).fontColor(this.colors.secondary).width('100%')
         Row({ space: 8 }) {
           Button('回退上一版').type(ButtonType.Normal).height(44).layoutWeight(1).fontSize(13)
@@ -619,26 +659,64 @@ struct PluginsPage {
     }.width('100%').padding(14)
   }
 
+  // Builder 参数保留当前包和工具，清空页面选择时仍可完成退出过渡。
+  @Builder
+  private SelectionPanel(preview: PluginImportPreview | null, detail: InstalledPlugin | null,
+    tool: PluginDescriptor | null): void {
+    Column({ space: 12 }) {
+      if (preview !== null) {
+        CardGroup({ content: (): void => { this.PreviewCard(preview); } })
+      }
+      CardGroup({ content: (): void => { this.PackageCard(preview, detail); } })
+      if (this.selectedPackage(preview, detail) !== null) {
+        CardGroup({ content: (): void => { this.ToolCard(preview, detail, tool); } })
+      }
+      if (preview === null) {
+        CardGroup({ content: (): void => { this.ManagementCard(detail); } })
+      }
+    }.width('100%').alignItems(HorizontalAlign.Start)
+      .transition(TransitionEffect.OPACITY.combine(TransitionEffect.translate({ y: 8 }))
+        .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
+  }
+
   build(): void {
     Column() {
+      // 主题纪元重挂载(勿拆):epoch 变化 → 整页子树销毁重建,全量重读令牌
+      ForEach([this.themeEpoch], (_e: number): void => {
       CenteredTitleBar({ title: '插件中心', actionText: '刷新', onAction: (): void => { this.load(); } })
       Scroll() {
         Column({ space: 12 }) {
           Text('插件把包内 Recipe、JSVM、本机 Python 或固定远程端点注册成工具，能力仍与当前默认助手的真实工具及审批相交。')
             .fontSize(12).fontColor(this.colors.secondary).width('100%')
-          Row({ space: 8 }) {
-            Button(this.showKeys ? '收起发布者' : '可信发布者').type(ButtonType.Normal).height(44).layoutWeight(1)
-              .fontSize(13).fontColor(this.accentColor).backgroundColor(this.colors.surface)
-              .onClick((): void => { this.showKeys = !this.showKeys; })
-            Button(this.showSDK ? '收起 SDK' : '插件 SDK').type(ButtonType.Normal).height(44).layoutWeight(1)
-              .fontSize(13).fontColor(this.accentColor).backgroundColor(this.colors.surface)
-              .onClick((): void => { this.showSDK = !this.showSDK; })
-          }.width('100%')
-          if (this.showKeys) { CardGroup({ content: (): void => { this.TrustCard(); } }) }
-          if (this.showSDK) {
-            Text(this.sdkJSON).fontSize(12).fontFamily(FONT_MONO).fontColor(this.colors.ink).width('100%')
-              .wordBreak(WordBreak.BREAK_ALL).copyOption(CopyOptions.LocalDevice)
-          }
+          Column() {
+            Row({ space: 8 }) {
+              Button(this.showKeys ? '收起发布者' : '可信发布者').type(ButtonType.Normal).height(44).layoutWeight(1)
+                .fontSize(13).fontColor(this.accentColor).backgroundColor(this.colors.surface)
+                .onClick((): void => {
+                  animateTo({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }, (): void => {
+                    this.showKeys = !this.showKeys;
+                  });
+                })
+              Button(this.showSDK ? '收起 SDK' : '插件 SDK').type(ButtonType.Normal).height(44).layoutWeight(1)
+                .fontSize(13).fontColor(this.accentColor).backgroundColor(this.colors.surface)
+                .onClick((): void => {
+                  animateTo({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }, (): void => {
+                    this.showSDK = !this.showSDK;
+                  });
+                })
+            }.width('100%')
+            Column() {
+              if (this.showKeys) { CardGroup({ content: (): void => { this.TrustCard(); } }) }
+            }.width('100%').alignItems(HorizontalAlign.Start).clip(true)
+              .margin({ top: this.showKeys ? 12 : 0 })
+            Column() {
+              if (this.showSDK) {
+                Text(this.sdkJSON).fontSize(12).fontFamily(FONT_MONO).fontColor(this.colors.ink).width('100%')
+                  .wordBreak(WordBreak.BREAK_ALL).copyOption(CopyOptions.LocalDevice)
+              }
+            }.width('100%').alignItems(HorizontalAlign.Start).clip(true)
+              .margin({ top: this.showSDK ? 12 : 0 })
+          }.width('100%').alignItems(HorizontalAlign.Start)
           CardGroup({ content: (): void => { this.SourceCard(); } })
           if (this.busy.length > 0) { Text(this.busy).fontSize(12).fontColor(this.colors.secondary).width('100%') }
           if (this.error.length > 0) {
@@ -648,19 +726,20 @@ struct PluginsPage {
             Text(this.notice).fontSize(12).fontColor(this.colors.secondary).width('100%').wordBreak(WordBreak.BREAK_ALL).copyOption(CopyOptions.LocalDevice)
           }
           if (this.preview !== null || this.detail !== null) {
-            if (this.preview !== null) { CardGroup({ content: (): void => { this.PreviewCard(); } }) }
-            CardGroup({ content: (): void => { this.PackageCard(); } })
-            if (this.selectedPackage() !== null) {
-              CardGroup({ content: (): void => { this.ToolCard(); } })
-            }
-            if (this.preview === null) { CardGroup({ content: (): void => { this.ManagementCard(); } }) }
+            this.SelectionPanel(this.preview, this.detail, this.selectedTool())
           } else {
-            Text('已安装').fontSize(14).fontColor(this.colors.secondary).width('100%')
-            CardGroup({ content: (): void => { this.InstalledCard(); } })
+            Column({ space: 12 }) {
+              Text('已安装').fontSize(14).fontColor(this.colors.secondary).width('100%')
+              CardGroup({ content: (): void => { this.InstalledCard(); } })
+            }.width('100%').alignItems(HorizontalAlign.Start)
+              .transition(TransitionEffect.OPACITY.animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
           }
         }.width('100%').padding({ left: GUTTER, right: GUTTER, top: 12, bottom: 16 + this.navBarHeight })
           .justifyContent(FlexAlign.Start)
       }.width('100%').layoutWeight(1).align(Alignment.TopStart).scrollBar(BarState.Auto)
-    }.width('100%').height('100%').backgroundColor(this.colors.background)
+    
+      }, (e: number): string => `theme-${e}`)
+}
+      .opacity(this.themeEpoch >= 0 ? 1 : 1).width('100%').height('100%').backgroundColor(this.colors.background)
   }
 }

@@ -8,6 +8,7 @@ import { fetchProviderBalance } from '../../platform_impl/BalanceSupport.ets';
 
 @Component
 export struct ProviderBalanceText {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop @Watch('onSettingChange') setting: ProviderSetting | null = null;
   @State balance: string = '~';
   private alive: boolean = false;
@@ -35,7 +36,7 @@ export struct ProviderBalanceText {
   }
 
   build(): void {
-    if (this.setting !== null && this.setting.balanceOption.enabled) {
+    if (this.themeEpoch >= 0 && this.setting !== null && this.setting.balanceOption.enabled) {
       Row() {
         Icon({ name: 'money', iconSize: META, color: INK2 }).margin({ right: 4 })
         Text(this.balance).fontSize(LABEL).fontColor(INK3)

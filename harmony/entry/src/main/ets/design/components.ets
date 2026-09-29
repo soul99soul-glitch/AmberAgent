@@ -7,11 +7,13 @@ import { INK, INK2, INK3, INK4, LINE, ACCENT, ACCENT_INK, SURFACE, SURFACE2, BG,
 // AmberCard:通用容器(surface 底 + 1dp hairline + 14dp 圆角)
 @Component
 export struct AmberCard {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @BuilderParam content: () => void;
   build(): void {
     Column() {
       this.content();
     }
+      .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .width('100%')
     .backgroundColor(SURFACE)
     .border({ width: 1, color: LINE })
@@ -22,8 +24,10 @@ export struct AmberCard {
 // Hairline:1dp 发丝分割线
 @Component
 export struct Hairline {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   build(): void {
-    Divider().color(LINE).strokeWidth(0.5).width('100%')
+    Divider()
+      .opacity(this.themeEpoch >= 0 ? 1 : 1).color(LINE).strokeWidth(0.5).width('100%')
   }
 }
 
@@ -32,13 +36,15 @@ export struct Hairline {
 //   故重命名为 fieldEnabled / onClicked。
 @Component
 export struct BtnInk {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   text: string = '';
   fieldEnabled: boolean = true;
   onClicked: () => void = (): void => {};
   @State private pressed: boolean = false; // Android pressable() 0.975 语义
   build(): void {
     Text(this.text)
-      .fontSize(BODY).fontWeight(FontWeight.Medium)
+      
+      .enabled(this.themeEpoch >= 0).fontSize(BODY).fontWeight(FontWeight.Medium)
       .fontColor(this.fieldEnabled ? SURFACE : INK4)
       .padding({ left: 16, right: 16, top: 8, bottom: 8 })
       .borderRadius(15)
@@ -60,13 +66,15 @@ export struct BtnInk {
 //   故重命名为 fieldEnabled / onClicked。
 @Component
 export struct BtnAccent {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   text: string = '';
   fieldEnabled: boolean = true;
   onClicked: () => void = (): void => {};
   @State private pressed: boolean = false; // Android pressable() 0.975 语义
   build(): void {
     Text(this.text)
-      .fontSize(BODY).fontWeight(FontWeight.Medium)
+      
+      .enabled(this.themeEpoch >= 0).fontSize(BODY).fontWeight(FontWeight.Medium)
       .fontColor(this.fieldEnabled ? ACCENT_INK : INK4)
       .padding({ left: 16, right: 16, top: 8, bottom: 8 })
       .borderRadius(15)
@@ -86,11 +94,13 @@ export struct BtnAccent {
 // LiveDot:呼吸光晕活体圆点(signal 绿 / idle 灰)
 @Component
 export struct LiveDot {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   idle: boolean = false;
   dotSize: number = 8;
   build(): void {
     Circle({ width: this.dotSize, height: this.dotSize })
-      .fill(this.idle ? INK4 : SIGNAL)
+      
+      .opacity(this.themeEpoch >= 0 ? 1 : 1).fill(this.idle ? INK4 : SIGNAL)
   }
 }
 
@@ -99,6 +109,7 @@ export struct LiveDot {
 //   故重命名为 cursorWidth / cursorHeight。
 @Component
 export struct BlinkingCursor {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop color: string = ACCENT;
   @Prop cursorWidth: number = 2;
   @Prop cursorHeight: number = 16;
@@ -133,7 +144,8 @@ export struct BlinkingCursor {
 
   build(): void {
     Column()
-      .width(this.cursorWidth)
+      
+      .enabled(this.themeEpoch >= 0).width(this.cursorWidth)
       .height(this.cursorHeight)
       .backgroundColor(this.color)
       .opacity(this.visible ? 1 : 0)
@@ -143,18 +155,21 @@ export struct BlinkingCursor {
 // SectionLabel:带 accent // 前缀的 mono 大写眉标
 @Component
 export struct SectionLabel {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   text: string = '';
   build(): void {
     Row() {
       Text('//').fontSize(10).fontColor(ACCENT).fontWeight(FontWeight.Bold)
       Text(' ' + this.text.toUpperCase()).fontSize(10).fontWeight(FontWeight.Medium).fontColor(INK3)
     }
+      .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .width('100%')
   }
 }
 
 @Component
 export struct RubricHead {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   label: string = '';
   status: string = '';
   build(): void {
@@ -166,12 +181,14 @@ export struct RubricHead {
         Text(this.status).fontSize(10).fontColor(INK4)
       }
     }
+      .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .width('100%').padding({ top: 22, bottom: 8 })
   }
 }
 
 @Component
 export struct LeadCard {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   title: string = '';
   heat: string = '';
   onTap: () => void = () => {};
@@ -184,6 +201,7 @@ export struct LeadCard {
         Text(this.heat).fontSize(META).fontColor(INK3).margin({ top: 6 })
       }
     }
+      .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .width('100%').padding(PAD_CARD)
     .backgroundColor(SURFACE).borderRadius(RADIUS)
     .border({ width: 1, color: LINE })
@@ -193,6 +211,7 @@ export struct LeadCard {
 
 @Component
 export struct IndexRow {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   rank: number = 0;
   title: string = '';
   heat: string = '';
@@ -209,6 +228,7 @@ export struct IndexRow {
         Text(this.heat).fontSize(LABEL).fontColor(INK4).margin({ left: 8 })
       }
     }
+      .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .width('100%').padding({ top: PAD_ITEM, bottom: PAD_ITEM })
     .border({ width: { bottom: this.last ? 0 : 0.5 }, color: { bottom: LINE } })
     .onClick(() => { this.onTap(); })
@@ -217,6 +237,7 @@ export struct IndexRow {
 
 @Component
 export struct EmptyState {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   icon: string = '';
   title: string = '';
   subtitle: string = '';
@@ -245,17 +266,20 @@ export struct EmptyState {
           .onClick(() => { this.onAction(); })
       }
     }
+      .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .alignItems(HorizontalAlign.Center)
   }
 }
 
 @Component
 export struct SkeletonRow {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   build(): void {
     Row() {
       Text('  ').fontSize(12).backgroundColor(SURFACE2).width(24)
       Text('  ').fontSize(14).backgroundColor(SURFACE2).layoutWeight(1).margin({ left: 8 })
     }
+      .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .width('100%').padding({ top: 14, bottom: 14 })
   }
 }
@@ -265,6 +289,7 @@ export struct SkeletonRow {
 // FormItem: 标签 + 内容行
 @Component
 export struct FormItem {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop label: string = '';
   @BuilderParam content: () => void;
   build(): void {
@@ -272,6 +297,7 @@ export struct FormItem {
       Text(this.label).fontSize(BODY).fontColor(INK2).width(100)
       this.content()
     }
+      .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .width('100%')
     .padding({ top: 10, bottom: 10 })
   }
@@ -280,17 +306,20 @@ export struct FormItem {
 // AmberSwitch: 自定义开关(系统 Toggle 封装)
 @Component
 export struct AmberSwitch {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop checked: boolean = false;
   onChange: (value: boolean) => void = (_v: boolean): void => {};
   build(): void {
     Toggle({ type: ToggleType.Switch, isOn: this.checked })
-      .onChange((v: boolean): void => { this.onChange(v); })
+      
+      .opacity(this.themeEpoch >= 0 ? 1 : 1).onChange((v: boolean): void => { this.onChange(v); })
   }
 }
 
 // AmberSelect: 下拉选择(系统 Select 封装)
 @Component
 export struct AmberSelect {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop options: string[] = [];
   @Prop selected: number = 0;
   onSelect: (index: number) => void = (_i: number): void => {};
@@ -298,7 +327,8 @@ export struct AmberSelect {
     Select(this.options.map((opt: string): SelectOption => {
       return { value: opt } as SelectOption;
     }))
-      .selected(this.selected)
+      
+      .opacity(this.themeEpoch >= 0 ? 1 : 1).selected(this.selected)
       .onSelect((index: number): void => { this.onSelect(index); })
       .width('100%')
   }
@@ -307,6 +337,7 @@ export struct AmberSelect {
 // ConfirmDialog: 通用确认对话框
 @Component
 export struct ConfirmDialog {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop show: boolean = false;
   @Prop title: string = '确认';
   @Prop message: string = '';
@@ -322,7 +353,7 @@ export struct ConfirmDialog {
   }
 
   build(): void {
-    if (this.show) {
+    if (this.themeEpoch >= 0 && this.show) {
       Stack({ alignContent: Alignment.Center }) {
         Row() {}
           .width('100%')
@@ -363,10 +394,11 @@ export struct ConfirmDialog {
 // ErrorCard: 错误信息卡片
 @Component
 export struct ErrorCard {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop message: string = '';
   onDismiss: () => void = (): void => {};
   build(): void {
-    if (this.message.length > 0) {
+    if (this.themeEpoch >= 0 && this.message.length > 0) {
       Row() {
         Text('⚠').fontSize(14).fontColor(ERROR)
         Text(this.message).fontSize(META).fontColor(ERROR)
@@ -386,6 +418,7 @@ export struct ErrorCard {
 // JsonTree: JSON 树形展示(MVP: 美化 JSON 文本)
 @Component
 export struct JsonTree {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop data: string = '';
   build(): void {
     Scroll() {
@@ -395,6 +428,7 @@ export struct JsonTree {
         .width('100%')
         .padding(12)
     }
+      .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .width('100%')
     .backgroundColor(SURFACE2)
     .borderRadius(8)
@@ -413,12 +447,14 @@ export struct JsonTree {
 //   故重命名为 onClicked。
 @Component
 export struct Tag {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop text: string = '';
   @Prop selected: boolean = false;
   onClicked: () => void = (): void => {};
   build(): void {
     Text(this.text)
-      .fontSize(11)
+      
+      .opacity(this.themeEpoch >= 0 ? 1 : 1).fontSize(11)
       .fontColor(this.selected ? '#FFFFFF' : INK2)
       .padding({ left: 10, right: 10, top: 4, bottom: 4 })
       .borderRadius(999)
@@ -433,11 +469,12 @@ export struct Tag {
 // ImagePreviewDialog: 全屏图片预览(点击关闭)
 @Component
 export struct ImagePreviewDialog {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop url: string = '';
   @Prop show: boolean = false;
   onDismiss: () => void = (): void => {};
   build(): void {
-    if (this.show) {
+    if (this.themeEpoch >= 0 && this.show) {
       Stack({ alignContent: Alignment.Center }) {
         Column() {
           Image(this.url)
@@ -458,6 +495,7 @@ export struct ImagePreviewDialog {
 // ShareSheet: 分享面板(MVP:复制链接/分享文本)
 @Component
 export struct ShareSheet {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop show: boolean = false;
   @Prop text: string = '';
   onCopy: () => void = (): void => {};
@@ -470,7 +508,7 @@ export struct ShareSheet {
   }
 
   build(): void {
-    if (this.show) {
+    if (this.themeEpoch >= 0 && this.show) {
       Stack() {
         Row() {}
           .width('100%')
@@ -507,6 +545,7 @@ export struct ShareSheet {
 // ToggleSurface: 可折叠表面(标题可点切换展开/折叠)
 @Component
 export struct ToggleSurface {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop title: string = '';
   @Prop expanded: boolean = false;
   onToggle: () => void = (): void => {};
@@ -528,6 +567,7 @@ export struct ToggleSurface {
         .padding({ left: 12, right: 12, bottom: 8 })
       }
     }
+      .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .width('100%')
     .backgroundColor(SURFACE)
     .border({ width: 1, color: LINE })

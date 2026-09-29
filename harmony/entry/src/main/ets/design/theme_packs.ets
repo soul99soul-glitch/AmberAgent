@@ -3,8 +3,10 @@
 // 模型:ThemePack = 纸色组(light/dark 各 10 槽)+ accent + 首页点阵开关。
 // 应用:applyThemePack = 先 applyTheme 拿状态色/玻璃/HOME alpha 默认值,再经
 //   applyPaperPalette 覆写 pack 纸色;accent 走既有 setAccentColor。
-// 刷新(与深色切换同机制,不过度设计):调用方应用后写
-//   AppStorage accentColor(35 订阅者)/ darkMode(模式翻转)/ homeDotGrid / themePackId。
+// 刷新:令牌变更收口(applyTheme/applyPaperPalette/setAccentColor/applyAmoledBlack)
+//   自动 bumpThemeEpoch → 全站 @Entry 页面 ForEach 纪元重挂载,整棵子树销毁重建。
+//   调用方另写 AppStorage accentColor / darkMode / homeDotGrid / themePackId
+//   供语义化订阅者(如点阵重绘开关)。
 // 持久化:KV theme_pack_id + theme_custom_packs(JSON 数组,导入包);
 //   启动时 EntryAbility hydrate 后用 applyCurrentTheme 替代裸 applyTheme。
 

@@ -21,6 +21,7 @@ import { Icon } from './ui/Icon.ets';
 
 @Component
 export struct ChatMessageActionsSheet {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop message: UIMessage;
   @Prop isUser: boolean = false;
   @Prop isLastAssistant: boolean = false;
@@ -101,6 +102,7 @@ export struct ChatMessageActionsSheet {
       .alignItems(HorizontalAlign.Center)
       .margin({ top: 12 })
     }
+      .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .width('100%')
     .padding({ left: 16, right: 16, top: 10, bottom: 24 })
   }

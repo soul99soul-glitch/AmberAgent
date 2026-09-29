@@ -22,6 +22,7 @@ type MultiAnswerMap = Record<string, string[]>;
 
 @Component
 export struct ChatMessageAskUserStep {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop part: UIMessagePartTool;
   @Prop answers: AnswerMap;
   @Prop multiAnswers: MultiAnswerMap;
@@ -158,6 +159,7 @@ export struct ChatMessageAskUserStep {
         .width('100%').margin({ top: 8 })
       }
     }
+      .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .width('100%')
   }
 

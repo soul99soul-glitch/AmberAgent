@@ -5,7 +5,9 @@
 //
 // 主题: 色板令牌为 export let(可变),applyTheme(dark) 在启动/切换时整体赋值
 //   (session-home.html :root 与 [data-theme="dark"] 逐值复制)。
-//   组件在 build() 时读取 → 页面重建即生效;切换当前页经 replaceUrl 重建。
+//   刷新: export let 重新赋值自身不触发 UI 更新,故每次令牌变更收口处一律调
+//   bumpThemeEpoch() 递增 AppStorage 'themeEpoch';全站组件以
+//   `@StorageProp('themeEpoch')` 订阅,任何主题/模式/accent/主题包变更即全量重建。
 
 import { FONT_SANS, FONT_SANS_SEMIBOLD, FONT_SANS_BOLD, FONT_MONO, FONT_MONO_SEMIBOLD } from './fonts.ets';
 
@@ -51,6 +53,14 @@ const accentInkFor = (accent: string): string => {
 export const STATUS_BLUE: string = '#4F86D6';   // 压缩中/信息
 export const STATUS_AMBER: string = '#D19A66';  // ≥50% 用量预警
 export let STATUS_BLUE_LIGHT: string = '#E8F0FE'; // 蓝色 chip 淡底(随主题)
+
+// ── 主题变更广播(export let 自身无响应式,所有令牌变更收口必须调本函数) ──
+// 全站 struct 订阅 AppStorage 'themeEpoch' 并在 build() 根节点消费(V1 限制:
+// 状态变量未参与 UI 绑定则变化不触发刷新);epoch 递增 → 全量组件重建重读令牌。
+export const bumpThemeEpoch = (): void => {
+  const cur: number = AppStorage.get<number>('themeEpoch') ?? 0;
+  AppStorage.setOrCreate<number>('themeEpoch', cur + 1);
+};
 
 // ── 遮罩(弹层/抽屉半透明黑,统一暗度) ──
 export const OVERLAY: string = '#66000000';
@@ -129,6 +139,7 @@ export const applyTheme = (dark: boolean): void => {
   // signal 随 accent(Android 别名决策);accentInk 按 accent 亮度
   SIGNAL = ACCENT;
   ACCENT_INK = accentInkFor(ACCENT);
+  bumpThemeEpoch();
 };
 
 // setAccentColor — 强调色切换(色板五选一)
@@ -137,6 +148,7 @@ export const setAccentColor = (hex: string): void => {
   ACCENT_LIGHT = accentLightFor(hex, darkTheme);
   SIGNAL = hex;
   ACCENT_INK = accentInkFor(hex);
+  bumpThemeEpoch();
 };
 
 // ── 主题包覆写钩子(design/theme_packs.ets 调用) ──
@@ -184,6 +196,7 @@ export const applyPaperPalette = (o: PaperPaletteOverrides): void => {
   HOME_INK2 = o.ink2;
   HOME_MUTED = o.muted;
   HOME_MUTED2 = o.muted2;
+  bumpThemeEpoch();
 };
 
 // D0-11:AMOLED 纯黑覆写(仅深色;画布/渐隐/玻璃纯黑,卡片面保持原色分层)。
@@ -194,6 +207,7 @@ export const applyAmoledBlack = (): void => {
   BG_FADE_START = '#00000000';
   BG_FADE_END = '#000000';
   BG_GLASS = '#CC000000';
+  bumpThemeEpoch();
 };
 
 // ── 字号(对齐设计稿 px 值) ──

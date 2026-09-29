@@ -29,6 +29,7 @@ interface ModelRow {
 @Entry
 @Component
 struct ChatModelPickerPage {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @State rows: ModelRow[] = [];
   @State loaded: boolean = false;
   // 助手已绑定模型:顶部提供「跟随全局选择」清除入口(UI-F34)
@@ -143,6 +144,8 @@ struct ChatModelPickerPage {
 
   build() {
     Column() {
+      // 主题纪元重挂载(勿拆):epoch 变化 → 整页子树销毁重建,全量重读令牌
+      ForEach([this.themeEpoch], (_e: number): void => {
       CenteredTitleBar({ title: '选择模型' })
 
       // 清除绑定入口(UI-F34)在所有分支前渲染:已绑定但无可用模型时也必须可达
@@ -193,7 +196,10 @@ struct ChatModelPickerPage {
         }
         .width('100%').layoutWeight(1).align(Alignment.TopStart)
       }
-    }
+    
+      }, (e: number): string => `theme-${e}`)
+}
+      .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .width('100%').height('100%').backgroundColor(BG)
   }
 }

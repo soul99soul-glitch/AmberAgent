@@ -16,6 +16,7 @@ export interface NovelPolishCreateSheetChapter {
 
 @Component
 export struct NovelPolishCreateSheet {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop visible: boolean = false;
   @Prop chapters: NovelPolishCreateSheetChapter[] = [];
   @Prop modelReady: boolean = false;
@@ -42,7 +43,7 @@ export struct NovelPolishCreateSheet {
   }
 
   build(): void {
-    if (this.visible) {
+    if (this.themeEpoch >= 0 && this.visible) {
       Stack() {
         Row() {}
           .width('100%').height('100%').backgroundColor(OVERLAY)

@@ -14,6 +14,7 @@ const formatTokens = (n: number): string => {
 
 @Component
 export struct ContextRing {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop used: number = 0;
   @Prop total: number = 0;
   @State expanded: boolean = false;
@@ -60,6 +61,7 @@ export struct ContextRing {
         .fontSize(LABEL)
         .fontColor(INK3)
     }
+      .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .alignItems(VerticalAlign.Center)
     .padding({ left: 6, right: 6, top: 6, bottom: 6 })
     .borderRadius(8)

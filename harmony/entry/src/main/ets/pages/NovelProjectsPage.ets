@@ -450,6 +450,8 @@ struct NovelProjectsPage {
 
   build(): void {
     Stack() {
+      // 主题纪元重挂载(勿拆):epoch 变化 → 整页子树销毁重建,全量重读令牌
+      ForEach([this.themeEpoch], (_e: number): void => {
       Column() {
         CenteredTitleBar({ title: '小说创作', actionIcon: 'arrow_down_to_line',
           onAction: (): void => { this.importWorkspace(); } })
@@ -634,7 +636,10 @@ struct NovelProjectsPage {
           });
         })
       }
-    }
+    
+      }, (e: number): string => `theme-${e}`)
+}
+      .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .width('100%').height('100%')
   }
 }

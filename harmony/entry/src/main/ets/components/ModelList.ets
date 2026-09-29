@@ -74,6 +74,7 @@ function sortModels(models: ModelInfo[], key: ModelSortKey): ModelInfo[] {
 
 @Component
 export struct ModelList {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop models: ModelInfo[] = [];
   // 回调(父级负责持久化)
   onAdd: (m: ModelInfo) => void = (_m: ModelInfo): void => {};
@@ -414,6 +415,7 @@ export struct ModelList {
         .align(Alignment.TopStart)
       .layoutWeight(1)
     }
+      .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .width('100%').height('100%')
   }
 }

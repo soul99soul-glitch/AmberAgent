@@ -17,6 +17,7 @@ import { Icon } from './Icon.ets';
 
 @Component
 export struct AmberTextArea {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop value: string = '';
   @Prop label: string = '';
   @Prop placeholder: string = '';
@@ -108,6 +109,7 @@ export struct AmberTextArea {
         .padding({ top: 4, left: 2, right: 2 })
       }
     }
+      .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .width('100%')
     .alignItems(HorizontalAlign.Start)
     .bindSheet(this.fullScreenOpen, this.FullScreenEditor(), {

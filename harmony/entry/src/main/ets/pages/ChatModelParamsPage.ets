@@ -58,6 +58,7 @@ class ModelParameterColors {
 @Entry
 @Component
 struct ChatModelParamsPage {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @State loaded: boolean = false;
   @State modelLabel: string = '';
   // 草稿态(dialogState.currentState 语义;raw 文本 + 最近合法 body 值)
@@ -404,6 +405,8 @@ struct ChatModelParamsPage {
 
   build() {
     Column() {
+      // 主题纪元重挂载(勿拆):epoch 变化 → 整页子树销毁重建,全量重读令牌
+      ForEach([this.themeEpoch], (_e: number): void => {
       PageTitleBar({ title: `模型参数 · ${this.modelLabel}` })
 
       if (!this.loaded) {
@@ -603,7 +606,10 @@ struct ChatModelParamsPage {
         }
         .width('100%').padding({ left: 16, right: 16, top: 8, bottom: 16 + this.navBarHeight })
       }
-    }
+    
+      }, (e: number): string => `theme-${e}`)
+}
+      .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .width('100%').height('100%').backgroundColor(this.colors.background)
   }
 }

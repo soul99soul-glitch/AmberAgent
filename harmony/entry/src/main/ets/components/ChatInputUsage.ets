@@ -31,6 +31,7 @@ const contextColor = (ratio: number, compactActive: boolean): string => {
 
 @Component
 struct ContextRing {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop @Watch('onInputChanged') ratio: number = 0;
   @Prop @Watch('onInputChanged') color: string = INK3;
   @Prop @Watch('onInputChanged') lineColor: string = LINE;
@@ -66,7 +67,8 @@ struct ContextRing {
 
   build(): void {
     Canvas(this.context)
-      .width(14)
+      
+      .opacity(this.themeEpoch >= 0 ? 1 : 1).width(14)
       .height(14)
       .onReady((): void => { this.draw(); });
   }
@@ -75,6 +77,7 @@ struct ContextRing {
 // ContextUsageIndicator — 上下文环 + token 文本
 @Component
 export struct ContextUsageIndicator {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop usedTokens: number = 0;
   @Prop contextWindow: number = 0;
   @Prop compactActive: boolean = false;
@@ -108,6 +111,7 @@ export struct ContextUsageIndicator {
         .maxLines(1)
         .textOverflow({ overflow: TextOverflow.Ellipsis })
     }
+      .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .alignItems(VerticalAlign.Center)
   }
 }
@@ -115,6 +119,7 @@ export struct ContextUsageIndicator {
 // ContextBarsIndicator — 上下文四段竖条 + 百分比(amber-zhenji.html .ctx-bars 规格)
 @Component
 export struct ContextBarsIndicator {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop usedTokens: number = 0;
   @Prop contextWindow: number = 0;
   @Prop compactActive: boolean = false;
@@ -159,6 +164,7 @@ export struct ContextBarsIndicator {
         .fontFamily('JetBrainsMono')
         .fontColor(INK3)
     }
+      .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .alignItems(VerticalAlign.Center)
   }
 }
@@ -166,12 +172,14 @@ export struct ContextBarsIndicator {
 // ReasoningLevelChip — reasoning 等级选择 chip
 @Component
 export struct ReasoningLevelChip {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop label: string = '';
   @Prop accent: boolean = false;
   onSelect: () => void = (): void => {};
   build(): void {
     Text(this.label)
-      .fontSize(LABEL)
+      
+      .opacity(this.themeEpoch >= 0 ? 1 : 1).fontSize(LABEL)
       .fontColor(this.accent ? STATUS_BLUE : INK2)
       .padding({ left: 10, right: 10, top: 5, bottom: 5 })
       .backgroundColor(this.accent ? STATUS_BLUE_LIGHT : SURFACE)
@@ -185,12 +193,14 @@ export struct ReasoningLevelChip {
 // ComposerStatusChip — 状态 chip(对齐 Android ComposerStatusChip)
 @Component
 export struct ComposerStatusChip {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop text: string = '';
   @Prop accent: boolean = false;
   onSelect: () => void = (): void => {};
   build(): void {
     Text(this.text)
-      .fontSize(LABEL)
+      
+      .opacity(this.themeEpoch >= 0 ? 1 : 1).fontSize(LABEL)
       .fontColor(this.accent ? STATUS_BLUE : INK2)
       .padding({ left: 10, right: 10, top: 5, bottom: 5 })
       .backgroundColor(this.accent ? STATUS_BLUE_LIGHT : SURFACE)

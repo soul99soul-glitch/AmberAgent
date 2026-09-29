@@ -23,6 +23,7 @@ export const resolveActionFooterMode = (
 
 @Component
 export struct ChatMessageActionFooter {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop annotations: UIMessageAnnotation[];
   @Prop mode: ActionFooterMode = 'hidden';
   @Prop isUser: boolean = false;
@@ -49,7 +50,7 @@ export struct ChatMessageActionFooter {
   }
 
   build(): void {
-    if (this.mode === 'hidden') {
+    if (this.themeEpoch >= 0 && this.mode === 'hidden') {
       Blank().height(0)
     } else {
       Column() {

@@ -5,11 +5,13 @@ import { ACCENT, ACCENT_INK, INK, INK2, INK3, INK4, SURFACE, SURFACE2, LINE, BG,
 // AmberCard — 圆角卡片容器(borderRadius 14, surface 背景, line 边框)
 @Component
 export struct AmberCard {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @BuilderParam content: () => void;
   build(): void {
     Column() {
       this.content()
     }
+      .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .width('100%')
     .backgroundColor(SURFACE)
     .borderRadius(14)
@@ -21,10 +23,12 @@ export struct AmberCard {
 // Hairline — 1px 分隔线
 @Component
 export struct Hairline {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   build(): void {
     Column() {
       Text('').width('100%').height(1).backgroundColor(LINE)
     }
+      .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .width('100%')
   }
 }
@@ -32,6 +36,7 @@ export struct Hairline {
 // BtnInk — 深色主按钮(ink 背景, bg 文字)
 @Component
 export struct BtnInk {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop text: string = '';
   @Prop enabled: boolean = true;
   onClick: () => void = (): void => {};
@@ -42,6 +47,7 @@ export struct BtnInk {
         .fontWeight(FontWeight.Medium)
         .fontColor(this.enabled ? BG : INK4)
     }
+      .enabled(this.themeEpoch >= 0)
     .width('100%')
     .justifyContent(FlexAlign.Center)
     .padding({ left: 18, right: 18, top: 12, bottom: 12 })
@@ -55,6 +61,7 @@ export struct BtnInk {
 // BtnAccent — 强调色按钮(accent 背景, 白字)
 @Component
 export struct BtnAccent {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @StorageProp('accentColor') accentColorStore: string = ACCENT;
   @Prop text: string = '';
   @Prop enabled: boolean = true;
@@ -66,6 +73,7 @@ export struct BtnAccent {
         .fontWeight(FontWeight.Medium)
         .fontColor(this.enabled ? ACCENT_INK : INK4)
     }
+      .enabled(this.themeEpoch >= 0)
     .width('100%')
     .justifyContent(FlexAlign.Center)
     .padding({ left: 18, right: 18, top: 12, bottom: 12 })
@@ -79,6 +87,7 @@ export struct BtnAccent {
 // SectionLabel — eyebrow 标签("// TITLE")
 @Component
 export struct SectionLabel {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @StorageProp('accentColor') accentColorStore: string = ACCENT;
   @Prop text: string = '';
   build(): void {
@@ -86,6 +95,7 @@ export struct SectionLabel {
       Text('//').fontSize(META).fontColor(this.accentColorStore).fontWeight(FontWeight.Bold)
       Text(' ' + this.text.toUpperCase()).fontSize(META).fontColor(INK3)
     }
+      .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .width('100%')
   }
 }
@@ -93,6 +103,7 @@ export struct SectionLabel {
 // LiveDot — 呼吸点(signal 色, 脉冲动画)
 @Component
 export struct LiveDot {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @StorageProp('accentColor') accentColorStore: string = ACCENT;
   @Prop idle: boolean = false;
   @Prop dotSize: number = 7;
@@ -121,6 +132,7 @@ export struct LiveDot {
         .borderRadius(this.dotSize / 2)
         .backgroundColor(this.idle ? INK4 : this.accentColorStore)
     }
+      .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .width(this.dotSize * 2.2)
     .height(this.dotSize * 2.2)
     .alignContent(Alignment.Center)
@@ -130,6 +142,7 @@ export struct LiveDot {
 // BlinkingCursor — 终端闪烁光标
 @Component
 export struct BlinkingCursor {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @StorageProp('accentColor') accentColorStore: string = ACCENT;
   @Prop color: string = '';
   @Prop width: number = 8;
@@ -137,7 +150,8 @@ export struct BlinkingCursor {
   @State visible: boolean = true;
   build(): void {
     Text('')
-      .width(this.width)
+      
+      .enabled(this.themeEpoch >= 0).width(this.width)
       .height(this.height)
       .backgroundColor(this.color.length > 0 ? this.color : this.accentColorStore)
       .borderRadius(1)

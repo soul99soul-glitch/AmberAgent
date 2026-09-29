@@ -3,7 +3,7 @@
 //   // 预置 区(DEFAULT_PROVIDERS 减去已存在的 id),行 = monogram34 + 名称 +
 //   subtitle(slug)+ auth 徽标。选择 → onPickPreset(整份 ProviderSetting)。
 import {
-  ACCENT, BG, INK, INK2, INK3, INK4, LABEL, LINE, META, OVERLAY, SURFACE2,
+  ACCENT, BG, INK, INK2, INK3, INK4, LABEL, LINE, META, MOTION_OVERLAY, OVERLAY, SURFACE2,
 } from '../design/tokens.ets';
 import type { ProviderSetting } from '@amber/chat-domain';
 import { DEFAULT_PROVIDERS, toProviderMonogram, providerSlug } from '../di/ProviderDefaults.ets';
@@ -21,6 +21,7 @@ const OAUTH_ROWS: OAuthRow[] = [
 
 @Component
 export struct ProviderTemplatePickerSheet {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop show: boolean = false;
   @Prop existingIds: string = ''; // JSON 数组字符串(ArkTS @Prop 传数组受限,序列化传递)
   onPickPreset: (p: ProviderSetting) => void = (_p: ProviderSetting): void => {};
@@ -59,13 +60,15 @@ export struct ProviderTemplatePickerSheet {
   }
 
   build(): void {
-    if (this.show) {
+    if (this.themeEpoch >= 0 && this.show) {
       Stack({ alignContent: Alignment.Bottom }) {
         Column()
           .width('100%')
           .height('100%')
           .backgroundColor(OVERLAY)
           .onClick((): void => { this.onDismiss(); })
+          .transition(TransitionEffect.OPACITY
+            .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
 
         Column() {
           Text('')
@@ -172,6 +175,8 @@ export struct ProviderTemplatePickerSheet {
         .backgroundColor(BG)
         .borderRadius({ topLeft: 16, topRight: 16 })
         .onClick((): void => {})
+        .transition(TransitionEffect.translate({ y: 80 }).combine(TransitionEffect.OPACITY)
+          .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
       }
       .width('100%')
       .height('100%')

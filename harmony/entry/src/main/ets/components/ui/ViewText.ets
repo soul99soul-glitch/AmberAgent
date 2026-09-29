@@ -5,6 +5,7 @@ import { INK, INK2, INK3, BODY } from '../../design/tokens.ets';
 
 @Component
 export struct ViewText {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop text: string = '';
   @Prop fontSize: number = BODY;
   @Prop fontColor: string = INK2;
@@ -12,7 +13,8 @@ export struct ViewText {
   @Prop maxLines: number = 0;  // 0 = 不限
   build(): void {
     Text(this.text)
-      .fontSize(this.fontSize)
+      
+      .opacity(this.themeEpoch >= 0 ? 1 : 1).fontSize(this.fontSize)
       .fontColor(this.fontColor)
       .fontFamily(this.mono ? 'monospace' : 'sans-serif')
       .lineHeight(this.fontSize * 1.5)

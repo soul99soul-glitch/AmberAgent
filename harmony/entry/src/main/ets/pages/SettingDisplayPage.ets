@@ -8,7 +8,7 @@ import { getChatKvStore } from '../di/AppContainer.ets';
 import {
   CenteredTitleBar, PlainSection, CardGroup, CardToggleRow, Seg, BtnFill,
 } from '../components/PageTemplate.ets';
-import { INK, INK3, BG, ACCENT, GUTTER, TEXT_STYLES } from '../design/tokens.ets';
+import { INK, INK3, BG, ACCENT, GUTTER, TEXT_STYLES, MOTION_OVERLAY } from '../design/tokens.ets';
 import { FONT_MONO_MEDIUM, FONT_SANS_MEDIUM } from '../design/fonts.ets';
 import { textToSpeech } from '@kit.CoreSpeechKit';
 import { promptAction } from '@kit.ArkUI';
@@ -29,6 +29,7 @@ const FONT_FAMILY_VALUES: string[] = ['DEFAULT', 'SERIF', 'MONO'];
 @Entry
 @Component
 struct SettingDisplayPage {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @StorageProp('accentColor') accentColorStore: string = ACCENT;
   @State setting: DisplaySetting = makeDisplaySetting();
   @State loaded: boolean = false;
@@ -97,7 +98,7 @@ struct SettingDisplayPage {
 
   private update(patch: Partial<DisplaySetting>): void {
     // ArkTS 禁止对象 spread(arkts-no-spread)→ 手动合并
-    this.setting = makeDisplaySetting({
+    const next: DisplaySetting = makeDisplaySetting({
       showAssistantBubble: patch.showAssistantBubble ?? this.setting.showAssistantBubble,
       showModelIcon: patch.showModelIcon ?? this.setting.showModelIcon,
       showModelName: patch.showModelName ?? this.setting.showModelName,
@@ -132,6 +133,13 @@ struct SettingDisplayPage {
       userNickname: patch.userNickname ?? this.setting.userNickname,
       userAvatar: patch.userAvatar ?? this.setting.userAvatar,
     });
+    if (patch.pasteLongTextAsFile !== undefined) {
+      this.getUIContext().animateTo({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }, (): void => {
+        this.setting = next;
+      });
+    } else {
+      this.setting = next;
+    }
     saveDisplaySetting(getChatKvStore(), this.setting);
   }
 
@@ -306,6 +314,8 @@ struct SettingDisplayPage {
       }
       .width('100%')
       .padding({ left: 14, right: 14, top: 12, bottom: 12 })
+      .transition(TransitionEffect.OPACITY.combine(TransitionEffect.translate({ y: -8 }))
+        .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
     }
   }
 
@@ -369,6 +379,8 @@ struct SettingDisplayPage {
 
   build(): void {
     Column() {
+      // 主题纪元重挂载(勿拆):epoch 变化 → 整页子树销毁重建,全量重读令牌
+      ForEach([this.themeEpoch], (_e: number): void => {
       CenteredTitleBar({ title: '显示与字体' })
       if (!this.loaded) {
         Text('加载中…')
@@ -413,7 +425,10 @@ struct SettingDisplayPage {
         .align(Alignment.TopStart)
         .layoutWeight(1)
       }
-    }
+    
+      }, (e: number): string => `theme-${e}`)
+}
+      .enabled(this.themeEpoch >= 0)
     .width('100%').height('100%').backgroundColor(BG)
     .opacity(this.accentColorStore.length >= 0 ? 1 : 1)
   }

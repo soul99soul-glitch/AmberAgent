@@ -149,6 +149,7 @@ const messageResultsFrom = async (
 @Entry
 @Component
 struct SearchPage {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @StorageProp('statusBarHeight') statusBarHeight: number = 44;
   @State searchText: string = '';
   @State results: SearchResult[] = [];
@@ -339,6 +340,8 @@ struct SearchPage {
 
   build(): void {
     Column() {
+      // 主题纪元重挂载(勿拆):epoch 变化 → 整页子树销毁重建,全量重读令牌
+      ForEach([this.themeEpoch], (_e: number): void => {
       CenteredTitleBar({ title: '搜索' })
 
       Row() {
@@ -413,7 +416,10 @@ struct SearchPage {
         }
         .width('100%').layoutWeight(1).divider({ strokeWidth: 1, color: LINE })
       }
-    }
+    
+      }, (e: number): string => `theme-${e}`)
+}
+      .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .width('100%').height('100%').backgroundColor(BG)
   }
 }

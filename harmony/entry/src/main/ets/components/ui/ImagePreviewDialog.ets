@@ -5,13 +5,14 @@ import { INK, INK3, SURFACE, LINE, BODY, META } from '../../design/tokens.ets';
 
 @Component
 export struct ImagePreviewDialog {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop images: string[] = [];
   @Prop show: boolean = false;
   @State currentIndex: number = 0;
   onDismiss: () => void = (): void => {};
 
   build(): void {
-    if (this.show && this.images.length > 0) {
+    if (this.themeEpoch >= 0 && this.show && this.images.length > 0) {
       Stack() {
         // 图片
         if (this.currentIndex < this.images.length) {

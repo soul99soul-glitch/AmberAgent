@@ -38,6 +38,7 @@ const AI_TEMPLATE_PROMPT: string =
 @Entry
 @Component
 struct DeepReadTemplateWorkbenchPage {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @StorageProp('accentColor') accentColorStore: string = ACCENT;
   @State templates: CustomTemplateDef[] = [];
   @State editingId: string = '';   // '' = 新建
@@ -204,6 +205,8 @@ struct DeepReadTemplateWorkbenchPage {
 
   build(): void {
     Column() {
+      // 主题纪元重挂载(勿拆):epoch 变化 → 整页子树销毁重建,全量重读令牌
+      ForEach([this.themeEpoch], (_e: number): void => {
       CenteredTitleBar({ title: '模板工坊' })
       Scroll() {
         Column() {
@@ -230,7 +233,10 @@ struct DeepReadTemplateWorkbenchPage {
       }
       .align(Alignment.TopStart)
       .layoutWeight(1)
-    }
+    
+      }, (e: number): string => `theme-${e}`)
+}
+      .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .width('100%').height('100%').backgroundColor(BG)
     .bindSheet(this.previewOpen, this.PreviewSheet(), {
       height: SheetSize.LARGE, showClose: false,

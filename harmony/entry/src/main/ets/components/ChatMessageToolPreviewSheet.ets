@@ -29,6 +29,7 @@ interface SearchResultItem {
 
 @Component
 export struct ChatMessageToolPreviewSheet {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop part: UIMessagePartTool;
   @Prop jevSubjectHash: string = '';
   onDismiss: () => void = (): void => {};
@@ -164,6 +165,7 @@ export struct ChatMessageToolPreviewSheet {
         .align(Alignment.TopStart)
       .layoutWeight(1)
     }
+      .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .width('100%')
     .height('70%')
     .backgroundColor(SURFACE)

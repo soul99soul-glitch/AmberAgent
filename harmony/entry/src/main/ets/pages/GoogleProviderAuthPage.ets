@@ -15,13 +15,14 @@ import {
 } from '../platform_impl/GoogleProviderConfigSupport.ets';
 import { PageTitleBar, BtnFill, BtnGhost, PageSpacer } from '../components/PageTemplate.ets';
 import { FlatTextField } from '../components/ui/FlatTextField.ets';
-import { BG, INK, INK3, ERROR, TEXT_STYLES } from '../design/tokens.ets';
+import { BG, INK, INK3, ERROR, TEXT_STYLES, MOTION_OVERLAY } from '../design/tokens.ets';
 
 interface GoogleProviderAuthRoute { providerId?: string; }
 
 @Entry
 @Component
 struct GoogleProviderAuthPage {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @State provider: ProviderSettingGoogle | null = null;
   @State mode: GooglePageAuthMode = 'api_key';
   @State clientId: string = '';
@@ -131,7 +132,7 @@ struct GoogleProviderAuthPage {
 
   private selectMode(mode: GooglePageAuthMode): void {
     if (this.busy || this.mode === mode) return;
-    this.mode = mode;
+    animateTo({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }, (): void => { this.mode = mode; });
     this.changed();
   }
 
@@ -334,6 +335,8 @@ struct GoogleProviderAuthPage {
 
   build() {
     Column() {
+      // 主题纪元重挂载(勿拆):epoch 变化 → 整页子树销毁重建,全量重读令牌
+      ForEach([this.themeEpoch], (_e: number): void => {
       PageTitleBar({ title: 'Google 认证', onBack: (): void => { this.back(); } })
       Scroll() {
         Column() {
@@ -411,7 +414,10 @@ struct GoogleProviderAuthPage {
           PageSpacer()
         }.width('100%').alignItems(HorizontalAlign.Start).padding({ left: 16, right: 16, top: 12 })
       }.layoutWeight(1).width('100%')
-    }.width('100%').height('100%').backgroundColor(BG)
+    
+      }, (e: number): string => `theme-${e}`)
+}
+      .opacity(this.themeEpoch >= 0 ? 1 : 1).width('100%').height('100%').backgroundColor(BG)
       .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
   }
 }

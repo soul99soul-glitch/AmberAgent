@@ -12,6 +12,7 @@ import { AmberSwitch, SwitchSize } from './ui/Switch.ets';
 
 @Component
 export struct ProviderCard {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop providerName: string = '';
   @Prop baseUrl: string = '';
   @Prop modelCount: number = 0;
@@ -102,6 +103,7 @@ export struct ProviderCard {
         .padding({ left: 8, right: 4, top: 8, bottom: 8 })
         .onClick((): void => { this.onDelete(); })
     }
+      .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .width('100%')
     .padding({ left: 14, right: 10, top: 12, bottom: 12 })
     .backgroundColor(SURFACE)

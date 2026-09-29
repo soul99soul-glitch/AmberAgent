@@ -8,7 +8,7 @@
 // 2026-09-27 二级页 iOS 对齐(基准 IMG_1992「站点」):仅换视觉骨架
 // (CenteredTitleBar/PlainSection/CardGroup r18+描边/CardToggleRow/FooterNote),逻辑零改动。
 
-import { BG, INK, INK3, ERROR, ACCENT, LINE, SURFACE2, accentSoftBg, lineHeightForSize } from '../design/tokens.ets';
+import { BG, INK, INK3, ERROR, ACCENT, LINE, SURFACE2, MOTION_OVERLAY, accentSoftBg, lineHeightForSize } from '../design/tokens.ets';
 import { FONT_SANS_MEDIUM, FONT_MONO } from '../design/fonts.ets';
 import {
   CenteredTitleBar, PlainSection, CardGroup, CardToggleRow, FooterNote, BtnFill, PageSpacer,
@@ -48,11 +48,14 @@ interface FeishuCodePaste {
 @Entry
 @Component
 struct SettingExperimentalWebMountPage {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @StorageProp('accentColor') accentColorStore: string = ACCENT;
   @State loaded: boolean = false;
   @State globalEnabled: boolean = false;
   @State evalEnabled: boolean = false;
   @State sites: UserSiteEntry[] = [];
+  private pageScroller: Scroller = new Scroller();
+
   // 添加表单
   @State addOpen: boolean = false;
   @State addName: string = '';
@@ -151,7 +154,7 @@ struct SettingExperimentalWebMountPage {
     this.oauthApiOrigins = app.apiOrigins.join(',');
     this.oauthSecret = '';
     this.oauthNote = `编辑 ${app.siteId};密钥留空则保留`;
-    this.oauthFormOpen = true;
+    this.setOauthFormOpen(true);
   }
 
   private saveOauth(): void {
@@ -180,7 +183,7 @@ struct SettingExperimentalWebMountPage {
     getWebMountOAuthRuntime().saveApplication(draft).then((saved: WebMountOAuthApplication): void => {
       this.oauthNote = `已保存 ${saved.siteId}(绑定 ${saved.bindingHash.substring(0, 8)}…)`;
       this.oauthSecret = '';
-      this.oauthFormOpen = false;
+      this.setOauthFormOpen(false);
       this.refreshOauth();
     }).catch((error: Error): void => {
       this.oauthNote = `保存失败:${error.message}`;
@@ -442,20 +445,26 @@ struct SettingExperimentalWebMountPage {
     const entry: UserSiteEntry = makeUserSite(name, url);
     saveWebMountSites(getChatKvStore(), [...this.sites, entry]).then((): void => {
       this.sites = [...this.sites, entry];
-      this.addOpen = false;
-      this.addName = '';
-      this.addUrl = '';
-      this.addError = '';
+      this.setAddOpen(false);
     }).catch((): void => {
       this.addError = '保存失败,请重试';
     });
   }
 
+  private setAddOpen(open: boolean): void {
+    this.getUIContext().animateTo({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }, (): void => {
+      this.addOpen = open;
+    });
+  }
+
+  private setOauthFormOpen(open: boolean): void {
+    this.getUIContext().animateTo({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }, (): void => {
+      this.oauthFormOpen = open;
+    });
+  }
+
   private cancelAdd(): void {
-    this.addOpen = false;
-    this.addName = '';
-    this.addUrl = '';
-    this.addError = '';
+    this.setAddOpen(false);
   }
 
   private removeSite(id: string): void {
@@ -849,94 +858,99 @@ struct SettingExperimentalWebMountPage {
           this.oauthApiOrigins = '';
           this.oauthSecret = '';
           this.oauthNote = '';
-          this.oauthFormOpen = true;
+          this.setOauthFormOpen(true);
         })
       }
 
       if (this.oauthFormOpen || this.oauthApps.length === 0) {
-      Text('站点 ID')
-        .fontSize(12).fontColor(INK3).fontFamily(FONT_SANS_MEDIUM)
-        .width('100%').padding({ left: 14, right: 14, top: 12 })
-      TextInput({ text: this.oauthSiteId, placeholder: '如 hackernews(与该站点的注册应用一致)' })
-        .height(44).fontSize(15).fontColor(INK).placeholderColor(INK3)
-        .backgroundColor(SURFACE2).borderRadius(8)
-        .margin({ left: 14, right: 14, top: 6 })
-        .onChange((v: string): void => { this.oauthSiteId = v; })
-      TextInput({ text: this.oauthAuthEndpoint, placeholder: '授权端点 https://…/authorize' })
-        .height(44).fontSize(15).fontColor(INK).placeholderColor(INK3)
-        .backgroundColor(SURFACE2).borderRadius(8)
-        .margin({ left: 14, right: 14, top: 8 })
-        .onChange((v: string): void => { this.oauthAuthEndpoint = v; })
-      TextInput({ text: this.oauthTokenEndpoint, placeholder: '令牌端点 https://…/token' })
-        .height(44).fontSize(15).fontColor(INK).placeholderColor(INK3)
-        .backgroundColor(SURFACE2).borderRadius(8)
-        .margin({ left: 14, right: 14, top: 8 })
-        .onChange((v: string): void => { this.oauthTokenEndpoint = v; })
-      TextInput({ text: this.oauthClientId, placeholder: 'Client ID' })
-        .height(44).fontSize(15).fontColor(INK).placeholderColor(INK3)
-        .backgroundColor(SURFACE2).borderRadius(8)
-        .margin({ left: 14, right: 14, top: 8 })
-        .onChange((v: string): void => { this.oauthClientId = v; })
-      TextInput({ text: this.oauthRedirect, placeholder: '回调地址(默认 http://127.0.0.1:53682/callback)' })
-        .height(44).fontSize(15).fontColor(INK).placeholderColor(INK3)
-        .backgroundColor(SURFACE2).borderRadius(8)
-        .margin({ left: 14, right: 14, top: 8 })
-        .onChange((v: string): void => { this.oauthRedirect = v; })
-      TextInput({ text: this.oauthScope, placeholder: 'Scope(可空)' })
-        .height(44).fontSize(15).fontColor(INK).placeholderColor(INK3)
-        .backgroundColor(SURFACE2).borderRadius(8)
-        .margin({ left: 14, right: 14, top: 8 })
-        .onChange((v: string): void => { this.oauthScope = v; })
-      Row({ space: 12 }) {
-        Text('编码')
-          .fontSize(13).fontColor(INK3).fontFamily(FONT_SANS_MEDIUM)
-        Text('form')
-          .fontSize(14)
-          .fontColor(this.oauthEncoding === 'form' ? this.accentColorStore : INK3)
-          .constraintSize({ minWidth: 44, minHeight: 44 })
-          .onClick((): void => { this.oauthEncoding = 'form'; })
-        Text('json')
-          .fontSize(14)
-          .fontColor(this.oauthEncoding === 'json' ? this.accentColorStore : INK3)
-          .constraintSize({ minWidth: 44, minHeight: 44 })
-          .onClick((): void => { this.oauthEncoding = 'json'; })
-        Blank().layoutWeight(1)
-        Text('密钥方式')
-          .fontSize(13).fontColor(INK3).fontFamily(FONT_SANS_MEDIUM)
-        ForEach(['none', 'body', 'basic'], (mode: string): void => {
-          Text(mode)
-            .fontSize(14)
-            .fontColor(this.oauthClientAuth === mode ? this.accentColorStore : INK3)
-            .constraintSize({ minWidth: 44, minHeight: 44 })
-            .onClick((): void => { this.oauthClientAuth = mode; })
-        }, (mode: string): string => mode)
-      }
-      .width('100%')
-      .alignItems(VerticalAlign.Center)
-      .padding({ left: 14, right: 14, top: 8 })
-      TextInput({ text: this.oauthApiOrigins, placeholder: '允许注入 Bearer 的 API origins,逗号分隔(仅 https)' })
-        .height(44).fontSize(15).fontColor(INK).placeholderColor(INK3)
-        .backgroundColor(SURFACE2).borderRadius(8)
-        .margin({ left: 14, right: 14, top: 8 })
-        .onChange((v: string): void => { this.oauthApiOrigins = v; })
-      TextInput({ text: this.oauthSecret, placeholder: 'Client Secret(留空保留;none 方式不需要)' })
-        .type(InputType.Password)
-        .height(44).fontSize(15).fontColor(INK).placeholderColor(INK3)
-        .backgroundColor(SURFACE2).borderRadius(8)
-        .margin({ left: 14, right: 14, top: 8 })
-        .onChange((v: string): void => { this.oauthSecret = v; })
-      if (this.oauthNote.length > 0) {
-        Text(this.oauthNote)
-          .fontSize(12).fontColor(INK3).fontFamily(FONT_SANS_MEDIUM)
+        Column() {
+          Text('站点 ID')
+            .fontSize(12).fontColor(INK3).fontFamily(FONT_SANS_MEDIUM)
+            .width('100%').padding({ left: 14, right: 14, top: 12 })
+          TextInput({ text: this.oauthSiteId, placeholder: '如 hackernews(与该站点的注册应用一致)' })
+            .height(44).fontSize(15).fontColor(INK).placeholderColor(INK3)
+            .backgroundColor(SURFACE2).borderRadius(8)
+            .margin({ left: 14, right: 14, top: 6 })
+            .onChange((v: string): void => { this.oauthSiteId = v; })
+          TextInput({ text: this.oauthAuthEndpoint, placeholder: '授权端点 https://…/authorize' })
+            .height(44).fontSize(15).fontColor(INK).placeholderColor(INK3)
+            .backgroundColor(SURFACE2).borderRadius(8)
+            .margin({ left: 14, right: 14, top: 8 })
+            .onChange((v: string): void => { this.oauthAuthEndpoint = v; })
+          TextInput({ text: this.oauthTokenEndpoint, placeholder: '令牌端点 https://…/token' })
+            .height(44).fontSize(15).fontColor(INK).placeholderColor(INK3)
+            .backgroundColor(SURFACE2).borderRadius(8)
+            .margin({ left: 14, right: 14, top: 8 })
+            .onChange((v: string): void => { this.oauthTokenEndpoint = v; })
+          TextInput({ text: this.oauthClientId, placeholder: 'Client ID' })
+            .height(44).fontSize(15).fontColor(INK).placeholderColor(INK3)
+            .backgroundColor(SURFACE2).borderRadius(8)
+            .margin({ left: 14, right: 14, top: 8 })
+            .onChange((v: string): void => { this.oauthClientId = v; })
+          TextInput({ text: this.oauthRedirect, placeholder: '回调地址(默认 http://127.0.0.1:53682/callback)' })
+            .height(44).fontSize(15).fontColor(INK).placeholderColor(INK3)
+            .backgroundColor(SURFACE2).borderRadius(8)
+            .margin({ left: 14, right: 14, top: 8 })
+            .onChange((v: string): void => { this.oauthRedirect = v; })
+          TextInput({ text: this.oauthScope, placeholder: 'Scope(可空)' })
+            .height(44).fontSize(15).fontColor(INK).placeholderColor(INK3)
+            .backgroundColor(SURFACE2).borderRadius(8)
+            .margin({ left: 14, right: 14, top: 8 })
+            .onChange((v: string): void => { this.oauthScope = v; })
+          Row({ space: 12 }) {
+            Text('编码')
+              .fontSize(13).fontColor(INK3).fontFamily(FONT_SANS_MEDIUM)
+            Text('form')
+              .fontSize(14)
+              .fontColor(this.oauthEncoding === 'form' ? this.accentColorStore : INK3)
+              .constraintSize({ minWidth: 44, minHeight: 44 })
+              .onClick((): void => { this.oauthEncoding = 'form'; })
+            Text('json')
+              .fontSize(14)
+              .fontColor(this.oauthEncoding === 'json' ? this.accentColorStore : INK3)
+              .constraintSize({ minWidth: 44, minHeight: 44 })
+              .onClick((): void => { this.oauthEncoding = 'json'; })
+            Blank().layoutWeight(1)
+            Text('密钥方式')
+              .fontSize(13).fontColor(INK3).fontFamily(FONT_SANS_MEDIUM)
+            ForEach(['none', 'body', 'basic'], (mode: string): void => {
+              Text(mode)
+                .fontSize(14)
+                .fontColor(this.oauthClientAuth === mode ? this.accentColorStore : INK3)
+                .constraintSize({ minWidth: 44, minHeight: 44 })
+                .onClick((): void => { this.oauthClientAuth = mode; })
+            }, (mode: string): string => mode)
+          }
           .width('100%')
+          .alignItems(VerticalAlign.Center)
           .padding({ left: 14, right: 14, top: 8 })
-      }
-      Row() {
-        Blank().layoutWeight(1)
-        BtnFill({ label: '保存配置', onTap: (): void => { this.saveOauth(); } })
-      }
-      .width('100%')
-      .padding({ left: 14, right: 14, top: 10, bottom: 14 })
+          TextInput({ text: this.oauthApiOrigins, placeholder: '允许注入 Bearer 的 API origins,逗号分隔(仅 https)' })
+            .height(44).fontSize(15).fontColor(INK).placeholderColor(INK3)
+            .backgroundColor(SURFACE2).borderRadius(8)
+            .margin({ left: 14, right: 14, top: 8 })
+            .onChange((v: string): void => { this.oauthApiOrigins = v; })
+          TextInput({ text: this.oauthSecret, placeholder: 'Client Secret(留空保留;none 方式不需要)' })
+            .type(InputType.Password)
+            .height(44).fontSize(15).fontColor(INK).placeholderColor(INK3)
+            .backgroundColor(SURFACE2).borderRadius(8)
+            .margin({ left: 14, right: 14, top: 8 })
+            .onChange((v: string): void => { this.oauthSecret = v; })
+          if (this.oauthNote.length > 0) {
+            Text(this.oauthNote)
+              .fontSize(12).fontColor(INK3).fontFamily(FONT_SANS_MEDIUM)
+              .width('100%')
+              .padding({ left: 14, right: 14, top: 8 })
+          }
+          Row() {
+            Blank().layoutWeight(1)
+            BtnFill({ label: '保存配置', onTap: (): void => { this.saveOauth(); } })
+          }
+          .width('100%')
+          .padding({ left: 14, right: 14, top: 10, bottom: 14 })
+        }
+        .width('100%')
+        .transition(TransitionEffect.OPACITY.combine(TransitionEffect.translate({ y: -8 }))
+          .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
       }
     }
     .width('100%')
@@ -1078,21 +1092,33 @@ struct SettingExperimentalWebMountPage {
 
   build(): void {
     Column() {
+      // 主题纪元重挂载(勿拆):epoch 变化 → 整页子树销毁重建,全量重读令牌
+      ForEach([this.themeEpoch], (_e: number): void => {
       CenteredTitleBar({
         title: '站点',
         subtitle: this.loaded ? `${this.sites.length} 个站点` : '',
         actionIcon: 'plus',
         onAction: (): void => {
-          this.addOpen = true;
+          this.addName = '';
+          this.addUrl = '';
           this.addError = '';
+          this.setAddOpen(true);
+          this.pageScroller.scrollTo({ xOffset: 0, yOffset: 0,
+            animation: { duration: MOTION_OVERLAY, curve: Curve.EaseOut } });
         },
       })
 
       if (!this.loaded) {
         Text('加载中…').fontSize(12).fontColor(INK3).padding({ top: 40 })
       } else {
-        Scroll() {
+        Scroll(this.pageScroller) {
           Column() {
+            if (this.addOpen) {
+              CardGroup({ radius: 18, stroke: true, content: (): void => { this.AddFormCard(); } })
+                .margin({ left: 16, right: 16, top: 12 })
+                .transition(TransitionEffect.OPACITY.combine(TransitionEffect.translate({ y: -8 }))
+                  .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
+            }
             PlainSection({ label: '开关' })
             CardGroup({ radius: 18, stroke: true, content: (): void => { this.SwitchesCard(); } })
               .margin({ left: 16, right: 16 })
@@ -1103,10 +1129,6 @@ struct SettingExperimentalWebMountPage {
             PlainSection({ label: '站点' })
             CardGroup({ radius: 18, stroke: true, content: (): void => { this.SitesCard(); } })
               .margin({ left: 16, right: 16 })
-            if (this.addOpen) {
-              CardGroup({ radius: 18, stroke: true, content: (): void => { this.AddFormCard(); } })
-                .margin({ left: 16, right: 16, top: 12 })
-            }
             FooterNote({
               text: '授权按域名匹配(含子域)。Agent 请求添加新站点时会在聊天中向你确认;'
                 + '点击类操作(wm_click)与站点增删均需逐次批准。',
@@ -1146,7 +1168,10 @@ struct SettingExperimentalWebMountPage {
         .align(Alignment.TopStart)
         .layoutWeight(1)
       }
-    }
+    
+      }, (e: number): string => `theme-${e}`)
+}
+      .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .width('100%').height('100%').backgroundColor(BG)
   }
 }

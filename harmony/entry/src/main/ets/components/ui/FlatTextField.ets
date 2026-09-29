@@ -8,6 +8,7 @@ import { INK, INK3, INK4, SURFACE, LINE, ACCENT, ERROR, BODY, META, LABEL } from
 
 @Component
 export struct FlatTextField {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop value: string = '';
   @Prop label: string = '';
   @Prop placeholder: string = '';
@@ -63,6 +64,7 @@ export struct FlatTextField {
           .margin({ left: 2, top: 6 })
       }
     }
+      .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .width('100%')
     .alignItems(HorizontalAlign.Start)
   }

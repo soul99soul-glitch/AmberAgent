@@ -9,7 +9,7 @@
 import {
   ACCENT, ACCENT_INK, BG, BG_FADE_END, BG_FADE_START, BG_GLASS, BODY, BODY2, ERROR, HEADER, INK, INK2, INK3,
   INK4, LABEL, LINE, LINE2, META, MONO_SMALL, OVERLAY, RADIUS, SIGNAL, STATUS_AMBER, STATUS_BLUE, SURFACE,
-  SURFACE2, TEXT_STYLES, USER_BG, USER_INK,
+  SURFACE2, TEXT_STYLES, USER_BG, USER_INK, MOTION_OVERLAY,
 } from '../design/tokens.ets';
 
 import { router, promptAction, window } from '@kit.ArkUI';
@@ -267,6 +267,7 @@ interface KernelRunOutcome {
 @Entry
 @Component
 struct ChatPage {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @StorageProp('statusBarHeight') statusBarHeight: number = 44;
   // P4:底部导航条安全区高度(EntryAbility 全屏布局避让区 bottomRect,vp;0=手势导航全隐藏)
   @StorageProp('navBarHeight') navBarHeight: number = 0;
@@ -2626,8 +2627,6 @@ struct ChatPage {
       this.unsubSubAgentLive = null;
     }
     this.subAgentSheetOpen = false;
-    this.subAgentSheetRunId = '';
-    this.subAgentLiveText = '';
   }
 
   // Copy sheet
@@ -2900,7 +2899,6 @@ struct ChatPage {
 
   private closeToolPreview(): void {
     this.toolPreviewSheetOpen = false;
-    this.toolPreviewLocator = null;
   }
 
   // TopModelMenu:打开/关闭下拉。打开 = 装配 groups(过滤 hasUsableAuth + chat 类型),
@@ -3131,7 +3129,7 @@ struct ChatPage {
     this.denyDialogOpen = false;
     this.denyDialogToolCallId = '';
     this.denyDialogLocator = undefined;
-    this.denyReasonText = '';
+    // 保留退出帧的输入内容；下次 openDenyDialog 再清空。
   }
 
   private confirmDenyDialog(): void {
@@ -3860,7 +3858,11 @@ struct ChatPage {
       .hitTestBehavior(HitTestMode.None)
       .bindSheet(this.subAgentSheetOpen, this.subAgentSheetBuilder(), {
         height: SheetSize.LARGE,
-        onDisappear: (): void => { this.closeSubAgentSheet(); },
+        onDisappear: (): void => {
+          this.closeSubAgentSheet();
+          this.subAgentSheetRunId = '';
+          this.subAgentLiveText = '';
+        },
       })
     Column() {}
       .width(0).height(0)
@@ -3881,12 +3883,17 @@ struct ChatPage {
       .hitTestBehavior(HitTestMode.None)
       .bindSheet(this.toolPreviewSheetOpen, this.toolPreviewSheetBuilder(), {
         height: SheetSize.LARGE,
-        onDisappear: (): void => { this.closeToolPreview(); },
+        onDisappear: (): void => {
+          this.closeToolPreview();
+          this.toolPreviewLocator = null;
+        },
       })
   }
 
   build() {
     Stack() {
+      // 主题纪元重挂载(勿拆):epoch 变化 → 整页子树销毁重建,全量重读令牌
+      ForEach([this.themeEpoch], (_e: number): void => {
     this.chatSheetHosts()
     // WebMount 会话宿主(移出可视区的真实尺寸 Web;按需挂载)
     WebMountHost({ visible: this.webmountHostVisible })
@@ -4074,6 +4081,8 @@ struct ChatPage {
         .alignContent(Alignment.Center)
         .onClick((): void => { this.jumpToBottom(); })
         .accessibilityText('回到消息底部')
+        .transition(TransitionEffect.OPACITY.combine(TransitionEffect.translate({ y: 8 }))
+          .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
       }
 
       // D0-5:回到顶部(离开首屏后出现;跳底按钮可见时上移避让)
@@ -4095,6 +4104,8 @@ struct ChatPage {
           this.scroller.scrollEdge(Edge.Top);
         })
         .accessibilityText('回到消息顶部')
+        .transition(TransitionEffect.OPACITY.combine(TransitionEffect.translate({ y: 8 }))
+          .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
       }
 
       // ContextUsagePanel(Android ContextRing.kt ContextUsagePopup):指示器下方右锚定
@@ -4107,6 +4118,8 @@ struct ChatPage {
           this.contextUsagePanel()
         }
         .position({ top: this.statusBarHeight + 72, right: 8 })
+        .transition(TransitionEffect.OPACITY.combine(TransitionEffect.translate({ y: -8 }))
+          .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
       }
       }
       .layoutWeight(1)
@@ -4453,13 +4466,19 @@ struct ChatPage {
         .border({ width: 1, color: LINE })
         // 消费点击,防穿透到遮罩 onClick(遮罩点击 = onDismissRequest)
         .onClick((): void => {})
+        .transition(TransitionEffect.scale({ x: 0.96, y: 0.96 })
+          .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
       }
       .width('100%').height('100%')
       .justifyContent(FlexAlign.Center)
       .backgroundColor(OVERLAY)
       .onClick((): void => { this.dismissDenyDialog(); })
+      .transition(TransitionEffect.OPACITY.animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
     }
-    }
+    
+      }, (e: number): string => `theme-${e}`)
+}
+      .enabled(this.themeEpoch >= 0)
     .width('100%').height('100%')
     // 1:1 原型 slideInR .28s ease-out:整页入场 translateX 20→0 + opacity 0→1
     //   乘 themeTick 读取建依赖:主题变更 onPageShow 后 build 重读令牌

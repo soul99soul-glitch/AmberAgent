@@ -5,6 +5,7 @@ import { INK, INK2, INK3, INK4, SURFACE, SURFACE2, LINE, ACCENT, ACCENT_LIGHT, B
 
 @Component
 export struct NotionListRow {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop title: string = '';
   @Prop subtitle: string = '';
   @Prop selected: boolean = false;
@@ -26,6 +27,7 @@ export struct NotionListRow {
       }
       .alignItems(HorizontalAlign.Start).layoutWeight(1)
     }
+      .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .width('100%')
     .constraintSize({ minHeight: 56 })
     .padding({ left: 16, right: 16 })

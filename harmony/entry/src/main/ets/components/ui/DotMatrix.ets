@@ -46,6 +46,7 @@ DFEATURE['pin'] = ['00111', '00101', '00111', '01000', '10000'];
 
 @Component
 export struct DotGlyph {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop rows: string[] = [];
   @Prop dotScale: number = 2;
   @Prop dotGap: number = -1; // -1 = 缺省 max(1, dotScale*0.5)
@@ -82,12 +83,14 @@ export struct DotGlyph {
         }
       }, (row: string, ri: number): string => `r${ri}`)
     }
+      .opacity(this.themeEpoch >= 0 ? 1 : 1)
   }
 }
 
 // 点阵底纹:19px 网格圆点,浅 4% 墨 / 深 6.5% 墨(LED 屏熄灭像素,淡到几乎不可见)
 @Component
 export struct DotGround {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   private settings: RenderingContextSettings = new RenderingContextSettings(true);
   private ctx: CanvasRenderingContext2D = new CanvasRenderingContext2D(this.settings);
   @StorageProp('darkMode') @Watch('onDarkChange') darkMode: boolean = false;
@@ -112,7 +115,8 @@ export struct DotGround {
 
   build(): void {
     Canvas(this.ctx)
-      .width('100%')
+      
+      .opacity(this.themeEpoch >= 0 ? 1 : 1).width('100%')
       .height('100%')
       .hitTestBehavior(HitTestMode.None)
       .onReady((): void => { this.draw(); })
@@ -121,6 +125,7 @@ export struct DotGround {
 
 @Component
 export struct DotText {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop text: string = '';
   @Prop dotScale: number = 2;
   @Prop dotGap: number = -1;
@@ -144,6 +149,7 @@ export struct DotText {
         }
       }, (ch: string, i: number): string => `${ch}-${i}`)
     }
+      .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .alignItems(VerticalAlign.Center)
   }
 }

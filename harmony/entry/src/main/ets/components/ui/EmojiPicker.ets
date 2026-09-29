@@ -22,6 +22,7 @@ const CATEGORIES: EmojiCategory[] = [
 
 @Component
 export struct EmojiPicker {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop iconSize: number = 36;
   onEmojiSelected: (emoji: string) => void = (_e: string): void => {};
   @State searchQuery: string = '';
@@ -85,6 +86,7 @@ export struct EmojiPicker {
       .layoutWeight(1)
       .width('100%')
     }
+      .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .width('100%')
     .height('100%')
     .padding(12)

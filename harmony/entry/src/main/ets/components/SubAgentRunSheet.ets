@@ -14,6 +14,7 @@ import { MarkdownText } from './MarkdownText.ets';
 
 @Component
 export struct SubAgentRunSheet {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop runId: string = '';
   @Prop tools: UIMessagePartTool[];
   // 父组件注入的实时文本(由 ChatPage subscribeLiveText 更新)
@@ -53,6 +54,7 @@ export struct SubAgentRunSheet {
       .layoutWeight(1)
       .padding({ left: 16, right: 16, bottom: 16 })
     }
+      .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .width('100%')
     .height('70%')
     .backgroundColor(SURFACE)

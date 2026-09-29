@@ -11,7 +11,7 @@ import { fileIo, picker } from '@kit.CoreFileKit';
 import { util } from '@kit.ArkTS';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import type { UIMessagePartMiniApp, MiniAppRecord, MiniAppVersionRecord } from '@amber/chat-domain';
-import { ACCENT, ACCENT_INK, BODY, BODY2, INK, INK2, INK3, INK4, LINE, META, OVERLAY, SURFACE, SURFACE2 } from '../design/tokens.ets';
+import { ACCENT, ACCENT_INK, BODY, BODY2, INK, INK2, INK3, INK4, LINE, META, MOTION_OVERLAY, OVERLAY, SURFACE, SURFACE2 } from '../design/tokens.ets';
 import { getMiniAppPlatform } from '../platform_impl/MiniAppPlatform.ets';
 import type { MiniAppPlatform } from '../platform_impl/MiniAppPlatform.ets';
 
@@ -25,6 +25,7 @@ interface ChatCardVersionTarget {
 
 @Component
 export struct MiniAppChatCard {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop part: UIMessagePartMiniApp;
   @Prop canRun: boolean = true;
   @Prop canModify: boolean = true;
@@ -107,7 +108,6 @@ export struct MiniAppChatCard {
     ].join('\n');
     if (this.onModify(prompt)) {
       this.modifyDialogOpen = false;
-      this.modifyRequest = '';
     }
   }
 
@@ -219,10 +219,15 @@ export struct MiniAppChatCard {
         .backgroundColor(SURFACE)
         .borderRadius(14)
         .border({ width: 1, color: LINE })
+        .onClick((): void => {})
+        .transition(TransitionEffect.scale({ x: 0.96, y: 0.96 })
+          .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
       }
       .width('100%').height('100%')
       .backgroundColor(OVERLAY)
       .onClick((): void => { this.sourceDialogOpen = false; })
+      .transition(TransitionEffect.OPACITY
+        .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
     }
   }
 
@@ -283,10 +288,15 @@ export struct MiniAppChatCard {
       .backgroundColor(SURFACE)
       .borderRadius(14)
       .border({ width: 1, color: LINE })
+      .onClick((): void => {})
+      .transition(TransitionEffect.scale({ x: 0.96, y: 0.96 })
+        .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
     }
     .width('100%').height('100%')
     .backgroundColor(OVERLAY)
     .onClick((): void => { this.versionTarget = null; })
+    .transition(TransitionEffect.OPACITY
+      .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
   }
 
   @Builder
@@ -346,10 +356,15 @@ export struct MiniAppChatCard {
         .backgroundColor(SURFACE)
         .borderRadius(14)
         .border({ width: 1, color: LINE })
+        .onClick((): void => {})
+        .transition(TransitionEffect.scale({ x: 0.96, y: 0.96 })
+          .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
       }
       .width('100%').height('100%')
       .backgroundColor(OVERLAY)
       .onClick((): void => { this.modifyDialogOpen = false; })
+      .transition(TransitionEffect.OPACITY
+        .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
     }
 
   build(): void {
@@ -438,6 +453,7 @@ export struct MiniAppChatCard {
         this.modifyDialog(this.modifyApp)
       }
     }
+      .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .width('100%')
   }
 

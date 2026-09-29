@@ -23,6 +23,7 @@ import { Icon } from './ui/Icon.ets';
 
 @Component
 export struct ToolResultPreview {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop toolName: string = '';
   @Prop outputText: string = '';
   @Prop outputJson: string = '';
@@ -132,7 +133,7 @@ export struct ToolResultPreview {
   }
 
   build(): void {
-    if (this.hasContent()) {
+    if (this.themeEpoch >= 0 && this.hasContent()) {
       Column() {
         // 标签行(按工具类型)
         this.RenderLabelRow()

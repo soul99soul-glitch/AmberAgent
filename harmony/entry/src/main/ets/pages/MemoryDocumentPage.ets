@@ -5,7 +5,7 @@ import { CenteredTitleBar, PlainSection, CardGroup, CardRow, FooterNote, PageSpa
 import { Icon } from '../components/ui/Icon.ets';
 import { MarkdownText } from '../components/MarkdownText.ets';
 import { SSHUIColors } from '../components/SSHUIColors.ets';
-import { ACCENT } from '../design/tokens.ets';
+import { ACCENT, MOTION_OVERLAY } from '../design/tokens.ets';
 import { FONT_MONO, FONT_MONO_MEDIUM, FONT_SANS_MEDIUM } from '../design/fonts.ets';
 
 interface MemoryDocumentParams { relativePath?: string; }
@@ -13,6 +13,7 @@ interface MemoryDocumentParams { relativePath?: string; }
 @Entry
 @Component
 struct MemoryDocumentPage {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @State documents: MemoryDerivedDocument[] = [];
   @State selected: MemoryDerivedDocument | null = null;
   @State content: string | null = null;
@@ -158,11 +159,16 @@ struct MemoryDocumentPage {
       }
       .width('100%').alignItems(VerticalAlign.Center).constraintSize({ minHeight: 52 })
       .padding({ left: 14, right: 14, top: 10, bottom: 10 })
-      .onClick((): void => { this.rawExpanded = !this.rawExpanded; })
+      .onClick((): void => {
+        animateTo({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }, (): void => {
+          this.rawExpanded = !this.rawExpanded;
+        });
+      })
       if (this.rawExpanded) {
         Text(this.content ?? '').fontSize(13).fontFamily(FONT_MONO).fontColor(this.colors.ink).width('100%')
           .wordBreak(WordBreak.BREAK_ALL).copyOption(CopyOptions.LocalDevice)
           .padding({ left: 14, right: 14, bottom: 14 })
+          .transition(TransitionEffect.OPACITY.animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
       }
     }.width('100%')
   }
@@ -177,6 +183,8 @@ struct MemoryDocumentPage {
 
   build(): void {
     Column() {
+      // 主题纪元重挂载(勿拆):epoch 变化 → 整页子树销毁重建,全量重读令牌
+      ForEach([this.themeEpoch], (_e: number): void => {
       CenteredTitleBar({ title: '记忆文档', subtitle: this.relativePath.length > 0 ? this.selected?.title ?? '' : '' })
       Scroll() {
         Column() {
@@ -222,6 +230,9 @@ struct MemoryDocumentPage {
           PageSpacer()
         }.width('100%').padding({ left: 16, right: 16, top: 2, bottom: 16 + this.navBarHeight }).justifyContent(FlexAlign.Start)
       }.width('100%').layoutWeight(1).align(Alignment.TopStart)
-    }.width('100%').height('100%').backgroundColor(this.colors.background)
+    
+      }, (e: number): string => `theme-${e}`)
+}
+      .opacity(this.themeEpoch >= 0 ? 1 : 1).width('100%').height('100%').backgroundColor(this.colors.background)
   }
 }

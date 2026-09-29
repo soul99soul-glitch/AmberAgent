@@ -19,6 +19,7 @@ import { Icon } from '../components/ui/Icon.ets';
 @Entry
 @Component
 struct FavoritePage {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @State items: FavoriteEntry[] = [];
   @State loaded: boolean = false;
 
@@ -121,6 +122,8 @@ struct FavoritePage {
 
   build(): void {
     Column() {
+      // 主题纪元重挂载(勿拆):epoch 变化 → 整页子树销毁重建,全量重读令牌
+      ForEach([this.themeEpoch], (_e: number): void => {
       CenteredTitleBar({ title: '收藏' })
 
       if (this.loaded && this.items.length === 0) {
@@ -150,7 +153,10 @@ struct FavoritePage {
         .width('100%').layoutWeight(1)
       }
       PageSpacer()
-    }
+    
+      }, (e: number): string => `theme-${e}`)
+}
+      .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .width('100%').height('100%').backgroundColor(BG)
   }
 }

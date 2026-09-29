@@ -85,6 +85,7 @@ const HI_MESSAGE: string =
 
 @Component
 export struct Icon {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop name: string = 'search';
   @Prop iconSize: number = 20;
   @Prop color: string = INK2;
@@ -179,7 +180,7 @@ export struct Icon {
   }
 
   build(): void {
-    if (this.hiPath() !== '') {
+    if (this.themeEpoch >= 0 && this.hiPath() !== '') {
       Path()
         .commands(scalePathData(this.hiPath(), this.scaleFactor()))
         .width(this.iconSize)

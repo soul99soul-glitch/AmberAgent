@@ -79,6 +79,7 @@ const bracketClose = (type: JsonNodeType): string => {
 
 @Component
 export struct JsonTree {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @StorageProp('darkMode') darkMode: boolean = false;
   @Prop json: string = '';
   @State root: JsonNodeData | null = null;
@@ -95,6 +96,7 @@ export struct JsonTree {
         Text('Invalid JSON').fontSize(META).fontColor(INK3)
       }
     }
+      .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .width('100%')
     .alignItems(HorizontalAlign.Start)
   }

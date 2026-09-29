@@ -24,10 +24,11 @@ import { ReasoningPicker } from './ReasoningPicker.ets';
 import {
   formatNumberInt,
 } from '@amber/chat-domain';
-import { ACCENT, BODY, HEADER, INK2, INK3, INK4, LABEL, LINE, META, OVERLAY, SURFACE, SURFACE2 } from '../design/tokens.ets';
+import { MOTION_OVERLAY, ACCENT, BODY, HEADER, INK2, INK3, INK4, LABEL, LINE, META, OVERLAY, SURFACE, SURFACE2 } from '../design/tokens.ets';
 
 @Component
 export struct TopModelMenu {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @StorageProp('accentColor') accentColorStore: string = ACCENT;
   // 预装配数据:每 provider 一组,组内仅目标类型模型(调用方决定 type,通常 chat)
   @Prop groups: TopModelMenuGroup[] = [];
@@ -145,7 +146,8 @@ export struct TopModelMenu {
       .transition(
         TransitionEffect.OPACITY
           .combine(TransitionEffect.scale({ x: 0.96, y: 0.96, centerX: '50%', centerY: '0%' }))
-          .combine(TransitionEffect.translate({ y: -3 })),
+          .combine(TransitionEffect.translate({ y: -3 }))
+          .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }),
       )
       // 灰色 scrim:占满剩余高度(头部下方),点击 = 关闭(对齐参考图)
       Column()
@@ -153,8 +155,10 @@ export struct TopModelMenu {
         .layoutWeight(1)
         .backgroundColor(OVERLAY)
         .onClick((): void => { this.onClose(); })
-        .transition(TransitionEffect.OPACITY)
+        .transition(TransitionEffect.OPACITY
+          .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
     }
+      .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .width('100%')
     .height('100%')
   }
@@ -173,27 +177,37 @@ export struct TopModelMenu {
       }
       .width('100%')
       .padding({ left: 16, right: 16, top: 14, bottom: 14 })
-      .onClick((): void => { this.toggleExpand(group.providerId); })
+      .onClick((): void => {
+        this.getUIContext().animateTo({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }, (): void => {
+          this.toggleExpand(group.providerId);
+        });
+      })
 
       if (this.isExpanded(group.providerId)) {
-        ForEach(group.models, (model: TopModelMenuModel): void => {
-          Row() {
-            Text(model.displayName.length > 0 ? model.displayName : model.modelId)
-              .fontSize(14).fontFamily('JetBrainsMono')
-              .fontColor(model.selected ? this.accentColorStore : INK3).layoutWeight(1)
-              .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
-            if (model.contextWindowTokens !== null) {
-              Text(formatNumberInt(model.contextWindowTokens))
-                .fontSize(LABEL).fontColor(INK4)
-                .margin({ left: 8 })
+        Column() {
+          ForEach(group.models, (model: TopModelMenuModel): void => {
+            Row() {
+              Text(model.displayName.length > 0 ? model.displayName : model.modelId)
+                .fontSize(14).fontFamily('JetBrainsMono')
+                .fontColor(model.selected ? this.accentColorStore : INK3).layoutWeight(1)
+                .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+              if (model.contextWindowTokens !== null) {
+                Text(formatNumberInt(model.contextWindowTokens))
+                  .fontSize(LABEL).fontColor(INK4)
+                  .margin({ left: 8 })
+              }
             }
-          }
-          .width('100%')
-          .padding({ left: 36, right: 16, top: 12, bottom: 12 })
-          .onClick((): void => { this.onSelect(group.providerId, model.modelId); })
-        }, (model: TopModelMenuModel): string => `${group.providerId}/${model.modelId}`)
+            .width('100%')
+            .padding({ left: 36, right: 16, top: 12, bottom: 12 })
+            .onClick((): void => { this.onSelect(group.providerId, model.modelId); })
+          }, (model: TopModelMenuModel): string => `${group.providerId}/${model.modelId}`)
+        }
+        .width('100%')
+        .transition(TransitionEffect.OPACITY.combine(TransitionEffect.translate({ y: -8 }))
+          .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
       }
     }
     .width('100%')
+    .clip(true)
   }
 }

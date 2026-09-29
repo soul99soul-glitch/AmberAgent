@@ -9,12 +9,13 @@ import { loadAgentRuntimeSnapshot, updateMemoryWorkerToggles } from '../platform
 import { CenteredTitleBar, PlainSection, CardGroup, CardRow, CardToggleRow, FooterNote, PageSpacer } from '../components/PageTemplate.ets';
 import { Icon } from '../components/ui/Icon.ets';
 import { SSHUIColors } from '../components/SSHUIColors.ets';
-import { ACCENT } from '../design/tokens.ets';
+import { ACCENT, MOTION_OVERLAY } from '../design/tokens.ets';
 import { FONT_MONO_MEDIUM, FONT_SANS_MEDIUM } from '../design/fonts.ets';
 
 @Entry
 @Component
 struct MemoryTopicsPage {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @State topics: MemoryRecord[] = [];
   @State sources: MemoryRecord[] = [];
   @State runState: MemoryTopicRunState = getMemoryTopicCoordinator().state();
@@ -217,7 +218,11 @@ struct MemoryTopicsPage {
       }
       .width('100%').alignItems(VerticalAlign.Center).constraintSize({ minHeight: 52 })
       .padding({ left: 14, right: 14, top: 10, bottom: 10 })
-      .onClick((): void => { this.sourcesExpanded = !this.sourcesExpanded; })
+      .onClick((): void => {
+        animateTo({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }, (): void => {
+          this.sourcesExpanded = !this.sourcesExpanded;
+        });
+      })
       if (this.sourcesExpanded) {
         ForEach(this.sources, (item: MemoryRecord): void => {
           Row() {
@@ -252,6 +257,8 @@ struct MemoryTopicsPage {
 
   build(): void {
     Column() {
+      // 主题纪元重挂载(勿拆):epoch 变化 → 整页子树销毁重建,全量重读令牌
+      ForEach([this.themeEpoch], (_e: number): void => {
       CenteredTitleBar({ title: '记忆主题' })
       Scroll() {
         Column() {
@@ -289,6 +296,9 @@ struct MemoryTopicsPage {
           PageSpacer()
         }.width('100%').padding({ left: 16, right: 16, top: 2, bottom: 16 + this.navBarHeight }).justifyContent(FlexAlign.Start)
       }.width('100%').layoutWeight(1).align(Alignment.TopStart)
-    }.width('100%').height('100%').backgroundColor(this.colors.background)
+    
+      }, (e: number): string => `theme-${e}`)
+}
+      .opacity(this.themeEpoch >= 0 ? 1 : 1).width('100%').height('100%').backgroundColor(this.colors.background)
   }
 }

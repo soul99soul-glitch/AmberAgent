@@ -22,20 +22,24 @@ export const toneColors = (tone: WorkspaceTone): { container: string; content: s
 
 @Component
 export struct WorkspaceDivider {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   build(): void {
     Column()
-      .width('100%').height(1)
+      
+      .opacity(this.themeEpoch >= 0 ? 1 : 1).width('100%').height(1)
       .backgroundColor(LINE)
   }
 }
 
 @Component
 export struct WorkspaceStatusPill {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop text: string = '';
   @Prop tone: WorkspaceTone = 'Neutral';
   build(): void {
     Text(this.text)
-      .fontSize(LABEL)
+      
+      .opacity(this.themeEpoch >= 0 ? 1 : 1).fontSize(LABEL)
       .fontColor(toneColors(this.tone).content)
       .padding({ left: 8, right: 8, top: 3, bottom: 3 })
       .backgroundColor(toneColors(this.tone).container)
@@ -46,6 +50,7 @@ export struct WorkspaceStatusPill {
 
 @Component
 export struct WorkspaceIconButton {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop icon: string = '';
   @Prop tone: WorkspaceTone = 'Neutral';
   @Prop showBorder: boolean = true;
@@ -53,7 +58,8 @@ export struct WorkspaceIconButton {
   onClick: () => void = (): void => {};
   build(): void {
     Text(this.icon)
-      .fontSize(15)
+      
+      .enabled(this.themeEpoch >= 0).fontSize(15)
       .fontColor(toneColors(this.tone).content)
       .width(40).height(40)
       .textAlign(TextAlign.Center)
@@ -67,12 +73,14 @@ export struct WorkspaceIconButton {
 
 @Component
 export struct WorkspaceTextButton {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop text: string = '';
   @Prop tone: WorkspaceTone = 'Neutral';
   onClick: () => void = (): void => {};
   build(): void {
     Text(this.text)
-      .fontSize(LABEL)
+      
+      .opacity(this.themeEpoch >= 0 ? 1 : 1).fontSize(LABEL)
       .fontColor(toneColors(this.tone).content)
       .padding({ left: 12, right: 12, top: 6, bottom: 6 })
       .backgroundColor(toneColors(this.tone).container)
@@ -83,6 +91,7 @@ export struct WorkspaceTextButton {
 
 @Component
 export struct WorkspaceTopBar {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop title: string = '';
   onBack: () => void = (): void => {};
   @BuilderParam actions: () => void;
@@ -96,6 +105,7 @@ export struct WorkspaceTopBar {
         .margin({ left: 12 }).layoutWeight(1)
       this.actions();
     }
+      .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .width('100%').height(56).padding({ left: 16, right: 16 })
   }
 }

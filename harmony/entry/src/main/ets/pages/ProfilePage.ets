@@ -27,6 +27,7 @@ import {
 // 昵称编辑弹窗
 @CustomDialog
 struct NicknameEditDialog {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   controller: CustomDialogController;
   currentName: string = '';
   @State draft: string = '';
@@ -80,6 +81,7 @@ struct NicknameEditDialog {
       .width('100%')
       .margin({ top: 18 })
     }
+      .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .padding({ left: 20, right: 20, top: 20, bottom: 20 })
     .backgroundColor(SURFACE)
     .borderRadius(16)
@@ -172,6 +174,7 @@ const heatmapAlpha = (count: number, q1: number, q2: number, q3: number): number
 @Entry
 @Component
 struct ProfilePage {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @StorageProp('accentColor') accentColorStore: string = ACCENT;
   @StorageProp('statusBarHeight') statusBarHeight: number = 44;
   @State setting: DisplaySetting = makeDisplaySetting();
@@ -430,6 +433,8 @@ struct ProfilePage {
 
   build() {
     Column() {
+      // 主题纪元重挂载(勿拆):epoch 变化 → 整页子树销毁重建,全量重读令牌
+      ForEach([this.themeEpoch], (_e: number): void => {
       CenteredTitleBar({ title: '个人中心' })
 
       Scroll() {
@@ -557,7 +562,10 @@ struct ProfilePage {
       }
         .align(Alignment.TopStart)
       .layoutWeight(1).backgroundColor(BG)
-    }
+    
+      }, (e: number): string => `theme-${e}`)
+}
+      .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .width('100%').height('100%').backgroundColor(BG)
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
   }

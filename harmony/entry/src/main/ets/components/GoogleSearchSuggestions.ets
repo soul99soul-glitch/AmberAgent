@@ -4,6 +4,7 @@ import { INK3, LABEL } from '../design/tokens.ets';
 // Provider HTML/CSS stays intact; FIT_CONTENT follows its actual document height.
 @Component
 export struct GoogleSearchSuggestions {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop @Watch('loadHtml') html: string = '';
   onOpenUrl: (url: string) => void = (_url: string): void => {};
   @StorageProp('darkMode') @Watch('refreshColors') darkMode: boolean = false;
@@ -59,6 +60,7 @@ export struct GoogleSearchSuggestions {
       if (this.loadError.length > 0) {
         Text(this.loadError).fontSize(LABEL).fontColor(this.mutedColor).width('100%')
       }
-    }.width('100%')
+    }
+      .opacity(this.themeEpoch >= 0 ? 1 : 1).width('100%')
   }
 }

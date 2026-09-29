@@ -10,6 +10,7 @@ import { pasteboard } from '@kit.BasicServicesKit';
 // 待接入:ChatPage 用 bindSheet 套法接入,此组件为 sheet builder 内容
 @Component
 export struct ChatMessageCopySheet {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop message: UIMessage;
   // D7-4:复制格式(false = 纯文本,true = Markdown)
   @State formatMarkdown: boolean = false;
@@ -96,6 +97,7 @@ export struct ChatMessageCopySheet {
           .padding({ top: 24, bottom: 24 })
       }
     }
+      .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .width('100%')
     .backgroundColor(SURFACE)
     .borderRadius({ topLeft: 16, topRight: 16 })

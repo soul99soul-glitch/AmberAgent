@@ -11,6 +11,7 @@ import { ACCENT, BODY, INK, INK2, INK3, LINE, META, MOTION_OVERLAY, OVERLAY, SUR
 
 @Component
 export struct DeepReadConfirmationDialog {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop show: boolean = false;
   @Prop dialogTitle: string = '重新生成?';
   @Prop message: string = '重新生成将覆盖当前文章';
@@ -20,7 +21,7 @@ export struct DeepReadConfirmationDialog {
   onDismiss: () => void = (): void => {};
 
   build(): void {
-    if (this.show) {
+    if (this.themeEpoch >= 0 && this.show) {
       Stack() {
         Column() {
           // ── 标题 ──

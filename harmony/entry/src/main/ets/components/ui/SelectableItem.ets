@@ -7,6 +7,7 @@ import { ACCENT } from '../../design/tokens.ets';
 
 @Component
 export struct SelectableItem {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop itemKey: string = '';
   @Prop selectedKeys: string[] = [];
   @Prop enabled: boolean = true;
@@ -30,6 +31,7 @@ export struct SelectableItem {
       }
       .layoutWeight(1)
     }
+      .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .width('100%')
   }
 }

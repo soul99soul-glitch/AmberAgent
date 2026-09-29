@@ -7,11 +7,12 @@ import { Icon } from './ui/Icon.ets';
 
 @Component
 export struct ChatMessageBranch {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop branchCount: number = 1;
   @Prop selectIndex: number = 0;
   onSwitch: (index: number) => void = (_i: number): void => {};
   build(): void {
-    if (this.branchCount > 1) {
+    if (this.themeEpoch >= 0 && this.branchCount > 1) {
       Row() {
         Row() {
           Icon({ name: 'chevron_left', iconSize: 17, color: this.selectIndex > 0 ? INK3 : INK4 })

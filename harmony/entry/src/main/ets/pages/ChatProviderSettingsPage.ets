@@ -44,6 +44,7 @@ interface ProviderRow {
 @Entry
 @Component
 struct ChatProviderSettingsPage {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @StorageProp('accentColor') accentColorStore: string = ACCENT;
   @State loaded: boolean = false;
   @State filterQuery: string = '';
@@ -309,6 +310,8 @@ struct ChatProviderSettingsPage {
 
   build() {
     Stack() {
+      // 主题纪元重挂载(勿拆):epoch 变化 → 整页子树销毁重建,全量重读令牌
+      ForEach([this.themeEpoch], (_e: number): void => {
     Column() {
       CenteredTitleBar({
         title: '服务商',
@@ -445,6 +448,9 @@ struct ChatProviderSettingsPage {
             },
             onDismiss: (): void => { this.sheetShow = false; },
           })
-    }
+    
+      }, (e: number): string => `theme-${e}`)
+}
+      .opacity(this.themeEpoch >= 0 ? 1 : 1)
   }
 }

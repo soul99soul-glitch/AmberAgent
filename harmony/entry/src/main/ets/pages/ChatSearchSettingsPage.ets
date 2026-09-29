@@ -95,6 +95,7 @@ const capitalize = (s: string): string =>
 @Entry
 @Component
 struct ChatSearchSettingsPage {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @StorageProp('accentColor') accentColorStore: string = ACCENT;
   @State loaded: boolean = false;
   @State s: SearchSettings = defaultSearchPrefs();
@@ -268,8 +269,11 @@ struct ChatSearchSettingsPage {
 
   // 类型切换 = primaryConstructor.callBy(mapOf())(:87)— 全新默认实例(新 id)
   private onTypeChange(t: SearchServiceOptionsType): void {
-    this.loadDraft(makeSearchServiceOptions(t));
-    this.typeMenuOpen = false;
+    const draft: SearchServiceOptions = makeSearchServiceOptions(t);
+    animateTo({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }, (): void => {
+      this.loadDraft(draft);
+      this.typeMenuOpen = false;
+    });
   }
 
   private loadDraft(o: SearchServiceOptions): void {
@@ -700,7 +704,11 @@ struct ChatSearchSettingsPage {
               }
               .width('100%').padding(10)
               .backgroundColor(BG).borderRadius(8)
-              .onClick((): void => { this.typeMenuOpen = !this.typeMenuOpen; })
+              .onClick((): void => {
+                animateTo({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }, (): void => {
+                  this.typeMenuOpen = !this.typeMenuOpen;
+                });
+              })
 
               if (this.typeMenuOpen) {
                 Scroll() {
@@ -724,9 +732,10 @@ struct ChatSearchSettingsPage {
                 .align(Alignment.TopStart)
                 .height(220).margin({ top: 4 })
                 .backgroundColor(BG).borderRadius(8)
+                .transition(TransitionEffect.OPACITY.animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
               }
             }
-            .width('100%').margin({ bottom: 12 })
+            .width('100%').margin({ bottom: 12 }).clip(true)
 
             // 能力 tag(SearchAbilityTagLine :228-253)
             Row() {
@@ -853,6 +862,8 @@ struct ChatSearchSettingsPage {
 
   build() {
     Stack() {
+      // 主题纪元重挂载(勿拆):epoch 变化 → 整页子树销毁重建,全量重读令牌
+      ForEach([this.themeEpoch], (_e: number): void => {
       Column() {
         CenteredTitleBar({
           title: '搜索服务',
@@ -918,7 +929,10 @@ struct ChatSearchSettingsPage {
       if (this.editorVisible) {
         this.editorOverlay()
       }
-    }
+    
+      }, (e: number): string => `theme-${e}`)
+}
+      .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .width('100%').height('100%')
   }
 }

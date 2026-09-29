@@ -27,12 +27,13 @@ export const backupSubtitle = (config: BackupConfig): string => {
 
 @Component
 export struct BackupReminderCard {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop config: BackupConfig = { enabled: false, lastBackupTime: 0, intervalDays: 7 };
   @State dismissed: boolean = false;
   onClick: () => void = (): void => {};
 
   build(): void {
-    if (isBackupDue(this.config) && !this.dismissed) {
+    if (this.themeEpoch >= 0 && isBackupDue(this.config) && !this.dismissed) {
       Row() {
         Icon({ name: 'save', iconSize: BODY, color: INK2 }).margin({ right: 10 })
         Column() {

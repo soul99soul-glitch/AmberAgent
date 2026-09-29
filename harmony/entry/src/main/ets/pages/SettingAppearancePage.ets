@@ -3,7 +3,7 @@
 //   内置三包/导入导出/AI 生成试穿,对齐 iOS AmberThemePack 体系)。
 import {
   BG, INK, INK3, ACCENT, ACCENT_OPTIONS, setAccentColor, ERROR, TEXT_STYLES,
-  SURFACE, LINE, LINE2, OVERLAY, lineHeightForSize,
+  SURFACE, LINE, LINE2, OVERLAY, MOTION_OVERLAY, lineHeightForSize,
 } from '../design/tokens.ets';
 import { FONT_SANS_MEDIUM } from '../design/fonts.ets';
 import { Icon } from '../components/ui/Icon.ets';
@@ -47,6 +47,7 @@ const extractJsonObject = (text: string): string => {
 @Entry
 @Component
 struct SettingAppearancePage {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @StorageProp('darkMode') darkMode: boolean = false;
   @StorageProp('systemDarkMode') systemDarkMode: boolean = false;
   @StorageProp('accentColor') accentColorStore: string = ACCENT;
@@ -68,8 +69,7 @@ struct SettingAppearancePage {
   private themeSeq: number = 0;
 
   aboutToAppear(): void {
-    loadDisplaySetting(getChatKvStore()).then((s: DisplaySetting): void => {
-      if (s.accentColor.length > 0) {
+    loadDisplaySetting(getChatKvStore()).then((s: DisplaySetting): void => {      if (s.accentColor.length > 0) {
         this.accentColor = s.accentColor;
         setAccentColor(s.accentColor);
         AppStorage.setOrCreate<string>('accentColor', s.accentColor);
@@ -390,8 +390,37 @@ struct SettingAppearancePage {
     .onClick((): void => { this.applyPack(pack); })
   }
 
+  @Builder
+  private TryOnBar(pack: ThemePack): void {
+    Row() {
+      Text(`正在试穿「${pack.displayName}」`)
+        .fontSize(13).fontColor(INK)
+        .layoutWeight(1)
+        .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+      Text('还原')
+        .fontSize(13).fontColor(INK3)
+        .padding({ left: 12, top: 8, bottom: 8 })
+        .onClick((): void => { this.revertTryOn(); })
+      Text('采用')
+        .fontSize(13).fontColor(this.accentColorStore)
+        .padding({ left: 12, top: 8, bottom: 8 })
+        .onClick((): void => { this.adoptTryOn(); })
+    }
+    .width('92%')
+    .padding({ left: 16, right: 16, top: 10, bottom: 10 })
+    .backgroundColor(SURFACE)
+    .borderRadius(12)
+    .border({ width: 0.5, color: LINE })
+    .shadow({ radius: 16, color: OVERLAY, offsetY: 4 })
+    .margin({ bottom: 24 })
+    .transition(TransitionEffect.OPACITY.combine(TransitionEffect.translate({ y: 24 }))
+      .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
+  }
+
   build(): void {
     Stack({ alignContent: Alignment.Bottom }) {
+      // 主题纪元重挂载(勿拆):epoch 变化 → 整页子树销毁重建,全量重读令牌
+      ForEach([this.themeEpoch], (_e: number): void => {
       Column() {
         CenteredTitleBar({ title: '外观' })
         Scroll() {
@@ -520,29 +549,12 @@ struct SettingAppearancePage {
 
       // 试穿条(iOS AmberThemeTryOnBar 语义:全局试穿 → 采用/还原)
       if (this.tryOnPack !== null) {
-        Row() {
-          Text(`正在试穿「${this.tryOnPack.displayName}」`)
-            .fontSize(13).fontColor(INK)
-            .layoutWeight(1)
-            .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
-          Text('还原')
-            .fontSize(13).fontColor(INK3)
-            .padding({ left: 12, top: 8, bottom: 8 })
-            .onClick((): void => { this.revertTryOn(); })
-          Text('采用')
-            .fontSize(13).fontColor(this.accentColorStore)
-            .padding({ left: 12, top: 8, bottom: 8 })
-            .onClick((): void => { this.adoptTryOn(); })
-        }
-        .width('92%')
-        .padding({ left: 16, right: 16, top: 10, bottom: 10 })
-        .backgroundColor(SURFACE)
-        .borderRadius(12)
-        .border({ width: 0.5, color: LINE })
-        .shadow({ radius: 16, color: OVERLAY, offsetY: 4 })
-        .margin({ bottom: 24 })
+        this.TryOnBar(this.tryOnPack)
       }
-    }
+    
+      }, (e: number): string => `theme-${e}`)
+}
+      .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .width('100%').height('100%').backgroundColor(BG)
   }
 }

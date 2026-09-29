@@ -15,6 +15,7 @@ class MessageAnnotationColors {
 
 @Component
 export struct ChatMessageAnnotations {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop annotations: UIMessageAnnotation[];
   @Prop visible: boolean = true;
   @StorageProp('accentColor') accentColor: string = ACCENT;
@@ -62,7 +63,7 @@ export struct ChatMessageAnnotations {
   }
 
   build(): void {
-    if (this.visible && this.annotations.length > 0) {
+    if (this.themeEpoch >= 0 && this.visible && this.annotations.length > 0) {
       Column() {
         ForEach(this.annotations, (ann: UIMessageAnnotation, i: number) => {
           if (ann.type === 'url_citation') {

@@ -9,7 +9,7 @@ import { TerminalView, TerminalViewController } from '../components/TerminalView
 import { SSHUIColors } from '../components/SSHUIColors.ets';
 import { sshPageError, sshPageErrorMessage } from '../components/SSHPageErrors.ets';
 import { Icon } from '../components/ui/Icon.ets';
-import { ACCENT } from '../design/tokens.ets';
+import { ACCENT, MOTION_OVERLAY } from '../design/tokens.ets';
 import { FONT_MONO } from '../design/fonts.ets';
 
 interface TerminalRouteParams { profileId?: string; }
@@ -17,6 +17,7 @@ interface TerminalRouteParams { profileId?: string; }
 @Entry
 @Component
 struct TerminalPage {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @State profiles: SSHProfile[] = [];
   @State selectedId: string = '';
   @State choosingProfile: boolean = false;
@@ -310,6 +311,8 @@ struct TerminalPage {
 
   build(): void {
     Column() {
+      // 主题纪元重挂载(勿拆):epoch 变化 → 整页子树销毁重建,全量重读令牌
+      ForEach([this.themeEpoch], (_e: number): void => {
       CenteredTitleBar({ title: '终端', actionText: '配置', onAction: (): void => {
         this.releaseOwnedSession(); router.pushUrl({ url: 'pages/SettingSSHProfilesPage' });
       } })
@@ -329,56 +332,70 @@ struct TerminalPage {
         if (this.protocol === 'mosh' && !this.isRunning() && !this.connecting && !this.disconnecting) {
           Text('需要远端 mosh-server 和可达 UDP。后台中断后需新建会话；关闭未获确认时，远端会话可能仍在运行。')
             .fontSize(12).fontColor(this.colors.secondary).width('100%')
-          Row() {
-            Text('服务器 UTF-8 区域').fontSize(12).fontColor(this.colors.secondary).layoutWeight(1)
-            Text(this.serverLocale).fontSize(13).fontFamily(FONT_MONO).fontColor(this.colors.ink)
-            Icon({ name: 'chevron_down', iconSize: 18, color: this.colors.secondary }).margin({ left: 8 })
-          }.width('100%').height(52).padding({ left: 14, right: 14 })
-            .backgroundColor(this.colors.surface).borderRadius(16)
-            .enabled(!this.isRunning() && !this.connecting && !this.disconnecting && !this.switchingProtocol)
-            .onClick((): void => { this.choosingLocale = !this.choosingLocale; })
-          if (this.choosingLocale && !this.isRunning() && !this.connecting) {
-            Row({ space: 8 }) {
-              Button('C.UTF-8').type(ButtonType.Normal).height(44).fontSize(13).layoutWeight(1)
-                .fontColor(this.serverLocale === 'C.UTF-8' ? this.accentColor : this.colors.ink)
-                .backgroundColor(this.colors.surface)
-                .onClick((): void => { this.serverLocale = 'C.UTF-8'; this.choosingLocale = false; })
-              Button('en_US.UTF-8').type(ButtonType.Normal).height(44).fontSize(13).layoutWeight(1)
-                .fontColor(this.serverLocale === 'en_US.UTF-8' ? this.accentColor : this.colors.ink)
-                .backgroundColor(this.colors.surface)
-                .onClick((): void => { this.serverLocale = 'en_US.UTF-8'; this.choosingLocale = false; })
-            }.width('100%')
-          }
+          Column({ space: 6 }) {
+            Row() {
+              Text('服务器 UTF-8 区域').fontSize(12).fontColor(this.colors.secondary).layoutWeight(1)
+              Text(this.serverLocale).fontSize(13).fontFamily(FONT_MONO).fontColor(this.colors.ink)
+              Icon({ name: 'chevron_down', iconSize: 18, color: this.colors.secondary }).margin({ left: 8 })
+            }.width('100%').height(52).padding({ left: 14, right: 14 })
+              .backgroundColor(this.colors.surface).borderRadius(16)
+              .enabled(!this.isRunning() && !this.connecting && !this.disconnecting && !this.switchingProtocol)
+              .onClick((): void => {
+                animateTo({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }, (): void => {
+                  this.choosingLocale = !this.choosingLocale;
+                });
+              })
+            if (this.choosingLocale && !this.isRunning() && !this.connecting) {
+              Row({ space: 8 }) {
+                Button('C.UTF-8').type(ButtonType.Normal).height(44).fontSize(13).layoutWeight(1)
+                  .fontColor(this.serverLocale === 'C.UTF-8' ? this.accentColor : this.colors.ink)
+                  .backgroundColor(this.colors.surface)
+                  .onClick((): void => { this.serverLocale = 'C.UTF-8'; this.choosingLocale = false; })
+                Button('en_US.UTF-8').type(ButtonType.Normal).height(44).fontSize(13).layoutWeight(1)
+                  .fontColor(this.serverLocale === 'en_US.UTF-8' ? this.accentColor : this.colors.ink)
+                  .backgroundColor(this.colors.surface)
+                  .onClick((): void => { this.serverLocale = 'en_US.UTF-8'; this.choosingLocale = false; })
+              }.width('100%')
+                .transition(TransitionEffect.OPACITY.animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
+            }
+          }.width('100%').alignItems(HorizontalAlign.Start).clip(true)
         }
         if (this.profiles.length > 0) {
-          Row() {
-            Text(this.selectedProfile()?.name ?? '选择 SSH 配置').fontSize(14).fontColor(this.colors.ink)
-              .layoutWeight(1).maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis })
-            Icon({ name: 'chevron_down', iconSize: 18, color: this.colors.secondary })
-          }
-            .width('100%').height(52).padding({ left: 14, right: 14 })
-            .backgroundColor(this.colors.surface).borderRadius(16)
-            .enabled(!this.isRunning() && !this.connecting && !this.disconnecting && !this.switchingProtocol)
-            .accessibilityText(`选择 SSH 配置: ${this.selectedProfile()?.name ?? '未选择'}`)
-            .onClick((): void => { this.choosingProfile = !this.choosingProfile; })
-          if (this.choosingProfile && !this.isRunning() && !this.connecting) {
-            Scroll() {
-              Column() {
-                ForEach(this.profiles, (profile: SSHProfile): void => {
-                  Row() {
-                    Text(profile.name).fontSize(14).fontColor(this.colors.ink).layoutWeight(1)
-                      .maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis })
-                    if (profile.id === this.selectedId) {
-                      Text('✓').fontSize(14).fontColor(this.accentColor).margin({ left: 12 })
-                    }
-                  }.width('100%').height(52).padding({ left: 14, right: 14 })
-                    .border({ width: { bottom: 0.5 }, color: this.colors.line })
-                    .onClick((): void => { this.selectedId = profile.id; this.choosingProfile = false; })
-                }, (profile: SSHProfile): string => profile.id)
-              }.width('100%')
-            }.width('100%').height(Math.min(this.profiles.length * 52, 208)).align(Alignment.TopStart)
-              .backgroundColor(this.colors.surface).borderRadius(16).scrollBar(BarState.Auto)
-          }
+          Column({ space: 6 }) {
+            Row() {
+              Text(this.selectedProfile()?.name ?? '选择 SSH 配置').fontSize(14).fontColor(this.colors.ink)
+                .layoutWeight(1).maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis })
+              Icon({ name: 'chevron_down', iconSize: 18, color: this.colors.secondary })
+            }
+              .width('100%').height(52).padding({ left: 14, right: 14 })
+              .backgroundColor(this.colors.surface).borderRadius(16)
+              .enabled(!this.isRunning() && !this.connecting && !this.disconnecting && !this.switchingProtocol)
+              .accessibilityText(`选择 SSH 配置: ${this.selectedProfile()?.name ?? '未选择'}`)
+              .onClick((): void => {
+                animateTo({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }, (): void => {
+                  this.choosingProfile = !this.choosingProfile;
+                });
+              })
+            if (this.choosingProfile && !this.isRunning() && !this.connecting) {
+              Scroll() {
+                Column() {
+                  ForEach(this.profiles, (profile: SSHProfile): void => {
+                    Row() {
+                      Text(profile.name).fontSize(14).fontColor(this.colors.ink).layoutWeight(1)
+                        .maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis })
+                      if (profile.id === this.selectedId) {
+                        Text('✓').fontSize(14).fontColor(this.accentColor).margin({ left: 12 })
+                      }
+                    }.width('100%').height(52).padding({ left: 14, right: 14 })
+                      .border({ width: { bottom: 0.5 }, color: this.colors.line })
+                      .onClick((): void => { this.selectedId = profile.id; this.choosingProfile = false; })
+                  }, (profile: SSHProfile): string => profile.id)
+                }.width('100%')
+              }.width('100%').height(Math.min(this.profiles.length * 52, 208)).align(Alignment.TopStart)
+                .backgroundColor(this.colors.surface).borderRadius(16).scrollBar(BarState.Auto)
+                .transition(TransitionEffect.OPACITY.animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
+            }
+          }.width('100%').alignItems(HorizontalAlign.Start).clip(true)
         } else {
           Text(this.loaded ? '先新建并验证 SSH 配置' : '正在加载 SSH 配置…')
             .fontSize(14).fontColor(this.colors.secondary).width('100%').height(52)
@@ -409,6 +426,9 @@ struct TerminalPage {
         })
       }.width('100%').layoutWeight(1).padding({ bottom: 16 + this.navBarHeight })
         .backgroundColor(this.colors.inset)
-    }.width('100%').height('100%').backgroundColor(this.colors.background)
+    
+      }, (e: number): string => `theme-${e}`)
+}
+      .opacity(this.themeEpoch >= 0 ? 1 : 1).width('100%').height('100%').backgroundColor(this.colors.background)
   }
 }

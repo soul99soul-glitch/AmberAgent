@@ -40,6 +40,7 @@ const STATUS_ERROR: string = 'error';
 //   OpenAI=绿 / Claude=橙 / Google=蓝 / DeepSeek=紫 / Custom=灰
 @Component
 export struct ProviderTypeBadge {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop providerType: string = 'custom';
 
   private badgeColor(): string {
@@ -65,7 +66,8 @@ export struct ProviderTypeBadge {
 
   build(): void {
     Text(this.badgeLabel())
-      .fontSize(LABEL)
+      
+      .opacity(this.themeEpoch >= 0 ? 1 : 1).fontSize(LABEL)
       .fontWeight(FontWeight.Medium)
       .fontColor('#FFFFFF')
       .backgroundColor(this.badgeColor())
@@ -80,6 +82,7 @@ export struct ProviderTypeBadge {
 //   脉冲:aboutToAppear 启动 iterations:-1 动画,halo 仅 testing 状态渲染(对齐 RunningIndicator)
 @Component
 export struct ProviderStatusIndicator {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop status: string = STATUS_DISCONNECTED;
   @Prop dotSize: number = 8;
   @State pulseAlpha: number = 0.5;
@@ -121,6 +124,7 @@ export struct ProviderStatusIndicator {
         .borderRadius(this.dotSize / 2)
         .backgroundColor(this.dotColor())
     }
+      .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .width(this.dotSize * 2.4)
     .height(this.dotSize * 2.4)
   }
@@ -130,11 +134,13 @@ export struct ProviderStatusIndicator {
 //   count > 0:ACCENT 字 + ACCENT_LIGHT 底;count = 0:INK4 字 + SURFACE2 底(弱化)
 @Component
 export struct ProviderModelCountBadge {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop modelCount: number = 0;
 
   build(): void {
     Text(`${this.modelCount} 模型`)
-      .fontSize(LABEL)
+      
+      .opacity(this.themeEpoch >= 0 ? 1 : 1).fontSize(LABEL)
       .fontWeight(FontWeight.Medium)
       .fontColor(this.modelCount > 0 ? ACCENT : INK4)
       .backgroundColor(this.modelCount > 0 ? ACCENT_LIGHT : SURFACE2)
@@ -148,6 +154,7 @@ export struct ProviderModelCountBadge {
 //   仅显示 host(去 scheme/path,降低视觉噪音);复制完整 baseUrl 到剪贴板
 @Component
 export struct ProviderUrlPreview {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop baseUrl: string = '';
 
   // baseUrl 仅显示 host(去掉 scheme 与 path)
@@ -186,6 +193,7 @@ export struct ProviderUrlPreview {
         .padding({ left: 8, right: 4, top: 4, bottom: 4 })
         .onClick((): void => { this.copyUrl(); })
     }
+      .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .width('100%')
     .alignItems(VerticalAlign.Center)
   }
@@ -197,6 +205,7 @@ export struct ProviderUrlPreview {
 //   回调命名避开 onClick 保留字:onEdit / onDelete / onToggle
 @Component
 export struct ProviderCardV2 {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop providerName: string = '';
   @Prop providerType: string = 'custom';
   @Prop baseUrl: string = '';
@@ -291,6 +300,7 @@ export struct ProviderCardV2 {
       .padding({ left: 14, right: 14, top: 10, bottom: 12 })
       .alignItems(HorizontalAlign.Start)
     }
+      .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .width('100%')
     .backgroundColor(SURFACE)
     .borderRadius(14)

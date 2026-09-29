@@ -15,7 +15,7 @@ import type { ConversationSummary, Conversation, UIMessage } from '@amber/chat-d
 import { currentMessages, toText } from '@amber/chat-domain';
 import { getChatRepository } from '../di/AppContainer.ets';
 import {
-  BG, INK3, ACCENT, LINE, SURFACE, BODY2, lineHeightForSize,
+  BG, INK3, ACCENT, LINE, SURFACE, BODY2, lineHeightForSize, MOTION_OVERLAY,
 } from '../design/tokens.ets';
 import { FONT_SANS_MEDIUM, FONT_SANS_SEMIBOLD } from '../design/fonts.ets';
 import {
@@ -38,6 +38,7 @@ interface ExportEntry {
 @Entry
 @Component
 struct HistoryPage {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @State groups: HistoryGroup[] = [];
   @State loaded: boolean = false;
   // 多选导出
@@ -110,8 +111,7 @@ struct HistoryPage {
   }
 
   private exitSelecting(): void {
-    this.selecting = false;
-    this.selectedIds = [];
+    animateTo({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }, (): void => { this.selecting = false; });
   }
 
   // F14:顶栏「选择」按钮此前恒调用 exitSelecting,导致选择模式不可达;按当前态切换。
@@ -120,7 +120,8 @@ struct HistoryPage {
       this.exitSelecting();
       return;
     }
-    this.selecting = true;
+    this.selectedIds = [];
+    animateTo({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }, (): void => { this.selecting = true; });
   }
 
   // ===== 导出(DocumentSavePicker;多会话单文件拼接) =====
@@ -209,6 +210,8 @@ struct HistoryPage {
 
   build(): void {
     Column() {
+      // 主题纪元重挂载(勿拆):epoch 变化 → 整页子树销毁重建,全量重读令牌
+      ForEach([this.themeEpoch], (_e: number): void => {
       CenteredTitleBar({
         title: '历史记录',
         actionText: this.selecting ? '取消' : '选择',
@@ -261,9 +264,14 @@ struct HistoryPage {
         .padding({ left: 16, right: 16, top: 8, bottom: 8 })
         .border({ width: { top: 0.5 }, color: { top: LINE } })
         .backgroundColor(SURFACE)
+        .transition(TransitionEffect.OPACITY.combine(TransitionEffect.translate({ y: 12 }))
+          .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
       }
       PageSpacer()
-    }
+    
+      }, (e: number): string => `theme-${e}`)
+}
+      .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .width('100%').height('100%').backgroundColor(BG)
   }
 }

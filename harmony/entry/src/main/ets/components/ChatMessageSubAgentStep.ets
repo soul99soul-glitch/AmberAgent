@@ -8,7 +8,7 @@
 import type { UIMessagePartTool, JsonValue } from '@amber/chat-domain';
 import { toolOutputJson, toolInputAsJson } from '@amber/chat-domain';
 import type { JsonObject } from '@amber/chat-domain';
-import { INK, INK2, INK3, INK4, SURFACE, SURFACE2, LINE, ACCENT, META, LABEL } from '../design/tokens.ets';
+import { MOTION_OVERLAY, INK, INK2, INK3, INK4, SURFACE, SURFACE2, LINE, ACCENT, META, LABEL } from '../design/tokens.ets';
 import { SubAgentAvatar } from './SubAgentAvatar.ets';
 import { AgentToolCallCapsule, ToolStatus } from './AgentToolCapsule.ets';
 
@@ -84,6 +84,7 @@ const statusToToolStatus = (status: string): ToolStatus => {
 
 @Component
 export struct ChatMessageSubAgentStep {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop tools: UIMessagePartTool[];
   @Prop runId: string = '';
   @Prop canOpenRun: boolean = true;
@@ -133,7 +134,11 @@ export struct ChatMessageSubAgentStep {
             Text(this.objectiveExpanded ? '收起' : '展开')
               .fontSize(LABEL).fontColor(ACCENT)
               .margin({ left: 8 })
-              .onClick((): void => { this.objectiveExpanded = !this.objectiveExpanded; })
+              .onClick((): void => {
+                this.getUIContext().animateTo({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }, (): void => {
+                  this.objectiveExpanded = !this.objectiveExpanded;
+                });
+              })
           }
           .width('100%')
 
@@ -141,12 +146,16 @@ export struct ChatMessageSubAgentStep {
             Text(this.objective())
               .fontSize(META).fontColor(INK2).lineHeight(18)
               .width('100%').margin({ top: 4 })
+            .transition(TransitionEffect.OPACITY.combine(TransitionEffect.translate({ y: -8 }))
+              .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
           } else {
             Text(this.objective())
               .fontSize(META).fontColor(INK2).lineHeight(18)
               .maxLines(3)
               .textOverflow({ overflow: TextOverflow.Ellipsis })
               .width('100%').margin({ top: 4 })
+            .transition(TransitionEffect.OPACITY.combine(TransitionEffect.translate({ y: -8 }))
+              .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
           }
         }
         .width('100%')
@@ -155,8 +164,10 @@ export struct ChatMessageSubAgentStep {
         .backgroundColor(SURFACE)
         .borderRadius(8)
         .border({ width: 0.5, color: LINE })
+        .clip(true)
       }
     }
+      .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .width('100%')
     .alignItems(HorizontalAlign.Start)
   }

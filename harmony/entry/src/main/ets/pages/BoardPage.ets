@@ -23,6 +23,7 @@ import type { common } from '@kit.AbilityKit';
 
 @Component
 struct BoardHotItemRow {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop rankText: string = '';
   @Prop title: string = '';
   @Prop heat: string = '';
@@ -73,6 +74,7 @@ struct BoardHotItemRow {
         PaperSeparator()
       }
     }
+      .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .width('100%')
     .transition(TransitionEffect.OPACITY
       .combine(TransitionEffect.translate({ y: 12 }))
@@ -84,6 +86,7 @@ struct BoardHotItemRow {
 @Entry
 @Component
 struct BoardPage {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @StorageProp('statusBarHeight') statusBarHeight: number = 44;
   @State sections: SourceSection[] = [];
   @State topics: HotTopic[] = [];
@@ -389,6 +392,8 @@ struct BoardPage {
 
   build(): void {
     Stack() {
+      // 主题纪元重挂载(勿拆):epoch 变化 → 整页子树销毁重建,全量重读令牌
+      ForEach([this.themeEpoch], (_e: number): void => {
       Column() {
       this.BoardHeader()
 
@@ -465,7 +470,10 @@ struct BoardPage {
       if (this.sheetItem !== null) {
         this.SheetOverlay(this.sheetItem)
       }
-    }
+    
+      }, (e: number): string => `theme-${e}`)
+}
+      .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .width('100%').height('100%')
   }
 

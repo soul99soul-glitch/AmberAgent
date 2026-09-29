@@ -9,7 +9,7 @@ import { common } from '@kit.AbilityKit';
 import { util } from '@kit.ArkTS';
 import {
   BG, INK, INK2, INK3, INK4, LINE, SURFACE2, ACCENT,
-  BODY, LABEL, META, GUTTER,
+  BODY, LABEL, META, GUTTER, MOTION_OVERLAY,
 } from '../design/tokens.ets';
 import {
   CenteredTitleBar, PlainSection, CardGroup, CardRow, CardToggleRow, FooterNote, PageSpacer,
@@ -34,6 +34,7 @@ import {
 @Entry
 @Component
 struct SettingBackupPage {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @StorageProp('statusBarHeight') statusBarHeight: number = 44;
   @StorageProp('accentColor') accentColorStore: string = ACCENT;
   @State passphrase: string = '';
@@ -234,14 +235,14 @@ struct SettingBackupPage {
       fileIo.writeSync(file.fd, bytes.buffer as ArrayBuffer);
       fileIo.closeSync(file.fd);
       const preview = await inspectSyncArchive(bytes, path);
-      this.preview = preview;
+      this.setPreview(preview);
       this.pendingArchivePath = path;
       this.statusMsg =
         `预览：v${preview.manifest.archiveVersion} · ${preview.manifest.deviceLabel || preview.manifest.deviceId}` +
         ` · ${preview.needsPassphrase ? '需密码' : '无密码'}`;
       this.toast('已载入恢复预览');
     } catch (e) {
-      this.preview = null;
+      this.setPreview(null);
       this.statusMsg = `下载失败：${e instanceof Error ? e.message : String(e)}`;
     } finally {
       this.busy = false;
@@ -263,13 +264,13 @@ struct SettingBackupPage {
       fileIo.readSync(file.fd, buf);
       fileIo.closeSync(file.fd);
       const preview = await inspectSyncArchive(new Uint8Array(buf), uris[0]);
-      this.preview = preview;
+      this.setPreview(preview);
       this.pendingArchivePath = uris[0];
       this.statusMsg =
         `预览：v${preview.manifest.archiveVersion} · ${preview.manifest.deviceLabel || preview.manifest.deviceId}` +
         ` · ${preview.needsPassphrase ? '需密码' : '无密码'}`;
     } catch (e) {
-      this.preview = null;
+      this.setPreview(null);
       this.statusMsg = `读取失败：${e instanceof Error ? e.message : String(e)}`;
     }
   }
@@ -354,7 +355,7 @@ struct SettingBackupPage {
         this.statusMsg = `${convNote}${settingsNote}`;
         this.toast('恢复完成');
       }
-      this.preview = null;
+      this.setPreview(null);
       this.pendingArchivePath = '';
     } catch (e) {
       this.statusMsg = `恢复失败：${e instanceof Error ? e.message : String(e)}`;
@@ -366,6 +367,8 @@ struct SettingBackupPage {
 
   build(): void {
     Column() {
+      // 主题纪元重挂载(勿拆):epoch 变化 → 整页子树销毁重建,全量重读令牌
+      ForEach([this.themeEpoch], (_e: number): void => {
       CenteredTitleBar({ title: '备份与恢复' })
       Scroll() {
         Column() {
@@ -390,7 +393,10 @@ struct SettingBackupPage {
         .width('100%')
       }
       .layoutWeight(1).backgroundColor(BG)
-    }
+    
+      }, (e: number): string => `theme-${e}`)
+}
+      .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .width('100%').height('100%').backgroundColor(BG)
   }
 
@@ -439,23 +445,34 @@ struct SettingBackupPage {
   @Builder
   ExportCard(): void {
     Column() {
-      CardToggleRow({
-        label: '使用密码加密',
-        checked: this.usePassphrase,
-        onToggle: (): void => { if (!this.busy) this.usePassphrase = !this.usePassphrase; },
-      })
-      if (this.usePassphrase) {
-        Column() {
-          this.PasswordField(false)
-          Row() {
-            Row().width('100%').height(1).backgroundColor(LINE)
+      Column() {
+        CardToggleRow({
+          label: '使用密码加密',
+          checked: this.usePassphrase,
+          onToggle: (): void => {
+            if (this.busy) return;
+            this.getUIContext().animateTo({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }, (): void => {
+              this.usePassphrase = !this.usePassphrase;
+            });
+          },
+        })
+        if (this.usePassphrase) {
+          Column() {
+            this.PasswordField(false)
+            Row() {
+              Row().width('100%').height(1).backgroundColor(LINE)
+            }
+            .width('100%')
+            .margin({ top: 12 })
           }
           .width('100%')
-          .margin({ top: 12 })
+          .padding({ left: 14, right: 14, top: 2 })
+          .transition(TransitionEffect.OPACITY.combine(TransitionEffect.translate({ y: -8 }))
+            .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
         }
-        .width('100%')
-        .padding({ left: 14, right: 14, top: 2 })
       }
+      .width('100%')
+      .clip(true)
       CardToggleRow({
         label: '会话', desc: '打包全部会话内容',
         checked: this.exportConversations,
@@ -483,6 +500,38 @@ struct SettingBackupPage {
     .width('100%')
   }
 
+  private setPreview(preview: SyncInspectPreview | null): void {
+    this.getUIContext().animateTo({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }, (): void => {
+      this.preview = preview;
+    });
+  }
+
+  @Builder
+  RestorePreview(preview: SyncInspectPreview): void {
+    Column() {
+      Text(this.statusMsg).fontSize(META).fontColor(INK3).lineHeight(18)
+      Text(`设备：${preview.manifest.deviceLabel.length > 0 ? preview.manifest.deviceLabel : preview.manifest.deviceId}`)
+        .fontSize(LABEL).fontColor(INK2).margin({ top: 6 })
+      Text(`创建：${new Date(preview.manifest.createdAt).toLocaleString()}`)
+        .fontSize(LABEL).fontColor(INK3).margin({ top: 4 })
+      Text('恢复').fontSize(BODY).fontWeight(FontWeight.Medium)
+        .fontColor(this.accentColorStore)
+        .height(44).padding({ left: 12, right: 12 })
+        .margin({ top: 8 })
+        .onClick((): void => { this.doRestore(); })
+      Row() {
+        Row().width('100%').height(1).backgroundColor(LINE)
+      }
+      .width('100%')
+      .margin({ top: 12 })
+    }
+    .width('100%')
+    .alignItems(HorizontalAlign.Start)
+    .padding({ left: 14, right: 14, top: 2 })
+    .transition(TransitionEffect.OPACITY.combine(TransitionEffect.translate({ y: -8 }))
+      .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
+  }
+
   @Builder
   RestoreCard(): void {
     Column() {
@@ -494,26 +543,7 @@ struct SettingBackupPage {
         onRowClick: (): void => { this.doPickRestore(); },
       })
       if (this.preview !== null) {
-        Column() {
-          Text(this.statusMsg).fontSize(META).fontColor(INK3).lineHeight(18)
-          Text(`设备：${this.preview.manifest.deviceLabel.length > 0 ? this.preview.manifest.deviceLabel : this.preview.manifest.deviceId}`)
-            .fontSize(LABEL).fontColor(INK2).margin({ top: 6 })
-          Text(`创建：${new Date(this.preview.manifest.createdAt).toLocaleString()}`)
-            .fontSize(LABEL).fontColor(INK3).margin({ top: 4 })
-          Text('恢复').fontSize(BODY).fontWeight(FontWeight.Medium)
-            .fontColor(this.accentColorStore)
-            .height(44).padding({ left: 12, right: 12 })
-            .margin({ top: 8 })
-            .onClick((): void => { this.doRestore(); })
-          Row() {
-            Row().width('100%').height(1).backgroundColor(LINE)
-          }
-          .width('100%')
-          .margin({ top: 12 })
-        }
-        .width('100%')
-        .alignItems(HorizontalAlign.Start)
-        .padding({ left: 14, right: 14, top: 2 })
+        this.RestorePreview(this.preview)
       }
       CardToggleRow({
         label: '会话', desc: '恢复全部会话内容',

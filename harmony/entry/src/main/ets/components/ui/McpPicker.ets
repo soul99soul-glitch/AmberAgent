@@ -14,6 +14,7 @@ export interface McpServerItem {
 
 @Component
 export struct McpPicker {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop servers: McpServerItem[] = [];
   @State sheetOpen: boolean = false;
   onToggleServer: (id: string) => void = (_id: string): void => {};
@@ -29,6 +30,7 @@ export struct McpPicker {
         .fontSize(BODY).fontColor(INK2).layoutWeight(1)
       Text('▾').fontSize(LABEL).fontColor(INK3)
     }
+      .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .width('100%')
     .padding({ left: 12, right: 12, top: 10, bottom: 10 })
     .backgroundColor(SURFACE)

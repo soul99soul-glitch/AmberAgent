@@ -775,11 +775,13 @@ export const setWebMountGlobalEnabled = (value: boolean): void => {
 // WebMountSurface — 会话可视面(同一 controller;offscreen host 与接管面板共用)
 @Component
 export struct WebMountSurface {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   private session: WebMountSession = getWebMountSession();
 
   build(): void {
     Web({ src: 'about:blank', controller: this.session.getController() })
-      .id(WEB_HOST_ID)
+      
+      .opacity(this.themeEpoch >= 0 ? 1 : 1).id(WEB_HOST_ID)
       // E12:文档初始化即注入 revision/MutationObserver 与 fetch/XHR 台账(API 11+)
       .javaScriptOnDocumentStart([{ script: WEBMOUNT_DOCSTART_JS, scriptRules: ['*'] }])
       .onControllerAttached((): void => {
@@ -805,6 +807,7 @@ export struct WebMountSurface {
 //   (Visibility.None/尺寸 0 会导致 Web 不渲染、截图黑,移出屏保持渲染树真实)
 @Component
 export struct WebMountHost {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop visible: boolean = false;
   private session: WebMountSession = getWebMountSession();
 
@@ -813,7 +816,7 @@ export struct WebMountHost {
   }
 
   build(): void {
-    if (this.visible) {
+    if (this.themeEpoch >= 0 && this.visible) {
       WebMountSurface()
         .width(360).height(720)
         .position({ x: -2000, y: 0 })

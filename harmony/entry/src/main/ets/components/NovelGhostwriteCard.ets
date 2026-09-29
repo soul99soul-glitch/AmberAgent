@@ -2,7 +2,7 @@
 // Job facts remain in the domain; this component holds only local detail expansion state.
 // E13:联合审稿段由 NovelChapterVerdictCard 承接(阻断/需重写/通过的真实裁定展示)。
 
-import {
+import { MOTION_OVERLAY,
   ACCENT, ACCENT_INK, ACCENT_LIGHT, ERROR, INK, INK2, INK3, INK4,
   LINE, RAISED, SURFACE, SURFACE2,
 } from '../design/tokens.ets';
@@ -17,6 +17,7 @@ import { NovelChapterVerdictCard } from './NovelChapterVerdictCard.ets';
 
 @Component
 export struct NovelGhostwriteCard {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop job: DurableGhostwriteJob | null = null;
   @Prop planReady: boolean = false;
   @Prop modelReady: boolean = false;
@@ -43,6 +44,7 @@ export struct NovelGhostwriteCard {
       .width('100%').padding({ left: 16, right: 16, top: 10, bottom: 18 })
       .alignItems(HorizontalAlign.Start)
     }
+      .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .width('100%').backgroundColor(SURFACE)
   }
 
@@ -136,13 +138,19 @@ export struct NovelGhostwriteCard {
     if (job.frozenPlan !== null) {
       Column() {
         this.detailToggle('冻结计划', this.frozenPlanSummary(job),
-          this.planExpanded, (): void => { this.planExpanded = !this.planExpanded; })
+          this.planExpanded, (): void => {
+            this.getUIContext().animateTo({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }, (): void => {
+              this.planExpanded = !this.planExpanded;
+            });
+          })
         if (this.planExpanded) {
           Text(job.frozenPlan.content).fontSize(12).fontColor(INK2).lineHeight(18).maxLines(12)
             .textOverflow({ overflow: TextOverflow.Ellipsis }).width('100%').margin({ top: 8 })
+          .transition(TransitionEffect.OPACITY.combine(TransitionEffect.translate({ y: -8 }))
+            .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
         }
       }
-      .width('100%').padding({ top: 11, bottom: 3 })
+      .width('100%').padding({ top: 11, bottom: 3 }).clip(true)
       .border({ width: { top: 0.5 }, color: { top: LINE } }).margin({ top: 12 })
     }
   }
@@ -152,15 +160,24 @@ export struct NovelGhostwriteCard {
     if (job.candidate !== null) {
       Column() {
         this.detailToggle('候选正文', `第 ${job.candidate.chapterOrdinal} 章 · 第 ${job.candidate.attempt + 1} 稿`,
-          this.candidateExpanded, (): void => { this.candidateExpanded = !this.candidateExpanded; })
+          this.candidateExpanded, (): void => {
+            this.getUIContext().animateTo({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }, (): void => {
+              this.candidateExpanded = !this.candidateExpanded;
+            });
+          })
         if (this.candidateExpanded) {
-          Text(job.candidate.title).fontSize(13).fontWeight(FontWeight.Medium).fontColor(INK).margin({ top: 8 })
-          Text('候选未收录前不会改变正文。').fontSize(11).fontColor(INK3).margin({ top: 3 })
-          Text(job.candidate.content).fontSize(12).fontColor(INK2).lineHeight(18).maxLines(16)
-            .textOverflow({ overflow: TextOverflow.Ellipsis }).width('100%').margin({ top: 8 })
+          Column() {
+            Text(job.candidate.title).fontSize(13).fontWeight(FontWeight.Medium).fontColor(INK).margin({ top: 8 })
+            Text('候选未收录前不会改变正文。').fontSize(11).fontColor(INK3).margin({ top: 3 })
+            Text(job.candidate.content).fontSize(12).fontColor(INK2).lineHeight(18).maxLines(16)
+              .textOverflow({ overflow: TextOverflow.Ellipsis }).width('100%').margin({ top: 8 })
+          }
+          .width('100%')
+          .transition(TransitionEffect.OPACITY.combine(TransitionEffect.translate({ y: -8 }))
+            .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
         }
       }
-      .width('100%').padding({ top: 11, bottom: 3 })
+      .width('100%').padding({ top: 11, bottom: 3 }).clip(true)
       .border({ width: { top: 0.5 }, color: { top: LINE } }).margin({ top: 12 })
     }
   }

@@ -8,6 +8,7 @@ import { INK3, ACCENT, SURFACE2, LABEL } from '../design/tokens.ets';
 
 @Component
 export struct ReasoningPicker {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop levels: ReasoningLevelOption[] = [];
   @Prop currentLevel: string = '';
   onReasoningLevelChange: (level: string) => void = (_l: string): void => {};
@@ -18,7 +19,7 @@ export struct ReasoningPicker {
   }
 
   build(): void {
-    if (this.levels.length > 1) {
+    if (this.themeEpoch >= 0 && this.levels.length > 1) {
       Row() {
         ForEach(this.levels, (opt: ReasoningLevelOption): void => {
           Text(opt.label)

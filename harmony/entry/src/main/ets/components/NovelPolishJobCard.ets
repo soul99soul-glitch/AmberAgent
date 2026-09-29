@@ -1,6 +1,6 @@
 // NovelPolishJobCard — durable batch-polish 作业在正文页的只读投影与控制。
 
-import {
+import { MOTION_OVERLAY,
   ACCENT, ACCENT_INK, ERROR, INK, INK2, INK3, INK4,
   LINE, RAISED, SURFACE, SURFACE2,
 } from '../design/tokens.ets';
@@ -11,6 +11,7 @@ import type {
 
 @Component
 export struct NovelPolishJobCard {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop job: DurablePolishJob | null = null;
   @Prop busy: boolean = false;
 
@@ -24,7 +25,7 @@ export struct NovelPolishJobCard {
   @State private resultsExpanded: boolean = true;
 
   build(): void {
-    if (this.job !== null) {
+    if (this.themeEpoch >= 0 && this.job !== null) {
       Scroll() {
         this.jobBody(this.job)
       }
@@ -110,14 +111,23 @@ export struct NovelPolishJobCard {
     if (job.candidate !== null) {
       Column() {
         this.detailToggle('候选正文', `第 ${job.candidate.chapterOrdinal} 章 · 第 ${job.candidate.attempt + 1} 稿`,
-          this.candidateExpanded, (): void => { this.candidateExpanded = !this.candidateExpanded; })
+          this.candidateExpanded, (): void => {
+            this.getUIContext().animateTo({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }, (): void => {
+              this.candidateExpanded = !this.candidateExpanded;
+            });
+          })
         if (this.candidateExpanded) {
-          Text('候选未原子收录前不会改变正文。').fontSize(11).fontColor(INK3).margin({ top: 8 })
-          Text(job.candidate.content).fontSize(12).fontColor(INK2).lineHeight(18)
-            .width('100%').margin({ top: 7 })
+          Column() {
+            Text('候选未原子收录前不会改变正文。').fontSize(11).fontColor(INK3).margin({ top: 8 })
+            Text(job.candidate.content).fontSize(12).fontColor(INK2).lineHeight(18)
+              .width('100%').margin({ top: 7 })
+          }
+          .width('100%')
+          .transition(TransitionEffect.OPACITY.combine(TransitionEffect.translate({ y: -8 }))
+            .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
         }
       }
-      .width('100%').padding({ top: 11, bottom: 3 })
+      .width('100%').padding({ top: 11, bottom: 3 }).clip(true)
       .border({ width: { top: 0.5 }, color: { top: LINE } }).margin({ top: 12 })
     }
   }
@@ -127,20 +137,29 @@ export struct NovelPolishJobCard {
     if (job.review !== null) {
       Column() {
         this.detailToggle('独立审稿', this.reviewSummary(job), this.reviewExpanded,
-          (): void => { this.reviewExpanded = !this.reviewExpanded; })
+          (): void => {
+            this.getUIContext().animateTo({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }, (): void => {
+              this.reviewExpanded = !this.reviewExpanded;
+            });
+          })
         if (this.reviewExpanded) {
-          if (job.review.rewriteInstructions.trim().length > 0) {
-            Text(`重写说明：${job.review.rewriteInstructions}`).fontSize(12).fontColor(INK2).lineHeight(18)
-              .width('100%').margin({ top: 8 })
+          Column() {
+            if (job.review.rewriteInstructions.trim().length > 0) {
+              Text(`重写说明：${job.review.rewriteInstructions}`).fontSize(12).fontColor(INK2).lineHeight(18)
+                .width('100%').margin({ top: 8 })
+            }
+            ForEach(job.review.findings, (finding: GhostwriteFinding): void => {
+              Text(`${this.findingLabel(finding)}：${finding.message}`).fontSize(12).fontColor(INK2)
+                .lineHeight(18)
+                .width('100%').margin({ top: 7 })
+            }, (finding: GhostwriteFinding): string => `${finding.code}:${finding.location}`)
           }
-          ForEach(job.review.findings, (finding: GhostwriteFinding): void => {
-            Text(`${this.findingLabel(finding)}：${finding.message}`).fontSize(12).fontColor(INK2)
-              .lineHeight(18)
-              .width('100%').margin({ top: 7 })
-          }, (finding: GhostwriteFinding): string => `${finding.code}:${finding.location}`)
+          .width('100%')
+          .transition(TransitionEffect.OPACITY.combine(TransitionEffect.translate({ y: -8 }))
+            .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
         }
       }
-      .width('100%').padding({ top: 11, bottom: 3 })
+      .width('100%').padding({ top: 11, bottom: 3 }).clip(true)
       .border({ width: { top: 0.5 }, color: { top: LINE } }).margin({ top: 12 })
     }
   }
@@ -158,14 +177,23 @@ export struct NovelPolishJobCard {
     if (this.showResults(job.stage)) {
       Column() {
         this.detailToggle('本次结果', `${job.progress.length} 已完成，${this.incompleteCount(job)} 未完成`,
-          this.resultsExpanded, (): void => { this.resultsExpanded = !this.resultsExpanded; })
+          this.resultsExpanded, (): void => {
+            this.getUIContext().animateTo({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }, (): void => {
+              this.resultsExpanded = !this.resultsExpanded;
+            });
+          })
         if (this.resultsExpanded) {
-          ForEach(job.targets, (target: PolishChapterTarget): void => {
-            this.resultRow(target, this.progressFor(job, target.id))
-          }, (target: PolishChapterTarget): string => target.id)
+          Column() {
+            ForEach(job.targets, (target: PolishChapterTarget): void => {
+              this.resultRow(target, this.progressFor(job, target.id))
+            }, (target: PolishChapterTarget): string => target.id)
+          }
+          .width('100%')
+          .transition(TransitionEffect.OPACITY.combine(TransitionEffect.translate({ y: -8 }))
+            .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
         }
       }
-      .width('100%').padding({ top: 11, bottom: 3 })
+      .width('100%').padding({ top: 11, bottom: 3 }).clip(true)
       .border({ width: { top: 0.5 }, color: { top: LINE } }).margin({ top: 12 })
     }
   }

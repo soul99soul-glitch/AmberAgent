@@ -54,6 +54,7 @@ function typeLabel(name: string): string {
 
 @Component
 export struct WorkspaceFilePreview {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop file: WorkspaceFileInfo | null = null;
   // 文本内容(父页读盘后注入;非文本类可为空)
   @Prop textContent: string = '';
@@ -177,7 +178,7 @@ export struct WorkspaceFilePreview {
   }
 
   build(): void {
-    if (this.file !== null) {
+    if (this.themeEpoch >= 0 && this.file !== null) {
       Stack() {
         Column() {
           this.HeaderRow()

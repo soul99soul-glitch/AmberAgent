@@ -3,6 +3,7 @@ import { ACCENT, ACCENT_INK, INK, INK2, INK3, LINE, SURFACE, SURFACE2 } from '..
 
 @Component
 export struct NovelSettingProposalCard {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop title: string = '';
   @Prop content: string = '';
   @Prop kindLabel: string = '设定提案';
@@ -37,6 +38,7 @@ export struct NovelSettingProposalCard {
       }
       .width('100%').margin({ top: 12 })
     }
+      .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .width('100%').padding(14).backgroundColor(SURFACE).borderRadius(12)
     .border({ width: 1, color: LINE }).margin({ bottom: 12 })
     .alignItems(HorizontalAlign.Start)

@@ -38,6 +38,7 @@ function dateBucketLabel(iso: string): string {
 
 @Component
 export struct ChatListGrouped {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop @Watch('onConversationsChange') conversations: ConversationSummary[] = [];
   @Prop selectedId: string = '';
   @Prop runningIds: string[] = [];
@@ -177,6 +178,7 @@ export struct ChatListGrouped {
         }
       }, (row: GroupedRow): string => row.key)
     }
+      .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .width('100%')
     .height('100%')
     .backgroundColor(BG)

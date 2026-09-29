@@ -4,6 +4,7 @@ import { INK, INK2, INK3, SURFACE, SURFACE2, LINE, ACCENT, BODY, META } from '..
 
 @Component
 export struct FullScreenTextEditor {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop show: boolean = false;
   @Prop title: string = '编辑';
   @State editText: string = '';
@@ -11,7 +12,7 @@ export struct FullScreenTextEditor {
   onDismiss: () => void = (): void => {};
 
   build(): void {
-    if (this.show) {
+    if (this.themeEpoch >= 0 && this.show) {
       Column() {
         // 标题栏
         Row() {

@@ -19,6 +19,7 @@ export interface NovelBatchPolishSheetResult {
 
 @Component
 export struct NovelBatchPolishSheet {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop chapters: NovelBatchPolishSheetChapter[] = [];
   @Prop running: boolean = false;
   @Prop current: number = 0;
@@ -69,6 +70,7 @@ export struct NovelBatchPolishSheet {
       .borderRadius({ topLeft: 20, topRight: 20 })
       .padding({ left: 20, right: 20, top: 18, bottom: 24 })
     }
+      .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .width('100%').height('100%').alignContent(Alignment.Bottom)
   }
 

@@ -9,7 +9,7 @@
 import type { UIMessagePartTool, JsonValue } from '@amber/chat-domain';
 import { toolOutputJson, toolInputAsJson } from '@amber/chat-domain';
 import type { JsonObject } from '@amber/chat-domain';
-import { INK, INK2, INK3, INK4, SURFACE, SURFACE2, LINE, ACCENT, ACCENT_LIGHT, META, LABEL, BODY } from '../design/tokens.ets';
+import { MOTION_OVERLAY, INK, INK2, INK3, INK4, SURFACE, SURFACE2, LINE, ACCENT, ACCENT_LIGHT, META, LABEL, BODY } from '../design/tokens.ets';
 import { AgentToolCallCapsule, ToolStatus } from './AgentToolCapsule.ets';
 
 const COUNCIL_TOOL_NAMES: ReadonlySet<string> = new Set<string>([
@@ -92,6 +92,7 @@ const extractSeats = (tools: UIMessagePartTool[]): string[] => {
 
 @Component
 export struct ChatMessageCouncilStep {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop tools: UIMessagePartTool[];
   @Prop runId: string = '';
   @Prop canOpenRun: boolean = true;
@@ -142,7 +143,11 @@ export struct ChatMessageCouncilStep {
             Text(this.objectiveExpanded ? '收起' : '展开')
               .fontSize(LABEL).fontColor(ACCENT)
               .margin({ left: 8 })
-              .onClick((): void => { this.objectiveExpanded = !this.objectiveExpanded; })
+              .onClick((): void => {
+                this.getUIContext().animateTo({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }, (): void => {
+                  this.objectiveExpanded = !this.objectiveExpanded;
+                });
+              })
           }
           .width('100%')
 
@@ -152,6 +157,8 @@ export struct ChatMessageCouncilStep {
               .lineHeight(18)
               .width('100%')
               .margin({ top: 4 })
+            .transition(TransitionEffect.OPACITY.combine(TransitionEffect.translate({ y: -8 }))
+              .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
           } else {
             Text(this.objective())
               .fontSize(META).fontColor(INK2)
@@ -160,6 +167,8 @@ export struct ChatMessageCouncilStep {
               .lineHeight(18)
               .width('100%')
               .margin({ top: 4 })
+            .transition(TransitionEffect.OPACITY.combine(TransitionEffect.translate({ y: -8 }))
+              .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
           }
         }
         .width('100%')
@@ -168,8 +177,10 @@ export struct ChatMessageCouncilStep {
         .backgroundColor(SURFACE)
         .borderRadius(8)
         .border({ width: 0.5, color: LINE })
+        .clip(true)
       }
     }
+      .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .width('100%')
     .alignItems(HorizontalAlign.Start)
     .margin({ bottom: 4 })

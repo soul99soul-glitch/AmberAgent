@@ -1,6 +1,6 @@
 // ChatDrawer — chat navigation drawer aligned with Android ChatDrawer.
 // Harmony uses a root Stack overlay instead of ModalNavigationDrawer.
-import { INK, INK2, INK3, SURFACE, BG, LINE, ACCENT, BODY, OVERLAY } from '../design/tokens.ets';
+import { INK, INK2, INK3, SURFACE, BG, LINE, ACCENT, BODY, OVERLAY, MOTION_OVERLAY } from '../design/tokens.ets';
 import { FONT_SERIF } from '../design/fonts.ets';
 import { WorkspaceSearchField } from './ui/WorkspaceSearchField.ets';
 import { UIAvatar } from './UIAvatar.ets';
@@ -8,6 +8,7 @@ import { Icon } from './ui/Icon.ets';
 
 @Component
 export struct ChatDrawer {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @StorageProp('statusBarHeight') statusBarHeight: number = 44;
   @StorageProp('navBarHeight') navBarHeight: number = 0;
   @Prop show: boolean = false;
@@ -23,7 +24,7 @@ export struct ChatDrawer {
   @BuilderParam conversationList: () => void;
 
   build(): void {
-    if (this.show) {
+    if (this.themeEpoch >= 0 && this.show) {
       Row() {
         Column() {
           Text('Amber')
@@ -113,12 +114,16 @@ export struct ChatDrawer {
         .backgroundColor(SURFACE)
         .borderRadius({ topRight: 24, bottomRight: 24 })
         .clip(true)
+        .transition(TransitionEffect.translate({ x: -336 })
+          .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
 
         Column()
           .layoutWeight(1)
           .height('100%')
           .backgroundColor(OVERLAY)
           .onClick((): void => { this.onDismiss(); })
+          .transition(TransitionEffect.OPACITY
+            .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
       }
       .width('100%')
       .height('100%')

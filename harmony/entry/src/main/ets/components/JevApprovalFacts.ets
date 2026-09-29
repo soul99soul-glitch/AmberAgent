@@ -6,6 +6,7 @@ import { SSHUIColors } from './SSHUIColors.ets';
 // The caller supplies the current saved subject hash, never the metadata's own hash.
 @Component
 export struct JevApprovalFacts {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop part: UIMessagePartTool;
   @Prop subjectHash: string = '';
   @State colors: SSHUIColors = new SSHUIColors();
@@ -32,6 +33,6 @@ export struct JevApprovalFacts {
   }
 
   build(): void {
-    if (this.facts() !== null) this.FactLabels(this.facts()!)
+    if (this.themeEpoch >= 0 && this.facts() !== null) this.FactLabels(this.facts()!)
   }
 }

@@ -8,12 +8,13 @@ import { CenteredTitleBar, CardGroup, PlainSection, FooterNote, PageSpacer, Seg 
 import { SSHUIColors } from '../components/SSHUIColors.ets';
 import { sshPageError } from '../components/SSHPageErrors.ets';
 import { Icon } from '../components/ui/Icon.ets';
-import { ACCENT } from '../design/tokens.ets';
+import { ACCENT, MOTION_OVERLAY } from '../design/tokens.ets';
 import { FONT_MONO, FONT_SANS_MEDIUM } from '../design/fonts.ets';
 
 @Entry
 @Component
 struct SettingSSHProfilesPage {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @State profiles: SSHProfile[] = [];
   @State defaultId: string = '';
   @State loaded: boolean = false;
@@ -63,6 +64,12 @@ struct SettingSSHProfilesPage {
   onPageHide(): void {
     this.cancelOperation();
     this.clearSecrets();
+  }
+
+  onBackPress(): boolean {
+    if (!this.editing) return false;
+    this.closeEditor();
+    return true;
   }
 
   private refreshColors(): void { this.colors = new SSHUIColors(); }
@@ -116,7 +123,9 @@ struct SettingSSHProfilesPage {
     this.candidate = null;
     this.notice = '';
     this.error = '';
-    this.editing = true;
+    this.getUIContext().animateTo({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }, (): void => {
+      this.editing = true;
+    });
   }
 
   private closeEditor(): void {
@@ -124,7 +133,9 @@ struct SettingSSHProfilesPage {
     this.clearSecrets();
     this.candidate = null;
     this.original = null;
-    this.editing = false;
+    this.getUIContext().animateTo({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }, (): void => {
+      this.editing = false;
+    });
     this.error = '';
   }
 
@@ -316,7 +327,11 @@ struct SettingSSHProfilesPage {
         .onChange((value: string): void => { this.username = value; this.draftChanged(); })
       Seg({ options: ['密码', '私钥'], selected: this.authIndex, onSelect: (index: number): void => {
         if (this.busy.length > 0) return;
-        this.authIndex = index; this.clearSecrets(); this.draftChanged();
+        this.clearSecrets();
+        this.draftChanged();
+        this.getUIContext().animateTo({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }, (): void => {
+          this.authIndex = index;
+        });
       } })
     }.width('100%').padding(14)
   }
@@ -325,23 +340,26 @@ struct SettingSSHProfilesPage {
   private CredentialFields(): void {
     Column({ space: 10 }) {
       if (this.authIndex === 1) {
-        TextArea({ text: this.secret, placeholder: '粘贴 OpenSSH / PEM 私钥' })
-          .height(150).fontSize(13).fontFamily(FONT_MONO).fontColor(this.colors.ink)
-          .placeholderColor(this.colors.muted)
-          .backgroundColor(this.colors.inset).enabled(this.busy.length === 0)
-          .copyOption(CopyOptions.None)
-          .onChange((value: string): void => { this.secret = value; })
-        Row() {
-          TextInput({ text: this.passphrase, placeholder: '私钥口令（可选）' })
-            .type(this.showPassphrase ? InputType.Normal : InputType.Password).showPasswordIcon(false).height(52)
-            .layoutWeight(1).fontColor(this.colors.ink).placeholderColor(this.colors.muted)
-            .backgroundColor(Color.Transparent).enabled(this.busy.length === 0)
-            .onChange((value: string): void => { this.passphrase = value; })
-          Row() { Icon({ name: this.showPassphrase ? 'eye' : 'eye_off', iconSize: 20, color: this.colors.secondary }) }
-            .width(44).height(44).justifyContent(FlexAlign.Center).alignItems(VerticalAlign.Center)
-            .accessibilityText(this.showPassphrase ? '隐藏私钥口令' : '显示私钥口令')
-            .enabled(this.busy.length === 0).onClick((): void => { this.showPassphrase = !this.showPassphrase; })
-        }.width('100%').height(52).padding({ right: 4 }).borderRadius(26).backgroundColor(this.colors.inset)
+        Column({ space: 10 }) {
+          TextArea({ text: this.secret, placeholder: '粘贴 OpenSSH / PEM 私钥' })
+            .height(150).fontSize(13).fontFamily(FONT_MONO).fontColor(this.colors.ink)
+            .placeholderColor(this.colors.muted)
+            .backgroundColor(this.colors.inset).enabled(this.busy.length === 0)
+            .copyOption(CopyOptions.None)
+            .onChange((value: string): void => { this.secret = value; })
+          Row() {
+            TextInput({ text: this.passphrase, placeholder: '私钥口令（可选）' })
+              .type(this.showPassphrase ? InputType.Normal : InputType.Password).showPasswordIcon(false).height(52)
+              .layoutWeight(1).fontColor(this.colors.ink).placeholderColor(this.colors.muted)
+              .backgroundColor(Color.Transparent).enabled(this.busy.length === 0)
+              .onChange((value: string): void => { this.passphrase = value; })
+            Row() { Icon({ name: this.showPassphrase ? 'eye' : 'eye_off', iconSize: 20, color: this.colors.secondary }) }
+              .width(44).height(44).justifyContent(FlexAlign.Center).alignItems(VerticalAlign.Center)
+              .accessibilityText(this.showPassphrase ? '隐藏私钥口令' : '显示私钥口令')
+              .enabled(this.busy.length === 0).onClick((): void => { this.showPassphrase = !this.showPassphrase; })
+          }.width('100%').height(52).padding({ right: 4 }).borderRadius(26).backgroundColor(this.colors.inset)
+        }.width('100%')
+        .transition(TransitionEffect.OPACITY.animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
       } else {
         Row() {
           TextInput({ text: this.secret, placeholder: '密码' })
@@ -354,6 +372,7 @@ struct SettingSSHProfilesPage {
             .accessibilityText(this.showSecret ? '隐藏密码' : '显示密码')
             .enabled(this.busy.length === 0).onClick((): void => { this.showSecret = !this.showSecret; })
         }.width('100%').height(52).padding({ right: 4 }).borderRadius(26).backgroundColor(this.colors.inset)
+        .transition(TransitionEffect.OPACITY.animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
       }
       Text(this.hasSavedCredential ? '已有本设备凭据。连接信息相同时可留空沿用，秘密不会回填。' : '认证成功后才保存凭据。')
         .fontSize(12).fontColor(this.colors.secondary).width('100%')
@@ -361,26 +380,31 @@ struct SettingSSHProfilesPage {
   }
 
   @Builder
+  private TrustDetails(candidate: SSHTrustProbe): void {
+    Text(candidate.trustState === 'trusted' ? '主机指纹匹配' : candidate.trustState === 'mismatch'
+      ? '主机指纹已改变。请核对服务器后再信任。' : '首次连接。请通过可信渠道核对完整主机指纹。')
+      .fontSize(14).fontColor(candidate.trustState === 'trusted' ? this.colors.success : this.colors.warning)
+      .width('100%')
+    Text(`${this.host.trim()}:${this.portText} · ${candidate.hostKeyType}`)
+      .fontSize(12).fontFamily(FONT_MONO).fontColor(this.colors.secondary).width('100%')
+    Text(candidate.fingerprintSHA256).fontSize(13).fontFamily(FONT_MONO)
+      .fontColor(this.colors.ink).width('100%').wordBreak(WordBreak.BREAK_ALL).copyOption(CopyOptions.LocalDevice)
+    if (candidate.trustState === 'mismatch' && candidate.expectedFingerprintSHA256 !== null) {
+      Text('原主机指纹').fontSize(12).fontColor(this.colors.muted).width('100%')
+      Text(candidate.expectedFingerprintSHA256).fontSize(12).fontFamily(FONT_MONO)
+        .fontColor(this.colors.secondary).width('100%').wordBreak(WordBreak.BREAK_ALL).copyOption(CopyOptions.LocalDevice)
+    }
+    Button(candidate.trustState === 'trusted' ? '验证并保存' : '信任并验证')
+      .width('100%').height(52).fontSize(15).backgroundColor(this.accentColor)
+      .fontColor(this.colors.accentInk).enabled(this.busy.length === 0)
+      .onClick((): void => { this.verify(); })
+  }
+
+  @Builder
   private TrustCard(): void {
     Column({ space: 10 }) {
       if (this.candidate !== null) {
-        Text(this.candidate.trustState === 'trusted' ? '主机指纹匹配' : this.candidate.trustState === 'mismatch'
-          ? '主机指纹已改变。请核对服务器后再信任。' : '首次连接。请通过可信渠道核对完整主机指纹。')
-          .fontSize(14).fontColor(this.candidate.trustState === 'trusted' ? this.colors.success : this.colors.warning)
-          .width('100%')
-        Text(`${this.host.trim()}:${this.portText} · ${this.candidate.hostKeyType}`)
-          .fontSize(12).fontFamily(FONT_MONO).fontColor(this.colors.secondary).width('100%')
-        Text(this.candidate.fingerprintSHA256).fontSize(13).fontFamily(FONT_MONO)
-          .fontColor(this.colors.ink).width('100%').wordBreak(WordBreak.BREAK_ALL).copyOption(CopyOptions.LocalDevice)
-        if (this.candidate.trustState === 'mismatch' && this.candidate.expectedFingerprintSHA256 !== null) {
-          Text('原主机指纹').fontSize(12).fontColor(this.colors.muted).width('100%')
-          Text(this.candidate.expectedFingerprintSHA256).fontSize(12).fontFamily(FONT_MONO)
-            .fontColor(this.colors.secondary).width('100%').wordBreak(WordBreak.BREAK_ALL).copyOption(CopyOptions.LocalDevice)
-        }
-        Button(this.candidate.trustState === 'trusted' ? '验证并保存' : '信任并验证')
-          .width('100%').height(52).fontSize(15).backgroundColor(this.accentColor)
-          .fontColor(this.colors.accentInk).enabled(this.busy.length === 0)
-          .onClick((): void => { this.verify(); })
+        this.TrustDetails(this.candidate)
       }
       Button(this.candidate === null ? '探测主机指纹' : '重新探测').width('100%').height(52)
         .type(ButtonType.Normal).fontColor(this.accentColor).backgroundColor(this.colors.inset)
@@ -401,6 +425,8 @@ struct SettingSSHProfilesPage {
 
   build(): void {
     Column() {
+      // 主题纪元重挂载(勿拆):epoch 变化 → 整页子树销毁重建,全量重读令牌
+      ForEach([this.themeEpoch], (_e: number): void => {
       CenteredTitleBar({ title: this.editing ? (this.original === null ? '新建 SSH 配置' : '编辑 SSH 配置') : 'SSH 配置',
         actionText: this.editing ? '' : '新建', onAction: (): void => { this.edit(null); },
         onBack: (): void => { if (this.editing) this.closeEditor(); else router.back(); } })
@@ -412,27 +438,40 @@ struct SettingSSHProfilesPage {
           if (this.notice.length > 0) {
             Text(this.notice).fontSize(14).fontColor(this.colors.success).width('100%').padding(16)
           }
-          if (this.editing) {
-            PlainSection({ label: '连接信息' })
-            CardGroup({ radius: 18, stroke: true, content: (): void => { this.ConnectionFields(); } }).margin({ left: 16, right: 16 })
-            PlainSection({ label: '认证凭据' })
-            CardGroup({ radius: 18, stroke: true, content: (): void => { this.CredentialFields(); } }).margin({ left: 16, right: 16 })
-            PlainSection({ label: '主机确认' })
-            CardGroup({ radius: 18, stroke: true, content: (): void => { this.TrustCard(); } }).margin({ left: 16, right: 16 })
-            FooterNote({ text: '探测不会发送密码或私钥；正式认证会再次校验主机指纹。失败或取消不会替换原配置。' })
-          } else {
-            PlainSection({ label: '远程主机' })
-            if (this.profiles.length > 0) {
-              CardGroup({ radius: 18, stroke: true, content: (): void => { this.ProfileRows(); } }).margin({ left: 16, right: 16 })
+          Stack({ alignContent: Alignment.TopStart }) {
+            if (this.editing) {
+              Column() {
+                PlainSection({ label: '连接信息' })
+                CardGroup({ radius: 18, stroke: true, content: (): void => { this.ConnectionFields(); } }).margin({ left: 16, right: 16 })
+                PlainSection({ label: '认证凭据' })
+                CardGroup({ radius: 18, stroke: true, content: (): void => { this.CredentialFields(); } }).margin({ left: 16, right: 16 })
+                PlainSection({ label: '主机确认' })
+                CardGroup({ radius: 18, stroke: true, content: (): void => { this.TrustCard(); } }).margin({ left: 16, right: 16 })
+                FooterNote({ text: '探测不会发送密码或私钥；正式认证会再次校验主机指纹。失败或取消不会替换原配置。' })
+              }.width('100%')
+              .transition(TransitionEffect.OPACITY.combine(TransitionEffect.translate({ y: 12 }))
+                .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
             } else {
-              Text(this.loaded ? '暂无 SSH 配置，点击“新建”连接远程主机' : '正在加载…')
-                .fontSize(14).fontColor(this.colors.secondary).width('100%').padding(24)
+              Column() {
+                PlainSection({ label: '远程主机' })
+                if (this.profiles.length > 0) {
+                  CardGroup({ radius: 18, stroke: true, content: (): void => { this.ProfileRows(); } }).margin({ left: 16, right: 16 })
+                } else {
+                  Text(this.loaded ? '暂无 SSH 配置，点击“新建”连接远程主机' : '正在加载…')
+                    .fontSize(14).fontColor(this.colors.secondary).width('100%').padding(24)
+                }
+                FooterNote({ text: '凭据只保存在本设备安全仓，备份恢复后需重新录入。切到后台会断开 SSH，回到前台不会自动重发命令。' })
+              }.width('100%')
+              .transition(TransitionEffect.OPACITY
+                .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
             }
-            FooterNote({ text: '凭据只保存在本设备安全仓，备份恢复后需重新录入。切到后台会断开 SSH，回到前台不会自动重发命令。' })
-          }
+          }.width('100%')
           PageSpacer()
         }.width('100%').justifyContent(FlexAlign.Start)
       }.width('100%').layoutWeight(1).align(Alignment.TopStart).scrollBar(BarState.Off).edgeEffect(EdgeEffect.Spring)
-    }.width('100%').height('100%').backgroundColor(this.colors.background)
+    
+      }, (e: number): string => `theme-${e}`)
+}
+      .opacity(this.themeEpoch >= 0 ? 1 : 1).width('100%').height('100%').backgroundColor(this.colors.background)
   }
 }

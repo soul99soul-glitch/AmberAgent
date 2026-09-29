@@ -7,7 +7,7 @@
 
 import type { UIMessagePartTool, UIMessagePartText, UIMessagePartImage } from '@amber/chat-domain';
 import { toolActivityStatus, toolOutputJson } from '@amber/chat-domain';
-import { INK, INK2, INK3, INK4, SURFACE, SURFACE2, LINE, ACCENT, ERROR, META, LABEL } from '../design/tokens.ets';
+import { MOTION_OVERLAY, INK, INK2, INK3, INK4, SURFACE, SURFACE2, LINE, ACCENT, ERROR, META, LABEL } from '../design/tokens.ets';
 import { GeneratedImageCarousel } from './GeneratedImageCarousel.ets';
 import { isSSHApprovalTool, sshApprovalTargetLabel, sshApprovalCommand, sshApprovalProtocolLabel } from './SSHApprovalSummary.ets';
 import { SSHUIColors } from './SSHUIColors.ets';
@@ -27,6 +27,7 @@ import {
 
 @Component
 export struct ChatMessageTools {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop part: UIMessagePartTool;
   @Prop jevSubjectHash: string = '';
   onApprove: (toolCallId: string) => void = (): void => {};
@@ -200,6 +201,8 @@ export struct ChatMessageTools {
                 .fontFamily('JetBrainsMono')
                 .width('100%')
                 .lineHeight(16)
+              .transition(TransitionEffect.OPACITY.combine(TransitionEffect.translate({ y: -8 }))
+                .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
             } else {
               Text(this.firstOutputText())
                 .fontSize(LABEL)
@@ -209,13 +212,19 @@ export struct ChatMessageTools {
                 .textOverflow({ overflow: TextOverflow.Ellipsis })
                 .width('100%')
                 .lineHeight(16)
+              .transition(TransitionEffect.OPACITY.combine(TransitionEffect.translate({ y: -8 }))
+                .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
             }
             Text(this.outputExpanded ? '收起' : '展开')
               .fontSize(LABEL)
               .fontColor(INK3)
               .padding({ left: 12, right: 12, top: 10, bottom: 6 })
               .margin({ top: 2 })
-              .onClick((): void => { this.outputExpanded = !this.outputExpanded; })
+              .onClick((): void => {
+                this.getUIContext().animateTo({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }, (): void => {
+                  this.outputExpanded = !this.outputExpanded;
+                });
+              })
               .accessibilityText(this.outputExpanded ? '收起工具输出' : '展开工具输出')
           }
           .width('100%')
@@ -223,11 +232,13 @@ export struct ChatMessageTools {
           .backgroundColor(SURFACE)
           .borderRadius(8)
           .border({ width: 0.5, color: LINE })
+          .clip(true)
         }
         .width('100%')
         .padding({ left: 32, top: 4 })
       }
     }
+      .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .width('100%')
     .alignItems(HorizontalAlign.Start)
     .margin({ bottom: 4 })

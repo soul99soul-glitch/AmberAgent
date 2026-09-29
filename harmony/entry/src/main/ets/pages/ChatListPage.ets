@@ -190,6 +190,7 @@ const relativeTimeIso = (iso: string): string => {
 @Entry
 @Component
 struct ChatListPage {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @StorageProp('statusBarHeight') statusBarHeight: number = 44;
   @StorageProp('navBarHeight') navBarHeight: number = 0;
   @StorageProp('darkMode') darkMode: boolean = false;
@@ -1297,6 +1298,8 @@ struct ChatListPage {
 
   build(): void {
     Stack({ alignContent: Alignment.Bottom }) {
+      // 主题纪元重挂载(勿拆):epoch 变化 → 整页子树销毁重建,全量重读令牌
+      ForEach([this.themeEpoch], (_e: number): void => {
       Stack({ alignContent: Alignment.BottomEnd }) {
         // 画布点阵(点阵主题皮,压在 HOME_BG 上、内容下)
         Canvas(this.dotContext)
@@ -1475,7 +1478,10 @@ struct ChatListPage {
           .animation({ duration: 220, curve: Curve.EaseOut }))
         .onClick((): void => { this.renameOpen = false; })
       }
-    }
+    
+      }, (e: number): string => `theme-${e}`)
+}
+      .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .width('100%')
     .height('100%')
     .backgroundColor(HOME_BG)

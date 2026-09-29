@@ -11,6 +11,7 @@ const KEEP_RECENT_OPTIONS: number[] = [0, 16, 32, 64];
 
 @Component
 export struct CompressContextDialog {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop show: boolean = false;
   onConfirm: (additionalPrompt: string, targetTokens: number, keepRecentMessages: number) => void
     = (_p: string, _t: number, _k: number): void => {};
@@ -26,7 +27,7 @@ export struct CompressContextDialog {
   }
 
   build(): void {
-    if (this.show) {
+    if (this.themeEpoch >= 0 && this.show) {
       Stack() {
         Column() {
           // 标题(loading 时也保留)

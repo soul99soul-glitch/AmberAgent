@@ -41,6 +41,7 @@ interface CommonPatch {
 @Entry
 @Component
 struct ChatMcpSettingsPage {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @State servers: McpServerConfig[] = [];
   @State statuses: Record<string, McpStatus> = {};
   @StorageProp('statusBarHeight') statusBarHeight: number = 44;
@@ -601,6 +602,8 @@ struct ChatMcpSettingsPage {
 
   build() {
     Column() {
+      // 主题纪元重挂载(勿拆):epoch 变化 → 整页子树销毁重建,全量重读令牌
+      ForEach([this.themeEpoch], (_e: number): void => {
       // bindSheet 以宿主节点区分面板；独立宿主避免导入的 false 收起编辑面板。
       Column() {}
         .width(0).height(0)
@@ -704,7 +707,10 @@ struct ChatMcpSettingsPage {
         .position({ x: 0, y: '40%' }).width('100%')
         .alignItems(HorizontalAlign.Center)
       }
-    }
+    
+      }, (e: number): string => `theme-${e}`)
+}
+      .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .width('100%').height('100%').backgroundColor(BG)
   }
 }

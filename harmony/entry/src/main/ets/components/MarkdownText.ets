@@ -31,7 +31,7 @@ import type {
   HighlightToken,
   MarkdownCacheResult,
 } from '@amber/chat-domain';
-import { ACCENT, BODY, INK, INK3, LABEL, LINE, META, MONO_SMALL, SURFACE2, TEXT_STYLES, lineHeightForSize } from '../design/tokens.ets';
+import { MOTION_OVERLAY, ACCENT, BODY, INK, INK3, LABEL, LINE, META, MONO_SMALL, SURFACE2, TEXT_STYLES, lineHeightForSize } from '../design/tokens.ets';
 import { FONT_SANS, FONT_SANS_BOLD, FONT_SANS_MEDIUM, FONT_MONO, FONT_SERIF } from '../design/fonts.ets';
 import { Icon } from './ui/Icon.ets';
 import { promptAction } from '@kit.ArkUI';
@@ -114,6 +114,7 @@ const INLINE_CODE_FG: string = ACCENT;
 
 @Component
 export struct MarkdownText {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop @Watch('onContentChanged') content: string = '';
   @Prop fontSize: number = BODY;
   @Prop fontColor: string = INK;
@@ -338,6 +339,7 @@ export struct MarkdownText {
         }
       }
     }
+      .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .width(this.fillWidth ? '100%' : 'auto')
     .alignItems(HorizontalAlign.Start)
     .bindContentCover(this.previewUrl.length > 0, this.ImagePreviewOverlay(), {
@@ -514,7 +516,9 @@ export struct MarkdownText {
     const keys: string[] = Object.keys(this.codeExpanded);
     for (const k of keys) copy[k] = this.codeExpanded[k];
     copy[key] = !(this.codeExpanded[key] === true);
-    this.codeExpanded = copy;
+    this.getUIContext().animateTo({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }, (): void => {
+      this.codeExpanded = copy;
+    });
   }
 
   private visibleCodeLineCap(block: MarkdownBlock, bi: number): number {
@@ -760,6 +764,8 @@ export struct MarkdownText {
       }
     }
     .alignItems(VerticalAlign.Top)
+    // 只跟随用户展开/折叠的 animateTo，不为流式追加的每一行启动动画。
+    .transition(TransitionEffect.OPACITY)
   }
 
   // D7-3:mermaid 判定/实例唯一块 id;导出由 MermaidBlock 掌握实际图高。
@@ -868,12 +874,14 @@ export struct MarkdownText {
             .onClick((): void => {
               this.toggleCodeExpanded(block, bi);
             })
+            .transition(TransitionEffect.OPACITY)
         }
       }
     }
     .width('100%')
     .backgroundColor(CODE_BG)
     .borderRadius(8)
+    .clip(true)
     .padding({ left: 12, right: 12, top: 10, bottom: 10 })
     .margin({ top: 4, bottom: 6 })
   }

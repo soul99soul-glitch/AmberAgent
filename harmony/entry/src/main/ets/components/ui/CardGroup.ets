@@ -5,6 +5,7 @@ import { INK, INK2, INK3, INK4, SURFACE, SURFACE2, LINE, ACCENT, BODY, META, LAB
 
 @Component
 export struct CardGroupItem {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop title: string = '';
   @Prop subtitle: string = '';
   @Prop isFirst: boolean = false;
@@ -26,6 +27,7 @@ export struct CardGroupItem {
       .alignItems(HorizontalAlign.Start).layoutWeight(1)
       Text('›').fontSize(BODY).fontColor(INK4)
     }
+      .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .width('100%')
     .padding({ left: 16, right: 16, top: 14, bottom: 14 })
     .backgroundColor(SURFACE)
@@ -45,6 +47,7 @@ export struct CardGroupItem {
 
 @Component
 export struct CardGroup {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop title: string = '';
   @BuilderParam content: () => void;
 
@@ -67,6 +70,7 @@ export struct CardGroup {
       // ArkUI 无 clipToOutline → 用 overflow hidden 模拟(不完美,登记设备验证)
       .clip(true)
     }
+      .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .width('100%')
   }
 }

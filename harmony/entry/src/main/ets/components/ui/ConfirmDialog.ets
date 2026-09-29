@@ -3,6 +3,7 @@ import { INK, INK2, INK3, SURFACE, ACCENT, LINE, BODY, META, OVERLAY, MOTION_OVE
 
 @Component
 export struct ConfirmDialog {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop show: boolean = false;
   @Prop title: string = '';
   @Prop message: string = '';
@@ -12,7 +13,7 @@ export struct ConfirmDialog {
   onDismiss: () => void = (): void => {};
 
   build(): void {
-    if (this.show) {
+    if (this.themeEpoch >= 0 && this.show) {
       // 遮罩层独立成全屏子项，卡片置后并消费点击避免误关闭
       Stack() {
         Row() {}

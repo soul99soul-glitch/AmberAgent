@@ -4,6 +4,7 @@ import { INK3, ERROR, ERROR_BG, LINE, LABEL, META } from '../../design/tokens.et
 
 @Component
 export struct ErrorCard {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop title: string = '';
   @Prop message: string = '';
   onDismiss: () => void = (): void => {};
@@ -46,6 +47,7 @@ export struct ErrorCard {
         .padding({ left: 8, right: 8, top: 6, bottom: 6 })
         .onClick((): void => { this.onDismiss(); })
     }
+      .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .width('100%')
     .backgroundColor(ERROR_BG)
     .borderRadius(12)

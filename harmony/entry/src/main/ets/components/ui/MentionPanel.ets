@@ -8,11 +8,12 @@ const MAX_MENTIONS: number = 8;
 
 @Component
 export struct MentionPanel {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop roles: MentionRoleItem[] = [];
   onSelect: (roleId: string) => void = (_id: string): void => {};
 
   build(): void {
-    if (this.roles.length > 0) {
+    if (this.themeEpoch >= 0 && this.roles.length > 0) {
       Column() {
         ForEach(this.roles.slice(0, MAX_MENTIONS), (role: MentionRoleItem, i: number): void => {
           this.MentionRow(role)

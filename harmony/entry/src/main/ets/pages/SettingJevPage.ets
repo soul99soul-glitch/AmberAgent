@@ -13,7 +13,7 @@ import type { JevSettings, JevEvaluation, JevQuestion, JevMode, JevNewPurpose, J
 import { getChatKvStore, getAppContainer } from '../di/AppContainer.ets';
 import { loadJevRuntimeStatus, JevRuntimeStatus } from '../platform_impl/JevSupport.ets';
 import {
-  ACCENT, BG, ERROR, INK, INK3, INK4, SURFACE2, BODY, LABEL, META, TEXT_STYLES, GUTTER,
+  ACCENT, BG, ERROR, INK, INK3, INK4, SURFACE2, BODY, LABEL, META, TEXT_STYLES, GUTTER, MOTION_OVERLAY,
 } from '../design/tokens.ets';
 import {
   CenteredTitleBar, PlainSection, CardGroup, CardRow, CardToggleRow, FooterNote, PageSpacer, Seg,
@@ -30,6 +30,7 @@ const API_MODE_VALUES: string[] = ['typesafe', 'vercel'];
 @Entry
 @Component
 struct SettingJevPage {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @StorageProp('accentColor') accentColorStore: string = ACCENT;
   @State settings: JevSettings = makeJevSettings();
   @State status: JevRuntimeStatus = {
@@ -111,14 +112,16 @@ struct SettingJevPage {
   }
 
   private setApiMode(idx: number): void {
-    this.settings = makeJevSettings({
-      mode: this.settings.mode,
-      apiMode: API_MODE_VALUES[idx] === 'vercel' ? 'vercel' : 'typesafe',
-      apiKey: this.settings.apiKey,
-      baseUrl: this.settings.baseUrl,
-      model: this.settings.model,
-      approvalTriage: this.settings.approvalTriage,
-      webAutomation: this.settings.webAutomation,
+    this.getUIContext().animateTo({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }, (): void => {
+      this.settings = makeJevSettings({
+        mode: this.settings.mode,
+        apiMode: API_MODE_VALUES[idx] === 'vercel' ? 'vercel' : 'typesafe',
+        apiKey: this.settings.apiKey,
+        baseUrl: this.settings.baseUrl,
+        model: this.settings.model,
+        approvalTriage: this.settings.approvalTriage,
+        webAutomation: this.settings.webAutomation,
+      });
     });
     this.persist();
   }
@@ -312,6 +315,8 @@ struct SettingJevPage {
           .padding({ left: 14, right: 14 })
           .margin({ top: 12 })
           .onChange((v: string): void => { this.patchText({ baseUrl: v.trim() }); })
+          .transition(TransitionEffect.OPACITY.combine(TransitionEffect.translate({ y: -8 }))
+            .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
       }
       Row() {
         Text(this.testMsg)
@@ -360,6 +365,8 @@ struct SettingJevPage {
 
   build(): void {
     Column() {
+      // 主题纪元重挂载(勿拆):epoch 变化 → 整页子树销毁重建,全量重读令牌
+      ForEach([this.themeEpoch], (_e: number): void => {
       CenteredTitleBar({ title: 'Jev 快速判断' })
       if (this.loadError.length > 0 || this.saveError.length > 0) {
         Text(this.loadError.length > 0 ? this.loadError : this.saveError).fontSize(LABEL)
@@ -401,7 +408,10 @@ struct SettingJevPage {
         .layoutWeight(1)
         .backgroundColor(BG)
       }
-    }
+    
+      }, (e: number): string => `theme-${e}`)
+}
+      .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .width('100%').height('100%').backgroundColor(BG)
   }
 }

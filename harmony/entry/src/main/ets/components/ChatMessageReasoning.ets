@@ -10,12 +10,13 @@ import {
   toDisplayReasoningText, reasoningDurationMs, formatThoughtSeconds,
   extractThinkingTitle,
 } from '@amber/chat-domain';
-import { INK, INK2, INK3, INK4, ACCENT, SURFACE, SURFACE2, LINE, META } from '../design/tokens.ets';
+import { MOTION_OVERLAY, INK, INK2, INK3, INK4, ACCENT, SURFACE, SURFACE2, LINE, META } from '../design/tokens.ets';
 import { MarkdownText } from './MarkdownText.ets';
 import { Icon } from './ui/Icon.ets';
 
 @Component
 export struct ChatMessageReasoning {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop part: UIMessagePartReasoning;
   @Prop state: string; // 'collapsed' | 'preview' | 'expanded'
   @Prop @Watch('onLoadingChanged') loading: boolean;
@@ -82,7 +83,9 @@ export struct ChatMessageReasoning {
       if (timerVersion !== this.collapseTimerVersion) return;
       this.collapseTimer = -1;
       if (this.autoCloseThinking && this.state === 'expanded' && this.part.finishedAt !== null) {
-        this.onAutoCollapse();
+        this.getUIContext().animateTo({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }, (): void => {
+          this.onAutoCollapse();
+        });
       }
     }, 800);
   }
@@ -111,15 +114,19 @@ export struct ChatMessageReasoning {
             .margin({ right: 6 })
         }
 
-        Text(this.state === 'collapsed' ? '▸' : '▾')
+        Text('▸')
           .fontSize(11)
           .fontColor(INK3)
+          .rotate({ angle: this.state === 'collapsed' ? 0 : 90 })
+          .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut })
       }
       .width('100%')
       .padding({ left: 2, top: 6, bottom: 6 })
       .onClick((): void => {
         this.clearCollapseTimer();
-        this.onToggle();
+        this.getUIContext().animateTo({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }, (): void => {
+          this.onToggle();
+        });
       })
 
       // 内容(preview / expanded)
@@ -136,6 +143,8 @@ export struct ChatMessageReasoning {
         .height(100)
         .padding({ left: 14, top: 2, bottom: 2 })
         .border({ width: { left: 2 }, color: { left: LINE } })
+        .transition(TransitionEffect.OPACITY.combine(TransitionEffect.translate({ y: -8 }))
+          .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
       } else if (this.state === 'expanded') {
         // expanded: 全文
         Column() {
@@ -144,9 +153,13 @@ export struct ChatMessageReasoning {
         .width('100%')
         .padding({ left: 14, top: 2, bottom: 2 })
         .border({ width: { left: 2 }, color: { left: LINE } })
+        .transition(TransitionEffect.OPACITY.combine(TransitionEffect.translate({ y: -8 }))
+          .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
       }
     }
+      .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .width('100%')
+    .clip(true)
     .margin({ bottom: 4 })
   }
 

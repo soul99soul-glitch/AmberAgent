@@ -4,7 +4,7 @@
 // Markdown 复制与最近 40 条长图相册导出；由聊天消息操作菜单打开。
 import type { UIMessage, Conversation, ImageExportPage } from '@amber/chat-domain';
 import { exportConversationMarkdown, messageImageExportText, imageExportPages } from '@amber/chat-domain';
-import { ACCENT, BODY, INK, INK2, INK3, INK4, LABEL, LINE, META, OVERLAY, SURFACE, SURFACE2, BG, USER_BG, USER_INK } from '../design/tokens.ets';
+import { ACCENT, BODY, INK, INK2, INK3, INK4, LABEL, LINE, META, MOTION_OVERLAY, OVERLAY, SURFACE, SURFACE2, BG, USER_BG, USER_INK } from '../design/tokens.ets';
 import { Icon } from './ui/Icon.ets';
 import { pasteboard } from '@kit.BasicServicesKit';
 import { display, promptAction } from '@kit.ArkUI';
@@ -16,6 +16,7 @@ const IMAGE_EXPORT_MAX_MESSAGES: number = 40;
 
 @Component
 export struct ChatExportSheet {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop show: boolean = false;
   @Prop conversation: Conversation | null = null;
   @Prop messages: UIMessage[] = [];
@@ -200,7 +201,7 @@ export struct ChatExportSheet {
   }
 
   build(): void {
-    if (this.show) {
+    if (this.themeEpoch >= 0 && this.show) {
       Stack() {
         Column() {
           // 标题
@@ -281,6 +282,8 @@ export struct ChatExportSheet {
         .backgroundColor(SURFACE)
         .borderRadius(16)
         .padding({ left: 20, right: 20, top: 24, bottom: 12 })
+        .transition(TransitionEffect.scale({ x: 0.96, y: 0.96 })
+          .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
         if (this.renderImageMode) {
           this.ExportImageRender()
         }
@@ -289,6 +292,8 @@ export struct ChatExportSheet {
       .height('100%')
       .backgroundColor(OVERLAY)
       .alignContent(Alignment.Center)
+      .transition(TransitionEffect.OPACITY
+        .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
     }
   }
 }

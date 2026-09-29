@@ -14,6 +14,7 @@ import { FONT_MONO } from '../design/fonts.ets';
 
 @Component
 export struct ChatMessageAvatar {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @StorageProp('accentColor') accentColorStore: string = ACCENT;
   @Prop message: UIMessage;
   // F09:仅 streaming=true 时闪烁;@Watch 对称启停(不再只看 role)
@@ -76,7 +77,7 @@ export struct ChatMessageAvatar {
   }
 
   build(): void {
-    if (this.message.role !== 'user') {
+    if (this.themeEpoch >= 0 && this.message.role !== 'user') {
       Row() {
         if (this.modelIconChar().length > 0) {
           Text(this.modelIconChar())

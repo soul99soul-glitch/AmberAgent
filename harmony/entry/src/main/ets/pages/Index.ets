@@ -60,6 +60,7 @@ const accentWithAlpha = (hex: string, alpha: number): string => {
 
 @Component
 struct IndexSuggestionChip {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @StorageProp('accentColor') accentColorStore: string = ACCENT;
   @Prop label: string = '';
   @State pressedScale: number = 1;
@@ -74,7 +75,8 @@ struct IndexSuggestionChip {
 
   build(): void {
     Text(this.label)
-      .fontSize(12)
+      
+      .opacity(this.themeEpoch >= 0 ? 1 : 1).fontSize(12)
       .fontWeight(FontWeight.Normal)
       .lineHeight(CHIP_LINE_HEIGHT)
       .fontFamily(FONT_SANS)
@@ -93,6 +95,7 @@ struct IndexSuggestionChip {
 
 @Component
 struct IndexRecentRow {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop title: string = '';
   @Prop timeText: string = '';
   onSelect: () => void = (): void => {};
@@ -117,6 +120,7 @@ struct IndexRecentRow {
         .maxLines(1)
         .margin({ left: 12 })
     }
+      .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .width('100%')
     .constraintSize({ minHeight: 40 })
     .padding({ left: 12, right: 12, top: 8, bottom: 8 })
@@ -128,6 +132,7 @@ struct IndexRecentRow {
 @Entry
 @Component
 struct Index {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @StorageProp('statusBarHeight') statusBarHeight: number = 44;
   @StorageProp('navBarHeight') navBarHeight: number = 0;
   @StorageProp('darkMode') darkMode: boolean = false;
@@ -369,6 +374,8 @@ struct Index {
 
   build(): void {
     Column() {
+      // 主题纪元重挂载(勿拆):epoch 变化 → 整页子树销毁重建,全量重读令牌
+      ForEach([this.themeEpoch], (_e: number): void => {
       // Header content is 56vp; the system status inset is kept outside that height.
       Row() {
         Row() {
@@ -592,7 +599,10 @@ struct Index {
       .alignItems(VerticalAlign.Bottom)
       .padding({ left: 12, right: 12, top: 10, bottom: this.keyboardHeightVp + this.navBarHeight + 6 })
       .backgroundColor(SURFACE)
-    }
+    
+      }, (e: number): string => `theme-${e}`)
+}
+      .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .width('100%')
     .height('100%')
     .padding({ top: this.statusBarHeight })

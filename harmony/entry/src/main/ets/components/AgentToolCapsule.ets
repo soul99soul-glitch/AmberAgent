@@ -105,6 +105,7 @@ export const toolStatusIcon = (status: ToolStatus): string => {
 
 @Component
 export struct AgentToolCallCapsule {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @StorageProp('accentColor') accentColorStore: string = ACCENT;
   @Prop toolName: string = '';
   @Prop title: string = '';
@@ -168,6 +169,7 @@ export struct AgentToolCallCapsule {
         }
       }
     }
+      .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .width('100%')
     .alignItems(VerticalAlign.Center)
   }

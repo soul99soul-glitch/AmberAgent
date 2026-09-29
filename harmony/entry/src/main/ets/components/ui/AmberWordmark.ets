@@ -6,6 +6,7 @@
 
 @Component
 export struct AmberWordmark {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop @Watch('drawAll') color: string = '#1B1813';
   @Prop cell: number = 4;
   private settings: RenderingContextSettings = new RenderingContextSettings(true);
@@ -44,7 +45,8 @@ export struct AmberWordmark {
 
   build(): void {
     Canvas(this.context)
-      .width(AmberWordmark.COLS * this.cell)
+      
+      .opacity(this.themeEpoch >= 0 ? 1 : 1).width(AmberWordmark.COLS * this.cell)
       .height(AmberWordmark.ROWS * this.cell)
       .onReady((): void => { this.drawAll(); })
       .onAreaChange((): void => { this.drawAll(); })

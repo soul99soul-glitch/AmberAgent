@@ -71,6 +71,7 @@ const TASK_ICONS: TaskTexts = {
 @Entry
 @Component
 struct ChatTaskModelsPage {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @State loaded: boolean = false;
   @State slots: TaskSlotView[] = [];
   @State error: string = '';
@@ -389,12 +390,12 @@ struct ChatTaskModelsPage {
   }
   // 提示词编辑 sheet:与灵魂编辑器同族(顶角 r20、mono 文本域 r12、文本动作)
   @Builder
-  private PromptEditor(): void {
+  private PromptEditor(task: string): void {
     Column() {
       Blank().onClick((): void => { if (!this.saving) this.editingPrompt = ''; })
       Column({ space: 10 }) {
         Row() {
-          Text(taskText(TASK_TITLES, this.editingPrompt)).fontSize(16).fontWeight(FontWeight.Medium)
+          Text(taskText(TASK_TITLES, task)).fontSize(16).fontWeight(FontWeight.Medium)
             .fontFamily(FONT_SANS_MEDIUM).fontColor(this.colors.ink).layoutWeight(1)
           Text('重置为默认').fontSize(13).fontFamily(FONT_SANS_MEDIUM).fontColor(this.colors.muted)
             .constraintSize({ minHeight: 44 }).padding({ left: 12 })
@@ -402,8 +403,8 @@ struct ChatTaskModelsPage {
         }.width('100%').alignItems(VerticalAlign.Center)
         Scroll() {
           Column({ space: 6 }) {
-            Text(this.editingPrompt === 'compress' ? '变量：{content}、{target_tokens}、{additional_context}'
-              : this.editingPrompt === 'ocr' ? '变量：图片数据：{images}' : '变量：对话内容 {content}，语言 {locale}')
+            Text(task === 'compress' ? '变量：{content}、{target_tokens}、{additional_context}'
+              : task === 'ocr' ? '变量：图片数据：{images}' : '变量：对话内容 {content}，语言 {locale}')
               .fontSize(12).fontColor(this.colors.secondary).width('100%')
             if (this.error.length > 0) {
               Text(this.error).fontSize(13).fontColor(this.colors.error).width('100%').wordBreak(WordBreak.BREAK_ALL)
@@ -431,6 +432,8 @@ struct ChatTaskModelsPage {
 
   build(): void {
     Stack() {
+      // 主题纪元重挂载(勿拆):epoch 变化 → 整页子树销毁重建,全量重读令牌
+      ForEach([this.themeEpoch], (_e: number): void => {
       Column() {
         CenteredTitleBar({ title: '模型与提示词' })
         Scroll() {
@@ -447,7 +450,10 @@ struct ChatTaskModelsPage {
           }.width('100%').padding({ left: 16, right: 16, top: 2, bottom: 16 + this.navBarHeight }).justifyContent(FlexAlign.Start)
         }.width('100%').layoutWeight(1).align(Alignment.TopStart)
       }.width('100%').height('100%').backgroundColor(this.colors.background)
-      if (this.editingPrompt.length > 0) this.PromptEditor()
-    }.width('100%').height('100%')
+      if (this.editingPrompt.length > 0) this.PromptEditor(this.editingPrompt)
+    
+      }, (e: number): string => `theme-${e}`)
+}
+      .opacity(this.themeEpoch >= 0 ? 1 : 1).width('100%').height('100%')
   }
 }

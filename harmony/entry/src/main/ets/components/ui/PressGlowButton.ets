@@ -64,6 +64,7 @@ const hsvBoost = (hex: string, vFactor: number, sFactor: number): string => {
 
 @Component
 export struct PressGlowButton {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop accentColor: string = '#B8623A';
   @Prop radius: number = 19;
   @Prop bgMode: string = 'glass';
@@ -152,6 +153,7 @@ export struct PressGlowButton {
         this.content()
       }
     }
+      .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .constraintSize({
       minWidth: this.btnWidth,
       minHeight: this.btnHeight,

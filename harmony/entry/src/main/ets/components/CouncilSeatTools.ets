@@ -12,6 +12,7 @@ import { SSHUIColors } from './SSHUIColors.ets';
 
 @Component
 struct CouncilToolCard {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop part: UIMessagePartTool;
   @Prop request: CouncilApprovalRequest | null = null;
   @Prop active: boolean = false;
@@ -73,7 +74,8 @@ struct CouncilToolCard {
           onClear: (): void => { this.answers = {}; this.multiAnswers = {}; },
           onSubmit: (): void => { this.answer(); } })
       }
-    }.width('100%').margin({ bottom: 10 })
+    }
+      .opacity(this.themeEpoch >= 0 ? 1 : 1).width('100%').margin({ bottom: 10 })
       .bindSheet(this.previewOpen, this.Preview(), {
         height: SheetSize.LARGE, onDisappear: (): void => { this.previewOpen = false; },
       })
@@ -82,6 +84,7 @@ struct CouncilToolCard {
 
 @Component
 export struct CouncilSeatTools {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop snapshot: CouncilToolSnapshot;
   @Prop active: boolean = false;
   onVerdict: (request: CouncilApprovalRequest, verdict: CouncilToolVerdict) => void = (): void => {};
@@ -129,6 +132,7 @@ export struct CouncilSeatTools {
             .onClick((): void => { this.openSource(source.url); })
         }, (source: CouncilSource): string => JSON.stringify([source.url, source.service]))
       }
-    }.width('100%').alignItems(HorizontalAlign.Start)
+    }
+      .opacity(this.themeEpoch >= 0 ? 1 : 1).width('100%').alignItems(HorizontalAlign.Start)
   }
 }

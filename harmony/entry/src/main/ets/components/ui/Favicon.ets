@@ -16,10 +16,11 @@ export const faviconUrl = (url: string): string => {
 
 @Component
 export struct Favicon {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop url: string = '';
   @Prop iconSize: number = 20;
   build(): void {
-    if (faviconUrl(this.url).length > 0) {
+    if (this.themeEpoch >= 0 && faviconUrl(this.url).length > 0) {
       Image(faviconUrl(this.url))
         .width(this.iconSize).height(this.iconSize)
         .borderRadius(this.iconSize / 4)
@@ -40,6 +41,7 @@ export struct Favicon {
 
 @Component
 export struct FaviconRow {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop urls: string[] = [];
   @Prop iconSize: number = 20;
   build(): void {
@@ -49,6 +51,7 @@ export struct FaviconRow {
           .margin({ left: i > 0 ? -4 : 0 })
       }, (url: string, i: number): string => `${url}-${i}`)
     }
+      .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .width('100%')
   }
 }

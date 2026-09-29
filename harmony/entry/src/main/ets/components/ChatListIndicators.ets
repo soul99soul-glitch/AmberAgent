@@ -12,10 +12,11 @@ import { Icon } from './ui/Icon.ets';
 //   语义: "Running" contentDescription;ring = accent 脉冲,dot = modelStatusDot 绿
 @Component
 export struct RunningIndicator {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @State pulseScale: number = 0.72;
   @State pulseAlpha: number = 0.75;
 
-  aboutToAppear(): void {
+  private startPulse(): void {
     // 900ms 循环:scale 0.72→1.2,alpha 0.75→0.12(RepeatMode.Restart)
     animateTo({
       duration: 900,
@@ -45,8 +46,10 @@ export struct RunningIndicator {
         .borderRadius(3)
         .backgroundColor(SIGNAL)
     }
+      .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .width(22)
     .height(22)
+    .onAppear((): void => { this.startPulse(); })
   }
 }
 
@@ -55,12 +58,14 @@ export struct RunningIndicator {
 //   ArkUI: SymbolGlyph 单色符号(Icon.pin),对齐 HugeIcons.Pin 语义
 @Component
 export struct PinnedIndicator {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop tint: string = INK3;
 
   build(): void {
     Column() {
       Icon({ name: 'pin', iconSize: 13, color: this.tint })
     }
+      .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .width(15)
     .height(15)
     .justifyContent(FlexAlign.Center)
@@ -73,10 +78,11 @@ export struct PinnedIndicator {
 //   ArkUI: Text + 圆角背景,count > 99 显示 "99+"
 @Component
 export struct UnreadBadge {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop count: number = 0;
 
   build(): void {
-    if (this.count > 0) {
+    if (this.themeEpoch >= 0 && this.count > 0) {
       Text(this.count > 99 ? '99+' : `${this.count}`)
         .fontSize(10)
         .fontWeight(FontWeight.Medium)

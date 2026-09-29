@@ -20,14 +20,14 @@
 //   ❌ custom definition 编辑(后续迭代)
 
 import { getAgentPromptSettingsPort, refreshSubAgentSetting, getChatKvStore } from '../di/AppContainer.ets';
-import { router } from '@kit.ArkUI';
+import { router, KeyboardAvoidMode } from '@kit.ArkUI';
 import type { SubAgentRuntimeSetting, SubAgentMode, SubAgentOverride, SubAgentDefinition, ProviderSetting } from '@amber/chat-domain';
 import {
   DEFAULT_SUB_AGENT_TIMEOUT_MS, DEFAULT_SUB_AGENT_MAX_TURNS,
   DEFAULT_SUB_AGENT_MAX_CONCURRENT_RUNS, DEFAULT_SUB_AGENT_OUTPUT_BUDGET_CHARS,
   SUB_AGENT_BUILT_INS, loadProviders,
 } from '@amber/chat-domain';
-import { ACCENT, BG, ERROR, GUTTER, INK, INK3, LINE, SURFACE2, TEXT_STYLES, lineHeightForSize } from '../design/tokens.ets';
+import { ACCENT, BG, ERROR, GUTTER, INK, INK3, LINE, MOTION_OVERLAY, SURFACE2, TEXT_STYLES, lineHeightForSize } from '../design/tokens.ets';
 import { FONT_MONO_MEDIUM, FONT_SANS_MEDIUM } from '../design/fonts.ets';
 import { Icon } from '../components/ui/Icon.ets';
 import {
@@ -37,6 +37,7 @@ import {
 @Entry
 @Component
 struct SettingSubAgentPage {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @StorageProp('statusBarHeight') statusBarHeight: number = 44;
   @StorageProp('accentColor') accentColorStore: string = ACCENT;
   @State subAgentEnabled: boolean = false;
@@ -58,6 +59,40 @@ struct SettingSubAgentPage {
   @State dirty: boolean = false;
   @State saving: boolean = false;
   @State saveError: string = '';
+
+  private editorScroller: Scroller = new Scroller();
+  private focusedPromptId: string = '';
+
+  private revealPrompt(id: string): void {
+    const context = this.getUIContext();
+    const components = context.getComponentUtils();
+    const prompt = components.getRectangleById(id);
+    const viewport = components.getRectangleById('subagent-scroll');
+    // 把完整输入框移至滚动视口顶部,不只让系统保证首行光标可见。
+    const delta: number = context.px2vp(prompt.windowOffset.y - viewport.windowOffset.y) - 16;
+    this.editorScroller.scrollTo({
+      xOffset: 0, yOffset: Math.max(0, this.editorScroller.currentOffset().yOffset + delta),
+      animation: { duration: MOTION_OVERLAY, curve: Curve.EaseOut },
+    });
+  }
+
+  private previousKeyboardMode: KeyboardAvoidMode | null = null;
+
+  onPageShow(): void {
+    if (this.previousKeyboardMode === null) {
+      this.previousKeyboardMode = this.getUIContext().getKeyboardAvoidMode();
+    }
+    this.getUIContext().setKeyboardAvoidMode(KeyboardAvoidMode.RESIZE);
+  }
+
+  onPageHide(): void {
+    if (this.previousKeyboardMode !== null) {
+      this.getUIContext().setKeyboardAvoidMode(this.previousKeyboardMode);
+      this.previousKeyboardMode = null;
+    }
+  }
+
+  aboutToDisappear(): void { this.onPageHide(); }
 
   aboutToAppear(): void {
     this.loadSetting();
@@ -192,6 +227,8 @@ struct SettingSubAgentPage {
 
   build(): void {
     Column() {
+      // 主题纪元重挂载(勿拆):epoch 变化 → 整页子树销毁重建,全量重读令牌
+      ForEach([this.themeEpoch], (_e: number): void => {
       CenteredTitleBar({
         title: '子代理',
         actionText: this.saving ? '保存中…' : '保存',
@@ -213,7 +250,7 @@ struct SettingSubAgentPage {
           .lineHeight(TEXT_STYLES.body.lineHeight).fontFamily(TEXT_STYLES.body.family).fontColor(INK3)
           .width('100%').textAlign(TextAlign.Center).padding({ top: 40 })
       } else {
-        Scroll() {
+        Scroll(this.editorScroller) {
           Column() {
             Text('把独立任务交给子代理,在当前聊天中继续沟通。任务进度和结果会回到原会话。')
               .fontSize(13).lineHeight(lineHeightForSize(13)).fontFamily(FONT_SANS_MEDIUM)
@@ -236,10 +273,20 @@ struct SettingSubAgentPage {
           .width('100%')
           .padding({ bottom: 20 })
         }
+        .id('subagent-scroll')
+        .onAreaChange((oldArea: Area, area: Area): void => {
+          // 键盘缩小视口后再对齐:页面尾部在键盘出现前可滚动距离不足。
+          if (Number(area.height) < Number(oldArea.height) && this.focusedPromptId.length > 0) {
+            this.revealPrompt(this.focusedPromptId);
+          }
+        })
         .align(Alignment.TopStart)
         .layoutWeight(1)
       }
-    }
+    
+      }, (e: number): string => `theme-${e}`)
+}
+      .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .width('100%').height('100%').backgroundColor(BG)
   }
 
@@ -269,6 +316,7 @@ struct SettingSubAgentPage {
             this.saveSetting();
           },
         })
+          .transition(TransitionEffect.OPACITY.animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
       }
     }
     .width('100%')
@@ -290,7 +338,9 @@ struct SettingSubAgentPage {
         .alignItems(HorizontalAlign.Start).layoutWeight(1)
         Seg({ options: ['名册', '智能动态'], selected: this.mode === 'smart_dynamic' ? 1 : 0,
           onSelect: (idx: number): void => {
-            this.mode = idx === 1 ? 'smart_dynamic' : 'roster';
+            this.getUIContext().animateTo({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }, (): void => {
+              this.mode = idx === 1 ? 'smart_dynamic' : 'roster';
+            });
             this.saveSetting();
           } })
       }
@@ -463,21 +513,24 @@ struct SettingSubAgentPage {
             .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
         }
         .alignItems(HorizontalAlign.Start).layoutWeight(1)
-        Text(this.expandedRoleId === def.id ? '▾' : '▸')
+        Text('▸')
           .fontSize(TEXT_STYLES.meta.size).fontWeight(TEXT_STYLES.meta.weight)
           .lineHeight(TEXT_STYLES.meta.lineHeight).fontFamily(FONT_MONO_MEDIUM).fontColor(INK3)
+          .rotate({ angle: this.expandedRoleId === def.id ? 90 : 0 })
+          .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut })
       }
       .width('100%').alignItems(VerticalAlign.Center)
       .constraintSize({ minHeight: 52 })
       .padding({ left: 14, right: 14, top: 10, bottom: 10 })
+      .id(`subagent-role-${def.id}`)
       .onClick((): void => {
         // M3.2:折叠时保存(展开 → 折叠 = 提交编辑)
-        if (this.expandedRoleId === def.id) {
-          this.saveSetting();
-          this.expandedRoleId = '';
-        } else {
-          this.expandedRoleId = def.id;
-        }
+        const collapsing: boolean = this.expandedRoleId === def.id;
+        if (collapsing) this.saveSetting();
+        this.getUIContext().animateTo({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }, (): void => {
+          this.expandedRoleId = collapsing ? '' : def.id;
+          this.expandedModelFor = '';
+        });
       })
 
       if (this.expandedRoleId === def.id) {
@@ -494,34 +547,47 @@ struct SettingSubAgentPage {
             .fontWeight(TEXT_STYLES.body.weight).lineHeight(TEXT_STYLES.body.lineHeight)
             .fontFamily(TEXT_STYLES.body.family).fontColor(INK).placeholderColor(INK3)
             .backgroundColor(SURFACE2).borderRadius(8)
+            .id(`subagent-prompt-${def.id}`)
+            .onFocus((): void => {
+              this.focusedPromptId = `subagent-prompt-${def.id}`;
+              this.revealPrompt(this.focusedPromptId);
+            })
+            .onBlur((): void => { this.focusedPromptId = ''; })
             .onChange((v: string): void => { this.updateRolePrompt(def.id, v); })
-          Row() {
-            Text('模型(跟随默认 = 当前聊天模型)')
-              .fontSize(TEXT_STYLES.meta.size).fontWeight(TEXT_STYLES.meta.weight)
-              .lineHeight(TEXT_STYLES.meta.lineHeight).fontFamily(FONT_MONO_MEDIUM)
-              .fontColor(INK3).layoutWeight(1)
-            Text(this.modelLabel(this.getOverride(def.id).modelId))
-              .fontSize(TEXT_STYLES.meta.size).fontColor(this.accentColorStore)
-              .padding({ left: 8, top: 4, bottom: 4 })
-          }
-          .width('100%').alignItems(VerticalAlign.Center)
-          .margin({ top: 10 })
-          .onClick((): void => {
-            this.expandedModelFor = this.expandedModelFor === def.id ? '' : def.id;
-          })
-          if (this.expandedModelFor === def.id) {
-            Column() {
-              this.modelOptionRow(def.id, null, '跟随默认')
-              ForEach(this.modelPool, (entry: string[]): void => {
-                this.modelOptionRow(def.id, entry[0], entry[1])
-              }, (entry: string[]): string => entry[0])
+          Column() {
+            Row() {
+              Text('模型(跟随默认 = 当前聊天模型)')
+                .fontSize(TEXT_STYLES.meta.size).fontWeight(TEXT_STYLES.meta.weight)
+                .lineHeight(TEXT_STYLES.meta.lineHeight).fontFamily(FONT_MONO_MEDIUM)
+                .fontColor(INK3).layoutWeight(1)
+              Text(this.modelLabel(this.getOverride(def.id).modelId))
+                .fontSize(TEXT_STYLES.meta.size).fontColor(this.accentColorStore)
+                .padding({ left: 8, top: 4, bottom: 4 })
             }
-            .width('100%')
-            .backgroundColor(SURFACE2)
-            .borderRadius(8)
-            .padding({ left: 10, right: 10, top: 4, bottom: 4 })
-            .margin({ top: 4 })
+            .width('100%').alignItems(VerticalAlign.Center)
+            .margin({ top: 10 })
+            .onClick((): void => {
+              this.getUIContext().animateTo({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }, (): void => {
+                this.expandedModelFor = this.expandedModelFor === def.id ? '' : def.id;
+              });
+            })
+            if (this.expandedModelFor === def.id) {
+              Column() {
+                this.modelOptionRow(def.id, null, '跟随默认')
+                ForEach(this.modelPool, (entry: string[]): void => {
+                  this.modelOptionRow(def.id, entry[0], entry[1])
+                }, (entry: string[]): string => entry[0])
+              }
+              .width('100%')
+              .backgroundColor(SURFACE2)
+              .borderRadius(8)
+              .padding({ left: 10, right: 10, top: 4, bottom: 4 })
+              .margin({ top: 4 })
+              .transition(TransitionEffect.OPACITY.combine(TransitionEffect.translate({ y: -8 }))
+                .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
+            }
           }
+          .width('100%').clip(true)
           Row() {
             BtnGhost({ label: '恢复默认', onTap: (): void => { this.resetRole(def.id); } })
           }
@@ -529,6 +595,9 @@ struct SettingSubAgentPage {
         }
         .width('100%')
         .padding({ left: 14, right: 14, bottom: 12 })
+        .id(`subagent-editor-${def.id}`)
+        .transition(TransitionEffect.OPACITY.combine(TransitionEffect.translate({ y: -8 }))
+          .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
       }
       if (!isLast) {
         Row() {
@@ -538,7 +607,7 @@ struct SettingSubAgentPage {
         .padding({ left: 14, right: 14 })
       }
     }
-    .width('100%')
+    .width('100%').clip(true)
   }
 
   // M3.2:构建 overrides Map(Record → Map;空 override 不写)
@@ -605,13 +674,16 @@ struct SettingSubAgentPage {
     for (const k of keys) ov[k] = this.overrides[k];
     ov[roleId] = next;
     this.overrides = ov;
-    this.expandedModelFor = '';
+    this.getUIContext().animateTo({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }, (): void => {
+      this.expandedModelFor = '';
+    });
     this.dirty = true;
   }
 
   // M3.2:更新某 role 的 systemPrompt override
   private updateRolePrompt(roleId: string, prompt: string): void {
     const o: SubAgentOverride = this.getOverride(roleId);
+    if ((o.systemPrompt ?? '') === prompt) return;
     const next: SubAgentOverride = {
       systemPrompt: prompt, modelId: o.modelId, temperature: o.temperature,
       reasoningLevel: o.reasoningLevel, maxTurnsOverride: o.maxTurnsOverride,

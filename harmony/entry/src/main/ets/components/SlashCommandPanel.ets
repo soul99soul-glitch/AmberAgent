@@ -10,7 +10,7 @@
 //
 // 后续迭代: quickMessages / skills / 过滤 / 样式增强
 
-import { INK, INK2, INK3, ACCENT, SURFACE, SURFACE2, LINE, BODY, META, LABEL } from '../design/tokens.ets';
+import { INK, INK2, INK3, ACCENT, SURFACE, SURFACE2, LINE, BODY, META, LABEL, MOTION_OVERLAY } from '../design/tokens.ets';
 
 export interface SlashCommand {
   id: string;
@@ -30,12 +30,13 @@ export interface QuickMessage {
 
 @Component
 export struct SlashCommandPanel {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop commands: SlashCommand[];
   @Prop visible: boolean = false;
   onSelect: (cmd: SlashCommand) => void = (_cmd: SlashCommand): void => {};
 
   build(): void {
-    if (this.visible) {
+    if (this.themeEpoch >= 0 && this.visible) {
       Scroll() {
         Column() {
           if (this.commands.length > 0) {
@@ -93,6 +94,8 @@ export struct SlashCommandPanel {
       // The parent Stack is the composer; position above its actual height.
       .position({ left: 0, bottom: '100%' })
       .zIndex(20)
+      .transition(TransitionEffect.OPACITY.combine(TransitionEffect.translate({ y: 8 }))
+        .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
       .shadow({ radius: 10, color: '#22000000', offsetY: 3 })
     }
   }

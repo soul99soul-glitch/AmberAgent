@@ -14,6 +14,7 @@ interface MemorySourceMessage { messageId: string; nodeId: string | null; }
 @Entry
 @Component
 struct MemoryRecordPage {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @State record: MemoryRecord | null = null;
   @State draft: string = '';
   @State loaded: boolean = false;
@@ -241,6 +242,8 @@ struct MemoryRecordPage {
 
   build(): void {
     Column() {
+      // 主题纪元重挂载(勿拆):epoch 变化 → 整页子树销毁重建,全量重读令牌
+      ForEach([this.themeEpoch], (_e: number): void => {
       CenteredTitleBar({ title: '源记忆' })
       Scroll() {
         Column() {
@@ -261,6 +264,9 @@ struct MemoryRecordPage {
           PageSpacer()
         }.width('100%').padding({ left: 16, right: 16, top: 2, bottom: 16 + this.navBarHeight }).justifyContent(FlexAlign.Start)
       }.width('100%').layoutWeight(1).align(Alignment.TopStart)
-    }.width('100%').height('100%').backgroundColor(this.colors.background)
+    
+      }, (e: number): string => `theme-${e}`)
+}
+      .opacity(this.themeEpoch >= 0 ? 1 : 1).width('100%').height('100%').backgroundColor(this.colors.background)
   }
 }

@@ -10,6 +10,7 @@ export enum SwitchSize {
 
 @Component
 export struct AmberSwitch {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @StorageProp('accentColor') accentColorStore: string = ACCENT;
   @Prop checked: boolean = false;
   @Prop switchSize: SwitchSize = SwitchSize.Small;
@@ -56,6 +57,7 @@ export struct AmberSwitch {
       .backgroundColor(this.trackColor())
       .alignContent(Alignment.Start)
     }
+      .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .constraintSize({ minWidth: 44, minHeight: 44 })
     .justifyContent(FlexAlign.Center)
     .alignItems(VerticalAlign.Center)

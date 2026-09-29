@@ -15,6 +15,7 @@ import { saveImageToAlbum } from '../platform_impl/ImageSaveSupport.ets';
 
 @Component
 export struct GeneratedImageCarousel {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop imageUrls: string[];
   @Prop showActions: boolean = true;
   // 修改入口(generate_image edit 流程;仅 generate_image 工具结果开启)
@@ -29,7 +30,7 @@ export struct GeneratedImageCarousel {
   }
 
   build(): void {
-    if (this.imageUrls.length === 0) {
+    if (this.themeEpoch >= 0 && this.imageUrls.length === 0) {
       Blank().height(0)
     } else {
       Column() {

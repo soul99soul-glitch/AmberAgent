@@ -55,6 +55,7 @@ const TASK_TITLES: TaskTexts = {
 @Entry
 @Component
 struct ChatTaskModelPickerPage {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @State rows: TaskModelRow[] = [];
   @State loaded: boolean = false;
   @State task: string = 'title';
@@ -172,6 +173,8 @@ struct ChatTaskModelPickerPage {
 
   build(): void {
     Column() {
+      // 主题纪元重挂载(勿拆):epoch 变化 → 整页子树销毁重建,全量重读令牌
+      ForEach([this.themeEpoch], (_e: number): void => {
       CenteredTitleBar({ title: taskText(TASK_TITLES, this.task) })
       Scroll() {
         Column({ space: 10 }) {
@@ -210,6 +213,9 @@ struct ChatTaskModelPickerPage {
           }
         }.width('100%').padding({ left: 16, right: 16, top: 12, bottom: 16 + this.navBarHeight }).justifyContent(FlexAlign.Start)
       }.width('100%').layoutWeight(1).align(Alignment.TopStart)
-    }.width('100%').height('100%').backgroundColor(this.colors.background)
+    
+      }, (e: number): string => `theme-${e}`)
+}
+      .opacity(this.themeEpoch >= 0 ? 1 : 1).width('100%').height('100%').backgroundColor(this.colors.background)
   }
 }

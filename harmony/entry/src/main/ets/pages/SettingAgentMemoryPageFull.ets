@@ -22,6 +22,7 @@ import { Icon } from '../components/ui/Icon.ets';
 @Entry
 @Component
 struct SettingAgentMemoryPageFull {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @State memories: AssistantMemory[] = [];
   @State loaded: boolean = false;
   @State draft: string = '';
@@ -167,6 +168,12 @@ struct SettingAgentMemoryPageFull {
   }
 
   // 单条记忆行:正文(点按进入编辑)+ kind/pinned 状态 chip + 删除
+  private setEditingMemory(id: number): void {
+    this.getUIContext().animateTo({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }, (): void => {
+      this.editingId = id;
+    });
+  }
+
   @Builder
   private MemoryItem(m: AssistantMemory, idx: number): void {
     Column() {
@@ -192,7 +199,7 @@ struct SettingAgentMemoryPageFull {
             .margin({ left: 4 })
             .onClick((): void => {
               this.ops.updateContent(m.id, this.editDraft.trim())
-                .then((): void => { this.editingId = -1; this.reload(); });
+                .then((): void => { this.setEditingMemory(-1); this.reload(); });
             })
           Text('取消')
             .fontSize(15)
@@ -203,10 +210,11 @@ struct SettingAgentMemoryPageFull {
             .constraintSize({ minWidth: 44, minHeight: 44 })
             .textAlign(TextAlign.Center)
             .margin({ left: 4 })
-            .onClick((): void => { this.editingId = -1; })
+            .onClick((): void => { this.setEditingMemory(-1); })
         }
         .width('100%')
         .alignItems(VerticalAlign.Center)
+        .transition(TransitionEffect.OPACITY.animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
       } else {
         Text(m.content)
           .fontSize(TEXT_STYLES.secondary.size)
@@ -215,7 +223,8 @@ struct SettingAgentMemoryPageFull {
           .fontFamily(TEXT_STYLES.secondary.family)
           .fontColor(INK)
           .width('100%')
-          .onClick((): void => { this.editingId = m.id; this.editDraft = m.content; })
+          .onClick((): void => { this.editDraft = m.content; this.setEditingMemory(m.id); })
+          .transition(TransitionEffect.OPACITY.animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
       }
       Row() {
         StatusChip({ text: `${m.kind}${m.pinned ? ' · pinned' : ''}` })
@@ -384,6 +393,8 @@ struct SettingAgentMemoryPageFull {
 
   build(): void {
     Stack() {
+      // 主题纪元重挂载(勿拆):epoch 变化 → 整页子树销毁重建,全量重读令牌
+      ForEach([this.themeEpoch], (_e: number): void => {
       Column() {
         CenteredTitleBar({ title: '灵魂与记忆', subtitle: 'Amber 的核心指令与长期记忆' })
         Scroll() {
@@ -450,7 +461,10 @@ struct SettingAgentMemoryPageFull {
       if (this.soulEditorOpen) {
         this.SoulEditor()
       }
-    }
+    
+      }, (e: number): string => `theme-${e}`)
+}
+      .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .width('100%').height('100%')
   }
 }

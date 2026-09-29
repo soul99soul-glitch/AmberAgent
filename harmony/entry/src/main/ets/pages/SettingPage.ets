@@ -25,6 +25,7 @@ const UI_COLOR_MODE_KEY: string = 'ui_color_mode';
 @Entry
 @Component
 struct SettingPage {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   // theme swap triggers full-page rebuild (build re-reads mutable tokens)
   @StorageProp('darkMode') darkMode: boolean = false;
   @StorageProp('systemDarkMode') systemDarkMode: boolean = false;
@@ -183,6 +184,8 @@ struct SettingPage {
 
   build(): void {
     Column() {
+      // 主题纪元重挂载(勿拆):epoch 变化 → 整页子树销毁重建,全量重读令牌
+      ForEach([this.themeEpoch], (_e: number): void => {
       // ── 顶栏:返回 + 标题 + 账户头像(iOS SettingsHome header:头像 38,热区 44)──
       Row() {
         Row() {
@@ -288,7 +291,10 @@ struct SettingPage {
       }
         .align(Alignment.TopStart)
       .layoutWeight(1).backgroundColor(BG)
-    }
+    
+      }, (e: number): string => `theme-${e}`)
+}
+      .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .width('100%').height('100%').backgroundColor(BG)
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
   }

@@ -25,6 +25,7 @@ import { Icon } from '../components/ui/Icon.ets';
 @Entry
 @Component
 struct SkillsPage {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @StorageProp('accentColor') accentColorStore: string = ACCENT;
   @State skills: SkillMetadata[] = [];
   @State enabledNames: string[] = [];
@@ -208,6 +209,8 @@ struct SkillsPage {
 
   build(): void {
     Column() {
+      // 主题纪元重挂载(勿拆):epoch 变化 → 整页子树销毁重建,全量重读令牌
+      ForEach([this.themeEpoch], (_e: number): void => {
       CenteredTitleBar({ title: '技能' })
 
       Scroll() {
@@ -230,7 +233,10 @@ struct SkillsPage {
       }
       .layoutWeight(1)
       .align(Alignment.TopStart)
-    }
+    
+      }, (e: number): string => `theme-${e}`)
+}
+      .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .width('100%').height('100%').backgroundColor(BG)
   }
 }

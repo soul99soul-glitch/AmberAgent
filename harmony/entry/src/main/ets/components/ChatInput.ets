@@ -16,7 +16,7 @@
 //   ❌ +→× 形变动画(后续迭代)
 //   ❌ 用量面板(后续迭代)
 
-import { ACCENT, ACCENT_INK, BODY, INK, INK2, INK3, INK4, LABEL, LINE, META, SURFACE, SURFACE2, lineHeightForSize, accentSoftBg } from '../design/tokens.ets';
+import { MOTION_OVERLAY, ACCENT, ACCENT_INK, BODY, INK, INK2, INK3, INK4, LABEL, LINE, META, SURFACE, SURFACE2, lineHeightForSize, accentSoftBg } from '../design/tokens.ets';
 import { FONT_SANS, FONT_MONO } from '../design/fonts.ets';
 import { SlashCommandPanel, SlashCommand, QuickMessage, buildSlashCommands } from './SlashCommandPanel.ets';
 import { Icon } from './ui/Icon.ets';
@@ -27,6 +27,7 @@ import type { MentionContext } from '@amber/chat-domain';
 
 @Component
 export struct ChatInput {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @StorageProp('darkMode') darkMode: boolean = false;
   @StorageProp('accentColor') accentColorStore: string = ACCENT;
   @Prop text: string = '';
@@ -158,6 +159,8 @@ export struct ChatInput {
         .width('100%')
         .height(44).padding({ left: 20, right: 20 })
         .onClick((): void => { this.onCancelEdit(); })
+        .transition(TransitionEffect.OPACITY.combine(TransitionEffect.translate({ y: -8 }))
+          .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
       }
 
       // D0-8:@提及面板(inline 于输入区上方,与 composer 左右对齐)
@@ -171,6 +174,8 @@ export struct ChatInput {
           },
         })
           .padding({ left: 20, right: 20 })
+          .transition(TransitionEffect.OPACITY.combine(TransitionEffect.translate({ y: 8 }))
+            .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
       }
 
       // Composer 沉浸式(原型验收规格):无底盘底色、无顶部分隔线,
@@ -356,6 +361,7 @@ export struct ChatInput {
         })
       }
     }
+      .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .width('100%')
     .bindSheet(this.fullScreenOpen, this.FullScreenEditor(), {
       height: SheetSize.LARGE,

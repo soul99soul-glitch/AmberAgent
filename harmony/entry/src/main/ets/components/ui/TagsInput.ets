@@ -14,6 +14,7 @@ export interface AmberTag {
 
 @Component
 export struct TagsInput {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   // ===== 既有 API (向后兼容) =====
   @Prop selectedIds: string[] = [];
   @Prop tags: AmberTag[] = [];
@@ -191,6 +192,7 @@ export struct TagsInput {
           .width('100%').margin({ top: 4 })
       }
     }
+      .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .width('100%')
     .bindSheet(this.showAddDialog, this.AddDialog(), {
       height: SheetSize.MEDIUM,

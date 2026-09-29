@@ -17,12 +17,12 @@
 //   ❌ 席位编辑(后续迭代)
 
 import { getAgentPromptSettingsPort, getCouncilRunner, getModelRegistry } from '../di/AppContainer.ets';
-import { router } from '@kit.ArkUI';
+import { router, KeyboardAvoidMode } from '@kit.ArkUI';
 import type { ModelCouncilRuntimeSetting, ModelCouncilSeat, ModelCouncilRolePreset, ModelConfig, CouncilToolMode } from '@amber/deepread-domain';
 import {
   LENS_PRESETS, findRolePreset, isCoreRole, makeSeat,
 } from '@amber/deepread-domain';
-import { INK, INK3, ACCENT, SURFACE2, BG, ERROR, LINE, LINE2, GUTTER, TEXT_STYLES, lineHeightForSize, SUCCESS_FG } from '../design/tokens.ets';
+import { INK, INK3, ACCENT, SURFACE2, BG, ERROR, LINE, LINE2, GUTTER, MOTION_OVERLAY, TEXT_STYLES, lineHeightForSize, SUCCESS_FG } from '../design/tokens.ets';
 import { FONT_SANS_MEDIUM, FONT_SANS_SEMIBOLD, FONT_MONO_MEDIUM } from '../design/fonts.ets';
 import {
   CenteredTitleBar, PlainSection, CardGroup, CardRow, CardToggleRow, FooterNote, PageSpacer,
@@ -32,6 +32,7 @@ import { CouncilToolModePicker } from '../components/CouncilToolModePicker.ets';
 @Entry
 @Component
 struct SettingModelCouncilPage {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @StorageProp('statusBarHeight') statusBarHeight: number = 44;
   @StorageProp('accentColor') accentColorStore: string = ACCENT;
   @State councilEnabled: boolean = true;
@@ -55,6 +56,40 @@ struct SettingModelCouncilPage {
   // D0-3:连通性测试(逐席位最小请求;lines 元素 = 'seatName|ok|detail')
   @State testing: boolean = false;
   @State testLines: string[] = [];
+
+  private editorScroller: Scroller = new Scroller();
+  private focusedPromptId: string = '';
+
+  private revealPrompt(id: string): void {
+    const context = this.getUIContext();
+    const components = context.getComponentUtils();
+    const prompt = components.getRectangleById(id);
+    const viewport = components.getRectangleById('council-scroll');
+    // 把完整输入框移至滚动视口顶部,不只让系统保证首行光标可见。
+    const delta: number = context.px2vp(prompt.windowOffset.y - viewport.windowOffset.y) - 16;
+    this.editorScroller.scrollTo({
+      xOffset: 0, yOffset: Math.max(0, this.editorScroller.currentOffset().yOffset + delta),
+      animation: { duration: MOTION_OVERLAY, curve: Curve.EaseOut },
+    });
+  }
+
+  private previousKeyboardMode: KeyboardAvoidMode | null = null;
+
+  onPageShow(): void {
+    if (this.previousKeyboardMode === null) {
+      this.previousKeyboardMode = this.getUIContext().getKeyboardAvoidMode();
+    }
+    this.getUIContext().setKeyboardAvoidMode(KeyboardAvoidMode.RESIZE);
+  }
+
+  onPageHide(): void {
+    if (this.previousKeyboardMode !== null) {
+      this.getUIContext().setKeyboardAvoidMode(this.previousKeyboardMode);
+      this.previousKeyboardMode = null;
+    }
+  }
+
+  aboutToDisappear(): void { this.onPageHide(); }
 
   aboutToAppear(): void {
     this.loadSetting();
@@ -204,6 +239,8 @@ struct SettingModelCouncilPage {
 
   build(): void {
     Column() {
+      // 主题纪元重挂载(勿拆):epoch 变化 → 整页子树销毁重建,全量重读令牌
+      ForEach([this.themeEpoch], (_e: number): void => {
       CenteredTitleBar({
         title: 'Model Council 设置',
         actionText: this.saving ? '保存中…' : '保存',
@@ -225,7 +262,7 @@ struct SettingModelCouncilPage {
           .lineHeight(TEXT_STYLES.body.lineHeight).fontFamily(TEXT_STYLES.body.family).fontColor(INK3)
           .width('100%').textAlign(TextAlign.Center).padding({ top: 40 })
       } else {
-        Scroll() {
+        Scroll(this.editorScroller) {
           Column() {
             PlainSection({ label: '运行参数' })
             CardGroup({ radius: 18, stroke: true, content: (): void => { this.ParamsCard(); } })
@@ -257,10 +294,20 @@ struct SettingModelCouncilPage {
           .width('100%')
           .padding({ bottom: 20 })
         }
+        .id('council-scroll')
+        .onAreaChange((oldArea: Area, area: Area): void => {
+          // 键盘缩小视口后再对齐:页面尾部在键盘出现前可滚动距离不足。
+          if (Number(area.height) < Number(oldArea.height) && this.focusedPromptId.length > 0) {
+            this.revealPrompt(this.focusedPromptId);
+          }
+        })
         .align(Alignment.TopStart)
         .layoutWeight(1)
       }
-    }
+    
+      }, (e: number): string => `theme-${e}`)
+}
+      .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .width('100%').height('100%').backgroundColor(BG)
   }
 
@@ -481,20 +528,21 @@ struct SettingModelCouncilPage {
             .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
         }
         .alignItems(HorizontalAlign.Start).layoutWeight(1)
-        Text(this.expandedSeatId === seat.seatId ? '▾' : '▸')
+        Text('▸')
           .fontSize(TEXT_STYLES.meta.size).fontWeight(TEXT_STYLES.meta.weight)
           .lineHeight(TEXT_STYLES.meta.lineHeight).fontFamily(FONT_MONO_MEDIUM).fontColor(INK3)
+          .rotate({ angle: this.expandedSeatId === seat.seatId ? 90 : 0 })
+          .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut })
       }
       .width('100%').alignItems(VerticalAlign.Center)
       .constraintSize({ minHeight: 52 })
       .padding({ left: 14, right: 14, top: 10, bottom: 10 })
       .onClick((): void => {
-        if (this.expandedSeatId === seat.seatId) {
-          this.saveSetting();
-          this.expandedSeatId = '';
-        } else {
-          this.expandedSeatId = seat.seatId;
-        }
+        const collapsing: boolean = this.expandedSeatId === seat.seatId;
+        if (collapsing) this.saveSetting();
+        this.getUIContext().animateTo({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }, (): void => {
+          this.expandedSeatId = collapsing ? '' : seat.seatId;
+        });
       })
 
       if (this.expandedSeatId === seat.seatId) {
@@ -514,6 +562,12 @@ struct SettingModelCouncilPage {
             .lineHeight(TEXT_STYLES.meta.lineHeight).fontFamily(FONT_MONO_MEDIUM)
             .fontColor(INK3).width('100%').margin({ top: 10, bottom: 4 })
           TextArea({ text: seat.systemPrompt, placeholder: '系统提示词' })
+            .id(`council-prompt-${seat.seatId}`)
+            .onFocus((): void => {
+              this.focusedPromptId = `council-prompt-${seat.seatId}`;
+              this.revealPrompt(this.focusedPromptId);
+            })
+            .onBlur((): void => { this.focusedPromptId = ''; })
             .width('100%').height(100).fontSize(TEXT_STYLES.body.size).fontWeight(600).lineHeight(TEXT_STYLES.body.lineHeight)
             .fontFamily(FONT_SANS_SEMIBOLD).fontColor(INK)
             .backgroundColor(SURFACE2).borderRadius(8)
@@ -529,12 +583,14 @@ struct SettingModelCouncilPage {
         }
         .width('100%')
         .padding({ left: 14, right: 14, bottom: 12 })
+        .transition(TransitionEffect.OPACITY.combine(TransitionEffect.translate({ y: -8 }))
+          .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
       }
       if (!isLast) {
         this.CardSep()
       }
     }
-    .width('100%')
+    .width('100%').clip(true)
   }
 
   // M3.3:添加视角席(从 LENS_PRESETS 选)
@@ -546,35 +602,46 @@ struct SettingModelCouncilPage {
           .fontSize(16).fontWeight(FontWeight.Medium).lineHeight(lineHeightForSize(16))
           .fontFamily(FONT_SANS_MEDIUM).fontColor(this.accentColorStore)
           .layoutWeight(1)
-        Text(this.showAddSeatMenu ? '▾' : '▸')
+        Text('▸')
           .fontSize(TEXT_STYLES.meta.size).fontWeight(TEXT_STYLES.meta.weight)
           .lineHeight(TEXT_STYLES.meta.lineHeight).fontFamily(FONT_MONO_MEDIUM).fontColor(INK3)
+          .rotate({ angle: this.showAddSeatMenu ? 90 : 0 })
+          .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut })
       }
       .width('100%').alignItems(VerticalAlign.Center)
       .constraintSize({ minHeight: 52 })
       .padding({ left: 14, right: 14, top: 10, bottom: 10 })
-      .onClick((): void => { this.showAddSeatMenu = !this.showAddSeatMenu; })
+      .onClick((): void => {
+        this.getUIContext().animateTo({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }, (): void => {
+          this.showAddSeatMenu = !this.showAddSeatMenu;
+        });
+      })
 
       if (this.showAddSeatMenu) {
-        this.CardSep()
-        ForEach(LENS_PRESETS, (preset: ModelCouncilRolePreset, idx: number): void => {
-          Row() {
-            Text(preset.name)
-              .fontSize(TEXT_STYLES.body.size).fontWeight(TEXT_STYLES.body.weight)
-              .lineHeight(TEXT_STYLES.body.lineHeight).fontFamily(TEXT_STYLES.body.family)
-              .fontColor(INK).layoutWeight(1)
-            Text('添加')
-              .fontSize(15).fontWeight(FontWeight.Medium).lineHeight(lineHeightForSize(15))
-              .fontFamily(FONT_SANS_MEDIUM).fontColor(this.accentColorStore)
-          }
-          .width('100%').alignItems(VerticalAlign.Center)
-          .constraintSize({ minHeight: 44 })
-          .padding({ left: 32, right: 14, top: 8, bottom: 8 })
-          .onClick((): void => { this.addLensSeat(preset.id); })
-          if (idx < LENS_PRESETS.length - 1) {
-            this.CardSep()
-          }
-        }, (preset: ModelCouncilRolePreset): string => preset.id)
+        Column() {
+          this.CardSep()
+          ForEach(LENS_PRESETS, (preset: ModelCouncilRolePreset, idx: number): void => {
+            Row() {
+              Text(preset.name)
+                .fontSize(TEXT_STYLES.body.size).fontWeight(TEXT_STYLES.body.weight)
+                .lineHeight(TEXT_STYLES.body.lineHeight).fontFamily(TEXT_STYLES.body.family)
+                .fontColor(INK).layoutWeight(1)
+              Text('添加')
+                .fontSize(15).fontWeight(FontWeight.Medium).lineHeight(lineHeightForSize(15))
+                .fontFamily(FONT_SANS_MEDIUM).fontColor(this.accentColorStore)
+            }
+            .width('100%').alignItems(VerticalAlign.Center)
+            .constraintSize({ minHeight: 44 })
+            .padding({ left: 32, right: 14, top: 8, bottom: 8 })
+            .onClick((): void => { this.addLensSeat(preset.id); })
+            if (idx < LENS_PRESETS.length - 1) {
+              this.CardSep()
+            }
+          }, (preset: ModelCouncilRolePreset): string => preset.id)
+        }
+        .width('100%')
+        .transition(TransitionEffect.OPACITY.combine(TransitionEffect.translate({ y: -8 }))
+          .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
       }
     }
     .width('100%')
@@ -582,6 +649,7 @@ struct SettingModelCouncilPage {
 
   // M3.3:更新席位 name
   private updateSeatName(seatId: string, name: string): void {
+    if (this.seats.find((seat: ModelCouncilSeat): boolean => seat.seatId === seatId)?.name === name) return;
     this.seats = this.seats.map((s: ModelCouncilSeat): ModelCouncilSeat =>
       s.seatId === seatId ? { seatId: s.seatId, name, role: s.role, modelId: s.modelId,
         systemPrompt: s.systemPrompt, outputBudgetChars: s.outputBudgetChars,
@@ -592,6 +660,7 @@ struct SettingModelCouncilPage {
 
   // M3.3:更新席位 systemPrompt
   private updateSeatPrompt(seatId: string, prompt: string): void {
+    if (this.seats.find((seat: ModelCouncilSeat): boolean => seat.seatId === seatId)?.systemPrompt === prompt) return;
     this.seats = this.seats.map((s: ModelCouncilSeat): ModelCouncilSeat =>
       s.seatId === seatId ? { seatId: s.seatId, name: s.name, role: s.role, modelId: s.modelId,
         systemPrompt: prompt, outputBudgetChars: s.outputBudgetChars,
@@ -619,7 +688,9 @@ struct SettingModelCouncilPage {
       name: preset.name, role: preset.id, systemPrompt: preset.prompt,
     });
     this.seats = [...this.seats, seat];
-    this.showAddSeatMenu = false;
+    this.getUIContext().animateTo({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }, (): void => {
+      this.showAddSeatMenu = false;
+    });
     this.saveSetting();
   }
 

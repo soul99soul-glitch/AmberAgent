@@ -36,6 +36,7 @@ const QUALITY_BASIC: string = 'BASIC';
 
 @Component
 export struct ArticleRenderer {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   output: DeepReadOutput = {} as DeepReadOutput;
   // 字号倍率(由父页 zoom 按钮驱动;@Prop 双向同步父 @State)
   @Prop fontSizeMultiplier: number = FONT_SCALE_DEFAULT;
@@ -47,6 +48,7 @@ export struct ArticleRenderer {
       //   此 Column 仅作语义分组,实际缩放在各 Text/MarkdownText 的 fontSize 计算。
       this.ArticleBody()
     }
+      .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .width('100%')
     .padding({ left: 16, right: 16, bottom: 24 })
     .alignItems(HorizontalAlign.Start)

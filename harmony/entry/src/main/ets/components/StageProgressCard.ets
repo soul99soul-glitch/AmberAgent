@@ -6,6 +6,7 @@ import { STAGE_LABELS } from '@amber/deepread-domain';
 
 @Component
 export struct StageProgressCard {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   stage: DeepReadGenerationStage = 'OVERVIEW';
   status: DeepReadSectionStatus = 'PENDING';
   quality: string = '';
@@ -40,6 +41,7 @@ export struct StageProgressCard {
         Button('重试').type(ButtonType.Normal).fontSize(12).margin({ left: 8 }).onClick(() => this.onRetry())
       }
     }
+      .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .width('90%')
     .padding({ left: 12, right: 12, top: 8, bottom: 8 })
     .margin({ top: 6 })

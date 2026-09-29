@@ -18,6 +18,7 @@ interface MermaidRenderInfo {
 
 @Component
 export struct MermaidBlock {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop @Watch('onSourceChange') source: string = '';
   @StorageProp('darkMode') @Watch('onSourceChange') darkMode: boolean = false;
   @Prop blockId: string = '';
@@ -182,6 +183,7 @@ export struct MermaidBlock {
       }
       .width('100%')
     }
+      .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .width('100%')
     .backgroundColor(SURFACE2)
     .borderRadius(10)
