@@ -7,7 +7,7 @@ import {
   ACCENT, BG, ERROR, INK, INK3, INK4, LINE, MOTION_ENTER, MOTION_OVERLAY, OVERLAY, SURFACE, SURFACE2,
   WARNING_FG,
 } from '../design/tokens.ets';
-import { FONT_SERIF, FONT_SANS_MEDIUM } from '../design/fonts.ets';
+import { FONT_SANS_MEDIUM } from '../design/fonts.ets';
 import { CenteredTitleBar } from '../components/PageTemplate.ets';
 import { Icon } from '../components/ui/Icon.ets';
 import { MarkdownText } from '../components/MarkdownText.ets';
@@ -472,7 +472,8 @@ struct NovelChapterReaderPage {
                   MarkdownText({
                     content: (this.chapter()?.content ?? '').length > 0
                       ? this.chapter()?.content ?? '' : '这一章还没有正文。',
-                    fontColor: INK, readingMode: true, enableLatexRendering: false,
+                    fontColor: INK, readingMode: true, serifForReading: false,
+                    enableLatexRendering: false,
                     codeBlockAutoCollapse: true,
                   })
                 }

@@ -120,8 +120,10 @@ export struct MarkdownText {
   @Prop fontColor: string = INK;
   // 阅读模式行高倍率(0 = 走契约档;长文场景传 1.7 左右)
   @Prop lineHeightScale: number = 0;
-  // 阅读模式:衬线正文 + 两端对齐 + 段落间距(深读长文用;聊天消息保持默认)
+  // 阅读模式:两端对齐 + 段落间距(深读长文用;聊天消息保持默认)
+  //   字体族:默认衬线(深读杂志版式);小说章节传 serifForReading=false 走默认无衬线
   @Prop readingMode: boolean = false;
+  @Prop serifForReading: boolean = true;
   // 聊天字体族(DisplaySetting.chatFontFamily):'DEFAULT' | 'SERIF' | 'MONO'
   @Prop chatFontFamily: string = 'DEFAULT';
   // LaTeX 渲染开关(DisplaySetting.enableLatexRendering);关闭时公式显示源码
@@ -635,15 +637,16 @@ export struct MarkdownText {
 
   // 阅读模式字体族:正文/标题衬线(粗体经 fontWeight 合成)
   // 聊天字体族(DisplaySetting.chatFontFamily):DEFAULT/SERIF/MONO 三选
+  // serifForReading=false(小说章节阅读器):阅读模式排版保留,字体族不强制衬线
   private bodyFamily(): string {
-    if (this.readingMode) return FONT_SERIF;
+    if (this.readingMode && this.serifForReading) return FONT_SERIF;
     if (this.chatFontFamily === 'SERIF') return FONT_SERIF;
     if (this.chatFontFamily === 'MONO') return FONT_MONO;
     return FONT_SANS;
   }
 
   private headFamily(): string {
-    if (this.readingMode) return FONT_SERIF;
+    if (this.readingMode && this.serifForReading) return FONT_SERIF;
     if (this.chatFontFamily === 'SERIF') return FONT_SERIF;
     if (this.chatFontFamily === 'MONO') return FONT_MONO;
     return FONT_SANS_BOLD;
@@ -963,7 +966,7 @@ export struct MarkdownText {
 
   // 权重→家族名(字重由注册的静态档承载;仅设 fontWeight 会落到合成加粗)
   private spanFamily(weight: FontWeight): string {
-    if (this.readingMode) return FONT_SERIF;
+    if (this.readingMode && this.serifForReading) return FONT_SERIF;
     if (weight === FontWeight.Bold) return FONT_SANS_BOLD;
     if (weight === FontWeight.Medium) return FONT_SANS_MEDIUM;
     return FONT_SANS;

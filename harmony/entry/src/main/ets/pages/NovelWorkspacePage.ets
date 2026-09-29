@@ -4,7 +4,7 @@ import {
   ACCENT, ACCENT_INK, BG, ERROR, INK, INK2, INK3, INK4, LINE, MOTION_ENTER, MOTION_OVERLAY,
   MOTION_PRESS, OVERLAY, SUCCESS_FG, SURFACE, SURFACE2,
 } from '../design/tokens.ets';
-import { FONT_SERIF, FONT_MONO, FONT_SANS_MEDIUM } from '../design/fonts.ets';
+import { FONT_MONO, FONT_SANS_BOLD, FONT_SANS_MEDIUM } from '../design/fonts.ets';
 import { Icon } from '../components/ui/Icon.ets';
 import { Seg, CardGroup, CardRow } from '../components/PageTemplate.ets';
 import { ChatInput } from '../components/ChatInput.ets';
@@ -2589,7 +2589,7 @@ struct NovelWorkspacePage {
             .width('100%')
             Column() {
               Text(this.project !== null ? this.project.name : '小说创作')
-                .fontSize(17).fontWeight(FontWeight.Bold).fontColor(INK).fontFamily(FONT_SERIF)
+                .fontSize(17).fontWeight(FontWeight.Bold).fontColor(INK).fontFamily(FONT_SANS_BOLD)
                 .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
               Text(this.workspaceSubtitle())
                 .fontSize(11).fontColor(INK3).fontFamily(FONT_SANS_MEDIUM)

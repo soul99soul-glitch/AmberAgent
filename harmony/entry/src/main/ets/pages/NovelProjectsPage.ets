@@ -2,7 +2,7 @@
 // 底部悬浮新建胶囊 + 创建 sheet(空白/快速开始)+ 空态双按钮)
 // 行操作收进长按菜单(对齐会话首页交互);恢复删除项目为列表尾注链接。
 import { ACCENT, ACCENT_INK, ACCENT_LIGHT, BG, INK, INK2, INK3, INK4, ERROR, MOTION_ENTER, MOTION_OVERLAY, MOTION_STAGGER, OVERLAY, SHADOW_OVERLAY, SURFACE, SURFACE2, TITLE, TEXT_STYLES } from '../design/tokens.ets';
-import { FONT_SERIF, FONT_SANS_MEDIUM, FONT_SANS_SEMIBOLD } from '../design/fonts.ets';
+import { FONT_SANS_MEDIUM, FONT_SANS_SEMIBOLD } from '../design/fonts.ets';
 import { CenteredTitleBar, PlainSection, CardGroup, BtnFill, BtnGhost, Seg, IconSeat, PaperSeparator, PageSpacer } from '../components/PageTemplate.ets';
 import { Icon } from '../components/ui/Icon.ets';
 import { router, promptAction, KeyboardAvoidMode } from '@kit.ArkUI';
@@ -296,7 +296,7 @@ struct NovelProjectsPage {
             .fontSize(TEXT_STYLES.body.size)
             .fontWeight(600)
             .lineHeight(TEXT_STYLES.body.lineHeight)
-            .fontFamily(FONT_SERIF)
+            .fontFamily(FONT_SANS_SEMIBOLD)
             .fontColor(INK)
             .maxLines(1)
             .textOverflow({ overflow: TextOverflow.Ellipsis })
