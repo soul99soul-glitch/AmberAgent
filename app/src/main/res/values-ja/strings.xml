@@ -633,8 +633,10 @@
   <string name="setting_page_search_agent_search_desc">有効なサービスを使って、チャットから search_web と scrape_web を利用します。</string>
   <string name="setting_page_search_enabled_services_summary">%1$d / %2$d 件有効 · 複数ソース検索</string>
   <string name="setting_page_search_builtin_sources">内蔵の無料ソース</string>
-  <string name="setting_page_search_builtin_jina">Jina Search / Reader</string>
-  <string name="setting_page_search_builtin_jina_desc">キーは任意です。可能な場合は Markdown で検索・取得します。</string>
+  <string name="setting_page_search_builtin_free_aggregate">無料アグリゲート検索</string>
+  <string name="setting_page_search_builtin_free_aggregate_desc">Bing・Brave・DuckDuckGo・360・Quark・Wikipedia・HN を同時に検索し、認証ページが出たエンジンは 10 分間停止します。</string>
+  <string name="setting_page_search_builtin_jina">Jina Reader</string>
+  <string name="setting_page_search_builtin_jina_desc">キー不要。scrape_web でページ本文を読み込みます。</string>
   <string name="setting_page_search_builtin_duckduckgo">DuckDuckGo Lite</string>
   <string name="setting_page_search_builtin_duckduckgo_desc">API Key 不要の無料公開検索ソースです。</string>
   <string name="setting_page_search_builtin_bing">Bing HTML</string>

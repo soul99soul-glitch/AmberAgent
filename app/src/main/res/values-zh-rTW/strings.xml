@@ -424,8 +424,10 @@
   <string name="setting_page_search_agent_search_desc">允許聊天呼叫 search_web 和 scrape_web，使用已啟用服務。</string>
   <string name="setting_page_search_enabled_services_summary">%1$d / %2$d 個服務已啟用 · 多源召回</string>
   <string name="setting_page_search_builtin_sources">內建免費源</string>
-  <string name="setting_page_search_builtin_jina">Jina Search / Reader</string>
-  <string name="setting_page_search_builtin_jina_desc">可無 Key 使用，盡量以 Markdown 搜尋和讀取網頁。</string>
+  <string name="setting_page_search_builtin_free_aggregate">免費聚合搜尋</string>
+  <string name="setting_page_search_builtin_free_aggregate_desc">同時查詢 Bing、Brave、DuckDuckGo、360、夸克、維基百科和 HN，遇驗證頁的引擎暫停 10 分鐘。</string>
+  <string name="setting_page_search_builtin_jina">Jina Reader</string>
+  <string name="setting_page_search_builtin_jina_desc">無需 Key，為 scrape_web 讀取網頁全文。</string>
   <string name="setting_page_search_builtin_duckduckgo">DuckDuckGo Lite</string>
   <string name="setting_page_search_builtin_duckduckgo_desc">無需 API Key 的免費公共召回源。</string>
   <string name="setting_page_search_builtin_bing">Bing HTML</string>

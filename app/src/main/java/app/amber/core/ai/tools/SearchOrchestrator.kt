@@ -17,15 +17,11 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import app.amber.core.settings.Settings
 import app.amber.core.utils.toLocalString
-import app.amber.search.BingSearchService
-import app.amber.search.DuckDuckGoSearchService
-import app.amber.search.HackerNewsSearchService
-import app.amber.search.JinaSearchService
+import app.amber.search.FreeSearchAggregator
 import app.amber.search.SearchCommonOptions
 import app.amber.search.SearchResult
 import app.amber.search.SearchService
 import app.amber.search.SearchServiceOptions
-import app.amber.search.WikipediaSearchService
 import java.net.URI
 import java.net.URLEncoder
 import java.time.LocalDate
@@ -36,6 +32,11 @@ import kotlin.uuid.Uuid
 internal object SearchOrchestrator {
     private const val MAX_SOURCES = 5
     private const val MAX_SOURCE_VARIANT_CALLS = 10
+    private const val WEAK_RESULT_THRESHOLD = 3
+    private const val FREE_SEARCH_HINT =
+        "Only built-in free sources are enabled; they are limited by network environment and anti-bot checks. " +
+            "If results stay weak, tell the user they can add a search service with a free tier in Settings > Search: " +
+            "Tavily, Serper, Exa, Brave, or Zhipu / Bocha (usable in mainland China)."
     private val allowedTopics = setOf("general", "news", "market", "technical", "finance")
     private val allowedTimeRanges = setOf("day", "week", "month", "year", "any")
     private val allowedDepths = setOf("quick", "standard", "deep")
@@ -182,6 +183,9 @@ internal object SearchOrchestrator {
             if (shouldOfferWebView) {
                 put("webview_fallback", webViewFallback(query))
             }
+            if (merged.size < WEAK_RESULT_THRESHOLD && sources.all { it.builtin }) {
+                put("search_service_hint", FREE_SEARCH_HINT)
+            }
             if (merged.isEmpty()) {
                 put(
                     "message",
@@ -206,8 +210,7 @@ internal object SearchOrchestrator {
             put("enabled", settings.enableWebSearch)
             put("configured_service_count", settings.searchServices.size)
             put("enabled_configured_service_count", enabledConfigured.size)
-            put("builtin_duckduckgo_enabled", settings.searchBuiltinDuckDuckGoEnabled)
-            put("builtin_bing_enabled", settings.searchBuiltinBingEnabled)
+            put("builtin_free_aggregate_enabled", freeAggregateEnabled(settings))
             put("google_webview_fallback_enabled", includeWebViewFallback && settings.searchGoogleWebViewFallbackEnabled)
             put("sources", buildJsonArray {
                 buildSources(settings).forEach { source ->
@@ -290,12 +293,13 @@ internal object SearchOrchestrator {
         topic: String = "general",
     ): List<OrchestratorSource> {
         val requested = requestedServices.map { it.lowercase(Locale.ROOT).trim() }.filter { it.isNotBlank() }
-        fun allowed(id: String, name: String): Boolean {
+        fun allowed(source: OrchestratorSource): Boolean {
             if (requested.isEmpty()) return true
-            val lowerName = name.lowercase(Locale.ROOT)
+            val lowerName = source.name.lowercase(Locale.ROOT)
+            val selectors = source.acceptedSelectors()
             return requested.any { selector ->
-                id.lowercase(Locale.ROOT).startsWith(selector) ||
-                    lowerName == selector ||
+                selector in selectors ||
+                    source.id.lowercase(Locale.ROOT).startsWith(selector) ||
                     lowerName.contains(selector)
             }
         }
@@ -307,28 +311,18 @@ internal object SearchOrchestrator {
                     priority = index,
                 )
             }
-        val hasConfiguredBing = configured.any { it.options is SearchServiceOptions.BingLocalOptions }
-        val builtins = buildList {
-            if (settings.searchBuiltinJinaEnabled && allowed("jina_builtin", "Jina")) {
-                add(OrchestratorSource.BuiltInJinaSearch)
-            }
-            if (settings.searchBuiltinDuckDuckGoEnabled && allowed("duckduckgo_builtin", "DuckDuckGo")) {
-                add(OrchestratorSource.BuiltInDuckDuckGo)
-            }
-            if (settings.searchBuiltinBingEnabled && !hasConfiguredBing && allowed("bing_builtin", "Bing")) {
-                add(OrchestratorSource.BuiltInBing)
-            }
-            if (settings.searchBuiltinWikipediaEnabled && allowed("wikipedia_builtin", "Wikipedia")) {
-                add(OrchestratorSource.BuiltInWikipedia)
-            }
-            if (settings.searchBuiltinHackerNewsEnabled && allowed("hackernews_builtin", "Hacker News")) {
-                add(OrchestratorSource.BuiltInHackerNews)
-            }
-        }
-        return (configured + builtins)
-            .filter { source -> source.applicableFor(query = query, topic = topic) }
-            .sortedBy { it.priority }
+        val builtins = listOfNotNull(
+            OrchestratorSource.BuiltInFreeAggregate.takeIf { freeAggregateEnabled(settings) && allowed(it) },
+        )
+        return (configured + builtins).sortedBy { it.priority }
     }
+
+    /**
+     * 与 iOS 一致：设置页把 DuckDuckGo / Bing / Wikipedia / HN 四个旧开关合并成一个「免费聚合搜索」开关，
+     * 旧字段保留不删，DuckDuckGo 或 Bing 任一为开即视为聚合搜索开启。
+     */
+    internal fun freeAggregateEnabled(settings: Settings): Boolean =
+        settings.searchBuiltinDuckDuckGoEnabled || settings.searchBuiltinBingEnabled
 
     private fun buildSourceCalls(
         sources: List<OrchestratorSource>,
@@ -360,6 +354,7 @@ internal object SearchOrchestrator {
         while (calls.size < MAX_SOURCE_VARIANT_CALLS && variantIndex < variants.size) {
             sources.forEachIndexed { sourceIndex, source ->
                 if (calls.size >= MAX_SOURCE_VARIANT_CALLS) return@forEachIndexed
+                if (variantIndex >= source.maxVariantCalls) return@forEachIndexed
                 calls += SourceSearchRequest(
                     source = source,
                     sourceIndex = sourceIndex,
@@ -431,24 +426,7 @@ internal object SearchOrchestrator {
         commonOptions: SearchCommonOptions,
     ): Result<SearchResult> {
         return when (val source = request.source) {
-            OrchestratorSource.BuiltInJinaSearch -> {
-                JinaSearchService.search(
-                    params = request.serviceParams(),
-                    commonOptions = commonOptions,
-                    serviceOptions = SearchServiceOptions.JinaOptions(),
-                )
-            }
-            OrchestratorSource.BuiltInDuckDuckGo -> DuckDuckGoSearchService.search(request.query, commonOptions)
-            OrchestratorSource.BuiltInBing -> {
-                BingSearchService.search(
-                    params = request.serviceParams(),
-                    commonOptions = commonOptions,
-                    serviceOptions = SearchServiceOptions.BingLocalOptions(),
-                    locale = request.locale,
-                )
-            }
-            OrchestratorSource.BuiltInWikipedia -> WikipediaSearchService.search(request.query, commonOptions)
-            OrchestratorSource.BuiltInHackerNews -> HackerNewsSearchService.search(request.query, commonOptions)
+            OrchestratorSource.BuiltInFreeAggregate -> FreeSearchAggregator.search(request.query, commonOptions.resultSize)
 
             is OrchestratorSource.Configured -> {
                 val service = SearchService.getService(source.options)
@@ -464,14 +442,7 @@ internal object SearchOrchestrator {
 
     private fun SourceSearchRequest.serviceParams(): JsonObject {
         return when (source) {
-            OrchestratorSource.BuiltInJinaSearch,
-            OrchestratorSource.BuiltInDuckDuckGo,
-            OrchestratorSource.BuiltInBing -> buildJsonObject {
-                put("query", query)
-            }
-
-            OrchestratorSource.BuiltInWikipedia,
-            OrchestratorSource.BuiltInHackerNews -> buildJsonObject {
+            OrchestratorSource.BuiltInFreeAggregate -> buildJsonObject {
                 put("query", query)
             }
 
@@ -751,50 +722,17 @@ internal object SearchOrchestrator {
         abstract val builtin: Boolean
         abstract val priority: Int
         abstract val reason: String
+        open val maxVariantCalls: Int = Int.MAX_VALUE
 
-        data object BuiltInDuckDuckGo : OrchestratorSource() {
-            override val id = "duckduckgo_builtin"
-            override val name = "DuckDuckGo"
-            override val kind = "public_html"
+        /** 一次调用会并发请求 7 个免费引擎，限制变体数，以免把免费源打到限流。 */
+        data object BuiltInFreeAggregate : OrchestratorSource() {
+            override val id = "free_aggregate_builtin"
+            override val name = FreeSearchAggregator.NAME
+            override val kind = "public_aggregate"
             override val builtin = true
             override val priority = 200
-            override val reason = "Built-in free public recall source"
-        }
-
-        data object BuiltInJinaSearch : OrchestratorSource() {
-            override val id = "jina_builtin"
-            override val name = "Jina Search"
-            override val kind = "public_api"
-            override val builtin = true
-            override val priority = 90
-            override val reason = "Built-in Jina search source; API key optional"
-        }
-
-        data object BuiltInBing : OrchestratorSource() {
-            override val id = "bing_builtin"
-            override val name = "Bing HTML 兜底"
-            override val kind = "public_html"
-            override val builtin = true
-            override val priority = 210
-            override val reason = "Built-in free public recall source"
-        }
-
-        data object BuiltInWikipedia : OrchestratorSource() {
-            override val id = "wikipedia_builtin"
-            override val name = "Wikipedia"
-            override val kind = "vertical_knowledge"
-            override val builtin = true
-            override val priority = 230
-            override val reason = "Vertical source for entity and background knowledge"
-        }
-
-        data object BuiltInHackerNews : OrchestratorSource() {
-            override val id = "hackernews_builtin"
-            override val name = "Hacker News"
-            override val kind = "vertical_technical"
-            override val builtin = true
-            override val priority = 220
-            override val reason = "Vertical source for technical and open-source discussions"
+            override val reason = "Built-in free aggregate: Bing, Brave, DuckDuckGo, 360, Quark, Wikipedia, Hacker News"
+            override val maxVariantCalls = 2
         }
 
         data class Configured(
@@ -826,14 +764,12 @@ internal object SearchOrchestrator {
         val base = buildList {
             add(id)
             add(name)
-            when (this@acceptedSelectors) {
-                is OrchestratorSource.BuiltInBing -> addAll(listOf("bing", "bing_builtin", "bing html"))
-                is OrchestratorSource.BuiltInDuckDuckGo -> addAll(listOf("duckduckgo", "duckduckgo_builtin", "ddg"))
-                is OrchestratorSource.BuiltInHackerNews -> addAll(listOf("hackernews", "hacker_news", "hn"))
-                is OrchestratorSource.BuiltInJinaSearch -> addAll(listOf("jina", "jina_builtin", "jina search"))
-                is OrchestratorSource.BuiltInWikipedia -> addAll(listOf("wikipedia", "wiki"))
-                is OrchestratorSource.Configured -> Unit
-            }
+            addAll(
+                listOf(
+                    "free", "free_aggregate", "bing", "bing_builtin", "duckduckgo", "duckduckgo_builtin", "ddg",
+                    "wikipedia", "wiki", "hackernews", "hacker_news", "hn", "360", "quark", "夸克",
+                )
+            )
         }
         return base.flatMap { it.selectorForms() }.distinct()
     }
@@ -844,24 +780,6 @@ internal object SearchOrchestrator {
         val underscored = raw.replace(Regex("[\\s-]+"), "_")
         val spaced = raw.replace(Regex("[_-]+"), " ")
         return setOf(raw, underscored, spaced)
-    }
-
-    private fun OrchestratorSource.applicableFor(query: String?, topic: String): Boolean {
-        if (query == null) return true
-        if (this !is OrchestratorSource.BuiltInWikipedia && this !is OrchestratorSource.BuiltInHackerNews) {
-            return true
-        }
-        val lower = query.orEmpty().lowercase(Locale.ROOT)
-        return when (this) {
-            is OrchestratorSource.BuiltInWikipedia -> {
-                topic == "general" && listOf("是什么", "百科", "wiki", "wikipedia", "who is", "what is", "definition", "介绍")
-                    .any { lower.contains(it) }
-            }
-            is OrchestratorSource.BuiltInHackerNews -> {
-                topic == "technical" || listOf("github", "开源", "developer", "claude code", "codex", "mcp", "llm", "ai agent", "hacker news")
-                    .any { lower.contains(it) }
-            }
-        }
     }
 
     private fun OrchestratorSource.apiKeyConfigured(): Boolean? {

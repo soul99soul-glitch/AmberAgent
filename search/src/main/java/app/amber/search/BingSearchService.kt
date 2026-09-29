@@ -13,7 +13,9 @@ import kotlinx.serialization.json.put
 import app.amber.ai.core.InputSchema
 import app.amber.search.SearchResult.SearchResultItem
 import org.jsoup.Jsoup
+import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
+import okio.ByteString.Companion.decodeBase64
 import java.net.URI
 import java.net.URLDecoder
 import java.net.URLEncoder
@@ -82,12 +84,7 @@ object BingSearchService : SearchService<SearchServiceOptions.BingLocalOptions> 
                 "Bing blocked the request with a verification page"
             }
 
-            val primary = doc.select("li.b_algo").mapNotNull(::parseBingResult)
-            val fallback = if (primary.isEmpty()) parseFallbackLinks(doc.select("main h2 a, #b_results h2 a, h2 a")) else emptyList()
-            val results = (primary + fallback)
-                .filter { it.title.isNotBlank() && it.url.startsWith("http") }
-                .distinctBy { it.url }
-                .take(commonOptions.resultSize)
+            val results = parseDocument(doc, commonOptions.resultSize)
 
             require(results.isNotEmpty()) {
                 "Search failed: no results found"
@@ -95,6 +92,15 @@ object BingSearchService : SearchService<SearchServiceOptions.BingLocalOptions> 
 
             SearchResult(items = results)
         }
+    }
+
+    internal fun parseDocument(doc: Document, limit: Int): List<SearchResultItem> {
+        val primary = doc.select("li.b_algo").mapNotNull(::parseBingResult)
+        val fallback = if (primary.isEmpty()) parseFallbackLinks(doc.select("main h2 a, #b_results h2 a, h2 a")) else emptyList()
+        return (primary + fallback)
+            .filter { it.title.isNotBlank() && it.url.startsWith("http") }
+            .distinctBy { it.url }
+            .take(limit)
     }
 
     private fun parseBingResult(element: Element): SearchResultItem? {
@@ -140,8 +146,14 @@ object BingSearchService : SearchService<SearchServiceOptions.BingLocalOptions> 
                 ?.split("&")
                 ?.firstOrNull { it.substringBefore("=") in setOf("u", "url") }
                 ?.substringAfter("=", "")
-            if (target.isNullOrBlank()) raw else URLDecoder.decode(target, "UTF-8")
+            if (target.isNullOrBlank()) raw else URLDecoder.decode(target, "UTF-8").let { unwrapTrackingTarget(it) ?: it }
         }.getOrDefault(raw)
+    }
+
+    /** Bing /ck/a 跳转链接的 u 参数是 "a1" + base64url(原始链接)（同 ddgs unwrap_bing_url）。 */
+    internal fun unwrapTrackingTarget(value: String): String? {
+        if (!value.startsWith("a1") || value.length <= 2) return null
+        return value.substring(2).decodeBase64()?.utf8()?.takeIf { it.startsWith("http") }
     }
 
     override suspend fun scrape(

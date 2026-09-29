@@ -578,8 +578,10 @@
   <string name="setting_page_search_agent_search_desc">Let chats use enabled search services.</string>
   <string name="setting_page_search_enabled_services_summary">%1$d of %2$d enabled · multi-source recall</string>
   <string name="setting_page_search_builtin_sources">Built-in free sources</string>
-  <string name="setting_page_search_builtin_jina">Jina Search / Reader</string>
-  <string name="setting_page_search_builtin_jina_desc">No key required; prefers Markdown page reading.</string>
+  <string name="setting_page_search_builtin_free_aggregate">Free aggregate search</string>
+  <string name="setting_page_search_builtin_free_aggregate_desc">Queries Bing, Brave, DuckDuckGo, 360, Quark, Wikipedia and HN at once; blocked engines pause for 10 minutes.</string>
+  <string name="setting_page_search_builtin_jina">Jina Reader</string>
+  <string name="setting_page_search_builtin_jina_desc">No key required; reads full page text for scrape_web.</string>
   <string name="setting_page_search_builtin_duckduckgo">DuckDuckGo Lite</string>
   <string name="setting_page_search_builtin_duckduckgo_desc">Free public search source; no API key.</string>
   <string name="setting_page_search_builtin_bing">Bing HTML</string>

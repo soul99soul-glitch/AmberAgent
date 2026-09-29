@@ -633,8 +633,10 @@
   <string name="setting_page_search_agent_search_desc">활성화된 서비스로 채팅에서 search_web 및 scrape_web을 사용합니다.</string>
   <string name="setting_page_search_enabled_services_summary">%1$d / %2$d개 활성화 · 다중 소스 검색</string>
   <string name="setting_page_search_builtin_sources">내장 무료 소스</string>
-  <string name="setting_page_search_builtin_jina">Jina Search / Reader</string>
-  <string name="setting_page_search_builtin_jina_desc">키는 선택 사항입니다. 가능한 경우 Markdown으로 검색하고 읽습니다.</string>
+  <string name="setting_page_search_builtin_free_aggregate">무료 통합 검색</string>
+  <string name="setting_page_search_builtin_free_aggregate_desc">Bing, Brave, DuckDuckGo, 360, Quark, Wikipedia, HN을 동시에 검색하며, 인증 페이지가 뜬 엔진은 10분간 쉽니다.</string>
+  <string name="setting_page_search_builtin_jina">Jina Reader</string>
+  <string name="setting_page_search_builtin_jina_desc">키 없이 scrape_web으로 페이지 본문을 읽습니다.</string>
   <string name="setting_page_search_builtin_duckduckgo">DuckDuckGo Lite</string>
   <string name="setting_page_search_builtin_duckduckgo_desc">API Key가 필요 없는 무료 공개 검색 소스입니다.</string>
   <string name="setting_page_search_builtin_bing">Bing HTML</string>

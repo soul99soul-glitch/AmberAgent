@@ -633,8 +633,10 @@
   <string name="setting_page_search_agent_search_desc">Разрешает чатам использовать search_web и scrape_web через включённые службы.</string>
   <string name="setting_page_search_enabled_services_summary">Включено %1$d из %2$d · поиск по нескольким источникам</string>
   <string name="setting_page_search_builtin_sources">Встроенные бесплатные источники</string>
-  <string name="setting_page_search_builtin_jina">Jina Search / Reader</string>
-  <string name="setting_page_search_builtin_jina_desc">Ключ необязателен. По возможности ищет и читает страницы в Markdown.</string>
+  <string name="setting_page_search_builtin_free_aggregate">Бесплатный агрегатный поиск</string>
+  <string name="setting_page_search_builtin_free_aggregate_desc">Одновременно ищет в Bing, Brave, DuckDuckGo, 360, Quark, Wikipedia и HN; движки с проверкой на бота отключаются на 10 минут.</string>
+  <string name="setting_page_search_builtin_jina">Jina Reader</string>
+  <string name="setting_page_search_builtin_jina_desc">Без ключа; читает полный текст страницы для scrape_web.</string>
   <string name="setting_page_search_builtin_duckduckgo">DuckDuckGo Lite</string>
   <string name="setting_page_search_builtin_duckduckgo_desc">Бесплатный общедоступный источник без API Key.</string>
   <string name="setting_page_search_builtin_bing">Bing HTML</string>

@@ -851,8 +851,10 @@
   <string name="setting_page_search_agent_search_desc">允许聊天使用已启用的搜索服务。</string>
   <string name="setting_page_search_enabled_services_summary">%1$d / %2$d 个服务已启用 · 多源召回</string>
   <string name="setting_page_search_builtin_sources">内置免费源</string>
-  <string name="setting_page_search_builtin_jina">Jina Search / Reader</string>
-  <string name="setting_page_search_builtin_jina_desc">无需 Key，优先以 Markdown 读取网页。</string>
+  <string name="setting_page_search_builtin_free_aggregate">免费聚合搜索</string>
+  <string name="setting_page_search_builtin_free_aggregate_desc">同时查询 Bing、Brave、DuckDuckGo、360、夸克、维基百科和 HN，遇验证页的引擎暂停 10 分钟。</string>
+  <string name="setting_page_search_builtin_jina">Jina Reader</string>
+  <string name="setting_page_search_builtin_jina_desc">无需 Key，为 scrape_web 读取网页全文。</string>
   <string name="setting_page_search_builtin_duckduckgo">DuckDuckGo Lite</string>
   <string name="setting_page_search_builtin_duckduckgo_desc">免费公共搜索源，无需 API Key。</string>
   <string name="setting_page_search_builtin_bing">Bing HTML</string>
