@@ -25,6 +25,7 @@ interface RecipePageRouteParams { conversationId: string; recipeManualToolCallId
 
 export const startEntryRecipeFromPage = async (
   deps: RecipePageLaunchDeps, name: string, expectedHash: string, inputs: JsonObject,
+  shouldNavigate: () => boolean,
 ): Promise<void> => {
   const installed: InstalledRecipe[] = await deps.store.listInstalled();
   const recipe: InstalledRecipe | undefined = installed.find((item: InstalledRecipe): boolean =>
@@ -51,6 +52,7 @@ export const startEntryRecipeFromPage = async (
   ]);
   const patch: RecipeConversationNodesPatch = { messageNodes: nodes };
   await deps.repository.save(patchConversation(conversation, patch));
+  if (!shouldNavigate()) return;
   const params: RecipePageRouteParams = {
     conversationId: conversation.id, recipeManualToolCallId: prepared.toolCallId,
   };

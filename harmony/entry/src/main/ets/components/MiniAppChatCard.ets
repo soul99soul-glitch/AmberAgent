@@ -126,13 +126,16 @@ export struct MiniAppChatCard {
     if (platform === null) return;
     platform.repository.restoreVersion(target.app.id, version.versionNumber)
       .then((record: MiniAppRecord | null): void => {
+        if (!this.alive || this.versionTarget !== target) return;
         if (record === null) {
           this.toast('恢复失败:小应用不存在');
         } else {
           this.versionTarget = null;
         }
       })
-      .catch((e: Error): void => this.toast(`恢复失败:${e.message}`));
+      .catch((e: Error): void => {
+        if (this.alive && this.versionTarget === target) this.toast(`恢复失败:${e.message}`);
+      });
   }
 
   private exportApp(app: MiniAppRecord): void {

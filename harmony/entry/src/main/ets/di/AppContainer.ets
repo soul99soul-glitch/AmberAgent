@@ -1240,11 +1240,13 @@ export const getRecipePrimitives = async (): Promise<AgentTool[]> => {
   return recipePagePrimitives(assistants[0]);
 };
 
-export const startRecipeFromPage = async (name: string, expectedHash: string, inputs: JsonObject): Promise<void> => {
+export const startRecipeFromPage = async (
+  name: string, expectedHash: string, inputs: JsonObject, shouldNavigate: () => boolean,
+): Promise<void> => {
   const assistants: Assistant[] = await getChatAssistants();
   const assistant: Assistant = assistants[0];
   await startEntryRecipeFromPage({ store: await getRecipeStore(), primitives: await recipePagePrimitives(assistant),
-    assistant, repository: getChatRepository() }, name, expectedHash, inputs);
+    assistant, repository: getChatRepository() }, name, expectedHash, inputs, shouldNavigate);
 };
 
 let pluginStorePromise: Promise<PluginStore> | null = null;
@@ -1282,7 +1284,7 @@ export const getPluginPrimitives = async (): Promise<AgentTool[]> => {
 };
 
 export const startPluginFromPage = async (
-  toolName: string, input: JsonObject, title: string, expectedPackageHash: string | null = null,
+  toolName: string, input: JsonObject, title: string, shouldNavigate: () => boolean, expectedPackageHash: string | null = null,
 ): Promise<void> => {
   const assistants: Assistant[] = await getChatAssistants();
   const assistant: Assistant = assistants[0];
@@ -1300,7 +1302,7 @@ export const startPluginFromPage = async (
   const parent: UIMessagePartTool = { type: 'tool', toolCallId: newId(), toolName,
     input: JSON.stringify(input), output: [], approvalState: { type: 'auto' }, metadata: { plugin_manual: true } };
   await startEntryPluginFromPage({ assistant, primitives, adapter: createEntryPluginAdapter(store, installed, primitives),
-    repository: getChatRepository() }, parent, title);
+    repository: getChatRepository() }, parent, title, shouldNavigate);
 };
 
 export const exportPluginFromPage = async (id: string, hash: string, destination: string): Promise<void> => {

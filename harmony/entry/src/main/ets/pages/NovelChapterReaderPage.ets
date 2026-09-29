@@ -44,9 +44,11 @@ struct NovelChapterReaderPage {
   private editOriginalContent: string = '';
   private projectId: string = '';
   private pageAlive: boolean = false;
+  private previousKeyboardAvoidMode: KeyboardAvoidMode = KeyboardAvoidMode.OFFSET;
+  private keyboardAvoidanceActive: boolean = false;
 
   aboutToAppear(): void {
-    this.getUIContext().setKeyboardAvoidMode(KeyboardAvoidMode.RESIZE);
+    this.enableKeyboardAvoidance();
     this.pageAlive = true;
     const params: ReaderParams = router.getParams() as ReaderParams;
     this.projectId = params?.projectId ?? '';
@@ -54,9 +56,26 @@ struct NovelChapterReaderPage {
     this.reload();
   }
 
+  onPageShow(): void { this.enableKeyboardAvoidance(); }
+
+  onPageHide(): void { this.restoreKeyboardAvoidance(); }
+
   aboutToDisappear(): void {
     this.pageAlive = false;
-    this.getUIContext().setKeyboardAvoidMode(KeyboardAvoidMode.OFFSET);
+    this.restoreKeyboardAvoidance();
+  }
+
+  private enableKeyboardAvoidance(): void {
+    if (this.keyboardAvoidanceActive) return;
+    this.previousKeyboardAvoidMode = this.getUIContext().getKeyboardAvoidMode();
+    this.getUIContext().setKeyboardAvoidMode(KeyboardAvoidMode.RESIZE);
+    this.keyboardAvoidanceActive = true;
+  }
+
+  private restoreKeyboardAvoidance(): void {
+    if (!this.keyboardAvoidanceActive) return;
+    this.getUIContext().setKeyboardAvoidMode(this.previousKeyboardAvoidMode);
+    this.keyboardAvoidanceActive = false;
   }
 
   onBackPress(): boolean {
@@ -156,6 +175,7 @@ struct NovelChapterReaderPage {
   private openEdit(): void {
     const c: NovelChapter | null = this.chapter();
     if (c === null) return;
+    this.errorMsg = '';
     this.editTitle = c.title;
     this.editContent = c.content;
     this.editOriginalTitle = c.title;
@@ -185,7 +205,7 @@ struct NovelChapterReaderPage {
       this.notice = '已保存';
       await this.reload();
     } catch (e) {
-      if (this.pageAlive) this.errorMsg = String(e);
+      if (this.pageAlive) this.errorMsg = e instanceof Error ? e.message : String(e);
     } finally {
       this.busy = false;
     }
@@ -367,6 +387,12 @@ struct NovelChapterReaderPage {
           .onChange((v: string): void => { this.editContent = v; })
         Text(`${charCountOf(this.editContent)} 字`).fontSize(11).fontColor(INK3)
           .width('100%').margin({ top: 6 })
+        if (this.errorMsg.length > 0) {
+          Scroll() {
+            Text(this.errorMsg).fontSize(12).fontColor(ERROR).width('100%').wordBreak(WordBreak.BREAK_ALL)
+          }
+          .width('100%').constraintSize({ maxHeight: 54 }).align(Alignment.TopStart).margin({ top: 8 })
+        }
         Row() {
           Text('取消').fontSize(14).fontFamily(FONT_SANS_MEDIUM).fontColor(INK3)
             .layoutWeight(1).textAlign(TextAlign.Center).constraintSize({ minHeight: 44 })
@@ -442,7 +468,7 @@ struct NovelChapterReaderPage {
           actionIcon: 'more',
           onAction: (): void => { this.menuOpen = true; },
         })
-        if (this.errorMsg.length > 0) {
+        if (this.errorMsg.length > 0 && !this.editOpen) {
           Text(this.errorMsg).fontSize(12).fontColor(ERROR).lineHeight(18)
             .width('100%').padding({ left: 20, right: 20, bottom: 8 })
         }

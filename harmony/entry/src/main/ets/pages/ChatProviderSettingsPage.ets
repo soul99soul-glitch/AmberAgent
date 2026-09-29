@@ -56,6 +56,12 @@ struct ChatProviderSettingsPage {
     this.load();
   }
 
+  onBackPress(): boolean {
+    if (!this.sheetShow) return false;
+    this.sheetShow = false;
+    return true;
+  }
+
   // 子页(模型参数页)保存返回后重读,避免陈旧 models 合并覆盖新参数
   onPageShow(): void {
     this.load();

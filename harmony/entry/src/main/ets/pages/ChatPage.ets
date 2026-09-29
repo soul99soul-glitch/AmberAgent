@@ -383,8 +383,9 @@ struct ChatPage {
   @State modelLabel: string = '';
   // TopModelMenu:顶部模型快速切换下拉(Android TopModelMenu.kt)
   @State modelMenuOpen: boolean = false;
-  // 打开重入守卫:async 装配期间阻止重复触发(避免连点产生多条 loadProviders 链)
+  // 装配请求由关闭/离页失效，迟到回调不能重开菜单或覆盖下一次请求。
   @State modelMenuLoading: boolean = false;
+  private modelMenuSeq: number = 0;
   @State modelMenuGroups: TopModelMenuGroup[] = [];
   @State modelMenuCurrentProvider: string = '';
   @State modelMenuCurrentModel: string = '';
@@ -411,6 +412,7 @@ struct ChatPage {
   @State subAgentLiveText: string = '';
   private subAgentSheetTools: UIMessagePartTool[] = [];
   private unsubSubAgentLive: (() => void) | null = null;
+  private subAgentSheetSeq: number = 0;
   // Copy sheet
   @State copySheetOpen: boolean = false;
   private copySheetMessage: UIMessage | null = null;
@@ -504,6 +506,8 @@ struct ChatPage {
   aboutToDisappear(): void {
     this.pageAlive = false;
     this.pageVisible = false;
+    this.modelMenuSeq++;
+    this.modelMenuLoading = false;
     this.detachConversationRun();
     if (this.runConversationId.length > 0) getConversationRunService().discardNewConversation(this.runConversationId);
     this.contextChoiceSeq++;
@@ -518,7 +522,7 @@ struct ChatPage {
     if (this.greetTimer !== -1) { clearInterval(this.greetTimer); this.greetTimer = -1; }
     if (this.cursorTimer !== -1) { clearInterval(this.cursorTimer); this.cursorTimer = -1; }
     this.invalidatePicker(true);
-    if (this.unsubSubAgentLive !== null) { this.unsubSubAgentLive(); this.unsubSubAgentLive = null; }
+    this.closeSubAgentSheet();
   }
 
   private serviceOwnsConversation(id: string): boolean {
@@ -803,6 +807,8 @@ struct ChatPage {
 
   onPageHide(): void {
     this.pageVisible = false;
+    this.closeModelMenu();
+    this.closeSubAgentSheet();
     this.detachConversationRun();
     this.webmountHookBinding?.unbind();
     this.webmountHookBinding = null;
@@ -819,7 +825,7 @@ struct ChatPage {
     if (this.exportSheetOpen) { this.exportSheetOpen = false; return true; }
     if (this.documentPreviewOpen) { this.documentPreviewOpen = false; return true; }
     if (this.denyDialogOpen) { this.dismissDenyDialog(); return true; }
-    if (this.modelMenuOpen) { this.modelMenuOpen = false; return true; }
+    if (this.modelMenuOpen || this.modelMenuLoading) { this.closeModelMenu(); return true; }
     if (this.contextMeterOpen) { this.contextMeterOpen = false; return true; }
     if (this.drawerOpen) { this.closeDrawer(); return true; }
     return false;
@@ -2600,13 +2606,20 @@ struct ChatPage {
 
   // SubAgent run sheet:打开时订阅 liveText,关闭时取消订阅
   private async openSubAgentSheet(runId: string, tools: UIMessagePartTool[]): Promise<void> {
+    const seq: number = ++this.subAgentSheetSeq;
+    if (this.unsubSubAgentLive !== null) {
+      this.unsubSubAgentLive();
+      this.unsubSubAgentLive = null;
+    }
     this.subAgentSheetRunId = runId;
     this.subAgentSheetTools = tools;
     this.subAgentLiveText = '';
     try {
       const manager = await getSubAgentManager();
+      if (!this.pageAlive || !this.pageVisible || seq !== this.subAgentSheetSeq) return;
       // 订阅实时文本
       this.unsubSubAgentLive = manager.subscribeLiveText(runId, (text: string): void => {
+        if (!this.pageAlive || !this.pageVisible || seq !== this.subAgentSheetSeq) return;
         this.subAgentLiveText = text;
       });
       // 若已结束,从 snapshot 取最终文本
@@ -2615,6 +2628,7 @@ struct ChatPage {
         this.subAgentLiveText = snapshot.displayText;
       }
     } catch (e) {
+      if (!this.pageAlive || !this.pageVisible || seq !== this.subAgentSheetSeq) return;
       const msg: string = e instanceof Error ? e.message : String(e);
       hilog.warn(0x0001, 'Chat.Page', 'openSubAgentSheet failed: %{public}s', msg);
     }
@@ -2622,6 +2636,7 @@ struct ChatPage {
   }
 
   private closeSubAgentSheet(): void {
+    this.subAgentSheetSeq++;
     if (this.unsubSubAgentLive !== null) {
       this.unsubSubAgentLive();
       this.unsubSubAgentLive = null;
@@ -2799,7 +2814,7 @@ struct ChatPage {
   }
 
   private openDrawerConversation(id: string): void {
-    this.drawerOpen = false;
+    this.closeDrawer();
     if (this.conversation !== null && this.conversation.id === id) return;
     router.replaceUrl({ url: 'pages/ChatPage', params: { conversationId: id } });
   }
@@ -2908,6 +2923,8 @@ struct ChatPage {
   //   嵌套 .then(对齐 ChatModelPickerPage 既有装配范式,避开 Promise.all 元组推断)
   // 1:1 原型 menuIn .16s ease-out:开/关都经 animateTo 驱动 transition 进出场
   private closeModelMenu(): void {
+    this.modelMenuSeq++;
+    this.modelMenuLoading = false;
     animateTo({ duration: 220, curve: Curve.EaseOut }, (): void => {
       this.modelMenuOpen = false;
     });
@@ -2939,17 +2956,17 @@ struct ChatPage {
   }
 
   private toggleModelMenu(): void {
-    if (this.modelMenuOpen) {
+    if (this.modelMenuOpen || this.modelMenuLoading) {
       this.closeModelMenu();
       return;
     }
-    // 重入守卫:装配期间连点忽略(KV/Preferences 本地读取快,但避免重复链)
-    if (this.modelMenuLoading) return;
+    const seq: number = ++this.modelMenuSeq;
     this.modelMenuLoading = true;
     // 读取失败也必须复位 loading — 否则菜单从此点不开
     loadProviders(getChatKvStore()).then((providers: ProviderSetting[] | null): void => {
+      if (!this.pageAlive || !this.pageVisible || seq !== this.modelMenuSeq) return;
       resolveEffectiveChatChoice(this.conversation?.assistantId).then((choice: ChatProviderChoice | null): void => {
-        if (!this.pageAlive) { this.modelMenuLoading = false; return; }
+        if (!this.pageAlive || !this.pageVisible || seq !== this.modelMenuSeq) return;
         const currentProvider: string = choice !== null ? choice.provider.id : '';
         const currentModel: string = choice !== null ? choice.model.modelId : '';
         this.modelMenuGroups = buildTopModelMenuGroups(
@@ -2962,10 +2979,12 @@ struct ChatPage {
           this.modelMenuOpen = true;
         });
       }).catch((e: Error): void => {
+        if (!this.pageAlive || seq !== this.modelMenuSeq) return;
         this.modelMenuLoading = false;
         hilog.warn(HILOG_DOMAIN, HILOG_TAG, 'model selection read failed: %{public}s', e.message);
       });
     }).catch((e: Error): void => {
+      if (!this.pageAlive || seq !== this.modelMenuSeq) return;
       this.modelMenuLoading = false;
       hilog.warn(HILOG_DOMAIN, HILOG_TAG, 'providers read failed: %{public}s', e.message);
     });

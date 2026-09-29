@@ -18,6 +18,7 @@ interface PluginPageRouteParams { conversationId: string; pluginManualToolCallId
 // Preparation pins content and inputs; execution belongs to Chat's same adapter.
 export const startEntryPluginFromPage = async (
   deps: PluginPageLaunchDeps, parent: UIMessagePartTool, title: string,
+  shouldNavigate: () => boolean,
 ): Promise<void> => {
   if (!deps.adapter.supports(parent.toolName)) throw new Error('plugin_manual_tool_unavailable');
   const prepared: UIMessagePartTool = await deps.adapter.prepare(parent, deps.primitives);
@@ -39,6 +40,7 @@ export const startEntryPluginFromPage = async (
   ]);
   const patch: PluginConversationNodesPatch = { messageNodes: nodes };
   await deps.repository.save(patchConversation(conversation, patch));
+  if (!shouldNavigate()) return;
   const params: PluginPageRouteParams = {
     conversationId: conversation.id, pluginManualToolCallId: manual.toolCallId,
   };

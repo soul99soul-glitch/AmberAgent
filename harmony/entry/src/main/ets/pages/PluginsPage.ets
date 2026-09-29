@@ -66,18 +66,43 @@ struct PluginsPage {
   @StorageProp('appBackgrounded') backgrounded: boolean = false;
   private store: PluginStore | null = null;
   private alive: boolean = false;
+  private navigationVersion: number = 0;
+  private previousKeyboardAvoidMode: KeyboardAvoidMode = KeyboardAvoidMode.OFFSET;
+  private keyboardAvoidanceActive: boolean = false;
 
   aboutToAppear(): void {
     this.alive = true;
-    this.getUIContext().setKeyboardAvoidMode(KeyboardAvoidMode.RESIZE);
+    this.enableKeyboardAvoidance();
     this.load();
   }
 
-  onPageShow(): void { if (this.loaded) this.load(); }
+  onPageShow(): void {
+    this.enableKeyboardAvoidance();
+    if (this.loaded) this.load();
+  }
+
+  onPageHide(): void {
+    // 回到本页也不恢复离开前提交的导航权限。
+    this.navigationVersion++;
+    this.restoreKeyboardAvoidance();
+  }
 
   aboutToDisappear(): void {
     this.alive = false;
-    this.getUIContext().setKeyboardAvoidMode(KeyboardAvoidMode.OFFSET);
+    this.onPageHide();
+  }
+
+  private enableKeyboardAvoidance(): void {
+    if (this.keyboardAvoidanceActive) return;
+    this.previousKeyboardAvoidMode = this.getUIContext().getKeyboardAvoidMode();
+    this.getUIContext().setKeyboardAvoidMode(KeyboardAvoidMode.RESIZE);
+    this.keyboardAvoidanceActive = true;
+  }
+
+  private restoreKeyboardAvoidance(): void {
+    if (!this.keyboardAvoidanceActive) return;
+    this.getUIContext().setKeyboardAvoidMode(this.previousKeyboardAvoidMode);
+    this.keyboardAvoidanceActive = false;
   }
 
   private refreshColors(): void { this.colors = new PluginPageColors(); }
@@ -206,19 +231,22 @@ struct PluginsPage {
     const preview: PluginImportPreview | null = this.preview;
     const detail: InstalledPlugin | null = this.detail;
     if (!this.available()) return;
+    const navigationVersion: number = this.navigationVersion;
+    const shouldNavigate: () => boolean = (): boolean => this.alive && navigationVersion === this.navigationVersion;
     this.busy = '正在保存到对话…'; this.error = ''; this.notice = '';
     try {
       if (kind === 'import' && preview !== null) {
         const input: JsonObject = this.sourceInput(preview); input['enable'] = preview.enable;
         input['expected_base_hash'] = preview.baseHash;
-        await startPluginFromPage('plugin_import', input, `导入 ${preview.candidate.manifest.name}`);
+        await startPluginFromPage('plugin_import', input, `导入 ${preview.candidate.manifest.name}`, shouldNavigate);
       } else if (kind === 'test' && preview !== null && tool !== null) {
         const input: JsonObject = this.sourceInput(preview);
         input['tool'] = tool.name; input['inputs'] = this.inputValues(tool);
         if (this.expectedProvided) input['expected_result'] = this.expectedValue();
-        await startPluginFromPage('plugin_test', input, `测试 ${preview.candidate.manifest.name} / ${tool.name}`);
+        await startPluginFromPage('plugin_test', input, `测试 ${preview.candidate.manifest.name} / ${tool.name}`, shouldNavigate);
       } else if (kind === 'run' && detail !== null && detail.package !== null && detail.enabled && tool !== null) {
-        await startPluginFromPage(tool.toolId, this.inputValues(tool), `${detail.package.manifest.name} / ${tool.name}`, detail.package.hash);
+        await startPluginFromPage(tool.toolId, this.inputValues(tool), `${detail.package.manifest.name} / ${tool.name}`,
+          shouldNavigate, detail.package.hash);
       }
     } catch (error) { this.failure(error instanceof Error ? error : String(error)); }
     finally { if (this.alive) this.busy = ''; }

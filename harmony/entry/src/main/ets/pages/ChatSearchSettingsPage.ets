@@ -20,7 +20,7 @@
 //   逻辑(加载/启停/排序/key 编辑/删除)零改动,编辑器 overlay 原样保留。
 import {
   ACCENT, ACCENT_INK, BG, INK, INK3, INK4, LINE, LINE2, OVERLAY, RAISED, SURFACE, SURFACE2,
-  SUCCESS_FG, TEXT_STYLES, MOTION_OVERLAY, lineHeightForSize, accentSoftBg,
+  SUCCESS_FG, ERROR, TEXT_STYLES, MOTION_OVERLAY, lineHeightForSize, accentSoftBg,
 } from '../design/tokens.ets';
 import {
   CenteredTitleBar, PlainSection, CardGroup, CardToggleRow, FooterNote, BtnFill, BtnGhost,
@@ -101,6 +101,8 @@ struct ChatSearchSettingsPage {
   @State s: SearchSettings = defaultSearchPrefs();
   // ===== 编辑器 overlay(editIndex < 0 = 新增,Android target.index == null) =====
   @State editorVisible: boolean = false;
+  @State editorSaving: boolean = false;
+  @State editorError: string = '';
   @State editIndex: number = -1;
   @State editTargetId: string = ''; // target.service.id(编辑时)
   @State typeMenuOpen: boolean = false;
@@ -124,19 +126,25 @@ struct ChatSearchSettingsPage {
   @State dSummary: boolean = true;
   private previousKeyboardAvoidMode: KeyboardAvoidMode = KeyboardAvoidMode.OFFSET;
   private keyboardAvoidanceActive: boolean = false;
+  private pageAlive: boolean = false;
+  private editorSession: number = 0;
 
   aboutToAppear(): void {
+    this.pageAlive = true;
     this.enableKeyboardAvoidance();
     this.refresh();
   }
 
   onPageShow(): void { this.enableKeyboardAvoidance(); }
   onPageHide(): void { this.restoreKeyboardAvoidance(); }
-  aboutToDisappear(): void { this.restoreKeyboardAvoidance(); }
+  aboutToDisappear(): void {
+    this.pageAlive = false;
+    this.restoreKeyboardAvoidance();
+  }
   onBackPress(): boolean {
     if (!this.editorVisible) return false;
     if (this.typeMenuOpen) this.typeMenuOpen = false;
-    else this.editorVisible = false;
+    else this.closeEditor();
     return true;
   }
   private enableKeyboardAvoidance(): void {
@@ -153,6 +161,7 @@ struct ChatSearchSettingsPage {
 
   private async refresh(): Promise<void> {
     const s: SearchSettings = await loadSearchPrefs(getChatKvStore());
+    if (!this.pageAlive) return;
     this.s = s;
     this.loaded = true;
   }
@@ -250,7 +259,16 @@ struct ChatSearchSettingsPage {
 
   // ===== 编辑器 =====
 
+  private closeEditor(): void {
+    this.editorSession++;
+    this.editorVisible = false;
+    this.editorSaving = false;
+  }
+
   private openAdd(): void {
+    this.editorSession++;
+    this.editorSaving = false;
+    this.editorError = '';
     // Android 新增 target:BingLocalOptions() 初始(:54-59)
     this.loadDraft(makeSearchServiceOptions('bing_local'));
     this.editIndex = -1;
@@ -260,6 +278,9 @@ struct ChatSearchSettingsPage {
   }
 
   private openEdit(service: SearchServiceOptions, index: number): void {
+    this.editorSession++;
+    this.editorSaving = false;
+    this.editorError = '';
     this.loadDraft(service);
     this.editIndex = index;
     this.editTargetId = service.id;
@@ -387,10 +408,27 @@ struct ChatSearchSettingsPage {
     return this.dType === 'tavily' ? ['basic', 'advanced'] : ['standard', 'deep'];
   }
 
+  private async saveEditorPatch(patch: (n: SearchSettings) => void): Promise<void> {
+    if (this.editorSaving) return;
+    const session: number = this.editorSession;
+    this.editorSaving = true;
+    this.editorError = '';
+    try {
+      await this.applyPatch(patch);
+      if (this.pageAlive && session === this.editorSession) this.closeEditor();
+    } catch (_error) {
+      if (this.pageAlive && session === this.editorSession) {
+        this.editorError = '保存失败，请重试。草稿已保留。';
+      }
+    } finally {
+      if (this.pageAlive && session === this.editorSession) this.editorSaving = false;
+    }
+  }
+
   // onConfirm 新增(:216-226):prepend + 启用(distinct)+ selected = 0
   private confirmAdd(): void {
     const updated: SearchServiceOptions = this.draftOptions();
-    this.applyPatch((n: SearchSettings): void => {
+    this.saveEditorPatch((n: SearchSettings): void => {
       const ids: string[] = [updated.id];
       for (const oid of n.searchEnabledServiceIds) {
         if (ids.indexOf(oid) < 0) ids.push(oid);
@@ -399,7 +437,6 @@ struct ChatSearchSettingsPage {
       n.searchEnabledServiceIds = ids;
       n.searchServiceSelected = 0;
     });
-    this.editorVisible = false;
   }
 
   // onConfirm 编辑(:227-247):id 定位(失败回 target.index);曾启用 → enabledIds 换 id
@@ -407,7 +444,7 @@ struct ChatSearchSettingsPage {
     const updated: SearchServiceOptions = this.draftOptions();
     const targetId: string = this.editTargetId;
     const fallbackIndex: number = this.editIndex;
-    this.applyPatch((n: SearchSettings): void => {
+    this.saveEditorPatch((n: SearchSettings): void => {
       const found: number = n.searchServices.findIndex(
         (x: SearchServiceOptions): boolean => x.id === targetId);
       const currentIndex: number = found >= 0 ? found : fallbackIndex;
@@ -424,7 +461,6 @@ struct ChatSearchSettingsPage {
         n.searchEnabledServiceIds = distinct(swapped);
       }
     });
-    this.editorVisible = false;
   }
 
   // deleteSearchService(:83-103):guard index!=null && size>1;selectedId takeUnless 删除项
@@ -432,7 +468,7 @@ struct ChatSearchSettingsPage {
     if (this.editIndex < 0 || this.s.searchServices.length <= 1) return;
     const targetId: string = this.editTargetId;
     const fallbackIndex: number = this.editIndex;
-    this.applyPatch((n: SearchSettings): void => {
+    this.saveEditorPatch((n: SearchSettings): void => {
       if (n.searchServices.length <= 1) return;
       const found: number = n.searchServices.findIndex(
         (x: SearchServiceOptions): boolean => x.id === targetId);
@@ -449,7 +485,6 @@ struct ChatSearchSettingsPage {
       n.searchEnabledServiceIds = n.searchEnabledServiceIds.filter(
         (id: string): boolean => id !== deleted.id);
     });
-    this.editorVisible = false;
   }
 
   // ===== UI =====
@@ -684,7 +719,7 @@ struct ChatSearchSettingsPage {
   @Builder
   editorOverlay() {
     Column() {
-      Blank().onClick((): void => { this.editorVisible = false; })
+      Blank().onClick((): void => { this.closeEditor(); })
       Column() {
         Text(this.editIndex < 0 ? '添加提供商' : '编辑')
           .fontSize(16).fontWeight(FontWeight.Medium).fontColor(INK)
@@ -833,20 +868,28 @@ struct ChatSearchSettingsPage {
         }
         .align(Alignment.TopStart)
         .width('100%').layoutWeight(1)
+        .enabled(!this.editorSaving)
+
+        if (this.editorError.length > 0) {
+          Text(this.editorError).fontSize(12).fontColor(ERROR)
+            .width('100%').margin({ top: 8 })
+        }
 
         Row() {
           if (this.editIndex >= 0 && this.s.searchServices.length > 1) {
             BtnGhost({ label: '删除提供商', onTap: (): void => { this.confirmDelete(); } })
+              .enabled(!this.editorSaving)
           }
           Blank()
-          BtnGhost({ label: '取消', onTap: (): void => { this.editorVisible = false; } })
+          BtnGhost({ label: '取消', onTap: (): void => { this.closeEditor(); } })
           BtnFill({
-            label: this.editIndex < 0 ? '添加提供商' : '保存',
+            label: this.editorSaving ? '保存中…' : (this.editIndex < 0 ? '添加提供商' : '保存'),
             onTap: (): void => {
               if (this.editIndex < 0) this.confirmAdd();
               else this.confirmEdit();
             },
           })
+            .enabled(!this.editorSaving)
         }
         .width('100%').margin({ top: 8 })
       }
@@ -869,6 +912,7 @@ struct ChatSearchSettingsPage {
           title: '搜索服务',
           actionIcon: 'plus',
           onAction: (): void => { this.openAdd(); },
+          onBack: (): void => { if (!this.onBackPress()) router.back(); },
         })
 
         if (!this.loaded) {

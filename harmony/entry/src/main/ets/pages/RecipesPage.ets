@@ -51,16 +51,40 @@ struct RecipesPage {
   @StorageProp('appBackgrounded') backgrounded: boolean = false;
   private store: RecipeStore | null = null;
   private alive: boolean = false;
+  private navigationVersion: number = 0;
+  private previousKeyboardAvoidMode: KeyboardAvoidMode = KeyboardAvoidMode.OFFSET;
+  private keyboardAvoidanceActive: boolean = false;
 
   aboutToAppear(): void {
     this.alive = true;
-    this.getUIContext().setKeyboardAvoidMode(KeyboardAvoidMode.RESIZE);
+    this.enableKeyboardAvoidance();
     this.load();
+  }
+
+  onPageShow(): void { this.enableKeyboardAvoidance(); }
+
+  onPageHide(): void {
+    // 回到本页也不恢复离开前提交的导航权限。
+    this.navigationVersion++;
+    this.restoreKeyboardAvoidance();
   }
 
   aboutToDisappear(): void {
     this.alive = false;
-    this.getUIContext().setKeyboardAvoidMode(KeyboardAvoidMode.OFFSET);
+    this.onPageHide();
+  }
+
+  private enableKeyboardAvoidance(): void {
+    if (this.keyboardAvoidanceActive) return;
+    this.previousKeyboardAvoidMode = this.getUIContext().getKeyboardAvoidMode();
+    this.getUIContext().setKeyboardAvoidMode(KeyboardAvoidMode.RESIZE);
+    this.keyboardAvoidanceActive = true;
+  }
+
+  private restoreKeyboardAvoidance(): void {
+    if (!this.keyboardAvoidanceActive) return;
+    this.getUIContext().setKeyboardAvoidMode(this.previousKeyboardAvoidMode);
+    this.keyboardAvoidanceActive = false;
   }
 
   private refreshColors(): void { this.colors = new RecipeColors(); }
@@ -249,10 +273,12 @@ struct RecipesPage {
   private async runRecipe(): Promise<void> {
     const detail: RecipeDescriptor | null = this.detail;
     if (detail === null || this.preview !== null || !this.detailEnabled || this.busy.length > 0 || this.backgrounded) return;
+    const navigationVersion: number = this.navigationVersion;
     this.busy = '正在提交到对话…'; this.error = ''; this.notice = '';
     try {
       const inputs: JsonObject = this.inputValues();
-      await startRecipeFromPage(detail.manifest.name, detail.hash, inputs);
+      await startRecipeFromPage(detail.manifest.name, detail.hash, inputs,
+        (): boolean => this.alive && navigationVersion === this.navigationVersion);
     } catch (error) {
       if (this.alive) this.error = error instanceof Error ? this.message(error) : String(error);
     } finally { if (this.alive) this.busy = ''; }

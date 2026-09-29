@@ -217,9 +217,11 @@ struct NovelWorkspacePage {
   private materialOriginalTitle: string = '';
   private materialOriginalContent: string = '';
   private materialOriginalEnabled: boolean = true;
+  private previousKeyboardAvoidMode: KeyboardAvoidMode = KeyboardAvoidMode.OFFSET;
+  private keyboardAvoidanceActive: boolean = false;
 
   aboutToAppear(): void {
-    this.getUIContext().setKeyboardAvoidMode(KeyboardAvoidMode.RESIZE);
+    this.enableKeyboardAvoidance();
     this.pageAlive = true;
     const params = router.getParams() as Record<string, string>;
     this.projectId = params ? (params['projectId'] ?? '') : '';
@@ -249,9 +251,13 @@ struct NovelWorkspacePage {
   // 阅读器 push 返回时刷新(章节编辑/版本恢复/删除在子页完成)
   private pageHiddenOnce: boolean = false;
 
-  onPageHide(): void { this.pageHiddenOnce = true; }
+  onPageHide(): void {
+    this.pageHiddenOnce = true;
+    this.restoreKeyboardAvoidance();
+  }
 
   onPageShow(): void {
+    this.enableKeyboardAvoidance();
     if (this.pageHiddenOnce) {
       this.pageHiddenOnce = false;
       this.reload();
@@ -259,7 +265,7 @@ struct NovelWorkspacePage {
   }
 
   aboutToDisappear(): void {
-    this.getUIContext().setKeyboardAvoidMode(KeyboardAvoidMode.OFFSET);
+    this.restoreKeyboardAvoidance();
     this.pageAlive = false;
     this.reloadToken++;
     this.novelScrollToken++;
@@ -270,6 +276,19 @@ struct NovelWorkspacePage {
       this.currentUnsub = null;
       unsub(); // 终结即退订,emitter 不再持有页面闭包
     }
+  }
+
+  private enableKeyboardAvoidance(): void {
+    if (this.keyboardAvoidanceActive) return;
+    this.previousKeyboardAvoidMode = this.getUIContext().getKeyboardAvoidMode();
+    this.getUIContext().setKeyboardAvoidMode(KeyboardAvoidMode.RESIZE);
+    this.keyboardAvoidanceActive = true;
+  }
+
+  private restoreKeyboardAvoidance(): void {
+    if (!this.keyboardAvoidanceActive) return;
+    this.getUIContext().setKeyboardAvoidMode(this.previousKeyboardAvoidMode);
+    this.keyboardAvoidanceActive = false;
   }
 
   // F38:系统返回优先消费自绘 overlay,避免直接退出页面(编辑脏数据先确认)。
@@ -1232,6 +1251,7 @@ struct NovelWorkspacePage {
   // ===== 章节 =====
   openNewChapter(): void {
     if (this.novelJobLocksWorkspace()) return;
+    this.errorMsg = '';
     this.editingChapterId = '';
     const p: NovelProject | null = this.project;
     this.chapterTitle = p !== null ? `第 ${p.chapters.length + 1} 章` : '第 1 章';
@@ -1380,7 +1400,7 @@ struct NovelWorkspacePage {
       this.errorMsg = '';
       await this.reload();
     } catch (e) {
-      this.errorMsg = String(e);
+      this.errorMsg = e instanceof Error ? e.message : String(e);
     } finally {
       this.busy = false;
     }
@@ -1499,6 +1519,7 @@ struct NovelWorkspacePage {
   }
 
   openNewMaterial(kind: NovelMaterialKind = 'world'): void {
+    this.errorMsg = '';
     this.editingMaterialId = '';
     this.materialKind = kind;
     this.materialTitle = '';
@@ -1512,6 +1533,7 @@ struct NovelWorkspacePage {
   }
 
   openEditMaterial(m: NovelMaterial): void {
+    this.errorMsg = '';
     this.editingMaterialId = m.id;
     this.materialKind = m.kind;
     this.materialTitle = m.title;
@@ -1535,7 +1557,7 @@ struct NovelWorkspacePage {
       this.errorMsg = '';
       await this.reload();
     } catch (e) {
-      this.errorMsg = String(e);
+      this.errorMsg = e instanceof Error ? e.message : String(e);
     } finally {
       this.busy = false;
     }
@@ -1916,28 +1938,37 @@ struct NovelWorkspacePage {
           Column() {
             this.SheetLabel('创作模式')
             Seg({ options: ['共创', '代笔'], selected: this.controlTab,
-              onSelect: (idx: number): void => { this.controlTab = idx; } })
-            if (this.controlTab === 1) {
-              Column() {
-                NovelGhostwriteCard({
-                  job: this.ghostwriteJob,
-                  planReady: this.ghostwritePlanReady(),
-                  modelReady: this.ghostwriteModelsReady(),
-                  planDisabledReason: '请先保存本章计划。',
-                  modelDisabledReason: this.ghostwriteModelReason(),
-                  busy: this.ghostwriteBusy,
-                  onStart: (targetChapterCount: number): void => { this.startGhostwrite(targetChapterCount); },
-                  onPause: (): void => { this.pauseGhostwrite(); },
-                  onResume: (): void => { this.resumeGhostwrite(); },
-                  onRetry: (): void => { this.retryGhostwrite(); },
-                  onCancel: (): void => { this.cancelGhostwrite(); },
-                })
+              onSelect: (idx: number): void => {
+                animateTo({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }, (): void => {
+                  this.controlTab = idx;
+                });
+              } })
+            Column() {
+              if (this.controlTab === 1) {
+                Column() {
+                  NovelGhostwriteCard({
+                    job: this.ghostwriteJob,
+                    planReady: this.ghostwritePlanReady(),
+                    modelReady: this.ghostwriteModelsReady(),
+                    planDisabledReason: '请先保存本章计划。',
+                    modelDisabledReason: this.ghostwriteModelReason(),
+                    busy: this.ghostwriteBusy,
+                    onStart: (targetChapterCount: number): void => { this.startGhostwrite(targetChapterCount); },
+                    onPause: (): void => { this.pauseGhostwrite(); },
+                    onResume: (): void => { this.resumeGhostwrite(); },
+                    onRetry: (): void => { this.retryGhostwrite(); },
+                    onCancel: (): void => { this.cancelGhostwrite(); },
+                  })
+                }
+                .width('100%').margin({ top: 10 }).borderRadius(14).clip(true)
+                .transition(TransitionEffect.OPACITY.combine(TransitionEffect.translate({ y: -8 }))
+                  .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
+              } else {
+                Text('与 Amber 逐段讨论、逐章收录正文。').fontSize(12).fontColor(INK3)
+                  .width('100%').margin({ top: 8 })
+                  .transition(TransitionEffect.OPACITY.animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
               }
-              .width('100%').margin({ top: 10 }).borderRadius(14).clip(true)
-            } else {
-              Text('与 Amber 逐段讨论、逐章收录正文。').fontSize(12).fontColor(INK3)
-                .width('100%').margin({ top: 8 })
-            }
+            }.width('100%').clip(true)
 
             Column() {}.height(16)
             this.SheetLabel('写作模型')
@@ -2614,7 +2645,7 @@ struct NovelWorkspacePage {
             } })
             .margin({ left: 16, right: 16, top: 2, bottom: 8 })
 
-          if (this.errorMsg.length > 0) {
+          if (this.errorMsg.length > 0 && !this.chapterEditorOpen && !this.materialEditorOpen) {
             Text(this.errorMsg).fontSize(12).fontColor(ERROR).lineHeight(18)
               .width('100%').padding({ left: 20, right: 20, bottom: 8 })
           }
@@ -2858,6 +2889,12 @@ struct NovelWorkspacePage {
           .backgroundColor(SURFACE2).borderRadius(10).padding(12).margin({ top: 12 })
           .onChange((v: string) => { this.chapterContent = v; })
         Text(`${this.charCount(this.chapterContent)} 字`).fontSize(11).fontColor(INK3).margin({ top: 6 })
+        if (this.errorMsg.length > 0) {
+          Scroll() {
+            Text(this.errorMsg).fontSize(12).fontColor(ERROR).width('100%').wordBreak(WordBreak.BREAK_ALL)
+          }
+          .width('100%').constraintSize({ maxHeight: 54 }).align(Alignment.TopStart).margin({ top: 8 })
+        }
         Row() {
           Text('取消').fontSize(14).fontColor(INK3).layoutWeight(1).textAlign(TextAlign.Center)
             .height(44)
@@ -2912,6 +2949,12 @@ struct NovelWorkspacePage {
             .onChange((v: boolean) => { this.materialEnabled = v; })
         }
         .width('100%').margin({ top: 12 })
+        if (this.errorMsg.length > 0) {
+          Scroll() {
+            Text(this.errorMsg).fontSize(12).fontColor(ERROR).width('100%').wordBreak(WordBreak.BREAK_ALL)
+          }
+          .width('100%').constraintSize({ maxHeight: 54 }).align(Alignment.TopStart).margin({ top: 8 })
+        }
         Row() {
           Text('取消').fontSize(14).fontColor(INK3).layoutWeight(1).textAlign(TextAlign.Center)
             .height(44)

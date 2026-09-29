@@ -60,6 +60,7 @@ struct QuickMessagesPage {
   @State editContent: string = '';
   private pageAlive: boolean = false;
   private loadSeq: number = 0;
+  private editSession: number = 0;
 
   aboutToAppear(): void {
     this.pageAlive = true;
@@ -68,6 +69,16 @@ struct QuickMessagesPage {
 
   aboutToDisappear(): void {
     this.pageAlive = false;
+  }
+
+  onBackPress(): boolean {
+    if (!this.editing) return false;
+    this.cancelEdit();
+    return true;
+  }
+
+  private requestBack(): void {
+    if (!this.onBackPress()) router.back();
   }
 
   private refresh(): void {
@@ -94,6 +105,7 @@ struct QuickMessagesPage {
   }
 
   private startNew(): void {
+    this.editSession++;
     this.editId = '';
     this.editTitle = '';
     this.editContent = '';
@@ -101,6 +113,7 @@ struct QuickMessagesPage {
   }
 
   private startEdit(item: QuickMessage): void {
+    this.editSession++;
     this.editId = item.id;
     this.editTitle = item.title;
     this.editContent = item.content;
@@ -108,6 +121,7 @@ struct QuickMessagesPage {
   }
 
   private cancelEdit(): void {
+    this.editSession++;
     this.editing = false;
   }
 
@@ -134,10 +148,11 @@ struct QuickMessagesPage {
       }
     }
     const seq: number = this.loadSeq;
+    const session: number = this.editSession;
     this.saveList(getChatKvStore(), next).then((): void => {
       if (!this.pageAlive || seq !== this.loadSeq) return;
       this.items = next;
-      this.editing = false;
+      if (session === this.editSession) this.cancelEdit();
     }).catch((): void => {});
   }
 
@@ -164,7 +179,7 @@ struct QuickMessagesPage {
       // 主题纪元重挂载(勿拆):epoch 变化 → 整页子树销毁重建,全量重读令牌
       ForEach([this.themeEpoch], (_e: number): void => {
       CenteredTitleBar({ title: '快捷消息', actionIcon: this.editing ? '' : 'plus',
-        onAction: (): void => { this.startNew(); } })
+        onAction: (): void => { this.startNew(); }, onBack: (): void => { this.requestBack(); } })
 
       if (this.editing) {
         Scroll() {
