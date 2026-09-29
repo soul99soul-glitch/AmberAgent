@@ -693,10 +693,11 @@ export class NovelCreation {
   // 建议分析可能耗时数十秒,UI 收录后应立即响应;建议稍后异步刷新。
   async collectMessage(
     projectId: string, messageId: string, target: NovelCollectionTarget,
+    editedContent: string | null = null,
   ): Promise<NovelCollectionResult> {
     const box: { value: NovelChapter | null } = { value: null };
     await this.commitMutation(projectId, 'collect', p => {
-      const m = collect(p, messageId, target, this.nowMs());
+      const m = collect(p, messageId, target, this.nowMs(), editedContent);
       box.value = m.value;
       return m.project;
     });

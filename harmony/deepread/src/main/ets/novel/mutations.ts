@@ -221,29 +221,31 @@ export const deleteMaterial = (
   return { ...project, materials: project.materials.filter(m => m.id !== materialId), updatedAt: now };
 };
 
-// 收录助手回复进章节
+// 收录助手回复进章节;editedContent = 收录前编辑稿(四段式收录表单),null 取消息原文
 export const collect = (
   project: NovelProject, messageId: string, target: NovelCollectionTarget, now: number,
+  editedContent: string | null = null,
 ): NovelMutation<NovelChapter> => {
   const msgIdx: number = project.messages.findIndex(m => m.id === messageId);
   if (msgIdx < 0) throw notFound('message', messageId);
   const msg: NovelMessage = project.messages[msgIdx];
   if (msg.role !== 'assistant' || msg.mode !== 'write') throw invalidInput('只能收录助手的写作回复');
-  if (msg.content.trim().length === 0) throw invalidInput('该回复没有正文');
+  const content: string = editedContent !== null ? editedContent : msg.content;
+  if (content.trim().length === 0) throw invalidInput('该回复没有正文');
   if (msg.collectedChapterId !== null) throw alreadyCollected(messageId);
 
   let chapters: NovelChapter[] = project.chapters.slice();
   let chapter: NovelChapter;
   if (target.kind === 'new_chapter') {
-    chapter = makeNovelChapter({ title: cleanTitle(target.title), content: msg.content, now: now });
+    chapter = makeNovelChapter({ title: cleanTitle(target.title), content: content, now: now });
     chapters = [...chapters, chapter];
   } else {
     const idx: number = chapters.findIndex(c => c.id === target.chapterId);
     if (idx < 0) throw notFound('chapter', target.chapterId);
     const existing: NovelChapter = chapters[idx];
     const newContent: string = target.kind === 'append'
-      ? (existing.content.length > 0 ? existing.content + '\n\n' + msg.content : msg.content)
-      : msg.content;
+      ? (existing.content.length > 0 ? existing.content + '\n\n' + content : content)
+      : content;
     chapter = { ...existing, content: newContent, updatedAt: now };
     chapters[idx] = chapter;
   }

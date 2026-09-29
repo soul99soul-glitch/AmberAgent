@@ -141,6 +141,19 @@ test('collect new_chapter: creates chapter', () => {
   assert.equal(res.value.title, '第二章');
 });
 
+test('collect editedContent: 收录前编辑稿覆盖消息原文', () => {
+  let p = base();
+  const msg = assistantWrite('原文第一段\n\n原文第二段');
+  p = appendMessage(p, msg, NOW);
+  const res = collect(p, msg.id, { kind: 'new_chapter', title: '第二章' }, NOW + 1, '只要第一段');
+  assert.equal(res.value.content, '只要第一段');
+  // 空编辑稿回落原文(段落全不选时不应为空章节)
+  let p2 = base();
+  const msg2 = assistantWrite('原文');
+  p2 = appendMessage(p2, msg2, NOW);
+  assert.throws(() => collect(p2, msg2.id, { kind: 'new_chapter', title: 't' }, NOW, '  '));
+});
+
 test('collect: rejects non-write / already-collected / blank', () => {
   let p = base();
   const discussMsg = makeNovelMessage({ role: 'assistant', mode: 'discuss', content: 'x', createdAt: NOW });

@@ -165,6 +165,12 @@ struct NovelWorkspacePage {
   @State pendingUserText: string = '';
   @State collectMessageId: string = '';
   @State collectTitle: string = '';
+  // 四段式收录(iOS NovelCollectCandidateSheet):段落勾选 → 收录前编辑 → 位置
+  @State collectParas: string[] = [];
+  @State collectSelected: boolean[] = [];
+  @State collectDraft: string = '';
+  @State collectMode: number = 0;  // 0 新开 / 1 并入 / 2 替换
+  @State collectChapterId: string = '';
   // 章节
   @State chapterEditorOpen: boolean = false;
   @State editingChapterId: string = '';
@@ -1033,10 +1039,76 @@ struct NovelWorkspacePage {
     return this.activeRunId.length > 0 || this.novelJobLocksWorkspace();
   }
 
+  // 打开收录表单(iOS 四段式):拆段落、全选、初稿=全选拼接
   openCollect(messageId: string): void {
     this.collectMessageId = messageId;
     const p: NovelProject | null = this.project;
     this.collectTitle = p !== null ? `第 ${p.chapters.length + 1} 章` : '第 1 章';
+    const msg: NovelMessage | null = p === null ? null
+      : p.messages.find((m: NovelMessage): boolean => m.id === messageId) ?? null;
+    const text: string = msg === null ? '' : novelMessageText(msg);
+    this.collectParas = text.split(/\n\s*\n/).map((s: string): string => s.trim())
+      .filter((s: string): boolean => s.length > 0);
+    this.collectSelected = this.collectParas.map((): boolean => true);
+    this.collectDraft = this.collectParas.join('\n\n');
+    this.collectMode = 0;
+    this.collectChapterId = p !== null && p.chapters.length > 0
+      ? p.chapters[p.chapters.length - 1].id : '';
+  }
+
+  private togglePara(idx: number): void {
+    const next: boolean[] = this.collectSelected.slice();
+    next[idx] = !next[idx];
+    this.collectSelected = next;
+  }
+
+  private collectSelectedCount(): number {
+    return this.collectSelected.filter((v: boolean): boolean => v).length;
+  }
+
+  // 「按当前选择重置」:编辑稿回到勾选段落拼接(iOS 同名)
+  private resetDraftFromSelection(): void {
+    const parts: string[] = [];
+    for (let i: number = 0; i < this.collectParas.length; i++) {
+      if (this.collectSelected[i]) parts.push(this.collectParas[i]);
+    }
+    this.collectDraft = parts.join('\n\n');
+  }
+
+  private collectDisabled(): boolean {
+    if (this.busy || this.collectDraft.trim().length === 0) return true;
+    return this.collectMode !== 0 && this.collectChapterId.length === 0;
+  }
+
+  private async submitCollect(): Promise<void> {
+    if (this.collectMessageId.length === 0 || this.collectDisabled()) return;
+    let target: NovelCollectionTarget;
+    if (this.collectMode === 0) target = { kind: 'new_chapter', title: this.collectTitle };
+    else if (this.collectMode === 1) target = { kind: 'append', chapterId: this.collectChapterId };
+    else target = { kind: 'replace', chapterId: this.collectChapterId };
+    this.busy = true;
+    try {
+      await getNovelCreation().collectMessage(this.projectId, this.collectMessageId, target,
+        this.collectDraft.trim());
+      const mode: number = this.collectMode;
+      this.collectMessageId = '';
+      this.errorMsg = '';
+      await this.reload();
+      this.tab = 1;
+      // iOS:整章收录(新开/替换)完成后自动 offer 讨论归档;并入片段不弹
+      if (mode !== 1) {
+        AlertDialog.show({
+          title: '正文已收进章节',
+          message: '要把这次讨论整理成长期记忆吗？Amber 会把讨论蒸馏成资料建议，确认后才写入设定。',
+          primaryButton: { value: '不了', action: (): void => {} },
+          secondaryButton: { value: '整理讨论', action: (): void => { this.archiveDiscussion(); } },
+        });
+      }
+    } catch (e) {
+      this.errorMsg = String(e);
+    } finally {
+      this.busy = false;
+    }
   }
 
   private continueNovelTool(toolCallId: string, verdict: NovelToolContinuationVerdict,
@@ -1140,24 +1212,6 @@ struct NovelWorkspacePage {
     });
     if (this.activeRunId === run.id) this.currentUnsub = unsub;
     else unsub();
-  }
-
-  async doCollect(target: NovelCollectionTarget): Promise<void> {
-    if (this.collectMessageId.length === 0) return;
-    this.busy = true;
-    try {
-      await getNovelCreation().collectMessage(this.projectId, this.collectMessageId, target);
-      this.collectMessageId = '';
-      this.errorMsg = '';
-      await this.reload();
-      // F32:收录后跳到活资料并直接定位「资料库」二级页(section=1),否则建议在 section1 而用户停在 section0
-      this.tab = 2;
-      this.settingsSection = 1;
-    } catch (e) {
-      this.errorMsg = String(e);
-    } finally {
-      this.busy = false;
-    }
   }
 
   private async resolveSettingProposal(proposal: NovelSettingProposal, accept: boolean): Promise<void> {
@@ -2349,7 +2403,7 @@ struct NovelWorkspacePage {
 
       // 收录对话框
       if (this.collectMessageId.length > 0) {
-        this.collectDialog()
+        this.collectSheet()
       }
       // 章节编辑器
       if (this.chapterEditorOpen) {
@@ -2403,49 +2457,141 @@ struct NovelWorkspacePage {
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
   }
 
+  // 收录 sheet(iOS NovelCollectCandidateSheet 四段式:选段落 → 收录前编辑 → 章节位置)
   @Builder
-  collectDialog(): void {
+  private collectSheet(): void {
     Column() {
+      Blank().onClick((): void => { this.collectMessageId = ''; })
       Column() {
-        Text('收进章节').fontSize(17).fontWeight(FontWeight.Bold).fontColor(INK).margin({ bottom: 16 })
+        Row() {
+          Text('收录正文').fontSize(17).fontWeight(FontWeight.Bold).fontFamily(FONT_SANS_MEDIUM).fontColor(INK)
+            .layoutWeight(1)
+          Text(`${this.collectSelectedCount()}/${this.collectParas.length} 段`)
+            .fontSize(12).fontColor(INK3)
+        }.width('100%').alignItems(VerticalAlign.Center).margin({ bottom: 10 })
         Scroll() {
           Column() {
-            // 新开
-            Text(`新开第 ${this.project !== null ? this.project.chapters.length + 1 : 1} 章`)
-              .fontSize(14).fontColor(ACCENT).height(44).textAlign(TextAlign.Start)
-              .margin({ bottom: 4 })
-              .onClick(() => { this.doCollect({ kind: 'new_chapter', title: this.collectTitle }); })
-            // 并入/替换已有章节
-            if (this.project !== null) {
-              ForEach(this.project.chapters, (c: NovelChapter, idx: number) => {
-                Column() {
-                  Text(`并入第 ${idx + 1} 章《${c.title}》`).fontSize(13).fontColor(INK2)
-                    .height(44).textAlign(TextAlign.Start)
-                    .onClick(() => { this.doCollect({ kind: 'append', chapterId: c.id }); })
-                  Text(`替换第 ${idx + 1} 章《${c.title}》`).fontSize(12).fontColor(ERROR)
-                    .height(44).textAlign(TextAlign.Start)
-                    .onClick(() => { this.doCollect({ kind: 'replace', chapterId: c.id }); })
+            Row() {
+              this.SheetLabel('选择段落')
+              Blank()
+              Text('全选').fontSize(12).fontFamily(FONT_SANS_MEDIUM).fontColor(ACCENT)
+                .constraintSize({ minHeight: 36 }).padding({ left: 10 })
+                .onClick((): void => {
+                  this.collectSelected = this.collectParas.map((): boolean => true);
+                  this.resetDraftFromSelection();
+                })
+              Text('清空').fontSize(12).fontFamily(FONT_SANS_MEDIUM).fontColor(INK3)
+                .constraintSize({ minHeight: 36 }).padding({ left: 10 })
+                .onClick((): void => {
+                  this.collectSelected = this.collectParas.map((): boolean => false);
+                  this.collectDraft = '';
+                })
+            }.width('100%').alignItems(VerticalAlign.Center)
+            ForEach(this.collectParas, (para: string, idx: number): void => {
+              Row({ space: 10 }) {
+                Row() {
+                  if (this.collectSelected[idx]) {
+                    Icon({ name: 'check', iconSize: 12, color: ACCENT_INK })
+                  }
                 }
-                .width('100%').padding({ top: 8, bottom: 8 })
-                .border({ width: { bottom: 0.5 }, color: { bottom: LINE } })
-              }, (c: NovelChapter) => c.id)
+                .width(20).height(20).borderRadius(10)
+                .justifyContent(FlexAlign.Center).alignItems(VerticalAlign.Center)
+                .backgroundColor(this.collectSelected[idx] ? ACCENT : Color.Transparent)
+                .border({ width: 1, color: this.collectSelected[idx] ? ACCENT : LINE })
+                Text(para).fontSize(13).fontColor(INK2).lineHeight(20).layoutWeight(1)
+                  .maxLines(3).textOverflow({ overflow: TextOverflow.Ellipsis })
+              }
+              .width('100%').alignItems(VerticalAlign.Top)
+              .padding({ top: 8, bottom: 8 })
+              .onClick((): void => { this.togglePara(idx); })
+            }, (para: string, idx: number): string => `para-${idx}`)
+
+            Column() {}.height(14)
+            Row() {
+              this.SheetLabel('收录前编辑')
+              Blank()
+              Text('按当前选择重置').fontSize(12).fontFamily(FONT_SANS_MEDIUM).fontColor(ACCENT)
+                .constraintSize({ minHeight: 36 })
+                .onClick((): void => { this.resetDraftFromSelection(); })
+            }.width('100%').alignItems(VerticalAlign.Center)
+            TextArea({ text: this.collectDraft, placeholder: '收录进章节的正文…' })
+              .width('100%').height(150).fontSize(13).fontColor(INK).placeholderColor(INK4)
+              .backgroundColor(SURFACE2).borderRadius(12).padding(12)
+              .onChange((v: string): void => { this.collectDraft = v; })
+
+            Column() {}.height(14)
+            this.SheetLabel('章节位置')
+            Seg({ options: ['新开章节', '并入', '替换'], selected: this.collectMode,
+              onSelect: (idx: number): void => { this.collectMode = idx; } })
+            if (this.collectMode === 0) {
+              TextInput({ text: this.collectTitle, placeholder: '章节标题' })
+                .height(44).fontSize(14).fontColor(INK).placeholderColor(INK4)
+                .backgroundColor(SURFACE2).borderRadius(10).padding({ left: 14, right: 14 })
+                .margin({ top: 10 })
+                .onChange((v: string): void => { this.collectTitle = v; })
+            } else if (this.project !== null) {
+              CardGroup({ radius: 18, stroke: true, content: (): void => { this.CollectChapterRows(); } })
+                .margin({ top: 10 })
             }
-          }.width('100%')
+            if (this.errorMsg.length > 0) {
+              Text(this.errorMsg).fontSize(13).fontColor(ERROR).width('100%').margin({ top: 8 })
+            }
+            Column() {}.height(8)
+          }
+          .width('100%').alignItems(HorizontalAlign.Start)
         }
-        .width('100%').layoutWeight(1).align(Alignment.TopStart).scrollBar(BarState.Auto)
-        Text('取消').fontSize(14).fontColor(INK3)
-          .constraintSize({ minWidth: 44 }).height(44).textAlign(TextAlign.Center).margin({ top: 8 })
-          .onClick(() => { this.collectMessageId = ''; })
+        .width('100%').layoutWeight(1).align(Alignment.TopStart).scrollBar(BarState.Off)
+        Row() {
+          Text('取消').fontSize(14).fontFamily(FONT_SANS_MEDIUM).fontColor(INK3)
+            .layoutWeight(1).textAlign(TextAlign.Center).constraintSize({ minHeight: 44 })
+            .enabled(!this.busy)
+            .onClick((): void => { this.collectMessageId = ''; })
+          Text(this.busy ? '收录中…' : '收录').fontSize(14).fontWeight(FontWeight.Medium)
+            .fontFamily(FONT_SANS_MEDIUM).fontColor(this.collectDisabled() ? INK4 : ACCENT)
+            .layoutWeight(1).textAlign(TextAlign.Center).constraintSize({ minHeight: 44 })
+            .enabled(!this.collectDisabled())
+            .onClick((): void => { this.submitCollect(); })
+        }.width('100%').margin({ top: 8 })
       }
-      .width('84%').height('80%').padding(22).backgroundColor(SURFACE).borderRadius(16)
+      .width('100%').height('85%')
+      .padding({ left: 18, right: 18, top: 16, bottom: 14 + this.navBarHeight })
+      .backgroundColor(SURFACE).borderRadius({ topLeft: 20, topRight: 20 })
       .onClick((): void => {})
-      .transition(TransitionEffect.translate({ y: 24 })
+      .transition(TransitionEffect.translate({ y: 160 })
         .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
     }
     .width('100%').height('100%').backgroundColor(OVERLAY)
-    .justifyContent(FlexAlign.Center)
-    .onClick(() => { this.collectMessageId = ''; })
+    .justifyContent(FlexAlign.End)
     .transition(TransitionEffect.OPACITY.animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
+  }
+
+  // 并入/替换的章节单选行
+  @Builder
+  private CollectChapterRows(): void {
+    Column() {
+      ForEach(this.project !== null ? this.project.chapters : [] as NovelChapter[],
+        (c: NovelChapter, idx: number): void => {
+          Row() {
+            Column({ space: 2 }) {
+              Text(`第 ${idx + 1} 章${c.title.length > 0 ? ' · ' + c.title : ''}`)
+                .fontSize(14).fontFamily(FONT_SANS_MEDIUM).fontColor(INK)
+                .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+              Text(`${this.charCount(c.content)} 字`).fontSize(11).fontColor(INK3)
+            }.alignItems(HorizontalAlign.Start).layoutWeight(1)
+            if (this.collectChapterId === c.id) {
+              Icon({ name: 'check', iconSize: 16, color: ACCENT })
+            }
+          }
+          .width('100%').alignItems(VerticalAlign.Center).constraintSize({ minHeight: 48 })
+          .padding({ left: 14, right: 14 })
+          .onClick((): void => { this.collectChapterId = c.id; })
+          if (this.project !== null && idx < this.project.chapters.length - 1) {
+            Row() {
+              Row().width('100%').height(1).backgroundColor(LINE)
+            }.width('100%').padding({ left: 14, right: 14 })
+          }
+        }, (c: NovelChapter): string => c.id)
+    }.width('100%')
   }
 
   @Builder
