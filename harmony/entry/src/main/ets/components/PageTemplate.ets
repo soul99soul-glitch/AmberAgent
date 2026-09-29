@@ -283,6 +283,8 @@ export struct Seg {
           .padding({ top: 9, bottom: 9, left: 8, right: 8 })
           .borderRadius(8)
           .backgroundColor(this.displayed() === idx ? RAISED : Color.Transparent)
+          // 暗色下 RAISED 与轨道亮度差不足 2%,选中 pill 加发丝描边兜底可见性
+          .border({ width: this.displayed() === idx ? 0.5 : 0, color: LINE2 })
           .margin(2)
           .onClick((): void => {
             if (this.displayed() === idx) return;

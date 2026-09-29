@@ -2373,7 +2373,7 @@ struct NovelWorkspacePage {
     Scroll() {
       Column() {
         Row() {
-          this.SheetLabel('总纲')
+          Text('总纲').fontSize(12).fontFamily(FONT_SANS_MEDIUM).fontColor(INK3)
           Blank()
           Text('新增总纲').fontSize(12).fontFamily(FONT_SANS_MEDIUM).fontColor(ACCENT)
             .constraintSize({ minHeight: 44 }).padding({ left: 8, right: 8 }).textAlign(TextAlign.Center)
