@@ -312,6 +312,7 @@ struct NovelProjectsPage {
         }
         .alignItems(HorizontalAlign.Start)
         .layoutWeight(1)
+        .margin({ left: 12 })
         Icon({ name: 'chevron_right', iconSize: 16, color: INK4 })
       }
       .width('100%')
@@ -398,7 +399,11 @@ struct NovelProjectsPage {
           .fontSize(17).fontWeight(FontWeight.Bold).fontFamily(FONT_SANS_SEMIBOLD).fontColor(INK)
           .width('100%').margin({ bottom: 12 })
         Seg({ options: ['空白项目', '快速开始'], selected: this.createMode,
-          onSelect: (idx: number): void => { this.createMode = idx; } })
+          onSelect: (idx: number): void => {
+            animateTo({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }, (): void => {
+              this.createMode = idx;
+            });
+          } })
         Scroll() {
           Column({ space: 12 }) {
             TextInput({ text: this.createName, placeholder: '小说名称，例如：长夜来信' })
@@ -408,23 +413,28 @@ struct NovelProjectsPage {
               .margin({ top: 12 })
               .onChange((v: string) => { this.createName = v; })
             if (this.createMode === 1) {
-              TextInput({ text: this.quickGenre, placeholder: '题材，例如：近未来悬疑' })
-                .height(46).fontSize(TEXT_STYLES.body.size).fontFamily(TEXT_STYLES.body.family)
-                .fontColor(INK).placeholderColor(INK4)
-                .backgroundColor(SURFACE2).borderRadius(10).padding({ left: 14, right: 14 })
-                .onChange((v: string) => { this.quickGenre = v; })
-              TextArea({ text: this.quickIdea, placeholder: '核心想法：一句话讲清这个故事最想说的事…' })
-                .height(120).fontSize(14).fontColor(INK).placeholderColor(INK4)
-                .backgroundColor(SURFACE2).borderRadius(10).padding(12)
-                .onChange((v: string) => { this.quickIdea = v; })
-              Text('AI 只会生成建议，确认后才写入项目设定。')
-                .fontSize(12).fontColor(INK3).width('100%')
+              Column({ space: 12 }) {
+                TextInput({ text: this.quickGenre, placeholder: '题材，例如：近未来悬疑' })
+                  .height(46).fontSize(TEXT_STYLES.body.size).fontFamily(TEXT_STYLES.body.family)
+                  .fontColor(INK).placeholderColor(INK4)
+                  .backgroundColor(SURFACE2).borderRadius(10).padding({ left: 14, right: 14 })
+                  .onChange((v: string) => { this.quickGenre = v; })
+                TextArea({ text: this.quickIdea, placeholder: '核心想法：一句话讲清这个故事最想说的事…' })
+                  .height(120).fontSize(14).fontColor(INK).placeholderColor(INK4)
+                  .backgroundColor(SURFACE2).borderRadius(10).padding(12)
+                  .onChange((v: string) => { this.quickIdea = v; })
+                Text('AI 只会生成建议，确认后才写入项目设定。')
+                  .fontSize(12).fontColor(INK3).width('100%')
+              }
+              .width('100%').alignItems(HorizontalAlign.Start)
+              .transition(TransitionEffect.OPACITY.combine(TransitionEffect.translate({ y: -8 }))
+                .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
             }
             if (this.errorMsg.length > 0) {
               Text(this.errorMsg).fontSize(13).fontColor(ERROR).width('100%')
             }
           }
-          .width('100%').alignItems(HorizontalAlign.Start)
+          .width('100%').alignItems(HorizontalAlign.Start).clip(true)
         }
         .width('100%').layoutWeight(1).align(Alignment.TopStart).scrollBar(BarState.Off)
         Row() {
