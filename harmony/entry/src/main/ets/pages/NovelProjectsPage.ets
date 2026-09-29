@@ -1,9 +1,11 @@
-// NovelProjectsPage — 小说项目库:列表 / 新建 / 重命名 / 删除 / 进工作区(对齐 iOS NovelProjectListView 卡片式)
-import { ACCENT, ACCENT_LIGHT, BG, INK, INK2, INK3, INK4, ERROR, MOTION_ENTER, MOTION_OVERLAY, MOTION_STAGGER, OVERLAY, SHADOW_OVERLAY, SURFACE, SURFACE2, TITLE, TEXT_STYLES } from '../design/tokens.ets';
-import { FONT_SERIF, FONT_SANS_SEMIBOLD } from '../design/fonts.ets';
-import { CenteredTitleBar, PlainSection, CardGroup, BtnFill, IconSeat, PaperSeparator, PageSpacer } from '../components/PageTemplate.ets';
+// NovelProjectsPage — 小说项目库(iOS NovelProjectListView 结构:右上导入 +
+// 底部悬浮新建胶囊 + 创建 sheet(空白/快速开始)+ 空态双按钮)
+// 行操作收进长按菜单(对齐会话首页交互);恢复删除项目为列表尾注链接。
+import { ACCENT, ACCENT_INK, ACCENT_LIGHT, BG, INK, INK2, INK3, INK4, ERROR, MOTION_ENTER, MOTION_OVERLAY, MOTION_STAGGER, OVERLAY, SHADOW_OVERLAY, SURFACE, SURFACE2, TITLE, TEXT_STYLES } from '../design/tokens.ets';
+import { FONT_SERIF, FONT_SANS_MEDIUM, FONT_SANS_SEMIBOLD } from '../design/fonts.ets';
+import { CenteredTitleBar, PlainSection, CardGroup, BtnFill, BtnGhost, Seg, IconSeat, PaperSeparator, PageSpacer } from '../components/PageTemplate.ets';
 import { Icon } from '../components/ui/Icon.ets';
-import { router, promptAction } from '@kit.ArkUI';
+import { router, promptAction, KeyboardAvoidMode } from '@kit.ArkUI';
 import { getNovelCreation, getNovelWorkspaceService } from '../di/AppContainer.ets';
 import type { NovelProject } from '@amber/deepread-domain';
 import { fileIo, picker } from '@kit.CoreFileKit';
@@ -25,23 +27,34 @@ const relativeTime = (ms: number): string => {
 @Entry
 @Component
 struct NovelProjectsPage {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @StorageProp('statusBarHeight') statusBarHeight: number = 44;
+  @StorageProp('navBarHeight') navBarHeight: number = 0;
   @State projects: NovelProject[] = [];
   @State loading: boolean = true;
-  @State nameDialogOpen: boolean = false;
-  @State editingId: string = '';   // '' = 新建
+  @State renameDialogOpen: boolean = false;
+  @State renameId: string = '';
   @State nameInput: string = '';
   @State confirmDeleteId: string = '';
   @State restoring: boolean = false;
   @State importing: boolean = false;
   @State errorMsg: string = '';
   @State pressedId: string = '';
+  // 创建 sheet(iOS NovelProjectCreateSheet):空白项目 / 快速开始(题材+核心想法)
+  @State createSheetOpen: boolean = false;
+  @State createMode: number = 0;
+  @State createName: string = '';
+  @State quickGenre: string = '';
+  @State quickIdea: string = '';
+  @State creating: boolean = false;
   private pageAlive: boolean = false;
   private loadToken: number = 0;
   // F41:仅首次加载展示整页 loading;后续刷新保留既有列表(不卸载已读内容)
   private loadedOnce: boolean = false;
   // aboutToAppear 与首次 onPageShow 都会触发,首屏只加载一次
   private firstShowDone: boolean = false;
+  private previousKeyboardAvoidMode: KeyboardAvoidMode = KeyboardAvoidMode.OFFSET;
+  private keyboardAvoidanceActive: boolean = false;
 
   aboutToAppear(): void {
     this.pageAlive = true;
@@ -60,9 +73,43 @@ struct NovelProjectsPage {
     }
   }
 
+  onPageHide(): void { this.restoreKeyboardAvoidance(); }
+
   aboutToDisappear(): void {
+    this.restoreKeyboardAvoidance();
     this.pageAlive = false;
     this.loadToken++;
+  }
+
+  onBackPress(): boolean {
+    if (this.createSheetOpen) {
+      if (!this.creating) this.dismissCreateSheet();
+      return true;
+    }
+    if (this.renameDialogOpen) {
+      this.renameDialogOpen = false;
+      this.errorMsg = '';
+      return true;
+    }
+    if (this.confirmDeleteId.length > 0) {
+      this.confirmDeleteId = '';
+      return true;
+    }
+    return false;
+  }
+
+  // 创建 sheet 有底部输入框:页面级键盘 RESIZE 避让(灵魂/提示词编辑器同款)
+  private enableKeyboardAvoidance(): void {
+    if (this.keyboardAvoidanceActive) return;
+    this.previousKeyboardAvoidMode = this.getUIContext().getKeyboardAvoidMode();
+    this.getUIContext().setKeyboardAvoidMode(KeyboardAvoidMode.RESIZE);
+    this.keyboardAvoidanceActive = true;
+  }
+
+  private restoreKeyboardAvoidance(): void {
+    if (!this.keyboardAvoidanceActive) return;
+    this.getUIContext().setKeyboardAvoidMode(this.previousKeyboardAvoidMode);
+    this.keyboardAvoidanceActive = false;
   }
 
   async loadProjects(): Promise<void> {
@@ -89,41 +136,64 @@ struct NovelProjectsPage {
     }
   }
 
-  openNew(): void {
-    this.editingId = '';
-    this.nameInput = '';
+  openCreateSheet(): void {
+    this.createMode = 0;
+    this.createName = '';
+    this.quickGenre = '';
+    this.quickIdea = '';
     this.errorMsg = '';
-    animateTo({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }, (): void => {
-      this.nameDialogOpen = true;
-    });
+    this.enableKeyboardAvoidance();
+    this.createSheetOpen = true;
+  }
+
+  private dismissCreateSheet(): void {
+    this.createSheetOpen = false;
+    this.errorMsg = '';
+    this.restoreKeyboardAvoidance();
   }
 
   openRename(p: NovelProject): void {
-    this.editingId = p.id;
+    this.renameId = p.id;
     this.nameInput = p.name;
     this.errorMsg = '';
     animateTo({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }, (): void => {
-      this.nameDialogOpen = true;
+      this.renameDialogOpen = true;
     });
   }
 
-  async submitName(): Promise<void> {
+  async submitCreate(): Promise<void> {
+    const name: string = this.createName.trim();
+    if (name.length === 0) {
+      this.errorMsg = '请输入名称';
+      return;
+    }
+    if (this.creating) return;
+    this.creating = true;
+    try {
+      const created: NovelProject = await getNovelCreation().create(name);
+      // 快速开始:题材+核心想法拼成种子,进工作区自动发起 quick_start
+      const seed: string = this.createMode === 1
+        ? `题材：${this.quickGenre.trim()}\n核心想法：${this.quickIdea.trim()}` : '';
+      this.dismissCreateSheet();
+      this.openWorkspace(created.id, seed);
+    } catch (e) {
+      this.errorMsg = String(e);
+    } finally {
+      this.creating = false;
+    }
+  }
+
+  async submitRename(): Promise<void> {
     const name: string = this.nameInput.trim();
     if (name.length === 0) {
       this.errorMsg = '请输入名称';
       return;
     }
     try {
-      if (this.editingId.length === 0) {
-        const created: NovelProject = await getNovelCreation().create(name);
-        animateTo({ duration: 200, curve: Curve.EaseIn }, (): void => { this.nameDialogOpen = false; });
-        this.openWorkspace(created.id);
-      } else {
-        await getNovelCreation().rename(this.editingId, name);
-        animateTo({ duration: 200, curve: Curve.EaseIn }, (): void => { this.nameDialogOpen = false; });
-        await this.loadProjects();
-      }
+      await getNovelCreation().rename(this.renameId, name);
+      animateTo({ duration: 200, curve: Curve.EaseIn }, (): void => { this.renameDialogOpen = false; });
       this.errorMsg = '';
+      await this.loadProjects();
     } catch (e) {
       this.errorMsg = String(e);
     }
@@ -158,19 +228,19 @@ struct NovelProjectsPage {
 
   private readSelectedBytes(uri: string): Uint8Array {
     const maxBytes: number = 16 * 1024 * 1024;
-    const file: fileIo.File = fileIo.openSync(uri, fileIo.OpenMode.READ_ONLY);
+    const f: fileIo.File = fileIo.openSync(uri);
     try {
-      const stat: fileIo.Stat = fileIo.statSync(file.fd);
-      if (stat.size > maxBytes) throw new Error('ZIP 超过 16MB 导入上限');
-      const buffer: ArrayBuffer = new ArrayBuffer(stat.size);
-      fileIo.readSync(file.fd, buffer, { offset: 0, length: stat.size });
-      return new Uint8Array(buffer);
+      const stat: fileIo.Stat = fileIo.statSync(f.fd);
+      if (stat.size > maxBytes) throw new Error('文件过大');
+      const buf: ArrayBuffer = new ArrayBuffer(stat.size);
+      fileIo.readSync(f.fd, buf);
+      return new Uint8Array(buf);
     } finally {
-      fileIo.closeSync(file);
+      fileIo.closeSync(f);
     }
   }
 
-  private async importWorkspace(): Promise<void> {
+  async importWorkspace(): Promise<void> {
     if (this.importing) return;
     const options: picker.DocumentSelectOptions = new picker.DocumentSelectOptions();
     options.maxSelectNumber = 1;
@@ -185,7 +255,7 @@ struct NovelProjectsPage {
       const project: NovelProject = await getNovelWorkspaceService().importZip(
         this.readSelectedBytes(uris[0]));
       await this.loadProjects();
-      this.openWorkspace(project.id);
+      this.openWorkspace(project.id, '');
     } catch (e) {
       this.errorMsg = `导入失败：${String(e)}`;
     } finally {
@@ -193,8 +263,9 @@ struct NovelProjectsPage {
     }
   }
 
-  openWorkspace(projectId: string): void {
+  openWorkspace(projectId: string, quickStartSeed: string): void {
     const params: Record<string, string> = { 'projectId': projectId };
+    if (quickStartSeed.length > 0) params['quickStartSeed'] = quickStartSeed;
     router.pushUrl({ url: 'pages/NovelWorkspacePage', params: params });
   }
 
@@ -251,7 +322,7 @@ struct NovelProjectsPage {
         if (e.type === TouchType.Down) this.pressedId = project.id;
         else if (e.type === TouchType.Up || e.type === TouchType.Cancel) this.pressedId = '';
       })
-      .onClick((): void => { this.openWorkspace(project.id); })
+      .onClick((): void => { this.openWorkspace(project.id, ''); })
       .gesture(
         LongPressGesture()
           .onAction((): void => { this.showRowMenu(project); })
@@ -267,59 +338,123 @@ struct NovelProjectsPage {
         delay: Math.min(idx * MOTION_STAGGER, 240) }))
   }
 
+  // 项目行组(CardGroup 内容必须 @Builder:尾闭包后链 .margin 会被当新语句)
   @Builder
-  WorkspaceCard(): void {
-    PlainSection({ label: '工作区' })
-    CardGroup({ radius: 18, stroke: true }) {
-      Column() {
-        Row() {
-          IconSeat({ iconName: 'arrow_down_to_line' })
-          Column() {
-            Text(this.importing ? '正在导入…' : '导入工作区')
-              .fontSize(TEXT_STYLES.body.size).fontWeight(600)
-              .lineHeight(TEXT_STYLES.body.lineHeight).fontFamily(TEXT_STYLES.body.family).fontColor(INK)
-            Text('从 ZIP 包恢复一个完整小说工作区')
-              .fontSize(TEXT_STYLES.secondary.size).fontWeight(TEXT_STYLES.secondary.weight)
-              .lineHeight(TEXT_STYLES.secondary.lineHeight).fontFamily(TEXT_STYLES.secondary.family)
-              .fontColor(INK3).margin({ top: 4 })
-          }
-          .alignItems(HorizontalAlign.Start).layoutWeight(1).margin({ left: 12 })
-          Icon({ name: 'chevron_right', iconSize: 16, color: INK4 })
-        }
-        .width('100%').constraintSize({ minHeight: 64 })
-        .padding({ left: 16, right: 16, top: 12, bottom: 12 })
-        .enabled(!this.importing)
-        .onClick((): void => { this.importWorkspace(); })
-        PaperSeparator()
-        Row() {
-          IconSeat({ iconName: 'history' })
-          Column() {
-            Text(this.restoring ? '正在恢复…' : '恢复删除的项目')
-              .fontSize(TEXT_STYLES.body.size).fontWeight(600)
-              .lineHeight(TEXT_STYLES.body.lineHeight).fontFamily(TEXT_STYLES.body.family).fontColor(INK)
-            Text('找回最近一次删除的小说项目')
-              .fontSize(TEXT_STYLES.secondary.size).fontWeight(TEXT_STYLES.secondary.weight)
-              .lineHeight(TEXT_STYLES.secondary.lineHeight).fontFamily(TEXT_STYLES.secondary.family)
-              .fontColor(INK3).margin({ top: 4 })
-          }
-          .alignItems(HorizontalAlign.Start).layoutWeight(1).margin({ left: 12 })
-          Icon({ name: 'chevron_right', iconSize: 16, color: INK4 })
-        }
-        .width('100%').constraintSize({ minHeight: 64 })
-        .padding({ left: 16, right: 16, top: 12, bottom: 12 })
-        .enabled(!this.restoring)
-        .onClick((): void => { this.restoreDeleted(); })
+  ProjectRows(): void {
+    ForEach(this.projects, (p: NovelProject, idx: number): void => {
+      this.projectRow(p, idx === this.projects.length - 1, idx)
+    }, (p: NovelProject): string => p.id)
+  }
+
+  // 列表尾注:恢复删除的项目(鸿蒙独有救命入口,iOS 无对等行)
+  @Builder
+  RestoreFooter(): void {Text(this.restoring ? '正在恢复…' : '恢复删除的项目')
+      .fontSize(13)
+      .fontFamily(FONT_SANS_MEDIUM)
+      .fontColor(this.restoring ? INK4 : ACCENT)
+      .constraintSize({ minHeight: 44 })
+      .enabled(!this.restoring)
+      .onClick((): void => { this.restoreDeleted(); })
+      .margin({ top: 4 })
+  }
+
+  // 底部悬浮新建胶囊(iOS 列表页底中大按钮)
+  @Builder
+  Fab(): void {
+    Column() {
+      Blank()
+      Row() {
+        Icon({ name: 'plus', iconSize: 18, color: ACCENT_INK })
+        Text('新建项目')
+          .fontSize(15).fontWeight(FontWeight.Medium).fontFamily(FONT_SANS_MEDIUM)
+          .fontColor(ACCENT_INK).margin({ left: 6 })
       }
-      .width('100%')
+      .alignItems(VerticalAlign.Center)
+      .constraintSize({ minHeight: 50 })
+      .padding({ left: 24, right: 24 })
+      .backgroundColor(ACCENT)
+      .borderRadius(25)
+      .shadow({ radius: 16, color: SHADOW_OVERLAY, offsetY: 6 })
+      .margin({ bottom: 24 + Math.max(this.navBarHeight, 24) })
+      .onClick((): void => { this.openCreateSheet(); })
+      .accessibilityText('新建小说项目')
     }
+    .width('100%').height('100%')
+    .alignItems(HorizontalAlign.Center)
+    .hitTestBehavior(HitTestMode.Transparent)
+  }
+
+  // 创建 sheet:空白项目 / 快速开始(题材+核心想法;AI 只生成建议,确认后才写入设定)
+  @Builder
+  CreateSheet(): void {
+    Column() {
+      Blank().onClick((): void => { if (!this.creating) this.dismissCreateSheet(); })
+      Column() {
+        Text('新建小说')
+          .fontSize(17).fontWeight(FontWeight.Bold).fontFamily(FONT_SANS_SEMIBOLD).fontColor(INK)
+          .width('100%').margin({ bottom: 12 })
+        Seg({ options: ['空白项目', '快速开始'], selected: this.createMode,
+          onSelect: (idx: number): void => { this.createMode = idx; } })
+        Scroll() {
+          Column({ space: 12 }) {
+            TextInput({ text: this.createName, placeholder: '小说名称，例如：长夜来信' })
+              .height(46).fontSize(TEXT_STYLES.body.size).fontFamily(TEXT_STYLES.body.family)
+              .fontColor(INK).placeholderColor(INK4)
+              .backgroundColor(SURFACE2).borderRadius(10).padding({ left: 14, right: 14 })
+              .margin({ top: 12 })
+              .onChange((v: string) => { this.createName = v; })
+            if (this.createMode === 1) {
+              TextInput({ text: this.quickGenre, placeholder: '题材，例如：近未来悬疑' })
+                .height(46).fontSize(TEXT_STYLES.body.size).fontFamily(TEXT_STYLES.body.family)
+                .fontColor(INK).placeholderColor(INK4)
+                .backgroundColor(SURFACE2).borderRadius(10).padding({ left: 14, right: 14 })
+                .onChange((v: string) => { this.quickGenre = v; })
+              TextArea({ text: this.quickIdea, placeholder: '核心想法：一句话讲清这个故事最想说的事…' })
+                .height(120).fontSize(14).fontColor(INK).placeholderColor(INK4)
+                .backgroundColor(SURFACE2).borderRadius(10).padding(12)
+                .onChange((v: string) => { this.quickIdea = v; })
+              Text('AI 只会生成建议，确认后才写入项目设定。')
+                .fontSize(12).fontColor(INK3).width('100%')
+            }
+            if (this.errorMsg.length > 0) {
+              Text(this.errorMsg).fontSize(13).fontColor(ERROR).width('100%')
+            }
+          }
+          .width('100%').alignItems(HorizontalAlign.Start)
+        }
+        .width('100%').layoutWeight(1).align(Alignment.TopStart).scrollBar(BarState.Off)
+        Row() {
+          Text('取消').fontSize(14).fontFamily(FONT_SANS_MEDIUM).fontColor(INK3)
+            .layoutWeight(1).textAlign(TextAlign.Center).constraintSize({ minHeight: 44 })
+            .enabled(!this.creating)
+            .onClick((): void => { this.dismissCreateSheet(); })
+          Text(this.creating ? '创建中…' : '创建')
+            .fontSize(14).fontWeight(FontWeight.Medium).fontFamily(FONT_SANS_MEDIUM).fontColor(ACCENT)
+            .layoutWeight(1).textAlign(TextAlign.Center).constraintSize({ minHeight: 44 })
+            .enabled(!this.creating)
+            .onClick((): void => { this.submitCreate(); })
+        }
+        .width('100%').margin({ top: 8 })
+      }
+      .width('100%').constraintSize({ maxHeight: '78%' })
+      .padding({ left: 18, right: 18, top: 16, bottom: 14 + this.navBarHeight })
+      .backgroundColor(SURFACE).borderRadius({ topLeft: 20, topRight: 20 })
+      .onClick((): void => {})
+      .transition(TransitionEffect.translate({ y: 160 })
+        .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
+    }
+    .width('100%').height('100%').backgroundColor(OVERLAY)
+    .justifyContent(FlexAlign.End)
+    .transition(TransitionEffect.OPACITY.animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
   }
 
   build(): void {
     Stack() {
       Column() {
-        CenteredTitleBar({ title: '小说创作', actionText: '新建', onAction: (): void => { this.openNew(); } })
+        CenteredTitleBar({ title: '小说创作', actionIcon: 'arrow_down_to_line',
+          onAction: (): void => { this.importWorkspace(); } })
 
-        if (this.errorMsg.length > 0 && !this.nameDialogOpen) {
+        if (this.errorMsg.length > 0 && !this.renameDialogOpen && !this.createSheetOpen) {
           Text(this.errorMsg)
             .fontSize(TEXT_STYLES.meta.size)
             .fontWeight(TEXT_STYLES.meta.weight)
@@ -344,52 +479,53 @@ struct NovelProjectsPage {
           .width('100%').padding({ top: 64, left: 18, right: 18 })
           .alignItems(HorizontalAlign.Start)
         } else if (this.projects.length === 0) {
-          Scroll() {
-            Column() {
-              // 空态图标座:accent 淡底圆座,避免纯文字荒芜感
-              Row() {
-                Icon({ name: 'book', iconSize: 30, color: ACCENT })
-              }
-              .width(76).height(76).borderRadius(38)
-              .backgroundColor(ACCENT_LIGHT)
-              .justifyContent(FlexAlign.Center)
-              .alignItems(VerticalAlign.Center)
-              .margin({ bottom: 20, top: 40 })
-              Text('开始一本新小说')
-                .fontSize(TITLE)
-                .fontWeight(600)
-                .lineHeight(TEXT_STYLES.screenTitle.lineHeight)
-                .fontFamily(FONT_SANS_SEMIBOLD)
-                .fontColor(INK2)
-              Text('项目会独立保存设定、正文、分支和创作记录。')
-                .fontSize(TEXT_STYLES.secondary.size)
-                .fontWeight(TEXT_STYLES.secondary.weight)
-                .lineHeight(TEXT_STYLES.secondary.lineHeight)
-                .fontFamily(TEXT_STYLES.secondary.family)
-                .fontColor(INK3)
-                .margin({ top: 8 })
-              Row() {
-                BtnFill({ label: '新建项目', onTap: (): void => { this.openNew(); } })
-              }
-              .margin({ top: 24, bottom: 12 })
-              this.WorkspaceCard()
-              PageSpacer()
+          // 空态(iOS ContentUnavailableView):大图标座 + 标题 + 说明 + 新建/导入
+          Column() {
+            Row() {
+              Icon({ name: 'book', iconSize: 30, color: ACCENT })
             }
-            .width('100%')
-            .alignItems(HorizontalAlign.Center)
+            .width(76).height(76).borderRadius(38)
+            .backgroundColor(ACCENT_LIGHT)
+            .justifyContent(FlexAlign.Center)
+            .alignItems(VerticalAlign.Center)
+            .margin({ bottom: 20 })
+            Text('开始一本新小说')
+              .fontSize(TITLE)
+              .fontWeight(600)
+              .lineHeight(TEXT_STYLES.screenTitle.lineHeight)
+              .fontFamily(FONT_SANS_SEMIBOLD)
+              .fontColor(INK2)
+            Text('项目会独立保存设定、正文、分支和创作记录。')
+              .fontSize(TEXT_STYLES.secondary.size)
+              .fontWeight(TEXT_STYLES.secondary.weight)
+              .lineHeight(TEXT_STYLES.secondary.lineHeight)
+              .fontFamily(TEXT_STYLES.secondary.family)
+              .fontColor(INK3)
+              .margin({ top: 8 })
+            Row({ space: 12 }) {
+              BtnFill({ label: '新建项目', onTap: (): void => { this.openCreateSheet(); } })
+              BtnGhost({ label: '导入项目', onTap: (): void => { this.importWorkspace(); } })
+            }
+            .margin({ top: 24 })
+            .justifyContent(FlexAlign.Center)
+            this.RestoreFooter()
           }
-          .layoutWeight(1)
-          .align(Alignment.TopStart)
+          .width('100%').layoutWeight(1)
+          .justifyContent(FlexAlign.Center)
+          .alignItems(HorizontalAlign.Center)
+          .padding({ bottom: 96 })
         } else {
           Scroll() {
             Column() {
               PlainSection({ label: '项目' })
-              CardGroup({ radius: 18, stroke: true }) {
-                ForEach(this.projects, (p: NovelProject, idx: number): void => {
-                  this.projectRow(p, idx === this.projects.length - 1, idx)
-                }, (p: NovelProject): string => p.id)
+              CardGroup({ radius: 18, stroke: true, content: (): void => { this.ProjectRows(); } })
+                .margin({ left: 16, right: 16 })
+              Row() {
+                Blank()
+                this.RestoreFooter()
+                Blank()
               }
-              this.WorkspaceCard()
+              .width('100%')
               PageSpacer()
             }
             .width('100%')
@@ -400,14 +536,22 @@ struct NovelProjectsPage {
         }
       }
       .width('100%').height('100%').backgroundColor(BG)
-      .padding({ left: 0, right: 0 })
       .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
 
-      // 名称对话框叠层
-      if (this.nameDialogOpen) {
+      if (!this.loading && !this.createSheetOpen) {
+        this.Fab()
+      }
+
+      // 创建 sheet(空白/快速开始)
+      if (this.createSheetOpen) {
+        this.CreateSheet()
+      }
+
+      // 重命名对话框叠层
+      if (this.renameDialogOpen) {
         Column() {
           Column() {
-            Text(this.editingId.length === 0 ? '新建小说' : '重命名')
+            Text('重命名')
               .fontSize(TEXT_STYLES.screenTitle.size).fontWeight(TEXT_STYLES.screenTitle.weight)
               .lineHeight(TEXT_STYLES.screenTitle.lineHeight).fontFamily(TEXT_STYLES.screenTitle.family)
               .fontColor(INK).margin({ bottom: 16 })
@@ -427,18 +571,19 @@ struct NovelProjectsPage {
                 .fontColor(INK3).layoutWeight(1).textAlign(TextAlign.Center)
                 .onClick(() => {
                   animateTo({ duration: 200, curve: Curve.EaseIn }, (): void => {
-                    this.nameDialogOpen = false; this.errorMsg = '';
+                    this.renameDialogOpen = false; this.errorMsg = '';
                   });
                 })
               Text('确定').fontSize(TEXT_STYLES.secondary.size).fontWeight(TEXT_STYLES.secondary.weight)
                 .lineHeight(TEXT_STYLES.secondary.lineHeight).fontFamily(TEXT_STYLES.secondary.family)
                 .fontColor(ACCENT).layoutWeight(1).textAlign(TextAlign.Center)
-                .onClick(() => { this.submitName(); })
+                .onClick(() => { this.submitRename(); })
             }
             .width('100%').margin({ top: 20 })
           }
           .width('80%').padding(22).backgroundColor(SURFACE).borderRadius(16)
           .shadow({ radius: 24, color: SHADOW_OVERLAY, offsetY: 8 })
+          .onClick((): void => {})
         }
         .width('100%').height('100%').backgroundColor(OVERLAY)
         .justifyContent(FlexAlign.Center)
@@ -446,7 +591,7 @@ struct NovelProjectsPage {
           .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
         .onClick(() => {
           animateTo({ duration: 200, curve: Curve.EaseIn }, (): void => {
-            this.nameDialogOpen = false; this.errorMsg = '';
+            this.renameDialogOpen = false; this.errorMsg = '';
           });
         })
       }
@@ -477,6 +622,7 @@ struct NovelProjectsPage {
           }
           .width('80%').padding(22).backgroundColor(SURFACE).borderRadius(16)
           .shadow({ radius: 24, color: SHADOW_OVERLAY, offsetY: 8 })
+          .onClick((): void => {})
         }
         .width('100%').height('100%').backgroundColor(OVERLAY)
         .justifyContent(FlexAlign.Center)
