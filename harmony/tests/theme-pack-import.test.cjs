@@ -394,3 +394,100 @@ test('tokens: setAccentColor 第二参确立/清除 ink 覆写,applyTheme 保持
   setAccentColor('#6B8CAD'); // steelBlue → iOS 奶油墨(对比度公式会给黑,配对优先)
   assert.equal(tokens.ACCENT_INK, '#FAF9F7');
 });
+
+// ── design 纹理层(patterns / gradient;老花包回归) ──
+
+const espresso = fs.readFileSync(path.join(__dirname, 'fixtures/espresso-monogram.json'), 'utf8');
+
+test('textures: 老花包 patterns/gradient/designDark 全量解析', () => {
+  const r = parseThemePackImport(espresso);
+  assert.equal(r.issues.length, 0, `issues: ${r.issues.join(';')}`);
+  assert.ok(r.pack);
+  assert.equal(r.pack.displayName, '咖啡 · 老花');
+  assert.equal(r.pack.accent, '#6B4A2F');
+  assert.equal(r.pack.accentInk, '#FFF8F0'); // 0x 前缀归一化
+  assert.equal(r.pack.dotGrid, false); // canvasStyle flat
+  assert.equal(r.pack.designDark, true); // 带 design.dark
+  // 三层纹理逐值
+  assert.equal(r.pack.patterns.length, 3);
+  sameData(r.pack.patterns[0], { kind: 'diagonal', color: '#8B6A4E', opacity: 0.045, spacing: 34, size: 0.7 });
+  sameData(r.pack.patterns[1], { kind: 'crosses', color: '#9C7C4A', opacity: 0.055, spacing: 26, size: 3.5 });
+  sameData(r.pack.patterns[2], { kind: 'rings', color: '#7A5A3E', opacity: 0.05, spacing: 52, size: 3 });
+  // 渐变双 palette 各 4 stops + 角度
+  sameData(r.pack.gradient, {
+    colors: ['#EADCCB', '#F5EDE2', '#FAF3E9', '#FDF9F3'],
+    darkColors: ['#2E2118', '#251A11', '#1E140C', '#1A120C'],
+    angle: 90,
+  });
+  // canvasStyle flat + design 双 palette → 色板走 design 而非 paper
+  assert.equal(r.pack.light.bg, '#F3EAE0');
+  assert.equal(r.pack.dark.bg, '#1A120C');
+  // canvasScope appWide → 提示纹理仅首页渲染
+  assert.ok(r.warnings.some((w) => w.includes('仅在首页')));
+});
+
+test('textures: 老花包导出往返(patterns/gradient 无损)', () => {
+  const first = parseThemePackImport(espresso);
+  assert.ok(first.pack);
+  const reimported = parseThemePackImport(themePackToPortableJson(first.pack));
+  assert.equal(reimported.issues.length, 0, `issues: ${reimported.issues.join(';')}`);
+  sameData(reimported.pack.patterns, first.pack.patterns);
+  sameData(reimported.pack.gradient, first.pack.gradient);
+  sameData(reimported.pack.light, first.pack.light);
+  // KV 持久化往返(原生文档)
+  const kv = parseThemePackJson(themePackToJson(first.pack));
+  sameData(kv.patterns, first.pack.patterns);
+  sameData(kv.gradient, first.pack.gradient);
+  assert.equal(kv.designDark, true);
+});
+
+test('textures: patterns 严格校验拒绝项(两端协议对齐)', () => {
+  const base = JSON.parse(espresso);
+  const bad = (mutate, expectMsg) => {
+    const doc = JSON.parse(JSON.stringify(base));
+    mutate(doc);
+    const r = parseThemePackImport(JSON.stringify(doc));
+    assert.equal(r.pack, null, `应拒绝:${expectMsg}`);
+    assert.ok(r.issues.some((i) => i.includes(expectMsg)), `issues 应含「${expectMsg}」:${r.issues.join(';')}`);
+  };
+  bad((d) => { d.design.patterns = new Array(4).fill(d.design.patterns[0]); }, '最多支持 3 层');
+  bad((d) => { d.design.patterns[0].kind = 'hexagons'; }, '不受支持');
+  bad((d) => { d.design.patterns[0].color = '#12345'; }, '必须是 RGB 十六进制颜色');
+  bad((d) => { d.design.patterns[0].opacity = 0.5; }, '0 到 0.3');
+  bad((d) => { d.design.patterns[0].spacing = 5; }, '12 到 120');
+  bad((d) => { d.design.patterns[0].size = 9; }, '0.5 到 8');
+  bad((d) => { d.design.gradient.colors = ['#EADCCB']; }, '2 到 4 个颜色');
+  bad((d) => { delete d.design.gradient.darkColors; }, '2 到 4 个颜色');
+  bad((d) => { d.design.gradient.colors[0] = '#2A1D16'; }, '对比度'); // 与 foreground 同色
+  bad((d) => { d.design.gradient.angle = '90'; }, '有限角度');
+  bad((d) => { delete d.design.dark; }, '需要同时提供 light 和 dark');
+});
+
+test('textures: AMOLED 跳过带 design.dark 的包(Android 同规则)', async () => {
+  const kv = { get: async () => null, put: async () => {} };
+  const { setAmoledBlack, applyThemePack, BUILTIN_PACKS: builtins } = packs;
+  const { BG } = tokens;
+  void BG;
+  await setAmoledBlack(kv, true, true); // 内置包 + AMOLED → 纯黑
+  assert.equal(tokens.BG, '#000000');
+  const r = parseThemePackImport(espresso);
+  applyThemePack(r.pack, true); // 老花带 design.dark → AMOLED 不覆写
+  assert.equal(tokens.BG, '#1A120C');
+  applyThemePack(builtins[0], true); // 切回内置 → AMOLED 恢复纯黑
+  assert.equal(tokens.BG, '#000000');
+  await setAmoledBlack(kv, false, true); // 收尾:关掉 AMOLED 模块态
+});
+
+test('textures: 无纹理的包 patterns/gradient 为空(访问器退化)', () => {
+  // 内置包导出 patterns:[]、无 gradient → 再导入应为"无纹理"(designDark 因导出恒带 design 而为 true)
+  const r = parseThemePackImport(themePackToPortableJson(BUILTIN_PACKS[0]));
+  assert.equal(r.issues.length, 0);
+  assert.ok(r.pack);
+  assert.equal(r.pack.patterns, undefined);
+  assert.equal(r.pack.gradient, undefined);
+  assert.equal(r.pack.designDark, true);
+  const { currentCanvasGradient, currentCanvasGradientAngle, currentCanvasPatterns } = packs;
+  assert.equal(typeof currentCanvasGradientAngle(), 'number');
+  assert.ok(Array.isArray(currentCanvasPatterns()));
+  assert.ok(currentCanvasGradient(false) === null || Array.isArray(currentCanvasGradient(false)));
+});

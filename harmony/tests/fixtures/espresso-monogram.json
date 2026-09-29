@@ -1,0 +1,86 @@
+{
+  "accentHex" : "0x6B4A2F",
+  "assetMode" : "builtinOnly",
+  "brandMark" : "serifWordmark",
+  "bubbleChrome" : "soft",
+  "canvasScope" : "appWide",
+  "canvasStyle" : "flat",
+  "chromeTypeface" : "serif",
+  "design" : {
+    "components" : {
+      "borderWidth" : 0,
+      "brandSize" : 24,
+      "brandText" : "AMBER",
+      "brandTracking" : 2.5,
+      "bubbleRadius" : 28,
+      "cardRadius" : 18,
+      "controlRadius" : 26,
+      "shadowOpacity" : 0.06,
+      "shadowRadius" : 16
+    },
+    "dark" : {
+      "background" : "#1A120C",
+      "border" : "#3A2A1E",
+      "foreground" : "#F0E4D6",
+      "mutedForeground" : "#A8917C",
+      "surface" : "#3A2B1E"
+    },
+    "gradient" : {
+      "angle" : 90,
+      "colors" : [
+        "#EADCCB",
+        "#F5EDE2",
+        "#FAF3E9",
+        "#FDF9F3"
+      ],
+      "darkColors" : [
+        "#2E2118",
+        "#251A11",
+        "#1E140C",
+        "#1A120C"
+      ]
+    },
+    "light" : {
+      "background" : "#F3EAE0",
+      "border" : "#D9C6B2",
+      "foreground" : "#2A1D16",
+      "mutedForeground" : "#6E5A4C",
+      "surface" : "#FFFDFA"
+    },
+    "patterns" : [
+      {
+        "color" : "#8B6A4E",
+        "kind" : "diagonal",
+        "opacity" : 0.045,
+        "size" : 0.7,
+        "spacing" : 34
+      },
+      {
+        "color" : "#9C7C4A",
+        "kind" : "crosses",
+        "opacity" : 0.055,
+        "size" : 3.5,
+        "spacing" : 26
+      },
+      {
+        "color" : "#7A5A3E",
+        "kind" : "rings",
+        "opacity" : 0.05,
+        "size" : 3,
+        "spacing" : 52
+      }
+    ]
+  },
+  "displayName" : "咖啡 · 老花",
+  "emptyArt" : "none",
+  "format" : "amber.theme.pack",
+  "glassChrome" : "quieter",
+  "id" : "espresso-monogram",
+  "immersivePolicy" : "hidden",
+  "inkHex" : "0xFFF8F0",
+  "launchBrand" : "matchBrand",
+  "paper" : "notion",
+  "settingsChrome" : true,
+  "shortcutIconStyle" : "phosphorFill",
+  "version" : 1
+}

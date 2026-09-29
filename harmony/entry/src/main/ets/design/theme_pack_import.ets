@@ -8,12 +8,15 @@
 //
 // 校验口径(与两端对齐的部分严格,鸿蒙特有容差处收敛到可读默认值):
 //   严格拒绝:format/version 不符、id/displayName 空、accentHex 非法、
-//     design palette 缺字段/颜色非法/对比度不足(foreground≥4.5:1,mutedForeground≥3:1)。
+//     design palette 缺字段/颜色非法/对比度不足(foreground≥4.5:1,mutedForeground≥3:1)、
+//     patterns 层数/kind/颜色/数值范围非法、gradient 缺 palette/stop 数/对比度/角度非法。
 //     —— 这些在 iOS/Android 同样被拒,拒绝即兼容,放进来才会出怪异界面。
 //   自动修正(告警不拒绝):inkHex 缺失/非法/与 accent 对比度 <3:1 → 按 WCAG 自动取黑/白;
 //     未知/沉浸 paper → 回退暖纸;未知 canvasStyle → 平涂;内置 id 冲突 → 改名。
-//   忽略不校验:gradient/patterns/components 与 canvasScope 等表面槽(鸿蒙不渲染,
-//     接收超集;Android 侧同样有一批"可解析不消费"的槽位)。
+//   忽略不校验:components 与 canvasScope 等表面槽(鸿蒙不渲染,接收超集;
+//     Android 侧同样有一批"可解析不消费"的槽位)。
+// 渲染范围:patterns/gradient 经严格校验后在首页画布渲染(canvasScope 为 shell/appWide
+//   时告警"仅首页渲染");components(圆角/描边/阴影/品牌字)本轮不消费。
 // 5 槽 → 9 槽派生(iOS AmberThemeDesign.Palette.resolving 逐值):
 //   surface2 = midpoint(background, surface);ink2 = ink;muted2 = muted;borderSoft = border。
 // design 缺一侧时该侧继承 paper 画布色板(iOS 同款语义);paper 五画布色板逐值取自
@@ -26,7 +29,7 @@ import {
 } from './tokens.ets';
 import {
   ThemePack, ThemePalette, BUILTIN_PACKS, PaletteDoc, readPalette, paletteToDoc,
-  parseThemePackJson,
+  parseThemePackJson, ThemePackPattern, ThemePackGradient,
 } from './theme_packs.ets';
 
 const PORTABLE_FORMAT: string = 'amber.theme.pack';
@@ -72,11 +75,26 @@ interface PortablePaletteDoc {
   border?: string;
 }
 
+interface PortablePatternDoc {
+  kind?: string;
+  color?: string;
+  opacity?: number;
+  spacing?: number;
+  size?: number;
+}
+
+interface PortableGradientDoc {
+  colors?: string[];
+  darkColors?: string[];
+  angle?: number;
+}
+
 interface PortableDesignDoc {
   light?: PortablePaletteDoc;
   dark?: PortablePaletteDoc;
-  // iOS Codable 要求 design 内含 patterns 数组(鸿蒙不渲染,导出恒为 [])
-  patterns?: string[];
+  // iOS Codable 要求 design 内含 patterns 数组(无纹理时导出为 [])
+  patterns?: PortablePatternDoc[];
+  gradient?: PortableGradientDoc;
 }
 
 // 鸿蒙扩展段:自家导出文件的 9 槽无损回读(iOS/Android 解码均忽略未知键)
@@ -187,6 +205,89 @@ const paperPalettes = (paper: string): PalettePair | null => {
 const IMMERSIVE_PAPERS: string[] = ['garnet', 'ochre', 'turmeric', 'magenta', 'lotus'];
 
 const CANVAS_STYLES: string[] = ['flat', 'dotGrid', 'lineGrid', 'paperGrain'];
+
+const PATTERN_KINDS: string[] = ['dots', 'grid', 'diagonal', 'crosses', 'waves', 'rings'];
+
+// design.patterns 逐层校验(与两端协议一致:≤3 层,kind/颜色/数值范围非法即拒)
+const readPortablePatterns = (doc: PortablePatternDoc[] | undefined,
+  result: ThemePackImportResult): ThemePackPattern[] | null => {
+  if (doc === undefined) return null;
+  if (!Array.isArray(doc) || doc.length > 3) {
+    result.issues.push('patterns 最多支持 3 层');
+    return null;
+  }
+  const out: ThemePackPattern[] = [];
+  for (let i = 0; i < doc.length; i++) {
+    const p: PortablePatternDoc = doc[i];
+    const prefix: string = `patterns[${i}]`;
+    if (p === null || typeof p !== 'object') {
+      result.issues.push(`${prefix} 必须是对象`);
+      return null;
+    }
+    if (typeof p.kind !== 'string' || PATTERN_KINDS.indexOf(p.kind) < 0) {
+      result.issues.push(`${prefix}.kind 不受支持:${p.kind}`);
+      return null;
+    }
+    const color: string | null = normalizeHexRgb(typeof p.color === 'string' ? p.color : '');
+    if (color === null) {
+      result.issues.push(`${prefix}.color 必须是 RGB 十六进制颜色`);
+      return null;
+    }
+    if (typeof p.opacity !== 'number' || !Number.isFinite(p.opacity) || p.opacity < 0 || p.opacity > 0.3) {
+      result.issues.push(`${prefix}.opacity 必须在 0 到 0.3 之间`);
+      return null;
+    }
+    if (typeof p.spacing !== 'number' || !Number.isFinite(p.spacing) || p.spacing < 12 || p.spacing > 120) {
+      result.issues.push(`${prefix}.spacing 必须在 12 到 120 之间`);
+      return null;
+    }
+    if (typeof p.size !== 'number' || !Number.isFinite(p.size) || p.size < 0.5 || p.size > 8) {
+      result.issues.push(`${prefix}.size 必须在 0.5 到 8 之间`);
+      return null;
+    }
+    out.push({ kind: p.kind, color, opacity: p.opacity, spacing: p.spacing, size: p.size });
+  }
+  return out;
+};
+
+// design.gradient:需双 palette;每侧 2–4 stops,stop 与对应 foreground 对比度 ≥4.5(两端同)
+const readPortableGradient = (doc: PortableGradientDoc, hasPalettes: boolean,
+  lightFg: number, darkFg: number, result: ThemePackImportResult): ThemePackGradient | null => {
+  if (!hasPalettes) {
+    result.issues.push('gradient 需要同时提供 light 和 dark palette');
+    return null;
+  }
+  const readStops = (raw: string[] | undefined, field: string, fg: number): string[] | null => {
+    if (!Array.isArray(raw) || raw.length < 2 || raw.length > 4) {
+      result.issues.push(`${field} 必须包含 2 到 4 个颜色`);
+      return null;
+    }
+    const stops: string[] = [];
+    for (let i = 0; i < raw.length; i++) {
+      const color: string | null = normalizeHexRgb(typeof raw[i] === 'string' ? raw[i] : '');
+      if (color === null) {
+        result.issues.push(`${field}[${i}] 必须是 RGB 十六进制颜色`);
+        return null;
+      }
+      const rgb: number = parseHexRgb(color) ?? 0;
+      if (contrastRatio(rgb, fg) < 4.5) {
+        result.issues.push(`${field}[${i}] 与 foreground 的对比度必须至少为 4.5:1`);
+        return null;
+      }
+      stops.push(color);
+    }
+    return stops;
+  };
+  const colors: string[] | null = readStops(doc.colors, 'gradient.colors', lightFg);
+  if (colors === null) return null;
+  const darkColors: string[] | null = readStops(doc.darkColors, 'gradient.darkColors', darkFg);
+  if (darkColors === null) return null;
+  if (typeof doc.angle !== 'number' || !Number.isFinite(doc.angle)) {
+    result.issues.push('gradient.angle 必须是有限角度');
+    return null;
+  }
+  return { colors, darkColors, angle: doc.angle };
+};
 
 // ── 共用小件 ──
 
@@ -305,17 +406,36 @@ const parsePortableDoc = (doc: PortableDoc, result: ThemePackImportResult): Them
   }
   let light: ThemePalette = pair.light;
   let dark: ThemePalette = pair.dark;
-  // design:有则逐侧覆写,缺的一侧继承 paper(iOS resolving 语义)
+  let designDark: boolean = false;
+  let patterns: ThemePackPattern[] | null = null;
+  let gradient: ThemePackGradient | null = null;
+  // design:有则逐侧覆写,缺的一侧继承 paper(iOS resolving 语义);纹理层严格校验
   if (doc.design !== undefined && doc.design !== null && typeof doc.design === 'object') {
+    let hasDesignLight: boolean = false;
+    let hasDesignDark: boolean = false;
     if (doc.design.light !== undefined && doc.design.light !== null && typeof doc.design.light === 'object') {
       const p: ThemePalette | null = readPortablePalette('light', doc.design.light, result);
       if (p === null) return result;
       light = p;
+      hasDesignLight = true;
     }
     if (doc.design.dark !== undefined && doc.design.dark !== null && typeof doc.design.dark === 'object') {
       const p: ThemePalette | null = readPortablePalette('dark', doc.design.dark, result);
       if (p === null) return result;
       dark = p;
+      hasDesignDark = true;
+      designDark = true;
+    }
+    if (doc.design.patterns !== undefined) {
+      patterns = readPortablePatterns(doc.design.patterns, result);
+      if (patterns === null) return result;
+    }
+    if (doc.design.gradient !== undefined && doc.design.gradient !== null && typeof doc.design.gradient === 'object') {
+      const lightFg: number = parseHexRgb(light.ink) ?? 0;
+      const darkFg: number = parseHexRgb(dark.ink) ?? 0;
+      gradient = readPortableGradient(doc.design.gradient, hasDesignLight && hasDesignDark,
+        lightFg, darkFg, result);
+      if (gradient === null) return result;
     }
   }
   // 画布纹理:点阵/方格 → 首页点阵;paperGrain/flat → 平涂(鸿蒙无纸纹层)
@@ -348,6 +468,15 @@ const parsePortableDoc = (doc: PortableDoc, result: ThemePackImportResult): Them
     light,
     dark,
   };
+  if (patterns !== null && patterns.length > 0) pack.patterns = patterns;
+  if (gradient !== null) pack.gradient = gradient;
+  if (designDark) pack.designDark = true;
+  // canvasScope appWide/shell 的纹理在鸿蒙目前仅首页渲染(其余页不铺),提前说明防预期差
+  if ((patterns !== null && patterns.length > 0) || gradient !== null) {
+    if (doc.canvasScope === 'appWide' || doc.canvasScope === 'shell') {
+      result.warnings.push('画布纹理目前仅在首页渲染');
+    }
+  }
   dedupeBuiltinId(pack, result.warnings);
   result.pack = pack;
   return result;
@@ -554,11 +683,24 @@ export const themePackToPortableJson = (pack: ThemePack): string => {
     light: paletteToDoc(pack.light),
     dark: paletteToDoc(pack.dark),
   };
+  const outPatterns: PortablePatternDoc[] = [];
+  if (pack.patterns !== undefined) {
+    for (const p of pack.patterns) {
+      outPatterns.push({ kind: p.kind, color: p.color, opacity: p.opacity, spacing: p.spacing, size: p.size });
+    }
+  }
   const design: PortableDesignDoc = {
     light: portablePaletteDoc(pack.light),
     dark: portablePaletteDoc(pack.dark),
-    patterns: [],
+    patterns: outPatterns,
   };
+  if (pack.gradient !== undefined) {
+    design.gradient = {
+      colors: pack.gradient.colors,
+      darkColors: pack.gradient.darkColors,
+      angle: pack.gradient.angle,
+    };
+  }
   const doc: PortableDoc = {
     format: PORTABLE_FORMAT,
     version: 1,

@@ -41,6 +41,21 @@ export interface ThemePalette {
   borderSoft: string;
 }
 
+// 跨平台 design 纹理层(amber.theme.pack v1;首页画布渲染,iOS AmberThemeDesignPatternRenderer 逐值)
+export interface ThemePackPattern {
+  kind: string;    // dots | grid | diagonal | crosses | waves | rings
+  color: string;   // #RRGGBB
+  opacity: number; // 0–0.3(逐层 globalAlpha)
+  spacing: number; // 12–120(网格点间距)
+  size: number;    // 0.5–8(标记尺寸;lineWidth = max(0.5, size*0.32))
+}
+
+export interface ThemePackGradient {
+  colors: string[];     // 浅色 stops(2–4 个 #RRGGBB)
+  darkColors: string[]; // 深色 stops(2–4)
+  angle: number;        // iOS 语义:自水平轴顺时针角度(0=左→右,90=上→下)
+}
+
 export interface ThemePack {
   id: string;
   displayName: string;
@@ -50,6 +65,11 @@ export interface ThemePack {
   // accent 填充上的墨色(跨平台 amber.theme.pack 的 inkHex;缺省 = 按 accent 对比度自动推导)
   accentInk?: string;
   dotGrid: boolean; // 首页画布点阵(点阵·陶土/点阵·Pi);false = 平涂(Notion)
+  // design 纹理(patterns 存在时优先于 dotGrid;iOS design 层为权威背景)
+  patterns?: ThemePackPattern[];
+  gradient?: ThemePackGradient;
+  // 源文件带 design.dark(Android 规则:自定义深色色板时关闭 AMOLED 纯黑覆写)
+  designDark?: boolean;
   builtin: boolean;
 }
 
@@ -139,8 +159,9 @@ export const applyThemePack = (pack: ThemePack, dark: boolean): void => {
     bgGlass: `#CC${p.bg.substring(1)}`,
   });
   setAccentColor(pack.accent, pack.accentInk);
-  // D0-11:AMOLED 纯黑覆写(仅深色;画布/渐隐/玻璃改纯黑,卡片面保持原色分层)
-  if (dark && amoledBlack) {
+  // D0-11:AMOLED 纯黑覆写(仅深色;画布/渐隐/玻璃改纯黑,卡片面保持原色分层)。
+  //   源文件带自定义 design.dark 的包跳过(Android 同规则:让作者的深色色板/渐变生效)
+  if (dark && amoledBlack && pack.designDark !== true) {
     applyAmoledBlack();
   }
 };
@@ -171,9 +192,42 @@ interface ThemePackDoc {
   dot_grid?: boolean;
   light?: PaletteDoc;
   dark?: PaletteDoc;
+  patterns?: ThemePackPattern[];
+  gradient?: ThemePackGradient;
+  design_dark?: boolean;
 }
 
 const isHexColor = (v: string): boolean => /^#[0-9a-fA-F]{6}$/.test(v);
+
+const PATTERN_KINDS: string[] = ['dots', 'grid', 'diagonal', 'crosses', 'waves', 'rings'];
+
+// 原生文档纹理校验(KV 回读/AI 生成:宽松,单层非法即丢整层,不拒包)
+const readPatterns = (doc: ThemePackPattern[] | undefined): ThemePackPattern[] | null => {
+  if (doc === undefined || !Array.isArray(doc)) return null;
+  const out: ThemePackPattern[] = [];
+  for (const p of doc) {
+    if (p === null || typeof p !== 'object') continue;
+    if (PATTERN_KINDS.indexOf(p.kind) < 0) continue;
+    if (typeof p.color !== 'string' || !isHexColor(p.color)) continue;
+    if (!Number.isFinite(p.opacity) || p.opacity < 0 || p.opacity > 0.3) continue;
+    if (!Number.isFinite(p.spacing) || p.spacing < 12 || p.spacing > 120) continue;
+    if (!Number.isFinite(p.size) || p.size < 0.5 || p.size > 8) continue;
+    out.push({ kind: p.kind, color: p.color, opacity: p.opacity, spacing: p.spacing, size: p.size });
+    if (out.length >= 3) break;
+  }
+  return out.length > 0 ? out : null;
+};
+
+const readGradient = (doc: ThemePackGradient | undefined): ThemePackGradient | null => {
+  if (doc === undefined || doc === null || typeof doc !== 'object') return null;
+  if (!Array.isArray(doc.colors) || !Array.isArray(doc.darkColors)) return null;
+  if (doc.colors.length < 2 || doc.colors.length > 4) return null;
+  if (doc.darkColors.length < 2 || doc.darkColors.length > 4) return null;
+  for (const c of doc.colors) { if (typeof c !== 'string' || !isHexColor(c)) return null; }
+  for (const c of doc.darkColors) { if (typeof c !== 'string' || !isHexColor(c)) return null; }
+  if (!Number.isFinite(doc.angle)) return null;
+  return { colors: doc.colors, darkColors: doc.darkColors, angle: doc.angle };
+};
 
 export const readPalette = (doc: PaletteDoc | undefined): ThemePalette | null => {
   if (doc === undefined) return null;
@@ -221,6 +275,11 @@ export const parseThemePackJson = (text: string): ThemePack | null => {
     if (doc.accent_ink !== undefined && isHexColor(doc.accent_ink)) {
       pack.accentInk = doc.accent_ink;
     }
+    const patterns: ThemePackPattern[] | null = readPatterns(doc.patterns);
+    if (patterns !== null) pack.patterns = patterns;
+    const gradient: ThemePackGradient | null = readGradient(doc.gradient);
+    if (gradient !== null) pack.gradient = gradient;
+    if (doc.design_dark === true) pack.designDark = true;
     return pack;
   } catch (_e) {
     return null;
@@ -240,6 +299,15 @@ export const themePackToJson = (pack: ThemePack): string => {
   };
   if (pack.accentInk !== undefined) {
     doc.accent_ink = pack.accentInk;
+  }
+  if (pack.patterns !== undefined) {
+    doc.patterns = pack.patterns;
+  }
+  if (pack.gradient !== undefined) {
+    doc.gradient = pack.gradient;
+  }
+  if (pack.designDark === true) {
+    doc.design_dark = true;
   }
   return JSON.stringify(doc);
 };
@@ -327,4 +395,24 @@ export const themePackStore = new ThemePackStore();
 // 全局主题应用入口(模式切换/系统深浅变化时替代裸 applyTheme;pack 由 store 提供)
 export const applyCurrentTheme = (dark: boolean): void => {
   applyThemePack(themePackStore.current(), dark);
+};
+
+// ── 首页画布纹理访问(patterns 优先于 dotGrid;iOS design 层为权威背景) ──
+
+export const currentCanvasPatterns = (): ThemePackPattern[] => {
+  return themePackStore.current().patterns ?? [];
+};
+
+// 当前模式的渐变 stops;无渐变 → null(调用方退化为纯色)
+export const currentCanvasGradient = (dark: boolean): string[] | null => {
+  const g: ThemePackGradient | undefined = themePackStore.current().gradient;
+  if (g === undefined) return null;
+  return dark ? g.darkColors : g.colors;
+};
+
+// iOS 角度 → ArkUI linearGradient angle(ArkUI 0°=从下往上、顺时针为正;iOS 0°=从左往右)
+export const currentCanvasGradientAngle = (): number => {
+  const g: ThemePackGradient | undefined = themePackStore.current().gradient;
+  if (g === undefined) return 180;
+  return (g.angle + 90) % 360;
 };
