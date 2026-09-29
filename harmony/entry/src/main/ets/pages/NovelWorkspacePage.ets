@@ -1,10 +1,12 @@
 // NovelWorkspacePage — 小说工作区:三页签(聊天写作 / 章节正文 / 活资料)
 // 单文件承载三个 pane(@Builder)与对话框(Stack 叠层),状态集中于本页 @State。
 import {
-  ACCENT, ACCENT_INK, BG, ERROR, INK, INK2, INK3, INK4, LINE, MOTION_OVERLAY, OVERLAY, SURFACE, SURFACE2,
+  ACCENT, ACCENT_INK, BG, ERROR, INK, INK2, INK3, INK4, LINE, MOTION_ENTER, MOTION_OVERLAY,
+  MOTION_PRESS, OVERLAY, SURFACE, SURFACE2,
 } from '../design/tokens.ets';
-import { FONT_SERIF } from '../design/fonts.ets';
+import { FONT_SERIF, FONT_MONO, FONT_SANS_MEDIUM } from '../design/fonts.ets';
 import { Icon } from '../components/ui/Icon.ets';
+import { Seg, CardGroup, CardRow } from '../components/PageTemplate.ets';
 import { ChatInput } from '../components/ChatInput.ets';
 import {
   AgentMessageRow, NO_AGENT_MESSAGE_ROW_CAPABILITIES,
@@ -102,10 +104,18 @@ const filterLabel = (f: MaterialFilter): string => {
 @Entry
 @Component
 struct NovelWorkspacePage {
+  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @StorageProp('statusBarHeight') statusBarHeight: number = 44;
   @State project: NovelProject | null = null;
   @State workspaceStatus: NovelWorkspaceStatus | null = null;
   @State branchSheetOpen: boolean = false;
+  // 项目控制 sheet(iOS writingContext):模式/写作模型/本章计划/写作偏好/分支/导出
+  @State controlSheetOpen: boolean = false;
+  @State controlTab: number = 0;
+  @State planThisChapter: string = '';
+  @State planFuture: string = '';
+  @State planPreferences: string = '';
+  @State controlNotice: string = '';
   @State tab: number = 0;
   @State settingsSection: number = 0;
   @State errorMsg: string = '';
@@ -115,10 +125,7 @@ struct NovelWorkspacePage {
   @State auditIssues: NovelAuditIssue[] = [];
   @State modelOptions: NovelModelOptionView[] = [];
   @State busy: boolean = false;
-  // 批量代笔卡默认收起(聊天优先);有任务时常显
-  @State ghostwriteEntryOpen: boolean = false;
-  // 聊天
-  @State draft: string = '';
+  @State draft: string = '';  // 聊天
   @State composeMode: ComposeMode = 'whole_chapter';
   @State activeMessages: UIMessage[] = [];
   @State activeTextDeltasLive: boolean = false;
@@ -212,9 +219,25 @@ struct NovelWorkspacePage {
     this.projectId = params ? (params['projectId'] ?? '') : '';
     this.requestedBranchId = params ? (params['branchId'] ?? '') : '';
     this.requestedPolishJobId = params ? (params['jobId'] ?? '') : '';
+    // 列表页「快速开始」创建的种子:项目首载且空消息时自动发起 quick_start
+    this.pendingQuickStartSeed = params ? (params['quickStartSeed'] ?? '') : '';
     if (params && params['tab'] === 'chapters') this.tab = 1;
     this.reload();
     this.loadProjectModelOptions();
+  }
+
+  private pendingQuickStartSeed: string = '';
+
+  private maybeFireQuickStart(project: NovelProject, activeRun: NovelActiveRun | null): void {
+    if (this.pendingQuickStartSeed.length === 0) return;
+    if (project.messages.length > 0 || activeRun !== null) {
+      this.pendingQuickStartSeed = '';
+      return;
+    }
+    const seed: string = this.pendingQuickStartSeed;
+    this.pendingQuickStartSeed = '';
+    this.draft = seed;
+    this.send('quick_start');
   }
 
   aboutToDisappear(): void {
@@ -245,6 +268,10 @@ struct NovelWorkspacePage {
   // 关闭最上层自绘 overlay;有关闭动作返回 true(已消费返回),无 overlay 返回 false。
   private closeTopOverlay(): boolean {
     // 渲染顺序:后面的 child 更靠上,故按逆序检查
+    if (this.controlSheetOpen) {
+      this.controlSheetOpen = false;
+      return true;
+    }
     if (this.polishCreateOpen) {
       if (!this.polishBusy) this.polishCreateOpen = false;
       return true;
@@ -384,6 +411,7 @@ struct NovelWorkspacePage {
         this.scheduleRecoverableTool(project);
         this.scheduleGhostwritePoll();
         this.schedulePolishPoll();
+        this.maybeFireQuickStart(project, activeRun);
         if (polishNotice.length > 0) {
           promptAction.showToast({ message: polishNotice, duration: 2400 });
         }
@@ -1479,28 +1507,14 @@ struct NovelWorkspacePage {
   novelTimelineRows(): void {
     if (this.project !== null) {
       if (this.project.messages.length === 0 && this.activeRunId.length === 0) {
+        // 空态(iOS 纯文字):快速开始已前置到列表页创建 sheet
         ListItem() {
-          Row() {
-            Column() {
-              Text('从一个念头开始').fontSize(15).fontColor(INK2)
-              Text('在下方写下灵感，先梳理设定与开篇方向。')
-                .fontSize(12).fontColor(INK3).margin({ top: 6 })
-            }
-            .alignItems(HorizontalAlign.Start).layoutWeight(1)
-            Text('快速开始')
-              .fontSize(13)
-              .fontColor(this.draft.trim().length > 0 && !this.hasBlockingNovelRun() ? ACCENT_INK : INK4)
-              .constraintSize({ minWidth: 96 }).height(44).textAlign(TextAlign.Center)
-              .padding({ left: 18, right: 18 })
-              .borderRadius(22)
-              .backgroundColor(this.draft.trim().length > 0 && !this.hasBlockingNovelRun() ? ACCENT : SURFACE2)
-              .margin({ left: 12 })
-              .onClick((): void => {
-                if (this.draft.trim().length > 0 && !this.hasBlockingNovelRun()) this.send('quick_start');
-              })
-              .accessibilityText('用当前灵感快速开始创作')
+          Column() {
+            Text('新的创作对话').fontSize(15).fontColor(INK2).width('100%')
+            Text('在下方写下灵感，先梳理设定与开篇方向。')
+              .fontSize(12).fontColor(INK3).margin({ top: 6 }).width('100%')
           }
-          .alignItems(VerticalAlign.Center)
+          .alignItems(HorizontalAlign.Start)
           .width('100%').padding({ left: 16, right: 16, top: 12, bottom: 12 })
         }
       }
@@ -1598,52 +1612,283 @@ struct NovelWorkspacePage {
     }
   }
 
+  // ===== 项目控制 sheet(iOS writingContext:模式与偏好) =====
+
+  private composeModeLabel(): string {
+    if (this.composeMode === 'discuss') return '讨论';
+    if (this.composeMode === 'continue') return '写一段';
+    return '写整章';
+  }
+
+  private writingModelLabel(): string {
+    const p: NovelProject | null = this.project;
+    if (p === null) return '跟随全局';
+    const writing: NovelModelTarget = p.modelPolicy.writing;
+    if (writing.kind === 'global') return '跟随全局';
+    const option: NovelModelOptionView | undefined = this.modelOptions.find(
+      (o: NovelModelOptionView): boolean => o.providerId === writing.providerId && o.modelId === writing.modelId);
+    return option !== undefined ? option.label : writing.modelId;
+  }
+
+  private workspaceSubtitle(): string {
+    const mode: string = this.ghostwriteJob !== null ? '代笔' : '共创';
+    const branch: string = this.workspaceStatus !== null ? this.workspaceStatus.activeBranchName : '';
+    return `${mode} · ${branch} · ${this.writingModelLabel()}`;
+  }
+
+  // 创作方式 menu(讨论/写一段/写整章 + 归档当前讨论;iOS 意图 menu 同款)
+  private showComposeModeMenu(): void {
+    if (this.hasBlockingNovelRun()) return;
+    promptAction.showActionMenu({
+      title: '创作方式',
+      buttons: [
+        { text: '讨论', color: INK },
+        { text: '写一段', color: INK },
+        { text: '写整章', color: INK },
+        { text: '归档当前讨论', color: INK },
+      ],
+    }).then((result: ExportMenuResult): void => {
+      if (result.index === 0) this.composeMode = 'discuss';
+      else if (result.index === 1) this.composeMode = 'continue';
+      else if (result.index === 2) this.composeMode = 'whole_chapter';
+      else if (result.index === 3) this.archiveDiscussion();
+    }).catch((): void => {});
+  }
+
+  private openControlSheet(): void {
+    const p: NovelProject | null = this.project;
+    if (p === null) return;
+    this.planThisChapter = p.branchSettings.thisChapterPlan;
+    this.planFuture = p.branchSettings.futurePlan;
+    this.planPreferences = p.branchSettings.preferences;
+    this.controlTab = this.ghostwriteJob !== null ? 1 : 0;
+    this.controlNotice = '';
+    this.controlSheetOpen = true;
+  }
+
+  private selectWritingTarget(target: NovelModelTarget): void {
+    const p: NovelProject | null = this.project;
+    if (p === null || this.busy) return;
+    this.saveNovelModelPolicy({
+      writing: target, review: p.modelPolicy.review, stateSync: p.modelPolicy.stateSync,
+    });
+  }
+
+  private writingTargetSelected(option: NovelModelOptionView | null): boolean {
+    const p: NovelProject | null = this.project;
+    if (p === null) return false;
+    const writing: NovelModelTarget = p.modelPolicy.writing;
+    if (option === null) return writing.kind === 'global';
+    if (writing.kind !== 'fixed') return false;
+    return writing.providerId === option.providerId && writing.modelId === option.modelId;
+  }
+
+  private async savePlanPrefs(): Promise<void> {
+    const p: NovelProject | null = this.project;
+    if (p === null || this.busy) return;
+    const s: NovelBranchSettings = p.branchSettings;
+    await this.saveNovelBranchSettings({
+      thisChapterPlan: this.planThisChapter,
+      futurePlan: this.planFuture,
+      preferences: this.planPreferences,
+      foreshadows: s.foreshadows,
+      confirmedDecisions: s.confirmedDecisions,
+    });
+    if (this.errorMsg.length === 0) this.controlNotice = '已保存到当前分支';
+  }
+
+  // 写作模型选项行(跟随全局 + 固定模型;iOS ComposerModelSheet 的「跟随小说默认」)
+  @Builder
+  private ModelRow(label: string, detail: string, selected: boolean, available: boolean, isLast: boolean,
+    target: NovelModelTarget): void {
+    Column() {
+      Row() {
+        Column({ space: 2 }) {
+          Text(label).fontSize(15).fontFamily(FONT_SANS_MEDIUM).fontColor(available ? INK : INK4)
+            .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+          if (detail.length > 0) {
+            Text(detail).fontSize(12).fontColor(INK3).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+          }
+        }.alignItems(HorizontalAlign.Start).layoutWeight(1)
+        if (selected) {
+          Icon({ name: 'check', iconSize: 16, color: ACCENT })
+        }
+      }
+      .width('100%').alignItems(VerticalAlign.Center).constraintSize({ minHeight: 52 })
+      .padding({ left: 14, right: 14, top: 10, bottom: 10 })
+      .opacity(available ? 1 : 0.55)
+      .enabled(available && !this.busy)
+      .onClick((): void => { this.selectWritingTarget(target); })
+      if (!isLast) {
+        Row() {
+          Row().width('100%').height(1).backgroundColor(LINE)
+        }.width('100%').padding({ left: 14, right: 14 })
+      }
+    }.width('100%')
+  }
+
+  @Builder
+  private ModelRows(): void {
+    this.ModelRow('跟随聊天全局模型', '写作使用应用聊天当前模型', this.writingTargetSelected(null), true,
+      this.modelOptions.length === 0, { kind: 'global' })
+    ForEach(this.modelOptions, (option: NovelModelOptionView, idx: number): void => {
+      this.ModelRow(option.label,
+        option.available ? option.providerLabel : `${option.providerLabel} · 当前不可用`,
+        this.writingTargetSelected(option), option.available, idx === this.modelOptions.length - 1,
+        { kind: 'fixed', providerId: option.providerId, modelId: option.modelId })
+    }, (option: NovelModelOptionView): string => `${option.providerId}-${option.modelId}`)
+  }
+
+  @Builder
+  private ControlOps(): void {
+    CardRow({ label: '分支管理', desc: '创建、切换与撤销分支',
+      onRowClick: (): void => {
+        if (this.busy || this.novelJobLocksWorkspace()) return;
+        this.controlSheetOpen = false;
+        this.branchSheetOpen = true;
+      } })
+    CardRow({ label: '导出作品', desc: '工作区 ZIP / 正文 TXT / Markdown / EPUB', isLast: true,
+      onRowClick: (): void => {
+        this.controlSheetOpen = false;
+        this.showExportMenu();
+      } })
+  }
+
+  @Builder
+  private SheetLabel(label: string): void {
+    Text(label).fontSize(12).fontFamily(FONT_SANS_MEDIUM).fontColor(INK3)
+      .width('100%').margin({ bottom: 8 })
+  }
+
+  // 项目控制 sheet(顶栏 principal 触发;bottom sheet 85%,内容可滚)
+  @Builder
+  private ControlSheet(): void {
+    Column() {
+      Blank().onClick((): void => { this.controlSheetOpen = false; })
+      Column() {
+        Row() {
+          Column({ space: 2 }) {
+            Text('项目控制').fontSize(17).fontWeight(FontWeight.Bold).fontFamily(FONT_SANS_MEDIUM).fontColor(INK)
+            Text(this.project !== null ? this.project.name : '').fontSize(12).fontColor(INK3)
+              .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+          }.alignItems(HorizontalAlign.Start).layoutWeight(1)
+          Text('完成').fontSize(15).fontFamily(FONT_SANS_MEDIUM).fontColor(ACCENT)
+            .constraintSize({ minWidth: 44, minHeight: 44 }).textAlign(TextAlign.End)
+            .onClick((): void => { this.controlSheetOpen = false; })
+        }.width('100%').alignItems(VerticalAlign.Center).padding({ bottom: 10 })
+        Scroll() {
+          Column() {
+            this.SheetLabel('创作模式')
+            Seg({ options: ['共创', '代笔'], selected: this.controlTab,
+              onSelect: (idx: number): void => { this.controlTab = idx; } })
+            if (this.controlTab === 1) {
+              Column() {
+                NovelGhostwriteCard({
+                  job: this.ghostwriteJob,
+                  planReady: this.ghostwritePlanReady(),
+                  modelReady: this.ghostwriteModelsReady(),
+                  planDisabledReason: '请先保存本章计划。',
+                  modelDisabledReason: this.ghostwriteModelReason(),
+                  busy: this.ghostwriteBusy,
+                  onStart: (targetChapterCount: number): void => { this.startGhostwrite(targetChapterCount); },
+                  onPause: (): void => { this.pauseGhostwrite(); },
+                  onResume: (): void => { this.resumeGhostwrite(); },
+                  onRetry: (): void => { this.retryGhostwrite(); },
+                  onCancel: (): void => { this.cancelGhostwrite(); },
+                })
+              }
+              .width('100%').margin({ top: 10 }).borderRadius(14).clip(true)
+            } else {
+              Text('与 Amber 逐段讨论、逐章收录正文。').fontSize(12).fontColor(INK3)
+                .width('100%').margin({ top: 8 })
+            }
+
+            Column() {}.height(16)
+            this.SheetLabel('写作模型')
+            CardGroup({ radius: 18, stroke: true, content: (): void => { this.ModelRows(); } })
+
+            Column() {}.height(16)
+            this.SheetLabel('本章计划')
+            TextArea({ text: this.planThisChapter, placeholder: '本章的位置、目标冲突、必须发生与不能发生…' })
+              .width('100%').height(100).fontSize(13).fontColor(INK).placeholderColor(INK4)
+              .backgroundColor(SURFACE2).borderRadius(12).padding(12)
+              .enabled(!this.busy)
+              .onChange((v: string): void => { this.planThisChapter = v; })
+            Column() {}.height(12)
+            this.SheetLabel('往后计划')
+            TextArea({ text: this.planFuture, placeholder: '接下来几章的方向…' })
+              .width('100%').height(80).fontSize(13).fontColor(INK).placeholderColor(INK4)
+              .backgroundColor(SURFACE2).borderRadius(12).padding(12)
+              .enabled(!this.busy)
+              .onChange((v: string): void => { this.planFuture = v; })
+            Column() {}.height(12)
+            this.SheetLabel('写作偏好')
+            TextArea({ text: this.planPreferences, placeholder: '文风、视角、节奏偏好…' })
+              .width('100%').height(80).fontSize(13).fontColor(INK).placeholderColor(INK4)
+              .backgroundColor(SURFACE2).borderRadius(12).padding(12)
+              .enabled(!this.busy)
+              .onChange((v: string): void => { this.planPreferences = v; })
+            Row() {
+              Text(this.controlNotice).fontSize(12).fontColor(INK3).layoutWeight(1)
+              Text(this.busy ? '保存中…' : '保存').fontSize(14).fontWeight(FontWeight.Medium)
+                .fontFamily(FONT_SANS_MEDIUM).fontColor(this.busy ? INK4 : ACCENT)
+                .constraintSize({ minHeight: 44 })
+                .enabled(!this.busy)
+                .onClick((): void => { this.savePlanPrefs(); })
+            }.width('100%').margin({ top: 6 })
+
+            Column() {}.height(16)
+            this.SheetLabel('操作')
+            CardGroup({ radius: 18, stroke: true, content: (): void => { this.ControlOps(); } })
+            Column() {}.height(24)
+          }
+          .width('100%').alignItems(HorizontalAlign.Start)
+        }
+        .width('100%').layoutWeight(1).align(Alignment.TopStart).scrollBar(BarState.Off)
+      }
+      .width('100%').height('85%')
+      .padding({ left: 18, right: 18, top: 16, bottom: 14 + this.navBarHeight })
+      .backgroundColor(SURFACE).borderRadius({ topLeft: 20, topRight: 20 })
+      .onClick((): void => {})
+      .transition(TransitionEffect.translate({ y: 160 })
+        .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
+    }
+    .width('100%').height('100%').backgroundColor(OVERLAY)
+    .justifyContent(FlexAlign.End)
+    .transition(TransitionEffect.OPACITY.animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
+  }
+
   @Builder
   emptyTimelineSlot(): void {}
 
   @Builder
   chatPane(): void {
     Column() {
-    // 工具行:批量代笔入口(默认收起,聊天优先;有任务时卡片常显) + 归档讨论
-    Row() {
-      Row() {
-        Icon({ name: 'spark', iconSize: 13, color: this.ghostwriteJob !== null ? ACCENT : INK3 })
-        Text(this.ghostwriteJob !== null ? '批量代笔进行中' : (this.ghostwriteEntryOpen ? '收起批量代笔' : '批量代笔'))
-          .fontSize(12).fontColor(this.ghostwriteJob !== null ? ACCENT : INK3).margin({ left: 6 })
-        Icon({ name: this.ghostwriteEntryOpen || this.ghostwriteJob !== null ? 'chevron_down' : 'chevron_right',
-          iconSize: 12, color: INK4 }).margin({ left: 4 })
+    Column() {
+      // 代笔任务进行中时卡片常显于聊天顶(控制入口在顶栏「项目控制」)
+      if (this.project !== null && this.ghostwriteJob !== null) {
+        NovelGhostwriteCard({
+          job: this.ghostwriteJob,
+          planReady: this.ghostwritePlanReady(),
+          modelReady: this.ghostwriteModelsReady(),
+          planDisabledReason: '请先在设定中保存本章计划。',
+          modelDisabledReason: this.ghostwriteModelReason(),
+          busy: this.ghostwriteBusy,
+          onStart: (targetChapterCount: number): void => { this.startGhostwrite(targetChapterCount); },
+          onPause: (): void => { this.pauseGhostwrite(); },
+          onResume: (): void => { this.resumeGhostwrite(); },
+          onRetry: (): void => { this.retryGhostwrite(); },
+          onCancel: (): void => { this.cancelGhostwrite(); },
+        })
+        .constraintSize({ maxHeight: 404 })
+        .margin({ left: 16, right: 16, bottom: 8 })
+        .borderRadius(14)
+        .clip(true)
+        .transition(TransitionEffect.OPACITY
+          .combine(TransitionEffect.translate({ y: -8 }))
+          .animation({ duration: MOTION_ENTER, curve: Curve.EaseOut }))
       }
-      .constraintSize({ minHeight: 44 })
-      .padding({ left: 20, right: 12 })
-      .alignItems(VerticalAlign.Center)
-      .enabled(this.ghostwriteJob === null)
-      .onClick((): void => { this.ghostwriteEntryOpen = !this.ghostwriteEntryOpen; })
-      .accessibilityText('展开或收起批量代笔')
-      Blank()
-      Text('归档讨论').fontSize(12).fontColor(INK3)
-        .height(44).padding({ left: 12, right: 20 }).textAlign(TextAlign.Center)
-        .onClick((): void => { this.archiveDiscussion(); })
-    }
-    .width('100%').padding({ top: 4 })
-    if (this.project !== null && (this.ghostwriteJob !== null || this.ghostwriteEntryOpen)) {
-      NovelGhostwriteCard({
-        job: this.ghostwriteJob,
-        planReady: this.ghostwritePlanReady(),
-        modelReady: this.ghostwriteModelsReady(),
-        planDisabledReason: '请先在设定中保存本章计划。',
-        modelDisabledReason: this.ghostwriteModelReason(),
-        busy: this.ghostwriteBusy,
-        onStart: (targetChapterCount: number): void => { this.startGhostwrite(targetChapterCount); },
-        onPause: (): void => { this.pauseGhostwrite(); },
-        onResume: (): void => { this.resumeGhostwrite(); },
-        onRetry: (): void => { this.retryGhostwrite(); },
-        onCancel: (): void => { this.cancelGhostwrite(); },
-      })
-      .constraintSize({ maxHeight: this.ghostwriteJob === null ? 356 : 404 })
-      .margin({ left: 16, right: 16, bottom: 8 })
-      .borderRadius(14)
-      .clip(true)
-    }
+    }.width('100%').clip(true)
     Column() {
       // Chat 与 Novel 共享同一 Timeline/AgentMessageRow；Timeline 独占 16vp 水平 gutter。
       InteractiveMessageTimeline({
@@ -1691,15 +1936,30 @@ struct NovelWorkspacePage {
       .layoutWeight(1)
       .clip(true)
 
-      // 输入器(复用聊天页 ChatInput;上方保留模式切换)
+      // 输入器(复用聊天页 ChatInput;meta 行 = 模型 chip + 创作方式 menu,iOS 同款)
       Column() {
         Row() {
-          this.modeChip('讨论', 'discuss')
-          this.modeChip('续写', 'continue')
-          this.modeChip('整章', 'whole_chapter')
+          Text(this.writingModelLabel())
+            .fontSize(11).fontFamily(FONT_MONO).fontColor(INK3)
+            .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+            .constraintSize({ minHeight: 44, maxWidth: '50%' })
+            .padding({ left: 10, right: 10 })
+            .backgroundColor(SURFACE2).borderRadius(12)
+            .enabled(this.project !== null)
+            .onClick((): void => { this.openControlSheet(); })
+            .accessibilityText('写作模型，打开项目控制')
           Blank()
+          Text(`${this.composeModeLabel()} ▾`)
+            .fontSize(12).fontFamily(FONT_SANS_MEDIUM).fontColor(INK2)
+            .maxLines(1)
+            .constraintSize({ minHeight: 44 })
+            .padding({ left: 12, right: 12 })
+            .backgroundColor(SURFACE2).borderRadius(12)
+            .opacity(this.hasBlockingNovelRun() ? 0.5 : 1)
+            .onClick((): void => { this.showComposeModeMenu(); })
+            .accessibilityText('创作方式')
         }
-        .width('100%').margin({ bottom: 4 })
+        .width('100%').margin({ bottom: 6 }).alignItems(VerticalAlign.Center)
 
         ChatInput({
           text: this.draft,
@@ -1745,6 +2005,9 @@ struct NovelWorkspacePage {
       .alignContent(Alignment.Center)
       .onClick((): void => { this.jumpNovelToBottom(); })
       .accessibilityText('回到消息底部')
+      .transition(TransitionEffect.OPACITY
+        .combine(TransitionEffect.translate({ y: 8 }))
+        .animation({ duration: MOTION_PRESS, curve: Curve.EaseOut }))
     }
   }
 
@@ -1752,18 +2015,6 @@ struct NovelWorkspacePage {
     if (this.composeMode === 'discuss') return '聊人物、情节或世界观…';
     if (this.composeMode === 'continue') return '描述接下来发生的场景…';
     return '描述本章要点，生成完整章节…';
-  }
-
-  @Builder
-  modeChip(label: string, mode: ComposeMode): void {
-    Text(label)
-      .fontSize(13).height(44).padding({ left: 14, right: 14 }).borderRadius(22)
-      .textAlign(TextAlign.Center)
-      .fontColor(this.composeMode === mode ? ACCENT_INK : INK2)
-      .backgroundColor(this.composeMode === mode ? ACCENT : SURFACE2)
-      .margin({ right: 8 })
-      .opacity(this.hasBlockingNovelRun() ? 0.5 : 1)
-      .onClick(() => { if (!this.hasBlockingNovelRun()) this.composeMode = mode; })
   }
 
   @Builder
@@ -1957,7 +2208,7 @@ struct NovelWorkspacePage {
                 }
                 .width('100%').margin({ top: 10 })
               }
-              .width('100%').padding(14).backgroundColor(SURFACE).borderRadius(12)
+              .width('100%').padding(14).backgroundColor(SURFACE).borderRadius(12).clip(true)
               .border({ width: 1, color: LINE }).margin({ bottom: 12 })
             }, (s: NovelMaterialSuggestion) => s.id)
           }
@@ -1990,23 +2241,31 @@ struct NovelWorkspacePage {
                 }
                 .width('100%').constraintSize({ minHeight: 44 })
                 .onClick(() => {
-                  this.expandedMaterialId = this.expandedMaterialId === m.id ? '' : m.id;
+                  animateTo({ duration: MOTION_ENTER, curve: Curve.EaseOut }, (): void => {
+                    this.expandedMaterialId = this.expandedMaterialId === m.id ? '' : m.id;
+                  });
                 })
                 if (this.expandedMaterialId === m.id) {
-                  Text(m.content).fontSize(13).fontColor(INK2).lineHeight(20).margin({ top: 10 })
-                  Row() {
-                    Blank()
-                    Text('删除').fontSize(12).fontColor(ERROR)
-                      .constraintSize({ minWidth: 44 }).height(44).textAlign(TextAlign.Center).margin({ right: 8 })
-                      .onClick(() => { this.deleteMaterial(m.id); })
-                    Text('编辑').fontSize(12).fontColor(ACCENT)
-                      .constraintSize({ minWidth: 44 }).height(44).textAlign(TextAlign.Center)
-                      .onClick(() => { this.openEditMaterial(m); })
+                  Column() {
+                    Text(m.content).fontSize(13).fontColor(INK2).lineHeight(20).margin({ top: 10 })
+                    Row() {
+                      Blank()
+                      Text('删除').fontSize(12).fontColor(ERROR)
+                        .constraintSize({ minWidth: 44 }).height(44).textAlign(TextAlign.Center).margin({ right: 8 })
+                        .onClick(() => { this.deleteMaterial(m.id); })
+                      Text('编辑').fontSize(12).fontColor(ACCENT)
+                        .constraintSize({ minWidth: 44 }).height(44).textAlign(TextAlign.Center)
+                        .onClick(() => { this.openEditMaterial(m); })
+                    }
+                    .width('100%').margin({ top: 10 })
                   }
-                  .width('100%').margin({ top: 10 })
+                  .width('100%')
+                  .transition(TransitionEffect.OPACITY
+                    .combine(TransitionEffect.translate({ y: -8 }))
+                    .animation({ duration: MOTION_ENTER, curve: Curve.EaseOut }))
                 }
               }
-              .width('100%').padding(14).backgroundColor(SURFACE).borderRadius(12)
+              .width('100%').padding(14).backgroundColor(SURFACE).borderRadius(12).clip(true)
               .border({ width: 1, color: LINE }).margin({ bottom: 10 })
             }, (m: NovelMaterial) => m.id)
           }
@@ -2076,46 +2335,58 @@ struct NovelWorkspacePage {
 
   build(): void {
     Stack() {
+      // 主题纪元重挂载(勿拆):epoch 变化 → 整页子树销毁重建,全量重读令牌
+      ForEach([this.themeEpoch], (_e: number): void => {
       Column() {
-        // 顶栏
-        Row() {
-          Stack() {
-            Icon({ name: 'back', iconSize: 22, color: INK3 })
-          }
-          .width(44).height(44).alignContent(Alignment.Center)
-          .onClick(() => { this.handleBack(); })
-          .accessibilityText('返回')
-          Text(this.project !== null ? this.project.name : '小说创作')
-            .fontSize(20).fontWeight(FontWeight.Bold).fontColor(INK)
-            .fontFamily(FONT_SERIF).margin({ left: 12 }).layoutWeight(1)
-            .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
-          if (this.workspaceStatus !== null) {
-            Text(`${this.workspaceStatus.activeBranchName} ▾`)
-              .fontSize(12).fontColor(this.busy || this.novelJobLocksWorkspace() ? INK4 : ACCENT)
+        // 顶栏(iOS NovelProjectWorkspaceView):返回玻璃圆 + 居中 principal
+        // (项目名 + 模式·分支·模型,点开「项目控制」)+ 右侧导出玻璃圆。
+        // 可点胶囊必须先声明(下层),整宽按钮行后声明覆盖边缘热区(Stack 点击拦截坑)
+        Stack({ alignContent: Alignment.Center }) {
+          Column() {
+            Text(this.project !== null ? this.project.name : '小说创作')
+              .fontSize(17).fontWeight(FontWeight.Bold).fontColor(INK).fontFamily(FONT_SERIF)
               .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
-              .constraintSize({ minWidth: 44, maxWidth: 104 })
-              .height(44).textAlign(TextAlign.Center)
-              .padding({ left: 8, right: 8 })
-              .onClick((): void => {
-                if (!this.busy && !this.novelJobLocksWorkspace()) this.branchSheetOpen = true;
-              })
-              .accessibilityText(`当前分支 ${this.workspaceStatus.activeBranchName}，打开分支面板`)
+            Text(this.workspaceSubtitle())
+              .fontSize(11).fontColor(INK3).fontFamily(FONT_SANS_MEDIUM)
+              .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+              .margin({ top: 2 })
           }
-          if (this.busy) LoadingProgress().width(16).height(16).color(ACCENT)
-          Text('导出').fontSize(14).fontColor(this.busy ? INK4 : ACCENT)
-            .width(44).height(44).textAlign(TextAlign.Center)
+          .alignItems(HorizontalAlign.Center)
+          .padding({ left: 60, right: 60 })
+          .width('100%')
+          .constraintSize({ minHeight: 44 })
+          .enabled(this.project !== null)
+          .onClick((): void => { this.openControlSheet(); })
+          .accessibilityText('项目控制')
+          Row() {
+            Row() {
+              Icon({ name: 'back', iconSize: 18, color: INK })
+            }
+            .width(44).height(44).borderRadius(22).backgroundColor(SURFACE)
+            .border({ width: 0.5, color: LINE })
+            .justifyContent(FlexAlign.Center).alignItems(VerticalAlign.Center)
+            .onClick((): void => { this.handleBack(); })
+            .accessibilityText('返回')
+            Blank()
+            Row() {
+              Icon({ name: 'share', iconSize: 17, color: INK2 })
+            }
+            .width(44).height(44).borderRadius(22).backgroundColor(SURFACE)
+            .border({ width: 0.5, color: LINE })
+            .justifyContent(FlexAlign.Center).alignItems(VerticalAlign.Center)
+            .enabled(!this.busy && this.project !== null)
             .onClick((): void => { this.showExportMenu(); })
+            .accessibilityText('导出')
+          }
+          .width('100%')
         }
-        .width('100%').padding({ left: 14, right: 14, top: this.statusBarHeight + 2, bottom: 11 })
+        .width('100%').padding({ left: 16, right: 16, top: this.statusBarHeight + 10, bottom: 10 })
         .backgroundColor(BG)
 
-        // 页签
-        Row() {
-          this.tabChip('创作', 0)
-          this.tabChip('正文', 1)
-          this.tabChip('设定', 2)
-        }
-        .width('100%').padding({ left: 16, right: 16, top: 4, bottom: 8 })
+        // 页签(iOS segmented:灰轨 + 白 pill)
+        Seg({ options: ['创作', '正文', '设定'], selected: this.tab,
+          onSelect: (idx: number): void => { this.tab = idx; } })
+          .margin({ left: 16, right: 16, top: 2, bottom: 8 })
 
         if (this.errorMsg.length > 0) {
           Text(this.errorMsg).fontSize(12).fontColor(ERROR).lineHeight(18)
@@ -2151,11 +2422,11 @@ struct NovelWorkspacePage {
       }
       // N2:章节操作菜单
       if (this.chapterMenuId.length > 0) {
-        this.chapterMenuOverlay()
+        this.chapterMenuOverlay(this.chapterMenuId)
       }
       // N2:版本历史 sheet
       if (this.versionsOpen) {
-        this.versionsSheetOverlay()
+        this.versionsSheetOverlay(this.versionsFor(this.versionsChapterId))
       }
       if (this.branchSheetOpen && this.workspaceStatus !== null) {
         NovelBranchSheet({
@@ -2189,20 +2460,16 @@ struct NovelWorkspacePage {
           onClose: (): void => { if (!this.polishBusy) this.polishCreateOpen = false; },
         })
       }
-    }
+      // 项目控制 sheet(顶栏 principal 触发,渲染最上层)
+      if (this.controlSheetOpen) {
+        this.ControlSheet()
+      }
+    
+      }, (e: number): string => `theme-${e}`)
+}
+      .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .width('100%').height('100%')
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
-  }
-
-  @Builder
-  tabChip(label: string, idx: number): void {
-    Text(label)
-      .fontSize(13).layoutWeight(1).textAlign(TextAlign.Center)
-      .height(44).borderRadius(22)
-      .fontColor(this.tab === idx ? ACCENT_INK : INK2)
-      .backgroundColor(this.tab === idx ? ACCENT : SURFACE2)
-      .margin({ left: 4, right: 4 })
-      .onClick(() => { this.tab = idx; })
   }
 
   @Builder
@@ -2276,9 +2543,12 @@ struct NovelWorkspacePage {
         .width('100%').margin({ top: 16 })
       }
       .width('88%').padding(22).backgroundColor(SURFACE).borderRadius(16)
+      .transition(TransitionEffect.translate({ y: 24 })
+        .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
     }
     .width('100%').height('100%').backgroundColor(OVERLAY)
     .justifyContent(FlexAlign.Center)
+    .transition(TransitionEffect.OPACITY.animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
   }
 
   @Builder
@@ -2327,13 +2597,16 @@ struct NovelWorkspacePage {
         .width('100%').margin({ top: 16 })
       }
       .width('88%').padding(22).backgroundColor(SURFACE).borderRadius(16)
+      .transition(TransitionEffect.translate({ y: 24 })
+        .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
     }
     .width('100%').height('100%').backgroundColor(OVERLAY)
     .justifyContent(FlexAlign.Center)
+    .transition(TransitionEffect.OPACITY.animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
   }
 
   @Builder
-  chapterMenuOverlay(): void {
+  chapterMenuOverlay(chapterId: string): void {
     if (this.chapterMenuId.length > 0) {
       Column() {
         Blank().onClick(() => { this.chapterMenuId = ''; })
@@ -2342,16 +2615,19 @@ struct NovelWorkspacePage {
           this.menuRow('润色', 'polish')
           this.menuRow('版本历史', 'versions')
           this.menuRow('编辑', 'edit')
-          this.menuRow(this.isDiscarded(this.chapterMenuId) ? '取消废弃' : '废弃章节', 'discard')
+          this.menuRow(this.isDiscarded(chapterId) ? '取消废弃' : '废弃章节', 'discard')
         }
         .width('100%')
         .backgroundColor(SURFACE)
         .borderRadius({ topLeft: 20, topRight: 20 })
         .padding({ top: 10, bottom: 16 })
+        .transition(TransitionEffect.translate({ y: 160 })
+          .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
       }
       .width('100%').height('100%')
       .backgroundColor(OVERLAY)
       .justifyContent(FlexAlign.End)
+      .transition(TransitionEffect.OPACITY.animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
     }
   }
 
@@ -2384,19 +2660,19 @@ struct NovelWorkspacePage {
   }
 
   @Builder
-  versionsSheetOverlay(): void {
+  versionsSheetOverlay(versions: NovelChapterVersion[]): void {
     if (this.versionsOpen) {
       Column() {
         Blank().onClick(() => { this.versionsOpen = false; })
         Column() {
           Text('版本历史').fontSize(17).fontWeight(FontWeight.Bold).fontColor(INK)
             .width('100%').padding({ left: 20, right: 20, top: 16, bottom: 8 })
-          if (this.project === null || this.versionsFor(this.versionsChapterId).length === 0) {
+          if (versions.length === 0) {
             Text('暂无历史版本').fontSize(13).fontColor(INK3)
               .width('100%').padding({ left: 20, right: 20, top: 12, bottom: 20 })
           } else {
             List() {
-              ForEach(this.versionsFor(this.versionsChapterId), (v: NovelChapterVersion) => {
+              ForEach(versions, (v: NovelChapterVersion) => {
                 ListItem() {
                   Row() {
                     Column() {
@@ -2420,10 +2696,13 @@ struct NovelWorkspacePage {
         .backgroundColor(SURFACE)
         .borderRadius({ topLeft: 20, topRight: 20 })
         .padding({ bottom: 16 })
+        .transition(TransitionEffect.translate({ y: 160 })
+          .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
       }
       .width('100%').height('100%')
       .backgroundColor(OVERLAY)
       .justifyContent(FlexAlign.End)
+      .transition(TransitionEffect.OPACITY.animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
     }
   }
 
