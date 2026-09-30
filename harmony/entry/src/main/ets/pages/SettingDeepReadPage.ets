@@ -6,7 +6,7 @@
 //   表单控件装入卡片(标题 16 medium sans、字段标 mono meta、值 12 muted)/
 //   FooterNote 组下脚注,逻辑零改动(读写/测试连通/保存/模型库增删全原样)。
 import {
-  ACCENT, INK, INK3, INK4, SURFACE, SURFACE2, ERROR, SIGNAL, LINE,
+  ACCENT, BG, INK, INK3, INK4, SURFACE, SURFACE2, ERROR, SIGNAL, LINE,
   TEXT_STYLES, GUTTER, MOTION_OVERLAY, accentSoftBg, lineHeightForSize,
 } from '../design/tokens.ets';
 import { FONT_SANS_MEDIUM, FONT_MONO_MEDIUM } from '../design/fonts.ets';
@@ -27,8 +27,6 @@ import type { Storage, ModelConfig } from '@amber/deepread-domain';
 import { makeModelConfig } from '@amber/deepread-domain';
 import { NEWSNOW_PRESETS } from '../platform_impl/NewsNowProvider.ets';
 import type { NewsNowPreset } from '../platform_impl/NewsNowProvider.ets';
-import { canvasGradientColors, currentCanvasGradientAngle } from '../design/theme_packs.ets';
-import { DesignCanvasLayer } from '../design/DesignCanvasLayer.ets';
 
 const DOMAIN: number = 0x0001;
 const TAG: string = 'DeepRead.Settings';
@@ -450,8 +448,6 @@ struct SettingDeepReadPage {
     Stack() {
       // 主题纪元重挂载(勿拆):epoch 变化 → 整页子树销毁重建,全量重读令牌
       ForEach([this.themeEpoch], (_e: number): void => {
-      // 画布纹理层(共享组件;压在渐变上、内容下)
-      DesignCanvasLayer({ surface: 'shell' })
       Column() {
         CenteredTitleBar({ title: '深度阅读设置' })
       Scroll() {
@@ -507,14 +503,10 @@ struct SettingDeepReadPage {
         .width('100%').alignItems(HorizontalAlign.Start)
         .padding({ bottom: 20 })
       }
-      .layoutWeight(1).align(Alignment.TopStart)
+      .layoutWeight(1).align(Alignment.TopStart).backgroundColor(BG)
       .align(Alignment.TopStart)
       }
-      .width('100%').height('100%')
-      .linearGradient({
-        angle: currentCanvasGradientAngle(),
-        colors: canvasGradientColors(),
-      })
+      .width('100%').height('100%').backgroundColor(BG)
 
       if (this.modelSheetOpen) {
         this.ModelSheet()

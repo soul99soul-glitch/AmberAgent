@@ -4,13 +4,11 @@
 // 2026-09-27 二级页 iOS 对齐:仅换视觉骨架(CenteredTitleBar/PlainSection/
 //   CardGroup r18+描边/CardRow/FooterNote),版本信息与展示逻辑零改动。
 import { bundleManager } from '@kit.AbilityKit';
-import { INK, INK3, BODY, TITLE, TEXT_STYLES } from '../design/tokens.ets';
+import { INK, INK3, BG, BODY, TITLE, TEXT_STYLES } from '../design/tokens.ets';
 import { FONT_SANS_MEDIUM, FONT_SANS_BOLD } from '../design/fonts.ets';
 import {
   CenteredTitleBar, PlainSection, CardGroup, CardRow, FooterNote, PageSpacer,
 } from '../components/PageTemplate.ets';
-import { canvasGradientColors, currentCanvasGradientAngle } from '../design/theme_packs.ets';
-import { DesignCanvasLayer } from '../design/DesignCanvasLayer.ets';
 
 @Entry
 @Component
@@ -31,8 +29,6 @@ struct SettingAboutPage {
     Column() {
       // 主题纪元重挂载(勿拆):epoch 变化 → 整页子树销毁重建,全量重读令牌
       ForEach([this.themeEpoch], (_e: number): void => {
-      // 画布纹理层(共享组件;压在渐变上、内容下)
-      DesignCanvasLayer({ surface: 'shell' })
       CenteredTitleBar({ title: '关于' })
 
       Scroll() {
@@ -65,11 +61,7 @@ struct SettingAboutPage {
       }, (e: number): string => `theme-${e}`)
 }
       .opacity(this.themeEpoch >= 0 ? 1 : 1)
-    .width('100%').height('100%')
-    .linearGradient({
-      angle: currentCanvasGradientAngle(),
-      colors: canvasGradientColors(),
-    })
+    .width('100%').height('100%').backgroundColor(BG)
   }
 
   // ── 卡片内容(@Builder:组件构造必须在 builder 上下文,铁律 4b)──

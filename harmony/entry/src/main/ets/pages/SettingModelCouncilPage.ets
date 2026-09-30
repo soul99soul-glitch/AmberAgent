@@ -22,14 +22,12 @@ import type { ModelCouncilRuntimeSetting, ModelCouncilSeat, ModelCouncilRolePres
 import {
   LENS_PRESETS, findRolePreset, isCoreRole, makeSeat,
 } from '@amber/deepread-domain';
-import { INK, INK3, ACCENT, SURFACE2, ERROR, LINE, LINE2, GUTTER, MOTION_OVERLAY, TEXT_STYLES, lineHeightForSize, SUCCESS_FG } from '../design/tokens.ets';
+import { INK, INK3, ACCENT, SURFACE2, BG, ERROR, LINE, LINE2, GUTTER, MOTION_OVERLAY, TEXT_STYLES, lineHeightForSize, SUCCESS_FG } from '../design/tokens.ets';
 import { FONT_SANS_MEDIUM, FONT_SANS_SEMIBOLD, FONT_MONO_MEDIUM } from '../design/fonts.ets';
 import {
   CenteredTitleBar, PlainSection, CardGroup, CardRow, CardToggleRow, FooterNote, PageSpacer,
 } from '../components/PageTemplate.ets';
 import { CouncilToolModePicker } from '../components/CouncilToolModePicker.ets';
-import { canvasGradientColors, currentCanvasGradientAngle } from '../design/theme_packs.ets';
-import { DesignCanvasLayer } from '../design/DesignCanvasLayer.ets';
 
 @Entry
 @Component
@@ -243,8 +241,6 @@ struct SettingModelCouncilPage {
     Column() {
       // 主题纪元重挂载(勿拆):epoch 变化 → 整页子树销毁重建,全量重读令牌
       ForEach([this.themeEpoch], (_e: number): void => {
-      // 画布纹理层(共享组件;压在渐变上、内容下)
-      DesignCanvasLayer({ surface: 'shell' })
       CenteredTitleBar({
         title: 'Model Council 设置',
         actionText: this.saving ? '保存中…' : '保存',
@@ -312,11 +308,7 @@ struct SettingModelCouncilPage {
       }, (e: number): string => `theme-${e}`)
 }
       .opacity(this.themeEpoch >= 0 ? 1 : 1)
-    .width('100%').height('100%')
-    .linearGradient({
-      angle: currentCanvasGradientAngle(),
-      colors: canvasGradientColors(),
-    })
+    .width('100%').height('100%').backgroundColor(BG)
   }
 
   // ── 卡片内容(@Builder:组件构造必须在 builder 上下文,铁律 4b)──

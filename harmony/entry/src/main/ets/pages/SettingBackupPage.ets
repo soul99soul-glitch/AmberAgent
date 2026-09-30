@@ -30,8 +30,6 @@ import {
   type SyncConversationDto, type SyncInspectPreview, type SyncRestoreResult, type SyncRestoreSettings, type WebDavConfig,
   type WebDavRemoteFile, type WebDavClient,
 } from '@amber/chat-domain';
-import { canvasGradientColors, currentCanvasGradientAngle } from '../design/theme_packs.ets';
-import { DesignCanvasLayer } from '../design/DesignCanvasLayer.ets';
 
 @Entry
 @Component
@@ -371,8 +369,6 @@ struct SettingBackupPage {
     Column() {
       // 主题纪元重挂载(勿拆):epoch 变化 → 整页子树销毁重建,全量重读令牌
       ForEach([this.themeEpoch], (_e: number): void => {
-      // 画布纹理层(共享组件;压在渐变上、内容下)
-      DesignCanvasLayer({ surface: 'shell' })
       CenteredTitleBar({ title: '备份与恢复' })
       Scroll() {
         Column() {
@@ -396,16 +392,12 @@ struct SettingBackupPage {
         }
         .width('100%')
       }
-      .layoutWeight(1)
+      .layoutWeight(1).backgroundColor(BG)
     
       }, (e: number): string => `theme-${e}`)
 }
       .opacity(this.themeEpoch >= 0 ? 1 : 1)
-    .width('100%').height('100%')
-    .linearGradient({
-      angle: currentCanvasGradientAngle(),
-      colors: canvasGradientColors(),
-    })
+    .width('100%').height('100%').backgroundColor(BG)
   }
 
   // ── 卡片内容(@Builder:组件构造必须在 builder 上下文,铁律 4b)──

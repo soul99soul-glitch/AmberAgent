@@ -17,7 +17,7 @@ import {
 } from '../platform_impl/ManagedFileStore.ets';
 import { getChatRepository, getChatKvStore } from '../di/AppContainer.ets';
 import {
-  ACCENT, ERROR, INK, INK3, LINE, accentSoftBg, lineHeightForSize,
+  ACCENT, BG, ERROR, INK, INK3, LINE, accentSoftBg, lineHeightForSize,
 } from '../design/tokens.ets';
 import {
   FONT_MONO_MEDIUM, FONT_SANS_MEDIUM, FONT_SANS_SEMIBOLD, FONT_SANS_BOLD,
@@ -26,8 +26,6 @@ import {
   CenteredTitleBar, PlainSection, CardGroup, CardRow, PageSpacer,
 } from '../components/PageTemplate.ets';
 import { Icon } from '../components/ui/Icon.ets';
-import { canvasGradientColors, currentCanvasGradientAngle } from '../design/theme_packs.ets';
-import { DesignCanvasLayer } from '../design/DesignCanvasLayer.ets';
 
 interface FileRow {
   folder: string;
@@ -352,8 +350,6 @@ struct SettingFilesPage {
     Column() {
       // 主题纪元重挂载(勿拆):epoch 变化 → 整页子树销毁重建,全量重读令牌
       ForEach([this.themeEpoch], (_e: number): void => {
-      // 画布纹理层(共享组件;压在渐变上、内容下)
-      DesignCanvasLayer({ surface: 'shell' })
       CenteredTitleBar({
         title: '文件管理',
         subtitle: '文件上下文与生成结果',
@@ -443,10 +439,6 @@ struct SettingFilesPage {
       }, (e: number): string => `theme-${e}`)
 }
       .opacity(this.themeEpoch >= 0 ? 1 : 1)
-    .width('100%').height('100%')
-    .linearGradient({
-      angle: currentCanvasGradientAngle(),
-      colors: canvasGradientColors(),
-    })
+    .width('100%').height('100%').backgroundColor(BG)
   }
 }

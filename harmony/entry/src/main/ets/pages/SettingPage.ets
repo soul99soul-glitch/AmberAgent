@@ -13,8 +13,6 @@ import { loadDisplaySetting } from '@amber/chat-domain';
 import {
   BG, ACCENT, INK, INK2, INK3, SURFACE2, LABEL, TEXT_STYLES, GUTTER,
 } from '../design/tokens.ets';
-import { canvasGradientColors, currentCanvasGradientAngle } from '../design/theme_packs.ets';
-import { DesignCanvasLayer } from '../design/DesignCanvasLayer.ets';
 import { SectionHeader, CardGroup, CardRow, PageSpacer } from '../components/PageTemplate.ets';
 import { FONT_MONO, FONT_SANS_SEMIBOLD } from '../design/fonts.ets';
 import { describeChatModel, getChatKvStore } from '../di/AppContainer.ets';
@@ -188,8 +186,6 @@ struct SettingPage {
     Column() {
       // 主题纪元重挂载(勿拆):epoch 变化 → 整页子树销毁重建,全量重读令牌
       ForEach([this.themeEpoch], (_e: number): void => {
-      // 画布纹理层(共享组件;压在渐变上、内容下)
-      DesignCanvasLayer({ surface: 'shell' })
       // ── 顶栏:返回 + 标题 + 账户头像(iOS SettingsHome header:头像 38,热区 44)──
       Row() {
         Row() {
@@ -294,16 +290,12 @@ struct SettingPage {
         .width('100%')
       }
         .align(Alignment.TopStart)
-      .layoutWeight(1)
+      .layoutWeight(1).backgroundColor(BG)
     
       }, (e: number): string => `theme-${e}`)
 }
       .opacity(this.themeEpoch >= 0 ? 1 : 1)
-    .width('100%').height('100%')
-    .linearGradient({
-      angle: currentCanvasGradientAngle(),
-      colors: canvasGradientColors(),
-    })
+    .width('100%').height('100%').backgroundColor(BG)
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
   }
 }

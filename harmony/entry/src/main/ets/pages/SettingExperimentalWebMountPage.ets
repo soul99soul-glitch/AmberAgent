@@ -8,7 +8,7 @@
 // 2026-09-27 二级页 iOS 对齐(基准 IMG_1992「站点」):仅换视觉骨架
 // (CenteredTitleBar/PlainSection/CardGroup r18+描边/CardToggleRow/FooterNote),逻辑零改动。
 
-import { INK, INK3, ERROR, ACCENT, LINE, SURFACE2, MOTION_OVERLAY, accentSoftBg, lineHeightForSize } from '../design/tokens.ets';
+import { BG, INK, INK3, ERROR, ACCENT, LINE, SURFACE2, MOTION_OVERLAY, accentSoftBg, lineHeightForSize } from '../design/tokens.ets';
 import { FONT_SANS_MEDIUM, FONT_MONO } from '../design/fonts.ets';
 import {
   CenteredTitleBar, PlainSection, CardGroup, CardToggleRow, FooterNote, BtnFill, PageSpacer,
@@ -36,8 +36,6 @@ import {
   getWebMountOAuthRuntime, importWebMountHar, listWebMountHarArchives, removeWebMountHarArchive,
 } from '../platform_impl/WebMountOAuthRuntime.ets';
 import type { WebMountHarArchive } from '@amber/chat-domain';
-import { canvasGradientColors, currentCanvasGradientAngle } from '../design/theme_packs.ets';
-import { DesignCanvasLayer } from '../design/DesignCanvasLayer.ets';
 
 interface HarArchiveRow { id: string; count: number; }
 
@@ -1096,8 +1094,6 @@ struct SettingExperimentalWebMountPage {
     Column() {
       // 主题纪元重挂载(勿拆):epoch 变化 → 整页子树销毁重建,全量重读令牌
       ForEach([this.themeEpoch], (_e: number): void => {
-      // 画布纹理层(共享组件;压在渐变上、内容下)
-      DesignCanvasLayer({ surface: 'shell' })
       CenteredTitleBar({
         title: '站点',
         subtitle: this.loaded ? `${this.sites.length} 个站点` : '',
@@ -1176,10 +1172,6 @@ struct SettingExperimentalWebMountPage {
       }, (e: number): string => `theme-${e}`)
 }
       .opacity(this.themeEpoch >= 0 ? 1 : 1)
-    .width('100%').height('100%')
-    .linearGradient({
-      angle: currentCanvasGradientAngle(),
-      colors: canvasGradientColors(),
-    })
+    .width('100%').height('100%').backgroundColor(BG)
   }
 }

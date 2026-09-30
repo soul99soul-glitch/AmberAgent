@@ -16,8 +16,6 @@ import {
 import { FONT_MONO, FONT_SANS, FONT_SANS_SEMIBOLD } from '../design/fonts.ets';
 import { PageTitleBar, SectionHeader, IconSeat, PaperSeparator, PageSpacer } from '../components/PageTemplate.ets';
 import { Icon } from '../components/ui/Icon.ets';
-import { canvasGradientColors, currentCanvasGradientAngle } from '../design/theme_packs.ets';
-import { DesignCanvasLayer } from '../design/DesignCanvasLayer.ets';
 
 @Entry
 @Component
@@ -240,8 +238,6 @@ struct SettingCronTasksPage {
     Column() {
       // 主题纪元重挂载(勿拆):epoch 变化 → 整页子树销毁重建,全量重读令牌
       ForEach([this.themeEpoch], (_e: number): void => {
-      // 画布纹理层(共享组件;压在渐变上、内容下)
-      DesignCanvasLayer({ surface: 'shell' })
       PageTitleBar({ title: '定时任务' })
 
       if (!this.executionAvailable) {
@@ -279,10 +275,6 @@ struct SettingCronTasksPage {
       }, (e: number): string => `theme-${e}`)
 }
       .opacity(this.themeEpoch >= 0 ? 1 : 1)
-    .width('100%').height('100%')
-    .linearGradient({
-      angle: currentCanvasGradientAngle(),
-      colors: canvasGradientColors(),
-    })
+    .width('100%').height('100%').backgroundColor(BG)
   }
 }

@@ -4,14 +4,12 @@
 //   处置:入口已从 SkillsPage 移除;本页显式标记未支持并禁用全部编辑,
 //   不再接受修改、不再提供“完成”动作(仅可返回),避免制造已保存的错觉。
 import {
-  INK, INK2, INK3, BODY, META, TEXT_STYLES, lineHeightForSize,
+  INK, INK2, INK3, BG, BODY, META, TEXT_STYLES, lineHeightForSize,
 } from '../design/tokens.ets';
 import { FONT_MONO, FONT_SANS, FONT_SANS_SEMIBOLD } from '../design/fonts.ets';
 import { PageTitleBar, SectionHeader, PaperSeparator, PageSpacer } from '../components/PageTemplate.ets';
 import { PillSelect } from '../components/ui/Select.ets';
 import { NotionSlider } from '../components/ui/NotionSlider.ets';
-import { canvasGradientColors, currentCanvasGradientAngle } from '../design/theme_packs.ets';
-import { DesignCanvasLayer } from '../design/DesignCanvasLayer.ets';
 
 interface SlidesFontSettings {
   fontFamilyIndex: number;
@@ -127,8 +125,6 @@ struct SettingSlidesFontPage {
     Column() {
       // 主题纪元重挂载(勿拆):epoch 变化 → 整页子树销毁重建,全量重读令牌
       ForEach([this.themeEpoch], (_e: number): void => {
-      // 画布纹理层(共享组件;压在渐变上、内容下)
-      DesignCanvasLayer({ surface: 'shell' })
       PageTitleBar({ title: '幻灯片字体' })
 
       if (!SLIDES_FONT_SUPPORTED) {
@@ -192,10 +188,6 @@ struct SettingSlidesFontPage {
       }, (e: number): string => `theme-${e}`)
 }
       .opacity(this.themeEpoch >= 0 ? 1 : 1)
-    .width('100%').height('100%')
-    .linearGradient({
-      angle: currentCanvasGradientAngle(),
-      colors: canvasGradientColors(),
-    })
+    .width('100%').height('100%').backgroundColor(BG)
   }
 }

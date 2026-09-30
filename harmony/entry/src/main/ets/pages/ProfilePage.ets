@@ -23,6 +23,8 @@ import {
   INK, INK2, INK3, INK4, SURFACE, SURFACE2, LINE, BG,
   BODY, BODY2, META, LABEL, ACCENT, RADIUS,
 } from '../design/tokens.ets';
+import { canvasGradientColors, currentCanvasGradientAngle } from '../design/theme_packs.ets';
+import { DesignCanvasLayer } from '../design/DesignCanvasLayer.ets';
 
 // 昵称编辑弹窗
 @CustomDialog
@@ -435,6 +437,8 @@ struct ProfilePage {
     Column() {
       // 主题纪元重挂载(勿拆):epoch 变化 → 整页子树销毁重建,全量重读令牌
       ForEach([this.themeEpoch], (_e: number): void => {
+      // 画布纹理层(共享组件;shell 面:对位 iOS AccountView)
+      DesignCanvasLayer({ surface: 'shell' })
       CenteredTitleBar({ title: '个人中心' })
 
       Scroll() {
@@ -561,12 +565,16 @@ struct ProfilePage {
         .padding({ left: 18, right: 18 })
       }
         .align(Alignment.TopStart)
-      .layoutWeight(1).backgroundColor(BG)
+      .layoutWeight(1)
     
       }, (e: number): string => `theme-${e}`)
 }
       .opacity(this.themeEpoch >= 0 ? 1 : 1)
-    .width('100%').height('100%').backgroundColor(BG)
+    .width('100%').height('100%')
+    .linearGradient({
+      angle: currentCanvasGradientAngle(),
+      colors: canvasGradientColors(),
+    })
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
   }
 

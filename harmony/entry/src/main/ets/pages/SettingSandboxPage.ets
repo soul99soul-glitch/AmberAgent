@@ -24,8 +24,6 @@ import {
   CenteredTitleBar, PlainSection, CardGroup, CardRow, CardToggleRow,
   FooterNote, BtnGhost, PageSpacer, Seg,
 } from '../components/PageTemplate.ets';
-import { canvasGradientColors, currentCanvasGradientAngle } from '../design/theme_packs.ets';
-import { DesignCanvasLayer } from '../design/DesignCanvasLayer.ets';
 
 const TOOL_LOOP_STEP_OPTIONS: number[] = [64, 128, 256, 384, 512];
 const RETRY_COUNT_OPTIONS: number[] = [1, 2, 3, 5];
@@ -423,8 +421,6 @@ struct SettingSandboxPage {
     Column() {
       // 主题纪元重挂载(勿拆):epoch 变化 → 整页子树销毁重建,全量重读令牌
       ForEach([this.themeEpoch], (_e: number): void => {
-      // 画布纹理层(共享组件;压在渐变上、内容下)
-      DesignCanvasLayer({ surface: 'shell' })
       CenteredTitleBar({ title: '运行环境' })
       Scroll() {
         Column() {
@@ -477,10 +473,6 @@ struct SettingSandboxPage {
       }, (e: number): string => `theme-${e}`)
 }
       .opacity(this.themeEpoch >= 0 ? 1 : 1)
-    .width('100%').height('100%')
-    .linearGradient({
-      angle: currentCanvasGradientAngle(),
-      colors: canvasGradientColors(),
-    })
+    .width('100%').height('100%').backgroundColor(BG)
   }
 }
