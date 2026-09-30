@@ -114,11 +114,6 @@ export struct ChatMessageReasoning {
             .margin({ right: 6 })
         }
 
-        Text('▸')
-          .fontSize(11)
-          .fontColor(INK3)
-          .rotate({ angle: this.state === 'collapsed' ? 0 : 90 })
-          .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut })
       }
       .width('100%')
       .padding({ left: 2, top: 6, bottom: 6 })
