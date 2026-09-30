@@ -50,6 +50,27 @@ class NovelWorkspaceStoreTest {
     }
 
     @Test
+    fun `list prefix keeps exact file and hidden path semantics`() {
+        val store = store()
+        store.write("branches/main/chapters/002-b.md", "b")
+        store.write("branches/main/chapters/001-a.md", "a")
+        store.write("branches/main/plan/next.md", "next")
+        File(store.rootDirectory, "branches/main/chapters/.hidden").mkdirs()
+        File(store.rootDirectory, "branches/main/chapters/.hidden/leak.md").writeText("hidden")
+
+        assertEquals(
+            listOf("branches/main/chapters/001-a.md", "branches/main/chapters/002-b.md"),
+            store.list("branches/main/chapters"),
+        )
+        assertEquals(
+            listOf("branches/main/chapters/001-a.md"),
+            store.list("branches/main/chapters/001-a.md"),
+        )
+        assertEquals(emptyList<String>(), store.list("branches/main/chapters/.hidden"))
+        assertEquals(emptyList<String>(), store.list("branches/main/./chapters"))
+    }
+
+    @Test
     fun `file tree excludes manifest and hashes content`() {
         val store = store()
         store.write("manifest.yaml", "m")
