@@ -12,6 +12,20 @@ AmberAgent 的 Android 产品仓库。应用、Compose UI、Room、WorkManager�
 
 Core 只接收两端已经共同消费且平台无关的稳定契约；当前 Android 代码不通过相对路径读取其他仓库。
 
+## GitHub Actions 自动构建 APK
+
+`Build APK` 会在推送到 `main`、向 `main` 提交或更新 PR 时运行，也可在 **Actions → Build APK → Run workflow** 手动触发。流程安装 JDK 17/21、Android SDK 和 Rust/NDK，运行 Native 单测、构建 Debug APK，并检查每个 APK 中的八个 required `.so`。
+
+构建成功后，在运行详情页的 **Artifacts** 下载 `AmberAgent-debug-<运行编号>`，解压后安装其中一个 APK。产物保留 14 天；当前只支持 ARM64，`universal` APK 也仅包含 ARM64 库。
+
+自动构建无需配置 Secrets。Debug 包名为 `app.amber.agent.graphite`，可以与正式版共存；CI 使用临时 Debug 签名，不保证不同构建之间可以覆盖安装。需要稳定签名的正式包时，手动运行现有的 `Android Release Build`，并在仓库的 **Settings → Secrets and variables → Actions** 配置：
+
+- `KEY_BASE64`：签名 keystore 的 Base64 内容，流程还原为 `app/app.key`。
+- `SIGNING_CONFIG`：包含 `storeFile=app.key`、`storePassword`、`keyAlias`、`keyPassword` 的多行 Java properties 内容。
+- `GOOGLE_SERVICES_JSON`：包含 `app.amber.agent` 客户端的完整 Firebase 配置。
+
+Release 产物位于对应运行详情页的 `android-release-apk`；两个流程都只上传 Actions 构建产物。
+
 ## SSH
 
 SSH 客户端固定使用 `com.github.mwiede:jsch:2.28.7`。
