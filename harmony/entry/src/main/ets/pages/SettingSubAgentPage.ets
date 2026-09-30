@@ -27,12 +27,14 @@ import {
   DEFAULT_SUB_AGENT_MAX_CONCURRENT_RUNS, DEFAULT_SUB_AGENT_OUTPUT_BUDGET_CHARS,
   SUB_AGENT_BUILT_INS, loadProviders,
 } from '@amber/chat-domain';
-import { ACCENT, BG, ERROR, GUTTER, INK, INK3, LINE, MOTION_OVERLAY, SURFACE2, TEXT_STYLES, lineHeightForSize } from '../design/tokens.ets';
+import { ACCENT, ERROR, GUTTER, INK, INK3, LINE, MOTION_OVERLAY, SURFACE2, TEXT_STYLES, lineHeightForSize } from '../design/tokens.ets';
 import { FONT_MONO_MEDIUM, FONT_SANS_MEDIUM } from '../design/fonts.ets';
 import { Icon } from '../components/ui/Icon.ets';
 import {
   CenteredTitleBar, PlainSection, CardGroup, CardRow, CardToggleRow, Seg, PageSpacer, BtnGhost,
 } from '../components/PageTemplate.ets';
+import { canvasGradientColors, currentCanvasGradientAngle } from '../design/theme_packs.ets';
+import { DesignCanvasLayer } from '../design/DesignCanvasLayer.ets';
 
 @Entry
 @Component
@@ -229,6 +231,8 @@ struct SettingSubAgentPage {
     Column() {
       // 主题纪元重挂载(勿拆):epoch 变化 → 整页子树销毁重建,全量重读令牌
       ForEach([this.themeEpoch], (_e: number): void => {
+      // 画布纹理层(共享组件;压在渐变上、内容下)
+      DesignCanvasLayer({ surface: 'shell' })
       CenteredTitleBar({
         title: '子代理',
         actionText: this.saving ? '保存中…' : '保存',
@@ -287,7 +291,11 @@ struct SettingSubAgentPage {
       }, (e: number): string => `theme-${e}`)
 }
       .opacity(this.themeEpoch >= 0 ? 1 : 1)
-    .width('100%').height('100%').backgroundColor(BG)
+    .width('100%').height('100%')
+    .linearGradient({
+      angle: currentCanvasGradientAngle(),
+      colors: canvasGradientColors(),
+    })
   }
 
   // ── 卡片内容(@Builder:组件构造必须在 builder 上下文,铁律 4b)──

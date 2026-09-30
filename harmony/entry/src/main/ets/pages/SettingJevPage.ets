@@ -21,6 +21,8 @@ import {
 import { FONT_MONO } from '../design/fonts.ets';
 import { promptAction } from '@kit.ArkUI';
 import { SSHUIColors } from '../components/SSHUIColors.ets';
+import { canvasGradientColors, currentCanvasGradientAngle } from '../design/theme_packs.ets';
+import { DesignCanvasLayer } from '../design/DesignCanvasLayer.ets';
 
 const MODE_OPTIONS: string[] = ['关', '影子', '主动'];
 const MODE_VALUES: string[] = ['off', 'shadow', 'active'];
@@ -367,6 +369,8 @@ struct SettingJevPage {
     Column() {
       // 主题纪元重挂载(勿拆):epoch 变化 → 整页子树销毁重建,全量重读令牌
       ForEach([this.themeEpoch], (_e: number): void => {
+      // 画布纹理层(共享组件;压在渐变上、内容下)
+      DesignCanvasLayer({ surface: 'shell' })
       CenteredTitleBar({ title: 'Jev 快速判断' })
       if (this.loadError.length > 0 || this.saveError.length > 0) {
         Text(this.loadError.length > 0 ? this.loadError : this.saveError).fontSize(LABEL)
@@ -412,6 +416,10 @@ struct SettingJevPage {
       }, (e: number): string => `theme-${e}`)
 }
       .opacity(this.themeEpoch >= 0 ? 1 : 1)
-    .width('100%').height('100%').backgroundColor(BG)
+    .width('100%').height('100%')
+    .linearGradient({
+      angle: currentCanvasGradientAngle(),
+      colors: canvasGradientColors(),
+    })
   }
 }

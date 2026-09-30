@@ -9,7 +9,7 @@ import { pasteboard, BusinessError } from '@kit.BasicServicesKit';
 import { common } from '@kit.AbilityKit';
 import { notificationManager } from '@kit.NotificationKit';
 import { FONT_SANS } from '../design/fonts.ets';
-import { BG, INK3, ERROR, LABEL, META, TEXT_STYLES } from '../design/tokens.ets';
+import { INK3, ERROR, LABEL, META, TEXT_STYLES } from '../design/tokens.ets';
 import { CenteredTitleBar, PlainSection, CardGroup, FooterNote, NavRow, ToggleRow, BtnFill, BtnGhost, PageSpacer } from '../components/PageTemplate.ets';
 import {
   MacGatewayClient, MacGatewayError, describeMacGatewayError, parsePairingLink, loadMacGatewayConnection,
@@ -17,6 +17,8 @@ import {
   type MacGatewayConnection, type MacGatewayPairingPayload, type MacGatewayStatus, type MacGatewaySession,
   type MacGatewayHealth,
 } from '../platform_impl/MacGatewayClient.ets';
+import { canvasGradientColors, currentCanvasGradientAngle } from '../design/theme_packs.ets';
+import { DesignCanvasLayer } from '../design/DesignCanvasLayer.ets';
 
 const REFRESH_INTERVAL_MS: number = 10000;
 const VISIBLE_TASK_LIMIT: number = 20;
@@ -428,6 +430,8 @@ struct SettingMacGatewayPage {
     Column() {
       // 主题纪元重挂载(勿拆):epoch 变化 → 整页子树销毁重建,全量重读令牌
       ForEach([this.themeEpoch], (_e: number): void => {
+      // 画布纹理层(共享组件;压在渐变上、内容下)
+      DesignCanvasLayer({ surface: 'shell' })
       CenteredTitleBar({ title: 'Mac Gateway' })
       if (!this.loaded) {
         Text('加载中…').fontSize(META).fontColor(INK3).padding({ top: 40 })
@@ -464,7 +468,11 @@ struct SettingMacGatewayPage {
       }, (e: number): string => `theme-${e}`)
 }
       .opacity(this.themeEpoch >= 0 ? 1 : 1)
-    .width('100%').height('100%').backgroundColor(BG)
+    .width('100%').height('100%')
+    .linearGradient({
+      angle: currentCanvasGradientAngle(),
+      colors: canvasGradientColors(),
+    })
   }
 }
 

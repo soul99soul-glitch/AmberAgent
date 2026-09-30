@@ -422,8 +422,8 @@ test('textures: 老花包 patterns/gradient/designDark 全量解析', () => {
   // canvasStyle flat + design 双 palette → 色板走 design 而非 paper
   assert.equal(r.pack.light.bg, '#F3EAE0');
   assert.equal(r.pack.dark.bg, '#1A120C');
-  // canvasScope appWide → 提示纹理仅首页渲染
-  assert.ok(r.warnings.some((w) => w.includes('仅在首页')));
+  // canvasScope appWide → 作用域入包(设置树/其余集成面可见纹理)
+  assert.equal(r.pack.canvasScope, 'appWide');
 });
 
 test('textures: 老花包导出往返(patterns/gradient 无损)', () => {
@@ -431,6 +431,7 @@ test('textures: 老花包导出往返(patterns/gradient 无损)', () => {
   assert.ok(first.pack);
   const reimported = parseThemePackImport(themePackToPortableJson(first.pack));
   assert.equal(reimported.issues.length, 0, `issues: ${reimported.issues.join(';')}`);
+  assert.equal(reimported.pack.canvasScope, 'appWide'); // 作用域随导出往返
   sameData(reimported.pack.patterns, first.pack.patterns);
   sameData(reimported.pack.gradient, first.pack.gradient);
   sameData(reimported.pack.light, first.pack.light);
@@ -490,4 +491,17 @@ test('textures: 无纹理的包 patterns/gradient 为空(访问器退化)', () =
   assert.equal(typeof currentCanvasGradientAngle(), 'number');
   assert.ok(Array.isArray(currentCanvasPatterns()));
   assert.ok(currentCanvasGradient(false) === null || Array.isArray(currentCanvasGradient(false)));
+});
+
+test('textures: canvasScope 未知值回退 homeOnly + 告警;内置导出带 shell', () => {
+  const doc = JSON.parse(espresso);
+  doc.canvasScope = 'everywhere';
+  const r = parseThemePackImport(JSON.stringify(doc));
+  assert.equal(r.issues.length, 0);
+  assert.equal(r.pack.canvasScope, undefined); // 未知值 → 默认 homeOnly 语义
+  assert.ok(r.warnings.some((w) => w.includes('canvasScope')));
+  const json = JSON.parse(themePackToPortableJson(BUILTIN_PACKS[0]));
+  assert.equal(json.canvasScope, 'shell'); // iOS 内置 sit-terracotta 作用域
+  const notion = JSON.parse(themePackToPortableJson(BUILTIN_PACKS[2]));
+  assert.equal(notion.canvasScope, 'homeOnly');
 });

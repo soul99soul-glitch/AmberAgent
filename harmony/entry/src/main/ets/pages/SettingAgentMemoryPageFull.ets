@@ -18,6 +18,8 @@ import {
 } from '../components/PageTemplate.ets';
 import { router, KeyboardAvoidMode } from '@kit.ArkUI';
 import { Icon } from '../components/ui/Icon.ets';
+import { canvasGradientColors, currentCanvasGradientAngle } from '../design/theme_packs.ets';
+import { DesignCanvasLayer } from '../design/DesignCanvasLayer.ets';
 
 @Entry
 @Component
@@ -395,6 +397,8 @@ struct SettingAgentMemoryPageFull {
     Stack() {
       // 主题纪元重挂载(勿拆):epoch 变化 → 整页子树销毁重建,全量重读令牌
       ForEach([this.themeEpoch], (_e: number): void => {
+      // 画布纹理层(共享组件;压在渐变上、内容下)
+      DesignCanvasLayer({ surface: 'shell' })
       Column() {
         CenteredTitleBar({ title: '灵魂与记忆', subtitle: 'Amber 的核心指令与长期记忆' })
         Scroll() {
@@ -456,7 +460,11 @@ struct SettingAgentMemoryPageFull {
         .scrollBar(BarState.Off)
         .edgeEffect(EdgeEffect.Spring)
       }
-      .width('100%').height('100%').backgroundColor(BG)
+      .width('100%').height('100%')
+      .linearGradient({
+        angle: currentCanvasGradientAngle(),
+        colors: canvasGradientColors(),
+      })
 
       if (this.soulEditorOpen) {
         this.SoulEditor()

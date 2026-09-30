@@ -13,7 +13,7 @@
 //   启动时 EntryAbility hydrate 后用 applyCurrentTheme 替代裸 applyTheme。
 
 import {
-  applyTheme, setAccentColor, applyPaperPalette, applyAmoledBlack,
+  applyTheme, setAccentColor, applyPaperPalette, applyAmoledBlack, BG,
 } from './tokens.ets';
 import type { KeyValueStore } from '@amber/chat-domain';
 
@@ -68,6 +68,8 @@ export interface ThemePack {
   // design 纹理(patterns 存在时优先于 dotGrid;iOS design 层为权威背景)
   patterns?: ThemePackPattern[];
   gradient?: ThemePackGradient;
+  // 纹理作用域(amber.theme.pack v1 可选槽):homeOnly(默认)| shell(home+设置树)| appWide(全部集成面)
+  canvasScope?: string;
   // 源文件带 design.dark(Android 规则:自定义深色色板时关闭 AMOLED 纯黑覆写)
   designDark?: boolean;
   builtin: boolean;
@@ -84,6 +86,7 @@ export const BUILTIN_PACKS: ThemePack[] = [
     accent: '#B8623A',
     accentInk: '#FFFFFF',
     dotGrid: true,
+    canvasScope: 'shell',
     builtin: true,
     light: {
       bg: '#EFE7D6', surface: '#FFFDF7', surface2: '#F0EBE2',
@@ -102,6 +105,7 @@ export const BUILTIN_PACKS: ThemePack[] = [
     accent: '#6B8CAD',
     accentInk: '#FAF9F7',
     dotGrid: true,
+    canvasScope: 'shell',
     builtin: true,
     light: {
       bg: '#F3F0EB', surface: '#FAF9F7', surface2: '#EBE7E0',
@@ -120,6 +124,7 @@ export const BUILTIN_PACKS: ThemePack[] = [
     accent: '#0075DE',
     accentInk: '#FFFFFF',
     dotGrid: false,
+    canvasScope: 'homeOnly',
     builtin: true,
     light: {
       bg: '#F6F5F4', surface: '#FFFFFF', surface2: '#EFEEEC',
@@ -195,6 +200,7 @@ interface ThemePackDoc {
   patterns?: ThemePackPattern[];
   gradient?: ThemePackGradient;
   design_dark?: boolean;
+  canvas_scope?: string;
 }
 
 const isHexColor = (v: string): boolean => /^#[0-9a-fA-F]{6}$/.test(v);
@@ -280,6 +286,9 @@ export const parseThemePackJson = (text: string): ThemePack | null => {
     const gradient: ThemePackGradient | null = readGradient(doc.gradient);
     if (gradient !== null) pack.gradient = gradient;
     if (doc.design_dark === true) pack.designDark = true;
+    if (doc.canvas_scope === 'homeOnly' || doc.canvas_scope === 'shell' || doc.canvas_scope === 'appWide') {
+      pack.canvasScope = doc.canvas_scope;
+    }
     return pack;
   } catch (_e) {
     return null;
@@ -308,6 +317,9 @@ export const themePackToJson = (pack: ThemePack): string => {
   }
   if (pack.designDark === true) {
     doc.design_dark = true;
+  }
+  if (pack.canvasScope !== undefined) {
+    doc.canvas_scope = pack.canvasScope;
   }
   return JSON.stringify(doc);
 };
@@ -415,4 +427,27 @@ export const currentCanvasGradientAngle = (): number => {
   const g: ThemePackGradient | undefined = themePackStore.current().gradient;
   if (g === undefined) return 180;
   return (g.angle + 90) % 360;
+};
+
+// 纹理作用域(缺省 homeOnly;DesignCanvasLayer 按 surface 判定可见性)
+export const currentCanvasScope = (): string => {
+  return themePackStore.current().canvasScope ?? 'homeOnly';
+};
+
+// 页面根背景渐变 stops(均匀分布,对齐 SwiftUI LinearGradient);无渐变 → BG 双色点平涂。
+// dark 直读 AppStorage(EntryAbility 维护),调用页无需自持 darkMode prop;
+// 在 epoch 重挂载的 build 中调用即随模式/包切换重读。
+export const canvasGradientColors = (): Array<[string, number]> => {
+  const out: Array<[string, number]> = [];
+  const dark: boolean = AppStorage.get<boolean>('darkMode') ?? false;
+  const stops: string[] | null = currentCanvasGradient(dark);
+  if (stops === null || stops.length < 2) {
+    out.push([BG, 0]);
+    out.push([BG, 1]);
+    return out;
+  }
+  for (let i = 0; i < stops.length; i++) {
+    out.push([stops[i], i / (stops.length - 1)]);
+  }
+  return out;
 };

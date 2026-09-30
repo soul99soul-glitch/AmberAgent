@@ -13,10 +13,11 @@
 //     —— 这些在 iOS/Android 同样被拒,拒绝即兼容,放进来才会出怪异界面。
 //   自动修正(告警不拒绝):inkHex 缺失/非法/与 accent 对比度 <3:1 → 按 WCAG 自动取黑/白;
 //     未知/沉浸 paper → 回退暖纸;未知 canvasStyle → 平涂;内置 id 冲突 → 改名。
-//   忽略不校验:components 与 canvasScope 等表面槽(鸿蒙不渲染,接收超集;
+//   忽略不校验:components 与其余表面槽(鸿蒙不渲染,接收超集;
 //     Android 侧同样有一批"可解析不消费"的槽位)。
-// 渲染范围:patterns/gradient 经严格校验后在首页画布渲染(canvasScope 为 shell/appWide
-//   时告警"仅首页渲染");components(圆角/描边/阴影/品牌字)本轮不消费。
+// 渲染范围:patterns/gradient 经严格校验后按 canvasScope 渲染(homeOnly=首页,
+//   shell=首页+设置树,appWide=全部已集成面;DesignCanvasLayer 逐面判定);
+//   components(圆角/描边/阴影/品牌字)本轮不消费。
 // 5 槽 → 9 槽派生(iOS AmberThemeDesign.Palette.resolving 逐值):
 //   surface2 = midpoint(background, surface);ink2 = ink;muted2 = muted;borderSoft = border。
 // design 缺一侧时该侧继承 paper 画布色板(iOS 同款语义);paper 五画布色板逐值取自
@@ -471,10 +472,12 @@ const parsePortableDoc = (doc: PortableDoc, result: ThemePackImportResult): Them
   if (patterns !== null && patterns.length > 0) pack.patterns = patterns;
   if (gradient !== null) pack.gradient = gradient;
   if (designDark) pack.designDark = true;
-  // canvasScope appWide/shell 的纹理在鸿蒙目前仅首页渲染(其余页不铺),提前说明防预期差
-  if ((patterns !== null && patterns.length > 0) || gradient !== null) {
-    if (doc.canvasScope === 'appWide' || doc.canvasScope === 'shell') {
-      result.warnings.push('画布纹理目前仅在首页渲染');
+  // 纹理作用域(homeOnly/shell/appWide;未知值回退默认 homeOnly)
+  if (typeof doc.canvasScope === 'string') {
+    if (doc.canvasScope === 'homeOnly' || doc.canvasScope === 'shell' || doc.canvasScope === 'appWide') {
+      pack.canvasScope = doc.canvasScope;
+    } else {
+      result.warnings.push(`未知 canvasScope「${doc.canvasScope}」,已按首页作用域处理`);
     }
   }
   dedupeBuiltinId(pack, result.warnings);
@@ -713,7 +716,7 @@ export const themePackToPortableJson = (pack: ThemePack): string => {
     brandMark,
     shortcutIconStyle,
     chromeTypeface,
-    canvasScope: 'shell',
+    canvasScope: pack.canvasScope ?? 'homeOnly',
     assetMode: 'builtinOnly',
     immersivePolicy: 'hidden',
     design,

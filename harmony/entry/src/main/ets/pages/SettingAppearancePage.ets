@@ -15,8 +15,9 @@ import { getChatKvStore } from '../di/AppContainer.ets';
 import { applyWindowTheme } from '../entryability/EntryAbility.ets';
 import {
   ThemePack, themePackStore, applyThemePack, parseThemePackJson,
-  isAmoledBlack, setAmoledBlack,
+  isAmoledBlack, setAmoledBlack, canvasGradientColors, currentCanvasGradientAngle,
 } from '../design/theme_packs.ets';
+import { DesignCanvasLayer } from '../design/DesignCanvasLayer.ets';
 import {
   ThemePackImportResult, ThemePackDisplayPatch, parseThemePackImport, themePackToPortableJson,
 } from '../design/theme_pack_import.ets';
@@ -445,6 +446,8 @@ struct SettingAppearancePage {
     Stack({ alignContent: Alignment.Bottom }) {
       // 主题纪元重挂载(勿拆):epoch 变化 → 整页子树销毁重建,全量重读令牌
       ForEach([this.themeEpoch], (_e: number): void => {
+      // 画布纹理层(共享组件;压在渐变上、内容下)
+      DesignCanvasLayer({ surface: 'shell' })
       Column() {
         CenteredTitleBar({ title: '外观' })
         Scroll() {
@@ -566,9 +569,8 @@ struct SettingAppearancePage {
         }
         .align(Alignment.TopStart)
         .layoutWeight(1)
-        .backgroundColor(BG)
       }
-      .width('100%').height('100%').backgroundColor(BG)
+      .width('100%').height('100%')
       .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
 
       // 试穿条(iOS AmberThemeTryOnBar 语义:全局试穿 → 采用/还原)
@@ -579,6 +581,10 @@ struct SettingAppearancePage {
       }, (e: number): string => `theme-${e}`)
 }
       .opacity(this.themeEpoch >= 0 ? 1 : 1)
-    .width('100%').height('100%').backgroundColor(BG)
+    .width('100%').height('100%')
+    .linearGradient({
+      angle: currentCanvasGradientAngle(),
+      colors: canvasGradientColors(),
+    })
   }
 }

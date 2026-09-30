@@ -30,13 +30,11 @@ import { AmberWordmark } from '../components/ui/AmberWordmark.ets';
 import { PressGlowButton } from '../components/ui/PressGlowButton.ets';
 import { SubAgentActivityStrip } from '../components/SubAgentActivityStrip.ets';
 import { RunningIndicator } from '../components/ChatListIndicators.ets';
-import { ACCENT, ACCENT_INK, ERROR, HOME_BG, HOME_CARD, HOME_CARD2, HOME_DOT, HOME_GLASS_BOTTOM,
+import { ACCENT, ACCENT_INK, ERROR, HOME_CARD, HOME_CARD2, HOME_GLASS_BOTTOM,
   HOME_GLASS_EDGE, HOME_GLASS_SHADOW, HOME_GLASS_TOP, HOME_INK, HOME_INK2, HOME_MUTED, HOME_MUTED2,
   HOME_PRESS, HOME_ROWLINE, HOME_SEP, HOME_SHADOW, MOTION_ENTER, MOTION_STAGGER, OVERLAY } from '../design/tokens.ets';
-import {
-  currentCanvasPatterns, currentCanvasGradient, currentCanvasGradientAngle,
-} from '../design/theme_packs.ets';
-import type { ThemePackPattern } from '../design/theme_packs.ets';
+import { canvasGradientColors, currentCanvasGradientAngle } from '../design/theme_packs.ets';
+import { DesignCanvasLayer } from '../design/DesignCanvasLayer.ets';
 import { FONT_SANS, FONT_SANS_MEDIUM, FONT_SANS_SEMIBOLD } from '../design/fonts.ets';
 
 interface ActionMenuResult {
@@ -199,9 +197,8 @@ struct ChatListPage {
   @StorageProp('navBarHeight') navBarHeight: number = 0;
   @StorageProp('darkMode') darkMode: boolean = false;
   @StorageProp('accentColor') accentColorStore: string = ACCENT;
-  // 主题包(C2):包切换 → 本页重建重读 HOME_* 令牌;homeDotGrid 控制画布点阵
+  // 主题包(C2):包切换 → 本页重建重读 HOME_* 令牌;画布纹理由 DesignCanvasLayer 自绘
   @StorageProp('themePackId') themePackId: string = '';
-  @StorageProp('homeDotGrid') @Watch('redrawDots') homeDotGrid: boolean = true;
   @State items: ConversationSummary[] = [];
   @State runningIds: string[] = [];
   @State loaded: boolean = false;
@@ -237,8 +234,6 @@ struct ChatListPage {
   private cascadeDone: boolean = false;
   private navCooldownUntil: number = 0;
   // 画布点阵
-  private dotSettings: RenderingContextSettings = new RenderingContextSettings(true);
-  private dotContext: CanvasRenderingContext2D = new CanvasRenderingContext2D(this.dotSettings);
 
   onPageShow(): void {
     this.observeRunning();
@@ -847,148 +842,6 @@ struct ChatListPage {
     }
   }
 
-  // 画布纹理(patterns 优先,iOS design 权威背景;否则 dotGrid 点阵,间距 18 点径 1.3)
-  private drawCanvasTexture(width: number, height: number): void {
-    const ctx: CanvasRenderingContext2D = this.dotContext;
-    ctx.clearRect(0, 0, width, height);
-    const patterns: ThemePackPattern[] = currentCanvasPatterns();
-    if (patterns.length > 0) {
-      for (const p of patterns) {
-        this.drawPatternLayer(ctx, p, width, height);
-      }
-      return;
-    }
-    if (!this.homeDotGrid) return;
-    ctx.fillStyle = HOME_DOT;
-    for (let y = 9; y < height; y += 18) {
-      for (let x = 9; x < width; x += 18) {
-        ctx.beginPath();
-        ctx.arc(x, y, 0.65, 0, Math.PI * 2);
-        ctx.fill();
-      }
-    }
-  }
-
-  // 单层 pattern(iOS AmberThemeDesignPatternRenderer 逐值:网格点列/行、
-  //   lineWidth=max(0.5,size*0.32)、opacity 折进颜色 alpha 逐层叠加)
-  private drawPatternLayer(ctx: CanvasRenderingContext2D, p: ThemePackPattern,
-    width: number, height: number): void {
-    if (width <= 0 || height <= 0) return;
-    const spacing: number = p.spacing;
-    const markSize: number = p.size;
-    const lineWidth: number = Math.max(0.5, markSize * 0.32);
-    const columns: number = Math.max(0, Math.ceil(width / spacing));
-    const rows: number = Math.max(0, Math.ceil(height / spacing));
-    const alpha: number = Math.round(Math.min(Math.max(p.opacity, 0), 0.3) * 255);
-    const color: string = `#${alpha.toString(16).padStart(2, '0').toUpperCase()}${p.color.substring(1)}`;
-
-    if (p.kind === 'dots') {
-      ctx.fillStyle = color;
-      for (let row = 0; row <= rows; row++) {
-        for (let column = 0; column <= columns; column++) {
-          ctx.beginPath();
-          ctx.arc(column * spacing, row * spacing, markSize, 0, Math.PI * 2);
-          ctx.fill();
-        }
-      }
-      return;
-    }
-    ctx.strokeStyle = color;
-    ctx.lineWidth = lineWidth;
-    if (p.kind === 'grid') {
-      ctx.beginPath();
-      for (let column = 0; column <= columns; column++) {
-        ctx.moveTo(column * spacing, 0);
-        ctx.lineTo(column * spacing, height);
-      }
-      for (let row = 0; row <= rows; row++) {
-        ctx.moveTo(0, row * spacing);
-        ctx.lineTo(width, row * spacing);
-      }
-      ctx.stroke();
-      return;
-    }
-    if (p.kind === 'diagonal') {
-      const count: number = Math.max(0, Math.ceil((width + height) / spacing)) + 1;
-      ctx.beginPath();
-      for (let index = 0; index <= count; index++) {
-        const x: number = -height + index * spacing;
-        ctx.moveTo(x, height);
-        ctx.lineTo(x + height, 0);
-      }
-      ctx.stroke();
-      return;
-    }
-    if (p.kind === 'crosses') {
-      ctx.beginPath();
-      for (let row = 0; row <= rows; row++) {
-        for (let column = 0; column <= columns; column++) {
-          const x: number = column * spacing;
-          const y: number = row * spacing;
-          ctx.moveTo(x - markSize, y);
-          ctx.lineTo(x + markSize, y);
-          ctx.moveTo(x, y - markSize);
-          ctx.lineTo(x, y + markSize);
-        }
-      }
-      ctx.stroke();
-      return;
-    }
-    if (p.kind === 'waves') {
-      const wavelength: number = Math.max(spacing * 2, 1);
-      const amplitude: number = Math.max(markSize * 1.5, 0.75);
-      const sampleWidth: number = Math.max(wavelength / 6, 1);
-      const sampleCount: number = Math.max(1, Math.min(512, Math.ceil(width / sampleWidth)));
-      for (let row = 0; row <= rows; row++) {
-        const baseline: number = row * spacing;
-        ctx.beginPath();
-        for (let sample = 0; sample <= sampleCount; sample++) {
-          const x: number = sample / sampleCount * width;
-          const y: number = baseline + Math.sin(x / wavelength * 2 * Math.PI) * amplitude;
-          if (sample === 0) {
-            ctx.moveTo(x, y);
-          } else {
-            ctx.lineTo(x, y);
-          }
-        }
-        ctx.stroke();
-      }
-      return;
-    }
-    if (p.kind === 'rings') {
-      const radius: number = Math.max(markSize * 2, 0.5);
-      for (let row = 0; row <= rows; row++) {
-        for (let column = 0; column <= columns; column++) {
-          ctx.beginPath();
-          ctx.arc(column * spacing, row * spacing, radius, 0, Math.PI * 2);
-          ctx.stroke();
-        }
-      }
-      return;
-    }
-  }
-
-  // 画布底色:有渐变 → 包内 stops(均匀分布,对齐 SwiftUI LinearGradient);
-  //   无渐变 → HOME_BG 双色点(等效平涂,AMOLED/主题覆写随令牌)
-  private homeGradientColors(): Array<[string, number]> {
-    const out: Array<[string, number]> = [];
-    const stops: string[] | null = currentCanvasGradient(this.darkMode);
-    if (stops === null || stops.length < 2) {
-      out.push([HOME_BG, 0]);
-      out.push([HOME_BG, 1]);
-      return out;
-    }
-    for (let i = 0; i < stops.length; i++) {
-      out.push([stops[i], i / (stops.length - 1)]);
-    }
-    return out;
-  }
-
-  // dotGrid 运行时切换:onReady/onAreaChange 不会重触发,需手动重绘
-  private redrawDots(): void {
-    if (!this.pageAlive) return;
-    this.drawCanvasTexture(this.dotContext.width, this.dotContext.height);
-  }
 
   @Builder
   SearchCapsuleContent(): void {
@@ -1428,16 +1281,8 @@ struct ChatListPage {
       // 主题纪元重挂载(勿拆):epoch 变化 → 整页子树销毁重建,全量重读令牌
       ForEach([this.themeEpoch], (_e: number): void => {
       Stack({ alignContent: Alignment.BottomEnd }) {
-        // 画布纹理层(patterns/点阵,压在 HOME_BG 渐变上、内容下)
-        Canvas(this.dotContext)
-          .width('100%')
-          .height('100%')
-          .onReady((): void => {
-            this.drawCanvasTexture(this.dotContext.width, this.dotContext.height);
-          })
-          .onAreaChange((_old: Area, value: Area): void => {
-            this.drawCanvasTexture(Number(value.width), Number(value.height));
-          })
+        // 画布纹理层(patterns/点阵,压在渐变上、内容下;共享组件自绘)
+        DesignCanvasLayer({ surface: 'home' })
 
         List() {
           ListItem() {
@@ -1611,10 +1456,10 @@ struct ChatListPage {
       .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .width('100%')
     .height('100%')
-    // 画布底色:包渐变(无渐变时 homeGradientColors 退化为 HOME_BG 平涂;角度 iOS→ArkUI 已换算)
+    // 画布底色:包渐变(无渐变时 canvasGradientColors 退化为 HOME_BG 平涂;角度 iOS→ArkUI 已换算)
     .linearGradient({
       angle: currentCanvasGradientAngle(),
-      colors: this.homeGradientColors(),
+      colors: canvasGradientColors(),
     })
   }
 }
