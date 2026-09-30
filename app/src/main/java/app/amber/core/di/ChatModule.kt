@@ -1,5 +1,8 @@
 package app.amber.core.di
 
+import android.content.Context
+import app.amber.core.recap.ConversationRecapGenerator
+import app.amber.core.recap.ConversationRecapStore
 import app.amber.core.service.ChatService
 import app.amber.core.service.ConversationAccess
 import app.amber.core.service.PendingMessageStore
@@ -7,6 +10,7 @@ import app.amber.core.service.UserInputPreprocessor
 import app.amber.core.service.orchestrator.BranchMessageOrchestrator
 import app.amber.core.service.orchestrator.RegenerateMessageOrchestrator
 import app.amber.core.service.orchestrator.SendMessageOrchestrator
+import java.io.File
 import org.koin.dsl.module
 
 /**
@@ -26,6 +30,22 @@ val chatModule = module {
     }
 
     single { UserInputPreprocessor(settingsStore = get()) }
+
+    single {
+        ConversationRecapStore(
+            rootDir = File(get<Context>().filesDir, ConversationRecapStore.DIRECTORY),
+        )
+    }
+
+    single {
+        ConversationRecapGenerator(
+            context = get(),
+            settingsStore = get(),
+            providerCatalog = get(),
+            conversationRepo = get(),
+            store = get(),
+        )
+    }
 
     single {
         ChatService(
@@ -74,6 +94,8 @@ val chatModule = module {
             themePackageManager = get(),
             restoreWriteGate = get(),
             jevToolSemanticSearch = get(),
+            recapGenerator = get(),
+            recapStore = get(),
         )
     }
     single<ConversationAccess> { get<ChatService>() }

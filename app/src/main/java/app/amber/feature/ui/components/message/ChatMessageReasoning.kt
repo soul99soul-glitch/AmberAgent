@@ -8,6 +8,7 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.ScrollState
+import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -28,6 +29,7 @@ import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.platform.LocalDensity
@@ -36,6 +38,10 @@ import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -45,6 +51,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.isActive
 import app.amber.ai.core.ReasoningLevel
 import app.amber.ai.provider.Model
@@ -162,38 +169,6 @@ private fun rememberReasoningState(
         }
     }
 
-    val previewDensity = LocalDensity.current.density
-    LaunchedEffect(reasoning.reasoning.length, loading, state.expandState) {
-        if (
-            loading &&
-            state.expandState.expanded &&
-            !reasoning.reasoning.isReasoningTailTrimmed(
-                loading = true,
-                expanded = state.expandState == ReasoningCardState.Expanded,
-            )
-        ) {
-            // Rate-limited continuous follow instead of per-append snap: the
-            // preview box used to scrollTo(maxValue) on every length change,
-            // jerking a full line height each append (STREAMING_PRESENTATION_
-            // PLAYBOOK 坑14 — limit by pt/s, keep motion continuous). The user
-            // reading the box can still win: touch steals the scroll.
-            var lastNanos = 0L
-            while (true) {
-                val now = withFrameNanos { it }
-                val frameMs = if (lastNanos == 0L) 16f else ((now - lastNanos) / 1_000_000f).coerceIn(4f, 100f)
-                lastNanos = now
-                val remaining = scrollState.maxValue - scrollState.value
-                if (remaining > 0) {
-                    val step = minOf(
-                        remaining.toFloat(),
-                        REASONING_PREVIEW_FOLLOW_DP_PER_SECOND * previewDensity * frameMs / 1000f,
-                    )
-                    scrollState.dispatchRawDelta(step)
-                }
-            }
-        }
-    }
-
     LaunchedEffect(loading) {
         if (loading) {
             while (isActive) {
@@ -218,27 +193,59 @@ private fun ReasoningContent(
     val workspace = workspaceColors()
     val isPreview = expandState == ReasoningCardState.Preview
     val omittedPrefixTemplate = stringResource(R.string.chat_message_reasoning_omitted)
-    val displayText = remember(reasoning.reasoning, loading, expandState, omittedPrefixTemplate) {
-        reasoning.reasoning.toDisplayReasoningText(
-            loading = loading,
-            expanded = expandState == ReasoningCardState.Expanded,
-            omittedPrefixTemplate = omittedPrefixTemplate,
+    val displayText = remember(reasoning.reasoning, regexes) {
+        MessageRenderCache.visualRegexText(
+            text = reasoning.reasoning,
+            regexes = regexes,
+            scope = AssistantAffectScope.ASSISTANT,
         )
     }
-    // Streaming treatment only while the display text is the plain growing
-    // prefix. Once toDisplayReasoningText switches to its sliding tail window
-    // ("已省略前 N 字…"), every append rewrites the head — a prefix-breaking
-    // content that would make the display buffer snap per chunk and reset the
-    // reveal motion scope. Trimmed thoughts render statically, as before.
-    val displayTextStreaming = remember(reasoning.reasoning, loading, expandState) {
-        loading && !reasoning.reasoning.isReasoningTailTrimmed(
-            loading = loading,
-            expanded = expandState == ReasoningCardState.Expanded,
-        )
+    var followTail by remember(scrollState) { mutableStateOf(true) }
+    val followedStream = remember(scrollState) { loading }
+    val isDragged by scrollState.interactionSource.collectIsDraggedAsState()
+    val density = LocalDensity.current.density
+    val bottomBuffer = 24f * density
+    val scrollConnection = remember(scrollState, bottomBuffer) {
+        object : NestedScrollConnection {
+            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                if (source == NestedScrollSource.UserInput && available.y > 0f) followTail = false
+                return Offset.Zero
+            }
+
+            override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset {
+                if (source == NestedScrollSource.UserInput && consumed.y < 0f &&
+                    scrollState.maxValue - scrollState.value <= bottomBuffer
+                ) followTail = true
+                return Offset.Zero
+            }
+        }
+    }
+    LaunchedEffect(scrollState, loading, followTail, isDragged, density) {
+        if ((!loading && !followedStream) || !followTail || isDragged) return@LaunchedEffect
+        // Cropping a complete head row can keep maxValue unchanged while
+        // moving value back. Observe the remaining gap, not just content size.
+        snapshotFlow { scrollState.value < scrollState.maxValue }.collectLatest { needsScroll ->
+            if (!needsScroll) return@collectLatest
+            scrollState.scroll {
+                var lastNanos = withFrameNanos { it }
+                while (scrollState.value < scrollState.maxValue) {
+                    val now = withFrameNanos { it }
+                    val seconds = ((now - lastNanos) / 1_000_000_000f).coerceAtMost(0.1f)
+                    lastNanos = now
+                    scrollBy(
+                        minOf(
+                            (scrollState.maxValue - scrollState.value).toFloat(),
+                            REASONING_PREVIEW_FOLLOW_DP_PER_SECOND * density * seconds,
+                        ),
+                    )
+                }
+            }
+        }
     }
     Column(
         modifier = Modifier
             .fillMaxWidth()
+            .nestedScroll(scrollConnection)
             .let { contentModifier ->
                 if (isPreview) {
                     contentModifier
@@ -291,15 +298,15 @@ private fun ReasoningContent(
                 // 显示层剥离标记（原文保留，导出/复制仍是 markdown），并复用与正文
                 // 相同的词量化节奏 + 逐字淡入（StreamingPlainText）。
                 StreamingPlainText(
-                    text = MessageRenderCache.visualRegexText(
-                        text = displayText,
-                        regexes = regexes,
-                        scope = AssistantAffectScope.ASSISTANT,
+                    text = displayText,
+                    streaming = loading,
+                    maxVisibleChars = reasoningDisplayLimit(
+                        loading = loading,
+                        expanded = expandState == ReasoningCardState.Expanded,
                     ),
-                    // Thinking text streams like answer text: display-buffer
-                    // pacing + tail reveal. Trimmed (sliding-window) thoughts
-                    // are prefix-breaking content and render statically.
-                    streaming = displayTextStreaming,
+                    omittedPrefixTemplate = omittedPrefixTemplate,
+                    scrollState = scrollState,
+                    followTail = followTail && !isDragged,
                     // Thoughts are human prose → SANS (.secondary), rendered directly on the
                     // thinking surface without a document-style quote rule.
                     // 字号随聊天字号比例缩放（思考正文原来被硬编码绕过滑杆）。
@@ -448,22 +455,6 @@ private fun ReasoningLevel?.reasoningLabel(): String? = when (this) {
     ReasoningLevel.XHIGH -> stringResource(R.string.reasoning_xhigh)
     ReasoningLevel.MAX -> stringResource(R.string.reasoning_max)
 }
-
-internal fun String.toDisplayReasoningText(
-    loading: Boolean,
-    expanded: Boolean,
-    omittedPrefixTemplate: String = "… 已省略前 %1\$d 字，以保持流式思考界面流畅。",
-): String {
-    val limit = reasoningDisplayLimit(loading = loading, expanded = expanded)
-    if (length <= limit) return this
-    val omitted = length - limit
-    return omittedPrefixTemplate.format(omitted) + "\n\n" + takeLast(limit)
-}
-
-internal fun String.isReasoningTailTrimmed(
-    loading: Boolean,
-    expanded: Boolean,
-): Boolean = length > reasoningDisplayLimit(loading = loading, expanded = expanded)
 
 private fun reasoningDisplayLimit(
     loading: Boolean,

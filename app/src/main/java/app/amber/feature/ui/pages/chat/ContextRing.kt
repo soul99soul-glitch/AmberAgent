@@ -73,6 +73,101 @@ fun contextMeterFilledBars(used: Int, total: Int): Int {
     return ((v * 5f) + 0.5f).toInt().coerceIn(0, 5)
 }
 
+/** Values behind the context usage summary (tokens in K). */
+@androidx.compose.runtime.Immutable
+data class ContextUsageSnapshot(
+    val usedK: Int,
+    val totalK: Int,
+    val lastTurnTotalTokens: Int? = null,
+    val lastTurnCompletionTokens: Int? = null,
+    val lastTurnCachedTokens: Int? = null,
+    val lastTurnPromptTokens: Int? = null,
+    val lastTurnElapsedMs: Long? = null,
+)
+
+/** Threshold colour of the usage bar. */
+@Composable
+fun contextUsageColor(used: Int, total: Int): Color {
+    val theme = LocalChatTheme.current
+    val v = if (total > 0) (used.toFloat() / total.toFloat()).coerceIn(0f, 1f) else 0f
+    return when {
+        v <= 0.001f -> theme.contextEmpty
+        v < 0.50f -> theme.contextLow
+        v < 0.75f -> theme.contextMid
+        else -> theme.contextHigh
+    }
+}
+
+/**
+ * Compact context usage at the top of the model menu: one row with the bar and
+ * used / total, one row of turn stats. Stats without data are left out.
+ */
+@Composable
+fun ContextUsageSummary(snapshot: ContextUsageSnapshot, modifier: Modifier = Modifier) {
+    val theme = LocalChatTheme.current
+    val tokens = app.amber.feature.ui.theme.LocalAmberTokens.current
+    val meta = LocalAmberType.current.meta
+    val used = snapshot.usedK
+    val total = snapshot.totalK
+    val fraction = if (total > 0) (used.toFloat() / total).coerceIn(0f, 1f) else 0f
+    val stats = buildList {
+        snapshot.lastTurnTotalTokens?.let {
+            add("${stringResource(R.string.context_ring_this_turn)} ${formatTokens(it)} tok")
+        }
+        val prompt = snapshot.lastTurnPromptTokens ?: 0
+        val cached = snapshot.lastTurnCachedTokens ?: 0
+        if (prompt > 0 && cached > 0) {
+            val pct = (cached * 100.0 / prompt).coerceIn(0.0, 100.0).toInt()
+            add("${stringResource(R.string.context_ring_cache_hit)} $pct%")
+        }
+        val completion = snapshot.lastTurnCompletionTokens ?: 0
+        val elapsed = snapshot.lastTurnElapsedMs ?: 0L
+        if (elapsed > 0L && completion > 0) {
+            val tps = (completion / (elapsed / 1000.0)).toInt()
+            if (tps > 0) add("$tps tok/s")
+        }
+    }
+    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = stringResource(R.string.chat_model_menu_context),
+                style = meta.copy(fontSize = 12.sp, lineHeight = 16.sp, fontWeight = FontWeight.Medium),
+                color = tokens.ink2,
+            )
+            Box(
+                modifier = Modifier
+                    .padding(horizontal = 10.dp)
+                    .weight(1f)
+                    .height(4.dp)
+                    .clip(RoundedCornerShape(999.dp))
+                    .background(theme.contextTrack),
+            ) {
+                Box(
+                    Modifier
+                        .fillMaxWidth(fraction)
+                        .height(4.dp)
+                        .clip(RoundedCornerShape(999.dp))
+                        .background(contextUsageColor(used, total)),
+                )
+            }
+            Text(
+                text = "${formatContextWindowK(used)} / ${formatContextWindowK(total)}",
+                style = meta.copy(fontSize = 12.sp, lineHeight = 16.sp),
+                color = tokens.ink2,
+            )
+        }
+        if (stats.isNotEmpty()) {
+            Text(
+                text = stats.joinToString(" · "),
+                style = meta.copy(fontSize = 11.sp, lineHeight = 14.sp),
+                color = tokens.ink3,
+                maxLines = 1,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
 /**
  * 22dp Context Ring —— 顶栏右侧轻量进度环 + 点开 usage panel popup。
  *
@@ -307,103 +402,130 @@ private fun ContextUsagePopup(
                 tonalElevation = 0.dp,
                 shadowElevation = 0.dp,
             ) {
-                Column(
+                ContextUsageSummary(
+                    used = used,
+                    total = total,
+                    progressColor = progressColor,
+                    quotaSupported = quotaSupported,
+                    lastTurnTotalTokens = lastTurnTotalTokens,
+                    lastTurnCompletionTokens = lastTurnCompletionTokens,
+                    lastTurnCachedTokens = lastTurnCachedTokens,
+                    lastTurnPromptTokens = lastTurnPromptTokens,
+                    lastTurnElapsedMs = lastTurnElapsedMs,
                     modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 14.dp, bottom = 14.dp),
-                ) {
-                    Text(
-                        text = stringResource(R.string.context_ring_usage_context),
-                        fontSize = 13.sp,
-                        color = theme.inkSoft,
-                        letterSpacing = 0.3.sp,
-                        modifier = Modifier.padding(bottom = 10.dp),
-                    )
-
-                    if (quotaSupported) {
-                        UsageRow(
-                            label = stringResource(R.string.context_ring_five_hour_quota),
-                            value = 0.46f,
-                            caption = stringResource(R.string.context_ring_five_hour_caption),
-                            fillColor = theme.accent,
-                            theme = theme,
-                        )
-                        UsageRow(
-                            label = stringResource(R.string.context_ring_weekly_quota),
-                            value = 0.18f,
-                            caption = stringResource(R.string.context_ring_weekly_caption),
-                            fillColor = theme.accent,
-                            theme = theme,
-                        )
-
-                        // 分隔线 (仅在显示限额行时画)
-                        Box(
-                            modifier = Modifier
-                                .padding(top = 12.dp, bottom = 10.dp)
-                                .fillMaxWidth()
-                                .height(1.dp)
-                                .background(theme.hair),
-                        )
-                    }
-
-                    UsageRow(
-                        label = "Context",
-                        value = if (total > 0) used.toFloat() / total.toFloat() else 0f,
-                        caption = "${formatContextWindowK(used)} / ${formatContextWindowK(total)}",
-                        fillColor = progressColor,
-                        theme = theme,
-                    )
-
-                    // meta strip — 改 Column 排版 (label 在上, value 在下), 横向 SpaceBetween,
-                    // 避免之前 Row 一行 3 个 label+value 挤换行造成 "速度" 被切到下一行.
-                    Box(
-                        modifier = Modifier
-                            .padding(top = 14.dp)
-                            .fillMaxWidth()
-                            .height(1.dp)
-                            .background(theme.hair),
-                    )
-                    Row(
-                        modifier = Modifier
-                            .padding(top = 12.dp)
-                            .fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                    ) {
-                        // V3: 本次 = lastAssistantMessage.usage.totalTokens
-                        val turnVal = lastTurnTotalTokens?.let { formatTokens(it) + " tok" } ?: "—"
-                        MetaStat(
-                            label = stringResource(R.string.context_ring_this_turn),
-                            value = turnVal,
-                            theme = theme,
-                        )
-                        // 缓存命中率: cached / prompt * 100%, 跳过 prompt==0 (避免除零 / N/A 时显示 —)
-                        val promptTokens = lastTurnPromptTokens ?: 0
-                        val cachedTokens = lastTurnCachedTokens ?: 0
-                        val cacheVal = if (promptTokens > 0 && cachedTokens > 0) {
-                            val pct = (cachedTokens * 100.0 / promptTokens).coerceIn(0.0, 100.0)
-                            "${pct.toInt()}%"
-                        } else "—"
-                        MetaStat(
-                            label = stringResource(R.string.context_ring_cache_hit),
-                            value = cacheVal,
-                            theme = theme,
-                        )
-                        // 速度: completion_tokens / elapsed_seconds → tok/s. elapsed=null 时 —
-                        val completionTokens = lastTurnCompletionTokens ?: 0
-                        val speedVal = if (lastTurnElapsedMs != null && lastTurnElapsedMs > 0L && completionTokens > 0) {
-                            val tps = completionTokens.toDouble() / (lastTurnElapsedMs / 1000.0)
-                            "${tps.toInt()} tok/s"
-                        } else "—"
-                        MetaStat(
-                            label = stringResource(R.string.context_ring_speed),
-                            value = speedVal,
-                            theme = theme,
-                        )
-                    }
-                }
+                )
             }
 
             // V3: 删除指向 ring 的菱形箭头. 之前 14dp square rotate 45° 想模拟尖角,
             // 但 panel 没把它下半遮住, 整个菱形完整显示成一个奇怪的对话框勾, 而且 anchor
             // 错位让它对不准 ring. panel 直接挂在 ring 下方即可, 不需要 anchor 指示.
+        }
+    }
+}
+
+/** Context usage body shared by the ring popup and the model menu header. */
+@Composable
+fun ContextUsageSummary(
+    used: Int,
+    total: Int,
+    progressColor: Color,
+    modifier: Modifier = Modifier,
+    quotaSupported: Boolean = false,
+    lastTurnTotalTokens: Int? = null,
+    lastTurnCompletionTokens: Int? = null,
+    lastTurnCachedTokens: Int? = null,
+    lastTurnPromptTokens: Int? = null,
+    lastTurnElapsedMs: Long? = null,
+) {
+    val theme = LocalChatTheme.current
+    Column(modifier = modifier) {
+        Text(
+            text = stringResource(R.string.context_ring_usage_context),
+            fontSize = 13.sp,
+            color = theme.inkSoft,
+            letterSpacing = 0.3.sp,
+            modifier = Modifier.padding(bottom = 10.dp),
+        )
+
+        if (quotaSupported) {
+            UsageRow(
+                label = stringResource(R.string.context_ring_five_hour_quota),
+                value = 0.46f,
+                caption = stringResource(R.string.context_ring_five_hour_caption),
+                fillColor = theme.accent,
+                theme = theme,
+            )
+            UsageRow(
+                label = stringResource(R.string.context_ring_weekly_quota),
+                value = 0.18f,
+                caption = stringResource(R.string.context_ring_weekly_caption),
+                fillColor = theme.accent,
+                theme = theme,
+            )
+
+            // 分隔线 (仅在显示限额行时画)
+            Box(
+                modifier = Modifier
+                    .padding(top = 12.dp, bottom = 10.dp)
+                    .fillMaxWidth()
+                    .height(1.dp)
+                    .background(theme.hair),
+            )
+        }
+
+        UsageRow(
+            label = "Context",
+            value = if (total > 0) used.toFloat() / total.toFloat() else 0f,
+            caption = "${formatContextWindowK(used)} / ${formatContextWindowK(total)}",
+            fillColor = progressColor,
+            theme = theme,
+        )
+
+        // meta strip — 改 Column 排版 (label 在上, value 在下), 横向 SpaceBetween,
+        // 避免之前 Row 一行 3 个 label+value 挤换行造成 "速度" 被切到下一行.
+        Box(
+            modifier = Modifier
+                .padding(top = 14.dp)
+                .fillMaxWidth()
+                .height(1.dp)
+                .background(theme.hair),
+        )
+        Row(
+            modifier = Modifier
+                .padding(top = 12.dp)
+                .fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            // V3: 本次 = lastAssistantMessage.usage.totalTokens
+            val turnVal = lastTurnTotalTokens?.let { formatTokens(it) + " tok" } ?: "—"
+            MetaStat(
+                label = stringResource(R.string.context_ring_this_turn),
+                value = turnVal,
+                theme = theme,
+            )
+            // 缓存命中率: cached / prompt * 100%, 跳过 prompt==0 (避免除零 / N/A 时显示 —)
+            val promptTokens = lastTurnPromptTokens ?: 0
+            val cachedTokens = lastTurnCachedTokens ?: 0
+            val cacheVal = if (promptTokens > 0 && cachedTokens > 0) {
+                val pct = (cachedTokens * 100.0 / promptTokens).coerceIn(0.0, 100.0)
+                "${pct.toInt()}%"
+            } else "—"
+            MetaStat(
+                label = stringResource(R.string.context_ring_cache_hit),
+                value = cacheVal,
+                theme = theme,
+            )
+            // 速度: completion_tokens / elapsed_seconds → tok/s. elapsed=null 时 —
+            val completionTokens = lastTurnCompletionTokens ?: 0
+            val speedVal = if (lastTurnElapsedMs != null && lastTurnElapsedMs > 0L && completionTokens > 0) {
+                val tps = completionTokens.toDouble() / (lastTurnElapsedMs / 1000.0)
+                "${tps.toInt()} tok/s"
+            } else "—"
+            MetaStat(
+                label = stringResource(R.string.context_ring_speed),
+                value = speedVal,
+                theme = theme,
+            )
         }
     }
 }

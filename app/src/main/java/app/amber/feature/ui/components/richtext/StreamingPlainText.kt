@@ -1,127 +1,159 @@
 package app.amber.feature.ui.components.richtext
 
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.takeOrElse
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.dp
 import app.amber.core.utils.stripReasoningMarkdown
-import kotlinx.coroutines.delay
 
-/**
- * Plain-text streaming renderer for the thinking box.
- *
- * Reasoning is human prose, not document markdown — a `##` headline or bold
- * run inside a 13.5sp card reads as visual noise. This composable strips
- * markdown markers on the DISPLAY layer only (the stored/exported reasoning
- * keeps its original text), then reuses the exact same reveal machinery as
- * the answer body: the word-quantized display buffer
- * ([rememberStreamingDisplayText]) for pacing and the per-character fade
- * clock ([StreamingCharRevealClock]) so characters materialize with the same
- * light sweep as the answer text.
- *
- * Settled instances (export page, reopened history) never run the reveal:
- * the clock only renders through [applyStreamingCharRevealPlain] once a frame
- * callback has actually advanced it — stamping against the frozen seed time
- * would paint every character at alpha 0 (invisible text).
- *
- * Streaming inputs are marker-repaired before stripping so a half-typed
- * `**bol` doesn't flash raw asterisks: an unpaired closer is appended first
- * (display-only), the pair is stripped, and the visible text stays a stable
- * prefix as the marker completes upstream.
- */
+/** Thinking prose uses the answer renderer's bounded, self-drying tail reveal. */
 @Composable
 fun StreamingPlainText(
     text: String,
     streaming: Boolean,
     style: TextStyle,
     modifier: Modifier = Modifier,
+    maxVisibleChars: Int = Int.MAX_VALUE,
+    omittedPrefixTemplate: String = "",
+    scrollState: ScrollState? = null,
+    followTail: Boolean = true,
 ) {
     val displaySource = remember(text) {
         repairUnpairedInlineMarkers(text).stripReasoningMarkdown()
     }
-    val visible = rememberStreamingDisplayText(
-        content = displaySource,
-        streaming = streaming,
-    )
-    val clock = remember { StreamingCharRevealClock() }
-    // Seeded with System.nanoTime (same timebase as Choreographer frame nanos)
-    // so pre-first-frame characters don't read as ages old and skip the fade.
-    var revealNowNanos by remember { mutableLongStateOf(System.nanoTime()) }
-    // True once a frame callback has run — the only state that gates whether
-    // the reveal path is allowed to render. Instances composed in the settled
-    // state never flip it and render plain text.
-    var framesAdvanced by remember { mutableStateOf(false) }
-    val updatedStreaming by rememberUpdatedState(streaming)
-    val updatedSource by rememberUpdatedState(displaySource)
-    val updatedVisible by rememberUpdatedState(visible)
-    LaunchedEffect(displaySource) {
-        if (!updatedStreaming && updatedVisible == updatedSource) {
-            // Composed settled (export / history): no pacing, no reveal.
-            return@LaunchedEffect
-        }
-        // Frame clock: runs through streaming AND the post-stream drain, then
-        // holds ~300ms past the last text change so the final stamped
-        // characters complete their fade before the loop exits. Exiting on
-        // the settle flip alone would freeze them mid-sweep.
-        var lastChangeNanos = System.nanoTime()
-        var lastLength = -1
-        while (true) {
-            withFrameNanos { frameNanos ->
-                revealNowNanos = frameNanos
-                framesAdvanced = true
-            }
-            val length = updatedVisible.length
-            if (length != lastLength) {
-                lastLength = length
-                lastChangeNanos = System.nanoTime()
-            }
-            val settled = !updatedStreaming && length == updatedSource.length
-            if (settled && System.nanoTime() - lastChangeNanos > 300_000_000L) break
-            if (settled) delay(16)
-        }
+    // Pace the stable source BEFORE cropping. A moving window is not an append.
+    val visible = rememberStreamingDisplayText(content = displaySource, streaming = streaming)
+    val window = remember { PlainTextDisplayWindow() }
+    val displayed = remember(visible, maxVisibleChars, followTail, omittedPrefixTemplate) {
+        window.update(visible, maxVisibleChars, followTail, omittedPrefixTemplate)
     }
+    val releaseRate = remember { ReleaseRateTracker() }
+    var lastAppendMs by remember { mutableLongStateOf(0L) }
+    var settleNowMs by remember { mutableLongStateOf(0L) }
+    // Static exports/history stay opaque. A tracked stream drains and dries even
+    // if loading ends without one final text change.
+    var trackedStream by remember { mutableStateOf(streaming) }
+    SideEffect { if (streaming) trackedStream = true }
+    LaunchedEffect(visible, streaming) {
+        if (!streaming && !trackedStream) return@LaunchedEffect
+        val now = withFrameNanos { it / 1_000_000L }
+        releaseRate.record(now, visible.length)
+        lastAppendMs = now
+        do {
+            settleNowMs = withFrameNanos { it / 1_000_000L }
+        } while (revealWindowChars(releaseRate.ratePerSecond(settleNowMs), settleNowMs - now) > 0)
+    }
+    val revealChars = if (streaming || trackedStream) {
+        revealWindowChars(
+            releaseRate.ratePerSecond(settleNowMs),
+            (settleNowMs - lastAppendMs).coerceAtLeast(0L),
+        )
+    } else 0
     val baseColor = style.color.takeOrElse { Color.Black }
-    // The reveal rendering is only taken once frames have actually advanced.
-    // By the time the loop exits, every stamp is ≥300ms old = fully opaque,
-    // so the last annotated frame is visually identical to plain text — no
-    // alpha snap at the transition.
-    val annotated = if (framesAdvanced) {
-        remember(visible, revealNowNanos) {
-            applyStreamingCharRevealPlain(
-                text = visible,
-                suffixSourceOffset = 0,
-                clock = clock,
-                nowNanos = revealNowNanos,
-                baseColor = baseColor,
-            )
-        }
-    } else {
-        null
+    val annotated = remember(displayed, revealChars, baseColor) {
+        applyStreamingWindowReveal(AnnotatedString(displayed), revealChars, baseColor)
     }
-    if (annotated != null) {
-        BasicText(
-            text = annotated,
-            modifier = modifier.padding(start = 4.dp),
-            style = style,
-        )
-    } else {
-        BasicText(
-            text = visible,
-            modifier = modifier.padding(start = 4.dp),
-            style = style,
-        )
+    BasicText(
+        text = annotated,
+        modifier = modifier.padding(start = 4.dp)
+            .onGloballyPositioned { window.applyScrollAdjustment(scrollState) },
+        style = style,
+        onTextLayout = { window.onTextLayout(it, scrollState) },
+    )
+}
+
+/**
+ * Keep the existing text budget, but remove complete measured lines rather than
+ * shifting every character on every chunk. The retained line keeps its screen
+ * position. While reading back we retain the window instead of deleting text
+ * underneath the user's finger.
+ */
+private class PlainTextDisplayWindow {
+    private var previous = ""
+    private var start = 0
+    private var prefixLength = 0
+    private var limit = Int.MAX_VALUE
+    private var layout: TextLayoutResult? = null
+    private var retainedLineTop: Float? = null
+    private var retainedSourceOffset = 0
+    private var scrollAdjustment = 0f
+
+    fun update(text: String, maxChars: Int, followTail: Boolean, prefixTemplate: String): String {
+        if (!text.startsWith(previous)) {
+            start = 0
+            layout = null
+            retainedLineTop = null
+        } else if (maxChars > limit && start > 0) {
+            // Expanding the completed thought restores its longer history without
+            // moving the line that was visible in the streaming window.
+            retainedLineTop = layout?.let { it.getLineTop(it.getLineForOffset(prefixLength)) }
+            retainedSourceOffset = start
+            start = 0
+            layout = null
+        }
+        val currentLayout = layout
+        val excess = text.length - start - maxChars
+        if (followTail && excess > 0) {
+            if (currentLayout != null && currentLayout.layoutInput.text.isNotEmpty()) {
+                val offset = (prefixLength + excess).coerceAtMost(currentLayout.layoutInput.text.lastIndex)
+                val line = currentLayout.getLineForOffset(offset)
+                val removedChars = currentLayout.getLineStart(line) - prefixLength
+                if (removedChars > 0) {
+                    start += removedChars
+                    retainedLineTop = currentLayout.getLineTop(line)
+                    retainedSourceOffset = start
+                }
+            } else {
+                // First layout / settled history has no existing reading anchor.
+                start = text.length - maxChars
+                if (start > 0 && Character.isLowSurrogate(text[start])) start--
+            }
+        }
+        previous = text
+        limit = maxChars
+        val prefix = if (start > 0 && prefixTemplate.isNotEmpty()) prefixTemplate.format(start) + "\n\n" else ""
+        prefixLength = prefix.length
+        return prefix + text.substring(start)
+    }
+
+    fun onTextLayout(result: TextLayoutResult, scrollState: ScrollState?) {
+        retainedLineTop?.let { oldTop ->
+            val newTop = result.getLineTop(result.getLineForOffset(prefixLength + retainedSourceOffset - start))
+            val delta = newTop - oldTop
+            if (delta < 0f) {
+                // Remove rows before verticalScroll clamps to its smaller range;
+                // applying this after the clamp would subtract the height twice.
+                scrollState?.dispatchRawDelta(delta)
+            } else {
+                scrollAdjustment = delta
+            }
+            retainedLineTop = null
+        }
+        layout = result
+    }
+
+    fun applyScrollAdjustment(scrollState: ScrollState?) {
+        val delta = scrollAdjustment
+        scrollAdjustment = 0f
+        // Apply after verticalScroll has measured its new range, before drawing.
+        // This preserves geometry; it is not an auto-follow scroll mutation.
+        if (delta != 0f) scrollState?.dispatchRawDelta(delta)
     }
 }
 

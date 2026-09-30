@@ -4,6 +4,7 @@ import android.content.Context
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import app.amber.ai.core.Tool
@@ -88,6 +89,7 @@ data class PermissionDecisionStrings(
     val toolNotFound: (String) -> String,
     val userAlreadyDecided: String,
     val themePackForeground: String,
+    val themePackPreview: String,
     val askUser: String,
     val capabilityPolicyBlocked: (String) -> String,
     val bothAutoApproval: String,
@@ -117,6 +119,7 @@ data class PermissionDecisionStrings(
             },
             userAlreadyDecided = "User already decided.",
             themePackForeground = "Theme package import must be explicitly confirmed in the foreground.",
+            themePackPreview = "Theme preview is a reversible in-memory change and is not persisted.",
             askUser = "ask_user always needs a human answer.",
             capabilityPolicyBlocked = { capability -> "Capability $capability policy blocked this invocation." },
             bothAutoApproval = "High-risk auto-approval allows unattended tool execution.",
@@ -153,6 +156,7 @@ data class PermissionDecisionStrings(
             },
             userAlreadyDecided = context.getString(R.string.permission_decision_reason_user_already_decided),
             themePackForeground = context.getString(R.string.permission_decision_reason_theme_pack_foreground),
+            themePackPreview = context.getString(R.string.permission_decision_reason_theme_pack_preview),
             askUser = context.getString(R.string.permission_decision_reason_ask_user),
             capabilityPolicyBlocked = { capability ->
                 context.getString(R.string.permission_decision_reason_capability_policy_blocked, capability)
@@ -259,10 +263,24 @@ class PermissionDecisionResolver(
         if (tool.approvalState !is ToolApprovalState.Auto) {
             return decision(PermissionDecisionAction.ALLOW, localized.userAlreadyDecided, "approval_state", policy)
         }
-        // Theme package import is a foreground-only user action. Keep this
-        // gate ahead of the unattended toggles: even explicit high-risk auto
-        // approval must not turn a theme import into a background write.
+        // Preview/discard only change the visible in-memory try-on. They are
+        // available only in the ordinary conversation tool surface; the tool
+        // is deliberately absent from background and sub-agent registries.
+        // Applying the candidate remains an explicit foreground decision,
+        // regardless of either unattended-approval switch.
         if (tool.toolName == TOOL_THEME_PACK_IMPORT) {
+            val action = tool.inputAsJson().jsonObject["action"]?.jsonPrimitive?.contentOrNull
+                ?.lowercase() ?: "prepare"
+            if (invocationContext == ToolInvocationContext.Normal &&
+                action in setOf("prepare", "discard")
+            ) {
+                return decision(
+                    PermissionDecisionAction.ALLOW,
+                    localized.themePackPreview,
+                    "theme_pack_preview",
+                    policy,
+                )
+            }
             return decision(
                 PermissionDecisionAction.ASK,
                 localized.themePackForeground,

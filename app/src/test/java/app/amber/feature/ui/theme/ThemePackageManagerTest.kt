@@ -4,6 +4,8 @@ import android.app.Application
 import android.content.Context
 import androidx.room.Room
 import app.amber.agent.data.db.AppDatabase
+import app.amber.agent.data.db.dao.ThemePackageDAO
+import app.amber.agent.data.db.entity.ThemePackageEntity
 import app.amber.core.settings.ChatFontFamily
 import app.amber.core.settings.DisplaySetting
 import app.amber.core.settings.Settings
@@ -11,6 +13,8 @@ import app.amber.core.sync.core.SyncRestoreWriteEpoch
 import app.amber.core.sync.core.SyncRestoreWriteGate
 import app.amber.core.sync.core.SyncRestoreWriteRejectedException
 import app.amber.core.utils.JsonInstant
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.test.runTest
@@ -217,6 +221,63 @@ class ThemePackageManagerTest {
     }
 
     @Test
+    fun `discard during package write restores prior row and keeps replacement try-on`() = runTest {
+        val initial = Settings(displaySetting = DisplaySetting(amberBaseFamily = "WARM"))
+        val store = FakeThemeSettingsStore(initial)
+        val delegate = db.themePackageDao()
+        val entered = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        val dao = PausingUpsertThemePackageDao(delegate, entered, release)
+        val manager = ThemePackageManager(dao = dao, settingsStore = store)
+        val previousEntity = ThemePackageEntity(
+            id = "custom-theme",
+            name = "已有主题",
+            json = exportJson(customDisplay().copy(accentColor = "#12AB34")),
+            importedAtMs = 7L,
+        )
+        delegate.upsert(previousEntity)
+        val imported = manager.importPackage(exportJson(customDisplay())) as ThemePackageImportResult.Preview
+
+        val applying = async { manager.applyPrepared(imported.pkg.id, imported.candidateDigest) }
+        entered.await()
+
+        assertTrue(manager.discardTryOn(imported.pkg.id, imported.candidateDigest))
+        val replacement = manager.importPackage(
+            exportJson(customDisplay().copy(accentColor = "#A12B34")),
+        ) as ThemePackageImportResult.Preview
+        store.current = store.current.copy(enableWebSearch = true)
+        release.complete(Unit)
+
+        assertEquals(ThemePackageApplyResult.NotPrepared, applying.await())
+        assertEquals(previousEntity, delegate.getById(previousEntity.id))
+        assertEquals(replacement.candidateDigest, manager.tryOn.value?.candidateDigest)
+        assertTrue(store.current.enableWebSearch)
+        assertEquals(initial.displaySetting, store.current.displaySetting)
+    }
+
+    @Test
+    fun `apply prepared merges the latest non-theme settings after package write pauses`() = runTest {
+        val initial = Settings(displaySetting = DisplaySetting(amberBaseFamily = "WARM"))
+        val store = FakeThemeSettingsStore(initial)
+        val entered = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        val dao = PausingUpsertThemePackageDao(db.themePackageDao(), entered, release)
+        val manager = ThemePackageManager(dao = dao, settingsStore = store)
+        val imported = manager.importPackage(exportJson(customDisplay())) as ThemePackageImportResult.Preview
+
+        val applying = async { manager.applyPrepared(imported.pkg.id, imported.candidateDigest) }
+        entered.await()
+        store.current = store.current.copy(enableWebSearch = true, titlePrompt = "latest prompt")
+        release.complete(Unit)
+
+        assertEquals(ThemePackageApplyResult.Applied, applying.await())
+        assertTrue(store.current.enableWebSearch)
+        assertEquals("latest prompt", store.current.titlePrompt)
+        assertEquals(imported.pkg.id, store.current.displaySetting.appliedThemePackageId)
+        assertEquals(customDisplay().accentColor, store.current.displaySetting.accentColor)
+    }
+
+    @Test
     fun `prepared candidate requires matching package id and digest`() = runTest {
         val store = FakeThemeSettingsStore(Settings(displaySetting = DisplaySetting()))
         val manager = ThemePackageManager(dao = db.themePackageDao(), settingsStore = store)
@@ -272,6 +333,33 @@ class ThemePackageManagerTest {
         override suspend fun update(settings: Settings) {
             flow.value = settings
         }
+
+        override suspend fun update(transform: (Settings) -> Settings) {
+            flow.value = transform(flow.value)
+        }
+    }
+
+    private class PausingUpsertThemePackageDao(
+        private val delegate: ThemePackageDAO,
+        private val entered: CompletableDeferred<Unit>,
+        private val release: CompletableDeferred<Unit>,
+    ) : ThemePackageDAO {
+        private var pauseNextUpsert = true
+
+        override fun observeAll(): Flow<List<ThemePackageEntity>> = delegate.observeAll()
+
+        override suspend fun getById(id: String): ThemePackageEntity? = delegate.getById(id)
+
+        override suspend fun upsert(entity: ThemePackageEntity) {
+            delegate.upsert(entity)
+            if (pauseNextUpsert) {
+                pauseNextUpsert = false
+                entered.complete(Unit)
+                release.await()
+            }
+        }
+
+        override suspend fun delete(id: String): Int = delegate.delete(id)
     }
 
     private class FailingThemeSettingsStore(initial: Settings) : ThemeSettingsStore {

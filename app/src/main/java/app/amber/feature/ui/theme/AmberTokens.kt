@@ -195,7 +195,7 @@ private fun ThemeDesign.Palette.toTokens(base: AmberTokens): AmberTokens? {
         surface2 = surface2,
         raised = surface,
         ink = foreground,
-        ink2 = muted,
+        ink2 = foreground,
         ink3 = muted,
         ink4 = muted,
         line = border,

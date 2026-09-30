@@ -1,0 +1,462 @@
+{
+  "date": "2026-09-29",
+  "environment": "Android 35 arm64 emulator, host GPU, Debug APK; no physical-device or live-provider acceptance",
+  "sourceBaseline": "04d77a8fbc737dee71ce3d343bd888f86da99e13",
+  "wipSnapshot": "44ff09902b893f9900232c966737006be2fe04a2",
+  "validatedCodeHead": "c62d2c0ee5aaf498e661bcf0be0869d568517bf8",
+  "firstOpen": {
+    "before": {
+      "messages": 80,
+      "items": 3104,
+      "elapsedMs": 784.44
+    },
+    "after": {
+      "messages": 80,
+      "items": 3104,
+      "elapsedMs": 17.17
+    },
+    "beforeVisibleMs": 2225.0,
+    "afterVisibleMs": 1947.0,
+    "beforeLongParses": [
+      {
+        "pid": 2205,
+        "tid": 2205,
+        "chars": 8083,
+        "elapsedMs": 87.78,
+        "onMain": true
+      },
+      {
+        "pid": 2205,
+        "tid": 2205,
+        "chars": 12320,
+        "elapsedMs": 127.71,
+        "onMain": true
+      },
+      {
+        "pid": 2205,
+        "tid": 2205,
+        "chars": 16184,
+        "elapsedMs": 133.46,
+        "onMain": true
+      },
+      {
+        "pid": 2205,
+        "tid": 2205,
+        "chars": 22302,
+        "elapsedMs": 248.65,
+        "onMain": true
+      },
+      {
+        "pid": 2205,
+        "tid": 2205,
+        "chars": 29064,
+        "elapsedMs": 156.15,
+        "onMain": true
+      }
+    ],
+    "afterLongParses": [
+      {
+        "pid": 3054,
+        "tid": 3135,
+        "chars": 29064,
+        "elapsedMs": 405.3,
+        "onMain": false
+      },
+      {
+        "pid": 3054,
+        "tid": 3135,
+        "chars": 22302,
+        "elapsedMs": 107.34,
+        "onMain": false
+      },
+      {
+        "pid": 3054,
+        "tid": 3135,
+        "chars": 16184,
+        "elapsedMs": 49.32,
+        "onMain": false
+      },
+      {
+        "pid": 3054,
+        "tid": 3135,
+        "chars": 12320,
+        "elapsedMs": 54.7,
+        "onMain": false
+      },
+      {
+        "pid": 3054,
+        "tid": 3135,
+        "chars": 8083,
+        "elapsedMs": 16.23,
+        "onMain": false
+      }
+    ]
+  },
+  "olderPage": {
+    "before": {
+      "messages": 120,
+      "items": 3144,
+      "elapsedMs": 258.58
+    },
+    "after": {
+      "messages": 120,
+      "items": 3144,
+      "elapsedMs": 15.34
+    },
+    "beforeScrollToVisibleMs": 732.0,
+    "afterScrollToVisibleMs": 1315.0,
+    "beforeLongParses": [
+      {
+        "pid": 3384,
+        "tid": 3384,
+        "chars": 8083,
+        "elapsedMs": 47.48,
+        "onMain": true
+      },
+      {
+        "pid": 3384,
+        "tid": 3384,
+        "chars": 12243,
+        "elapsedMs": 47.06,
+        "onMain": true
+      },
+      {
+        "pid": 3384,
+        "tid": 3384,
+        "chars": 16184,
+        "elapsedMs": 41.68,
+        "onMain": true
+      },
+      {
+        "pid": 3384,
+        "tid": 3384,
+        "chars": 22302,
+        "elapsedMs": 50.09,
+        "onMain": true
+      },
+      {
+        "pid": 3384,
+        "tid": 3384,
+        "chars": 29064,
+        "elapsedMs": 54.41,
+        "onMain": true
+      }
+    ],
+    "afterLongParses": [
+      {
+        "pid": 2224,
+        "tid": 2834,
+        "chars": 29064,
+        "elapsedMs": 321.03,
+        "onMain": false
+      },
+      {
+        "pid": 2224,
+        "tid": 2834,
+        "chars": 22302,
+        "elapsedMs": 261.06,
+        "onMain": false
+      },
+      {
+        "pid": 2224,
+        "tid": 2834,
+        "chars": 16184,
+        "elapsedMs": 106.1,
+        "onMain": false
+      },
+      {
+        "pid": 2224,
+        "tid": 2834,
+        "chars": 12243,
+        "elapsedMs": 75.94,
+        "onMain": false
+      },
+      {
+        "pid": 2224,
+        "tid": 2834,
+        "chars": 8083,
+        "elapsedMs": 43.58,
+        "onMain": false
+      }
+    ]
+  },
+  "singleFlight": {
+    "beforeParses": 2,
+    "afterParses": 1,
+    "beforeEvidence": "hit-after-parse, misses=2",
+    "afterEvidence": "misses=1 and hit-in-flight"
+  },
+  "jvm": {
+    "tests": 142,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "councilProbe": {
+    "productionChanged": false,
+    "updateIntervalMs": 10,
+    "daoDelayMs": 50,
+    "updates": 200,
+    "completedWritesWhileStreaming": 15,
+    "finalSnapshotCorrect": true
+  },
+  "deviceChecks": {
+    "f4-after-first": {
+      "label": "f4-after-first",
+      "apk": "f4-after-app.apk",
+      "apkSha256": "05dd0dd60b9b7d4219e7c08e8b9d61711abb52d8557b93ae56911aea6646985f",
+      "exitCode": 0,
+      "passed": true,
+      "elapsedSeconds": 5.0
+    },
+    "f4-after-flight": {
+      "label": "f4-after-flight",
+      "apk": "f4-after-app.apk",
+      "apkSha256": "05dd0dd60b9b7d4219e7c08e8b9d61711abb52d8557b93ae56911aea6646985f",
+      "exitCode": 0,
+      "passed": true,
+      "elapsedSeconds": 2.9
+    },
+    "f4-after-resolver-save": {
+      "label": "f4-after-resolver-save",
+      "apk": "f4-after-app.apk",
+      "apkSha256": "05dd0dd60b9b7d4219e7c08e8b9d61711abb52d8557b93ae56911aea6646985f",
+      "exitCode": 0,
+      "passed": true,
+      "elapsedSeconds": 2.3
+    },
+    "final-older-page": {
+      "label": "final-older-page",
+      "apk": "final-app.apk",
+      "apkSha256": "b49173eec262eb066702a854783a270a4c3c0fc1bd8256b18738836e812826bc",
+      "exitCode": 0,
+      "passed": true,
+      "elapsedSeconds": 12.5
+    },
+    "final-resolver-log-on": {
+      "label": "final-resolver-log-on",
+      "apk": "final-app.apk",
+      "apkSha256": "b49173eec262eb066702a854783a270a4c3c0fc1bd8256b18738836e812826bc",
+      "exitCode": 0,
+      "passed": true,
+      "elapsedSeconds": 2.7
+    },
+    "final-resolver-log-off": {
+      "label": "final-resolver-log-off",
+      "apk": "final-app.apk",
+      "apkSha256": "b49173eec262eb066702a854783a270a4c3c0fc1bd8256b18738836e812826bc",
+      "exitCode": 0,
+      "passed": true,
+      "elapsedSeconds": 2.6
+    }
+  },
+  "logGate": {
+    "enabledConversationLoadRecords": 2,
+    "disabledConversationLoadRecords": 0
+  },
+  "rawArtifacts": "/tmp/amber-android-perf-artifacts-20260929",
+  "limitations": [
+    "single controlled emulator samples, not percentiles or real-device FPS",
+    "end-to-end loading was not uniformly faster",
+    "remaining cold-layout slow measurements were observed",
+    "no real provider, account, background device or hardware acceptance"
+  ],
+  "uiLongFlowsBeforeClosure": {
+    "ChatSoftTimelineSmokeTest": "failed waiting for task details title",
+    "RedesignNavigationSmokeTest": "failed at final Extensions settings selector after 22 captures",
+    "UiRefreshDeviceSmokeTest": "failed at Light option selector after 4 captures"
+  },
+  "uiLongFlows": {
+    "closure-baseline-chat": {
+      "label": "closure-baseline-chat",
+      "apk": "baseline-app.apk",
+      "apkSha256": "b9de7ca1b41b1447bd474e0de635f6d34f80a0d1d3d5997cf1a510c1f4dc34e3",
+      "testApkSha256": "70cf2b50ce74dbd7025170bd1589fea648304b01b16f82ce0cc28a53364c6a39",
+      "exitCode": 0,
+      "passed": true,
+      "elapsedSeconds": 21.5
+    },
+    "closure-baseline-theme": {
+      "label": "closure-baseline-theme",
+      "apk": "baseline-app.apk",
+      "apkSha256": "b9de7ca1b41b1447bd474e0de635f6d34f80a0d1d3d5997cf1a510c1f4dc34e3",
+      "testApkSha256": "70cf2b50ce74dbd7025170bd1589fea648304b01b16f82ce0cc28a53364c6a39",
+      "exitCode": 0,
+      "passed": true,
+      "elapsedSeconds": 9.9
+    },
+    "closure-baseline-navigation": {
+      "label": "closure-baseline-navigation",
+      "apk": "baseline-app.apk",
+      "apkSha256": "b9de7ca1b41b1447bd474e0de635f6d34f80a0d1d3d5997cf1a510c1f4dc34e3",
+      "testApkSha256": "70cf2b50ce74dbd7025170bd1589fea648304b01b16f82ce0cc28a53364c6a39",
+      "exitCode": 0,
+      "passed": false,
+      "elapsedSeconds": 48.8
+    },
+    "closure-final-chat": {
+      "label": "closure-final-chat",
+      "apk": "closure-app.apk",
+      "apkSha256": "48134cba69e05a62b5f67751e04faed7cc0b6f1766be319e97dc0209ef02d595",
+      "testApkSha256": "70cf2b50ce74dbd7025170bd1589fea648304b01b16f82ce0cc28a53364c6a39",
+      "exitCode": 0,
+      "passed": true,
+      "elapsedSeconds": 15.6
+    },
+    "closure-final-theme": {
+      "label": "closure-final-theme",
+      "apk": "closure-app.apk",
+      "apkSha256": "48134cba69e05a62b5f67751e04faed7cc0b6f1766be319e97dc0209ef02d595",
+      "testApkSha256": "70cf2b50ce74dbd7025170bd1589fea648304b01b16f82ce0cc28a53364c6a39",
+      "exitCode": 0,
+      "passed": true,
+      "elapsedSeconds": 9.2
+    },
+    "closure-final-navigation": {
+      "label": "closure-final-navigation",
+      "apk": "closure-app.apk",
+      "apkSha256": "48134cba69e05a62b5f67751e04faed7cc0b6f1766be319e97dc0209ef02d595",
+      "testApkSha256": "70cf2b50ce74dbd7025170bd1589fea648304b01b16f82ce0cc28a53364c6a39",
+      "exitCode": 0,
+      "passed": true,
+      "elapsedSeconds": 53.2
+    }
+  },
+  "closureRuntime": {
+    "initialTests": 66,
+    "initialFailures": 2,
+    "baselineSameFailures": true,
+    "fixtureCorrection": "two non-repeatable guard tests used deliberately repeatable file_read; changed fake to guard_probe without relaxing assertions",
+    "correctedClassTests": 8,
+    "correctedClassFailures": 0,
+    "featureSubagentTask": "NO-SOURCE",
+    "artifacts": [
+      "closure-runtime-jvm-results/summary.json",
+      "closure-durable-ab.json",
+      "closure-durable-corrected.xml"
+    ]
+  },
+  "closureState": "local implementation and bounded acceptance closed; P3 hardware/live-provider/background and F15 UI cache hit remain unverified",
+  "initialScreenshotsCaptured": 29,
+  "initialScreenshotsReviewed": 8,
+  "closureVisual": {
+    "l2Captured": 38,
+    "l2Reviewed": 12,
+    "l2BaselineCompared": 9,
+    "l3Captured": 3,
+    "l3Reviewed": 3,
+    "l3ScreenshotHashes": {
+      "l3-streaming.png": "25f8530b3300b46b76c807176eff1e0197e9bc8f7feb8d0d46c7a27132c45985",
+      "l3-complete-table.png": "86f324f18e84cbdfc26c5022916945ed9f215c96b71022b06018201670ef94b7",
+      "l3-complete-code.png": "c0667441231161ae26e327e4593ae7b61cc4c05f7a680caa6f516114d06c5171"
+    },
+    "knownOverlay": "existing floating scroll controls and suggestion pill cover parts of content; ChatListNormalSection unchanged from WIP baseline",
+    "horizontalGestureVerified": false,
+    "f15UiCacheHitVerified": false
+  },
+  "closureStreaming": {
+    "firstFunctionalRun": {
+      "label": "closure-stream",
+      "app": "closure-app.apk",
+      "appSha256": "48134cba69e05a62b5f67751e04faed7cc0b6f1766be319e97dc0209ef02d595",
+      "testApkSha256": "5a55ebccf8dd90af5ca53a8b222bcd80bda97e7ccdd1b3ec18a15331bd762f75",
+      "exitCode": 0,
+      "passed": true,
+      "elapsedSeconds": 22.2
+    },
+    "firstRunMetrics": {
+      "passed": true,
+      "responseChars": 12227,
+      "responseSha256": "b12c494d9c20d3f54d891f243076fd3695a31c57bccd6334cec10ed305595fe1",
+      "tableRows": 40,
+      "tableColumns": 6,
+      "codeBlocks": 3,
+      "mainParseMisses": [
+        {
+          "chars": 76,
+          "ms": 30.75,
+          "main": true
+        },
+        {
+          "chars": 20,
+          "ms": 0.9,
+          "main": true
+        }
+      ],
+      "backgroundParseMisses": 99,
+      "longMainParseMissesAtLeast4000Chars": [],
+      "streamFlush": {
+        "count": 278,
+        "minMs": 0.02,
+        "medianMs": 0.04,
+        "maxMs": 1.68
+      },
+      "checkpointRecords": [
+        "checkpointConversation force=false nodes=2 elapsedMs=4.33",
+        "checkpointConversation force=false nodes=2 elapsedMs=10.44",
+        "checkpointConversation force=true nodes=2 elapsedMs=12.05"
+      ],
+      "conversationLoadRecords": [
+        "conversationForGeneration.load nodes=1 elapsedMs=0.0285"
+      ],
+      "timelinePlanRecords": [
+        "timelinePlan messages=1 items=4 elapsedMs=1.88 cacheHits=0 cacheMisses=1"
+      ],
+      "slowMeasures": {
+        "count": 50,
+        "maxBySection": {
+          "Amber Chat list measure": 154.4,
+          "Amber ChatMessage assistant measure": 48.3,
+          "Amber ChatMessage user measure": 112.6,
+          "Amber ChatPage measure": 162.3,
+          "Amber DataTable measure": 41.0,
+          "Amber MarkdownBlock measure": 48.2
+        }
+      },
+      "boundary": "single debug emulator scenario; record counts are not DAO write/read counts, frame stats or live-provider latency"
+    },
+    "finalRun": {
+      "label": "closure-stream-final",
+      "app": "closure-app.apk",
+      "appSha256": "48134cba69e05a62b5f67751e04faed7cc0b6f1766be319e97dc0209ef02d595",
+      "testApkSha256": "cc9b17629cfe0f90058ded4d3a67689b0ab386725e72ce96a8639689d9b81c8a",
+      "exitCode": 0,
+      "passed": true,
+      "elapsedSeconds": 28.4
+    },
+    "finalCodeVisibleAfterSwipes": 23,
+    "finalTableHeaderVisibleAfterSwipes": 29,
+    "maxSwipes": 40,
+    "responseChars": 12227,
+    "sha256": "b12c494d9c20d3f54d891f243076fd3695a31c57bccd6334cec10ed305595fe1",
+    "tableRows": 40,
+    "tableColumns": 6,
+    "codeBlocks": 3,
+    "serviceAndDatabaseTextEqual": true,
+    "uiTailVisible": true,
+    "finalDataTableObservedMs": 83.5,
+    "final76CharColdParseObservedMs": 16.76
+  },
+  "initialIntegration": {
+    "sourceHead": "04d77a8fbc737dee71ce3d343bd888f86da99e13",
+    "appliedFileCount": 19,
+    "verifiedByteIdentical": true,
+    "unrelatedOriginalWipPreserved": true,
+    "sourceIndexUnchanged": true,
+    "sourceBranchUnchanged": true,
+    "performanceDiffCheckPassed": true,
+    "wholeSourceWhitespaceFindingsMatchBaseline": true
+  },
+  "integration": {
+    "sourceHead": "04d77a8fbc737dee71ce3d343bd888f86da99e13",
+    "closureAppliedFileCount": 8,
+    "totalAppliedFileCount": 24,
+    "verifiedByteIdentical": true,
+    "unrelatedOriginalWipPreserved": true,
+    "sourceIndexUnchanged": true,
+    "sourceBranchUnchanged": true,
+    "performanceDiffCheckPassed": true,
+    "wholeSourceWhitespaceFindingsMatchBaseline": true,
+    "artifact": "closure-integration.json"
+  }
+}

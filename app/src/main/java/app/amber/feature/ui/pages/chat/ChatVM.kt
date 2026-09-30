@@ -2,6 +2,7 @@ package app.amber.feature.ui.pages.chat
 
 import android.app.Application
 import android.content.Context
+import android.util.Log
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -13,9 +14,18 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.google.firebase.analytics.FirebaseAnalytics
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filterNot
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -61,6 +71,8 @@ import app.amber.feature.runtime.OutcomeUnknownPrompt
 import app.amber.feature.miniapp.ConversationDraftStore
 import app.amber.feature.ui.hooks.writeStringPreference
 import app.amber.feature.ui.hooks.ChatInputState
+import app.amber.feature.ui.components.message.chatMessageVirtualizationPrewarmTexts
+import app.amber.feature.ui.components.richtext.prewarmMarkdownContent
 import kotlin.uuid.Uuid
 
 private const val TAG = "ChatVM"
@@ -85,6 +97,8 @@ class ChatVM(
     val conversation: StateFlow<Conversation> = chatService.getConversationFlow(_conversationId)
     val timelineLoadState: StateFlow<ConversationTimelineLoadState> =
         chatService.getTimelineLoadStateFlow(_conversationId)
+    private val _timelineMarkdownReady = MutableStateFlow(false)
+    val timelineMarkdownReady: StateFlow<Boolean> = _timelineMarkdownReady.asStateFlow()
     val contextCompacts: StateFlow<List<ConversationCompact>> =
         contextRepository.getCompactsFlow(_conversationId)
             .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
@@ -163,6 +177,31 @@ class ChatVM(
     init {
         // 添加对话引用
         chatService.addConversationReference(_conversationId)
+
+        viewModelScope.launch {
+            var hasInitialized = timelineLoadState.value.initialized
+            timelineLoadState.map { it.initialized }.distinctUntilChanged().collectLatest { initialized ->
+                _timelineMarkdownReady.value = false
+                if (!initialized) {
+                    if (hasInitialized) {
+                        hasInitialized = false
+                        // Restore invalidates the live session; reload this visible page.
+                        viewModelScope.launch { chatService.initializeConversation(_conversationId) }
+                    }
+                    return@collectLatest
+                }
+                hasInitialized = true
+                try {
+                    prewarmTimelineNodes(conversation.value.messageNodes, conversationJob.value != null)
+                } catch (error: CancellationException) {
+                    throw error
+                } catch (error: Exception) {
+                    Log.w(TAG, "Timeline Markdown prewarm failed; rendering will parse on demand", error)
+                }
+                currentCoroutineContext().ensureActive()
+                if (timelineLoadState.value.initialized) _timelineMarkdownReady.value = true
+            }
+        }
 
         // 初始化对话
         viewModelScope.launch {
@@ -462,8 +501,57 @@ class ChatVM(
         return nodeId?.let { runCatching { Uuid.parse(it) }.getOrNull() }
     }
 
+    /** Session recap shown from the header island. */
+    val recapState: StateFlow<app.amber.core.recap.RecapState> = chatService.observeRecap(_conversationId)
+
+    private var recapJob: Job? = null
+
+    /**
+     * Opens the recap: shows the stored one at once, then lets the generator compare it
+     * with the full conversation and regenerate when it is missing or stale. [force]
+     * regenerates even a fresh recap and runs after any request already in flight.
+     */
+    fun requestRecap(force: Boolean = false) {
+        val previous = recapJob
+        if (!force && previous?.isActive == true) return
+        recapJob = viewModelScope.launch {
+            if (force) previous?.join()
+            chatService.loadRecap(_conversationId)
+            chatService.generateRecap(_conversationId, force = force)
+        }
+    }
+
+    /** Shelf source: the full current branch, without widening the paged timeline window. */
+    suspend fun loadFullConversation(): Conversation = chatService.loadFullConversation(_conversationId)
+
     suspend fun loadOlderTimelinePage() {
+        try {
+            val nodes = chatService.readOlderTimelinePageForPrewarm(_conversationId)
+            if (nodes.isNotEmpty()) prewarmTimelineNodes(nodes, loadingLastMessage = false)
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            Log.w(TAG, "Older timeline Markdown prewarm failed; loading normally", error)
+        }
         chatService.loadOlderTimelinePage(_conversationId)
+    }
+
+    private suspend fun prewarmTimelineNodes(nodes: List<MessageNode>, loadingLastMessage: Boolean) {
+        val settings = settingsStore.settingsFlow.filterNot { it.init }.first()
+        withContext(Dispatchers.Default) {
+            nodes.asReversed().forEachIndexed { index, node ->
+                currentCoroutineContext().ensureActive()
+                node.chatMessageVirtualizationPrewarmTexts(
+                    regexes = settings.regexes,
+                    showAssistantBubble = settings.displaySetting.showAssistantBubble,
+                    loading = loadingLastMessage,
+                    lastMessage = index == 0,
+                ).forEach { content ->
+                    currentCoroutineContext().ensureActive()
+                    prewarmMarkdownContent(content)
+                }
+            }
+        }
     }
 
     fun updateTitle(title: String) {

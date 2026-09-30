@@ -31,6 +31,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import app.amber.feature.ui.components.ds.AmberContinuousShape
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -203,10 +205,12 @@ fun NovelEmptyState(
  */
 object NovelControl {
     val ChipRadius = 999.dp
-    val RadiusCompact = ChipRadius
     val RadiusPrimary = 15.dp
-    val CompactHPad = 14.dp
-    val CompactVPad = 6.dp
+    val CompactHPad = 16.dp
+    val CompactVPad = 8.dp
+    /** 紧凑按钮的可见高度；48dp 触控区由外层透明盒子承担，胶囊本身不被撑胖。 */
+    val CompactHeight = 36.dp
+    val CompactShape: Shape = AmberContinuousShape(CompactHeight / 2)
     val QuietHPad = 10.dp
     val QuietVPad = 8.dp
     val ChipHPad = 14.dp
@@ -282,7 +286,7 @@ fun NovelQuietButton(
     Box(
         modifier = modifier
             .heightIn(min = NovelControl.MinTouch)
-            .clip(RoundedCornerShape(NovelControl.RadiusCompact))
+            .clip(RoundedCornerShape(NovelControl.ChipRadius))
             .pressable(onClick = onClick, enabled = enabled)
             .padding(horizontal = NovelControl.QuietHPad, vertical = NovelControl.QuietVPad),
         contentAlignment = Alignment.Center,
@@ -337,15 +341,16 @@ fun NovelGhostButton(
     val tokens = LocalAmberTokens.current
     val type = LocalAmberType.current
     // Same footprint as compact primary — pairs never misalign.
-    val shape = RoundedCornerShape(NovelControl.RadiusCompact)
+    val shape = NovelControl.CompactShape
     val fg = when {
         !enabled -> workspace.faint
         danger -> workspace.red
         else -> tokens.ink
     }
+    NovelCompactTouchTarget(modifier = modifier, enabled = enabled, onClick = onClick) {
     Box(
-        modifier = modifier
-            .heightIn(min = NovelControl.MinTouch)
+        modifier = Modifier
+            .heightIn(min = NovelControl.CompactHeight)
             .clip(shape)
             .border(
                 1.dp,
@@ -363,7 +368,6 @@ fun NovelGhostButton(
                     else -> workspace.paper
                 },
             )
-            .pressable(onClick = onClick, enabled = enabled)
             .padding(horizontal = NovelControl.CompactHPad, vertical = NovelControl.CompactVPad),
         contentAlignment = Alignment.Center,
     ) {
@@ -374,6 +378,25 @@ fun NovelGhostButton(
             maxLines = 2,
             textAlign = TextAlign.Center,
         )
+    }
+    }
+}
+
+/** 48dp 透明触控区，居中放置可见控件；按压缩放作用于整个控件。 */
+@Composable
+private fun NovelCompactTouchTarget(
+    modifier: Modifier,
+    enabled: Boolean,
+    onClick: () -> Unit,
+    content: @Composable () -> Unit,
+) {
+    Box(
+        modifier = modifier
+            .heightIn(min = NovelControl.MinTouch)
+            .pressable(onClick = onClick, enabled = enabled),
+        contentAlignment = Alignment.Center,
+    ) {
+        content()
     }
 }
 
@@ -394,7 +417,7 @@ fun NovelPrimaryButton(
     val workspace = workspaceColors()
     val type = LocalAmberType.current
     if (compact) {
-        val shape = RoundedCornerShape(NovelControl.RadiusCompact)
+        val shape = NovelControl.CompactShape
         val bg = when {
             !enabled -> workspace.row
             accent -> tokens.accent
@@ -405,22 +428,23 @@ fun NovelPrimaryButton(
             accent -> tokens.accentInk
             else -> tokens.bg
         }
-        Box(
-            modifier = modifier
-                .heightIn(min = NovelControl.MinTouch)
-                .clip(shape)
-                .background(bg)
-                .pressable(onClick = onClick, enabled = enabled)
-                .padding(horizontal = NovelControl.CompactHPad, vertical = NovelControl.CompactVPad),
-            contentAlignment = Alignment.Center,
-        ) {
-            Text(
-                text = text,
-                color = fg,
-                style = type.meta.copy(fontWeight = FontWeight.SemiBold),
-                maxLines = 2,
-                textAlign = TextAlign.Center,
-            )
+        NovelCompactTouchTarget(modifier = modifier, enabled = enabled, onClick = onClick) {
+            Box(
+                modifier = Modifier
+                    .heightIn(min = NovelControl.CompactHeight)
+                    .clip(shape)
+                    .background(bg)
+                    .padding(horizontal = NovelControl.CompactHPad, vertical = NovelControl.CompactVPad),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = text,
+                    color = fg,
+                    style = type.meta.copy(fontWeight = FontWeight.SemiBold),
+                    maxLines = 2,
+                    textAlign = TextAlign.Center,
+                )
+            }
         }
         return
     }

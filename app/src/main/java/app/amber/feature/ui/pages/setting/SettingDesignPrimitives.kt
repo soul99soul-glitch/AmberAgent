@@ -1,5 +1,6 @@
 package app.amber.feature.ui.pages.setting
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -13,20 +14,25 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.dropShadow
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.shadow.Shadow
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import app.amber.feature.ui.components.ds.SectionLabel
 import app.amber.feature.ui.components.ui.CardGroup
 import app.amber.feature.ui.components.ui.CardGroupScope
 import app.amber.feature.ui.components.ui.WorkspaceLeadingIcon
 import app.amber.feature.ui.components.ui.workspaceColors
+import app.amber.feature.ui.theme.LocalThemeDesign
 
 /**
  * The settings mock uses a small mono eyebrow and a hairline to separate each group.  Keep that
@@ -68,6 +74,23 @@ internal fun SettingCardGroup(
     content: @Composable CardGroupScope.() -> Unit,
 ) {
     val colors = workspaceColors()
+    val components = LocalThemeDesign.current?.components
+    val cardShape = RoundedCornerShape(components?.cardRadius?.toFloat()?.dp ?: 14.dp)
+    val borderWidth = components?.borderWidth?.toFloat()?.dp
+    val shadowRadius = components?.shadowRadius?.toFloat()?.dp ?: 0.dp
+    val shadowOpacity = components?.shadowOpacity?.toFloat() ?: 0f
+    val shadowModifier = if (shadowOpacity > 0f) {
+        Modifier.dropShadow(
+            cardShape,
+            Shadow(
+                radius = shadowRadius,
+                color = Color.Black.copy(alpha = shadowOpacity),
+                offset = DpOffset(0.dp, shadowRadius * 0.5f),
+            ),
+        )
+    } else {
+        Modifier
+    }
     Column(
         modifier = modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(6.dp),
@@ -77,8 +100,10 @@ internal fun SettingCardGroup(
             modifier = Modifier.padding(top = 10.dp),
         )
         CardGroup(
+            modifier = shadowModifier,
+            shape = cardShape,
             containerColor = colors.paper,
-            border = null,
+            border = borderWidth?.takeIf { it > 0.dp }?.let { BorderStroke(it, colors.hairline) },
             shadowElevation = 0.dp,
             itemSpacing = 0.dp,
             dividerColor = colors.hairline.copy(alpha = 0.28f),
@@ -104,11 +129,13 @@ internal fun <T> SettingSegmentedChoice(
     label: @Composable (T) -> Unit,
 ) {
     val colors = workspaceColors()
+    val shape = LocalThemeDesign.current?.components?.controlRadius?.toFloat()?.dp
+        ?.let { RoundedCornerShape(it) } ?: CircleShape
     Row(
         modifier = modifier
-            .clip(CircleShape)
+            .clip(shape)
             .background(colors.row)
-            .border(1.dp, colors.hairline, CircleShape)
+            .border(1.dp, colors.hairline, shape)
             .padding(3.dp),
         horizontalArrangement = Arrangement.spacedBy(2.dp),
     ) {
@@ -116,11 +143,11 @@ internal fun <T> SettingSegmentedChoice(
             Box(
                 modifier = Modifier
                     .weight(1f)
-                    .clip(CircleShape)
+                    .clip(shape)
                     .clickable { onSelected(option) }
                     .background(
                         if (option == selected) colors.paper else Color.Transparent,
-                        CircleShape,
+                        shape,
                     )
                     .padding(horizontal = 8.dp, vertical = 7.dp),
                 contentAlignment = Alignment.Center,

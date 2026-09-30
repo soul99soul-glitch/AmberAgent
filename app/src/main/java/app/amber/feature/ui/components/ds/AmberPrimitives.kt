@@ -33,9 +33,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.draw.dropShadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.shadow.Shadow
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.heading
@@ -44,6 +45,7 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import app.amber.feature.ui.theme.LocalAmberTokens
 import app.amber.feature.ui.theme.LocalAmberType
@@ -90,13 +92,14 @@ fun AmberCard(
     val shadowRadius = components?.shadowRadius?.toFloat()?.dp ?: 0.dp
     val shadowOpacity = components?.shadowOpacity?.toFloat() ?: 0f
     val shape = RoundedCornerShape(radius)
-    val shadowModifier = if (shadowRadius > 0.dp && shadowOpacity > 0f) {
-        modifier.shadow(
-            elevation = shadowRadius,
+    val shadowModifier = if (shadowOpacity > 0f) {
+        modifier.dropShadow(
             shape = shape,
-            clip = false,
-            ambientColor = Color.Black.copy(alpha = shadowOpacity),
-            spotColor = Color.Black.copy(alpha = shadowOpacity),
+            shadow = Shadow(
+                radius = shadowRadius,
+                color = Color.Black.copy(alpha = shadowOpacity),
+                offset = DpOffset(0.dp, shadowRadius * 0.5f),
+            ),
         )
     } else {
         modifier

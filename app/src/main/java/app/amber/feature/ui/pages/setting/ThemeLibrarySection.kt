@@ -13,6 +13,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.draw.clip
 import androidx.compose.material3.Button
@@ -53,6 +55,7 @@ import app.amber.feature.ui.theme.ThemePackageApplyResult
 import app.amber.feature.ui.theme.ThemePackageImportResult
 import app.amber.feature.ui.theme.ThemePackageManager
 import app.amber.feature.ui.theme.ThemePackTransfer
+import app.amber.feature.ui.theme.ThemeTryOnHost
 import app.amber.feature.ui.theme.LocalAmberTokens
 import app.amber.feature.ui.theme.SIT_TERRACOTTA_ACCENT_HEX
 import com.dokar.sonner.ToastType
@@ -80,6 +83,7 @@ fun ThemeLibrarySection(
     val navigator = LocalNavController.current
     val importedPackages by manager.observeLibrary().collectAsState(initial = emptyList())
     val activeTryOn by manager.tryOn.collectAsState(initial = null)
+    val previewBringIntoViewRequester = remember { BringIntoViewRequester() }
     var themeRequest by rememberSaveable { mutableStateOf("") }
     var applyMessage by remember { mutableStateOf<String?>(null) }
 
@@ -89,6 +93,10 @@ fun ThemeLibrarySection(
             toaster.show(it, type = ToastType.Info)
             applyMessage = null
         }
+    }
+
+    LaunchedEffect(activeTryOn?.candidateDigest) {
+        if (activeTryOn != null) previewBringIntoViewRequester.bringIntoView()
     }
 
     val importLauncher = rememberLauncherForActivityResult(
@@ -120,8 +128,13 @@ fun ThemeLibrarySection(
         }
     }
 
-    val exportCurrent: () -> Unit = {
-        val exported = ThemePackTransfer.export(displaySetting)
+    val exportCurrent: () -> Unit = export@{
+        val exported = try {
+            ThemePackTransfer.export(displaySetting)
+        } catch (_: IllegalArgumentException) {
+            toaster.show(context.getString(R.string.setting_theme_library_export_failed), type = ToastType.Error)
+            return@export
+        }
         val currentLibraryEntry = importedPackages.firstOrNull {
             it.id == displaySetting.appliedThemePackageId
         }
@@ -262,6 +275,7 @@ fun ThemeLibrarySection(
         activeTryOn?.let { preview ->
             SettingCardGroup(
                 title = stringResource(R.string.setting_theme_library_import_preview),
+                modifier = Modifier.bringIntoViewRequester(previewBringIntoViewRequester),
             ) {
                 rawItem {
                     Column(
@@ -294,6 +308,11 @@ fun ThemeLibrarySection(
                                 color = Color(0xFFB45F06),
                             )
                         }
+                        ThemeTryOnHost(
+                            packageId = preview.pkg.id,
+                            candidateDigest = preview.candidateDigest,
+                            manager = manager,
+                        )
                     }
                 }
             }

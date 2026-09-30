@@ -39,11 +39,13 @@ import app.amber.core.context.TokenFitResult
 import app.amber.core.utils.appLocale
 import app.amber.core.memory.recall.MemoryRecallStore
 import app.amber.core.repository.ConversationRepository
+import app.amber.agent.BuildConfig
 import app.amber.agent.R
 import kotlinx.serialization.json.Json
 import kotlin.uuid.Uuid
 
 private const val TAG = "GenerationRoundEngine"
+private const val PERF_TAG = "AmberChatPerf"
 // 2026-05-15 — flush cadence rationale.
 //
 // Was 200ms historically. User feedback after that: "一坨一坨蹦出来", not
@@ -149,17 +151,22 @@ class ChatGenerationRoundEngine(
         val speculativeRunner = request.speculativeRunner
         val loopBudgetPrompt = request.loopBudgetPrompt
         val responsesResume = request.responsesResume
+        val perfEnabled = BuildConfig.DEBUG && runCatching { Log.isLoggable(PERF_TAG, Log.DEBUG) }.getOrDefault(false)
         val ocrStrings = OcrStrings.from(context)
         val generativeWidgetCopy = GenerativeWidgetCopy.from(context)
 
         var messages: List<UIMessage> = request.messages
         val sessionDefaults = settings.resolveSessionDefaults(model)
+        val memoryStartedAt = if (perfEnabled) System.nanoTime() else 0L
         val memoryContextPrompt = memoryRecallStore.buildPrompt(
             settings = settings,
             messages = messages,
             locale = context.appLocale(),
             runKey = request.runId,
         )
+        if (perfEnabled) {
+            Log.d(PERF_TAG, "round.memory step=${request.stepIndex} elapsedMs=${(System.nanoTime() - memoryStartedAt) / 1_000_000.0}")
+        }
         val systemParts = buildSystemPromptParts(
             settings = settings,
             model = model,
@@ -169,6 +176,7 @@ class ChatGenerationRoundEngine(
             loopBudgetPrompt = loopBudgetPrompt,
         )
         val system = systemParts.filterIsInstance<UIMessagePart.Text>().joinToString("\n\n") { it.text }
+        val contextStartedAt = if (perfEnabled) System.nanoTime() else 0L
         val preparedContext = conversationContextEngine.prepareContext(
             conversation = conversation,
             settings = settings,
@@ -179,6 +187,9 @@ class ChatGenerationRoundEngine(
             promptOverheadTokens = ConversationContextPlanner.estimateTokens(listOf(UIMessage.system(system))),
             jevRunKey = request.runId,
         )
+        if (perfEnabled) {
+            Log.d(PERF_TAG, "round.prepareContext step=${request.stepIndex} messages=${preparedContext.messages.size} elapsedMs=${(System.nanoTime() - contextStartedAt) / 1_000_000.0}")
+        }
         suspend fun prepareInternalMessages(forceImageToText: Boolean = false): List<UIMessage> =
             buildList {
                 if (systemParts.isNotEmpty()) add(UIMessage(role = MessageRole.SYSTEM, parts = systemParts))
@@ -226,19 +237,24 @@ class ChatGenerationRoundEngine(
                 return
             }
             runCatching {
+                val snapshotStartedAt = if (perfEnabled) System.nanoTime() else 0L
+                val snapshot = buildRequestSnapshot(
+                    json = json,
+                    stepIndex = request.stepIndex,
+                    attempt = attempt,
+                    kind = kind,
+                    model = model,
+                    providerSettingId = provider.id.toString(),
+                    fitMessages = fit.messages,
+                    tools = params.tools,
+                    systemParts = systemParts,
+                    estimatedTokens = fit.receipt.estimatedAfter,
+                )
+                if (perfEnabled) {
+                    Log.d(PERF_TAG, "round.requestSnapshot step=${request.stepIndex} attempt=$attempt elapsedMs=${(System.nanoTime() - snapshotStartedAt) / 1_000_000.0}")
+                }
                 request.events.commit(
-                    buildRequestSnapshot(
-                        json = json,
-                        stepIndex = request.stepIndex,
-                        attempt = attempt,
-                        kind = kind,
-                        model = model,
-                        providerSettingId = provider.id.toString(),
-                        fitMessages = fit.messages,
-                        tools = params.tools,
-                        systemParts = systemParts,
-                        estimatedTokens = fit.receipt.estimatedAfter,
-                    ),
+                    snapshot,
                 )
             }.onFailure { error ->
                 // CancellationException must escape: the writers deliberately
@@ -311,6 +327,7 @@ class ChatGenerationRoundEngine(
                     // transformer, mailbox and steer merge. A request that
                     // still overflows after trimming throws
                     // ContextTooLargeException instead of being sent.
+                    val fitStartedAt = if (perfEnabled) System.nanoTime() else 0L
                     val fit = TokenBudgetFitter.fit(
                         messages = providerMessages,
                         tools = streamParams.tools,
@@ -320,6 +337,9 @@ class ChatGenerationRoundEngine(
                         json = json,
                         conversationId = conversation?.id?.toString(),
                     )
+                    if (perfEnabled) {
+                        Log.d(PERF_TAG, "round.fit.stream step=${request.stepIndex} attempt=$attempt elapsedMs=${(System.nanoTime() - fitStartedAt) / 1_000_000.0}")
+                    }
                     // Step 5: audit what the wire is about to receive — after
                     // the final fit, before the provider call.
                     commitRequestSnapshot(
@@ -333,11 +353,17 @@ class ChatGenerationRoundEngine(
                     val streamStartedAt = System.currentTimeMillis()
                     var visibleTextChars = 0
                     var reasoningChars = 0
+                    val firstChunkStartedAt = if (perfEnabled) System.nanoTime() else 0L
+                    var firstChunkLogged = false
                     providerImpl.stream(
                         providerSetting = provider,
                         messages = fit.messages,
                         params = streamParams,
                     ).collect { chunk ->
+                        if (perfEnabled && !firstChunkLogged) {
+                            firstChunkLogged = true
+                            Log.d(PERF_TAG, "round.providerFirstChunk.stream step=${request.stepIndex} attempt=$attempt elapsedMs=${(System.nanoTime() - firstChunkStartedAt) / 1_000_000.0}")
+                        }
                         val deltaParts = chunk.choices.getOrNull(0)?.let { choice ->
                             choice.delta?.parts ?: choice.message?.parts
                         }.orEmpty()
@@ -492,6 +518,7 @@ class ChatGenerationRoundEngine(
                     lastFinishReason = null
                     // P1-04: final token budget hard fit at the serialization
                     // boundary (see streamWith for the policy).
+                    val fitStartedAt = if (perfEnabled) System.nanoTime() else 0L
                     val fit = TokenBudgetFitter.fit(
                         messages = providerMessages,
                         tools = generateParams.tools,
@@ -501,6 +528,9 @@ class ChatGenerationRoundEngine(
                         json = json,
                         conversationId = conversation?.id?.toString(),
                     )
+                    if (perfEnabled) {
+                        Log.d(PERF_TAG, "round.fit.complete step=${request.stepIndex} attempt=$attempt elapsedMs=${(System.nanoTime() - fitStartedAt) / 1_000_000.0}")
+                    }
                     // Step 5: audit what the wire is about to receive — after
                     // the final fit, before the provider call.
                     commitRequestSnapshot(
@@ -509,11 +539,15 @@ class ChatGenerationRoundEngine(
                         fit = fit,
                         params = generateParams,
                     )
+                    val providerStartedAt = if (perfEnabled) System.nanoTime() else 0L
                     val chunk = providerImpl.complete(
                         providerSetting = provider,
                         messages = fit.messages,
                         params = generateParams,
                     )
+                    if (perfEnabled) {
+                        Log.d(PERF_TAG, "round.providerComplete step=${request.stepIndex} attempt=$attempt elapsedMs=${(System.nanoTime() - providerStartedAt) / 1_000_000.0}")
+                    }
                     chunk.lastFinishReason()?.let { lastFinishReason = it }
                     return chunk
                 }

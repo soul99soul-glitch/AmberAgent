@@ -11,6 +11,9 @@ import app.amber.core.settings.Settings
 import app.amber.core.utils.JsonInstant
 import app.amber.feature.runtime.PermissionDecisionAction
 import app.amber.feature.runtime.PermissionDecisionResolver
+import app.amber.feature.runtime.ToolInvocationContext
+import app.amber.feature.tools.ToolRegistry
+import app.amber.feature.tools.ToolRisk
 import app.amber.feature.ui.theme.ThemePackageManager
 import app.amber.feature.ui.theme.ThemeSettingsStore
 import app.amber.feature.ui.theme.ThemePackTransfer
@@ -61,7 +64,7 @@ class ThemePackToolsTest {
     }
 
     @Test
-    fun `theme tools expose status and approval-gated import`() = runTest {
+    fun `theme import allows reversible preview actions and requires apply confirmation`() = runTest {
         val tools = createThemePackTools(manager)
         assertTrue(tools.any { it.name == TOOL_THEME_PACK_STATUS })
         val import = tools.single { it.name == TOOL_THEME_PACK_IMPORT }
@@ -69,19 +72,60 @@ class ThemePackToolsTest {
         assertFalse(import.allowsAutoApproval)
         assertTrue(import.mandatoryApproval)
 
+        // Static catalog metadata stays conservative; only the per-invocation
+        // preview/discard policy is lowered. Apply remains high-risk/mandatory.
+        val metadata = ToolRegistry.from(listOf(import)).metadataFor(TOOL_THEME_PACK_IMPORT)!!
+        assertTrue(metadata.needsApproval)
+        assertFalse(metadata.autoApprovable)
+        assertTrue(metadata.mandatoryApproval)
+        assertEquals(ToolRisk.High, metadata.risk)
+
         val resolver = PermissionDecisionResolver()
-        val decision = resolver.resolve(
+        fun resolve(
+            action: String? = null,
+            approvalState: ToolApprovalState = ToolApprovalState.Auto,
+            invocationContext: ToolInvocationContext = ToolInvocationContext.Normal,
+            autoApproveTools: Boolean = false,
+            autoApproveHighRiskTools: Boolean = false,
+        ) = resolver.resolve(
             toolDef = import,
             tool = UIMessagePart.Tool(
                 toolCallId = "call_theme",
                 toolName = TOOL_THEME_PACK_IMPORT,
-                input = "{\"action\":\"prepare\"}",
-                approvalState = ToolApprovalState.Auto,
+                input = action?.let { "{\"action\":\"$it\"}" } ?: "{}",
+                approvalState = approvalState,
             ),
-            autoApproveTools = true,
-            autoApproveHighRiskTools = true,
+            autoApproveTools = autoApproveTools,
+            autoApproveHighRiskTools = autoApproveHighRiskTools,
+            invocationContext = invocationContext,
         )
-        assertEquals(PermissionDecisionAction.ASK, decision.action)
+
+        val prepare = resolve("prepare", autoApproveTools = true, autoApproveHighRiskTools = true)
+        assertEquals(PermissionDecisionAction.ALLOW, prepare.action)
+        assertEquals("theme_pack_preview", prepare.source)
+        assertTrue(prepare.trace.policy!!.mutates)
+        assertEquals(ToolRisk.Sensitive, prepare.trace.policy!!.risk)
+        assertFalse(prepare.trace.policy!!.needsApproval)
+        assertFalse(prepare.trace.policy!!.mandatoryApproval)
+        assertFalse(prepare.trace.policy!!.autoApprovable)
+        assertFalse(prepare.trace.policy!!.speculativeEligible)
+        assertEquals(PermissionDecisionAction.ALLOW, resolve().action) // default action is prepare
+        assertEquals(PermissionDecisionAction.ALLOW, resolve("discard").action)
+
+        val apply = resolve("apply", autoApproveTools = true, autoApproveHighRiskTools = true)
+        assertEquals(PermissionDecisionAction.ASK, apply.action)
+        assertEquals("theme_pack_foreground", apply.source)
+        assertEquals(ToolRisk.High, apply.trace.policy!!.risk)
+        assertTrue(apply.trace.policy!!.mandatoryApproval)
+        assertTrue(apply.trace.policy!!.needsApproval)
+        assertEquals(PermissionDecisionAction.ASK, resolve("unknown", autoApproveHighRiskTools = true).action)
+        assertEquals(
+            PermissionDecisionAction.ASK,
+            resolve("prepare", invocationContext = ToolInvocationContext.SubAgent).action,
+        )
+        val userApprovedApply = resolve("apply", approvalState = ToolApprovalState.Approved)
+        assertEquals(PermissionDecisionAction.ALLOW, userApprovedApply.action)
+        assertEquals("approval_state", userApprovedApply.source)
     }
 
     @Test

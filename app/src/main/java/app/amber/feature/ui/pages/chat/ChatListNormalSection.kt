@@ -38,6 +38,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
@@ -92,14 +93,17 @@ import app.amber.core.service.ConversationTimelineLoadState
 import app.amber.core.service.PendingUserMessage
 import app.amber.feature.ui.components.message.ChatMessage
 import app.amber.feature.ui.components.message.ChatMessageVirtualItemContent
+import app.amber.feature.ui.components.message.resolveThemeTryOnCardTarget
 import app.amber.feature.ui.components.richtext.prewarmMarkdownContent
 import app.amber.feature.ui.components.ui.ErrorCardsDisplay
 import app.amber.feature.ui.components.ui.ListSelectableItem
 import app.amber.feature.ui.components.ui.Tooltip
+import app.amber.feature.ui.theme.ThemePackageManager
 import app.amber.core.utils.ChatSendTransitionTracker
 import kotlin.math.abs
 import kotlin.math.roundToInt
 import kotlin.uuid.Uuid
+import org.koin.compose.koinInject
 
 @Composable
 internal fun ChatListNormal(
@@ -143,6 +147,15 @@ internal fun ChatListNormal(
     onEnsureTimelineLoaded: suspend () -> Conversation = { conversation },
     chatTimelinePlan: ChatTimelinePlan,
 ) {
+    val themePackageManager = koinInject<ThemePackageManager>()
+    val activeThemeTryOn by themePackageManager.tryOn.collectAsState(initial = null)
+    val themeTryOnCardTarget = remember(
+        conversation.messageNodes,
+        activeThemeTryOn?.pkg?.id,
+        activeThemeTryOn?.candidateDigest,
+    ) {
+        resolveThemeTryOnCardTarget(conversation.messageNodes, activeThemeTryOn)
+    }
     val scope = rememberCoroutineScope()
     val currentConversationState by rememberUpdatedState(conversation)
     val currentPendingUserMessages by rememberUpdatedState(pendingUserMessages)
@@ -597,8 +610,14 @@ internal fun ChatListNormal(
                                     // 注意 2026-05-14 教训（ChatMessage.kt:235 注释）：
                                     // 嵌套多层动画曾致流式卡顿——只允许这一处、
                                     // 永远不要在消息内部再叠加。
+                                    // 离底阅读时由 holdReadingOnTailGrowth 同帧抵消增高，
+                                    // 近底仍原生钉底跟随；它须在最外层，读到动画后的尺寸。
                                     if (isLoadingMessage || (isLastMessage && drainAmortizeGrace)) {
-                                        Modifier.animateContentSize(
+                                        Modifier.holdReadingOnTailGrowth(
+                                            state = state,
+                                            lazyIndex = planIndex,
+                                            followBottomPx = bottomPinBufferPx,
+                                        ).animateContentSize(
                                             animationSpec = spring(
                                                 dampingRatio = Spring.DampingRatioNoBouncy,
                                                 stiffness = Spring.StiffnessMedium,
@@ -621,7 +640,8 @@ internal fun ChatListNormal(
                             )
                             ListSelectableItem(
                                 modifier = (if (isPreCompacted) Modifier.alpha(0.4f) else Modifier)
-                                    .then(sendEntranceModifier(play = playSendEntrance)),
+                                    .then(sendEntranceModifier(play = playSendEntrance))
+                                    .timelineHighlight(node.id),
                                 key = node.id,
                                 onSelectChange = {
                                     if (!selectedItems.contains(node.id)) {
@@ -682,6 +702,7 @@ internal fun ChatListNormal(
                                     onToolApproval = onToolApproval,
                                     onToolAnswer = onToolAnswer,
                                     onOpenWorkspaceFile = onOpenWorkspaceFile,
+                                    themeTryOnCardTarget = themeTryOnCardTarget,
                                     onGenerativeWidgetAction = onGenerativeWidgetAction,
                                     onMiniAppModify = onMiniAppModify,
                                     lastMessage = isLastMessage,
@@ -726,11 +747,11 @@ internal fun ChatListNormal(
                                 )
                             }
                             TimelineSelectableMessageItem(
-                                modifier = if (visualCompactedTimelineEndIndex?.let { index <= it } == true) {
+                                modifier = (if (visualCompactedTimelineEndIndex?.let { index <= it } == true) {
                                     Modifier.alpha(0.4f)
                                 } else {
                                     Modifier
-                                },
+                                }).timelineHighlight(node.id, slice = true),
                                 key = node.id,
                                 onSelectChange = {
                                     if (!selectedItems.contains(node.id)) {
@@ -792,6 +813,7 @@ internal fun ChatListNormal(
                                     onToolApproval = onToolApproval,
                                     onToolAnswer = onToolAnswer,
                                     onOpenWorkspaceFile = onOpenWorkspaceFile,
+                                    themeTryOnCardTarget = themeTryOnCardTarget,
                                     onGenerativeWidgetAction = onGenerativeWidgetAction,
                                     onMiniAppModify = onMiniAppModify,
                                     lastMessage = isLastMessage,

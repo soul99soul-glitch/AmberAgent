@@ -188,14 +188,15 @@ class DefaultRunKernelDurableTest : DurableRuntimeTestBase() {
     @Test
     fun `guard rebuild counts a finished effect so a re-emitted signature skips across runs`() = runBlocking {
         val executions = AtomicInteger(0)
-        val readOnly = readOnlyTool(executions)
+        // file_read is deliberately repeatable across steps; use a non-repeatable read-only fake.
+        val readOnly = readOnlyTool(executions).copy(name = "guard_probe")
         val runId = "run_guard_rebuild"
         val flags = durableFlags()
 
         // Run 1: call_1 executes successfully → FINISHED in the ledger.
         val engine1 = ScriptedRoundEngine(
             listOf(
-                { toolCallAssistant("call_1", "file_read", input = """{"q":"a"}""") },
+                { toolCallAssistant("call_1", readOnly.name, input = """{"q":"a"}""") },
                 { textAssistant("完成") },
             ),
         )
@@ -211,7 +212,7 @@ class DefaultRunKernelDurableTest : DurableRuntimeTestBase() {
         // SECOND occurrence (skipped), not the first (executed).
         val engine2 = ScriptedRoundEngine(
             listOf(
-                { toolCallAssistant("call_2", "file_read", input = """{"q":"a"}""") },
+                { toolCallAssistant("call_2", readOnly.name, input = """{"q":"a"}""") },
                 { textAssistant("完成") },
             ),
         )
@@ -320,14 +321,14 @@ class DefaultRunKernelDurableTest : DurableRuntimeTestBase() {
     @Test
     fun `a guard-skipped duplicate's PREPARED effect is failed, not left orphaned`() = runBlocking {
         val executions = AtomicInteger(0)
-        val readOnly = readOnlyTool(executions)
+        val readOnly = readOnlyTool(executions).copy(name = "guard_probe")
         val runId = "run_orphan_prepared"
         val flags = durableFlags()
 
         // Run 1: call_1 executes → FINISHED in the ledger.
         val engine1 = ScriptedRoundEngine(
             listOf(
-                { toolCallAssistant("call_1", "file_read", input = """{"q":"a"}""") },
+                { toolCallAssistant("call_1", readOnly.name, input = """{"q":"a"}""") },
                 { textAssistant("完成") },
             ),
         )
@@ -342,7 +343,7 @@ class DefaultRunKernelDurableTest : DurableRuntimeTestBase() {
         // terminalized (FAILED), not left lingering forever.
         val engine2 = ScriptedRoundEngine(
             listOf(
-                { toolCallAssistant("call_2", "file_read", input = """{"q":"a"}""") },
+                { toolCallAssistant("call_2", readOnly.name, input = """{"q":"a"}""") },
                 { textAssistant("完成") },
             ),
         )
@@ -363,7 +364,7 @@ class DefaultRunKernelDurableTest : DurableRuntimeTestBase() {
         // to a stop by the terminalized skip.
         val engine3 = ScriptedRoundEngine(
             listOf(
-                { toolCallAssistant("call_3", "file_read", input = """{"q":"a"}""") },
+                { toolCallAssistant("call_3", readOnly.name, input = """{"q":"a"}""") },
                 { textAssistant("完成") },
             ),
         )

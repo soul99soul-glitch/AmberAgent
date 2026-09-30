@@ -11,6 +11,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.ProcessLifecycleOwner
 import kotlinx.coroutines.CancellationException
+import app.amber.core.recap.isRecapEligible
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -340,6 +341,9 @@ class ChatService(
     private val restoreWriteGate: SyncRestoreWriteGate? = null,
     // Jev 语义工具发现（tool_search 的语义重排）；nullable 兼容旧构造点与测试。
     private val jevToolSemanticSearch: app.amber.core.jev.JevToolSemanticSearch? = null,
+    // Session recap (tap the chat island); nullable keeps tests and legacy construction unchanged.
+    private val recapGenerator: app.amber.core.recap.ConversationRecapGenerator? = null,
+    private val recapStore: app.amber.core.recap.ConversationRecapStore? = null,
 ) : ConversationAccess {
     // ProviderConfigTools needs the same durable Codex OAuth store as the settings and
     // provider layers. This instance is lightweight and reads the shared encrypted store.
@@ -884,6 +888,20 @@ class ChatService(
         return loadOlderTimelineBatch(conversationId, TIMELINE_PREFETCH_BATCH_SIZE)
     }
 
+    /** Read only: the UI may warm Markdown before the normal page load publishes it. */
+    internal suspend fun readOlderTimelinePageForPrewarm(conversationId: Uuid): List<MessageNode> {
+        val loadState = sessions[conversationId]?.timelineLoadState?.value ?: return emptyList()
+        if (!loadState.initialized || loadState.isFullyLoaded || loadState.oldestLoadedIndex <= 0) {
+            return emptyList()
+        }
+        val offset = (loadState.oldestLoadedIndex - TIMELINE_PREFETCH_BATCH_SIZE).coerceAtLeast(0)
+        return conversationRepo.getConversationNodePage(
+            conversationId = conversationId,
+            offset = offset,
+            limit = loadState.oldestLoadedIndex - offset,
+        )
+    }
+
     private suspend fun loadOlderTimelineBatch(conversationId: Uuid, batchSize: Int): Boolean {
         val mutex = timelineLoadMutexes.computeIfAbsent(conversationId) { Mutex() }
         return mutex.withLock {
@@ -902,11 +920,18 @@ class ChatService(
             val nextLimit = loadState.oldestLoadedIndex - nextOffset
             session.setTimelineLoadState(loadState.copy(prefetchingOlder = true))
 
-            val olderNodes = conversationRepo.getConversationNodePage(
-                conversationId = conversationId,
-                offset = nextOffset,
-                limit = nextLimit,
-            )
+            val olderNodes = try {
+                conversationRepo.getConversationNodePage(
+                    conversationId = conversationId,
+                    offset = nextOffset,
+                    limit = nextLimit,
+                )
+            } catch (error: Throwable) {
+                // A cancelled caller (e.g. a UI effect restarting) must not leave the flag set:
+                // the timeline stops auto-loading older pages while prefetchingOlder is true.
+                session.setTimelineLoadState(session.timelineLoadState.value.copy(prefetchingOlder = false))
+                throw error
+            }
             var mergedNodeCount = session.state.value.messageNodes.size
             session.state.update { latestConversation ->
                 val existingNodeIds = latestConversation.messageNodes.mapTo(mutableSetOf()) { it.id }
@@ -1271,7 +1296,12 @@ class ChatService(
             ) {
                 return
             }
+            val perfEnabled = BuildConfig.DEBUG && runCatching { Log.isLoggable("AmberChatPerf", Log.DEBUG) }.getOrDefault(false)
+            val prepareStartedAt = if (perfEnabled) System.nanoTime() else 0L
             prepareKernelGenerationTurn(conversationId, settings, model)
+            if (perfEnabled) {
+                Log.d("AmberChatPerf", "prepareKernelGenerationTurn elapsedMs=${(System.nanoTime() - prepareStartedAt) / 1_000_000.0}")
+            }
             if (
                 expectedPausedRunId != null &&
                 !isExpectedWaitingUserRun(
@@ -1348,18 +1378,12 @@ class ChatService(
         }
     }
 
-    /**
-     * Per-turn pre-flight shared by all kernel dispatches (the retired
-     * legacy loop's prologue parity): load the full conversation,
-     * reset suggestions, warn when tools are unavailable for the model, and
-     * sanitize invalid messages before the session resolves its inputs.
-     */
+    /** Reset suggestions and warn about unavailable tools before runner launch. */
     private suspend fun prepareKernelGenerationTurn(
         conversationId: Uuid,
         settings: Settings,
         model: app.amber.ai.provider.Model,
     ) {
-        val initialConversation = loadFullConversationForGeneration(conversationId)
         // reset suggestions
         updateConversation(
             conversationId,
@@ -1375,12 +1399,6 @@ class ChatService(
                     title = context.getString(R.string.error_title_tool_unavailable)
                 )
             }
-        }
-        // check invalid messages
-        val conversation = sanitizeInvalidMessagesForGeneration(initialConversation)
-        if (conversation != initialConversation) {
-            withConversationWrite { conversationRepo.updateConversation(conversation) }
-            replaceSessionWithFullConversation(conversationId, conversation)
         }
     }
 
@@ -1563,6 +1581,7 @@ class ChatService(
                         updateAt = Instant.now(),
                     )
                     updateConversation(conversationId, updatedConversation, checkDeletedFiles = false)
+                    val checkpointLoadState = getOrCreateSession(conversationId).timelineLoadState.value
                     val conversationCheckpointed = checkpointConversation(
                         conversationId, updatedConversation, force = true,
                     )
@@ -1720,13 +1739,36 @@ class ChatService(
                         // Success side-effects (legacy onSuccess parity):
                         // window persistence, title, suggestions, memory.
                         val finalConversation = getConversationFlow(conversationId).value
-                        persistConversationWindow(conversationId, finalConversation, indexFts = true)
+                        // The forced checkpoint already indexed this exact window unless its
+                        // input or paging offset changed while terminal work was finishing.
+                        // Keep the restore barrier before scheduling success side-effects,
+                        // even when the checkpoint already persisted this exact window.
+                        withConversationWrite {
+                            if (!conversationCheckpointed ||
+                                finalConversation !== updatedConversation ||
+                                getOrCreateSession(conversationId).timelineLoadState.value != checkpointLoadState
+                            ) {
+                                persistConversationWindowInternal(conversationId, finalConversation, indexFts = true)
+                            }
+                        }
                         cleanupRunResourcesIfDone(conversationId, finalConversation)
                         launchWithConversationReference(conversationId, generationRestoreEpoch) {
                             generateTitle(conversationId, finalConversation)
                         }
                         launchWithConversationReference(conversationId, generationRestoreEpoch) {
                             generateSuggestion(conversationId, finalConversation)
+                        }
+                        // Recap only after a finished turn (not an approval pause or step limit).
+                        // The paged window is checked first so short chats skip the full load.
+                        val recapWindowLoad = getOrCreateSession(conversationId).timelineLoadState.value
+                        val recapCandidate = finalConversation.isRecapEligible() ||
+                            (recapWindowLoad.initialized && !recapWindowLoad.isFullyLoaded)
+                        if (recapGenerator != null && completed && recapCandidate &&
+                            !finalConversation.hasPendingOrUnexecutedTools()
+                        ) {
+                            launchWithConversationReference(conversationId, generationRestoreEpoch) {
+                                generateRecap(conversationId, force = false)
+                            }
                         }
                         if (!finalConversation.hasPendingOrUnexecutedTools()) {
                             appScope.launch(Dispatchers.IO + restoreWriteContext(generationRestoreEpoch)) {
@@ -1957,7 +1999,12 @@ class ChatService(
             messageNodes = currentConversation.messageNodes + userNode,
         )
         updateConversation(conversationId, newConversation)
+        val perfEnabled = BuildConfig.DEBUG && runCatching { Log.isLoggable("AmberChatPerf", Log.DEBUG) }.getOrDefault(false)
+        val persistStartedAt = if (perfEnabled) System.nanoTime() else 0L
         persistConversationWindow(conversationId, newConversation, indexFts = true)
+        if (perfEnabled) {
+            Log.d("AmberChatPerf", "appendUserMessage.persist elapsedMs=${(System.nanoTime() - persistStartedAt) / 1_000_000.0}")
+        }
         return userNode
     }
 
@@ -2654,6 +2701,39 @@ class ChatService(
     suspend fun generateSuggestion(conversationId: Uuid, conversation: Conversation) =
         aiAuxiliaryGenerator.generateSuggestion(conversationId, conversation)
 
+    // ---- 会话回顾 ----
+
+    fun observeRecap(conversationId: Uuid): StateFlow<app.amber.core.recap.RecapState> =
+        recapStore?.observe(conversationId.toString())
+            ?: MutableStateFlow(app.amber.core.recap.RecapState(loaded = true)).asStateFlow()
+
+    suspend fun loadRecap(conversationId: Uuid) {
+        recapStore?.ensureLoaded(conversationId.toString())
+    }
+
+    /**
+     * Generates the recap from the full current branch. Freshness is checked by the
+     * generator against the full conversation; below the threshold the state becomes
+     * `ineligible`. Load failures end in `failed` instead of escaping to the caller.
+     */
+    suspend fun generateRecap(conversationId: Uuid, force: Boolean) {
+        val generator = recapGenerator ?: return
+        val full = try {
+            loadFullConversationForGeneration(conversationId)
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            error.printStackTrace()
+            recapStore?.markFailed(conversationId.toString(), app.amber.core.recap.RecapFailure.ERROR)
+            return
+        }
+        generator.generate(full, force)
+    }
+
+    /** Full current conversation without widening the chat page's paged window. */
+    suspend fun loadFullConversation(conversationId: Uuid): Conversation =
+        loadFullConversationForGeneration(conversationId)
+
     // ---- 压缩对话历史 ----
 
     suspend fun compressConversation(
@@ -2731,7 +2811,7 @@ class ChatService(
             activity = activityStore.sandboxActivity.value
                 ?.takeIf { it.conversationId == conversationId.toString() },
             hideSensitive = settings.agentRuntime.hideSensitiveLiveStatus,
-            launchIntent = getPendingIntent(context, conversationId, runId),
+            launchIntent = { getPendingIntent(context, conversationId, runId) },
             runId = runId,
         )
     }
@@ -3439,9 +3519,32 @@ class ChatService(
         ) == true,
     )
 
-    /** Full (window-merged) conversation for a generation turn. */
-    internal suspend fun conversationForGeneration(conversationId: Uuid): Conversation =
-        loadFullConversationForGeneration(conversationId)
+    /** Load and sanitize the full conversation once for the resolver's generation turn. */
+    internal suspend fun conversationForGeneration(conversationId: Uuid): Conversation {
+        val perfEnabled = BuildConfig.DEBUG && runCatching { Log.isLoggable("AmberChatPerf", Log.DEBUG) }.getOrDefault(false)
+        try {
+            val loadStartedAt = if (perfEnabled) System.nanoTime() else 0L
+            val full = loadFullConversationForGeneration(conversationId)
+            if (perfEnabled) {
+                Log.d("AmberChatPerf", "conversationForGeneration.load nodes=${full.messageNodes.size} elapsedMs=${(System.nanoTime() - loadStartedAt) / 1_000_000.0}")
+            }
+            val sanitized = sanitizeInvalidMessagesForGeneration(full)
+            if (sanitized != full) {
+                withConversationWrite {
+                    conversationRepo.updateConversation(sanitized)
+                    replaceSessionWithFullConversation(conversationId, sanitized)
+                }
+            }
+            return sanitized
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            // Resolve runs before hooks are installed, so its failure cannot
+            // reach onRunFinished's user-facing error path.
+            addError(error, conversationId, title = context.getString(R.string.error_title_send_message))
+            throw error
+        }
+    }
 
     private fun createRunTools(
         settings: Settings,

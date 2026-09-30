@@ -19,6 +19,7 @@ import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToNode
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.test.core.app.ActivityScenario
 import androidx.test.espresso.Espresso.closeSoftKeyboard
 import androidx.test.espresso.Espresso.pressBack
@@ -40,6 +41,7 @@ import app.amber.feature.task.AgentTaskRetryPolicy
 import app.amber.feature.task.AgentTaskSnapshot
 import app.amber.feature.task.AgentTaskStatus
 import app.amber.feature.task.AgentTaskStore
+import app.amber.feature.subagent.SUB_AGENT_DOCK_AUTO_HIDE_NEVER
 import app.amber.feature.ui.components.ai.SubAgentDockState
 import java.io.File
 import kotlin.time.Clock
@@ -131,21 +133,24 @@ class ChatSoftTimelineSmokeTest {
                 // chain, then the reasoning row, so the framed thinking shape and
                 // its real body are visible in the second capture.
                 clickVisibleText(targetContext.getString(R.string.chain_of_thought_show_more_steps, 1))
-                clickVisibleText(targetContext.getString(R.string.deep_thinking_seconds, 0f))
+                clickVisibleText(targetContext.getString(R.string.deep_thinking_seconds, 1))
                 waitForVisibleText(REASONING_MARKER)
-                capture("02-first-thinking-expanded", anchor = targetContext.getString(R.string.deep_thinking_seconds, 0f))
+                capture("02-first-thinking-expanded", anchor = targetContext.getString(R.string.deep_thinking_seconds, 1))
 
-                // ContextRing is a clickable parent around the percentage text.
-                // Its popup is read-only and uses the production 380ms enter path.
-                clickContextRing()
-                waitForVisibleText(targetContext.getString(R.string.context_ring_usage_context))
-                capture("03-first-context-popup")
-                pressBack()
-                waitForTextToDisappear(targetContext.getString(R.string.context_ring_usage_context))
+                // Context usage now lives in the top model menu. The fixture has
+                // messages, so its summary is available without a selected model.
+                val modelMenuTrigger = targetContext.getString(R.string.model_list_select_model)
+                val contextSummaryLabel = targetContext.getString(R.string.chat_model_menu_context)
+                clickVisibleText(modelMenuTrigger)
+                waitForVisibleText(contextSummaryLabel)
+                capture("03-first-context-menu", anchor = contextSummaryLabel)
+                clickVisibleText(modelMenuTrigger)
+                waitForTextToDisappear(contextSummaryLabel)
 
                 // Navigate through the real global dock's source action, so both
                 // directions exercise the feature without geometric header selectors.
                 openTaskDetails(TASK_TITLES[1])
+                waitForVisibleText(targetContext.getString(R.string.subagent_dock_source_conversation))
                 clickVisibleText(targetContext.getString(R.string.subagent_dock_source_conversation))
                 waitForVisibleText(SECOND_USER_MARKER)
 
@@ -160,8 +165,8 @@ class ChatSoftTimelineSmokeTest {
                 // text. The dock owns its IME policy and collapses back to the
                 // compact LazyRow while the keyboard is visible.
                 focusChatInput()
-                waitForVisibleText(targetContext.getString(R.string.subagent_dock_expand))
-                waitForTextToDisappear(targetContext.getString(R.string.subagent_dock_collapse))
+                waitForTaskDockToggleState(targetContext.getString(R.string.subagent_dock_expand))
+                waitForTaskDockToggleState(targetContext.getString(R.string.subagent_dock_collapse), visible = false)
                 waitForVisibleText(targetContext.getString(R.string.chat_input_compose_placeholder))
                 capture("05-keyboard-dock-collapsed")
                 closeSoftKeyboard()
@@ -184,7 +189,7 @@ class ChatSoftTimelineSmokeTest {
                 // opens the selected pill's details sheet first; no task action
                 // or provider execution is involved.
                 openTaskDetails(TASK_TITLES.first())
-                waitForVisibleText(targetContext.getString(R.string.subagent_dock_details_title))
+                waitForVisibleText(targetContext.getString(R.string.subagent_dock_source_conversation))
                 clickVisibleText(targetContext.getString(R.string.subagent_dock_source_conversation))
                 revealText(FIRST_USER_MARKER)
 
@@ -208,7 +213,7 @@ class ChatSoftTimelineSmokeTest {
                 ensureTaskDockExpanded()
                 TASK_TITLES.forEach { title ->
                     openTaskDetails(title)
-                    waitForVisibleText(targetContext.getString(R.string.subagent_dock_details_title))
+                    waitForVisibleText(targetContext.getString(R.string.subagent_dock_dismiss))
                     clickVisibleText(targetContext.getString(R.string.subagent_dock_dismiss))
                     waitForTextToDisappear(title)
                 }
@@ -272,6 +277,9 @@ class ChatSoftTimelineSmokeTest {
                 original.copy(
                     agentRuntime = original.agentRuntime.copy(
                         operationPreviewMode = AgentOperationPreviewMode.HIDDEN,
+                        subAgent = original.agentRuntime.subAgent.copy(
+                            dockAutoHideAfterMs = SUB_AGENT_DOCK_AUTO_HIDE_NEVER,
+                        ),
                     ),
                 ),
             )
@@ -411,13 +419,6 @@ class ChatSoftTimelineSmokeTest {
         }
     }
 
-    private fun clickContextRing() {
-        clickVisibleMatcher(
-            hasClickAction() and hasAnyDescendant(hasText("%", substring = true)),
-            description = "ContextRing",
-        )
-    }
-
     private fun focusChatInput() {
         val inputs = compose.onAllNodes(hasSetTextAction(), useUnmergedTree = true)
         compose.waitUntil(timeoutMillis = WAIT_TIMEOUT_MS) {
@@ -431,15 +432,29 @@ class ChatSoftTimelineSmokeTest {
 
     private fun ensureTaskDockExpanded() {
         val collapseLabel = targetContext.getString(R.string.subagent_dock_collapse)
-        if (isVisibleText(collapseLabel)) return
-        clickVisibleText(targetContext.getString(R.string.subagent_dock_expand))
+        if (isTaskDockToggleStateVisible(collapseLabel)) return
+        val expandLabel = targetContext.getString(R.string.subagent_dock_expand)
+        clickVisibleMatcher(taskDockToggleState(expandLabel), description = "dock state=$expandLabel")
+        waitForTaskDockToggleState(collapseLabel)
+    }
+
+    private fun taskDockToggleState(label: String): SemanticsMatcher =
+        hasClickAction() and SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, label)
+
+    private fun isTaskDockToggleStateVisible(label: String): Boolean =
+        visibleIndex(compose.onAllNodes(taskDockToggleState(label), useUnmergedTree = true)) >= 0
+
+    private fun waitForTaskDockToggleState(label: String, visible: Boolean = true) {
+        compose.waitUntil(timeoutMillis = WAIT_TIMEOUT_MS) {
+            isTaskDockToggleStateVisible(label) == visible
+        }
     }
 
     private fun openTaskDetails(title: String) {
         clickVisibleText(title)
-        compose.waitUntil(timeoutMillis = WAIT_TIMEOUT_MS) {
-            isVisibleText(targetContext.getString(R.string.subagent_dock_details_title))
-        }
+        // The current sheet uses the task title, with no generic "Subagent details" heading.
+        // Its output toggle is unique to the sheet, unlike the title still visible in the rail.
+        waitForVisibleText(targetContext.getString(R.string.subagent_dock_view_original))
     }
 
     private fun clickVisibleText(value: String) {
@@ -504,15 +519,6 @@ class ChatSoftTimelineSmokeTest {
         }
     }
 
-    private fun isVisibleText(value: String): Boolean {
-        val matches = compose.onAllNodesWithText(
-            value,
-            substring = true,
-            useUnmergedTree = true,
-        )
-        return visibleIndex(matches) >= 0
-    }
-
     private fun visibleIndex(matches: androidx.compose.ui.test.SemanticsNodeInteractionCollection): Int {
         val count = matches.fetchSemanticsNodes().size
         return (0 until count).firstOrNull { index ->
@@ -524,7 +530,7 @@ class ChatSoftTimelineSmokeTest {
         anchor?.let(::revealText)
         compose.waitForIdle()
         instrumentation.waitForIdleSync()
-        // Cover the ContextRing enter and the dock's settling transition before
+        // Cover the model menu enter and the dock's settling transition before
         // writing a screenshot, without depending on a fixed device density.
         SystemClock.sleep(450)
         instrumentation.waitForIdleSync()

@@ -55,7 +55,11 @@ object ThemePackTransfer {
 
     fun export(display: DisplaySetting): ThemePackDocument {
         display.themePack?.let { return it }
-        val accent = themeRgb(display.accentColor) ?: 0xB8623A
+        val rawAccent = display.accentColor.trim()
+        val accent = themeRgb(rawAccent)
+            ?: rawAccent.takeIf { it.matches(Regex("#[fF]{2}[0-9a-fA-F]{6}")) }
+                ?.drop(3)?.toInt(16)
+            ?: throw IllegalArgumentException("当前强调色不能无损导出为跨平台 RGB 颜色；请先选择不带透明度的强调色。")
         val ink = if (themeContrast(accent, 0) >= themeContrast(accent, 0xFFFFFF)) 0 else 0xFFFFFF
         val sage = display.amberBaseFamily == "SAGE"
         return ThemePackDocument(
@@ -109,13 +113,28 @@ object ThemePackTransfer {
     }
 
     fun toolRecipe(arguments: JsonObject, base: ThemePackDocument? = null): ThemePackDocument {
-        val changes = arguments.filterKeys { it !in setOf("action", "base_id", "candidate_digest") }
+        // Some providers send an object-valued argument as a JSON string. Decode that
+        // transport representation once; the same strict recipe validation still follows.
+        val normalized = arguments.toMutableMap()
+        val designArgument = arguments["design"]
+        if (designArgument is JsonPrimitive && designArgument.isString) {
+            val design = runCatching { wireJson.parseToJsonElement(designArgument.content) }
+                .getOrElse { throw IllegalArgumentException("design 必须是有效的 JSON 对象，或使用 null 清除设计。", it) }
+            require(design is JsonObject || design == JsonNull) {
+                "design 必须是 JSON 对象，不能是数组、数字或普通文字。"
+            }
+            normalized["design"] = design
+        }
+        val changes = normalized.filterKeys { it !in setOf("action", "base_id", "candidate_digest") }
         require(changes.keys.all { it in argumentNames }) { "未知主题字段：${changes.keys - argumentNames.keys}" }
         require(changes.isNotEmpty()) { "请提供要修改的字段" }
         val mapped = JsonObject(changes.mapKeys { argumentNames.getValue(it.key) })
         val document = if (base == null) {
             require((mapped["id"] as? JsonPrimitive)?.content !in builtinIds) { "新主题不能使用内置 id" }
             val defaults = mapOf(
+                "brandMark" to JsonPrimitive("systemWordmark"),
+                "shortcutIconStyle" to JsonPrimitive("systemOutline"),
+                "chromeTypeface" to JsonPrimitive("system"),
                 "canvasScope" to JsonPrimitive("shell"),
                 "assetMode" to JsonPrimitive("builtinOnly"),
                 "immersivePolicy" to JsonPrimitive("hidden"),

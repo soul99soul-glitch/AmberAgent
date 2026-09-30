@@ -30,6 +30,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -184,6 +185,7 @@ private fun CardGroupListItem(
 @Composable
 fun CardGroup(
     modifier: Modifier = Modifier,
+    shape: Shape = RoundedCornerShape(CardGroupCorner),
     title: (@Composable () -> Unit)? = null,
     colors: ListItemColors? = null,
     containerColor: Color? = null,
@@ -220,7 +222,6 @@ fun CardGroup(
                 }
             }
         }
-        val shape = RoundedCornerShape(CardGroupCorner)
         Column(
             modifier = Modifier
                 .fillMaxWidth()

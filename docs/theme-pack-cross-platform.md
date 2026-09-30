@@ -1,6 +1,6 @@
 # Android / iOS 主题配方互通
 
-状态：2026-09-26 Android 编译、23 项定点测试和 Swift 数据协议往返检查通过；完整 iOS 模拟器、视觉、真机及真实 provider 生成未验收。本说明以 iOS 已有 `amber.theme.pack` v1 文件为协议基准；Android 保留旧版 token 主题包读取路径。
+状态：2026-09-26 Android 编译、25 项主题定点测试，以及 USB Android 真机的分享导入、Qwen 试穿/套用、还原、重启保留和导出回读通过。完整 iOS app/模拟器仍未验收；Swift 数据协议检查在 macOS 执行。本说明以 iOS 已有 `amber.theme.pack` v1 文件为协议基准；Android 保留旧版 token 主题包读取路径。
 
 ## 文件协议
 
@@ -37,7 +37,7 @@
 
 ## Agent 创建与局部修改
 
-Android 与 iOS 的主题工具都支持先读取状态，再创建或局部编辑 recipe。创建时 Android 默认 `canvasScope=shell`、`assetMode=builtinOnly`、`immersivePolicy=hidden`，与 iOS 工具默认一致。局部修改时省略字段会保留原值，修改已有自定义主题保留原 `id`；修改内置主题会生成可编辑副本。
+Android 与 iOS 的主题工具都支持先读取状态，再创建或局部编辑 recipe。创建时 Android 默认 `canvasScope=shell`、`assetMode=builtinOnly`、`immersivePolicy=hidden`，与 iOS 工具默认一致。Android 工具省略 `brand_mark`、`shortcut_icon_style`、`chrome_typeface` 时分别填充 `systemWordmark`、`systemOutline`、`system`；导出的 v1 文件仍包含完整必需字段。对真机已观测到的 JSON 字符串形式 `design`，先解码一次，再执行同一套严格字段、范围和对比度校验。局部修改时省略字段会保留原值，修改已有自定义主题保留原 `id`；修改内置主题会生成可编辑副本。
 
 局部 patch 对对象递归合并，对数组整体替换。`design.patterns`、渐变的 `colors` / `darkColors` 都按新数组替换。工具参数中的顶层槽不接受 `null`；design 内可空 palette、gradient、components 或可选 component 值可用 `null` 清除，`patterns` 本身不能写 `null`，清空时传 `[]`。Android 主题工具定点测试已通过；iOS 模拟器回归仍 **pending**。
 
@@ -47,13 +47,19 @@ Android 通过 `ThemePackageValidator` 保留无 `format` 的旧 `ThemePackage`�
 
 ## Android 的可视消费范围
 
-当前工作树中，Android 主题构建已接入 `paper`、`accentHex`、`inkHex`、`chromeTypeface`、`canvasStyle`、`design.light` / `design.dark`、gradient、patterns，以及 components 的圆角、边框、阴影值。`bubbleRadius` 已接到聊天消息圆角；card/control 几何进入主题 shapes，`borderWidth` 与阴影由 `AmberCard` 消费。配方 apply、Room 保存和重新读取已通过 Android 定点测试；实际界面呈现与手感尚未做设备验收。
+当前 Android 的颜色构建使用 `paper`、`accentHex`、`inkHex` 和 `design.light` / `design.dark`。自定义 palette 的 `foreground2` 与 iOS 一样使用 `foreground`，`mutedForeground` 留给弱化文字；有 portable document 时用户气泡使用 `accentHex` 填充和 `inkHex` 文字。无 document 的旧 Android 外观保持原样。
 
-以下字段可解析、校验、保存，并在未改动时随 v1 文件和 Agent patch 保留，但当前 Android 没有对应的可视消费：`canvasScope`、`bubbleChrome`、`settingsChrome`、`brandMark`、`shortcutIconStyle`、`glassChrome`、`emptyArt`、`launchBrand`，以及 `design.components.brandText`、`brandSize`、`brandTracking`。`assetMode` / `immersivePolicy` 目前分别只接受 `builtinOnly` / `hidden`；主题文件不携带外部 asset。
+背景的渐变、六种纹理和画布预设采用 v1 的同一几何语义：渐变方向按归一化画布坐标计算；纹理 `size` 是图案尺寸，描边为 `max(0.5, size * 0.32)`，dots 半径为 `size`、rings 半径为 `size * 2`，自定义纹理从原点起铺。`canvasScope` 在每个导航页面的内容边界生效：`homeOnly` 仅首页，`shell` 包含首页与设置，`appWide` 包含已接入 `amberCanvas` 的功能页；缺省文件槽按 iOS 的 `homeOnly` 处理，工具新建仍显式写入 `shell`。
+
+首页消费 `brandMark`、`shortcutIconStyle`、`emptyArt` 和 components 的 `brandText` / `brandSize` / `brandTracking`。Phosphor fill 复用两端同源图标，像素字标和五个快捷图标使用同一位图。`chromeTypeface` 通过首页的 Material typography 与 Amber 自定义文字样式共同生效；设置页仅在 `settingsChrome=true` 时跟随，聊天正文保留用户字体设置。
+
+components 的圆角、边框与阴影进入首页卡片、共享设置卡片及主题支持的共享组件；未提供值时保持各组件默认外观，显式零值可关闭对应效果。气泡优先使用 `bubbleRadius`，否则 portable document 的 `bubbleChrome` 使用 standard=18、soft=22、crisp=14 的预设。`glassChrome` 控制首页控件表面的强度，但 iOS Liquid Glass 的折射由系统实现，Android 使用本地表面效果近似；系统字体和页面布局仍存在平台差异，不能把文件互通等同于逐像素一致。
+
+`launchBrand` 仍只保留用于主题交换，未接到 Android 系统启动屏；`assetMode` / `immersivePolicy` 目前分别只接受 `builtinOnly` / `hidden`，主题文件不携带外部 asset。
 
 有自定义 `design.dark` palette 时，Android 会关闭 AMOLED 纯黑覆盖，让这套深色 palette 生效；没有自定义 dark palette 时，用户开启的 AMOLED 深色模式仍可覆盖基础背景色。
 
-Android Agent 工具的 `prepare` 只建立内存中的 try-on，并将候选 themePack 送入全局主题构建；它不会写入主题库或设置。工具要求前台用户批准，不能自动批准。应用前需用 prepare 返回的主题 `id` 与 `candidate_digest` 精确绑定；用户应用后才落库。Swift 侧对应 `beginTryOn` 与用户选择“套用/还原”的路径。Android 工具/manager 定点测试通过；Swift 侧和视觉应用的跨端闭环验收仍 **pending**。
+Android Agent 工具的 `prepare` 只建立内存中的 try-on，并将候选 themePack 送入全局主题构建，不写主题库或设置。普通对话中的 `prepare` / `discard` 不再弹通用审批；`apply` 仍必须明确确认，非普通对话的门控不放宽。聊天卡片绑定 `package_id` 与 `candidate_digest`；若模型已提出待审批的 apply，卡片接入原批准/拒绝回调，已批准但未执行完成时禁用操作，避免写完设置仍挂着 Pending。每个候选仅在匹配的聊天工具结果处显示一张卡，不占用全局导航顶端；外部文件导入在外观页显示同一控制卡。Swift 侧对应 `beginTryOn` 与用户选择“套用/还原”的路径，完整 iOS UI 交互仍未验收。
 
 ## 验证记录
 
@@ -74,3 +80,43 @@ Android Agent 工具的 `prepare` 只建立内存中的 try-on，并将候选 th
 - Android `ThemeDesign` 与 iOS Codable 的 gradient、pattern、component 数值字段当前均为 `Double`。共享 fixture 与 Android 导出中的高精度角度均经上述路径保留；Android 导出和 iOS 重编码的全 JSON 字段/值树比较 **passed**。
 
 本说明中的消费范围依据当前 Android 工作树源码；最终 UI/行为证据以各自定点测试结果更新。
+
+
+## USB 真机修复复核（2026-09-26）
+
+本次直接检查用户设备上的主题会话。日志显示批准已进入 ALLOW/execute，失败原因是 `design` 被模型编码成 JSON 字符串，之后重试又缺少三个平台样式字段；分享文件被旧路由存成聊天附件；原试穿卡则被挂在全局导航外壳顶部。
+
+修复并验证：
+
+- `ACTION_SEND` 单个主题文件和 content/file `ACTION_VIEW` 经有界读取确认 `format=amber.theme.pack` 后进入主题预览；保留来路导航，普通 JSON 仍作为聊天附件。
+- 以设备里原有的 `amber-theme-bordeaux-velvet.json` 验证热启动与冷启动导入；不会在导入时保存。
+- 当前 `qwen3.8-flash` 真实会话的 prepare 不再要求通用审批，模型输出的完整三层纹理配方试穿成功。用户后续确认时，聊天内单张主题卡通过原工具审批回调完成 apply，随后 status 确认已保存。
+- 还原可退回原外观；套用后重新启动应用仍保留主题。真机重新导出的 JSON 与用户原始共享文件逐字段/值树相等；该导出也通过 macOS 上摘取的真实 Swift 数据模型的编解码检查。
+- 保存期间取消或替换候选会拒绝旧提交并补偿本次写入；Settings 写入/回滚不再覆盖无关新设置。旧不透明 ARGB 强调色可无损转 RGB，含透明度且无法无损表示的旧颜色会给出错误，不再静默改成陶土色。
+
+验证命令：
+
+```sh
+JAVA_HOME=/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home \
+ANDROID_HOME=/opt/homebrew/share/android-commandlinetools \
+./gradlew :app:testDebugUnitTest \
+  --tests 'app.amber.core.ai.tools.ThemePackToolsTest' \
+  --tests 'app.amber.feature.ui.theme.ThemePackageManagerTest' \
+  --tests 'app.amber.feature.ui.theme.ThemePackageValidatorTest' \
+  --tests 'app.amber.feature.ui.theme.ThemePackTransferTest' \
+  :app:assembleGraphite --offline --console=plain -Pksp.incremental=false --max-workers=2
+```
+
+25 项测试通过（6 工具、11 管理器、5 旧包校验、3 跨平台配方转换）。Graphite 包以相同包名 `app.amber.agent` 和相同签名保留数据覆盖安装；原数据库及偏好文件均仍在，原有会话与 provider 配置可继续使用。截图、设备导出、构建日志存于本机 `/tmp/amber-theme-device-20260926/`；本次没有做全应用性能基准或其它 provider 的实机验证。
+
+## 视觉消费补齐（2026-09-26）
+
+本轮以用户分享的「勃艮第 · 暮红」为对照，修复了纹理线宽/半径/原点、归一化渐变、次级文字色及用户气泡配色，并把首页品牌/五个快捷图标、卡片几何/阴影、页面作用范围和界面字体接到实时 try-on 文档。画布绘制顺序与 iOS 一致：底色、渐变、自定义 patterns、canvasStyle。
+
+定点验证 `ThemeDesignRenderingTest` 2 项、`ThemePageChromeTest` 2 项、既有 `HomeCompactLayoutTest` 5 项和 `ThemePackToolsTest` 6 项，共 15 项通过。新增渲染用例直接读取原生 Canvas 输出像素，验证纵向画布的斜向渐变及 dots/crosses/rings 的尺寸；页面范围用例通过真实 Nav3 entryProvider 验证 metadata，没有把字符串 contentKey 错当作 Screen。
+
+子代理只读复核了 manager try-on → Theme.kt → LocalThemePack → 页面 decorator/首页的更新链，未发现依赖持久化才刷新或还原的断链。既有 HDR 工作树改动保留。本轮设备列表没有 USB Android 真机；Android 模拟器视觉结果记录在 `/tmp/amber-theme-parity-20260926/`，不能据此宣称两端真机逐像素一致。iOS 侧本轮仅核对主题渲染源码，没有重建或修改 iOS 应用。
+
+模拟器补充验收：保留数据覆盖安装后，「勃艮第 · 暮红」已保存主题直接呈现衬线字标、实心快捷图标和修正后的纹理；另一份 `homeOnly/settingsChrome=false` 配方在设置页保持纯色，在首页显示自定义品牌和像素图标，点击还原后返回已保存的勃艮第主题。最终 Graphite 构建通过；截图与构建日志同上目录。
+
+顶部沉浸补充：WorkspaceTopBar 将系统 inset 放到 toolbar surface 外侧，有主题画布时展开与滚动状态均透明，避免返回顶部时出现背景过渡色块。首页把 statusBars 避让从整个 Column 移到 LazyColumn 初始 contentPadding，滚动后可延伸至状态栏；Haze 捕获主题背景，顶部渐隐覆盖状态栏加 40dp，自定义配方不再叠纯色遮罩。模拟器对照确认初始首页字标边界不变，滚动后不再出现旧纯色顶带。`HomeCompactLayoutTest` 5 项复跑通过，Graphite 构建通过；展开/折叠设置页和紧凑窗口滚动截图均在本轮目录。

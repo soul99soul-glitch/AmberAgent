@@ -256,7 +256,10 @@ fun AmberAgentTheme(
     val amberTokens = remember(themeBaseTokens, amberAccent, effectiveAmoledDarkMode, darkTheme, themeDesign, themePack?.inkHex) {
         val tokens = buildAmberTokens(themeBaseTokens, amberAccent, themeDesign)
         val documentInk = themePack?.inkHex?.let(::parseThemeColor)
-        val withDocumentInk = if (documentInk != null) tokens.copy(accentInk = documentInk) else tokens
+        val withDocumentInk = if (documentInk != null) {
+            // Portable themes use the same accent-filled user bubble as iOS.
+            tokens.copy(accentInk = documentInk, userBg = tokens.accent, userInk = documentInk)
+        } else tokens
         if (effectiveAmoledDarkMode) withDocumentInk.copy(
             bg = AMOLED_DARK_BACKGROUND,
             surface = Color(0xFF050505),
@@ -335,6 +338,7 @@ fun AmberAgentTheme(
         LocalExtendColors provides extendColors,
         LocalOverscrollFactory provides null,
         LocalAmberTokens provides amberTokens,
+        LocalThemePack provides themePack,
         LocalThemeDesign provides themeDesign,
         LocalThemeCanvasStyle provides themePack?.canvasStyle,
         LocalAmberType provides defaultAmberTextStyles(),
@@ -346,7 +350,7 @@ fun AmberAgentTheme(
     ) {
         MaterialTheme(
             colorScheme = themedColorScheme,
-            typography = themeTypography(themePack?.chromeTypeface),
+            typography = AmberTypography,
             shapes = themeShapes(themeDesign),
             content = content,
         )
@@ -367,7 +371,7 @@ private fun parseAccent(hex: String): Color = try {
 
 private fun parseThemeColor(hex: String): Color? = themeRgb(hex)?.let(::opaqueColor)
 
-private fun chromeFontFamily(typeface: String?): FontFamily? = when (typeface) {
+internal fun chromeFontFamily(typeface: String?): FontFamily? = when (typeface) {
     null -> null
     "system" -> FontFamily.Default
     "rounded" -> HankenGrotesk
@@ -376,7 +380,7 @@ private fun chromeFontFamily(typeface: String?): FontFamily? = when (typeface) {
     else -> null
 }
 
-private fun themeTypography(typeface: String?): androidx.compose.material3.Typography {
+internal fun themeTypography(typeface: String?): androidx.compose.material3.Typography {
     val family = chromeFontFamily(typeface) ?: return AmberTypography
     return AmberTypography.copy(
         displayLarge = AmberTypography.displayLarge.copy(fontFamily = family),
@@ -388,6 +392,9 @@ private fun themeTypography(typeface: String?): androidx.compose.material3.Typog
         titleLarge = AmberTypography.titleLarge.copy(fontFamily = family),
         titleMedium = AmberTypography.titleMedium.copy(fontFamily = family),
         titleSmall = AmberTypography.titleSmall.copy(fontFamily = family),
+        bodyLarge = AmberTypography.bodyLarge.copy(fontFamily = family),
+        bodyMedium = AmberTypography.bodyMedium.copy(fontFamily = family),
+        bodySmall = AmberTypography.bodySmall.copy(fontFamily = family),
         labelLarge = AmberTypography.labelLarge.copy(fontFamily = family),
         labelMedium = AmberTypography.labelMedium.copy(fontFamily = family),
         labelSmall = AmberTypography.labelSmall.copy(fontFamily = family),

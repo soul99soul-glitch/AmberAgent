@@ -14,6 +14,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.time.Instant
 
 /** 主题库写入用的窄接口（真实实现包 SettingsAggregator；测试用内存实现）。 */
@@ -95,6 +97,7 @@ class ThemePackageManager(
 
     private val _tryOn = MutableStateFlow<ThemePackageTryOn?>(null)
     val tryOn: StateFlow<ThemePackageTryOn?> = _tryOn.asStateFlow()
+    private val themeWriteMutex = Mutex()
 
     fun observeLibrary(): Flow<List<ThemePackageEntity>> = dao.observeAll()
 
@@ -109,13 +112,14 @@ class ThemePackageManager(
                     validation.themePackage,
                     current.displaySetting,
                 ).copy(appliedThemePackageId = validation.themePackage.id)
-                _tryOn.value = ThemePackageTryOn(
+                val prepared = ThemePackageTryOn(
                     pkg = validation.themePackage,
                     unknownTokens = validation.unknownTokens,
                     candidate = candidate,
                     candidateDigest = candidateDigestFor(json),
                     rawJson = json,
                 )
+                _tryOn.value = prepared
                 ThemePackageImportResult.Preview(
                     pkg = validation.themePackage,
                     unknownTokens = validation.unknownTokens,
@@ -134,19 +138,13 @@ class ThemePackageManager(
      * 恢复原有库项与原有 Settings；成功后清除 try-on。
      */
     suspend fun applyPrepared(packageId: String, candidateDigest: String): ThemePackageApplyResult {
-        val prepared = _tryOn.value ?: return ThemePackageApplyResult.NotPrepared
+        val prepared = currentTryOn() ?: return ThemePackageApplyResult.NotPrepared
         if (packageId != prepared.pkg.id || candidateDigest != prepared.candidateDigest) {
             return ThemePackageApplyResult.NotPrepared
         }
 
         return withThemeWrite {
-            if (_tryOn.value?.candidateDigest != candidateDigest) return@withThemeWrite ThemePackageApplyResult.NotPrepared
-            // Read the current snapshot after the writer reaches the gate. A
-            // user action waiting behind restore must apply to the imported
-            // settings, not to the pre-restore snapshot it first observed.
-            val current = settingsStore.settingsFlow.first()
-            val nextDisplay = ThemePackageApplier.applyTokens(prepared.pkg, current.displaySetting)
-                .copy(appliedThemePackageId = prepared.pkg.id)
+            if (!isCurrentTryOn(prepared)) return@withThemeWrite ThemePackageApplyResult.NotPrepared
             val previousEntity = dao.getById(prepared.pkg.id)
             val nextEntity = ThemePackageEntity(
                 id = prepared.pkg.id,
@@ -157,19 +155,43 @@ class ThemePackageManager(
 
             try {
                 dao.upsert(nextEntity)
-                val result = if (nextDisplay == current.displaySetting) {
-                    // A package may be identical to the active settings; applying it still
-                    // persists the package so the user's explicit import is not lost.
-                    ThemePackageApplyResult.Applied
-                } else {
-                    updateWithRollback(current, current.copy(displaySetting = nextDisplay))
-                }
-                if (result == ThemePackageApplyResult.Applied || result == ThemePackageApplyResult.AlreadyApplied) {
-                    discardTryOn(packageId, candidateDigest)
-                } else {
+                // The DAO may suspend after writing. A try-on discarded or replaced
+                // during that write must not be allowed to apply its stale snapshot.
+                if (!isCurrentTryOn(prepared)) {
                     restoreEntity(prepared.pkg.id, previousEntity)
+                    return@withThemeWrite ThemePackageApplyResult.NotPrepared
                 }
-                result
+
+                when (val settingsWrite = writeDisplaySetting(
+                    isCurrent = { isCurrentTryOn(prepared) },
+                    transform = { current ->
+                        ThemePackageApplier.applyTokens(prepared.pkg, current)
+                            .copy(appliedThemePackageId = prepared.pkg.id)
+                    },
+                )) {
+                    is ThemeSettingsWriteResult.Invalidated -> {
+                        restoreEntity(prepared.pkg.id, previousEntity)
+                        ThemePackageApplyResult.NotPrepared
+                    }
+                    is ThemeSettingsWriteResult.Reverted -> {
+                        restoreEntity(prepared.pkg.id, previousEntity)
+                        if (isCurrentTryOn(prepared)) ThemePackageApplyResult.Reverted
+                        else ThemePackageApplyResult.NotPrepared
+                    }
+                    is ThemeSettingsWriteResult.Applied -> {
+                        // This compare-and-set is the try-on commit point.
+                        // If discard/import won while Settings was being persisted, undo
+                        // only this write's theme fields and restore the prior library row.
+                        if (!clearTryOnIfCurrent(prepared)) {
+                            rollbackThemeFields(settingsWrite.previous, settingsWrite.applied)
+                            restoreEntity(prepared.pkg.id, previousEntity)
+                            ThemePackageApplyResult.NotPrepared
+                        } else {
+                            // Applying an identical package still stores the explicit import.
+                            ThemePackageApplyResult.Applied
+                        }
+                    }
+                }
             } catch (_: Exception) {
                 // Roll back while this writer still owns the short persistence
                 // boundary; a restore/new writer cannot observe a half-applied
@@ -184,8 +206,7 @@ class ThemePackageManager(
     fun discardTryOn(packageId: String, candidateDigest: String): Boolean {
         val prepared = _tryOn.value ?: return false
         if (packageId != prepared.pkg.id || candidateDigest != prepared.candidateDigest) return false
-        clearTryOn()
-        return true
+        return _tryOn.compareAndSet(prepared, null)
     }
 
     suspend fun status(): ThemePackageStatus = ThemePackageStatus(
@@ -220,20 +241,26 @@ class ThemePackageManager(
 
     suspend fun apply(packageId: String): ThemePackageApplyResult {
         return withThemeWrite {
+            val preparedAtStart = currentTryOn()
             val entity = dao.getById(packageId) ?: return@withThemeWrite ThemePackageApplyResult.NotFound
             val validation = ThemePackageValidator.validateJson(entity.json) as? ThemePackageValidation.Valid
                 ?: return@withThemeWrite ThemePackageApplyResult.Corrupt
             val pkg = validation.themePackage
-            val current = settingsStore.settingsFlow.first()
-            val nextDisplay = ThemePackageApplier.applyTokens(pkg, current.displaySetting)
-                .copy(appliedThemePackageId = pkg.id)
-            if (nextDisplay == current.displaySetting) {
-                clearTryOn()
-                return@withThemeWrite ThemePackageApplyResult.AlreadyApplied
+            val result = when (val write = writeDisplaySetting { current ->
+                ThemePackageApplier.applyTokens(pkg, current).copy(appliedThemePackageId = pkg.id)
+            }) {
+                is ThemeSettingsWriteResult.Applied -> if (write.previous == write.applied) {
+                    ThemePackageApplyResult.AlreadyApplied
+                } else {
+                    ThemePackageApplyResult.Applied
+                }
+                ThemeSettingsWriteResult.Invalidated -> error("Unexpected try-on invalidation")
+                ThemeSettingsWriteResult.Reverted -> ThemePackageApplyResult.Reverted
             }
-            return@withThemeWrite updateWithRollback(current, current.copy(displaySetting = nextDisplay)).also {
-                if (it == ThemePackageApplyResult.Applied) clearTryOn()
+            if (result == ThemePackageApplyResult.Applied || result == ThemePackageApplyResult.AlreadyApplied) {
+                preparedAtStart?.let(::clearTryOnIfCurrent)
             }
+            result
         }
     }
 
@@ -241,24 +268,26 @@ class ThemePackageManager(
     suspend fun applyBuiltin(baseFamily: String): ThemePackageApplyResult {
         require(baseFamily in setOf("WARM", "SAGE")) { "未知的内置色系：$baseFamily" }
         return withThemeWrite {
-            val current = settingsStore.settingsFlow.first()
-            val nextDisplay = current.displaySetting.copy(
+            val preparedAtStart = currentTryOn()
+            val result = when (val write = writeDisplaySetting { current -> current.copy(
                 amberBaseFamily = baseFamily,
                 accentColor = if (baseFamily == "WARM") {
                     SIT_TERRACOTTA_ACCENT_HEX
-                } else current.displaySetting.accentColor,
+                } else current.accentColor,
                 appliedThemePackageId = null,
                 themePack = null,
-            )
-            if (nextDisplay == current.displaySetting) {
-                clearTryOn()
-                return@withThemeWrite ThemePackageApplyResult.AlreadyApplied
+            ) }) {
+                is ThemeSettingsWriteResult.Applied -> if (write.previous == write.applied) {
+                    ThemePackageApplyResult.AlreadyApplied
+                } else {
+                    ThemePackageApplyResult.Applied
+                }
+                ThemeSettingsWriteResult.Invalidated -> error("Unexpected try-on invalidation")
+                ThemeSettingsWriteResult.Reverted -> ThemePackageApplyResult.Reverted
             }
-            val result = updateWithRollback(
-                current,
-                current.copy(displaySetting = nextDisplay),
-            )
-            if (result == ThemePackageApplyResult.Applied) clearTryOn()
+            if (result == ThemePackageApplyResult.Applied || result == ThemePackageApplyResult.AlreadyApplied) {
+                preparedAtStart?.let(::clearTryOnIfCurrent)
+            }
             result
         }
     }
@@ -266,6 +295,7 @@ class ThemePackageManager(
     /** 从主题库移除导入包（`builtin:` 条目不在库中，天然不可移除）。 */
     suspend fun remove(packageId: String): Boolean {
         return withThemeWrite {
+            val preparedAtStart = currentTryOn()?.takeIf { it.pkg.id == packageId }
             val previousEntity = dao.getById(packageId) ?: return@withThemeWrite false
             val deleted = dao.delete(packageId) > 0
             if (!deleted) return@withThemeWrite false
@@ -287,7 +317,7 @@ class ThemePackageManager(
                 restoreEntity(packageId, previousEntity)
                 throw error
             }
-            if (_tryOn.value?.pkg?.id == packageId) clearTryOn()
+            preparedAtStart?.let(::clearTryOnIfCurrent)
             deleted
         }
     }
@@ -295,9 +325,13 @@ class ThemePackageManager(
     private fun preparedJson(prepared: ThemePackageTryOn): String =
         prepared.rawJson
 
-    private fun clearTryOn() {
-        _tryOn.value = null
-    }
+    private fun currentTryOn(): ThemePackageTryOn? = _tryOn.value
+
+    private fun isCurrentTryOn(prepared: ThemePackageTryOn): Boolean =
+        _tryOn.value == prepared
+
+    private fun clearTryOnIfCurrent(prepared: ThemePackageTryOn): Boolean =
+        _tryOn.compareAndSet(prepared, null)
 
     private fun candidateDigestFor(rawJson: String): String =
         ContentDigest.sha256(rawJson)
@@ -310,16 +344,81 @@ class ThemePackageManager(
         }
     }
 
-    private suspend fun updateWithRollback(previous: Settings, next: Settings): ThemePackageApplyResult =
-        try {
-            settingsStore.update(next)
-            ThemePackageApplyResult.Applied
-        } catch (error: Exception) {
-            // 应用失败回退到上一个可用主题（写入失败时整份 Settings 回滚）
-            runCatching { settingsStore.update(previous) }
-            ThemePackageApplyResult.Reverted
+    private sealed interface ThemeSettingsWriteResult {
+        data class Applied(val previous: DisplaySetting, val applied: DisplaySetting) : ThemeSettingsWriteResult
+        data object Invalidated : ThemeSettingsWriteResult
+        data object Reverted : ThemeSettingsWriteResult
+    }
+
+    private class TryOnInvalidatedException : RuntimeException()
+
+    private suspend fun writeDisplaySetting(
+        isCurrent: (() -> Boolean)? = null,
+        transform: (DisplaySetting) -> DisplaySetting,
+    ): ThemeSettingsWriteResult {
+        var previous: DisplaySetting? = null
+        var applied: DisplaySetting? = null
+        return try {
+            settingsStore.update { latest ->
+                if (isCurrent != null && !isCurrent()) throw TryOnInvalidatedException()
+                val before = latest.displaySetting
+                val next = transform(before)
+                previous = before
+                applied = next
+                latest.copy(displaySetting = next)
+            }
+            ThemeSettingsWriteResult.Applied(checkNotNull(previous), checkNotNull(applied))
+        } catch (_: TryOnInvalidatedException) {
+            ThemeSettingsWriteResult.Invalidated
+        } catch (_: Exception) {
+            if (previous != null && applied != null) {
+                rollbackThemeFields(previous!!, applied!!)
+            }
+            ThemeSettingsWriteResult.Reverted
         }
+    }
+
+    /** Restore only theme fields written by this operation and still unchanged since it. */
+    private suspend fun rollbackThemeFields(previous: DisplaySetting, applied: DisplaySetting) {
+        runCatching {
+            settingsStore.update { latest ->
+                val display = latest.displaySetting
+                fun <T> restoreIfStillApplied(current: T, written: T, before: T): T =
+                    if (current == written) before else current
+                val restored = display.copy(
+                    amberBaseFamily = restoreIfStillApplied(
+                        display.amberBaseFamily, applied.amberBaseFamily, previous.amberBaseFamily,
+                    ),
+                    accentColor = restoreIfStillApplied(
+                        display.accentColor, applied.accentColor, previous.accentColor,
+                    ),
+                    appliedThemePackageId = restoreIfStillApplied(
+                        display.appliedThemePackageId, applied.appliedThemePackageId,
+                        previous.appliedThemePackageId,
+                    ),
+                    themePack = restoreIfStillApplied(display.themePack, applied.themePack, previous.themePack),
+                    chatFontFamily = restoreIfStillApplied(
+                        display.chatFontFamily, applied.chatFontFamily, previous.chatFontFamily,
+                    ),
+                    fontSizeRatio = restoreIfStillApplied(
+                        display.fontSizeRatio, applied.fontSizeRatio, previous.fontSizeRatio,
+                    ),
+                    showUserAvatar = restoreIfStillApplied(
+                        display.showUserAvatar, applied.showUserAvatar, previous.showUserAvatar,
+                    ),
+                    showAssistantBubble = restoreIfStillApplied(
+                        display.showAssistantBubble, applied.showAssistantBubble, previous.showAssistantBubble,
+                    ),
+                )
+                latest.copy(displaySetting = restored)
+            }
+        }
+    }
 
     private suspend fun <T> withThemeWrite(block: suspend () -> T): T =
-        restoreWriteGate?.withCurrentWriterOrCancel(block) ?: block()
+        if (restoreWriteGate != null) {
+            restoreWriteGate.withCurrentWriterOrCancel { themeWriteMutex.withLock { block() } }
+        } else {
+            themeWriteMutex.withLock { block() }
+        }
 }

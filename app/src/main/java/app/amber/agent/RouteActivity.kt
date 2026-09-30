@@ -19,11 +19,13 @@ import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import app.amber.feature.ui.components.ds.enableAmberHdrWindow
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.AnimatedContentTransitionScope
 import androidx.compose.animation.ContentTransform
 import androidx.compose.animation.SharedTransitionLayout
 import androidx.compose.animation.fadeIn
+import androidx.navigation3.ui.LocalNavAnimatedContentScope
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.LinearEasing
@@ -35,9 +37,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.statusBars
-import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.CircularProgressIndicator
@@ -170,8 +169,9 @@ import app.amber.feature.ui.pages.webview.WebViewPage
 import app.amber.feature.ui.pages.webmount.WebMountSessionPage
 import app.amber.feature.ui.theme.LocalDarkMode
 import app.amber.feature.ui.theme.AmberAgentTheme
-import app.amber.feature.ui.theme.ThemePackageManager
-import app.amber.feature.ui.theme.ThemeTryOnHost
+import app.amber.feature.ui.theme.ThemePageChrome
+import app.amber.feature.ui.theme.rememberThemePageChromeDecorator
+import app.amber.feature.ui.theme.themePageChromeMetadata
 import app.amber.core.utils.base64Encode
 import app.amber.core.utils.CrashHandler
 import okhttp3.OkHttpClient
@@ -250,6 +250,7 @@ class RouteActivity : ComponentActivity() {
         )
         disableNavigationBarContrast()
         super.onCreate(savedInstanceState)
+        enableAmberHdrWindow()
         shareIntentConsumed = savedInstanceState?.getBoolean(STATE_SHARE_INTENT_CONSUMED) ?: false
         if (CrashHandler.hasCrashed(this)) {
             startActivity(Intent(this, SafeModeActivity::class.java))
@@ -335,11 +336,16 @@ class RouteActivity : ComponentActivity() {
     @Composable
     private fun ShareHandler(backStack: MutableList<NavKey>, currentIntent: Intent?) {
         val shareAction = remember(currentIntent) { currentIntent?.action }
+        val shareMimeType = remember(currentIntent) { currentIntent?.type }
         val shareText = remember(currentIntent) { currentIntent?.extractSharedText().orEmpty() }
         val streamUris = remember(currentIntent) {
             when (currentIntent?.action) {
                 Intent.ACTION_SEND -> currentIntent.extractSingleStreamUri().orEmpty()
                 Intent.ACTION_SEND_MULTIPLE -> currentIntent.extractMultipleStreamUris().orEmpty()
+                Intent.ACTION_VIEW -> currentIntent.data
+                    ?.takeIf { it.scheme == "content" || it.scheme == "file" }
+                    ?.let { listOf(it.toString()) }
+                    .orEmpty()
                 else -> emptyList()
             }
         }
@@ -349,12 +355,40 @@ class RouteActivity : ComponentActivity() {
             when (shareAction) {
                 Intent.ACTION_SEND,
                 Intent.ACTION_SEND_MULTIPLE -> {
-                    backStack.add(Screen.ShareHandler(text = shareText, streamUris = streamUris))
+                    backStack.add(
+                        Screen.ShareHandler(
+                            text = shareText,
+                            streamUris = streamUris,
+                            sourceAction = shareAction,
+                            declaredMimeType = shareMimeType,
+                        ),
+                    )
+                    shareIntentConsumed = true
+                }
+
+                Intent.ACTION_VIEW -> {
+                    if (streamUris.isNotEmpty()) {
+                        backStack.add(
+                            Screen.ShareHandler(
+                                text = shareText,
+                                streamUris = streamUris,
+                                sourceAction = shareAction,
+                                declaredMimeType = shareMimeType,
+                            ),
+                        )
+                    }
                     shareIntentConsumed = true
                 }
 
                 Intent.ACTION_PROCESS_TEXT -> {
-                    backStack.add(Screen.ShareHandler(text = shareText, streamUri = null))
+                    backStack.add(
+                        Screen.ShareHandler(
+                            text = shareText,
+                            streamUri = null,
+                            sourceAction = shareAction,
+                            declaredMimeType = shareMimeType,
+                        ),
+                    )
                     shareIntentConsumed = true
                 }
             }
@@ -521,8 +555,6 @@ class RouteActivity : ComponentActivity() {
         val toastState = rememberToasterState()
         val settings by settingsStore.settingsFlow.collectAsStateWithLifecycle()
         val eventBus = koinInject<AppEventBus>()
-        val themePackageManager = koinInject<ThemePackageManager>()
-        val themeTryOn by themePackageManager.tryOn.collectAsStateWithLifecycle()
 
         val notificationLink = remember { notificationDeepLinkFrom(intent) }
         val startScreen = remember {
@@ -637,14 +669,13 @@ class RouteActivity : ComponentActivity() {
                     modifier = Modifier
                         .fillMaxSize()
                         .background(MaterialTheme.colorScheme.background)
-                        .then(if (themeTryOn != null) Modifier.windowInsetsPadding(WindowInsets.statusBars) else Modifier)
                 ) {
-                    ThemeTryOnHost(manager = themePackageManager)
                     NavDisplay(
                         backStack = backStack,
                         entryDecorators = listOf(
                             rememberSaveableStateHolderNavEntryDecorator(),
                             rememberViewModelStoreNavEntryDecorator(),
+                            rememberThemePageChromeDecorator(),
                         ),
                         modifier = Modifier.fillMaxSize().weight(1f),
                         onBack = { backStack.removeLastOrNull() },
@@ -663,6 +694,7 @@ class RouteActivity : ComponentActivity() {
                                 },
                             ) { key ->
                                 ChatPage(
+                                    enterTransition = LocalNavAnimatedContentScope.current.transition,
                                     id = Uuid.parse(key.id),
                                     text = key.text,
                                     files = key.files.map { it.toUri() },
@@ -684,7 +716,10 @@ class RouteActivity : ComponentActivity() {
                                     text = key.text,
                                     streamUris = key.streamUris.ifEmpty {
                                         key.streamUri?.let { listOf(it) }.orEmpty()
-                                    }
+                                    },
+                                    sourceAction = key.sourceAction,
+                                    declaredMimeType = key.declaredMimeType,
+                                    deliveryId = key.deliveryId,
                                 )
                             }
 
@@ -692,7 +727,7 @@ class RouteActivity : ComponentActivity() {
                                 HistoryPage()
                             }
 
-                            entry<Screen.SessionHome> {
+                            entry<Screen.SessionHome>(metadata = themePageChromeMetadata(ThemePageChrome.Home)) {
                                 SessionHomePage()
                             }
 
@@ -731,11 +766,11 @@ class RouteActivity : ComponentActivity() {
                                 ZCodeSessionPage(url = key.url)
                             }
 
-                            entry<Screen.Setting> {
+                            entry<Screen.Setting>(metadata = themePageChromeMetadata(ThemePageChrome.Shell)) {
                                 SettingPage()
                             }
 
-                            entry<Screen.Backup> {
+                            entry<Screen.Backup>(metadata = themePageChromeMetadata(ThemePageChrome.Shell)) {
                                 BackupPage()
                             }
 
@@ -750,132 +785,132 @@ class RouteActivity : ComponentActivity() {
                                 )
                             }
 
-                            entry<Screen.SettingDisplay> {
+                            entry<Screen.SettingDisplay>(metadata = themePageChromeMetadata(ThemePageChrome.Shell)) {
                                 SettingDisplayPage()
                             }
 
-                            entry<Screen.SettingAppearance> {
+                            entry<Screen.SettingAppearance>(metadata = themePageChromeMetadata(ThemePageChrome.Shell)) {
                                 SettingAppearancePage()
                             }
 
-                            entry<Screen.SettingProvider> {
+                            entry<Screen.SettingProvider>(metadata = themePageChromeMetadata(ThemePageChrome.Shell)) {
                                 SettingProviderPage()
                             }
 
-                            entry<Screen.SettingProviderDetail> { key ->
+                            entry<Screen.SettingProviderDetail>(metadata = themePageChromeMetadata(ThemePageChrome.Shell)) { key ->
                                 val id = Uuid.parse(key.providerId)
                                 SettingProviderDetailPage(id = id)
                             }
 
-                            entry<Screen.SettingModels> {
+                            entry<Screen.SettingModels>(metadata = themePageChromeMetadata(ThemePageChrome.Shell)) {
                                 SettingModelPage()
                             }
 
-                            entry<Screen.SettingAbout> {
+                            entry<Screen.SettingAbout>(metadata = themePageChromeMetadata(ThemePageChrome.Shell)) {
                                 SettingAboutPage()
                             }
 
-                            entry<Screen.SettingAgentMemory> {
+                            entry<Screen.SettingAgentMemory>(metadata = themePageChromeMetadata(ThemePageChrome.Shell)) {
                                 SettingAgentMemoryPage()
                             }
 
-                            entry<Screen.SettingAgentMemoryRecall> {
+                            entry<Screen.SettingAgentMemoryRecall>(metadata = themePageChromeMetadata(ThemePageChrome.Shell)) {
                                 SettingAgentMemoryRecallPage()
                             }
 
-                            entry<Screen.SettingAgentMemoryWorker> {
+                            entry<Screen.SettingAgentMemoryWorker>(metadata = themePageChromeMetadata(ThemePageChrome.Shell)) {
                                 SettingAgentMemoryWorkerPage()
                             }
 
-                            entry<Screen.SettingAgentMemoryCompaction> {
+                            entry<Screen.SettingAgentMemoryCompaction>(metadata = themePageChromeMetadata(ThemePageChrome.Shell)) {
                                 SettingAgentMemoryCompactionPage()
                             }
 
-                            entry<Screen.SettingAgentMemoryLibrary> {
+                            entry<Screen.SettingAgentMemoryLibrary>(metadata = themePageChromeMetadata(ThemePageChrome.Shell)) {
                                 SettingAgentMemoryLibraryPage()
                             }
 
-                            entry<Screen.SettingAgentExtensions> {
+                            entry<Screen.SettingAgentExtensions>(metadata = themePageChromeMetadata(ThemePageChrome.Shell)) {
                                 SettingAgentExtensionsPage()
                             }
 
-                            entry<Screen.SettingSlidesFonts> {
+                            entry<Screen.SettingSlidesFonts>(metadata = themePageChromeMetadata(ThemePageChrome.Shell)) {
                                 SettingSlidesFontPage()
                             }
 
-                            entry<Screen.SettingCronTasks> {
+                            entry<Screen.SettingCronTasks>(metadata = themePageChromeMetadata(ThemePageChrome.Shell)) {
                                 SettingCronTasksPage()
                             }
 
-                            entry<Screen.SettingAgentRuntimeTasks> {
+                            entry<Screen.SettingAgentRuntimeTasks>(metadata = themePageChromeMetadata(ThemePageChrome.Shell)) {
                                 SettingAgentRuntimeTasksPage()
                             }
 
-                            entry<Screen.SettingAgentExecution> {
+                            entry<Screen.SettingAgentExecution>(metadata = themePageChromeMetadata(ThemePageChrome.Shell)) {
                                 SettingAgentExecutionPage()
                             }
 
-                            entry<Screen.SettingTts> {
+                            entry<Screen.SettingTts>(metadata = themePageChromeMetadata(ThemePageChrome.Shell)) {
                                 SettingTtsPage()
                             }
 
-                            entry<Screen.SettingAgentPermissions> {
+                            entry<Screen.SettingAgentPermissions>(metadata = themePageChromeMetadata(ThemePageChrome.Shell)) {
                                 SettingAgentPermissionsPage()
                             }
 
-                            entry<Screen.SettingCapabilityPermissions> {
+                            entry<Screen.SettingCapabilityPermissions>(metadata = themePageChromeMetadata(ThemePageChrome.Shell)) {
                                 SettingCapabilityPermissionsPage()
                             }
 
-                            entry<Screen.SettingSearch> {
+                            entry<Screen.SettingSearch>(metadata = themePageChromeMetadata(ThemePageChrome.Shell)) {
                                 SettingSearchPage()
                             }
 
-                            entry<Screen.SettingJev> {
+                            entry<Screen.SettingJev>(metadata = themePageChromeMetadata(ThemePageChrome.Shell)) {
                                 SettingJevPage()
                             }
 
-                            entry<Screen.SettingMcp> {
+                            entry<Screen.SettingMcp>(metadata = themePageChromeMetadata(ThemePageChrome.Shell)) {
                                 SettingMcpPage()
                             }
 
-                            entry<Screen.SettingFiles> {
+                            entry<Screen.SettingFiles>(metadata = themePageChromeMetadata(ThemePageChrome.Shell)) {
                                 SettingFilesPage()
                             }
 
-                            entry<Screen.SettingChatStorage> {
+                            entry<Screen.SettingChatStorage>(metadata = themePageChromeMetadata(ThemePageChrome.Shell)) {
                                 SettingChatStoragePage()
                             }
 
-                            entry<Screen.SettingStorage> {
+                            entry<Screen.SettingStorage>(metadata = themePageChromeMetadata(ThemePageChrome.Shell)) {
                                 SettingStoragePage()
                             }
 
-                            entry<Screen.SettingSandbox> {
+                            entry<Screen.SettingSandbox>(metadata = themePageChromeMetadata(ThemePageChrome.Shell)) {
                                 SettingSandboxPage()
                             }
 
-                            entry<Screen.SettingExperimental> {
+                            entry<Screen.SettingExperimental>(metadata = themePageChromeMetadata(ThemePageChrome.Shell)) {
                                 SettingExperimentalPage()
                             }
 
-                            entry<Screen.SettingExperimentalICloud> {
+                            entry<Screen.SettingExperimentalICloud>(metadata = themePageChromeMetadata(ThemePageChrome.Shell)) {
                                 SettingExperimentalICloudPage()
                             }
 
-                            entry<Screen.SettingExperimentalMacGateway> {
+                            entry<Screen.SettingExperimentalMacGateway>(metadata = themePageChromeMetadata(ThemePageChrome.Shell)) {
                                 SettingExperimentalMacGatewayPage()
                             }
 
-                            entry<Screen.SettingExperimentalSubAgent> {
+                            entry<Screen.SettingExperimentalSubAgent>(metadata = themePageChromeMetadata(ThemePageChrome.Shell)) {
                                 SettingExperimentalSubAgentPage()
                             }
 
-                            entry<Screen.SettingExperimentalModelCouncil> {
+                            entry<Screen.SettingExperimentalModelCouncil>(metadata = themePageChromeMetadata(ThemePageChrome.Shell)) {
                                 SettingExperimentalModelCouncilPage()
                             }
 
-                            entry<Screen.SettingExperimentalWebMount> {
+                            entry<Screen.SettingExperimentalWebMount>(metadata = themePageChromeMetadata(ThemePageChrome.Shell)) {
                                 SettingExperimentalWebMountPage()
                             }
 
@@ -897,11 +932,11 @@ class RouteActivity : ComponentActivity() {
                                 DeepReadHistoryPage()
                             }
 
-                            entry<Screen.SettingTodayBoard> {
+                            entry<Screen.SettingTodayBoard>(metadata = themePageChromeMetadata(ThemePageChrome.Shell)) {
                                 SettingTodayBoardPage()
                             }
 
-                            entry<Screen.SettingTodayBoardDetail> { key ->
+                            entry<Screen.SettingTodayBoardDetail>(metadata = themePageChromeMetadata(ThemePageChrome.Shell)) { key ->
                                 SettingTodayBoardPage(paneRoute = key.pane)
                             }
 
@@ -937,7 +972,7 @@ class RouteActivity : ComponentActivity() {
                                 MiniAppSettingsPage(groupRoute = key.group)
                             }
 
-                            entry<Screen.SettingSystemAccess> {
+                            entry<Screen.SettingSystemAccess>(metadata = themePageChromeMetadata(ThemePageChrome.Shell)) {
                                 SettingSystemAccessPage()
                             }
 
@@ -1070,6 +1105,8 @@ sealed interface Screen : NavKey {
         val text: String,
         val streamUri: String? = null,
         val streamUris: List<String> = emptyList(),
+        val sourceAction: String? = null,
+        val declaredMimeType: String? = null,
         val deliveryId: String = Uuid.random().toString(),
     ) : Screen
 

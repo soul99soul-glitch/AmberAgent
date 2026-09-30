@@ -46,7 +46,7 @@ fun createThemePackTools(manager: ThemePackageManager): List<Tool> = listOf(
     ),
     Tool(
         name = TOOL_THEME_PACK_IMPORT,
-        description = "生成或局部修改 Amber 自身主题。先调用 theme_pack_status。action=prepare（默认）在真实界面试穿，用户点击套用才保存，还原恢复已保存主题。修改时传 base_id=current 或已安装/内置 id，仅传要求修改的字段；省略字段保留，design 对象递归合并，数组整体替换，null 清除可选 design/配色/渐变/组件。自定义主题保留 id；内置主题首次修改生成副本，后续以 current 继续。新建不传 base_id，需要 id、display_name、paper、accent_hex、ink_hex、canvas_style、brand_mark、shortcut_icon_style、chrome_typeface。文件协议 amber.theme.pack v1 与 iOS 互通；以 status 中 Android 实际支持字段为准，不改变聊天字体或布局。确认前不能声称已保存。action=apply/discard 仍需 id 和 candidate_digest 精确绑定。仅前台用户批准可执行。",
+        description = "生成或局部修改 Amber 自身主题。先调用 theme_pack_status。action=prepare（默认）直接在真实界面创建可撤销的内存试穿，不写主题库或 Settings；action=discard 仅还原这份试穿。只有 action=apply 会持久化，必须等用户明确表示套用后再调用。修改时传 base_id=current 或已安装/内置 id，仅传要求修改的字段；省略字段保留，design 对象递归合并，数组整体替换，null 清除可选 design/配色/渐变/组件。自定义主题保留 id；内置主题首次修改生成副本，后续以 current 继续。新建不传 base_id，需要 id、display_name、paper、accent_hex、ink_hex、canvas_style；未指定平台样式槽时使用 brand_mark=systemWordmark、shortcut_icon_style=systemOutline、chrome_typeface=system。文件协议 amber.theme.pack v1 与 iOS 互通；以 status 中 Android 实际支持字段为准，不改变聊天字体或布局。只有用户明确确认后才可声称已保存。action=apply/discard 仍需 id 和 candidate_digest 精确绑定。",
         parameters = {
             InputSchema.Obj(
                 properties = buildJsonObject {
@@ -57,7 +57,7 @@ fun createThemePackTools(manager: ThemePackageManager): List<Tool> = listOf(
                             add("apply")
                             add("discard")
                         })
-                        put("description", "prepare（默认）/ apply / discard")
+                        put("description", "prepare（默认：直接试穿）/ apply（用户明确确认后持久化）/ discard（还原内存试穿）")
                     })
                     put("base_id", stringProperty("局部修改目标：current 或已安装/内置 id。省略则新建；修改不能另起 id。"))
                     put("id", stringProperty("新建主题 id；局部修改省略；apply/discard 使用 prepare 返回的 id。"))
@@ -67,13 +67,13 @@ fun createThemePackTools(manager: ThemePackageManager): List<Tool> = listOf(
                     put("accent_hex", stringProperty("强调色 RGB，#RRGGBB 或 0xRRGGBB。"))
                     put("ink_hex", stringProperty("强调色上的文字色；与强调色对比至少 3:1。"))
                     put("canvas_style", enumProperty("基础纹理", listOf("flat", "dotGrid", "lineGrid", "paperGrain")))
-                    put("brand_mark", enumProperty("保留以供 iOS 使用", listOf("systemWordmark", "paintAMBER", "serifWordmark")))
-                    put("shortcut_icon_style", enumProperty("保留以供 iOS 使用", listOf("phosphorFill", "pixelSit", "systemOutline")))
-                    put("chrome_typeface", enumProperty("界面字体，独立于聊天正文", listOf("system", "rounded", "serif", "monospace")))
+                    put("brand_mark", enumProperty("首页品牌字样：系统、像素 AMBER、衬线斜体；design.components.brandText 优先。", listOf("systemWordmark", "paintAMBER", "serifWordmark")))
+                    put("shortcut_icon_style", enumProperty("首页五个快捷入口的图标：Phosphor 实心、像素、系统线框。", listOf("phosphorFill", "pixelSit", "systemOutline")))
+                    put("chrome_typeface", enumProperty("界面字体，独立于聊天正文；无特别要求时用 system。", listOf("system", "rounded", "serif", "monospace")))
                     put("canvas_scope", enumProperty("背景范围", listOf("homeOnly", "shell", "appWide")))
-                    put("bubble_chrome", enumProperty("保留供 iOS 使用；Android 气泡形状使用 design.components.bubbleRadius", listOf("standard", "soft", "crisp")))
-                    put("glass_chrome", enumProperty("iOS 玻璃风格", listOf("standard", "quieter", "solid")))
-                    put("empty_art", enumProperty("iOS 空态装饰", listOf("none", "character")))
+                    put("bubble_chrome", enumProperty("气泡圆角预设；design.components.bubbleRadius 优先。", listOf("standard", "soft", "crisp")))
+                    put("glass_chrome", enumProperty("首页控件表面强度：标准、轻薄、厚实；Android 使用原生近似。", listOf("standard", "quieter", "solid")))
+                    put("empty_art", enumProperty("首页空态卡片中的淡纹理装饰。", listOf("none", "character")))
                     put("launch_brand", enumProperty("iOS 品牌呼应", listOf("none", "matchBrand")))
                     put("settings_chrome", buildJsonObject { put("type", "boolean") })
                     put("design", designProperty())
@@ -209,7 +209,10 @@ private fun themePreviewPayload(result: ThemePackageImportResult.Preview) = buil
     put("unknown_tokens", buildJsonArray { result.unknownTokens.forEach(::add) })
     put("candidate", displaySettingPayload(result.candidate))
     put("candidate_digest", result.candidateDigest)
-    put("apply_instruction", "After the user confirms this preview, call theme_pack_import with action=apply, id=${result.pkg.id}, and candidate_digest=${result.candidateDigest}.")
+    put(
+        "apply_instruction",
+        "Do not call action=apply on your own or in the same turn as prepare. Wait for the user to explicitly confirm applying this preview in a later message; only then call theme_pack_import with action=apply, id=${result.pkg.id}, and candidate_digest=${result.candidateDigest}.",
+    )
 }
 
 private fun themeStatusPayload(status: ThemePackageStatus, base: ThemePackDocument) = buildJsonObject {
@@ -222,11 +225,10 @@ private fun themeStatusPayload(status: ThemePackageStatus, base: ThemePackDocume
     put("installed_ids", buildJsonArray { status.installed.forEach { add(it.id) } })
     put("design_schema", designProperty())
     put("preserved_only", buildJsonArray {
-        add("brand_mark"); add("shortcut_icon_style"); add("glass_chrome"); add("empty_art"); add("launch_brand")
-        add("canvas_scope"); add("bubble_chrome"); add("settings_chrome")
-        add("design.components.brandText"); add("design.components.brandSize"); add("design.components.brandTracking")
+        add("launch_brand")
     })
-    put("android_background_scope", "已使用 amberCanvas 的页面；canvas_scope 保留用于与 iOS 交换")
+    put("android_background_scope", "canvas_scope 控制已接入画布的页面：homeOnly 仅首页，shell 首页和设置，appWide 全部。省略时文件默认 homeOnly；工具新建默认 shell。")
+    put("rendering_notes", "配方控制首页品牌、快捷图标、界面字体、组件圆角/边框/阴影、画布与用户气泡强调色。settings_chrome 仅控制设置界面字体；聊天正文字体和页面布局保持用户设置。glass_chrome 使用 Android 原生近似，系统字体与 iOS Liquid Glass 不保证像素一致。")
     put("rules", "用 base_id 局部修改，只发送变化字段；未提供字段保留，数组整体替换。可选 design/light/dark/gradient/components/组件属性可设 null。只改组件不必重建配色；首次添加配色需五个颜色。两端使用同一文件格式，平台专属字段保留但不保证同样渲染。试穿可继续修改，套用后覆盖同一条目；还原不改已保存主题。")
     put("installed", buildJsonArray {
         status.installed.forEach { packageEntity ->
@@ -349,6 +351,6 @@ private fun designProperty(): JsonObject {
             put("shadowOpacity", number(0.0, 0.35)); put("shadowRadius", number(0.0, 24.0))
             put("brandText", buildJsonObject { put("type", buildJsonArray { add("string"); add("null") }); put("minLength", 1); put("maxLength", 16) })
             put("brandSize", number(20.0, 40.0)); put("brandTracking", number(-2.0, 6.0))
-        }, "可选组件参数；仅变更指定字段，null 恢复平台默认。距离单位 dp/pt，品牌字段保留供 iOS 使用。"))
+        }, "可选组件参数；仅变更指定字段，null 恢复平台默认。距离单位 dp/pt；brandText、brandSize、brandTracking 控制首页品牌字样。"))
     }, "跨平台设计配方：light/dark 可省略以继承纸色，patterns 默认为 []；对象逐字段合并，数组整体替换。")
 }

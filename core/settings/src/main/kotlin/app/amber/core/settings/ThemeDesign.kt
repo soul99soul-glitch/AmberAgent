@@ -49,11 +49,11 @@ data class ThemeDesign(
         val borderWidth: Double? = null,
         val shadowOpacity: Double? = null,
         val shadowRadius: Double? = null,
-        /** Preserved for the portable document; Android does not render the brand wordmark. */
+        /** Optional home wordmark text; overrides the brandMark slot. */
         val brandText: String? = null,
-        /** Preserved for the portable document; Android does not render the brand wordmark. */
+        /** Home wordmark size in logical dp/pt. */
         val brandSize: Double? = null,
-        /** Preserved for the portable document; Android does not render the brand wordmark. */
+        /** Home wordmark tracking in logical dp/pt. */
         val brandTracking: Double? = null,
     )
 

@@ -6,12 +6,14 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -39,6 +41,9 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import app.amber.feature.ui.theme.LocalAmberTokens
 import app.amber.feature.ui.theme.LocalAmberType
+import app.amber.feature.ui.theme.LocalThemePack
+import app.amber.feature.ui.theme.LocalThemePageChrome
+import app.amber.feature.ui.theme.allowsThemeCanvasOverlay
 
 @Immutable
 data class WorkspaceColors(
@@ -288,8 +293,13 @@ fun WorkspaceTopBar(
     scrollBehavior: TopAppBarScrollBehavior? = null,
 ) {
     val workspace = workspaceColors()
+    val themePack = LocalThemePack.current
+    val showsThemeCanvas = themePack != null && allowsThemeCanvasOverlay(themePack, LocalThemePageChrome.current)
+    val containerColor = if (showsThemeCanvas) Color.Transparent else workspace.canvas
     TopAppBar(
-        modifier = modifier,
+        // Keep system-bar insets outside the opaque toolbar so the page canvas reaches the edges.
+        modifier = modifier.windowInsetsPadding(TopAppBarDefaults.windowInsets),
+        windowInsets = WindowInsets(0, 0, 0, 0),
         title = {
             Text(
                 text = title,
@@ -304,8 +314,9 @@ fun WorkspaceTopBar(
         scrollBehavior = scrollBehavior,
         expandedHeight = 52.dp,
         colors = TopAppBarDefaults.topAppBarColors(
-            containerColor = workspace.canvas,
-            scrolledContainerColor = workspace.canvas,
+            // Keep both scroll states identical so no solid strip animates over the theme canvas.
+            containerColor = containerColor,
+            scrolledContainerColor = containerColor,
             titleContentColor = workspace.ink,
             navigationIconContentColor = workspace.muted,
             actionIconContentColor = workspace.muted,

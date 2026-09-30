@@ -1,6 +1,5 @@
 package app.amber.feature.ui.pages.sessionhome
 
-import android.content.pm.ActivityInfo
 import android.os.Build
 import androidx.activity.compose.LocalActivity
 import androidx.compose.ui.platform.LocalDensity
@@ -25,6 +24,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -39,6 +39,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
@@ -108,6 +109,10 @@ import app.amber.feature.modelcouncil.CouncilRoomOpResult
 import app.amber.feature.modelcouncil.toCouncilParticipant
 import app.amber.feature.ui.components.ui.UIAvatar
 import app.amber.feature.ui.components.ds.amberCanvas
+import app.amber.feature.ui.components.ds.AMBER_HDR_IDLE_HEADROOM
+import app.amber.feature.ui.components.ds.supportsAmberHdr
+import app.amber.feature.ui.components.ds.AMBER_HDR_PRESS_HEADROOM
+import app.amber.feature.ui.components.ds.AmberContinuousShape
 import app.amber.feature.ui.components.ds.AmberDepthStyle
 import app.amber.feature.ui.components.ds.LocalAmberHdrPress
 import app.amber.feature.ui.components.ds.amberPressHighlight
@@ -120,6 +125,7 @@ import app.amber.feature.ui.hooks.rememberSharedPreferenceString
 import app.amber.feature.ui.theme.JetBrainsMonoFamily
 import app.amber.feature.ui.theme.LocalAmberTokens
 import app.amber.feature.ui.theme.LocalAmberType
+import app.amber.feature.ui.theme.LocalThemePack
 import app.amber.feature.home.ContinueCandidate
 import app.amber.feature.home.ContinueRoute
 import app.amber.feature.home.ContinueSourceKind
@@ -208,7 +214,7 @@ fun SessionHomePage() {
         }
     }
     val scope = rememberCoroutineScope()
-    val fabShape = CircleShape
+    val fabShape = remember { AmberContinuousShape(20.dp) }
     val fabInteractionSource = remember { MutableInteractionSource() }
     val fabFill = remember(tokens.accent) {
         val hsv = FloatArray(3)
@@ -222,30 +228,24 @@ fun SessionHomePage() {
     }
     val activity = LocalActivity.current
     val window = activity?.window
-    val display = activity?.display
-    val hdrAvailable = Build.VERSION.SDK_INT >= 34 && display?.isHdr == true &&
-        display.isHdrSdrRatioAvailable
+    // The window stays in HDR mode app-wide (RouteActivity); home only raises the
+    // headroom while a card is pressed, so no mode switch happens on navigation.
+    val hdrAvailable = activity?.supportsAmberHdr() == true
     var hdrPressCount by remember { mutableIntStateOf(0) }
     val onHdrPress = remember { { pressed: Boolean -> hdrPressCount += if (pressed) 1 else -1 } }
-    val previousHeadroom = remember(window, hdrAvailable) {
-        if (hdrAvailable && Build.VERSION.SDK_INT >= 35) window?.desiredHdrHeadroom ?: 0f else 0f
-    }
-    // 首页可见期间常驻 HDR 色彩模式；按压只改变 headroom，避免逐次切模式闪屏。
-    DisposableEffect(window, hdrAvailable) {
-        if (hdrAvailable && window != null) {
-            val previousColorMode = window.colorMode
-            window.colorMode = ActivityInfo.COLOR_MODE_HDR
-            onDispose {
-                if (Build.VERSION.SDK_INT >= 35) window.setDesiredHdrHeadroom(previousHeadroom)
-                window.colorMode = previousColorMode
-            }
-        } else {
-            onDispose { }
-        }
-    }
     LaunchedEffect(window, hdrAvailable, hdrPressCount) {
         if (hdrAvailable && Build.VERSION.SDK_INT >= 35) {
-            window?.setDesiredHdrHeadroom(if (hdrPressCount > 0) 1.8f else 1.0f)
+            window?.setDesiredHdrHeadroom(
+                if (hdrPressCount > 0) AMBER_HDR_PRESS_HEADROOM else AMBER_HDR_IDLE_HEADROOM,
+            )
+        }
+    }
+    DisposableEffect(window, hdrAvailable) {
+        onDispose {
+            // Leaving mid-press must not strand the raised headroom on other screens.
+            if (hdrAvailable && Build.VERSION.SDK_INT >= 35) {
+                window?.setDesiredHdrHeadroom(AMBER_HDR_IDLE_HEADROOM)
+            }
         }
     }
     val operationError = stringResource(R.string.error_title_operation)
@@ -352,36 +352,35 @@ fun SessionHomePage() {
     CompositionLocalProvider(LocalAmberHdrPress provides if (hdrAvailable) onHdrPress else null) {
     Box(
         modifier = Modifier
-            .fillMaxSize()
-            .amberCanvas(),
+            .fillMaxSize(),
     ) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .windowInsetsPadding(WindowInsets.statusBars)
-                .windowInsetsPadding(WindowInsets.navigationBars),
+                .then(
+                    if (hasTopOverflow || topFadeActive) {
+                        Modifier.hazeSource(state = hazeState, zIndex = 0f)
+                    } else Modifier,
+                )
+                .amberCanvas(),
         ) {
             LazyColumn(
                 state = listState,
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth()
-                    .amberTraceMeasure("Amber Home list measure")
-                    .then(
-                        if (hasTopOverflow || topFadeActive) {
-                            // Capture only when content crosses the top edge; the initial
-                            // home position remains clear and needs no blur layer.
-                            Modifier.hazeSource(state = hazeState, zIndex = 0f)
-                        } else {
-                            Modifier
-                        }
-                    ),
-                contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 100.dp),
+                    .amberTraceMeasure("Amber Home list measure"),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                    top = WindowInsets.statusBars.asPaddingValues().calculateTopPadding(),
+                    bottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() + 100.dp,
+                ),
             ) {
                 item(key = "home_header") {
                     HomeHeader(
                         settings = settings,
                         searchExpanded = homeSearchExpanded,
+                        hazeState = hazeState,
+                        hazeSourceActive = hasTopOverflow || topFadeActive,
                         onOpenSearch = { homeSearchExpanded = true },
                         onOpenSettings = { navController.navigate(Screen.Setting) },
                         onOpenProfile = { navController.navigate(Screen.Profile) },
@@ -523,14 +522,13 @@ fun SessionHomePage() {
         )
 
         // 列表底部渐隐，给 FAB 让出视觉空间（对齐设计稿的 mask 渐隐）。
-        // 让位 navigationBars：锚到「列表视口底」而非屏幕底，三键导航下不失效。
-        // 高度 72 = FAB 占位（bottom 24 + 胶囊高 48），盖住胶囊顶缘以上的列表行。
+        // 列表沉浸到小白条下方，渐隐也铺到屏幕底；高度 = navigationBars + 72
+        // （FAB 占位 bottom 24 + 胶囊高 48），盖住胶囊顶缘以上的列表行。
         Box(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
-                .windowInsetsPadding(WindowInsets.navigationBars)
                 .fillMaxWidth()
-                .height(72.dp)
+                .height(WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() + 72.dp)
                 .background(
                     Brush.verticalGradient(
                         colors = listOf(Color.Transparent, tokens.bg),
@@ -560,7 +558,13 @@ fun SessionHomePage() {
             Box(
                 modifier = Modifier
                     .height(40.dp)
-                    .amberPressHighlight(fabInteractionSource, fabShape, DpOffset(0.dp, 4.dp), hdrHighlight = true)
+                    .amberPressHighlight(
+                        fabInteractionSource,
+                        fabShape,
+                        DpOffset(0.dp, 4.dp),
+                        hdrHighlight = true,
+                        glowTint = tokens.accent,
+                    )
                     .amberShadow(fabShape, AmberDepthStyle.Accent)
                     .background(fabFill, fabShape)
                     .amberRim(fabShape, AmberDepthStyle.Accent)
@@ -604,6 +608,8 @@ internal fun HomeScrollTopFade(
     modifier: Modifier = Modifier,
 ) {
     val tokens = LocalAmberTokens.current
+    val statusBarHeight = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+    val scrim = if (LocalThemePack.current == null) tokens.bg else Color.Transparent
     AnimatedVisibility(
         visible = visible,
         modifier = modifier,
@@ -613,9 +619,8 @@ internal fun HomeScrollTopFade(
         Box(
             modifier = Modifier
                 .testTag("home-scroll-top-fade")
-                .windowInsetsPadding(WindowInsets.statusBars)
                 .fillMaxWidth()
-                .height(40.dp)
+                .height(statusBarHeight + 40.dp)
                 .hazeEffect(state = hazeState) {
                     backgroundColor = tokens.bg
                     blurRadius = 12.dp
@@ -627,7 +632,7 @@ internal fun HomeScrollTopFade(
                 }
                 .background(
                     Brush.verticalGradient(
-                        colors = listOf(tokens.bg, tokens.bg.copy(alpha = 0.6f), Color.Transparent),
+                        colors = listOf(scrim, scrim.copy(alpha = scrim.alpha * 0.6f), Color.Transparent),
                     )
                 )
         )
@@ -644,13 +649,27 @@ internal fun HomeHeader(
     onOpenSearch: () -> Unit,
     onOpenSettings: () -> Unit,
     onOpenProfile: () -> Unit,
+    hazeState: HazeState? = null,
+    hazeSourceActive: Boolean = false,
 ) {
     val tokens = LocalAmberTokens.current
+    val themePack = LocalThemePack.current
     val defaultUserName = stringResource(R.string.user_default_name)
     val searchInteraction = remember { MutableInteractionSource() }
     val settingsInteraction = remember { MutableInteractionSource() }
     val profileInteraction = remember { MutableInteractionSource() }
-    val searchShape = remember { androidx.compose.foundation.shape.RoundedCornerShape(16.dp) }
+    val controlRadius = themePack?.design?.components?.controlRadius?.toFloat()?.dp ?: 16.dp
+    val searchShape = remember(controlRadius) { AmberContinuousShape(controlRadius) }
+    val searchSurfaceModifier = if (themePack == null) {
+        Modifier.background(tokens.surface2, searchShape)
+    } else {
+        Modifier.homeGlassChrome(hazeState, hazeSourceActive, tokens, searchShape, themePack.glassChrome)
+    }
+    val settingsSurfaceModifier = if (themePack == null) {
+        Modifier.background(tokens.surface2, CircleShape)
+    } else {
+        Modifier.homeGlassChrome(hazeState, hazeSourceActive, tokens, CircleShape, themePack.glassChrome)
+    }
 
     // 终端光标：1.05s steps 闪烁（前半段不透明，后半段隐藏）
     val transition = rememberInfiniteTransition(label = "home-cursor")
@@ -684,24 +703,32 @@ internal fun HomeHeader(
                 modifier = Modifier.weight(1f),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Icon(
-                    painter = painterResource(R.drawable.amber_wordmark),
-                    contentDescription = "Amber",
-                    modifier = Modifier.size(width = 100.dp, height = 26.dp),
-                    tint = tokens.ink,
-                )
-                Spacer(Modifier.width(5.dp))
-                Box(
-                    modifier = Modifier
-                        .width(6.dp)
-                        .height(15.dp)
-                        .background(tokens.accent.copy(alpha = cursorAlpha)),
-                )
+                if (themePack == null) {
+                    Icon(
+                        painter = painterResource(R.drawable.amber_wordmark),
+                        contentDescription = "Amber",
+                        modifier = Modifier.size(width = 100.dp, height = 26.dp),
+                        tint = tokens.ink,
+                    )
+                    Spacer(Modifier.width(5.dp))
+                    Box(
+                        modifier = Modifier
+                            .width(6.dp)
+                            .height(15.dp)
+                            .background(tokens.accent.copy(alpha = cursorAlpha)),
+                    )
+                } else {
+                    HomeThemedBrandMark(
+                        pack = themePack,
+                        color = tokens.ink,
+                        modifier = Modifier.weight(1f, fill = false),
+                    )
+                }
             }
 
             Box(
                 modifier = Modifier
-                    .width(58.dp)
+                    .widthIn(min = 58.dp)
                     .height(44.dp)
                     .then(
                         if (!searchExpanded) {
@@ -718,42 +745,46 @@ internal fun HomeHeader(
             ) {
                 androidx.compose.animation.AnimatedVisibility(
                     visible = !searchExpanded,
+                    // 不裁切：按压放大时胶囊会超出自身边界几个像素。
                     enter = fadeIn(animationSpec = tween(190)) +
                         expandHorizontally(
                             expandFrom = Alignment.CenterHorizontally,
                             animationSpec = tween(190),
+                            clip = false,
                         ),
                     exit = fadeOut(animationSpec = tween(170)) +
                         shrinkHorizontally(
                             shrinkTowards = Alignment.CenterHorizontally,
                             animationSpec = tween(170),
+                            clip = false,
                         ),
                 ) {
                     Box(
                         modifier = Modifier
-                            .width(58.dp)
                             .height(32.dp)
                             .amberPressHighlight(searchInteraction, searchShape, DpOffset(0.dp, 6.dp), hdrHighlight = true)
                             .amberShadow(searchShape, AmberDepthStyle.Chip)
-                            .background(tokens.surface2, searchShape)
-                            .amberRim(searchShape, AmberDepthStyle.Chip),
+                            .then(searchSurfaceModifier)
+                            .amberRim(searchShape, AmberDepthStyle.Chip)
+                            .padding(horizontal = 12.dp),
                         contentAlignment = Alignment.Center,
                     ) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            horizontalArrangement = Arrangement.spacedBy(5.dp),
                         ) {
                             Icon(
                                 imageVector = Lucide.Search,
                                 contentDescription = stringResource(R.string.history_page_search),
-                                modifier = Modifier.size(14.dp),
-                                tint = tokens.ink2,
+                                modifier = Modifier.size(15.dp),
+                                tint = tokens.ink,
                             )
                             Text(
                                 text = stringResource(R.string.history_page_search),
-                                fontSize = 11.sp,
-                                lineHeight = 14.sp,
-                                color = tokens.ink2,
+                                fontSize = 12.5.sp,
+                                lineHeight = 16.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = tokens.ink,
                                 maxLines = 1,
                             )
                         }
@@ -777,7 +808,7 @@ internal fun HomeHeader(
                         .size(32.dp)
                         .amberPressHighlight(settingsInteraction, CircleShape, DpOffset(6.dp, 6.dp), hdrHighlight = true)
                         .amberShadow(CircleShape, AmberDepthStyle.Chip)
-                        .background(tokens.surface2, CircleShape)
+                        .then(settingsSurfaceModifier)
                         .amberRim(CircleShape, AmberDepthStyle.Chip),
                     contentAlignment = Alignment.Center,
                 ) {
@@ -785,7 +816,7 @@ internal fun HomeHeader(
                         imageVector = Lucide.Settings,
                         contentDescription = stringResource(R.string.settings),
                         modifier = Modifier.size(18.dp),
-                        tint = tokens.ink2,
+                        tint = tokens.ink,
                     )
                 }
             }
@@ -824,7 +855,7 @@ internal fun HomeHeader(
         Text(
             text = todayLabel(),
             modifier = Modifier.fillMaxWidth(),
-            fontFamily = JetBrainsMonoFamily,
+            fontFamily = homeChromeFontFamily(JetBrainsMonoFamily),
             fontSize = 10.sp,
             letterSpacing = 0.15.sp,
             lineHeight = 13.sp,
@@ -883,6 +914,10 @@ private fun HomeSearchField(
     onCollapse: () -> Unit,
 ) {
     val tokens = LocalAmberTokens.current
+    val controlRadius = LocalThemePack.current?.design?.components?.controlRadius?.toFloat()?.dp ?: 12.dp
+    val searchShape = remember(controlRadius) {
+        androidx.compose.foundation.shape.RoundedCornerShape(controlRadius)
+    }
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -893,9 +928,9 @@ private fun HomeSearchField(
                 modifier = Modifier
                     .weight(1f)
                     .heightIn(min = 40.dp)
-                    .clip(androidx.compose.foundation.shape.RoundedCornerShape(12.dp))
+                    .clip(searchShape)
                     .background(tokens.surface2)
-                    .border(1.dp, tokens.line, androidx.compose.foundation.shape.RoundedCornerShape(12.dp))
+                    .border(1.dp, tokens.line, searchShape)
                     .padding(horizontal = 12.dp),
                 contentAlignment = Alignment.CenterStart,
             ) {
@@ -1066,7 +1101,9 @@ private fun HomeContinueInlineError(onRetry: () -> Unit) {
 /* ------------------------------------------------------------ feature rail --- */
 
 private data class FeatureEntry(
-    val icon: ImageVector,
+    val systemIcon: ImageVector,
+    val phosphorIcon: HomeSessionIcon,
+    val pixelIcon: HomePixelShortcut,
     val label: String,
     val onClick: () -> Unit,
 )
@@ -1164,7 +1201,7 @@ private fun HomeConversationHeader() {
     ) {
         Text(
             text = "//",
-            fontFamily = JetBrainsMonoFamily,
+            fontFamily = homeChromeFontFamily(JetBrainsMonoFamily),
             fontSize = 11.sp,
             lineHeight = 14.sp,
             fontWeight = FontWeight.SemiBold,
@@ -1173,7 +1210,7 @@ private fun HomeConversationHeader() {
         )
         Text(
             text = stringResource(R.string.amber_redesign_conversations),
-            fontFamily = JetBrainsMonoFamily,
+            fontFamily = homeChromeFontFamily(JetBrainsMonoFamily),
             fontSize = 11.sp,
             lineHeight = 14.sp,
             fontWeight = FontWeight.SemiBold,
@@ -1201,19 +1238,52 @@ internal fun HomeFeatureRail(
     onCouncil: () -> Unit,
 ) {
     val tokens = LocalAmberTokens.current
+    val components = LocalThemePack.current?.design?.components
+    val cardRadius = components?.cardRadius?.toFloat()?.dp ?: 22.dp
+    val controlRadius = components?.controlRadius?.toFloat()?.dp
     val features = listOf(
-        FeatureEntry(Lucide.BookOpenText, stringResource(R.string.session_home_feature_deep_read), onDeepRead),
-        FeatureEntry(Lucide.Grid2x2, stringResource(R.string.session_home_feature_mini_apps), onMiniApps),
-        FeatureEntry(Lucide.Pen, stringResource(R.string.session_home_feature_novel), onNovel),
-        FeatureEntry(Lucide.Earth, stringResource(R.string.session_home_feature_sites), onWebMount),
-        FeatureEntry(Lucide.MessageCircle, stringResource(R.string.session_home_feature_council), onCouncil),
+        FeatureEntry(
+            Lucide.BookOpenText,
+            HomeSessionIcon.BOOK_OPEN,
+            HomePixelShortcut.BOOK,
+            stringResource(R.string.session_home_feature_deep_read),
+            onDeepRead,
+        ),
+        FeatureEntry(
+            Lucide.Grid2x2,
+            HomeSessionIcon.SQUARES_FOUR,
+            HomePixelShortcut.GRID,
+            stringResource(R.string.session_home_feature_mini_apps),
+            onMiniApps,
+        ),
+        FeatureEntry(
+            Lucide.Pen,
+            HomeSessionIcon.NOTEBOOK,
+            HomePixelShortcut.NOTEBOOK,
+            stringResource(R.string.session_home_feature_novel),
+            onNovel,
+        ),
+        FeatureEntry(
+            Lucide.Earth,
+            HomeSessionIcon.GLOBE,
+            HomePixelShortcut.GLOBE,
+            stringResource(R.string.session_home_feature_sites),
+            onWebMount,
+        ),
+        FeatureEntry(
+            Lucide.MessageCircle,
+            HomeSessionIcon.CHAT_CIRCLE_DOTS,
+            HomePixelShortcut.CHAT,
+            stringResource(R.string.session_home_feature_council),
+            onCouncil,
+        ),
     )
 
-    val railShape = AmberContinuousShape(cornerRadius = 22.dp)
+    val railShape = AmberContinuousShape(cornerRadius = cardRadius)
     val resumeInteraction = remember { MutableInteractionSource() }
     val resumeButtonInteraction = remember { MutableInteractionSource() }
-    val resumeIconShape = remember { androidx.compose.foundation.shape.RoundedCornerShape(12.dp) }
-    val resumeButtonShape = remember { androidx.compose.foundation.shape.RoundedCornerShape(18.dp) }
+    val resumeIconShape = remember(controlRadius) { AmberContinuousShape(controlRadius ?: 12.dp) }
+    val resumeButtonShape = remember(controlRadius) { AmberContinuousShape(controlRadius ?: 18.dp) }
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -1316,7 +1386,7 @@ internal fun HomeFeatureRail(
         ) {
             features.forEach { feature ->
                 val interaction = remember { MutableInteractionSource() }
-                val featureShape = remember { androidx.compose.foundation.shape.RoundedCornerShape(10.dp) }
+                val featureShape = remember(controlRadius) { AmberContinuousShape(controlRadius ?: 10.dp) }
                 Column(
                     modifier = Modifier
                         .weight(1f)
@@ -1331,8 +1401,10 @@ internal fun HomeFeatureRail(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterVertically),
                 ) {
-                    Icon(
-                        imageVector = feature.icon,
+                    HomeShortcutIcon(
+                        systemIcon = feature.systemIcon,
+                        phosphorIcon = feature.phosphorIcon,
+                        pixelIcon = feature.pixelIcon,
                         contentDescription = feature.label,
                         modifier = Modifier.size(20.dp),
                         tint = tokens.ink2,
@@ -1341,7 +1413,8 @@ internal fun HomeFeatureRail(
                         text = feature.label,
                         fontSize = 10.5.sp,
                         lineHeight = 14.sp,
-                        color = tokens.ink3,
+                        fontWeight = FontWeight.Medium,
+                        color = tokens.ink2,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
@@ -1410,6 +1483,7 @@ private fun HomeSessionRow(
     onTogglePin: () -> Unit,
 ) {
     val tokens = LocalAmberTokens.current
+    val cardRadius = LocalThemePack.current?.design?.components?.cardRadius?.toFloat()?.dp ?: 22.dp
     val newMessageLabel = stringResource(R.string.chat_page_new_message)
     val deleteLabel = stringResource(R.string.delete)
     val pinLabel = stringResource(R.string.history_page_pin)
@@ -1438,12 +1512,15 @@ private fun HomeSessionRow(
         }
     }
 
-    val rowShape = androidx.compose.foundation.shape.RoundedCornerShape(
-        topStart = if (isFirst) 14.dp else 0.dp,
-        topEnd = if (isFirst) 14.dp else 0.dp,
-        bottomStart = if (isLast) 14.dp else 0.dp,
-        bottomEnd = if (isLast) 14.dp else 0.dp,
-    )
+    // 与顶部入口卡同一套连续曲率圆角，列表整体读作一张卡。
+    val rowShape = remember(isFirst, isLast, cardRadius) {
+        AmberContinuousShape(
+            topStart = if (isFirst) cardRadius else 0.dp,
+            topEnd = if (isFirst) cardRadius else 0.dp,
+            bottomEnd = if (isLast) cardRadius else 0.dp,
+            bottomStart = if (isLast) cardRadius else 0.dp,
+        )
+    }
     val rowSurface = if (isLastVisited) {
         tokens.accent.copy(alpha = if (tokens.isDark) 0.16f else 0.08f)
             .compositeOver(tokens.surface)
@@ -1482,7 +1559,7 @@ private fun HomeSessionRow(
                             conversation.isPinned -> unpinLabel
                             else -> pinLabel
                         },
-                        fontFamily = JetBrainsMonoFamily,
+                        fontFamily = homeChromeFontFamily(JetBrainsMonoFamily),
                         fontSize = 10.sp,
                         letterSpacing = 0.4.sp,
                         color = if (isDelete) tokens.accentInk else tokens.accent,
@@ -1493,7 +1570,13 @@ private fun HomeSessionRow(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp)
-            .amberShadow(rowShape, AmberDepthStyle.Card, drawTop = isFirst, drawBottom = isLast)
+            .amberShadow(
+                rowShape,
+                AmberDepthStyle.Card,
+                drawTop = isFirst,
+                drawBottom = isLast,
+                opaqueContent = rowSurface.alpha >= 1f,
+            )
             .clip(rowShape)
             .amberRim(rowShape, AmberDepthStyle.Card, drawTop = isFirst, drawBottom = isLast),
     ) {
@@ -1549,7 +1632,7 @@ private fun HomeSessionRow(
                         ) {
                             Text(
                                 text = sessionTimeLabel(conversation.updateAt),
-                                fontFamily = JetBrainsMonoFamily,
+                                fontFamily = homeChromeFontFamily(JetBrainsMonoFamily),
                                 fontSize = 11.sp,
                                 lineHeight = 14.sp,
                                 fontWeight = FontWeight.Normal,
@@ -1559,7 +1642,7 @@ private fun HomeSessionRow(
                             )
                             Text(
                                 text = "·",
-                                fontFamily = JetBrainsMonoFamily,
+                                fontFamily = homeChromeFontFamily(JetBrainsMonoFamily),
                                 fontSize = 11.sp,
                                 lineHeight = 14.sp,
                                 color = tokens.ink4,
@@ -1596,7 +1679,7 @@ private fun SessionCountBadge(count: Int) {
     val tokens = LocalAmberTokens.current
     Text(
         text = "${if (count > 99) "99+" else count} 条",
-        fontFamily = JetBrainsMonoFamily,
+        fontFamily = homeChromeFontFamily(JetBrainsMonoFamily),
         fontSize = 11.sp,
         lineHeight = 14.sp,
         fontWeight = FontWeight.Normal,
@@ -1641,14 +1724,44 @@ private fun sessionTimeLabel(instant: Instant): String {
 @Composable
 private fun HomeEmptyState(modifier: Modifier = Modifier) {
     val tokens = LocalAmberTokens.current
+    val themePack = LocalThemePack.current
+    if (themePack?.emptyArt == "character") {
+        val cardRadius = themePack.design?.components?.cardRadius?.toFloat()?.dp ?: 22.dp
+        val shape = AmberContinuousShape(cardRadius)
+        Box(
+            modifier = modifier
+                .padding(horizontal = 16.dp)
+                .fillMaxWidth()
+                .heightIn(min = 76.dp)
+                .amberShadow(shape, AmberDepthStyle.Card)
+                .clip(shape)
+                .background(tokens.surface, shape)
+                .amberRim(shape, AmberDepthStyle.Card),
+            contentAlignment = Alignment.Center,
+        ) {
+            HomeEmptyArtBackground(
+                canvasStyle = themePack.canvasStyle,
+                isDark = tokens.isDark,
+                modifier = Modifier.matchParentSize(),
+            )
+            HomeEmptyStateContent(modifier = Modifier.fillMaxWidth())
+        }
+    } else {
+        HomeEmptyStateContent(modifier = modifier.fillMaxWidth())
+    }
+}
+
+@Composable
+private fun HomeEmptyStateContent(modifier: Modifier) {
+    val tokens = LocalAmberTokens.current
     Column(
-        modifier = modifier.fillMaxWidth(),
+        modifier = modifier,
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Text(
             text = "// 0 results",
-            fontFamily = JetBrainsMonoFamily,
+            fontFamily = homeChromeFontFamily(JetBrainsMonoFamily),
             fontSize = 12.sp,
             color = tokens.ink4,
             textAlign = TextAlign.Center,

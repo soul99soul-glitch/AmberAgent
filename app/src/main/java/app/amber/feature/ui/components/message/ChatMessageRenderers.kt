@@ -28,6 +28,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.isSpecified
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import app.amber.ai.ui.UIMessagePart
 import app.amber.core.model.AssistantAffectScope
@@ -41,6 +42,8 @@ import app.amber.feature.ui.components.richtext.StreamingSingleTextMarkdown
 import app.amber.feature.ui.components.richtext.topLevelBlockCount
 import app.amber.feature.ui.context.LocalSettings
 import app.amber.feature.ui.theme.LocalAmberTokens
+import app.amber.feature.ui.theme.LocalThemeDesign
+import app.amber.feature.ui.theme.LocalThemePack
 import app.amber.feature.ui.theme.JetbrainsMono
 
 @Composable
@@ -82,8 +85,9 @@ internal fun VirtualizedAssistantText(
                     contentAlignment = androidx.compose.ui.Alignment.TopStart,
                 ) {
                     val amberTokens = LocalAmberTokens.current
-                    val assistantBubbleShape = app.amber.feature.ui.theme.LocalThemeDesign.current?.components?.bubbleRadius
-                        ?.let { RoundedCornerShape(it.toFloat().dp) }
+                    val themeRadius = themeBubbleRadius()
+                    val themeBorderWidth = themeBubbleBorderWidth()
+                    val assistantBubbleShape = themeRadius?.let { RoundedCornerShape(it) }
                         ?: RoundedCornerShape(
                         topStart = 14.dp,
                         topEnd = 14.dp,
@@ -97,7 +101,11 @@ internal fun VirtualizedAssistantText(
                         contentColor = amberTokens.ink,
                         tonalElevation = 0.dp,
                         shadowElevation = 0.dp,
-                        border = BorderStroke(1.dp, amberTokens.line),
+                        border = if (themeBorderWidth == null) {
+                            BorderStroke(1.dp, amberTokens.line)
+                        } else {
+                            themeBorderWidth.takeIf { it > 0.dp }?.let { BorderStroke(it, amberTokens.line) }
+                        },
                     ) {
                         Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
                             AssistantMarkdownBlockOrWidgets(
@@ -391,11 +399,15 @@ private fun AssistantBubbleSegment(
     content: @Composable () -> Unit,
 ) {
     val amberTokens = LocalAmberTokens.current
+    val themeRadius = themeBubbleRadius()
+    val radiusDp = themeRadius ?: 14.dp
+    val tailRadiusDp = if (themeRadius == null) 5.dp else minOf(themeRadius, 5.dp)
+    val borderWidth = themeBubbleBorderWidth() ?: 1.dp
     val shape = RoundedCornerShape(
-        topStart = if (first) 14.dp else 0.dp,
-        topEnd = if (first) 14.dp else 0.dp,
-        bottomStart = if (last) 5.dp else 0.dp,
-        bottomEnd = if (last) 14.dp else 0.dp,
+        topStart = if (first) radiusDp else 0.dp,
+        topEnd = if (first) radiusDp else 0.dp,
+        bottomStart = if (last) tailRadiusDp else 0.dp,
+        bottomEnd = if (last) radiusDp else 0.dp,
     )
     BoxWithConstraints(
         modifier = Modifier.fillMaxWidth(),
@@ -406,81 +418,87 @@ private fun AssistantBubbleSegment(
                 .widthIn(max = maxWidth * 0.86f)
                 .clip(shape)
                 .background(amberTokens.surface)
-            .drawWithContent {
-                drawContent()
-                val stroke = 1.dp.toPx()
-                val half = stroke / 2f
-                val radius = 14.dp.toPx()
-                val right = size.width - half
-                val bottom = size.height - half
-                val topInset = if (first) radius else 0f
-                val bottomInset = if (last) radius else 0f
+                .drawWithContent {
+                    drawContent()
+                    val stroke = borderWidth.toPx()
+                    if (stroke > 0f) {
+                        val half = stroke / 2f
+                        val radius = minOf(radiusDp.toPx(), size.width / 2f, size.height / 2f)
+                        val tailRadius = minOf(tailRadiusDp.toPx(), radius, size.width / 2f, size.height / 2f)
+                        val right = size.width - half
+                        val bottom = size.height - half
+                        val topInset = if (first) radius else 0f
+                        val bottomStartInset = if (last) tailRadius else 0f
+                        val bottomEndInset = if (last) radius else 0f
 
-                drawLine(
-                    color = amberTokens.line,
-                    start = Offset(half, topInset),
-                    end = Offset(half, size.height - bottomInset),
-                    strokeWidth = stroke,
-                )
-                drawLine(
-                    color = amberTokens.line,
-                    start = Offset(right, topInset),
-                    end = Offset(right, size.height - bottomInset),
-                    strokeWidth = stroke,
-                )
-                if (first) {
-                    drawLine(
-                        color = amberTokens.line,
-                        start = Offset(radius, half),
-                        end = Offset(size.width - radius, half),
-                        strokeWidth = stroke,
-                    )
-                    drawArc(
-                        color = amberTokens.line,
-                        startAngle = 180f,
-                        sweepAngle = 90f,
-                        useCenter = false,
-                        topLeft = Offset(half, half),
-                        size = Size(radius * 2f, radius * 2f),
-                        style = Stroke(stroke),
-                    )
-                    drawArc(
-                        color = amberTokens.line,
-                        startAngle = 270f,
-                        sweepAngle = 90f,
-                        useCenter = false,
-                        topLeft = Offset(size.width - radius * 2f - half, half),
-                        size = Size(radius * 2f, radius * 2f),
-                        style = Stroke(stroke),
-                    )
+                        drawLine(
+                            color = amberTokens.line,
+                            start = Offset(half, topInset),
+                            end = Offset(half, size.height - bottomStartInset),
+                            strokeWidth = stroke,
+                        )
+                        drawLine(
+                            color = amberTokens.line,
+                            start = Offset(right, topInset),
+                            end = Offset(right, size.height - bottomEndInset),
+                            strokeWidth = stroke,
+                        )
+                        if (first) {
+                            drawLine(
+                                color = amberTokens.line,
+                                start = Offset(radius, half),
+                                end = Offset(size.width - radius, half),
+                                strokeWidth = stroke,
+                            )
+                            drawArc(
+                                color = amberTokens.line,
+                                startAngle = 180f,
+                                sweepAngle = 90f,
+                                useCenter = false,
+                                topLeft = Offset(half, half),
+                                size = Size(radius * 2f, radius * 2f),
+                                style = Stroke(stroke),
+                            )
+                            drawArc(
+                                color = amberTokens.line,
+                                startAngle = 270f,
+                                sweepAngle = 90f,
+                                useCenter = false,
+                                topLeft = Offset(size.width - radius * 2f - half, half),
+                                size = Size(radius * 2f, radius * 2f),
+                                style = Stroke(stroke),
+                            )
+                        }
+                        if (last) {
+                            drawLine(
+                                color = amberTokens.line,
+                                start = Offset(tailRadius, bottom),
+                                end = Offset(size.width - radius, bottom),
+                                strokeWidth = stroke,
+                            )
+                            if (tailRadius > 0f) {
+                                drawArc(
+                                    color = amberTokens.line,
+                                    startAngle = 90f,
+                                    sweepAngle = 90f,
+                                    useCenter = false,
+                                    topLeft = Offset(half, size.height - tailRadius * 2f - half),
+                                    size = Size(tailRadius * 2f, tailRadius * 2f),
+                                    style = Stroke(stroke),
+                                )
+                            }
+                            drawArc(
+                                color = amberTokens.line,
+                                startAngle = 0f,
+                                sweepAngle = 90f,
+                                useCenter = false,
+                                topLeft = Offset(size.width - radius * 2f - half, size.height - radius * 2f - half),
+                                size = Size(radius * 2f, radius * 2f),
+                                style = Stroke(stroke),
+                            )
+                        }
+                    }
                 }
-                if (last) {
-                    drawLine(
-                        color = amberTokens.line,
-                        start = Offset(radius, bottom),
-                        end = Offset(size.width - radius, bottom),
-                        strokeWidth = stroke,
-                    )
-                    drawArc(
-                        color = amberTokens.line,
-                        startAngle = 90f,
-                        sweepAngle = 90f,
-                        useCenter = false,
-                        topLeft = Offset(half, size.height - radius * 2f - half),
-                        size = Size(radius * 2f, radius * 2f),
-                        style = Stroke(stroke),
-                    )
-                    drawArc(
-                        color = amberTokens.line,
-                        startAngle = 0f,
-                        sweepAngle = 90f,
-                        useCenter = false,
-                        topLeft = Offset(size.width - radius * 2f - half, size.height - radius * 2f - half),
-                        size = Size(radius * 2f, radius * 2f),
-                        style = Stroke(stroke),
-                    )
-                }
-            }
                 .padding(
                     start = 14.dp,
                     end = 14.dp,
@@ -492,3 +510,19 @@ private fun AssistantBubbleSegment(
         }
     }
 }
+
+@Composable
+internal fun themeBubbleRadius(): Dp? {
+    val designRadius = LocalThemeDesign.current?.components?.bubbleRadius
+    if (designRadius != null) return designRadius.toFloat().dp
+    val pack = LocalThemePack.current ?: return null
+    return when (pack.bubbleChrome) {
+        "soft" -> 22.dp
+        "crisp" -> 14.dp
+        else -> 18.dp
+    }
+}
+
+@Composable
+internal fun themeBubbleBorderWidth(): Dp? =
+    LocalThemeDesign.current?.components?.borderWidth?.toFloat()?.dp

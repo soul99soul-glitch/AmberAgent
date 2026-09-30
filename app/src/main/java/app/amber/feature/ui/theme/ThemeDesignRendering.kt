@@ -11,18 +11,24 @@ import androidx.compose.ui.graphics.PointMode
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.clipRect
+import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.unit.dp
 import app.amber.core.settings.ThemeDesign
+import app.amber.core.settings.ThemePackDocument
 import app.amber.core.settings.themeRgb
 import kotlin.math.PI
-import kotlin.math.abs
+import kotlin.math.ceil
 import kotlin.math.cos
 import kotlin.math.max
 import kotlin.math.sin
 
 /** Active portable theme recipe, provided only inside the app's Compose theme. */
 val LocalThemeDesign = compositionLocalOf<ThemeDesign?> { null }
+
+/** Live portable document; uses the try-on candidate until it is committed or restored. */
+val LocalThemePack = compositionLocalOf<ThemePackDocument?> { null }
 
 /** Top-level canvas preset from the portable document; null keeps the pre-document default. */
 val LocalThemeCanvasStyle = compositionLocalOf<String?> { null }
@@ -51,12 +57,12 @@ internal fun themeGradientBrush(
     val colors = rawColors.mapNotNull { raw -> themeRgb(raw)?.let(::opaqueColor) }
     if (colors.size != rawColors.size || colors.size < 2 || size.width <= 0f || size.height <= 0f) return null
 
-    val radians = Math.toRadians(gradient.angle)
+    val radians = Math.toRadians(gradient.angle % 360.0)
     val dx = cos(radians).toFloat()
     val dy = sin(radians).toFloat()
-    val halfLength = abs(dx) * size.width / 2f + abs(dy) * size.height / 2f
     val center = Offset(size.width / 2f, size.height / 2f)
-    val direction = Offset(dx * halfLength, dy * halfLength)
+    // v1 angles use iOS UnitPoint coordinates: each axis scales by its own extent.
+    val direction = Offset(dx * size.width / 2f, dy * size.height / 2f)
     return Brush.linearGradient(
         colors = colors,
         start = center - direction,
@@ -67,113 +73,115 @@ internal fun themeGradientBrush(
 internal fun DrawScope.drawThemePattern(pattern: ThemeDesign.Pattern) {
     val color = themeRgb(pattern.color)?.let(::opaqueColor)?.copy(alpha = pattern.opacity.toFloat()) ?: return
     val spacing = pattern.spacing.toFloat().dp.toPx()
-    val size = pattern.size.toFloat().dp.toPx()
-    if (spacing <= 0f || size <= 0f) return
-    val stroke = size.coerceAtLeast(0.5f)
+    val markSize = pattern.size.toFloat().dp.toPx()
+    if (spacing <= 0f || markSize <= 0f) return
+    // v1 size describes the mark, not the stroke or dot diameter.
+    val stroke = max(0.5f.dp.toPx(), markSize * 0.32f)
     val canvasWidth = this.size.width
     val canvasHeight = this.size.height
+    val columns = ceil(canvasWidth / spacing).toInt()
+    val rows = ceil(canvasHeight / spacing).toInt()
 
-    when (pattern.kind) {
-        "dots" -> {
-            val points = buildList {
-                var y = spacing / 2f
-                while (y < canvasHeight) {
-                    var x = spacing / 2f
-                    while (x < canvasWidth) {
-                        add(Offset(x, y))
-                        x += spacing
+    clipRect {
+        when (pattern.kind) {
+            "dots" -> {
+                val points = buildList {
+                    for (row in 0..rows) {
+                        for (column in 0..columns) {
+                            add(Offset(column * spacing, row * spacing))
+                        }
                     }
-                    y += spacing
                 }
+                drawPoints(points, PointMode.Points, color, strokeWidth = markSize * 2f, cap = StrokeCap.Round)
             }
-            drawPoints(points, PointMode.Points, color, strokeWidth = size, cap = StrokeCap.Round)
-        }
 
-        "grid" -> {
-            var x = 0f
-            while (x <= canvasWidth) {
-                drawLine(color, Offset(x, 0f), Offset(x, canvasHeight), strokeWidth = stroke)
-                x += spacing
-            }
-            var y = 0f
-            while (y <= canvasHeight) {
-                drawLine(color, Offset(0f, y), Offset(canvasWidth, y), strokeWidth = stroke)
-                y += spacing
-            }
-        }
-
-        "diagonal" -> {
-            var x = -canvasHeight
-            while (x < canvasWidth) {
-                drawLine(color, Offset(x, 0f), Offset(x + canvasHeight, canvasHeight), strokeWidth = stroke)
-                x += spacing
-            }
-        }
-
-        "crosses" -> {
-            val arm = size
-            var y = spacing / 2f
-            while (y < canvasHeight) {
-                var x = spacing / 2f
-                while (x < canvasWidth) {
-                    drawLine(color, Offset(x - arm, y), Offset(x + arm, y), strokeWidth = stroke)
-                    drawLine(color, Offset(x, y - arm), Offset(x, y + arm), strokeWidth = stroke)
-                    x += spacing
-                }
-                y += spacing
-            }
-        }
-
-        "waves" -> {
-            val amplitude = size
-            val wavelength = spacing * 2f
-            val step = (spacing / 8f).coerceAtLeast(1f)
-            val waveStroke = stroke.coerceAtMost(1.dp.toPx())
-            var baseY = spacing / 2f
-            while (baseY < canvasHeight) {
+            "grid" -> {
                 val path = Path()
-                var x = 0f
-                path.moveTo(0f, baseY)
-                while (x < canvasWidth) {
-                    val y = baseY + amplitude * sin(2f * PI.toFloat() * x / wavelength)
-                    path.lineTo(x, y)
-                    x += step
+                for (column in 0..columns) {
+                    val x = column * spacing
+                    path.moveTo(x, 0f)
+                    path.lineTo(x, canvasHeight)
                 }
-                drawPath(path, color, style = Stroke(width = waveStroke, cap = StrokeCap.Round))
-                baseY += spacing
+                for (row in 0..rows) {
+                    val y = row * spacing
+                    path.moveTo(0f, y)
+                    path.lineTo(canvasWidth, y)
+                }
+                drawPath(path, color, style = Stroke(stroke))
             }
-        }
 
-        "rings" -> {
-            val radius = size
-            val ringStroke = max(0.5f, stroke / 2f)
-            var y = spacing / 2f
-            while (y < canvasHeight) {
-                var x = spacing / 2f
-                while (x < canvasWidth) {
-                    drawCircle(color, radius, Offset(x, y), style = Stroke(width = ringStroke))
-                    x += spacing
+            "diagonal" -> {
+                val path = Path()
+                val count = ceil((canvasWidth + canvasHeight) / spacing).toInt() + 1
+                for (index in 0..count) {
+                    val x = -canvasHeight + index * spacing
+                    path.moveTo(x, canvasHeight)
+                    path.lineTo(x + canvasHeight, 0f)
                 }
-                y += spacing
+                drawPath(path, color, style = Stroke(stroke))
+            }
+
+            "crosses" -> {
+                val path = Path()
+                for (row in 0..rows) {
+                    val y = row * spacing
+                    for (column in 0..columns) {
+                        val x = column * spacing
+                        path.moveTo(x - markSize, y)
+                        path.lineTo(x + markSize, y)
+                        path.moveTo(x, y - markSize)
+                        path.lineTo(x, y + markSize)
+                    }
+                }
+                drawPath(path, color, style = Stroke(stroke))
+            }
+
+            "waves" -> {
+                val amplitude = max(markSize * 1.5f, 0.75f.dp.toPx())
+                val wavelength = spacing * 2f
+                val sampleWidth = max(wavelength / 6f, 1.dp.toPx())
+                val sampleCount = ceil(canvasWidth / sampleWidth).toInt().coerceIn(1, 512)
+                for (row in 0..rows) {
+                    val baseY = row * spacing
+                    val path = Path()
+                    path.moveTo(0f, baseY)
+                    for (sample in 1..sampleCount) {
+                        val x = sample.toFloat() / sampleCount * canvasWidth
+                        val y = baseY + amplitude * sin(2f * PI.toFloat() * x / wavelength)
+                        path.lineTo(x, y)
+                    }
+                    drawPath(path, color, style = Stroke(stroke))
+                }
+            }
+
+            "rings" -> {
+                val radius = max(markSize * 2f, 0.5f.dp.toPx())
+                for (row in 0..rows) {
+                    for (column in 0..columns) {
+                        drawCircle(color, radius, Offset(column * spacing, row * spacing), style = Stroke(stroke))
+                    }
+                }
             }
         }
     }
 }
 
-internal fun DrawScope.drawThemeCanvasStyle(style: String?, isDark: Boolean) {
+internal fun DrawScope.drawThemeCanvasStyle(style: String?, isDark: Boolean, opacityMultiplier: Float = 1f) {
     val ink = if (isDark) "#F4F1ED" else "#281F14"
     when (style) {
         "flat" -> Unit
         "lineGrid" -> {
-            val lineOpacity = if (isDark) 0.11 else 0.08
-            val dotOpacity = if (isDark) 0.14 else 0.10
-            drawThemePattern(ThemeDesign.Pattern("grid", ink, lineOpacity, 18.0, 1.0))
-            drawThemePattern(ThemeDesign.Pattern("dots", ink, dotOpacity, 18.0, 1.3))
+            val lineOpacity = (if (isDark) 0.11 else 0.08) * opacityMultiplier
+            val dotOpacity = (if (isDark) 0.14 else 0.10) * opacityMultiplier
+            drawThemePattern(ThemeDesign.Pattern("grid", ink, lineOpacity, 18.0, 3.125))
+            drawThemePattern(ThemeDesign.Pattern("dots", ink, dotOpacity, 18.0, 0.65))
         }
-        "paperGrain" -> drawPaperGrain(ink, if (isDark) 0.065 else 0.04)
-        "dotGrid", null -> drawThemePattern(
-            ThemeDesign.Pattern("dots", ink, if (isDark) 0.08 else 0.055, 18.0, 1.4),
-        )
+        "paperGrain" -> drawPaperGrain(ink, (if (isDark) 0.065 else 0.04) * opacityMultiplier)
+        "dotGrid", null -> clipRect {
+            translate(9.dp.toPx(), 9.dp.toPx()) {
+                drawThemePattern(ThemeDesign.Pattern("dots", ink, (if (isDark) 0.08 else 0.055) * opacityMultiplier, 18.0, 0.7))
+            }
+        }
     }
 }
 
@@ -184,14 +192,14 @@ private fun DrawScope.drawPaperGrain(ink: String, opacity: Double) {
     val canvasWidth = size.width
     val canvasHeight = size.height
     val points = buildList {
-        var y = cell / 2f
+        var y = 0f
         var row = 0
         while (y < canvasHeight + cell) {
-            var x = cell / 2f
+            var x = 0f
             var column = 0
             while (x < canvasWidth + cell) {
                 val hash = column * 374_761 + row * 668_265
-                if ((hash and 0x7) == 0) add(Offset(x, y))
+                if ((hash and 0x7) == 0) add(Offset(x + 0.5f.dp.toPx(), y + 0.5f.dp.toPx()))
                 x += cell
                 column++
             }
