@@ -793,8 +793,11 @@ object NovelWorkspaceGhostwriteJobs {
      * 同秒重启时 job 从磁盘读回也是秒截断，恰好落在同一秒的旧 commit 仍可能被计入
      * 一次 —— 后果只是该章被多润色一次，安全方向。
      */
-    fun progress(job: NovelWorkspaceGhostwriteJob, store: NovelWorkspaceStore): Int {
-        val ledger = NovelWorkspaceLedger.load(store.rootDirectory)
+    fun progress(
+        job: NovelWorkspaceGhostwriteJob,
+        store: NovelWorkspaceStore,
+        ledger: NovelWorkspaceLedgerStore = NovelWorkspaceLedger.load(store.rootDirectory),
+    ): Int {
         if (job.mode == NovelWorkspaceGhostwriteMode.Polish) {
             val chaptersPrefix = NovelWorkspacePaths.branchPrefix(job.branchSlug) + "/chapters/"
             val ordinalRange = job.startOrdinal..job.endOrdinal

@@ -82,6 +82,7 @@ fun ChatMessage(
     onToolApproval: ((toolCallId: String, approved: Boolean, reason: String) -> Unit)? = null,
     onToolAnswer: ((toolCallId: String, answer: String) -> Unit)? = null,
     onOpenWorkspaceFile: ((String) -> Unit)? = null,
+    themeTryOnCardTarget: ThemeTryOnCardTarget? = null,
     onGenerativeWidgetAction: (String) -> Unit = {},
     onMiniAppModify: (String) -> Boolean = { false },
     onStreamingVisibleFrame: (() -> Unit)? = null,
@@ -156,6 +157,7 @@ fun ChatMessage(
                     onToolApproval = onToolApproval,
                     onToolAnswer = onToolAnswer,
                     onOpenWorkspaceFile = onOpenWorkspaceFile,
+                    themeTryOnCardTarget = themeTryOnCardTarget,
                     onUserMessageClick = if (message.role == MessageRole.USER) onEdit else null,
                     onUserMessageLongClick = if (message.role == MessageRole.USER) {
                         { showActionsSheet = true }

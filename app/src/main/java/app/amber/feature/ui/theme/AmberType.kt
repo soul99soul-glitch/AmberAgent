@@ -66,3 +66,18 @@ fun defaultAmberTextStyles(): AmberTextStyles = AmberTextStyles(
 )
 
 val LocalAmberType = staticCompositionLocalOf { defaultAmberTextStyles() }
+
+/** Home chrome, and settings only when requested by the portable document. */
+internal fun themeAmberTextStyles(typeface: String?): AmberTextStyles {
+    val base = defaultAmberTextStyles()
+    val family = chromeFontFamily(typeface) ?: return base
+    return base.copy(
+        screenTitle = base.screenTitle.copy(fontFamily = family),
+        sessionTitle = base.sessionTitle.copy(fontFamily = family),
+        body = base.body.copy(fontFamily = family),
+        secondary = base.secondary.copy(fontFamily = family),
+        meta = base.meta.copy(fontFamily = family),
+        eyebrow = base.eyebrow.copy(fontFamily = family),
+        tinyTag = base.tinyTag.copy(fontFamily = family),
+    )
+}

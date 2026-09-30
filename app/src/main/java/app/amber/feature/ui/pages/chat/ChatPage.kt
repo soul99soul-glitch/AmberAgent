@@ -46,7 +46,11 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.adaptive.currentWindowDpSize
+import androidx.compose.animation.EnterExitState
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.Transition
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -84,6 +88,14 @@ import com.dokar.sonner.ToastType
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withTimeoutOrNull
+import app.amber.core.recap.RECAP_MIN_USER_MESSAGES
+import app.amber.core.recap.freshnessForWindow
+import app.amber.core.recap.isJumpableInWindow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.map
@@ -183,6 +195,8 @@ fun ChatPage(
     nodeId: Uuid? = null,
     messageId: String? = null,
     toolCallId: String? = null,
+    /** The route's enter transition; the timeline composes once it has settled. */
+    enterTransition: Transition<EnterExitState>? = null,
 ) {
     // T2 perf-layer dispatch — flag-gated route to ChatPageSplit (scaffold).
     // Default flag = false → legacy path below runs unchanged. See PerfFlags.kt
@@ -242,6 +256,8 @@ fun ChatPage(
     )
     val conversation = remember(inputSnapshot) { inputSnapshot.toConversation() }
     val timelineLoadState by vm.timelineLoadState.collectAsStateWithLifecycle()
+    val timelineMarkdownReady by vm.timelineMarkdownReady.collectAsStateWithLifecycle()
+    val timelinePrepared = timelineLoadState.initialized && timelineMarkdownReady
     val contextCompacts by vm.contextCompacts.collectAsStateWithLifecycle()
     val activeCompactBoundary by vm.activeCompactBoundary.collectAsStateWithLifecycle()
     val compactLifecycleState by vm.compactLifecycleState.collectAsStateWithLifecycle()
@@ -376,7 +392,7 @@ fun ChatPage(
     // snapshot is used only when the LazyListState is first created; live plans are
     // collected and built inside the list content below.
     val initialConversation = remember(id) { vm.conversation.value }
-    val initialTimelineConversation = if (timelineLoadState.initialized) {
+    val initialTimelineConversation = if (timelinePrepared) {
         initialConversation
     } else {
         remember(id) { initialConversation.copy(messageNodes = emptyList()) }
@@ -415,9 +431,13 @@ fun ChatPage(
         }
     }
 
+    val timelineReady = rememberEnterTransitionSettled(enterTransition)
+
     // ChatDrawer 侧边栏已废弃移除（手机 ModalNavigationDrawer / 平板 PermanentNavigationDrawer
     // 两个挂载点一起拆掉）：会话列表入口由 Session 首页承担，顶栏左上是返回。
     ChatPageContent(
+        timelineReady = timelineReady,
+        timelinePrepared = timelinePrepared,
         inputState = inputState,
         loadingJob = loadingJob,
         processingStatus = processingStatus,
@@ -548,113 +568,105 @@ private fun Conversation.latestCurrentMessage(): UIMessage? =
         node.messages.getOrNull(node.selectIndex)
     }
 
-private fun Conversation.toChatPageHeaderConversation(): Conversation {
-    val lastAssistantNode = messageNodes.asReversed()
-        .firstOrNull { it.currentMessage.role == MessageRole.ASSISTANT }
-    val displayedNode = lastAssistantNode ?: messageNodes.lastOrNull()
-    val headerNodes = when {
-        displayedNode == null -> emptyList()
-        else -> listOf(
-            displayedNode.copy(
-                messages = listOf(
-                    displayedNode.currentMessage.copy(parts = emptyList(), annotations = emptyList())
-                ),
-                selectIndex = 0,
-            )
-        )
-    }
-    return copy(messageNodes = headerNodes)
-}
-
-private fun Conversation.sameChatPageHeaderConversation(other: Conversation): Boolean {
-    val assistant = messageNodes.firstOrNull()
-        ?.messages?.firstOrNull()
-        ?.takeIf { it.role == MessageRole.ASSISTANT }
-    val otherAssistant = other.messageNodes.firstOrNull()
-        ?.messages?.firstOrNull()
-        ?.takeIf { it.role == MessageRole.ASSISTANT }
-    return id == other.id &&
-        title == other.title &&
-        messageNodes.isNotEmpty() == other.messageNodes.isNotEmpty() &&
-        assistant?.usage == otherAssistant?.usage &&
-        assistant?.createdAt == otherAssistant?.createdAt &&
-        assistant?.finishedAt == otherAssistant?.finishedAt
-}
-
 @Composable
 private fun ChatPageTopBar(
     vm: ChatVM,
-    settings: Settings,
-    contextCompacts: List<ConversationCompact>,
     bigScreen: Boolean,
     onBack: () -> Unit,
     currentChatModel: Model?,
-    previewMode: Boolean,
-    onClickMenu: () -> Unit,
-    onUpdateChatModel: (Model) -> Unit,
-    onUpdateTitle: (String) -> Unit,
+    generating: Boolean,
+    processingStatus: String?,
+    recapEligible: Boolean,
+    recapOpen: Boolean,
+    shelfOpen: Boolean,
     modelMenuOpen: Boolean,
     onToggleModelMenu: () -> Unit,
+    onIslandOpenRecap: () -> Unit,
+    onIslandJumpToLive: () -> Unit,
+    onIslandStop: () -> Unit,
+    onToggleShelf: () -> Unit,
 ) {
     val headerConversationFlow = remember(vm.conversation) {
         vm.conversation
-            .map(Conversation::toChatPageHeaderConversation)
-            .distinctUntilChanged { old, new -> old.sameChatPageHeaderConversation(new) }
+            .map { it.title to it.messageNodes.isNotEmpty() }
+            .distinctUntilChanged()
     }
-    val conversation by headerConversationFlow.collectAsStateWithLifecycle(
-        initialValue = vm.conversation.value.toChatPageHeaderConversation(),
+    val header by headerConversationFlow.collectAsStateWithLifecycle(
+        initialValue = vm.conversation.value.let { it.title to it.messageNodes.isNotEmpty() },
     )
-    val lastAssistant = conversation.messageNodes.asReversed()
-        .asSequence()
-        .map { it.currentMessage }
-        .firstOrNull { it.role == MessageRole.ASSISTANT }
-    val measuredPromptTokens = lastAssistant?.usage?.promptTokens?.takeIf { it > 0 }
-    val latestContextCompacts by rememberUpdatedState(contextCompacts)
-    val latestMeasuredPromptTokens by rememberUpdatedState(measuredPromptTokens)
-    val contextInputTokenCache = remember(conversation.id) {
-        ContextFootprintEstimator.ConversationInputTokenCache()
-    }
-    val estimatedInputTokens by produceState(
-        initialValue = 0,
-        key1 = conversation.id,
-    ) {
-        combine(
-            vm.conversation,
-            snapshotFlow { latestContextCompacts to latestMeasuredPromptTokens },
-        ) { latestConversation, estimateInputs ->
-            Triple(latestConversation, estimateInputs.first, estimateInputs.second)
-        }.collectLatest { (latestConversation, compacts, measured) ->
-            if (measured != null) {
-                value = 0
-            } else {
-                value = withContext(Dispatchers.Default) {
-                    contextInputTokenCache.estimateConversationInputTokens(
-                        latestConversation,
-                        compacts,
-                    )
-                }
-            }
-        }
-    }
-
     TopBar(
-        settings = settings,
-        conversation = conversation,
-        estimatedInputTokens = estimatedInputTokens,
+        title = header.first,
+        hasMessages = header.second,
         bigScreen = bigScreen,
         onBack = onBack,
         currentChatModel = currentChatModel,
-        previewMode = previewMode,
-        onClickMenu = onClickMenu,
-        onUpdateChatModel = onUpdateChatModel,
-        onUpdateTitle = onUpdateTitle,
+        generating = generating,
+        processingStatus = processingStatus,
+        recapEligible = recapEligible,
+        recapOpen = recapOpen,
+        shelfOpen = shelfOpen,
         modelMenuOpen = modelMenuOpen,
         onToggleModelMenu = onToggleModelMenu,
+        onIslandOpenRecap = onIslandOpenRecap,
+        onIslandJumpToLive = onIslandJumpToLive,
+        onIslandStop = onIslandStop,
+        onToggleShelf = onToggleShelf,
+    )
+}
+
+/** Values for the model menu's context usage header; composed only while the menu is open. */
+@Composable
+private fun rememberContextUsage(
+    vm: ChatVM,
+    contextCompacts: List<ConversationCompact>,
+    currentChatModel: Model?,
+): ContextUsageSnapshot? {
+    val conversation by vm.conversation.collectAsStateWithLifecycle()
+    if (conversation.messageNodes.isEmpty()) return null
+    val lastAssistant = remember(conversation.messageNodes) {
+        conversation.messageNodes.asReversed()
+            .asSequence()
+            .mapNotNull { it.messages.getOrNull(it.selectIndex) }
+            .firstOrNull { it.role == MessageRole.ASSISTANT }
+    }
+    val usage = lastAssistant?.usage
+    val measuredPromptTokens = usage?.promptTokens?.takeIf { it > 0 }
+    val cache = remember(conversation.id) { ContextFootprintEstimator.ConversationInputTokenCache() }
+    val estimatedInputTokens by produceState(initialValue = 0, conversation, contextCompacts, measuredPromptTokens) {
+        value = if (measuredPromptTokens != null) {
+            0
+        } else {
+            withContext(Dispatchers.Default) {
+                cache.estimateConversationInputTokens(conversation, contextCompacts)
+            }
+        }
+    }
+    val usedTokens = measuredPromptTokens ?: estimatedInputTokens
+    // total: 优先使用持续维护的 registry，未知/自定义模型再退回 provider 配置。
+    val contextWindowTokens = currentChatModel?.let { model ->
+        ModelRegistry.MODEL_CONTEXT_WINDOW.getData(model.modelId) ?: model.contextWindowTokens
+    }
+    // 速度算的是端到端 (含网络/排队)：createdAt 是第一字符落地时刻, finishedAt 是最后字符。
+    val elapsedMs = lastAssistant?.finishedAt?.let { finished ->
+        val zone = kotlinx.datetime.TimeZone.currentSystemDefault()
+        (finished.toInstant(zone).toEpochMilliseconds() -
+            lastAssistant.createdAt.toInstant(zone).toEpochMilliseconds()).takeIf { it > 0 }
+    }
+    return ContextUsageSnapshot(
+        usedK = ((usedTokens + 999) / 1000).coerceAtLeast(0),
+        totalK = (((contextWindowTokens ?: 200_000) + 999) / 1000).coerceAtLeast(1),
+        lastTurnTotalTokens = usage?.totalTokens,
+        lastTurnCompletionTokens = usage?.completionTokens,
+        lastTurnCachedTokens = usage?.cachedTokens,
+        lastTurnPromptTokens = usage?.promptTokens,
+        lastTurnElapsedMs = elapsedMs,
     )
 }
 
 @Composable
 private fun ChatPageTimelineContent(
+    timelineReady: Boolean,
+    timelinePrepared: Boolean,
     vm: ChatVM,
     resolvedNodeId: Uuid?,
     state: LazyListState,
@@ -668,8 +680,9 @@ private fun ChatPageTimelineContent(
 ) {
     val conversation by vm.conversation.collectAsStateWithLifecycle()
     // Initialization publishes the conversation and its load state separately. While the
-    // spinner is visible, do not parse and plan history that cannot be displayed yet.
-    val timelineConversation = if (timelineLoadState.initialized) {
+    // spinner is visible, or the route is still sliding in, do not parse and plan history
+    // that cannot be displayed yet.
+    val timelineConversation = if (timelinePrepared && timelineReady) {
         conversation
     } else {
         remember(conversation.id) { conversation.copy(messageNodes = emptyList()) }
@@ -686,11 +699,12 @@ private fun ChatPageTimelineContent(
         pendingMessageCount = pendingUserMessages.size,
     )
 
-    LaunchedEffect(resolvedNodeId, conversation.messageNodes.size, timelineLoadState.initialized, timelineLoadState.isFullyLoaded) {
+    LaunchedEffect(resolvedNodeId, conversation.messageNodes.size, timelineLoadState.initialized, timelineLoadState.isFullyLoaded, timelinePrepared, timelineReady) {
         if (resolvedNodeId != null && !vm.chatListInitialized) {
             // A deep-link target may live on a history page that has not been loaded yet.
             val index = conversation.messageNodes.indexOfFirst { it.id == resolvedNodeId }
             if (index >= 0) {
+                if (!timelinePrepared || !timelineReady) return@LaunchedEffect
                 val listIndex = chatTimelinePlan.lazyIndexForMessage(index)
                 if (listIndex != null) {
                     state.scrollToItem(listIndex)
@@ -711,6 +725,8 @@ private fun ChatPageTimelineContent(
 
 @Composable
 private fun ChatPageContent(
+    timelineReady: Boolean,
+    timelinePrepared: Boolean,
     inputState: ChatInputState,
     loadingJob: Job?,
     processingStatus: String? = null,
@@ -786,7 +802,16 @@ private fun ChatPageContent(
         key1 = conversation.id,
     ) {
         combine(
-            vm.conversation,
+            vm.conversation.map { latestConversation ->
+                SandboxToolsSnapshot(
+                    conversationId = latestConversation.id.toString(),
+                    tools = latestConversation.sandboxActivityTools(),
+                )
+            }.distinctUntilChanged { previous, current ->
+                previous.conversationId == current.conversationId &&
+                    previous.tools.size == current.tools.size &&
+                    previous.tools.indices.all { previous.tools[it] === current.tools[it] }
+            }.flowOn(Dispatchers.Default),
             snapshotFlow {
                 Triple(
                     latestSandboxLoading,
@@ -794,16 +819,16 @@ private fun ChatPageContent(
                     latestSandboxLocaleTag,
                 )
             },
-        ) { latestConversation, status ->
+        ) { tools, status ->
             SandboxActivityInput(
-                conversation = latestConversation,
+                tools = tools,
                 loading = status.first,
                 processingStatus = status.second,
                 localeTag = status.third,
             )
         }.collectLatest { input ->
             value = withContext(Dispatchers.Default) {
-                input.conversation.deriveSandboxActivities(
+                input.tools.deriveSandboxActivities(
                     loading = input.loading,
                     processingStatus = input.processingStatus,
                     context = resourceContext,
@@ -875,31 +900,98 @@ private fun ChatPageContent(
 
     // Graphite TopModelMenu: header 下方卷帘下拉的开合状态（顶栏触发器 + 内容区 overlay 共享）
     var modelMenuOpen by remember { mutableStateOf(false) }
+    // Header island: recap panel, shelf panel, and timeline jumps they trigger.
+    var recapOpen by remember(conversation.id) { mutableStateOf(false) }
+    var shelfOpen by remember(conversation.id) { mutableStateOf(false) }
+    var renameOpen by remember { mutableStateOf(false) }
+    var jumpTarget by remember(conversation.id) { mutableStateOf<TimelineJumpTarget?>(null) }
+    var jumpToLiveKey by remember(conversation.id) { mutableIntStateOf(0) }
+    val timelineHighlight = remember(conversation.id) { TimelineHighlightState() }
+    // History fades in once it can compose; a page shown without an enter slide
+    // (returning from another screen) starts fully visible.
+    val timelineVisible = timelineReady && timelinePrepared
+    val timelineFade = remember(conversation.id) { Animatable(if (timelineVisible) 1f else 0f) }
+    LaunchedEffect(timelineVisible) {
+        if (timelineVisible) timelineFade.animateTo(1f, tween(durationMillis = 180))
+        else timelineFade.snapTo(0f)
+    }
+    // Node count changes on every new message; roles never change in place, so counting
+    // user nodes only when the count moves keeps this off the per-chunk streaming path.
+    val recapEligibleFlow = remember(vm) {
+        combine(
+            vm.conversation
+                .map { it.messageNodes }
+                .distinctUntilChanged { old, new -> old.size == new.size }
+                .map { nodes ->
+                    nodes.count { node -> node.messages.getOrNull(node.selectIndex)?.role == MessageRole.USER }
+                }
+                .flowOn(Dispatchers.Default),
+            vm.timelineLoadState,
+            vm.recapState,
+        ) { userCount, load, recap ->
+            userCount >= RECAP_MIN_USER_MESSAGES ||
+                (load.initialized && !load.isFullyLoaded && !recap.ineligible)
+        }.distinctUntilChanged()
+    }
+    val recapEligible by recapEligibleFlow.collectAsStateWithLifecycle(initialValue = false)
+    LaunchedEffect(jumpToLiveKey) {
+        if (jumpToLiveKey > 0) {
+            previewMode = false
+            // reverseLayout: lazy index 0 is the visual bottom (newest content).
+            chatListState.animateScrollToItem(0)
+        }
+    }
+    fun closeHeaderPanels() {
+        recapOpen = false
+        shelfOpen = false
+    }
+    CompositionLocalProvider(LocalTimelineHighlight provides timelineHighlight) {
     Box(modifier = Modifier.fillMaxSize().amberCanvas()) {
         Scaffold(
             modifier = Modifier.amberTraceMeasure("Amber ChatPage measure"),
             topBar = {
                 ChatPageTopBar(
                     vm = vm,
-                    settings = setting,
-                    contextCompacts = contextCompacts,
                     bigScreen = bigScreen,
                     onBack = {
                         navController.returnToSessionHome()
                     },
                     currentChatModel = currentChatModel,
-                    previewMode = previewMode,
-                    onClickMenu = {
-                        previewMode = !previewMode
-                    },
-                    onUpdateChatModel = {
-                        vm.setChatModel(model = it)
-                    },
-                    onUpdateTitle = {
-                        vm.updateTitle(it)
-                    },
+                    generating = loadingJob != null,
+                    processingStatus = processingStatus,
+                    recapEligible = recapEligible,
+                    recapOpen = recapOpen,
+                    shelfOpen = shelfOpen,
                     modelMenuOpen = modelMenuOpen,
-                    onToggleModelMenu = { modelMenuOpen = !modelMenuOpen },
+                    onToggleModelMenu = {
+                        closeHeaderPanels()
+                        modelMenuOpen = !modelMenuOpen
+                    },
+                    onIslandOpenRecap = {
+                        if (recapOpen) {
+                            recapOpen = false
+                        } else {
+                            modelMenuOpen = false
+                            shelfOpen = false
+                            recapOpen = true
+                            vm.requestRecap()
+                        }
+                    },
+                    onIslandJumpToLive = {
+                        closeHeaderPanels()
+                        modelMenuOpen = false
+                        jumpToLiveKey += 1
+                    },
+                    onIslandStop = { vm.stopGeneration() },
+                    onToggleShelf = {
+                        if (shelfOpen) {
+                            shelfOpen = false
+                        } else {
+                            modelMenuOpen = false
+                            recapOpen = false
+                            shelfOpen = true
+                        }
+                    },
                 )
             },
             bottomBar = {
@@ -1084,6 +1176,8 @@ private fun ChatPageContent(
         ) { innerPadding ->
             Box(modifier = Modifier.fillMaxSize()) {
             ChatPageTimelineContent(
+                timelineReady = timelineReady,
+                timelinePrepared = timelinePrepared,
                 vm = vm,
                 resolvedNodeId = resolvedNodeId,
                 state = chatListState,
@@ -1094,10 +1188,46 @@ private fun ChatPageContent(
                 loading = loadingJob != null,
                 settings = setting,
             ) { timelineConversation, chatTimelinePlan ->
+            val latestJumpConversation by rememberUpdatedState(timelineConversation)
+            val latestJumpPlan by rememberUpdatedState(chatTimelinePlan)
+            LaunchedEffect(jumpTarget) {
+                val target = jumpTarget ?: return@LaunchedEffect
+                try {
+                    fun messageIndex() = latestJumpConversation.messageNodes.indexOfFirst { it.id == target.nodeId }
+                    if (messageIndex() < 0) {
+                        // The node may sit on an older page. Keyed on the target only, so page
+                        // merges cannot cancel the load half-way.
+                        val full = vm.ensureTimelineLoaded()
+                        if (full.messageNodes.none { it.id == target.nodeId }) return@LaunchedEffect
+                    }
+                    val bottomIndex = withTimeoutOrNull(2_000) {
+                        snapshotFlow {
+                            messageIndex().takeIf { it >= 0 }?.let(latestJumpPlan::lazyIndexForMessage)
+                        }.filterNotNull().first()
+                    } ?: return@LaunchedEffect
+                    val node = latestJumpConversation.messageNodes.first { it.id == target.nodeId }
+                    // The variant may have been switched since the recap was generated.
+                    if (target.messageId != null &&
+                        node.messages.getOrNull(node.selectIndex)?.id?.toString() != target.messageId
+                    ) {
+                        return@LaunchedEffect
+                    }
+                    previewMode = false
+                    val topIndex = latestJumpPlan.lazyItemMessageIndexes.lastIndexOf(messageIndex())
+                        .takeIf { it >= bottomIndex } ?: bottomIndex
+                    chatListState.revealMessage(bottomIndex, topIndex)
+                    scope.launch { timelineHighlight.flash(target.nodeId) }
+                } finally {
+                    jumpTarget = null
+                }
+            }
             // V3: timeline 未初始化时 (conversation 刚切换), 用 spinner 完全覆盖整个 chat 区域,
             //   不渲染 ChatList / hero 这些底层内容. 加载完 (initialized=true) 才显示真实内容,
             //   避免"空白态闪一下再切到历史对话"的副作用.
-            if (!timelineLoadState.initialized) {
+            if (!timelineReady && timelinePrepared) {
+                // The enter slide stays light: history composes after it lands.
+                Box(Modifier.fillMaxSize())
+            } else if (!timelinePrepared) {
                 val chatTheme = LocalChatTheme.current
                 Box(
                     modifier = Modifier
@@ -1114,6 +1244,7 @@ private fun ChatPageContent(
                     )
                 }
             } else {
+            Box(Modifier.fillMaxSize().graphicsLayer { alpha = timelineFade.value }) {
             ChatList(
                 innerPadding = innerPadding,
                 conversation = timelineConversation,
@@ -1369,6 +1500,7 @@ private fun ChatPageContent(
                     }
                 }
             }
+            }  // end timeline fade Box
             }  // end if (!initialized) else branch (ChatList + hero)
             }
 
@@ -1403,6 +1535,54 @@ private fun ChatPageContent(
                     }
                 },
                 modifier = Modifier.padding(top = innerPadding.calculateTopPadding()),
+                header = if (conversation.messageNodes.isNotEmpty()) {
+                    {
+                        ChatModelMenuUsageHeader(
+                            vm = vm,
+                            contextCompacts = contextCompacts,
+                            currentChatModel = currentChatModel,
+                        )
+                    }
+                } else {
+                    null
+                },
+            )
+            ChatRecapPanelHost(
+                vm = vm,
+                visible = recapOpen,
+                onDismiss = { recapOpen = false },
+                onRename = { renameOpen = true },
+                onJump = { target ->
+                    recapOpen = false
+                    jumpTarget = target
+                },
+                onUseNextStep = { step ->
+                    recapOpen = false
+                    val current = inputState.textContent.text.toString()
+                    if (current.isBlank()) {
+                        inputState.setMessageText(step)
+                    } else {
+                        inputState.appendText("\n$step")
+                    }
+                    suggestionFillPulseKey += 1
+                },
+                modifier = Modifier.padding(
+                    top = innerPadding.calculateTopPadding(),
+                    bottom = innerPadding.calculateBottomPadding(),
+                ),
+            )
+            ChatShelfPanelHost(
+                vm = vm,
+                visible = shelfOpen,
+                onDismiss = { shelfOpen = false },
+                onOpen = { item ->
+                    shelfOpen = false
+                    jumpTarget = TimelineJumpTarget(item.nodeId, item.messageId)
+                },
+                modifier = Modifier.padding(
+                    top = innerPadding.calculateTopPadding(),
+                    bottom = innerPadding.calculateBottomPadding(),
+                ),
             )
             }  // end outer Box (fillMaxSize)
         }
@@ -1443,6 +1623,111 @@ private fun ChatPageContent(
                 onMoveToInput = { vm.moveFirstPendingMessageToInput() },
             )
         }
+
+        if (renameOpen) {
+            ChatTitleRenameDialog(
+                title = vm.conversation.value.title,
+                onDismiss = { renameOpen = false },
+                onConfirm = {
+                    renameOpen = false
+                    vm.updateTitle(it)
+                },
+            )
+        }
+    }
+    }  // end CompositionLocalProvider(LocalTimelineHighlight)
+}
+
+@Composable
+private fun ChatModelMenuUsageHeader(
+    vm: ChatVM,
+    contextCompacts: List<ConversationCompact>,
+    currentChatModel: Model?,
+) {
+    val usage = rememberContextUsage(vm, contextCompacts, currentChatModel) ?: return
+    ContextUsageSummary(
+        snapshot = usage,
+        modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 10.dp),
+    )
+}
+
+/** Collects the live conversation only while the recap panel is shown. */
+@Composable
+private fun ChatRecapPanelHost(
+    vm: ChatVM,
+    visible: Boolean,
+    onDismiss: () -> Unit,
+    onRename: () -> Unit,
+    onJump: (TimelineJumpTarget) -> Unit,
+    onUseNextStep: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val newSessionLabel = stringResource(R.string.chat_page_new_session)
+    ChatTopPanel(
+        visible = visible,
+        onDismiss = onDismiss,
+        transformOriginX = 0.5f,
+        modifier = modifier,
+    ) {
+        val conversation by vm.conversation.collectAsStateWithLifecycle()
+        val recapState by vm.recapState.collectAsStateWithLifecycle()
+        val freshness = recapState.recap?.freshnessForWindow(conversation)
+        ChatRecapPanelContent(
+            title = conversation.title.ifBlank { newSessionLabel },
+            state = recapState,
+            freshness = freshness,
+            isJumpable = { node -> node.isJumpableInWindow(conversation, vm.timelineLoadState.value.isFullyLoaded) },
+            onRename = onRename,
+            onRefresh = { vm.requestRecap(force = true) },
+            onJump = { node ->
+                node.nodeId?.let { runCatching { Uuid.parse(it) }.getOrNull() }
+                    ?.let { onJump(TimelineJumpTarget(it, node.messageId)) }
+            },
+            onUseNextStep = onUseNextStep,
+        )
+    }
+}
+
+/**
+ * Shelf items are derived only while the panel is shown, from the full conversation
+ * loaded off the paged window (the timeline itself is not widened). They refresh when
+ * a message is added or the newest message changes.
+ */
+@Composable
+private fun ChatShelfPanelHost(
+    vm: ChatVM,
+    visible: Boolean,
+    onDismiss: () -> Unit,
+    onOpen: (ShelfItem) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    ChatTopPanel(
+        visible = visible,
+        onDismiss = onDismiss,
+        transformOriginX = 1f,
+        modifier = modifier,
+    ) {
+        val refreshKeyFlow = remember(vm) {
+            vm.conversation
+                .map { conversation ->
+                    conversation.messageNodes.size to conversation.messageNodes.lastOrNull()
+                        ?.let { it.messages.getOrNull(it.selectIndex) }
+                }
+                .distinctUntilChanged { old, new -> old.first == new.first && old.second === new.second }
+        }
+        val refreshKey by refreshKeyFlow.collectAsStateWithLifecycle(initialValue = null)
+        val items by produceState<List<ShelfItem>?>(initialValue = null, refreshKey) {
+            // Streaming replaces the newest message every flush; let bursts settle first.
+            if (value != null) delay(400)
+            value = runCatching {
+                val full = vm.loadFullConversation()
+                withContext(Dispatchers.Default) { full.collectShelfItems() }
+            }.getOrElse { error ->
+                if (error is kotlinx.coroutines.CancellationException) throw error
+                value.orEmpty()
+            }
+        }
+        ChatShelfPanelContent(items = items, onOpen = onOpen)
     }
 }
 
@@ -1679,8 +1964,13 @@ private const val MAX_SANDBOX_TIMELINE_ITEMS = 24
 private const val MAX_SANDBOX_OUTPUT_TAIL_CHARS = 1_600
 private const val MAX_SANDBOX_JSON_PARSE_CHARS = 3_200_000
 
+private data class SandboxToolsSnapshot(
+    val conversationId: String,
+    val tools: List<UIMessagePart.Tool>,
+)
+
 private data class SandboxActivityInput(
-    val conversation: Conversation,
+    val tools: SandboxToolsSnapshot,
     val loading: Boolean,
     val processingStatus: String?,
     val localeTag: String,
@@ -1707,12 +1997,12 @@ private fun mergeSandboxTimeline(
     }
 }
 
-private fun Conversation.deriveSandboxActivities(
+private fun SandboxToolsSnapshot.deriveSandboxActivities(
     loading: Boolean,
     processingStatus: String?,
     context: Context,
 ): List<SandboxActivityUiState> {
-    val sandboxTools = sandboxActivityTools().takeLast(MAX_SANDBOX_TIMELINE_ITEMS)
+    val sandboxTools = tools.takeLast(MAX_SANDBOX_TIMELINE_ITEMS)
     if (sandboxTools.isEmpty()) {
         return processingStatus?.takeIf { loading && it.isNotBlank() }?.let {
             listOf(
@@ -1721,7 +2011,7 @@ private fun Conversation.deriveSandboxActivities(
                     toolName = "agent_processing",
                     title = it,
                     status = ToolActivityStatus.RUNNING,
-                    conversationId = id.toString(),
+                    conversationId = conversationId,
                     runtime = "agent-run",
                     canCancel = true,
                     stepIndex = 1,
@@ -1733,18 +2023,18 @@ private fun Conversation.deriveSandboxActivities(
 
     return sandboxTools.mapIndexed { index, tool ->
         val outputJson = tool.outputJson()
-        val input = tool.inputAsJson()
+        val input = MessageRenderCache.toolInputJson(tool.input)
         val status = tool.activityStatus(loading, outputJson)
         SandboxActivityUiState(
             toolCallId = tool.toolCallId,
             toolName = tool.toolName,
             title = tool.sandboxTitle(context, input),
             status = status,
-            conversationId = id.toString(),
+            conversationId = conversationId,
             inputPreview = tool.inputPreview(input),
             outputTail = tool.outputTail(outputJson),
-            runtime = outputJson.getStringContent("runtime") ?: tool.defaultRuntime(),
-            workspace = outputJson.getStringContent("workspace") ?: tool.defaultWorkspace(),
+            runtime = outputJson.getStringContent("runtime") ?: tool.defaultRuntime(input),
+            workspace = outputJson.getStringContent("workspace") ?: tool.defaultWorkspace(input),
             stepIndex = index + 1,
             stepTotal = sandboxTools.size,
             canCancel = loading && status in setOf(
@@ -1842,7 +2132,7 @@ private fun UIMessagePart.Tool.activityStatus(
 
 private fun UIMessagePart.Tool.sandboxTitle(
     context: Context,
-    input: kotlinx.serialization.json.JsonElement = inputAsJson(),
+    input: JsonElement,
 ): String {
     return when (toolName) {
         "search_web" -> context.getString(
@@ -1943,7 +2233,7 @@ private fun UIMessagePart.Tool.sandboxTitle(
     }
 }
 
-private fun UIMessagePart.Tool.inputPreview(input: kotlinx.serialization.json.JsonElement = inputAsJson()): String {
+private fun UIMessagePart.Tool.inputPreview(input: JsonElement): String {
     return when (toolName) {
         "search_web" -> input.getFirstStringContent("query", "q", "keyword", "keywords")
         "scrape_web" -> input.getFirstStringContent("url", "link", "uri")
@@ -1966,11 +2256,11 @@ private fun UIMessagePart.Tool.inputPreview(input: kotlinx.serialization.json.Js
     }?.compactSandboxText(180) ?: input.toString().compactSandboxText(180)
 }
 
-private fun UIMessagePart.Tool.defaultRuntime(): String = when {
+private fun UIMessagePart.Tool.defaultRuntime(input: JsonElement): String = when {
     toolName in setOf("terminal_execute", "terminal_job_start") &&
-        inputAsJson().getStringContent("ssh_profile_id") != null -> "remote_ssh"
+        input.getStringContent("ssh_profile_id") != null -> "remote_ssh"
     toolName in setOf("terminal_execute", "terminal_job_start") &&
-        inputAsJson().getStringContent("runtime") != null -> inputAsJson().getStringContent("runtime").orEmpty()
+        input.getStringContent("runtime") != null -> input.getStringContent("runtime").orEmpty()
     toolName == "search_web" -> "web-search"
     toolName == "scrape_web" -> "webview"
     toolName == "webview_search_open" -> "webview"
@@ -1989,8 +2279,8 @@ private fun UIMessagePart.Tool.defaultRuntime(): String = when {
     else -> ""
 }
 
-private fun UIMessagePart.Tool.defaultWorkspace(): String = when {
-    defaultRuntime() == "remote_ssh" -> inputAsJson().getStringContent("ssh_profile_id").orEmpty()
+private fun UIMessagePart.Tool.defaultWorkspace(input: JsonElement): String = when {
+    defaultRuntime(input) == "remote_ssh" -> input.getStringContent("ssh_profile_id").orEmpty()
     toolName.startsWith("terminal_job_") -> ""
     toolName.startsWith("terminal_") || toolName.startsWith("file_") -> "/workspace"
     toolName.startsWith("icloud_") -> "/icloud"
@@ -2071,20 +2361,26 @@ private fun String.compactSandboxText(maxLength: Int): String {
 
 @Composable
 private fun TopBar(
-    settings: Settings,
-    conversation: Conversation,
-    estimatedInputTokens: Int,
+    title: String,
+    hasMessages: Boolean,
     bigScreen: Boolean,
     onBack: () -> Unit,
     currentChatModel: Model?,
-    previewMode: Boolean,
-    onClickMenu: () -> Unit,
-    onUpdateChatModel: (Model) -> Unit,
-    onUpdateTitle: (String) -> Unit,
+    generating: Boolean,
+    processingStatus: String?,
+    recapEligible: Boolean,
+    recapOpen: Boolean,
+    shelfOpen: Boolean,
     modelMenuOpen: Boolean,
     onToggleModelMenu: () -> Unit,
+    onIslandOpenRecap: () -> Unit,
+    onIslandJumpToLive: () -> Unit,
+    onIslandStop: () -> Unit,
+    onToggleShelf: () -> Unit,
 ) {
     val newSessionLabel = stringResource(R.string.chat_page_new_session)
+    val amberTokens = LocalAmberTokens.current
+    val amberType = LocalAmberType.current
     // V3 phone-screen.jsx header 没有 surface —— 直接坐在 chatTheme.bg 之上
     // 之前用 workspace.paper@96% (legacy 硬编码白底)，用户反馈"顶栏没变暖纸色"
     // ——其实是被白 Surface 罩住了
@@ -2099,7 +2395,7 @@ private fun TopBar(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(56.dp)
+                    .heightIn(min = 62.dp)
                     .padding(horizontal = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -2117,24 +2413,24 @@ private fun TopBar(
                     Spacer(Modifier.size(48.dp))
                 }
 
+                // Two touch targets: the island (status / recap) and the model row below it.
                 Column(
                     modifier = Modifier
                         .weight(1f)
-                        .fillMaxHeight()
-                        .clip(androidx.compose.foundation.shape.CircleShape)
-                        .clickable { onToggleModelMenu() },
+                        .padding(vertical = 1.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center,
                 ) {
-                    val amberTokens = LocalAmberTokens.current
-                    val amberType = LocalAmberType.current
-                    val sessionTitle = conversation.title.ifBlank { newSessionLabel }
-                    Text(
-                        text = sessionTitle,
-                        style = amberType.sessionTitle,
-                        color = amberTokens.ink,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
+                    ChatIsland(
+                        title = title.ifBlank { newSessionLabel },
+                        generating = generating,
+                        status = processingStatus,
+                        recapEligible = recapEligible,
+                        recapOpen = recapOpen,
+                        enabled = hasMessages || generating,
+                        onOpenRecap = onIslandOpenRecap,
+                        onJumpToLive = onIslandJumpToLive,
+                        onStop = onIslandStop,
                     )
                     // Graphite §6.2 ChatHeader model-id trigger: mono model-id + a chevron that
                     // rotates 180° while the TopModelMenu dropdown is open. Tapping toggles it
@@ -2146,7 +2442,10 @@ private fun TopBar(
                     )
                     Row(
                         modifier = Modifier
-                            .padding(top = 2.dp, bottom = 2.dp),
+                            .heightIn(min = 28.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable { onToggleModelMenu() }
+                            .padding(horizontal = 10.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                     ) {
@@ -2175,55 +2474,15 @@ private fun TopBar(
                     }
                 }
 
+                // The shelf replaces the context ring; usage now lives in the model menu.
                 Box(
                     modifier = Modifier.widthIn(min = 48.dp),
                     contentAlignment = Alignment.Center,
                 ) {
-                // V3 Whisper：进入对话后顶栏右侧多出 22dp Context Ring（仅有消息时）。
-                // 真实 used/total —— 取最后一条 assistant 消息的 usage
-                // V3 review P2 #2: 之前用 totalTokens (= 该轮 prompt+completion 加起来), 跟 ring
-                // 的"上下文占用"语义不符 (短问题 totalTokens 小 → ring 缩水, 反而误导). 改用
-                // promptTokens (下一轮 LLM 实际加载的上下文长度), 也是用户最直观的"已占用".
-                if (conversation.messageNodes.isNotEmpty()) {
-                    val lastAssistant = remember(conversation.messageNodes) {
-                        conversation.messageNodes
-                            .asReversed()
-                            .asSequence()
-                            .map { it.currentMessage }
-                            .firstOrNull { it.role == app.amber.ai.core.MessageRole.ASSISTANT }
+                    if (hasMessages) {
+                        ChatShelfButton(open = shelfOpen, onClick = onToggleShelf)
                     }
-                    val lastUsage = lastAssistant?.usage
-                    val measuredPromptTokens = lastUsage?.promptTokens?.takeIf { it > 0 }
-                    val usedTokens = measuredPromptTokens ?: estimatedInputTokens
-                    val usedK = ((usedTokens + 999) / 1000).coerceAtLeast(0)
-                    // total: 优先使用持续维护的 registry，未知/自定义模型再退回 provider 配置。
-                    val contextWindowTokens = currentChatModel?.let { model ->
-                        ModelRegistry.MODEL_CONTEXT_WINDOW.getData(model.modelId)
-                            ?: model.contextWindowTokens
-                    }
-                    val totalK = (((contextWindowTokens ?: 200_000) + 999) / 1000).coerceAtLeast(1)
-                    // V3: 接真实 token 数据给 popup. 速度算的是端到端 (含网络/排队), 不是
-                    // 模型纯推理. createdAt 是 message 第一字符落地时刻, finishedAt 是最后字符,
-                    // 所以差值 = 全部 streaming 时长.
-                    val elapsedMs = if (lastAssistant?.finishedAt != null) {
-                        val createdInstant = lastAssistant.createdAt
-                            .toInstant(kotlinx.datetime.TimeZone.currentSystemDefault())
-                        val finishedInstant = lastAssistant.finishedAt!!
-                            .toInstant(kotlinx.datetime.TimeZone.currentSystemDefault())
-                        (finishedInstant.toEpochMilliseconds() - createdInstant.toEpochMilliseconds())
-                            .takeIf { it > 0 }
-                    } else null
-                        ContextRing(
-                        used = usedK,
-                        total = totalK,
-                        lastTurnTotalTokens = lastUsage?.totalTokens,
-                        lastTurnCompletionTokens = lastUsage?.completionTokens,
-                        lastTurnCachedTokens = lastUsage?.cachedTokens,
-                        lastTurnPromptTokens = lastUsage?.promptTokens,
-                        lastTurnElapsedMs = elapsedMs,
-                    )
                 }
-            }
             }
             Box(
                 Modifier
@@ -2335,3 +2594,25 @@ private fun OutcomeUnknownCard(
         }
     }
 }
+
+/**
+ * True once the route's enter transition has landed (or immediately when there is none).
+ * Kept across returns to this entry, so coming back does not blank the timeline again.
+ * A timeout guards against a transition that never reports settling.
+ */
+@Composable
+private fun rememberEnterTransitionSettled(transition: Transition<EnterExitState>?): Boolean {
+    var settled by rememberSaveable { mutableStateOf(transition == null) }
+    if (!settled && transition != null) {
+        LaunchedEffect(transition) {
+            withTimeoutOrNull(ENTER_SETTLE_TIMEOUT_MS) {
+                snapshotFlow { transition.currentState == EnterExitState.Visible && !transition.isRunning }
+                    .first { it }
+            }
+            settled = true
+        }
+    }
+    return settled
+}
+
+private const val ENTER_SETTLE_TIMEOUT_MS = 600L

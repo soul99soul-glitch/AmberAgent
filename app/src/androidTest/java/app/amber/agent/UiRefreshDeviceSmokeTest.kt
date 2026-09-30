@@ -369,6 +369,7 @@ class UiRefreshDeviceSmokeTest {
         val settings = targetContext.getString(R.string.settings)
         val displaySettings = targetContext.getString(R.string.setting_page_display_setting)
         val displayTitle = targetContext.getString(R.string.setting_display_page_title)
+        val appearance = targetContext.getString(R.string.setting_page_appearance)
         val light = targetContext.getString(R.string.setting_page_color_mode_light)
         val dark = targetContext.getString(R.string.setting_page_color_mode_dark)
         val back = targetContext.getString(R.string.back)
@@ -394,16 +395,22 @@ class UiRefreshDeviceSmokeTest {
         compose.onNodeWithContentDescription(back).performClick()
         compose.onNodeWithText(displaySettings).assertIsDisplayed()
 
-        // The selector is the real settings UI. Selecting the dark item causes
-        // the route to be recreated, which also exercises theme application.
+        // Color mode now lives on Appearance, separate from Display & Fonts.
+        compose.onNodeWithText(appearance).performClick()
+        compose.onNodeWithText(appearance).assertIsDisplayed()
         compose.onNodeWithText(light).performClick()
         compose.onNodeWithText(dark).performClick()
+        assertEquals(COLOR_MODE_DARK, preferences.getString(COLOR_MODE_PREF, null))
+        compose.onNodeWithContentDescription(back).performClick()
         compose.onNodeWithText(displaySettings).assertIsDisplayed()
         capture("05-settings-dark")
 
         // Return to light so the final home/chat capture is easy to compare.
+        compose.onNodeWithText(appearance).performClick()
         compose.onNodeWithText(dark).performClick()
         compose.onNodeWithText(light).performClick()
+        assertEquals(COLOR_MODE_LIGHT, preferences.getString(COLOR_MODE_PREF, null))
+        compose.onNodeWithContentDescription(back).performClick()
         compose.onNodeWithText(displaySettings).assertIsDisplayed()
         capture("06-settings-light-after-toggle")
 
@@ -476,6 +483,7 @@ class UiRefreshDeviceSmokeTest {
         const val PREFERENCES_NAME = "amber_agent.preferences"
         const val COLOR_MODE_PREF = "colorMode"
         const val COLOR_MODE_LIGHT = "LIGHT"
+        const val COLOR_MODE_DARK = "DARK"
         const val SCREENSHOT_DIRECTORY = "ui-refresh-smoke"
     }
 }

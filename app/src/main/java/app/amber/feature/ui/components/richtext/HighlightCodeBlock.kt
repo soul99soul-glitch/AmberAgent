@@ -48,6 +48,7 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontStyle
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.OffsetMapping
 import androidx.compose.ui.text.input.TransformedText
@@ -55,17 +56,18 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.unit.TextUnit
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
-import app.amber.highlight.HighlightText
 import app.amber.highlight.HighlightTextColorPalette
 import app.amber.highlight.Highlighter
 import app.amber.highlight.LocalHighlighter
 import app.amber.highlight.buildHighlightText
+import app.amber.highlight.nativebridge.HighlightNativeSwitch
 import com.composables.icons.lucide.Lucide
 import com.composables.icons.lucide.ArrowDown
 import com.composables.icons.lucide.ArrowUp
@@ -85,11 +87,48 @@ import app.amber.feature.ui.theme.JetbrainsMono
 import app.amber.feature.ui.theme.LocalDarkMode
 import app.amber.core.utils.base64Encode
 import app.amber.core.utils.toDp
+import java.util.LinkedHashMap
 import kotlin.time.Clock
 
 private const val COLLAPSE_LINES = 10
 private const val CODE_HIGHLIGHT_CROSSFADE_MS = 120
 private const val MAX_HIGHLIGHT_LINE_LENGTH = 4096
+private const val MAX_DEFAULT_HIGHLIGHT_LENGTH = 4096 // Matches HighlightText's long-code path.
+private const val HIGHLIGHT_CACHE_MAX_ENTRIES = 64
+private const val HIGHLIGHT_CACHE_MAX_CHARS = 400_000
+
+private data class CodeHighlightKey(
+    val code: String,
+    val language: String,
+    val colors: HighlightTextColorPalette,
+    val wrappedLines: Boolean,
+    val nativeEnabled: Boolean,
+    val highlighterIdentity: Int,
+)
+
+/** Stores only immutable render data; keys do not retain a Highlighter or Android Context. */
+private object CodeHighlightCache {
+    private val lock = Any()
+    private val entries = LinkedHashMap<CodeHighlightKey, List<AnnotatedString>>(64, 0.75f, true)
+    private var totalChars = 0
+
+    fun get(key: CodeHighlightKey): List<AnnotatedString>? = synchronized(lock) { entries[key] }
+
+    fun put(key: CodeHighlightKey, lines: List<AnnotatedString>) = synchronized(lock) {
+        val cost = key.code.length + lines.sumOf { it.length }
+        if (cost > HIGHLIGHT_CACHE_MAX_CHARS) return@synchronized
+        entries.put(key, lines)?.let { previous ->
+            totalChars -= key.code.length + previous.sumOf { it.length }
+        }
+        totalChars += cost
+        while (entries.size > HIGHLIGHT_CACHE_MAX_ENTRIES || totalChars > HIGHLIGHT_CACHE_MAX_CHARS) {
+            val iterator = entries.entries.iterator()
+            val eldest = iterator.next()
+            totalChars -= eldest.key.code.length + eldest.value.sumOf { it.length }
+            iterator.remove()
+        }
+    }
+}
 
 internal fun displayCodeBlockContent(
     code: String,
@@ -273,12 +312,24 @@ private fun CodeBlockWithLineNumbersWrapped(
         displayLines.size.toString().length
     }
     val highlighter = LocalHighlighter.current
-    var highlightedLines by remember(language, colorPalette) {
-        mutableStateOf(emptyList<AnnotatedString>())
+    val key = CodeHighlightKey(
+        code = displayCode,
+        language = language,
+        colors = colorPalette,
+        wrappedLines = true,
+        nativeEnabled = HighlightNativeSwitch.config.enabled(),
+        highlighterIdentity = System.identityHashCode(highlighter),
+    )
+    var highlightedLines by remember(key) {
+        mutableStateOf(CodeHighlightCache.get(key) ?: emptyList())
     }
-    LaunchedEffect(displayCode, language, colorPalette, completeCodeBlock) {
-        if (completeCodeBlock) {
-            highlightedLines = withContext(Dispatchers.Default) {
+    LaunchedEffect(key, completeCodeBlock) {
+        if (completeCodeBlock && highlightedLines.isEmpty()) {
+            CodeHighlightCache.get(key)?.let {
+                highlightedLines = it
+                return@LaunchedEffect
+            }
+            val result = withContext(Dispatchers.Default) {
                 val codeToHighlight = displayLines.joinToString("\n") { line ->
                     if (line.length > MAX_HIGHLIGHT_LINE_LENGTH) {
                         " ".repeat(line.length)
@@ -305,6 +356,8 @@ private fun CodeBlockWithLineNumbersWrapped(
                     }
                 }
             }
+            CodeHighlightCache.put(key, result)
+            highlightedLines = result
         }
     }
     SelectionContainer {
@@ -435,9 +488,10 @@ private fun SmoothHighlightText(
         modifier = modifier,
     ) { showHighlight ->
         if (showHighlight) {
-            HighlightText(
+            CachedHighlightText(
                 code = code,
                 language = language,
+                completeCodeBlock = highlighted,
                 fontSize = textStyle.fontSize,
                 lineHeight = textStyle.lineHeight,
                 colors = colorPalette,
@@ -456,6 +510,58 @@ private fun SmoothHighlightText(
             )
         }
     }
+}
+
+@Composable
+private fun CachedHighlightText(
+    code: String,
+    language: String,
+    completeCodeBlock: Boolean,
+    fontSize: TextUnit,
+    lineHeight: TextUnit,
+    colors: HighlightTextColorPalette,
+    overflow: TextOverflow,
+    softWrap: Boolean,
+    fontFamily: FontFamily,
+) {
+    val highlighter = LocalHighlighter.current
+    val key = CodeHighlightKey(
+        code = code,
+        language = language,
+        colors = colors,
+        wrappedLines = false,
+        nativeEnabled = HighlightNativeSwitch.config.enabled(),
+        highlighterIdentity = System.identityHashCode(highlighter),
+    )
+    var annotatedString by remember(key) {
+        mutableStateOf(CodeHighlightCache.get(key)?.singleOrNull() ?: AnnotatedString(code))
+    }
+    LaunchedEffect(key, completeCodeBlock) {
+        if (completeCodeBlock && code.length <= MAX_DEFAULT_HIGHLIGHT_LENGTH) {
+            CodeHighlightCache.get(key)?.singleOrNull()?.let {
+                annotatedString = it
+                return@LaunchedEffect
+            }
+            val result = withContext(Dispatchers.Default) {
+                val tokens = highlighter.highlight(code, language)
+                buildAnnotatedString {
+                    tokens.forEach { buildHighlightText(it, colors) }
+                }
+            }
+            CodeHighlightCache.put(key, listOf(result))
+            annotatedString = result
+        }
+    }
+    Text(
+        text = annotatedString,
+        fontSize = fontSize,
+        lineHeight = lineHeight,
+        overflow = overflow,
+        softWrap = softWrap,
+        fontFamily = fontFamily,
+        fontStyle = FontStyle.Normal,
+        fontWeight = FontWeight.Normal,
+    )
 }
 
 @Composable

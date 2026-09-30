@@ -1,30 +1,48 @@
-name: Android Native Build Check
+name: Build APK
 
 on:
+  push:
+    branches: [main]
   pull_request:
     branches: [main]
-    paths:
-      - 'native/**'
-      - 'app/**/Cargo.toml'
-      - 'document/build.gradle.kts'
-      - 'highlight/build.gradle.kts'
-      - 'app/build.gradle.kts'
-      - '.github/workflows/android-native-build-check.yml'
+  workflow_dispatch:
 
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build-check:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - name: Set up JDK
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v6
         with:
-          distribution: 'temurin'
-          java-version: '17'
+          # Match the Gradle daemon criteria; JVM-only modules also require JDK 17.
+          distribution: 'jetbrains'
+          java-version: |
+            17
+            21
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+
+      - name: Install Android SDK and NDK packages
+        run: |
+          sdkmanager --install "platforms;android-36" "platforms;android-37.0" \
+            "build-tools;36.0.0" "ndk;27.0.12077973"
+          echo "ANDROID_NDK_HOME=${ANDROID_HOME}/ndk/27.0.12077973" >> "$GITHUB_ENV"
 
       - name: Set up Rust and Android target
         uses: dtolnay/rust-toolchain@1.95.0
@@ -34,54 +52,27 @@ jobs:
       - name: Install cargo-ndk
         run: cargo install cargo-ndk --locked --version 3.5.4
 
-      - name: Set up Android NDK
-        id: setup-ndk
-        run: |
-          set -euo pipefail
-          ANDROID_SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
-          SDKMANAGER="${ANDROID_SDK}/cmdline-tools/latest/bin/sdkmanager"
-          if [ ! -x "$SDKMANAGER" ]; then
-            SDKMANAGER="$(find "${ANDROID_SDK}" -path '*/cmdline-tools/*/bin/sdkmanager' -type f | sort -r | head -n 1)"
-          fi
-          test -x "$SDKMANAGER"
-          "$SDKMANAGER" --install "ndk;27.0.12077973"
-          NDK_PATH="${ANDROID_SDK}/ndk/27.0.12077973"
-          echo "ndk-path=${NDK_PATH}" >> "$GITHUB_OUTPUT"
-          echo "${NDK_PATH}" >> "$GITHUB_PATH"
-
-      - name: Gradle cache
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.gradle/caches
-            ~/.gradle/wrapper
-          key: ${{ runner.os }}-android-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
-
       - name: Cargo cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
             native/target
-          key: ${{ runner.os }}-android-cargo-${{ hashFiles('native/**/Cargo.lock', 'native/**/Cargo.toml') }}
+          key: ${{ runner.os }}-${{ runner.arch }}-android-cargo-1.95.0-ndk27-${{ hashFiles('native/**/Cargo.lock', 'native/**/Cargo.toml', 'native/**/*.rs') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ runner.arch }}-android-cargo-1.95.0-ndk27-
 
       - name: Cargo tests
         working-directory: native
         run: cargo test --workspace --locked
 
       - name: Gradle debug build
-        env:
-          ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
-        run: |
-          chmod +x gradlew
-          ./gradlew :app:assembleDebug
+        run: ./gradlew :app:assembleDebug --no-daemon --console=plain
 
       - name: Verify native libraries in debug APK
         run: |
           set -euo pipefail
-          APK=$(ls app/build/outputs/apk/debug/app-arm64-v8a-debug.apk)
-          APK_ENTRIES="$(unzip -Z1 "$APK")"
           expected=(
             "lib/arm64-v8a/liboffice_parsers.so"
             "lib/arm64-v8a/libmarkdown_parser.so"
@@ -92,13 +83,21 @@ jobs:
             "lib/arm64-v8a/libmarkdown_preprocess.so"
             "lib/arm64-v8a/libhtml_diff_normalizer.so"
           )
-          missing=()
-          for so in "${expected[@]}"; do
-            if ! grep -Fxq "$so" <<< "$APK_ENTRIES"; then
-              missing+=("$so")
-            fi
+          for APK in app/build/outputs/apk/debug/*.apk; do
+            APK_ENTRIES="$(unzip -Z1 "$APK")"
+            for so in "${expected[@]}"; do
+              if ! grep -Fxq "$so" <<< "$APK_ENTRIES"; then
+                echo "Missing native library in $APK: $so" >&2
+                exit 1
+              fi
+            done
           done
-          if (( ${#missing[@]} > 0 )); then
-            printf 'Missing native library: %s\n' "${missing[@]}" >&2
-            exit 1
-          fi
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v7
+        with:
+          name: AmberAgent-debug-${{ github.run_number }}
+          path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0

@@ -220,9 +220,13 @@ internal fun buildPostSendTimelineState(
         )
     val tailWaitingForAssistant = activeGeneration && (latestIsPreSendTail || latestIsSentUserTail)
     val sentUserMessageId = ChatSendTransitionTracker.sentUserMessageId(conversationId)
-    val sentUserMessageIndex = sentUserMessageId?.let { id ->
+    val sentUserMessageUuid = sentUserMessageId?.let { id ->
+        // The old string comparison matched only the canonical spelling.
+        runCatching { Uuid.parse(id) }.getOrNull()?.takeIf { it.toString() == id }
+    }
+    val sentUserMessageIndex = sentUserMessageUuid?.let { id ->
         conversation.messageNodes
-            .indexOfFirst { node -> node.currentMessage.id.toString() == id }
+            .indexOfLast { node -> node.currentMessage.id == id }
             .takeIf { it >= 0 }
     }
     val assistantMessageIndex = sentUserMessageIndex?.let { userIndex ->

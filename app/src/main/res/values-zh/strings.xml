@@ -2710,6 +2710,7 @@
   <string name="permission_decision_reason_subagent_cannot_silent">子代理上下文不能静默运行此工具。</string>
   <string name="permission_decision_reason_subagent_history">历史子代理已预先批准使用只读历史工具。</string>
   <string name="permission_decision_reason_theme_pack_foreground">主题包导入必须在前台由用户明确确认。</string>
+  <string name="permission_decision_reason_theme_pack_preview">主题试穿只修改可撤销的内存状态，不会持久化。</string>
   <string name="permission_decision_reason_tool_not_found">未找到或未公开该工具。如果该工具来自 tools_list，请先使用 query="%1$s" 调用 tool_search，然后重试。</string>
   <string name="permission_decision_reason_user_already_decided">用户已做出决定。</string>
   <string name="permission_decision_scope_assistant">助手</string>
@@ -3620,4 +3621,27 @@
   <string name="mac_gateway_error_unauthorized">此设备已在 Mac 上被吊销，请重新配对</string>
   <string name="mac_gateway_error_invalid_response">Mac Gateway 返回了无法识别的数据</string>
   <string name="mac_gateway_error_generic">操作失败：%1$s</string>
+  <string name="setting_theme_library_try_on_title">试穿主题</string>
+  <string name="setting_theme_library_try_on_summary">正在试穿，尚未保存。套用后保存，还原回到试穿前。</string>
+  <string name="setting_theme_library_commit">套用</string>
+  <string name="chat_island_generating">正在生成…</string>
+  <string name="chat_island_recap_hint">再聊几轮就能回顾</string>
+  <string name="chat_island_a11y_generating">%1$s。轻点跳到最新位置，长按停止</string>
+  <string name="chat_island_a11y_recap">%1$s。轻点查看回顾</string>
+  <string name="chat_recap_loading">正在整理回顾…</string>
+  <string name="chat_recap_failed">回顾生成失败</string>
+  <string name="chat_recap_retry">重试</string>
+  <string name="chat_recap_stale">有新内容 · 刷新</string>
+  <string name="chat_recap_nodes">关键节点</string>
+  <string name="chat_recap_next">接下来</string>
+  <string name="chat_recap_rename_title">重命名对话</string>
+  <string name="chat_recap_title_label">标题</string>
+  <string name="chat_shelf">产物架</string>
+  <string name="chat_shelf_empty">这条对话里的图片、文件和网页会出现在这里。</string>
+  <string name="chat_shelf_kind_image">图片</string>
+  <string name="chat_shelf_kind_file">文件</string>
+  <string name="chat_shelf_kind_app">小应用</string>
+  <string name="chat_shelf_kind_web">网页</string>
+  <string name="chat_recap_no_model">还没有可用来生成回顾的模型，请在设置里选择标题模型。</string>
+  <string name="chat_model_menu_context">上下文</string>
 </resources>

@@ -2714,6 +2714,7 @@ Rule of thumb: “Make it moving” → @writer. “Translate this announcement�
   <string name="permission_decision_reason_subagent_cannot_silent">Sub Agent context cannot silently run this tool.</string>
   <string name="permission_decision_reason_subagent_history">Historian subagent pre-approved for read-only history tool.</string>
   <string name="permission_decision_reason_theme_pack_foreground">Theme package import must be explicitly confirmed in the foreground.</string>
+  <string name="permission_decision_reason_theme_pack_preview">Theme preview is a reversible in-memory change and is not persisted.</string>
   <string name="permission_decision_reason_tool_not_found">Tool not found or not exposed. If this tool came from tools_list, call tool_search with query="%1$s" first, then retry.</string>
   <string name="permission_decision_reason_user_already_decided">User already decided.</string>
   <string name="permission_decision_scope_assistant">assistant</string>
@@ -3622,4 +3623,27 @@ My task:</string>
   <string name="mac_gateway_error_unauthorized">This device was revoked on the Mac. Pair again.</string>
   <string name="mac_gateway_error_invalid_response">Mac Gateway returned data that couldn\'t be read</string>
   <string name="mac_gateway_error_generic">Failed: %1$s</string>
+  <string name="setting_theme_library_try_on_title">Try on theme</string>
+  <string name="setting_theme_library_try_on_summary">Previewing without saving. Apply to save, or restore the previous theme.</string>
+  <string name="setting_theme_library_commit">Apply</string>
+  <string name="chat_island_generating">Generating…</string>
+  <string name="chat_island_recap_hint">A few more turns to unlock recap</string>
+  <string name="chat_island_a11y_generating">%1$s. Tap to jump to the latest, long-press to stop</string>
+  <string name="chat_island_a11y_recap">%1$s. Tap for session recap</string>
+  <string name="chat_recap_loading">Putting the recap together…</string>
+  <string name="chat_recap_failed">Couldn\'t generate the recap</string>
+  <string name="chat_recap_retry">Retry</string>
+  <string name="chat_recap_stale">New content · Refresh</string>
+  <string name="chat_recap_nodes">Key moments</string>
+  <string name="chat_recap_next">Next</string>
+  <string name="chat_recap_rename_title">Rename session</string>
+  <string name="chat_recap_title_label">Title</string>
+  <string name="chat_shelf">Shelf</string>
+  <string name="chat_shelf_empty">Images, files and web pages from this chat will show up here.</string>
+  <string name="chat_shelf_kind_image">Image</string>
+  <string name="chat_shelf_kind_file">File</string>
+  <string name="chat_shelf_kind_app">Mini app</string>
+  <string name="chat_shelf_kind_web">Web page</string>
+  <string name="chat_recap_no_model">No model is set for recaps. Choose a title model in settings.</string>
+  <string name="chat_model_menu_context">Context</string>
 </resources>

@@ -74,7 +74,6 @@ import app.amber.feature.ui.modifier.shimmer
 import app.amber.feature.ui.context.LocalNavController
 import app.amber.feature.ui.context.LocalSettings
 import app.amber.feature.ui.theme.LocalAmberTokens
-import app.amber.feature.ui.theme.LocalThemeDesign
 import app.amber.feature.ui.pages.miniapp.components.MiniAppChatCard
 import kotlin.time.Duration.Companion.milliseconds
 
@@ -94,6 +93,7 @@ internal fun MessagePartsBlock(
     onUserMessageLongClick: (() -> Unit)? = null,
     onGenerativeWidgetAction: (String) -> Unit = {},
     onMiniAppModify: (String) -> Boolean = { false },
+    themeTryOnCardTarget: ThemeTryOnCardTarget? = null,
     onStreamingVisibleFrame: (() -> Unit)? = null,
     onStreamingVisualActiveChange: ((Boolean) -> Unit)? = null,
     deferStreamingParse: Boolean = false,
@@ -148,6 +148,16 @@ internal fun MessagePartsBlock(
             is MessagePartBlock.ThinkingBlock -> {
                 if (block.steps.isNotEmpty()) {
                     val isReasoningOnlyBlock = block.steps.fastAll { it is ThinkingStep.ReasoningStep }
+                    val themeTryOnTool = themeTryOnCardTarget?.let { target ->
+                        block.steps.asSequence().flatMap { step ->
+                            when (step) {
+                                is ThinkingStep.ToolStep -> sequenceOf(step.tool)
+                                is ThinkingStep.SubAgentTaskStep -> step.tools.asSequence()
+                                is ThinkingStep.CouncilTaskStep -> step.tools.asSequence()
+                                is ThinkingStep.ReasoningStep -> emptySequence()
+                            }
+                        }.firstOrNull { it.matchesThemeTryOnCardTarget(target) }
+                    }
                     // 2026-05-14: removed outer `Modifier.animateContentSizeIf(loading)` — the
                     // ChainOfThought card was the most visible jank source. Its inner
                     // `animateContentChanges = loading` still drives the step-list spring
@@ -185,6 +195,7 @@ internal fun MessagePartsBlock(
                                         onToolApproval = onToolApproval,
                                         onToolAnswer = onToolAnswer,
                                         onOpenWorkspaceFile = onOpenWorkspaceFile,
+                                        themeTryOnCardTarget = themeTryOnCardTarget,
                                     )
                                 }
                             }
@@ -212,6 +223,13 @@ internal fun MessagePartsBlock(
                             }
                         }
                     }
+                    themeTryOnTool?.let { tool ->
+                        ThemeTryOnToolCard(
+                            tool = tool,
+                            target = themeTryOnCardTarget!!,
+                            onToolApproval = onToolApproval,
+                        )
+                    }
                     if (!hasVisibleWidgetContent) {
                         ReasoningWidgetRescue(
                             steps = block.steps,
@@ -238,9 +256,15 @@ internal fun MessagePartsBlock(
                                     // bottomStart), right-aligned, max-width ~92% of available.
                                     // The bottomEnd corner keeps the same 14dp radius as the
                                     // right-side prototype; the entire bubble stays softly round.
-                                    val userBubbleShape = LocalThemeDesign.current?.components?.bubbleRadius
-                                        ?.let { RoundedCornerShape(it.toFloat().dp) }
-                                        ?: androidx.compose.foundation.shape.RoundedCornerShape(
+                                    val themeRadius = themeBubbleRadius()
+                                    val userBubbleShape = themeRadius?.let {
+                                        RoundedCornerShape(
+                                            topStart = it,
+                                            topEnd = it,
+                                            bottomStart = it,
+                                            bottomEnd = minOf(it, 6.dp),
+                                        )
+                                    } ?: androidx.compose.foundation.shape.RoundedCornerShape(
                                         topStart = 23.dp,
                                         topEnd = 23.dp,
                                         bottomEnd = 14.dp,
@@ -273,6 +297,8 @@ internal fun MessagePartsBlock(
                                         contentColor = LocalAmberTokens.current.userInk,
                                         tonalElevation = 0.dp,
                                         shadowElevation = 0.dp,
+                                        border = themeBubbleBorderWidth()?.takeIf { it > 0.dp }
+                                            ?.let { BorderStroke(it, LocalAmberTokens.current.line) },
                                     ) {
                                         Column(
                                             modifier = Modifier
@@ -341,8 +367,9 @@ internal fun MessagePartsBlock(
                                             contentAlignment = Alignment.TopStart,
                                         ) {
                                             val amberTokens = LocalAmberTokens.current
-                                            val assistantBubbleShape = LocalThemeDesign.current?.components?.bubbleRadius
-                                                ?.let { RoundedCornerShape(it.toFloat().dp) }
+                                            val themeRadius = themeBubbleRadius()
+                                            val themeBorderWidth = themeBubbleBorderWidth()
+                                            val assistantBubbleShape = themeRadius?.let { RoundedCornerShape(it) }
                                                 ?: RoundedCornerShape(
                                                 topStart = 14.dp,
                                                 topEnd = 14.dp,
@@ -356,7 +383,12 @@ internal fun MessagePartsBlock(
                                                 contentColor = amberTokens.ink,
                                                 tonalElevation = 0.dp,
                                                 shadowElevation = 0.dp,
-                                                border = BorderStroke(1.dp, amberTokens.line),
+                                                border = if (themeBorderWidth == null) {
+                                                    BorderStroke(1.dp, amberTokens.line)
+                                                } else {
+                                                    themeBorderWidth.takeIf { it > 0.dp }
+                                                        ?.let { BorderStroke(it, amberTokens.line) }
+                                                },
                                             ) {
                                                 Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
                                                     AssistantMarkdownBlockOrWidgets(

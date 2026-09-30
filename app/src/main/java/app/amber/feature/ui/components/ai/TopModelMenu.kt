@@ -74,6 +74,8 @@ fun TopModelMenu(
     reasoningLevel: ReasoningLevel? = null,
     onUpdateReasoningLevel: (ReasoningLevel) -> Unit = {},
     modifier: Modifier = Modifier,
+    /** Optional block above the provider list (chat: context usage). */
+    header: (@Composable () -> Unit)? = null,
 ) {
     val chatTheme = LocalChatTheme.current
     val selectedModel = remember(providers, modelType, currentModelId) {
@@ -137,6 +139,13 @@ fun TopModelMenu(
                     }
                     .heightIn(max = 560.dp)
             ) {
+                if (header != null) {
+                    header()
+                    HorizontalDivider(
+                        color = chatTheme.hair,
+                        modifier = Modifier.padding(horizontal = 16.dp),
+                    )
+                }
                 Column(
                     modifier = Modifier
                         .weight(1f, fill = false)

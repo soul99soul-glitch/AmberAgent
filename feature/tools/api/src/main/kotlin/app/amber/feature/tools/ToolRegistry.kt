@@ -308,6 +308,22 @@ fun Tool.invocationPolicy(input: JsonElement?): ToolInvocationPolicy {
             concurrencySafe = readOnly
         }
 
+        "theme_pack_import" -> {
+            val action = input.stringValue("action")?.lowercase(Locale.ROOT) ?: "prepare"
+            if (action == "prepare" || action == "discard") {
+                // These actions only change the in-memory preview. Keep them
+                // classified as a visible mutation (not speculative or
+                // parallel-safe), while reserving mandatory approval for the
+                // persistent apply action.
+                risk = ToolRisk.Sensitive
+                riskExplicit = true
+                mandatoryApprovalEffective = false
+                needsApproval = false
+                autoApprovable = false
+                concurrencySafe = false
+            }
+        }
+
         "cron_task_list", "agent_task_list", "agent_task_read", "agent_runtime_status", "tool_policy_explain", "tool_search", "tools_list", "provider_config_status", "jev_status" -> {
             mutates = false
             risk = ToolRisk.Normal

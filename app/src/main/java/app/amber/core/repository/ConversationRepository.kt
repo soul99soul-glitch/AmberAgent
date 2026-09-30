@@ -46,6 +46,7 @@ class ConversationRepository(
     private val filesManager: FilesManager,
     private val messageFtsManager: MessageFtsManager,
     private val restoreWriteGate: SyncRestoreWriteGate? = null,
+    private val recapStore: app.amber.core.recap.ConversationRecapStore? = null,
 ) {
     companion object {
         private const val PAGE_SIZE = 20
@@ -393,6 +394,7 @@ class ConversationRepository(
         // The dir is `filesDir/chat_images/{conversationId}/` and is created
         // lazily on first generation — deleteRecursively no-ops when missing.
         filesManager.deleteChatImagesDirAndAwait(conversation.id, cleanupEpoch)
+        recapStore?.delete(conversation.id.toString())
     }
 
     suspend fun searchMessages(keyword: String) = messageFtsManager.search(keyword)

@@ -55,6 +55,7 @@ class MarkdownTableTest {
         val tableData = extractStreamingMarkdownTableData(
             node = table,
             content = content,
+            settledData = extractMarkdownTableData(table, content) ?: error("table data missing"),
             sourceOffsetBase = 0,
             liveSuffix = "\n| 2 | Graphite |",
             liveSuffixSourceOffset = table.endOffset,
@@ -82,6 +83,7 @@ class MarkdownTableTest {
         val tableData = extractStreamingMarkdownTableData(
             node = table,
             content = content,
+            settledData = extractMarkdownTableData(table, content) ?: error("table data missing"),
             sourceOffsetBase = 0,
             liveSuffix = "\n| 2 | Graphite |",
             liveSuffixSourceOffset = table.endOffset + 1,

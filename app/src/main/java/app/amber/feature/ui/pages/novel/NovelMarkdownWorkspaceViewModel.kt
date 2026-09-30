@@ -39,6 +39,10 @@ import app.amber.feature.novelworkspace.NovelWorkspaceSlug
 import app.amber.feature.novelworkspace.NovelWorkspaceStore
 import app.amber.feature.novelworkspace.NovelWorkspaceUnresolvedStore
 import java.io.File
+import java.io.IOException
+import java.nio.file.Files
+import java.nio.file.attribute.BasicFileAttributes
+import java.nio.file.attribute.FileTime
 import java.time.Instant
 import java.util.UUID
 import kotlinx.coroutines.CancellationException
@@ -151,7 +155,29 @@ private data class NovelGhostwriteRefresh(
     val plotStale: Boolean,
     val unresolvedFromOrdinal: Int?,
     val canUndo: Boolean,
+    val chapterCache: Map<String, CachedNovelUi<NovelMarkdownChapterUi>>,
+    val draftCache: Map<String, CachedNovelUi<NovelMarkdownDraftUi>>,
 )
+
+private data class CachedNovelUi<T>(
+    val stamp: NovelFileStamp,
+    val value: T,
+)
+
+private data class NovelFileStamp(
+    val fileKey: Any,
+    val size: Long,
+    val lastModifiedTime: FileTime,
+)
+
+private fun novelFileStamp(file: File): NovelFileStamp? = try {
+    val attributes = Files.readAttributes(file.toPath(), BasicFileAttributes::class.java)
+    if (!attributes.isRegularFile) null else attributes.fileKey()?.let { key ->
+        NovelFileStamp(key, attributes.size(), attributes.lastModifiedTime())
+    }
+} catch (_: IOException) {
+    null
+}
 
 private data class NovelWorkspaceReloadSnapshot(
     val projectDirectory: File? = null,
@@ -227,6 +253,17 @@ class NovelMarkdownWorkspaceViewModel(
     // All reload coordination is launched from the ViewModel's main scope; a plain counter
     // is sufficient and keeps this UI-only guard lightweight.
     private var reloadGeneration = 0L
+    // Only the running batch's polling uses these snapshots. Ordinary edits load
+    // directly, and each poll rebuilds the maps from the currently listed paths.
+    private var chapterUiCache: Map<String, CachedNovelUi<NovelMarkdownChapterUi>> = emptyMap()
+    private var draftUiCache: Map<String, CachedNovelUi<NovelMarkdownDraftUi>> = emptyMap()
+    private var uiCacheGeneration = 0L
+
+    private fun clearUiCache() {
+        chapterUiCache = emptyMap()
+        draftUiCache = emptyMap()
+        uiCacheGeneration++
+    }
 
     /** Stop the in-flight turn (composer stop). Partial output is discarded; the
      *  workspace runtime rolls back any uncommitted canon writes on cancellation. */
@@ -240,6 +277,7 @@ class NovelMarkdownWorkspaceViewModel(
 
     fun reload() {
         reloadJob?.cancel()
+        clearUiCache()
         val generation = ++reloadGeneration
         reloadJob = viewModelScope.launch {
             reloadState(generation)
@@ -1175,6 +1213,7 @@ class NovelMarkdownWorkspaceViewModel(
         // Its IO work may finish later, but the generation check in reloadState prevents it
         // from publishing the old branch over the newly selected one.
         reloadJob?.cancel()
+        clearUiCache()
         val reloadGeneration = ++this.reloadGeneration
         viewModelScope.launch {
             _state.value = _state.value.copy(busy = true, errorMessage = null)
@@ -1333,13 +1372,27 @@ class NovelMarkdownWorkspaceViewModel(
         }
     }
 
-    private fun loadChapters(store: NovelWorkspaceStore, slug: String? = branchSlug): List<NovelMarkdownChapterUi> {
+    private fun loadChapters(
+        store: NovelWorkspaceStore,
+        slug: String? = branchSlug,
+        cache: MutableMap<String, CachedNovelUi<NovelMarkdownChapterUi>>? = null,
+    ): List<NovelMarkdownChapterUi> {
         slug ?: return emptyList()
         val prefix = NovelWorkspacePaths.branchPrefix(slug) + "/chapters"
-        return store.list(prefix).mapNotNull { path ->
-            val content = store.read(path) ?: return@mapNotNull null
+        val paths = store.list(prefix)
+        cache?.keys?.retainAll(paths.toSet())
+        return paths.mapNotNull { path ->
+            val file = cache?.let { File(store.rootDirectory, path) }
+            val stamp = file?.let(::novelFileStamp)
+            cache?.get(path)?.takeIf {
+                stamp != null && it.stamp == stamp
+            }?.let { return@mapNotNull it.value }
+            val content = store.read(path) ?: run {
+                cache?.remove(path)
+                return@mapNotNull null
+            }
             val parsed = NovelWorkspaceMarkdown.parseFile(content)
-            NovelMarkdownChapterUi(
+            val chapter = NovelMarkdownChapterUi(
                 path = path,
                 title = parsed.fields["title"] ?: NovelWorkspacePaths.fileNameTitle(path),
                 ordinal = parsed.fields["ordinal"]?.toIntOrNull()
@@ -1347,19 +1400,44 @@ class NovelMarkdownWorkspaceViewModel(
                     ?: 0,
                 charCount = parsed.body.length,
             )
+            if (cache != null && file != null && stamp != null && novelFileStamp(file) == stamp) {
+                cache[path] = CachedNovelUi(stamp, chapter)
+            } else {
+                cache?.remove(path)
+            }
+            chapter
         }.sortedBy { it.ordinal }
     }
 
-    private fun loadDrafts(store: NovelWorkspaceStore): List<NovelMarkdownDraftUi> {
-        return store.list(NovelWorkspacePaths.DRAFTS_DIR).mapNotNull { path ->
-            val content = store.read(path) ?: return@mapNotNull null
+    private fun loadDrafts(
+        store: NovelWorkspaceStore,
+        cache: MutableMap<String, CachedNovelUi<NovelMarkdownDraftUi>>? = null,
+    ): List<NovelMarkdownDraftUi> {
+        val paths = store.list(NovelWorkspacePaths.DRAFTS_DIR)
+        cache?.keys?.retainAll(paths.toSet())
+        return paths.mapNotNull { path ->
+            val file = cache?.let { File(store.rootDirectory, path) }
+            val stamp = file?.let(::novelFileStamp)
+            cache?.get(path)?.takeIf {
+                stamp != null && it.stamp == stamp
+            }?.let { return@mapNotNull it.value }
+            val content = store.read(path) ?: run {
+                cache?.remove(path)
+                return@mapNotNull null
+            }
             val parsed = NovelWorkspaceMarkdown.parseFile(content)
-            NovelMarkdownDraftUi(
+            val draft = NovelMarkdownDraftUi(
                 path = path,
                 title = parsed.fields["title"]?.takeIf { it.isNotBlank() }
                     ?: NovelWorkspacePaths.fileNameTitle(path),
                 excerpt = parsed.body.lineSequence().firstOrNull { it.isNotBlank() }?.trim().orEmpty().take(80),
             )
+            if (cache != null && file != null && stamp != null && novelFileStamp(file) == stamp) {
+                cache[path] = CachedNovelUi(stamp, draft)
+            } else {
+                cache?.remove(path)
+            }
+            draft
         }
     }
 
@@ -1437,6 +1515,9 @@ class NovelMarkdownWorkspaceViewModel(
         val directory = projectDirectory ?: return
         val slug = branchSlug ?: return
         ghostwriteRefreshJob?.cancel()
+        val cacheGeneration = uiCacheGeneration
+        val cachedChapters = chapterUiCache
+        val cachedDrafts = draftUiCache
         ghostwriteRefreshJob = viewModelScope.launch {
             try {
                 val refresh = withContext(Dispatchers.IO) {
@@ -1451,7 +1532,6 @@ class NovelMarkdownWorkspaceViewModel(
                         // durable job files remain authoritative for this refresh.
                     }
                     val store = NovelWorkspaceStore(directory)
-                    val ledger = NovelWorkspaceLedger.load(directory)
                     val snapshot = NovelWorkspaceGhostwriteJobs.snapshot(directory)
                     val selectedJob = if (focusedJobId != null) {
                         snapshot.jobs.firstOrNull { it.id == focusedJobId && it.branchSlug == slug }
@@ -1459,14 +1539,20 @@ class NovelMarkdownWorkspaceViewModel(
                         snapshot.jobs.firstOrNull { !it.isTerminal && it.branchSlug == slug }
                             ?: NovelWorkspaceGhostwriteJobs.latestFailed(directory, slug)
                     }
-                    val job = selectedJob
+                    // A terminal job is written after its final commit. Read the ledger
+                    // after choosing that job so its one-shot progress cannot lag behind.
+                    val ledger = NovelWorkspaceLedger.load(directory)
+                    val running = selectedJob?.status == NovelWorkspaceGhostwriteJob.STATUS_RUNNING
+                    val chapterCache = if (running) cachedChapters.toMutableMap() else null
+                    val draftCache = if (running) cachedDrafts.toMutableMap() else null
+                    val jobUi = selectedJob
                         ?.let { job ->
                             NovelMarkdownGhostwriteUi(
                                 jobId = job.id,
                                 executionId = job.executionKey,
                                 branchSlug = job.branchSlug,
                                 target = job.targetChapterCount,
-                                written = NovelWorkspaceGhostwriteJobs.progress(job, store),
+                                written = NovelWorkspaceGhostwriteJobs.progress(job, store, ledger),
                                 startOrdinal = job.startOrdinal,
                                 status = job.status,
                                 stage = job.stage,
@@ -1477,16 +1563,23 @@ class NovelMarkdownWorkspaceViewModel(
                             )
                         }
                     NovelGhostwriteRefresh(
-                        job = job,
+                        job = jobUi,
                         unreadableJobFiles = snapshot.unreadableFiles,
-                        chapters = loadChapters(store),
-                        drafts = loadDrafts(store),
+                        chapters = loadChapters(store, slug, chapterCache),
+                        drafts = loadDrafts(store, draftCache),
                         catalog = loadCatalog(directory, ledger, slug),
                         plotStale = NovelWorkspaceLedger.isPlotStale(store, ledger, slug),
                         unresolvedFromOrdinal = NovelWorkspaceUnresolvedStore.entryFor(directory, slug)?.fromOrdinal,
                         canUndo = runtime.canUndo(directory, slug),
+                        chapterCache = chapterCache.orEmpty(),
+                        draftCache = draftCache.orEmpty(),
                     )
                 }
+                if (cacheGeneration != uiCacheGeneration || directory != projectDirectory || slug != branchSlug) {
+                    return@launch
+                }
+                chapterUiCache = refresh.chapterCache
+                draftUiCache = refresh.draftCache
                 _state.value = _state.value.copy(
                     ghostwriteJob = refresh.job,
                     unreadableJobFiles = refresh.unreadableJobFiles,

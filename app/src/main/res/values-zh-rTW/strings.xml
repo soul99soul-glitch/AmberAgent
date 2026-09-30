@@ -3560,4 +3560,24 @@
   <string name="mac_gateway_error_unauthorized">此裝置已在 Mac 上被撤銷，請重新配對</string>
   <string name="mac_gateway_error_invalid_response">Mac Gateway 回傳了無法辨識的資料</string>
   <string name="mac_gateway_error_generic">操作失敗：%1$s</string>
+  <string name="chat_island_generating">正在生成…</string>
+  <string name="chat_island_recap_hint">再聊幾輪就能回顧</string>
+  <string name="chat_island_a11y_generating">%1$s。輕點跳到最新位置，長按停止</string>
+  <string name="chat_island_a11y_recap">%1$s。輕點查看回顧</string>
+  <string name="chat_recap_loading">正在整理回顧…</string>
+  <string name="chat_recap_failed">回顧產生失敗</string>
+  <string name="chat_recap_retry">重試</string>
+  <string name="chat_recap_stale">有新內容 · 重新整理</string>
+  <string name="chat_recap_nodes">關鍵節點</string>
+  <string name="chat_recap_next">接下來</string>
+  <string name="chat_recap_rename_title">重新命名對話</string>
+  <string name="chat_recap_title_label">標題</string>
+  <string name="chat_shelf">產物架</string>
+  <string name="chat_shelf_empty">這段對話裡的圖片、檔案和網頁會出現在這裡。</string>
+  <string name="chat_shelf_kind_image">圖片</string>
+  <string name="chat_shelf_kind_file">檔案</string>
+  <string name="chat_shelf_kind_app">小應用</string>
+  <string name="chat_shelf_kind_web">網頁</string>
+  <string name="chat_recap_no_model">還沒有可用來產生回顧的模型，請在設定裡選擇標題模型。</string>
+  <string name="chat_model_menu_context">上下文</string>
 </resources>

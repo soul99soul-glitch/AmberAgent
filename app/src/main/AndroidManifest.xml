@@ -151,6 +151,26 @@
         <data android:mimeType="text/plain" />
       </intent-filter>
 
+      <!-- Theme packages are JSON files. The receiver validates their contents before import. -->
+      <intent-filter>
+        <action android:name="android.intent.action.VIEW" />
+
+        <category android:name="android.intent.category.DEFAULT" />
+
+        <data
+          android:mimeType="application/json"
+          android:scheme="content" />
+      </intent-filter>
+      <intent-filter>
+        <action android:name="android.intent.action.VIEW" />
+
+        <category android:name="android.intent.category.DEFAULT" />
+
+        <data
+          android:mimeType="application/json"
+          android:scheme="file" />
+      </intent-filter>
+
       <!-- WebMount OAuth callback: amberagent://oauth/<provider> -->
       <intent-filter android:autoVerify="false">
         <action android:name="android.intent.action.VIEW" />

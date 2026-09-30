@@ -31,6 +31,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.amber.feature.ui.theme.LocalAmberTokens
 import app.amber.feature.ui.theme.LocalAmberType
+import app.amber.feature.ui.theme.LocalThemeDesign
 
 /**
  * The distinct inline surface used while a tool call is waiting for a decision.
@@ -57,7 +58,9 @@ internal fun ChatToolApprovalCard(
 ) {
     val tokens = LocalAmberTokens.current
     val type = LocalAmberType.current
-    val cardShape = RoundedCornerShape(20.dp)
+    val components = LocalThemeDesign.current?.components
+    val cardShape = RoundedCornerShape(components?.cardRadius?.toFloat()?.dp ?: 20.dp)
+    val borderWidth = components?.borderWidth?.toFloat()?.dp ?: 1.dp
 
     Surface(
         modifier = modifier.fillMaxWidth(),
@@ -66,7 +69,7 @@ internal fun ChatToolApprovalCard(
         contentColor = tokens.ink,
         tonalElevation = 0.dp,
         shadowElevation = 0.dp,
-        border = BorderStroke(1.dp, tokens.line),
+        border = borderWidth.takeIf { it > 0.dp }?.let { BorderStroke(it, tokens.line) },
     ) {
         Column(
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),

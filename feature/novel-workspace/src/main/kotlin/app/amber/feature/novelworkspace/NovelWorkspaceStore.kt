@@ -23,7 +23,16 @@ class NovelWorkspaceStore(val rootDirectory: File) {
         val normalized = prefix?.trim('/')?.ifEmpty { null }
         if (normalized != null) NovelWorkspacePaths.validate(normalized)
         val results = mutableListOf<String>()
-        collect(rootDirectory, "", results)
+        // A prefix is an exact path boundary, not a name fragment. Only descend
+        // directly when it names a visible directory; a file or non-directory
+        // prefix still needs the original whole-tree filtering semantics.
+        val directory = normalized?.takeIf { path -> path.split('/').none { it.startsWith('.') } }
+            ?.let { File(rootDirectory, it) }
+        if (directory?.isDirectory == true && normalized != null) {
+            collect(directory, normalized, results)
+        } else {
+            collect(rootDirectory, "", results)
+        }
         return results
             .filter { normalized == null || it.startsWith("$normalized/") || it == normalized }
             .sorted()

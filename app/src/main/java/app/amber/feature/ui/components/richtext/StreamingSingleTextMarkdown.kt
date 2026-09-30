@@ -274,7 +274,7 @@ fun StreamingSingleTextMarkdown(
 }
 
 /** 最近 ~1.5s 的释放速率（字符/秒），驱动淡入窗口宽度。 */
-private class ReleaseRateTracker {
+internal class ReleaseRateTracker {
     private val samples = ArrayDeque<Pair<Long, Int>>()
 
     fun record(nowMs: Long, length: Int) {

@@ -1,5 +1,7 @@
 package app.amber.feature.chat.impl
 
+import android.util.Log
+import app.amber.agent.BuildConfig
 import app.amber.feature.chat.api.ChatTurnInput
 import app.amber.feature.runtime.ToolInvocationContext
 import app.amber.core.ai.transformers.Base64ImageToLocalFileTransformer
@@ -36,9 +38,14 @@ class ChatSessionResolverImpl(
         val settings = settingsStore.settingsFlow.value
         val model = settings.getCurrentChatModel()
             ?: throw IllegalStateException("No chat model configured")
+        val perfEnabled = BuildConfig.DEBUG && runCatching { Log.isLoggable("AmberChatPerf", Log.DEBUG) }.getOrDefault(false)
         // Same source as the legacy loop: the full (window-merged) conversation
         // so long histories are not truncated to the loaded window.
+        val loadStartedAt = if (perfEnabled) System.nanoTime() else 0L
         val conversation = chatService.conversationForGeneration(conversationId)
+        if (perfEnabled) {
+            Log.d("AmberChatPerf", "resolve.conversation nodes=${conversation.messageNodes.size} elapsedMs=${(System.nanoTime() - loadStartedAt) / 1_000_000.0}")
+        }
         val hooks = chatService.chatRunHooks(conversationId)
 
         val inputTransformers = listOf(
@@ -74,6 +81,7 @@ class ChatSessionResolverImpl(
         // v1: default codifies no new restriction; narrowing arrives via
         // sub-agent payloads.
         val executionPolicy = app.amber.feature.runtime.ExecutionPolicy.permissive()
+        val toolsStartedAt = if (perfEnabled) System.nanoTime() else 0L
         val tools = chatService.createKernelRunTools(
             settings = settings,
             conversationId = conversationId,
@@ -83,6 +91,9 @@ class ChatSessionResolverImpl(
             events = events,
             executionPolicy = executionPolicy,
         )
+        if (perfEnabled) {
+            Log.d("AmberChatPerf", "resolve.tools count=${tools.size} elapsedMs=${(System.nanoTime() - toolsStartedAt) / 1_000_000.0}")
+        }
 
         // Legacy messageRange parity (variant regenerate): generate from a
         // window of the conversation instead of the whole message list.

@@ -118,6 +118,8 @@ import app.amber.agent.ui.components.richtext.nativebridge.MarkdownParserNative
 import app.amber.agent.ui.components.richtext.nativebridge.PackedAstReader
 import java.util.LinkedHashMap
 import java.util.LinkedHashSet
+import java.util.concurrent.CompletableFuture
+import java.util.concurrent.ExecutionException
 
 /**
  * When false, markdown nodes use wrap-content width instead of fill-max-width.
@@ -834,6 +836,7 @@ private object MarkdownParseCache {
     private var totalChars = 0
     private var hits = 0
     private var misses = 0
+    private val inFlight = HashMap<MarkdownParseCacheKey, CompletableFuture<MarkdownParseResult>>()
     private val entries = object : LinkedHashMap<MarkdownParseCacheKey, MarkdownParseResult>(
         MARKDOWN_PARSE_CACHE_MAX_ENTRIES,
         0.75f,
@@ -880,40 +883,71 @@ private object MarkdownParseCache {
         section: String,
         parser: (String) -> MarkdownParseResult,
     ): MarkdownParseResult {
+        val cacheKey = key(content, preprocessed)
+        val pending: CompletableFuture<MarkdownParseResult>
+        val parseHere: Boolean
         synchronized(lock) {
-            entries[key(content, preprocessed)]?.let {
+            entries[cacheKey]?.let {
                 hits++
                 logCacheLocked("hit", content.length, elapsedMs = null)
                 return it
             }
-            misses++
+            val current = inFlight[cacheKey]
+            if (current != null) {
+                pending = current
+                parseHere = false
+            } else {
+                pending = CompletableFuture()
+                inFlight[cacheKey] = pending
+                misses++
+                parseHere = true
+            }
         }
-        val startedAt = if (BuildConfig.DEBUG) System.nanoTime() else 0L
-        val parsed = traceMarkdown(section) {
-            parser(content)
-        }
-        val elapsedMs = if (BuildConfig.DEBUG) {
-            (System.nanoTime() - startedAt) / 1_000_000.0
-        } else {
-            null
-        }
-        synchronized(lock) {
-            val cacheKey = key(content, preprocessed)
-            entries[cacheKey]?.let {
+        if (!parseHere) {
+            val result = try {
+                pending.get()
+            } catch (e: ExecutionException) {
+                throw e.cause ?: e
+            } catch (e: InterruptedException) {
+                Thread.currentThread().interrupt()
+                throw e
+            }
+            synchronized(lock) {
                 hits++
-                logCacheLocked("hit-after-parse", content.length, elapsedMs)
-                return it
+                logCacheLocked("hit-in-flight", content.length, elapsedMs = null)
             }
-            if (content.length > MARKDOWN_PARSE_CACHE_MAX_CHARS) {
-                logCacheLocked("oversize-skip", content.length, elapsedMs)
-                return parsed
-            }
-            entries[cacheKey] = parsed
-            totalChars += content.length
-            trimToBudgetLocked()
-            logCacheLocked("miss", content.length, elapsedMs)
+            return result
         }
-        return parsed
+        try {
+            val startedAt = if (BuildConfig.DEBUG) System.nanoTime() else 0L
+            val parsed = traceMarkdown(section) {
+                parser(content)
+            }
+            val elapsedMs = if (BuildConfig.DEBUG) {
+                (System.nanoTime() - startedAt) / 1_000_000.0
+            } else {
+                null
+            }
+            synchronized(lock) {
+                if (content.length > MARKDOWN_PARSE_CACHE_MAX_CHARS) {
+                    logCacheLocked("oversize-skip", content.length, elapsedMs)
+                } else {
+                    entries[cacheKey] = parsed
+                    totalChars += content.length
+                    trimToBudgetLocked()
+                    logCacheLocked("miss", content.length, elapsedMs)
+                }
+            }
+            pending.complete(parsed)
+            return parsed
+        } catch (failure: Throwable) {
+            pending.completeExceptionally(failure)
+            throw failure
+        } finally {
+            synchronized(lock) {
+                inFlight.remove(cacheKey, pending)
+            }
+        }
     }
 
     private fun logCacheLocked(
@@ -3014,12 +3048,13 @@ private fun TableNode(
             extractStreamingMarkdownTableData(
                 node = node,
                 content = content,
+                settledData = settledTableData,
                 sourceOffsetBase = sourceOffsetBase,
                 liveSuffix = liveSuffix,
                 liveSuffixSourceOffset = liveSuffixSourceOffset,
             )
         }
-    } ?: settledTableData
+    }
     val tableMotionKey = remember(node.type, sourceOffsetBase, node.startOffset) {
         streamingMarkdownMotionKey(
             type = node.type,
@@ -3107,11 +3142,11 @@ internal data class MarkdownTableData(
 internal fun extractStreamingMarkdownTableData(
     node: MdNode,
     content: String,
+    settledData: MarkdownTableData,
     sourceOffsetBase: Int,
     liveSuffix: String,
     liveSuffixSourceOffset: Int,
-): MarkdownTableData? {
-    val settledData = extractMarkdownTableData(node = node, content = content) ?: return null
+): MarkdownTableData {
     if (liveSuffix.isEmpty()) return settledData
 
     val absoluteTableEnd = sourceOffsetBase + node.endOffset

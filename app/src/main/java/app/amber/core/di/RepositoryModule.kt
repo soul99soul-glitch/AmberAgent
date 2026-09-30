@@ -29,6 +29,7 @@ val repositoryModule = module {
             filesManager = get(),
             messageFtsManager = get(),
             restoreWriteGate = get(),
+            recapStore = get(),
         )
     }
 

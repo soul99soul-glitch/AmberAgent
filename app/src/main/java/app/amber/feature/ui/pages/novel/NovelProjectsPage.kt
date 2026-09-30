@@ -29,6 +29,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
+import app.amber.feature.ui.components.ds.AmberContinuousShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -265,9 +266,10 @@ fun NovelProjectsPage(
                     }
                 },
                 navigationIcon = { BackButton() },
+                // 透明顶栏：让页面画布一直铺到状态栏，不再切出一整块纯色。
                 colors = CustomColors.topBarColors.copy(
-                    containerColor = workspace.paper,
-                    scrolledContainerColor = workspace.paper,
+                    containerColor = Color.Transparent,
+                    scrolledContainerColor = Color.Transparent,
                 ),
                 actions = {
                     NovelQuietButton(
@@ -281,7 +283,8 @@ fun NovelProjectsPage(
             )
         },
         floatingActionButton = {
-            Box(
+            // 空列表时由空状态里的主按钮负责新建，不再重复一个悬浮按钮。
+            if (state.projects.isNotEmpty()) Box(
                 modifier = Modifier
                     .heightIn(min = 48.dp)
                     .pressable(
@@ -293,7 +296,7 @@ fun NovelProjectsPage(
                 Row(
                     modifier = Modifier
                         .height(40.dp)
-                        .clip(RoundedCornerShape(999.dp))
+                        .clip(AmberContinuousShape(20.dp))
                         .background(tokens.accent)
                         .padding(horizontal = 12.dp),
                     verticalAlignment = Alignment.CenterVertically,

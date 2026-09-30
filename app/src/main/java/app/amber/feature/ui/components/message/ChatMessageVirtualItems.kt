@@ -282,6 +282,7 @@ internal fun ChatMessageVirtualItemContent(
     onToolApproval: ((toolCallId: String, approved: Boolean, reason: String) -> Unit)? = null,
     onToolAnswer: ((toolCallId: String, answer: String) -> Unit)? = null,
     onOpenWorkspaceFile: ((String) -> Unit)? = null,
+    themeTryOnCardTarget: ThemeTryOnCardTarget? = null,
     onGenerativeWidgetAction: (String) -> Unit = {},
     onMiniAppModify: (String) -> Boolean = { false },
     /** P3-02: 保存到 Workspace (null 时不显示入口, 由 flag 控制). */
@@ -348,6 +349,7 @@ internal fun ChatMessageVirtualItemContent(
                         onToolApproval = onToolApproval,
                         onToolAnswer = onToolAnswer,
                         onOpenWorkspaceFile = onOpenWorkspaceFile,
+                        themeTryOnCardTarget = themeTryOnCardTarget,
                         onGenerativeWidgetAction = onGenerativeWidgetAction,
                         onMiniAppModify = onMiniAppModify,
                     )
@@ -370,6 +372,7 @@ internal fun ChatMessageVirtualItemContent(
                         onToolApproval = onToolApproval,
                         onToolAnswer = onToolAnswer,
                         onOpenWorkspaceFile = onOpenWorkspaceFile,
+                        themeTryOnCardTarget = themeTryOnCardTarget,
                         onGenerativeWidgetAction = onGenerativeWidgetAction,
                         onMiniAppModify = onMiniAppModify,
                     )
@@ -401,6 +404,7 @@ internal fun ChatMessageVirtualItemContent(
                                 onToolApproval = onToolApproval,
                                 onToolAnswer = onToolAnswer,
                                 onOpenWorkspaceFile = onOpenWorkspaceFile,
+                                themeTryOnCardTarget = themeTryOnCardTarget,
                                 onGenerativeWidgetAction = onGenerativeWidgetAction,
                                 onMiniAppModify = onMiniAppModify,
                             )

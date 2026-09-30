@@ -57,7 +57,7 @@ class AgentLiveStatusNotifier(
         messages: List<UIMessage>,
         activity: SandboxActivityUiState?,
         hideSensitive: Boolean,
-        launchIntent: PendingIntent?,
+        launchIntent: () -> PendingIntent?,
         runId: String? = null,
     ) {
         val status = buildStatus(senderName, messages, activity, hideSensitive)
@@ -89,7 +89,7 @@ class AgentLiveStatusNotifier(
             category = NotificationCompat.CATEGORY_PROGRESS
             progressMax = 100
             progress = xiaomiSuperIsland.progressPercent ?: 0
-            contentIntent = launchIntent
+            contentIntent = launchIntent()
             actions = buildActions(conversationId, runId, status, messages)
             requestPromotedOngoing = true
             shortCriticalText = xiaomiSuperIsland.chipText
