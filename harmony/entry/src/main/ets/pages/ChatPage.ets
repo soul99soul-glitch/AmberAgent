@@ -35,7 +35,7 @@ import type {
 import {
   currentMessages, makeConversation, newId, seedConversationWithPresets, nodeCurrentMessage,
   selectMessageBranch, deleteMessage, editMessage, buildChatTimelineRows, forkConversation, patchConversation,
-  runAutoTitle, makeUserMessage, toText, makeTextGenerationParams, pendingPreviewText, convertSteerToFollowup,
+  runAutoTitle, makeUserMessage, toText, messageCopyText, makeTextGenerationParams, pendingPreviewText, convertSteerToFollowup,
   invalidateCompacts, copyValidCompactsToConversation, ContextCompactionFailedError, recoverInterruptedRecipes,
   recoverInterruptedPlugins, recoverInterruptedWebMountGoals, parseDeepReadSlashCommand, estimateConversationInputTokens, formatNumberInt,
   formatContextTokens, nativeTokenizerForModel, loadSearchPrefs, updateSearchPrefs, SearchSettings,
@@ -98,6 +98,7 @@ import { ChatMessageCopySheet } from '../components/ChatMessageCopySheet.ets';
 import { ChatExportSheet } from '../components/ChatExportSheet.ets';
 import { ChatMessageToolPreviewSheet } from '../components/ChatMessageToolPreviewSheet.ets';
 import { ChatMessageActionsSheet } from '../components/ChatMessageActionsSheet.ets';
+import { AgentMessageActionsSheet } from '../components/AgentMessageActionsSheet.ets';
 import { ChatDrawer } from '../components/ChatDrawer.ets';
 import { ChatListGrouped } from '../components/ChatListGrouped.ets';
 import { TopModelMenu } from '../components/TopModelMenu.ets';
@@ -130,12 +131,12 @@ import { cleanupDeletedConversation } from '../platform_impl/ManagedFileStore.et
 const ROW: string = SURFACE2;
 
 const CHAT_MESSAGE_ROW_CAPABILITIES: AgentMessageRowHostCapabilities = {
-  copy: true,
+  copy: false,
   fork: true,
   branchSwitch: true,
   edit: true,
-  regenerate: true,
-  favorite: true,
+  regenerate: false,
+  favorite: false,
   openActions: true,
   approveTool: true,
   denyTool: true,
@@ -383,6 +384,7 @@ struct ChatPage {
   @State modelLabel: string = '';
   // TopModelMenu:顶部模型快速切换下拉(Android TopModelMenu.kt)
   @State modelMenuOpen: boolean = false;
+  @State chatHeaderHeight: number = 0;
   // 装配请求由关闭/离页失效，迟到回调不能重开菜单或覆盖下一次请求。
   @State modelMenuLoading: boolean = false;
   private modelMenuSeq: number = 0;
@@ -2719,6 +2721,14 @@ struct ChatPage {
     if (this.actionsSheetRow !== null) this.openCopySheet(this.actionsSheetRow.message);
   }
 
+  private copyAssistantMessage(): void {
+    if (this.actionsSheetRow === null) return;
+    const text: string = messageCopyText(this.actionsSheetRow.message, false);
+    const board: pasteboard.SystemPasteboard = pasteboard.getSystemPasteboard();
+    board.setDataSync(pasteboard.createData(pasteboard.MIMETYPE_TEXT_PLAIN, text));
+    promptAction.showToast({ message: '已复制', duration: 1200 });
+  }
+
   private editActionsSheetMessage(): void {
     if (this.actionsSheetRow !== null) this.startEditMessage(this.actionsSheetRow);
   }
@@ -3511,19 +3521,28 @@ struct ChatPage {
   @Builder
   messageActionsSheetBuilder() {
     if (this.actionsSheetRow !== null) {
-      ChatMessageActionsSheet({
-        message: this.actionsSheetMessage(),
-        isUser: this.actionsSheetIsUser(),
-        isLastAssistant: this.actionsSheetIsLastAssistant(),
-        onCopy: (): void => { this.copyActionsSheetMessage(); },
-        onEdit: (): void => { this.editActionsSheetMessage(); },
-        onRegenerate: (): void => { this.regenerateActionsSheetMessage(); },
-        onFork: (): void => { this.forkActionsSheetMessage(); },
-        onShare: (): void => { this.shareActionsSheetMessage(); },
-        onExport: (): void => { this.exportSheetOpen = true; },
-        onDelete: (): void => { this.deleteActionsSheetMessage(); },
-        onDismiss: (): void => { this.closeActionsSheet(); },
-      })
+      if (this.actionsSheetMessage().role === 'assistant') {
+        AgentMessageActionsSheet({
+          onSelectText: (): void => { this.copyActionsSheetMessage(); },
+          onCopy: (): void => { this.copyAssistantMessage(); },
+          onRegenerate: (): void => { this.regenerateActionsSheetMessage(); },
+          onDismiss: (): void => { this.closeActionsSheet(); },
+        })
+      } else {
+        ChatMessageActionsSheet({
+          message: this.actionsSheetMessage(),
+          isUser: this.actionsSheetIsUser(),
+          isLastAssistant: this.actionsSheetIsLastAssistant(),
+          onCopy: (): void => { this.copyActionsSheetMessage(); },
+          onEdit: (): void => { this.editActionsSheetMessage(); },
+          onRegenerate: (): void => { this.regenerateActionsSheetMessage(); },
+          onFork: (): void => { this.forkActionsSheetMessage(); },
+          onShare: (): void => { this.shareActionsSheetMessage(); },
+          onExport: (): void => { this.exportSheetOpen = true; },
+          onDelete: (): void => { this.deleteActionsSheetMessage(); },
+          onDismiss: (): void => { this.closeActionsSheet(); },
+        })
+      }
     }
   }
 
@@ -3888,13 +3907,16 @@ struct ChatPage {
       .hitTestBehavior(HitTestMode.None)
       .bindSheet(this.copySheetOpen, this.copySheetBuilder(), {
         height: SheetSize.MEDIUM,
+        showClose: false,
         onDisappear: (): void => { this.closeCopySheet(); },
       })
     Column() {}
       .width(0).height(0)
       .hitTestBehavior(HitTestMode.None)
       .bindSheet(this.actionsSheetOpen, this.messageActionsSheetBuilder(), {
-        height: SheetSize.LARGE,
+        height: this.actionsSheetRow !== null && this.actionsSheetMessage().role === 'assistant'
+          ? SheetSize.FIT_CONTENT : SheetSize.LARGE,
+        showClose: this.actionsSheetIsUser(),
         onDisappear: (): void => { this.clearActionsSheet(); },
       })
     Column() {}
@@ -4087,6 +4109,9 @@ struct ChatPage {
       .border({ width: { bottom: 1 }, color: { bottom: this.headerSolid ? LINE : Color.Transparent }, style: { bottom: BorderStyle.Dotted } })
       .backgroundColor(this.headerSolid ? BG_GLASS : Color.Transparent)
       .backdropBlur(this.headerSolid ? 14 : 0)
+      .onAreaChange((_old: Area, area: Area): void => {
+        this.chatHeaderHeight = Number(area.height);
+      })
       if (this.jumpButtonVisible && this.showMessageJumper) {
         Stack() {
           Icon({ name: 'arrow_down_to_line', iconSize: 20, color: INK })
@@ -4404,6 +4429,7 @@ struct ChatPage {
     //   组件自含全屏 dimmed scrim(28% 黑,点击 = onClose)+ 贴顶面板。
     if (this.modelMenuOpen) {
       TopModelMenu({
+        topInset: this.chatHeaderHeight,
         groups: this.modelMenuGroups,
         currentProviderId: this.modelMenuCurrentProvider,
         currentModelId: this.modelMenuCurrentModel,

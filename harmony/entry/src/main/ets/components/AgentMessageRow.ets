@@ -568,6 +568,10 @@ export struct AgentMessageRow {
     } else if (this.message.role === 'user' && this.capabilities.openActions) {
       Column() { this.MessageBlocks(); }
         .gesture(LongPressGesture().onAction((): void => { this.onOpenActions(); }))
+    } else if (this.message.role === 'assistant' && this.capabilities.openActions) {
+      Column() { this.MessageBlocks(); }
+        // 正文的原生 Text 支持选区；先打开操作面板，再由「选择文字」进入选区页。
+        .priorityGesture(LongPressGesture().onAction((): void => { this.onOpenActions(); }))
     } else {
       Column() { this.MessageBlocks(); }
     }

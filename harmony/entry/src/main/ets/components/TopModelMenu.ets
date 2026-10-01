@@ -30,6 +30,8 @@ import { MOTION_OVERLAY, ACCENT, BODY, HEADER, INK2, INK3, INK4, LABEL, LINE, ME
 export struct TopModelMenu {
   @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @StorageProp('accentColor') accentColorStore: string = ACCENT;
+  // 宿主实测的顶栏下边界，已包含状态栏和内边距。
+  @Prop topInset: number = 0;
   // 预装配数据:每 provider 一组,组内仅目标类型模型(调用方决定 type,通常 chat)
   @Prop groups: TopModelMenuGroup[] = [];
   // 当前选中(provider.id + model.modelId 字符串);空串 = 无选中
@@ -48,7 +50,6 @@ export struct TopModelMenu {
 
   // 展开的 provider 集合(本地态;aboutToAppear 初始化 = 当前 provider,不在则首组)
   @State expandedProviderIds: string[] = [];
-  @StorageProp('statusBarHeight') statusBarHeight: number = 44;
   @StorageProp('darkMode') darkMode: boolean = false;
 
   aboutToAppear(): void {
@@ -90,7 +91,7 @@ export struct TopModelMenu {
       // 顶部留白(头部高度, 透明+不拦截点击 → 头部仍可见可点, 对齐参考图面板在头部下方)
       Column()
         .width('100%')
-        .height(this.statusBarHeight + 56)
+        .height(this.topInset)
         .hitTestBehavior(HitTestMode.None)
       // 面板(provider 分组手风琴 + 底部全页入口)
       Scroll() {
