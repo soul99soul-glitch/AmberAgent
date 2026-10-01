@@ -98,12 +98,13 @@ fun MiniAppRunnerPage(
     repository: MiniAppRepository = koinInject(),
 ) {
     val scope = rememberCoroutineScope()
+    val loadFailedFallback = stringResource(R.string.miniapp_runner_load_failed)
     var state by remember(appId) { mutableStateOf<MiniAppRunnerState>(MiniAppRunnerState.Loading) }
     var reloadKey by remember(appId) { mutableStateOf(0) }
 
     LaunchedEffect(appId) {
         state = MiniAppRunnerState.Loading
-        when (val loaded = loadMiniAppRunnerState { repository.getById(appId) }) {
+        when (val loaded = loadMiniAppRunnerState(loadFailedFallback) { repository.getById(appId) }) {
             MiniAppRunnerLoadState.Missing -> state = MiniAppRunnerState.Missing
             is MiniAppRunnerLoadState.Error -> state = MiniAppRunnerState.Error(loaded.message)
             is MiniAppRunnerLoadState.Ready -> {
@@ -143,7 +144,7 @@ fun MiniAppRunnerPage(
                     onRetry = {
                         state = MiniAppRunnerState.Loading
                         scope.launch {
-                            when (val loaded = loadMiniAppRunnerState { repository.getById(appId) }) {
+                            when (val loaded = loadMiniAppRunnerState(loadFailedFallback) { repository.getById(appId) }) {
                                 MiniAppRunnerLoadState.Missing -> state = MiniAppRunnerState.Missing
                                 is MiniAppRunnerLoadState.Error -> state = MiniAppRunnerState.Error(loaded.message)
                                 is MiniAppRunnerLoadState.Ready -> {
@@ -281,13 +282,14 @@ internal sealed interface MiniAppRunnerLoadState {
 }
 
 internal suspend fun loadMiniAppRunnerState(
+    fallbackErrorMessage: String = "Failed to load mini app",
     load: suspend () -> MiniAppEntity?,
 ): MiniAppRunnerLoadState = try {
     load()?.let { MiniAppRunnerLoadState.Ready(it) } ?: MiniAppRunnerLoadState.Missing
 } catch (cancel: CancellationException) {
     throw cancel
 } catch (error: Throwable) {
-    MiniAppRunnerLoadState.Error(error.message ?: "小应用加载失败")
+    MiniAppRunnerLoadState.Error(error.message ?: fallbackErrorMessage)
 }
 
 @SuppressLint("SetJavaScriptEnabled")
@@ -327,8 +329,9 @@ private fun MiniAppWebView(
     val shellHtml = remember(context, app.id, app.htmlContent, bridgeScript, sessionToken) {
         MiniAppShell.inject(context, app.htmlContent, bridgeScript, sessionToken)
     }
-    val sendGate = remember(capabilityFlags, capabilityPermissionStore, appSettings) {
+    val sendGate = remember(context, capabilityFlags, capabilityPermissionStore, appSettings) {
         CapabilityMiniAppSendGate(
+            context = context,
             capabilityFlags = capabilityFlags,
             permissionStore = capabilityPermissionStore,
             highRiskAutoApproved = { appSettings.agentRuntime.autoApproveHighRiskToolCalls },

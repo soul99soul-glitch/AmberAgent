@@ -1,0 +1,204 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- SettingStoragePage: conversation exchange -->
+    <string name="setting_storage_exchange_exported">已导出 %1$d 个会话（%2$s）</string>
+    <string name="setting_storage_exchange_export_failed">导出失败：%1$s</string>
+    <string name="setting_storage_exchange_read_failed">无法读取交换文件：%1$s</string>
+    <string name="setting_storage_exchange_imported">已导入 %1$d 个会话</string>
+    <string name="setting_storage_exchange_overwritten_suffix">，覆盖 %1$d 个同 ID 会话</string>
+    <string name="setting_storage_exchange_attachment_refs_suffix">；保留 %1$d 个附件引用（未复制文件）</string>
+    <string name="setting_storage_exchange_import_failed">导入失败：%1$s</string>
+    <string name="setting_storage_exchange_title">会话交换</string>
+    <string name="setting_storage_exchange_desc">可与 iOS 交换普通会话；线程关系、禁用/受污染记忆模式暂不支持。本机附件不会随文件传输。</string>
+    <string name="setting_storage_exchange_export">导出会话</string>
+    <string name="setting_storage_exchange_import">导入会话</string>
+    <string name="setting_storage_exchange_confirm_title">确认导入会话</string>
+    <string name="setting_storage_exchange_confirm_summary">将导入 %1$d 个会话，其中新增 %2$d 个。</string>
+    <string name="setting_storage_exchange_conflicts_header">以下 %1$d 个同 ID 会话会被覆盖：</string>
+    <string name="setting_storage_exchange_untitled">无标题</string>
+    <string name="setting_storage_exchange_current_title">（当前：%1$s）</string>
+    <string name="setting_storage_exchange_conflicts_more">还有 %1$d 个会话未展开。</string>
+    <string name="setting_storage_exchange_attachment_note">包含 %1$d 个附件引用，文件本身不会随交换文件复制。</string>
+    <string name="setting_storage_exchange_import_side_effect">导入会停止正在生成的会话并刷新其持久化快照。</string>
+    <string name="setting_storage_exchange_importing">导入中</string>
+    <string name="setting_storage_exchange_confirm_import">确认导入</string>
+
+    <!-- SettingTtsPage -->
+    <string name="setting_tts_page_intro">Android 当前使用系统语音合成（TextToSpeech）。本页仅提供试听，不参与聊天朗读或录音转写。</string>
+    <string name="setting_tts_page_preview_section">试听</string>
+    <string name="setting_tts_page_system_tts">系统 TTS</string>
+    <string name="setting_tts_page_engine_ready_desc">使用系统 TTS 引擎，本机可直接试听</string>
+    <string name="setting_tts_page_engine_unchecked_desc">尚未检测，点击试听时确认引擎可用</string>
+    <string name="setting_tts_page_status_unavailable">不可用</string>
+    <string name="setting_tts_page_status_available">可用</string>
+    <string name="setting_tts_page_status_unchecked">未检测</string>
+    <string name="setting_tts_page_speech_rate">语速</string>
+    <string name="setting_tts_page_speech_rate_desc">调整试听语速</string>
+    <string name="setting_tts_page_sample_text">你好，这是 AmberAgent 的语音试听。系统 TTS 可用。</string>
+    <string name="setting_tts_page_engine_unavailable">系统 TTS 引擎不可用</string>
+    <string name="setting_tts_page_stop_preview">停止试听</string>
+    <string name="setting_tts_page_processing">处理中…</string>
+    <string name="setting_tts_page_start_preview">系统 TTS 试听</string>
+
+    <!-- Antigravity OAuth console -->
+    <string name="setting_provider_page_antigravity_oauth_signed_in_toast">已登录 Antigravity（%1$s）</string>
+    <string name="setting_provider_page_antigravity_oauth_google_account">Google 账号</string>
+    <string name="setting_provider_page_antigravity_oauth_login_failed">Antigravity 登录失败：%1$s</string>
+    <string name="setting_provider_page_antigravity_oauth_session">会话</string>
+    <string name="setting_provider_page_antigravity_oauth_signing_in">登录中…</string>
+    <string name="setting_provider_page_antigravity_oauth_relogin">重新登录 Antigravity</string>
+    <string name="setting_provider_page_antigravity_oauth_login">用 Google 账号登录 Antigravity</string>
+    <string name="setting_provider_page_antigravity_oauth_logout">退出 Antigravity</string>
+    <string name="setting_provider_page_antigravity_oauth_signed_out">已退出 Antigravity</string>
+    <string name="setting_provider_page_antigravity_oauth_login_hint">登录后会自动刷新模型列表并保存到该服务商。</string>
+    <string name="setting_provider_page_antigravity_oauth_signed_in_as">已登录：%1$s</string>
+    <string name="setting_provider_page_antigravity_oauth_signed_in">已登录</string>
+    <string name="setting_provider_page_antigravity_oauth_not_signed_in">未登录</string>
+    <string name="setting_provider_page_antigravity_oauth_unavailable">不可用</string>
+    <string name="setting_provider_page_antigravity_oauth_reauth_required">需要重新登录</string>
+
+    <!-- Grok OAuth console / provider connection -->
+    <string name="setting_provider_page_connected">已连接</string>
+    <string name="setting_provider_page_not_connected">未连接</string>
+    <string name="setting_provider_page_grok_oauth_signed_in_toast">已登录 Grok（%1$s）</string>
+    <string name="setting_provider_page_grok_oauth_account">账号</string>
+    <string name="setting_provider_page_grok_oauth_login_failed">Grok 登录失败：%1$s</string>
+    <string name="setting_provider_page_grok_oauth_signed_in">已登录 Grok</string>
+    <string name="setting_provider_page_grok_oauth_signed_in_as">已登录 Grok：%1$s</string>
+    <string name="setting_provider_page_grok_oauth_not_signed_in">尚未登录 Grok</string>
+    <string name="setting_provider_page_grok_oauth_login">登录 Grok</string>
+    <string name="setting_provider_page_grok_oauth_relogin">重新登录 Grok</string>
+    <string name="setting_provider_page_grok_oauth_logout">退出 Grok</string>
+    <string name="setting_provider_page_grok_oauth_signed_out">已退出 Grok</string>
+
+    <!-- Model capabilities -->
+    <string name="setting_provider_page_capabilities">能力</string>
+    <string name="setting_provider_page_vision">视觉</string>
+
+    <!-- Novel workspace -->
+    <string name="novel_writing_model">写作模型</string>
+    <string name="novel_models_section">模型</string>
+    <string name="novel_chapters_section">章节</string>
+    <string name="novel_chapter_title">章节标题</string>
+    <string name="novel_draft">草稿</string>
+    <string name="novel_project_ghostwrite_running">当前项目仍有代笔批次运行，请先让批次完成或取消后再删除</string>
+
+    <!-- Debug / Developer / Log -->
+    <string name="debug_avatar_editor">头像编辑器</string>
+    <string name="debug_mermaid_mindmap_preview">Mermaid 思维导图预览</string>
+    <string name="debug_council_room_entry">Council Room 调试入口</string>
+    <string name="debug_launch_count_current">当前 %1$d</string>
+    <string name="debug_logs_entry">日志入口</string>
+    <string name="debug_logs_entry_desc">网络请求日志与生成记录会在日志页面显示。</string>
+    <string name="developer_logs_empty">暂无日志</string>
+    <string name="developer_logs_empty_desc">Generation 类型的 AI 日志会显示在这里。</string>
+    <string name="developer_log_message_count">%1$d 条消息</string>
+    <string name="log_page_network_requests">网络请求</string>
+    <string name="log_page_requests_count">请求 · %1$d</string>
+
+    <!-- Sub-agent status -->
+    <string name="chat_message_subagent_status_followup_queued">补充已排队</string>
+    <string name="chat_message_subagent_status_turn_accepted">第%1$d轮已接受</string>
+    <string name="chat_message_subagent_status_request_accepted">请求已接受</string>
+    <string name="chat_message_subagent_status_followup_delivered">补充已送达</string>
+    <string name="chat_message_subagent_turn_prefix">第%1$d轮 </string>
+
+    <!-- MiniApp -->
+    <string name="miniapp_confirm_open_url_title">允许打开外部链接？</string>
+    <string name="miniapp_confirm_open_url_message">「%1$s」想打开：\n%2$s</string>
+    <string name="miniapp_confirm_open_url_truncated_note">\n\n链接较长，已省略部分内容。</string>
+    <string name="miniapp_confirm_system_title">允许使用系统能力？</string>
+    <string name="miniapp_confirm_system_message">「%1$s」想使用 %2$s 系统能力（%3$s）。</string>
+    <string name="miniapp_system_interaction_title">系统交互</string>
+    <string name="miniapp_system_interaction_description">允许已声明权限的小应用调用振动、设备、屏幕、语音、分享与外链；二维码也受此开关控制</string>
+    <string name="miniapp_runner_load_failed">小应用加载失败</string>
+    <string name="miniapp_send_disabled_by_policy">「写入并发送」能力已被策略禁用</string>
+
+    <!-- Session home -->
+    <string name="session_home_open_conversation_failed">暂时无法打开会话，请稍后重试</string>
+    <string name="session_home_conversation_missing">会话已不存在，无法继续</string>
+    <string name="session_home_message_count">%1$s 条</string>
+
+    <!-- Board -->
+    <string name="deep_read_template_custom_empty">还没有自定义模板</string>
+    <string name="deep_read_template_custom_empty_hint">创建后会出现在这里</string>
+    <string name="board_pull_to_refresh">下拉刷新</string>
+    <string name="board_custom_sources_empty">还没有自定义来源</string>
+
+    <!-- Shortcuts / Council -->
+    <string name="shortcut_new_chat">新建会话</string>
+    <string name="council_room_topic_label">议题</string>
+
+    <!-- Chat / sync / reminder errors that reach UI -->
+    <string name="chat_error_stop_before_edit">请先停止生成再编辑消息</string>
+    <string name="chat_error_stop_before_delete">请先停止生成再删除消息</string>
+    <string name="chat_error_switch_provider_to_resume">请切回原 Provider 后继续恢复，或选择重新生成。</string>
+    <string name="chat_error_cancel_not_confirmed">原响应的取消尚未确认，请稍后再重新生成。</string>
+    <string name="backup_google_auth_result_empty">Google 授权结果为空</string>
+    <string name="backup_google_drive_no_snapshot">Google Drive 云端还没有同步快照</string>
+    <string name="backup_google_auth_missing_confirmation">Google 授权缺少确认窗口</string>
+    <string name="backup_google_drive_token_empty">Google Drive access token 为空，请重新授权</string>
+    <string name="backup_google_drive_oauth_mismatch">当前 APK 的 Google Drive OAuth client 未注册或签名不匹配。请检查 Google API Console 中 %1$s 的 Android OAuth client 和 SHA-1。</string>
+    <string name="backup_google_account_fallback">Google 账号</string>
+    <string name="backup_webdav_url_missing">WebDAV 未配置服务器地址</string>
+    <string name="backup_webdav_credentials_missing">WebDAV 未配置凭据</string>
+    <string name="backup_webdav_digest_mismatch">快照内容校验失败（digest 不匹配），已拒绝恢复</string>
+    <string name="reminder_open_chat_prompt">提醒：%1$s\n%2$s</string>
+
+    <!-- Model council role display names -->
+    <string name="model_council_role_supporter">支持者</string>
+    <string name="model_council_role_opponent">反对者</string>
+    <string name="model_council_role_judge">裁判</string>
+    <string name="model_council_role_product">产品</string>
+    <string name="model_council_role_marketing">营销</string>
+    <string name="model_council_role_pr">公关</string>
+    <string name="model_council_role_engineering">工程</string>
+    <string name="model_council_role_ux">用户体验</string>
+    <string name="model_council_role_risk">风险</string>
+
+    <!-- NewsNow preset display names -->
+    <string name="board_newsnow_preset_zhihu">知乎热榜</string>
+    <string name="board_newsnow_preset_weibo">微博热搜</string>
+    <string name="board_newsnow_preset_douyin">抖音热搜</string>
+    <string name="board_newsnow_preset_coolapk">酷安</string>
+    <string name="board_newsnow_preset_bilibili">B 站热搜</string>
+    <string name="board_newsnow_preset_v2ex">V2EX 分享</string>
+    <string name="board_newsnow_preset_github">GitHub 趋势</string>
+    <string name="board_newsnow_preset_36kr">36 氪 快讯</string>
+    <string name="board_newsnow_preset_hupu">虎扑步行街</string>
+    <string name="board_newsnow_preset_xueqiu">雪球 热股</string>
+    <string name="board_newsnow_preset_wallstreet">华尔街见闻 热门</string>
+    <string name="board_newsnow_preset_cls">财联社 电报</string>
+
+    <!-- Antigravity / Grok OAuth library errors -->
+    <string name="antigravity_oauth_stale_session">Antigravity OAuth 会话已变更，已丢弃过期响应，请重试。</string>
+    <string name="antigravity_oauth_client_unconfigured">此构建未配置 Antigravity OAuth 客户端。</string>
+    <string name="antigravity_oauth_auth_timeout">Antigravity 授权超时，请重试。</string>
+    <string name="antigravity_oauth_auth_failed">Antigravity 授权失败：%1$s %2$s</string>
+    <string name="antigravity_oauth_state_mismatch">Antigravity OAuth state 不一致，请重试。</string>
+    <string name="antigravity_oauth_not_signed_in">尚未登录 Antigravity，请先登录。</string>
+    <string name="antigravity_oauth_token_missing">Antigravity OAuth token 不存在，请重新登录。</string>
+    <string name="antigravity_oauth_refresh_missing">Antigravity OAuth 没有 refresh_token，请重新登录。</string>
+    <string name="antigravity_oauth_refresh_failed">Antigravity OAuth 刷新失败：HTTP %1$d</string>
+    <string name="antigravity_oauth_not_signed_in_settings">尚未登录 Antigravity，请先在设置里登录。</string>
+    <string name="antigravity_oauth_onboarding_incomplete">Antigravity onboarding 尚未完成，请稍后重试。</string>
+    <string name="antigravity_oauth_not_signed_in_onboard">尚未登录 Antigravity，无法 onboard。</string>
+    <string name="antigravity_oauth_onboard_missing_project">onboardUser 没有返回 cloudaicompanionProject。</string>
+    <string name="antigravity_oauth_onboard_lro_error">onboardUser LRO 报错：%1$s</string>
+    <string name="antigravity_oauth_onboard_lro_timeout">onboardUser LRO 轮询超时，请稍后重试。</string>
+    <string name="antigravity_oauth_model_request_failed">Antigravity 模型请求失败：HTTP %1$d</string>
+    <string name="antigravity_oauth_request_failed">%1$s 失败：HTTP %2$d</string>
+    <string name="antigravity_oauth_token_exchange_failed">Antigravity OAuth 令牌交换失败：HTTP %1$d</string>
+    <string name="antigravity_oauth_missing_access_token">Antigravity OAuth 响应缺少 access_token</string>
+    <string name="grok_oauth_stale_session">Grok OAuth 会话已变更，已丢弃过期响应，请重试。</string>
+    <string name="grok_oauth_auth_timeout">Grok 授权超时，请重试。</string>
+    <string name="grok_oauth_auth_failed">Grok 授权失败：%1$s %2$s</string>
+    <string name="grok_oauth_state_mismatch">Grok OAuth state 不一致，请重试。</string>
+    <string name="grok_oauth_not_signed_in">尚未登录 Grok，请先登录。</string>
+    <string name="grok_oauth_token_missing">Grok OAuth token 不存在，请重新登录。</string>
+    <string name="grok_oauth_refresh_missing">Grok OAuth 没有 refresh_token，请重新登录。</string>
+    <string name="grok_oauth_refresh_failed">Grok OAuth 刷新失败：HTTP %1$d</string>
+    <string name="grok_oauth_model_request_failed">Grok 模型请求失败：HTTP %1$d</string>
+    <string name="grok_oauth_token_exchange_failed">Grok OAuth 令牌交换失败：HTTP %1$d</string>
+    <string name="grok_oauth_missing_access_token">Grok OAuth 响应缺少 access_token</string>
+</resources>

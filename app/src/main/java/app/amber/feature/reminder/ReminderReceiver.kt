@@ -80,7 +80,11 @@ class ReminderReceiver : BroadcastReceiver(), KoinComponent {
                 action = Intent.ACTION_MAIN
                 putExtra(
                     RouteActivity.EXTRA_OPEN_CHAT_PROMPT,
-                    "提醒：${reminder.title}\n${reminder.message}",
+                    context.getString(
+                        R.string.reminder_open_chat_prompt,
+                        reminder.title,
+                        reminder.message,
+                    ),
                 )
                 flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
             }

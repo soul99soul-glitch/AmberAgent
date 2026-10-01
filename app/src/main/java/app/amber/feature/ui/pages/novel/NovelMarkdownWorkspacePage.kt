@@ -314,7 +314,7 @@ fun NovelMarkdownWorkspacePage(
                                 .padding(start = if (tab == 1) 0.dp else 52.dp, top = 6.dp),
                         ) {
                         WorkspaceModelRow(
-                            label = "写作模型",
+                            label = stringResource(R.string.novel_writing_model),
                             value = resolvedName,
                             leadingIcon = if (tab == 1) Lucide.PenLine else null,
                             selected = modelMenuOpen,
@@ -385,7 +385,7 @@ fun NovelMarkdownWorkspacePage(
                     }
                     if (tab == 1) {
                         NovelWorkspaceSectionLabel(
-                            text = "模型",
+                            text = stringResource(R.string.novel_models_section),
                             modifier = Modifier.padding(top = 6.dp, bottom = 2.dp),
                         )
                         Surface(
@@ -2623,7 +2623,7 @@ internal fun MarkdownChapterEditor(
                 .padding(horizontal = 16.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            NovelWorkspaceSectionLabel(text = "章节")
+            NovelWorkspaceSectionLabel(text = stringResource(R.string.novel_chapters_section))
             Surface(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(14.dp),
@@ -2639,7 +2639,7 @@ internal fun MarkdownChapterEditor(
                         verticalArrangement = Arrangement.spacedBy(2.dp),
                     ) {
                         Text(
-                            text = "章节标题",
+                            text = stringResource(R.string.novel_chapter_title),
                             style = type.meta,
                             color = workspace.muted,
                         )
@@ -2692,7 +2692,7 @@ internal fun MarkdownChapterEditor(
                             border = BorderStroke(1.dp, workspace.hairline),
                         ) {
                             Text(
-                                if (saved) stringResource(R.string.novel_saved) else "草稿",
+                                if (saved) stringResource(R.string.novel_saved) else stringResource(R.string.novel_draft),
                                 style = type.meta,
                                 color = workspace.muted,
                                 modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp),
@@ -2883,7 +2883,7 @@ private fun MarkdownWorkspaceManuscript(
             )
         }
         NovelWorkspaceSectionLabel(
-            text = "章节",
+            text = stringResource(R.string.novel_chapters_section),
             modifier = Modifier.padding(start = 16.dp, top = 12.dp, end = 16.dp, bottom = 10.dp),
         )
         LazyColumn(

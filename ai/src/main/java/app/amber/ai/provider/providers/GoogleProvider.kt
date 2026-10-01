@@ -166,7 +166,7 @@ class GoogleProvider(
             if (isAntigravityOAuthMode(providerSetting)) {
                 return@withContext antigravityOAuthClient
                     ?.listModels(providerSetting.id)
-                    ?: error("Antigravity OAuth 客户端未初始化（GoogleProvider 缺少 Context 注入）。")
+                    ?: error("Antigravity OAuth client is not initialized (GoogleProvider missing Context injection).")
             }
             val url = buildUrl(providerSetting = providerSetting, path = "models?pageSize=100")
             val request = transformRequest(
@@ -227,7 +227,7 @@ class GoogleProvider(
                     .newBuilder().apply { params.customHeaders.forEach { (k, v) -> addHeader(k, v) } }.build()
             }
             isAntigravity -> {
-                val oauth = antigravityOAuthClient ?: error("Antigravity OAuth 客户端未初始化。")
+                val oauth = antigravityOAuthClient ?: error("Antigravity OAuth client is not initialized.")
                 val session = oauth.requireUsableSession(providerSetting.id)
                 oauth.generateContent(session.accessToken, params.model.modelId, session.projectId!!, requestBody)
                     .newBuilder().apply { params.customHeaders.forEach { (k, v) -> addHeader(k, v) } }.build()
@@ -289,7 +289,7 @@ class GoogleProvider(
                 .build()
             }
             isAntigravity -> {
-                val oauth = antigravityOAuthClient ?: error("Antigravity OAuth 客户端未初始化。")
+                val oauth = antigravityOAuthClient ?: error("Antigravity OAuth client is not initialized.")
                 val session = oauth.requireUsableSession(providerSetting.id)
                 oauth.streamGenerateContent(session.accessToken, params.model.modelId, session.projectId!!, requestBody)
                     .newBuilder().apply { params.customHeaders.forEach { (k, v) -> addHeader(k, v) } }.build()

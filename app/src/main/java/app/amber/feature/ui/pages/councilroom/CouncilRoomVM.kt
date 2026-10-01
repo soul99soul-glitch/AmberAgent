@@ -38,6 +38,7 @@ class CouncilRoomVM(
     conversationId: String,
     private val manager: CouncilRoomManager,
     private val settingsStore: SettingsAggregator,
+    private val context: android.content.Context,
 ) : ViewModel() {
     private val cid: Uuid = Uuid.parse(conversationId)
 
@@ -209,7 +210,8 @@ class CouncilRoomVM(
                         conversationId = cid,
                         hostAssistantId = AMBER_AGENT_ID,
                         hostName = "Amber",
-                        objective = currentRoom?.objective ?: "多模型协作讨论",
+                        objective = currentRoom?.objective
+                            ?: context.getString(app.amber.agent.R.string.council_room_default_objective),
                         initialGuests = guests,
                         maxRounds = currentRoom?.maxRounds ?: settings.agentRuntime.modelCouncil.defaultRounds.coerceIn(2, 6),
                         hostModelIdOverride = settings.agentRuntime.modelCouncil.hostModelId,

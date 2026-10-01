@@ -170,7 +170,7 @@ internal fun ModelEditorSheet(
                     ) {
                         Text("//", style = type.eyebrow, color = t.accent)
                         Text(
-                            text = "$slug / ${if (isEdit) "编辑" else "新建"}",
+                            text = "$slug / ${if (isEdit) stringResource(R.string.edit) else stringResource(R.string.setting_provider_page_new)}",
                             style = type.eyebrow,
                             color = t.ink3,
                             maxLines = 1,
@@ -290,10 +290,10 @@ internal fun ModelSettingsForm(
                             onDisplayNameChange = { onModelChange(model.copy(displayName = it)) },
                         )
 
-                        ModelEditorSection("能力") {
+                        ModelEditorSection(stringResource(R.string.setting_provider_page_capabilities)) {
                             ProviderCard(modifier = Modifier.fillMaxWidth()) {
                                 ModelCapabilitySwitchRow(
-                                    title = "视觉",
+                                    title = stringResource(R.string.setting_provider_page_vision),
                                     machineLabel = "vision",
                                     checked = Modality.IMAGE in model.inputModalities,
                                     onCheckedChange = { enabled ->
@@ -309,7 +309,7 @@ internal fun ModelSettingsForm(
                                 )
                                 ProviderHairline(Modifier.padding(horizontal = 14.dp))
                                 ModelCapabilitySwitchRow(
-                                    title = "工具",
+                                    title = stringResource(R.string.setting_provider_page_tool),
                                     machineLabel = "tools",
                                     checked = ModelAbility.TOOL in model.abilities,
                                     onCheckedChange = { enabled ->
@@ -325,7 +325,7 @@ internal fun ModelSettingsForm(
                                 )
                                 ProviderHairline(Modifier.padding(horizontal = 14.dp))
                                 ModelCapabilitySwitchRow(
-                                    title = "推理",
+                                    title = stringResource(R.string.setting_provider_page_reasoning),
                                     machineLabel = "reasoning",
                                     checked = ModelAbility.REASONING in model.abilities,
                                     onCheckedChange = { enabled ->
@@ -341,7 +341,7 @@ internal fun ModelSettingsForm(
                                 )
                                 ProviderHairline(Modifier.padding(horizontal = 14.dp))
                                 ModelCapabilitySwitchRow(
-                                    title = "图像",
+                                    title = stringResource(R.string.setting_provider_page_image),
                                     machineLabel = "image",
                                     checked = Modality.IMAGE in model.outputModalities,
                                     onCheckedChange = { enabled ->
@@ -530,7 +530,7 @@ private fun ModelEditorIdentityCard(
                 }
                 parentProvider?.let { provider ->
                     Text(
-                        text = if (provider.enabled) "已启用" else "未启用",
+                        text = if (provider.enabled) stringResource(R.string.setting_provider_page_enabled) else stringResource(R.string.setting_provider_page_disabled),
                         style = type.meta.copy(fontSize = 10.5.sp, fontWeight = FontWeight.SemiBold),
                         color = if (provider.enabled) t.signal else t.ink3,
                     )

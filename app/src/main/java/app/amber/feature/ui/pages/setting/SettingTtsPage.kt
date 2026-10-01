@@ -120,7 +120,7 @@ fun SettingTtsPage() {
                     border = BorderStroke(1.dp, colors.hairline),
                 ) {
                     Text(
-                        "Android 当前使用系统语音合成（TextToSpeech）。本页仅提供试听，不参与聊天朗读或录音转写。",
+                        stringResource(R.string.setting_tts_page_intro),
                         modifier = Modifier.padding(14.dp),
                         style = MaterialTheme.typography.bodySmall,
                         color = colors.muted,
@@ -128,15 +128,15 @@ fun SettingTtsPage() {
                 }
             }
             item {
-                SettingCardGroup(title = "试听") {
+                SettingCardGroup(title = stringResource(R.string.setting_tts_page_preview_section)) {
                     item(
-                        headlineContent = { Text("系统 TTS") },
+                        headlineContent = { Text(stringResource(R.string.setting_tts_page_system_tts)) },
                         supportingContent = {
                             Text(
                                 when {
                                     engineError != null -> engineError!!
-                                    checked -> "使用系统 TTS 引擎，本机可直接试听"
-                                    else -> "尚未检测，点击试听时确认引擎可用"
+                                    checked -> stringResource(R.string.setting_tts_page_engine_ready_desc)
+                                    else -> stringResource(R.string.setting_tts_page_engine_unchecked_desc)
                                 }
                             )
                         },
@@ -146,9 +146,9 @@ fun SettingTtsPage() {
                             } else {
                                 WorkspaceStatusPill(
                                     text = when {
-                                        engineError != null -> "不可用"
-                                        checked -> "可用"
-                                        else -> "未检测"
+                                        engineError != null -> stringResource(R.string.setting_tts_page_status_unavailable)
+                                        checked -> stringResource(R.string.setting_tts_page_status_available)
+                                        else -> stringResource(R.string.setting_tts_page_status_unchecked)
                                     },
                                     tone = when {
                                         engineError != null -> WorkspaceTone.Danger
@@ -160,8 +160,8 @@ fun SettingTtsPage() {
                         },
                     )
                     item(
-                        headlineContent = { Text("语速") },
-                        supportingContent = { Text("调整试听语速") },
+                        headlineContent = { Text(stringResource(R.string.setting_tts_page_speech_rate)) },
+                        supportingContent = { Text(stringResource(R.string.setting_tts_page_speech_rate_desc)) },
                         trailingContent = {
                             TtsSpeedChoice(
                                 speeds = speeds,
@@ -171,6 +171,8 @@ fun SettingTtsPage() {
                         },
                     )
                     rawItem {
+                        val sampleText = stringResource(R.string.setting_tts_page_sample_text)
+                        val engineUnavailable = stringResource(R.string.setting_tts_page_engine_unavailable)
                         Button(
                             onClick = {
                                 if (speaking || busy) {
@@ -198,7 +200,7 @@ fun SettingTtsPage() {
                                             speechEngine.dispatch(
                                                 "speech.speak",
                                                 paramsOf(
-                                                    "text" to "你好，这是 AmberAgent 的语音试听。系统 TTS 可用。",
+                                                    "text" to sampleText,
                                                     "language" to Locale.getDefault().toLanguageTag(),
                                                     "rate" to (speeds[speedIndex].first / 2f),
                                                 ),
@@ -208,7 +210,7 @@ fun SettingTtsPage() {
                                             throw cancel
                                         } catch (error: Throwable) {
                                             speaking = false
-                                            engineError = error.message ?: "系统 TTS 引擎不可用"
+                                            engineError = error.message ?: engineUnavailable
                                         } finally {
                                             busy = false
                                         }
@@ -220,9 +222,9 @@ fun SettingTtsPage() {
                         ) {
                             Text(
                                 when {
-                                    speaking -> "停止试听"
-                                    busy -> "处理中…"
-                                    else -> "系统 TTS 试听"
+                                    speaking -> stringResource(R.string.setting_tts_page_stop_preview)
+                                    busy -> stringResource(R.string.setting_tts_page_processing)
+                                    else -> stringResource(R.string.setting_tts_page_start_preview)
                                 }
                             )
                         }

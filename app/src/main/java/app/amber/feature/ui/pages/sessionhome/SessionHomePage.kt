@@ -164,6 +164,7 @@ import org.koin.androidx.compose.koinViewModel
 import org.koin.compose.getKoin
 import org.koin.compose.koinInject
 import kotlinx.coroutines.CancellationException
+import androidx.compose.ui.platform.LocalContext
 
 /**
  * Session 首页 —— Scrollable home of the app (Terminal × Modern graphite design).
@@ -214,6 +215,7 @@ fun SessionHomePage() {
         }
     }
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
     val fabShape = remember { AmberContinuousShape(20.dp) }
     val fabInteractionSource = remember { MutableInteractionSource() }
     val fabFill = remember(tokens.accent) {
@@ -285,7 +287,7 @@ fun SessionHomePage() {
                     conversationId = targetConversationId,
                     hostAssistantId = AMBER_AGENT_ID,
                     hostName = "Amber",
-                    objective = "多模型协作讨论",
+                    objective = context.getString(R.string.council_room_default_objective),
                     initialGuests = guests,
                     maxRounds = councilSettings.agentRuntime.modelCouncil.defaultRounds.coerceIn(2, 6),
                     hostModelIdOverride = councilSettings.agentRuntime.modelCouncil.hostModelId,
@@ -336,11 +338,11 @@ fun SessionHomePage() {
                 throw cancel
             } catch (error: Throwable) {
                 android.util.Log.e("SessionHomeRoute", "Unable to validate Continue route", error)
-                toaster.show("暂时无法打开会话，请稍后重试", type = ToastType.Error)
+                toaster.show(context.getString(R.string.session_home_open_conversation_failed), type = ToastType.Error)
                 return@launch
             }
             if (!canOpen) {
-                toaster.show("会话已不存在，无法继续", type = ToastType.Error)
+                toaster.show(context.getString(R.string.session_home_conversation_missing), type = ToastType.Error)
                 return@launch
             }
             navController.navigate(candidate.route.toScreen()) {
@@ -1678,7 +1680,7 @@ private fun HomeSessionRow(
 private fun SessionCountBadge(count: Int) {
     val tokens = LocalAmberTokens.current
     Text(
-        text = "${if (count > 99) "99+" else count} 条",
+        text = stringResource(R.string.session_home_message_count, if (count > 99) "99+" else count.toString()),
         fontFamily = homeChromeFontFamily(JetBrainsMonoFamily),
         fontSize = 11.sp,
         lineHeight = 14.sp,

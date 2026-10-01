@@ -113,14 +113,20 @@ internal fun AntigravityOAuthConsole(
                 )
             )
             toaster.show(
-                "已登录 Antigravity（${result.email ?: "Google 账号"}）",
+                context.getString(
+                    R.string.setting_provider_page_antigravity_oauth_signed_in_toast,
+                    result.email ?: context.getString(R.string.setting_provider_page_antigravity_oauth_google_account),
+                ),
                 type = ToastType.Success,
             )
         } catch (error: CancellationException) {
             throw error
         } catch (error: Exception) {
             toaster.show(
-                "Antigravity 登录失败：${error.message ?: error}",
+                context.getString(
+                    R.string.setting_provider_page_antigravity_oauth_login_failed,
+                    (error.message ?: error).toString(),
+                ),
                 type = ToastType.Error,
             )
         } finally {
@@ -142,7 +148,7 @@ internal fun AntigravityOAuthConsole(
         }
     }
 
-    ProviderSectionLabel("会话")
+    ProviderSectionLabel(stringResource(R.string.setting_provider_page_antigravity_oauth_session))
     ProviderCard(modifier = Modifier.fillMaxWidth()) {
         Row(
             modifier = Modifier
@@ -190,7 +196,9 @@ internal fun AntigravityOAuthConsole(
                 )
             }
             ProviderCommandButton(
-                text = if (busy) "登录中…" else if (signedIn) "重新登录 Antigravity" else "用 Google 账号登录 Antigravity",
+                text = if (busy) stringResource(R.string.setting_provider_page_antigravity_oauth_signing_in)
+                else if (signedIn) stringResource(R.string.setting_provider_page_antigravity_oauth_relogin)
+                else stringResource(R.string.setting_provider_page_antigravity_oauth_login),
                 accent = !signedIn,
                 onClick = { scope.launch { login() } },
                 modifier = Modifier
@@ -198,16 +206,16 @@ internal fun AntigravityOAuthConsole(
                     .padding(top = 10.dp),
             )
             AntigravityDangerButton(
-                text = "退出 Antigravity",
+                text = stringResource(R.string.setting_provider_page_antigravity_oauth_logout),
                 enabled = signedIn && !busy,
                 onClick = {
                     client.logout(provider.id)
                     tokens = null
-                    toaster.show("已退出 Antigravity", type = ToastType.Success)
+                    toaster.show(context.getString(R.string.setting_provider_page_antigravity_oauth_signed_out), type = ToastType.Success)
                 },
             )
             Text(
-                text = "登录后会自动刷新模型列表并保存到该服务商。",
+                text = stringResource(R.string.setting_provider_page_antigravity_oauth_login_hint),
                 style = LocalAmberType.current.secondary,
                 color = LocalAmberTokens.current.ink2,
                 modifier = Modifier.padding(top = 2.dp, bottom = 8.dp),
@@ -226,11 +234,11 @@ private fun AntigravityStatusPill(
     val connected = status.usable
     val statusColor = if (connected) t.signal else t.ink3
     val copy = when {
-        connected && !email.isNullOrBlank() -> "已登录：$email"
-        connected -> "已登录"
-        status.code == AntigravityAuthStatusCode.NOT_SIGNED_IN -> "未登录"
-        status.code == AntigravityAuthStatusCode.CLIENT_UNAVAILABLE -> "不可用"
-        else -> "需要重新登录"
+        connected && !email.isNullOrBlank() -> stringResource(R.string.setting_provider_page_antigravity_oauth_signed_in_as, email)
+        connected -> stringResource(R.string.setting_provider_page_antigravity_oauth_signed_in)
+        status.code == AntigravityAuthStatusCode.NOT_SIGNED_IN -> stringResource(R.string.setting_provider_page_antigravity_oauth_not_signed_in)
+        status.code == AntigravityAuthStatusCode.CLIENT_UNAVAILABLE -> stringResource(R.string.setting_provider_page_antigravity_oauth_unavailable)
+        else -> stringResource(R.string.setting_provider_page_antigravity_oauth_reauth_required)
     }
     Box(
         modifier = Modifier

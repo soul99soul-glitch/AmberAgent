@@ -154,11 +154,11 @@ class AntigravityOAuthClient(private val httpClient: OkHttpClient, private val a
     private fun generationLock(id: Uuid): Any =
         generationLocks.getOrPut(id.toString()) { Any() }
 
-    private fun staleSession(): Nothing = error("Antigravity OAuth 会话已变更，已丢弃过期响应，请重试。")
+    private fun staleSession(): Nothing = error("Antigravity OAuth session changed; discarded stale response. Please retry.")
 
     private fun requireClientConfiguration() {
         check(ANTIGRAVITY_OAUTH_CLIENT_ID.isNotBlank() && ANTIGRAVITY_OAUTH_CLIENT_SECRET.isNotBlank()) {
-            "此构建未配置 Antigravity OAuth 客户端。"
+            "This build has no Antigravity OAuth client configured."
         }
     }
 
@@ -173,9 +173,9 @@ class AntigravityOAuthClient(private val httpClient: OkHttpClient, private val a
             val params = listOf("response_type" to "code", "client_id" to ANTIGRAVITY_OAUTH_CLIENT_ID, "redirect_uri" to ANTIGRAVITY_OAUTH_REDIRECT_URI, "scope" to ANTIGRAVITY_SCOPE, "state" to state, "code_challenge" to challenge, "code_challenge_method" to "S256", "access_type" to "offline", "prompt" to "consent")
             val url = ANTIGRAVITY_OAUTH_AUTHORIZATION_ENDPOINT + "?" + params.joinToString("&") { (k, v) -> "$k=${URLEncoder.encode(v, "UTF-8")}" }
             context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-            val callback = withTimeoutOrNull(AUTH_TIMEOUT_MS) { running.awaitCallback() } ?: error("Antigravity 授权超时，请重试。")
-            require(callback.isSuccess) { "Antigravity 授权失败：${callback.error.orEmpty()} ${callback.errorDescription.orEmpty()}".trim() }
-            require(callback.state == state) { "Antigravity OAuth state 不一致，请重试。" }
+            val callback = withTimeoutOrNull(AUTH_TIMEOUT_MS) { running.awaitCallback() } ?: error("Antigravity authorization timed out. Please retry.")
+            require(callback.isSuccess) { "Antigravity authorization failed: ${callback.error.orEmpty()} ${callback.errorDescription.orEmpty()}".trim() }
+            require(callback.state == state) { "Antigravity OAuth state mismatch. Please retry." }
             val tokens = exchange(callback.code!!, verifier)
             if (!saveIfCurrent(providerId, loginGeneration, tokens)) staleSession()
             ensureOnboarded(providerId)
@@ -183,7 +183,7 @@ class AntigravityOAuthClient(private val httpClient: OkHttpClient, private val a
     }
 
     suspend fun getValidAccessToken(providerId: Uuid, forceRefresh: Boolean = false): String {
-        val current = authStore.get(providerId) ?: error("尚未登录 Antigravity，请先登录。")
+        val current = authStore.get(providerId) ?: error("Not signed in to Antigravity. Please sign in first.")
         if (!forceRefresh && current.expiresAtMillis - System.currentTimeMillis() > REFRESH_SKEW_MS) return current.accessToken
         return refresh(providerId).accessToken
     }
@@ -191,8 +191,8 @@ class AntigravityOAuthClient(private val httpClient: OkHttpClient, private val a
     suspend fun refresh(providerId: Uuid): AntigravityOAuthTokens = refreshLocks.getOrPut(providerId.toString()) { Mutex() }.withLock {
         requireClientConfiguration()
         val generationAtStart = generation(providerId)
-        val current = authStore.get(providerId) ?: error("Antigravity OAuth token 不存在，请重新登录。")
-        val refreshToken = current.refreshToken?.takeIf { it.isNotBlank() } ?: error("Antigravity OAuth 没有 refresh_token，请重新登录。")
+        val current = authStore.get(providerId) ?: error("Antigravity OAuth token missing. Please sign in again.")
+        val refreshToken = current.refreshToken?.takeIf { it.isNotBlank() } ?: error("No Antigravity refresh_token. Please sign in again.")
         val body = FormBody.Builder().add("grant_type", "refresh_token").add("refresh_token", refreshToken).add("client_id", ANTIGRAVITY_OAUTH_CLIENT_ID).add("client_secret", ANTIGRAVITY_OAUTH_CLIENT_SECRET).build()
         val response = httpClient.newCall(Request.Builder().url(ANTIGRAVITY_OAUTH_TOKEN_ENDPOINT).post(body).build()).await()
         val text = response.body?.string().orEmpty()
@@ -200,7 +200,7 @@ class AntigravityOAuthClient(private val httpClient: OkHttpClient, private val a
             if (text.contains("invalid_grant", ignoreCase = true)) {
                 invalidateIfCurrent(providerId, generationAtStart)
             }
-            error("Antigravity OAuth 刷新失败：HTTP ${response.code}")
+            error("Antigravity OAuth refresh failed: HTTP ${response.code}")
         }
         val merged = parseTokens(text, current)
         if (!saveIfCurrent(providerId, generationAtStart, merged)) staleSession()
@@ -208,18 +208,18 @@ class AntigravityOAuthClient(private val httpClient: OkHttpClient, private val a
     }
 
     suspend fun requireUsableSession(providerId: Uuid): AntigravityOAuthTokens {
-        authStore.get(providerId) ?: error("尚未登录 Antigravity，请先在设置里登录。")
+        authStore.get(providerId) ?: error("Not signed in to Antigravity. Please sign in in Settings first.")
         getValidAccessToken(providerId)
         val onboarded = ensureOnboarded(providerId)
         val refreshed = getValidAccessToken(providerId)
         val resolved = authStore.get(providerId)?.copy(accessToken = refreshed) ?: onboarded.copy(accessToken = refreshed)
-        require(AntigravityAuthStatus.from(resolved, System.currentTimeMillis()).code == AntigravityAuthStatusCode.READY) { "Antigravity onboarding 尚未完成，请稍后重试。" }
+        require(AntigravityAuthStatus.from(resolved, System.currentTimeMillis()).code == AntigravityAuthStatusCode.READY) { "Antigravity onboarding is not finished. Please retry later." }
         return resolved
     }
 
     suspend fun ensureOnboarded(providerId: Uuid): AntigravityOAuthTokens {
         val generationAtStart = generation(providerId)
-        val current = authStore.get(providerId) ?: error("尚未登录 Antigravity，无法 onboard。")
+        val current = authStore.get(providerId) ?: error("Not signed in to Antigravity; cannot onboard.")
         if (!current.projectId.isNullOrBlank() && !current.onboardedTier.isNullOrBlank()) {
             if (generation(providerId) != generationAtStart) staleSession()
             return current
@@ -243,7 +243,7 @@ class AntigravityOAuthClient(private val httpClient: OkHttpClient, private val a
         val allowed = load["allowedTiers"]?.jsonArray?.mapNotNull { it.jsonObject["id"]?.jsonPrimitive?.contentOrNull }.orEmpty()
         val chosen = allowed.firstOrNull { it == "FREE" } ?: allowed.firstOrNull() ?: "FREE"
         val body = buildJsonObject { put("tierId", chosen); putJsonObject("metadata") { put("ideType", "ANTIGRAVITY"); put("platform", "ANDROID"); put("pluginType", "GEMINI") }; if (chosen != "FREE" && !project.isNullOrBlank()) put("cloudaicompanionProject", project) }
-        val resolved = pollOnboard(token, cloudJson(token, ":onboardUser", body)) ?: error("onboardUser 没有返回 cloudaicompanionProject。")
+        val resolved = pollOnboard(token, cloudJson(token, ":onboardUser", body)) ?: error("onboardUser did not return cloudaicompanionProject.")
         return persistIfCurrent(current.copy(projectId = resolved, onboardedTier = chosen))
     }
 
@@ -251,14 +251,14 @@ class AntigravityOAuthClient(private val httpClient: OkHttpClient, private val a
         var current = initial
         repeat(MAX_LRO_POLL_ITERATIONS) {
             if (current["done"]?.jsonPrimitive?.booleanOrNull == true) {
-                current["error"]?.let { error("onboardUser LRO 报错：${it.toString().take(300)}") }
+                current["error"]?.let { error("onboardUser LRO error: ${it.toString().take(300)}") }
                 return current["response"]?.jsonObject?.get("cloudaicompanionProject")?.jsonObject?.get("id")?.jsonPrimitive?.contentOrNull
             }
             val name = current["name"]?.jsonPrimitive?.contentOrNull ?: return null
             delay(LRO_POLL_INTERVAL_MS)
             current = getCloudJson(token, name)
         }
-        error("onboardUser LRO 轮询超时，请稍后重试。")
+        error("onboardUser LRO polling timed out. Please retry later.")
     }
 
     fun streamGenerateContent(accessToken: String, modelId: String, projectId: String, innerRequest: JsonObject): Request = cloudRequest(accessToken, "/v1internal:streamGenerateContent?alt=sse", modelId, projectId, innerRequest)
@@ -268,16 +268,16 @@ class AntigravityOAuthClient(private val httpClient: OkHttpClient, private val a
         val token = getValidAccessToken(providerId)
         val request = Request.Builder().url("$ANTIGRAVITY_CLOUDCODE_BASE_URL/v1internal:fetchAvailableModels").header("Authorization", "Bearer $token").header("User-Agent", ANTIGRAVITY_USER_AGENT).header("Client-Metadata", ANTIGRAVITY_CLIENT_METADATA).post(buildJsonObject { authStore.get(providerId)?.projectId?.let { put("project", it) } }.toString().toRequestBody("application/json".toMediaType())).build()
         val response = httpClient.newCall(request).await(); val body = response.body?.string().orEmpty()
-        if (!response.isSuccessful) error("Antigravity 模型请求失败：HTTP ${response.code}")
+        if (!response.isSuccessful) error("Antigravity model request failed: HTTP ${response.code}")
         return parseAntigravityModels(body).ifEmpty { defaultAntigravityModels() }
     }
 
     private fun cloudRequest(token: String, path: String, model: String, project: String, inner: JsonObject) = Request.Builder().url("$ANTIGRAVITY_CLOUDCODE_BASE_URL$path").header("Authorization", "Bearer $token").header("Content-Type", "application/json").header("User-Agent", ANTIGRAVITY_USER_AGENT).header("Client-Metadata", ANTIGRAVITY_CLIENT_METADATA).header("Origin", ANTIGRAVITY_ORIGIN).post(buildJsonObject { put("model", model); put("project", project); put("userAgent", "antigravity"); put("requestType", "agent"); put("requestId", "agent-${Uuid.random()}"); put("request", inner) }.toString().toRequestBody("application/json".toMediaType())).build()
     private suspend fun cloudJson(token: String, method: String, body: JsonObject) = requestJson(Request.Builder().url("$ANTIGRAVITY_CLOUDCODE_BASE_URL/v1internal$method").header("Authorization", "Bearer $token").header("Content-Type", "application/json").header("User-Agent", ANTIGRAVITY_USER_AGENT).header("Client-Metadata", ANTIGRAVITY_CLIENT_METADATA).post(body.toString().toRequestBody("application/json".toMediaType())).build(), "cloudcode $method")
     private suspend fun getCloudJson(token: String, name: String) = requestJson(Request.Builder().url("$ANTIGRAVITY_CLOUDCODE_BASE_URL/v1internal/$name").header("Authorization", "Bearer $token").header("User-Agent", ANTIGRAVITY_USER_AGENT).get().build(), "cloudcode poll")
-    private suspend fun requestJson(request: Request, label: String): JsonObject { val r = httpClient.newCall(request).await(); val text = r.body?.string().orEmpty(); if (!r.isSuccessful) error("$label 失败：HTTP ${r.code}"); return json.parseToJsonElement(text).jsonObject }
-    private suspend fun exchange(code: String, verifier: String): AntigravityOAuthTokens { val body = FormBody.Builder().add("grant_type", "authorization_code").add("code", code).add("code_verifier", verifier).add("redirect_uri", ANTIGRAVITY_OAUTH_REDIRECT_URI).add("client_id", ANTIGRAVITY_OAUTH_CLIENT_ID).add("client_secret", ANTIGRAVITY_OAUTH_CLIENT_SECRET).build(); val r = httpClient.newCall(Request.Builder().url(ANTIGRAVITY_OAUTH_TOKEN_ENDPOINT).post(body).build()).await(); val text = r.body?.string().orEmpty(); if (!r.isSuccessful) error("Antigravity OAuth 令牌交换失败：HTTP ${r.code}"); return parseTokens(text, null) }
-    private fun parseTokens(raw: String, fallback: AntigravityOAuthTokens?): AntigravityOAuthTokens { val o = json.parseToJsonElement(raw).jsonObject; val access = o["access_token"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() } ?: error("Antigravity OAuth 响应缺少 access_token"); val refresh = o["refresh_token"]?.jsonPrimitive?.contentOrNull ?: fallback?.refreshToken; val id = o["id_token"]?.jsonPrimitive?.contentOrNull ?: fallback?.idToken; val expires = o["expires_in"]?.jsonPrimitive?.longOrNull ?: FALLBACK_TOKEN_LIFETIME_MS / 1000; return AntigravityOAuthTokens(access, refresh, System.currentTimeMillis() + expires * 1000, id, fallback?.email ?: id?.let(::decodeEmail), fallback?.projectId, fallback?.onboardedTier) }
+    private suspend fun requestJson(request: Request, label: String): JsonObject { val r = httpClient.newCall(request).await(); val text = r.body?.string().orEmpty(); if (!r.isSuccessful) error("$label failed: HTTP ${r.code}"); return json.parseToJsonElement(text).jsonObject }
+    private suspend fun exchange(code: String, verifier: String): AntigravityOAuthTokens { val body = FormBody.Builder().add("grant_type", "authorization_code").add("code", code).add("code_verifier", verifier).add("redirect_uri", ANTIGRAVITY_OAUTH_REDIRECT_URI).add("client_id", ANTIGRAVITY_OAUTH_CLIENT_ID).add("client_secret", ANTIGRAVITY_OAUTH_CLIENT_SECRET).build(); val r = httpClient.newCall(Request.Builder().url(ANTIGRAVITY_OAUTH_TOKEN_ENDPOINT).post(body).build()).await(); val text = r.body?.string().orEmpty(); if (!r.isSuccessful) error("Antigravity OAuth token exchange failed: HTTP ${r.code}"); return parseTokens(text, null) }
+    private fun parseTokens(raw: String, fallback: AntigravityOAuthTokens?): AntigravityOAuthTokens { val o = json.parseToJsonElement(raw).jsonObject; val access = o["access_token"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() } ?: error("Antigravity OAuth response missing access_token"); val refresh = o["refresh_token"]?.jsonPrimitive?.contentOrNull ?: fallback?.refreshToken; val id = o["id_token"]?.jsonPrimitive?.contentOrNull ?: fallback?.idToken; val expires = o["expires_in"]?.jsonPrimitive?.longOrNull ?: FALLBACK_TOKEN_LIFETIME_MS / 1000; return AntigravityOAuthTokens(access, refresh, System.currentTimeMillis() + expires * 1000, id, fallback?.email ?: id?.let(::decodeEmail), fallback?.projectId, fallback?.onboardedTier) }
     private fun decodeEmail(jwt: String): String? = runCatching { val bytes = Base64.decode(jwt.split('.')[1], Base64.URL_SAFE or Base64.NO_PADDING or Base64.NO_WRAP); json.parseToJsonElement(String(bytes)).jsonObject["email"]?.jsonPrimitive?.contentOrNull }.getOrNull()
     private fun randomState() = randomBytes(24)
     private fun generateCodeVerifier() = randomBytes(64)

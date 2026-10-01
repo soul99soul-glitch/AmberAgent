@@ -587,7 +587,21 @@ private fun ModelCouncilSeatEditor(
                     selectedOption = ModelCouncilRolePresets.byName(seat.role) ?: ModelCouncilRolePresets.presets.first(),
                     onOptionSelected = onPresetSelected,
                     modifier = Modifier.fillMaxWidth(),
-                    optionToString = { it.name },
+                    optionToString = { preset ->
+                        val resId = when (preset.id) {
+                            "supporter" -> R.string.model_council_role_supporter
+                            "opponent" -> R.string.model_council_role_opponent
+                            "judge" -> R.string.model_council_role_judge
+                            "product" -> R.string.model_council_role_product
+                            "marketing" -> R.string.model_council_role_marketing
+                            "pr" -> R.string.model_council_role_pr
+                            "engineering" -> R.string.model_council_role_engineering
+                            "ux" -> R.string.model_council_role_ux
+                            "risk" -> R.string.model_council_role_risk
+                            else -> null
+                        }
+                        if (resId != null) stringResource(resId) else preset.name
+                    },
                 )
             }
 

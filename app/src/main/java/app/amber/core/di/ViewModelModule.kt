@@ -62,6 +62,7 @@ val viewModelModule = module {
             conversationId = params.get(),
             manager = get(),
             settingsStore = get(),
+            context = androidContext(),
         )
     }
     viewModelOf(::SettingVM)

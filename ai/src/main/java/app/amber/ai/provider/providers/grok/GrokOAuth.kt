@@ -168,7 +168,7 @@ class GrokOAuthClient(private val httpClient: OkHttpClient, private val authStor
     private fun generationLock(id: Uuid): Any =
         generationLocks.getOrPut(id.toString()) { Any() }
 
-    private fun staleSession(): Nothing = error("Grok OAuth 会话已变更，已丢弃过期响应，请重试。")
+    private fun staleSession(): Nothing = error("Grok OAuth session changed; discarded stale response. Please retry.")
 
     suspend fun authorize(context: Context, providerId: Uuid): GrokOAuthTokens {
         val server = LoopbackOAuthCallbackServer(port = 8787)
@@ -194,9 +194,9 @@ class GrokOAuthClient(private val httpClient: OkHttpClient, private val authStor
             }
             context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
             val callback = withTimeoutOrNull(AUTH_TIMEOUT_MS) { running.awaitCallback() }
-                ?: error("Grok 授权超时，请重试。")
-            require(callback.isSuccess) { "Grok 授权失败：${callback.error.orEmpty()} ${callback.errorDescription.orEmpty()}".trim() }
-            require(callback.state == state) { "Grok OAuth state 不一致，请重试。" }
+                ?: error("Grok authorization timed out. Please retry.")
+            require(callback.isSuccess) { "Grok authorization failed: ${callback.error.orEmpty()} ${callback.errorDescription.orEmpty()}".trim() }
+            require(callback.state == state) { "Grok OAuth state mismatch. Please retry." }
             val tokens = exchange(callback.code!!, verifier)
             if (!saveIfCurrent(providerId, loginGeneration, tokens)) staleSession()
             tokens
@@ -204,7 +204,7 @@ class GrokOAuthClient(private val httpClient: OkHttpClient, private val authStor
     }
 
     suspend fun getValidAccessToken(providerId: Uuid, forceRefresh: Boolean = false): String {
-        val current = authStore.get(providerId) ?: error("尚未登录 Grok，请先登录。")
+        val current = authStore.get(providerId) ?: error("Not signed in to Grok. Please sign in first.")
         if (!forceRefresh && current.expiresAtMillis - System.currentTimeMillis() > REFRESH_SKEW_MS) {
             return current.accessToken
         }
@@ -213,9 +213,9 @@ class GrokOAuthClient(private val httpClient: OkHttpClient, private val authStor
 
     suspend fun refresh(providerId: Uuid): GrokOAuthTokens = refreshLocks.getOrPut(providerId.toString()) { Mutex() }.withLock {
         val generationAtStart = generation(providerId)
-        val current = authStore.get(providerId) ?: error("Grok OAuth token 不存在，请重新登录。")
+        val current = authStore.get(providerId) ?: error("Grok OAuth token missing. Please sign in again.")
         val refreshToken = current.refreshToken?.takeIf { it.isNotBlank() }
-            ?: error("Grok OAuth 没有 refresh_token，请重新登录。")
+            ?: error("No Grok refresh_token. Please sign in again.")
         val body = FormBody.Builder().add("grant_type", "refresh_token")
             .add("refresh_token", refreshToken).add("client_id", GROK_OAUTH_CLIENT_ID).build()
         val response = httpClient.newCall(Request.Builder().url(GROK_OAUTH_TOKEN_ENDPOINT).post(body).build()).await()
@@ -224,7 +224,7 @@ class GrokOAuthClient(private val httpClient: OkHttpClient, private val authStor
             if (runCatching { json.parseToJsonElement(text).jsonObject["error"]?.jsonPrimitive?.contentOrNull == "invalid_grant" }.getOrDefault(false)) {
                 invalidateIfCurrent(providerId, generationAtStart)
             }
-            error("Grok OAuth 刷新失败：HTTP ${response.code}")
+            error("Grok OAuth refresh failed: HTTP ${response.code}")
         }
         val merged = parseTokens(text, current)
         // logout 后到达的旧刷新响应不得复活会话；generation 变化时丢弃结果。
@@ -239,7 +239,7 @@ class GrokOAuthClient(private val httpClient: OkHttpClient, private val authStor
             response = modelsRequest(getValidAccessToken(providerId, forceRefresh = true))
         }
         val body = response.body?.string().orEmpty()
-        if (!response.isSuccessful) error("Grok 模型请求失败：HTTP ${response.code}")
+        if (!response.isSuccessful) error("Grok model request failed: HTTP ${response.code}")
         return parseGrokModels(body).ifEmpty { defaultGrokOAuthModels() }
     }
 
@@ -254,14 +254,14 @@ class GrokOAuthClient(private val httpClient: OkHttpClient, private val authStor
             .add("client_id", GROK_OAUTH_CLIENT_ID).build()
         val response = httpClient.newCall(Request.Builder().url(GROK_OAUTH_TOKEN_ENDPOINT).post(body).build()).await()
         val text = response.body?.string().orEmpty()
-        if (!response.isSuccessful) error("Grok OAuth 令牌交换失败：HTTP ${response.code}")
+        if (!response.isSuccessful) error("Grok OAuth token exchange failed: HTTP ${response.code}")
         return parseTokens(text, null)
     }
 
     private fun parseTokens(raw: String, fallback: GrokOAuthTokens?): GrokOAuthTokens {
         val obj = json.parseToJsonElement(raw).jsonObject
         val access = obj["access_token"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }
-            ?: error("Grok OAuth 响应缺少 access_token")
+            ?: error("Grok OAuth response missing access_token")
         val expires = obj["expires_in"]?.jsonPrimitive?.contentOrNull?.toLongOrNull()
         val idToken = obj["id_token"]?.jsonPrimitive?.contentOrNull ?: fallback?.idToken
         return GrokOAuthTokens(access, obj["refresh_token"]?.jsonPrimitive?.contentOrNull ?: fallback?.refreshToken,

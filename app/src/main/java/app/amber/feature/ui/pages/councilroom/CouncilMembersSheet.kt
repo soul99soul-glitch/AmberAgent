@@ -100,7 +100,7 @@ fun CouncilMembersSheet(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
                         Text(
-                            text = "议题",
+                            text = stringResource(R.string.council_room_topic_label),
                             style = LocalAmberType.current.eyebrow,
                             fontWeight = FontWeight.SemiBold,
                             color = chatTheme.accent,

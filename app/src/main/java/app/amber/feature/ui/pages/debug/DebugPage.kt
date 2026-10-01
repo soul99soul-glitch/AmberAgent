@@ -158,7 +158,7 @@ private fun MainPage(vm: DebugVM) {
         SectionLabel(stringResource(R.string.redesign_debug_tools))
         AmberCard {
             Column {
-                DebugActionRow("头像编辑器") {
+                DebugActionRow(stringResource(R.string.debug_avatar_editor)) {
                     UIAvatar(
                         value = avatar,
                         onUpdate = {
@@ -169,7 +169,7 @@ private fun MainPage(vm: DebugVM) {
                     )
                 }
                 Hairline()
-                DebugActionRow("Mermaid 思维导图预览") {
+                DebugActionRow(stringResource(R.string.debug_mermaid_mindmap_preview)) {
                     Mermaid(
                         code = """
                             mindmap
@@ -193,7 +193,7 @@ private fun MainPage(vm: DebugVM) {
                     toaster.show(context.getString(R.string.debug_test_toast, toastCounter++), type = ToastType.Error)
                 }
                 Hairline()
-                DebugActionRow("Council Room 调试入口") {
+                DebugActionRow(stringResource(R.string.debug_council_room_entry)) {
                     app.amber.feature.ui.pages.councilroom.CouncilRoomDevEntry()
                 }
                 Hairline()
@@ -305,7 +305,7 @@ private fun MainPage(vm: DebugVM) {
                     OutlinedTextField(
                         value = launchCountInput,
                         onValueChange = { launchCountInput = it },
-                        label = { Text("当前 ${settings.launchCount}") },
+                        label = { Text(stringResource(R.string.debug_launch_count_current, settings.launchCount)) },
                         modifier = Modifier.weight(1f),
                         singleLine = true,
                     )
@@ -392,8 +392,8 @@ private fun DebugLoggingPage() {
         SectionLabel(stringResource(R.string.redesign_logs))
         AmberCard {
             Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("日志入口", style = type.body, color = t.ink)
-                Text("网络请求日志与生成记录会在日志页面显示。", style = type.secondary, color = t.ink3)
+                Text(stringResource(R.string.debug_logs_entry), style = type.body, color = t.ink)
+                Text(stringResource(R.string.debug_logs_entry_desc), style = type.secondary, color = t.ink3)
             }
         }
     }

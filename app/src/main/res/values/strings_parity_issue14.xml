@@ -1,0 +1,204 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- SettingStoragePage: conversation exchange -->
+    <string name="setting_storage_exchange_exported">Exported %1$d conversations (%2$s)</string>
+    <string name="setting_storage_exchange_export_failed">Export failed: %1$s</string>
+    <string name="setting_storage_exchange_read_failed">Unable to read exchange file: %1$s</string>
+    <string name="setting_storage_exchange_imported">Imported %1$d conversations</string>
+    <string name="setting_storage_exchange_overwritten_suffix">, overwrote %1$d same-ID conversations</string>
+    <string name="setting_storage_exchange_attachment_refs_suffix">; kept %1$d attachment references (files not copied)</string>
+    <string name="setting_storage_exchange_import_failed">Import failed: %1$s</string>
+    <string name="setting_storage_exchange_title">Conversation exchange</string>
+    <string name="setting_storage_exchange_desc">Exchange regular conversations with iOS. Thread links and disabled/contaminated memory modes are not supported yet. Local attachments are not transferred.</string>
+    <string name="setting_storage_exchange_export">Export conversations</string>
+    <string name="setting_storage_exchange_import">Import conversations</string>
+    <string name="setting_storage_exchange_confirm_title">Confirm conversation import</string>
+    <string name="setting_storage_exchange_confirm_summary">Will import %1$d conversations, including %2$d new ones.</string>
+    <string name="setting_storage_exchange_conflicts_header">These %1$d same-ID conversations will be overwritten:</string>
+    <string name="setting_storage_exchange_untitled">Untitled</string>
+    <string name="setting_storage_exchange_current_title">(current: %1$s)</string>
+    <string name="setting_storage_exchange_conflicts_more">%1$d more conversations not shown.</string>
+    <string name="setting_storage_exchange_attachment_note">Includes %1$d attachment references; files are not copied with the exchange file.</string>
+    <string name="setting_storage_exchange_import_side_effect">Import will stop generating conversations and refresh their persisted snapshots.</string>
+    <string name="setting_storage_exchange_importing">Importing</string>
+    <string name="setting_storage_exchange_confirm_import">Confirm import</string>
+
+    <!-- SettingTtsPage -->
+    <string name="setting_tts_page_intro">Android currently uses system TextToSpeech. This page is for preview only and is not used for chat reading or transcription.</string>
+    <string name="setting_tts_page_preview_section">Preview</string>
+    <string name="setting_tts_page_system_tts">System TTS</string>
+    <string name="setting_tts_page_engine_ready_desc">Using the system TTS engine; you can preview on-device</string>
+    <string name="setting_tts_page_engine_unchecked_desc">Not checked yet; availability is confirmed when you preview</string>
+    <string name="setting_tts_page_status_unavailable">Unavailable</string>
+    <string name="setting_tts_page_status_available">Available</string>
+    <string name="setting_tts_page_status_unchecked">Not checked</string>
+    <string name="setting_tts_page_speech_rate">Speech rate</string>
+    <string name="setting_tts_page_speech_rate_desc">Adjust preview speech rate</string>
+    <string name="setting_tts_page_sample_text">Hello, this is AmberAgent speech preview. System TTS is available.</string>
+    <string name="setting_tts_page_engine_unavailable">System TTS engine unavailable</string>
+    <string name="setting_tts_page_stop_preview">Stop preview</string>
+    <string name="setting_tts_page_processing">Processing…</string>
+    <string name="setting_tts_page_start_preview">System TTS preview</string>
+
+    <!-- Antigravity OAuth console -->
+    <string name="setting_provider_page_antigravity_oauth_signed_in_toast">Signed in to Antigravity (%1$s)</string>
+    <string name="setting_provider_page_antigravity_oauth_google_account">Google account</string>
+    <string name="setting_provider_page_antigravity_oauth_login_failed">Antigravity sign-in failed: %1$s</string>
+    <string name="setting_provider_page_antigravity_oauth_session">Session</string>
+    <string name="setting_provider_page_antigravity_oauth_signing_in">Signing in…</string>
+    <string name="setting_provider_page_antigravity_oauth_relogin">Sign in to Antigravity again</string>
+    <string name="setting_provider_page_antigravity_oauth_login">Sign in to Antigravity with Google</string>
+    <string name="setting_provider_page_antigravity_oauth_logout">Sign out of Antigravity</string>
+    <string name="setting_provider_page_antigravity_oauth_signed_out">Signed out of Antigravity</string>
+    <string name="setting_provider_page_antigravity_oauth_login_hint">After sign-in, the model list is refreshed and saved to this provider.</string>
+    <string name="setting_provider_page_antigravity_oauth_signed_in_as">Signed in: %1$s</string>
+    <string name="setting_provider_page_antigravity_oauth_signed_in">Signed in</string>
+    <string name="setting_provider_page_antigravity_oauth_not_signed_in">Not signed in</string>
+    <string name="setting_provider_page_antigravity_oauth_unavailable">Unavailable</string>
+    <string name="setting_provider_page_antigravity_oauth_reauth_required">Sign-in required again</string>
+
+    <!-- Grok OAuth console / provider connection -->
+    <string name="setting_provider_page_connected">Connected</string>
+    <string name="setting_provider_page_not_connected">Not connected</string>
+    <string name="setting_provider_page_grok_oauth_signed_in_toast">Signed in to Grok (%1$s)</string>
+    <string name="setting_provider_page_grok_oauth_account">Account</string>
+    <string name="setting_provider_page_grok_oauth_login_failed">Grok sign-in failed: %1$s</string>
+    <string name="setting_provider_page_grok_oauth_signed_in">Signed in to Grok</string>
+    <string name="setting_provider_page_grok_oauth_signed_in_as">Signed in to Grok: %1$s</string>
+    <string name="setting_provider_page_grok_oauth_not_signed_in">Not signed in to Grok</string>
+    <string name="setting_provider_page_grok_oauth_login">Sign in to Grok</string>
+    <string name="setting_provider_page_grok_oauth_relogin">Sign in to Grok again</string>
+    <string name="setting_provider_page_grok_oauth_logout">Sign out of Grok</string>
+    <string name="setting_provider_page_grok_oauth_signed_out">Signed out of Grok</string>
+
+    <!-- Model capabilities -->
+    <string name="setting_provider_page_capabilities">Capabilities</string>
+    <string name="setting_provider_page_vision">Vision</string>
+
+    <!-- Novel workspace -->
+    <string name="novel_writing_model">Writing model</string>
+    <string name="novel_models_section">Models</string>
+    <string name="novel_chapters_section">Chapters</string>
+    <string name="novel_chapter_title">Chapter title</string>
+    <string name="novel_draft">Draft</string>
+    <string name="novel_project_ghostwrite_running">A ghostwrite batch is still running for this project; finish or cancel it before deleting</string>
+
+    <!-- Debug / Developer / Log -->
+    <string name="debug_avatar_editor">Avatar editor</string>
+    <string name="debug_mermaid_mindmap_preview">Mermaid mind-map preview</string>
+    <string name="debug_council_room_entry">Council Room debug entry</string>
+    <string name="debug_launch_count_current">Current %1$d</string>
+    <string name="debug_logs_entry">Logs entry</string>
+    <string name="debug_logs_entry_desc">Network request logs and generation records appear on the logs page.</string>
+    <string name="developer_logs_empty">No logs yet</string>
+    <string name="developer_logs_empty_desc">Generation-type AI logs appear here.</string>
+    <string name="developer_log_message_count">%1$d messages</string>
+    <string name="log_page_network_requests">Network requests</string>
+    <string name="log_page_requests_count">Requests · %1$d</string>
+
+    <!-- Sub-agent status -->
+    <string name="chat_message_subagent_status_followup_queued">Follow-up queued</string>
+    <string name="chat_message_subagent_status_turn_accepted">Turn %1$d accepted</string>
+    <string name="chat_message_subagent_status_request_accepted">Request accepted</string>
+    <string name="chat_message_subagent_status_followup_delivered">Follow-up delivered</string>
+    <string name="chat_message_subagent_turn_prefix">Turn %1$d </string>
+
+    <!-- MiniApp -->
+    <string name="miniapp_confirm_open_url_title">Allow opening external links?</string>
+    <string name="miniapp_confirm_open_url_message">“%1$s” wants to open:\n%2$s</string>
+    <string name="miniapp_confirm_open_url_truncated_note">\n\nThis link is long; some content was omitted.</string>
+    <string name="miniapp_confirm_system_title">Allow system capabilities?</string>
+    <string name="miniapp_confirm_system_message">“%1$s” wants to use the %2$s system capability (%3$s).</string>
+    <string name="miniapp_system_interaction_title">System interaction</string>
+    <string name="miniapp_system_interaction_description">Allow mini apps with declared permissions to use vibration, device, screen, speech, share, and external links; QR codes are also controlled by this switch</string>
+    <string name="miniapp_runner_load_failed">Failed to load mini app</string>
+    <string name="miniapp_send_disabled_by_policy">“Write and send” is disabled by policy</string>
+
+    <!-- Session home -->
+    <string name="session_home_open_conversation_failed">Unable to open the conversation right now. Try again later.</string>
+    <string name="session_home_conversation_missing">This conversation no longer exists.</string>
+    <string name="session_home_message_count">%1$s messages</string>
+
+    <!-- Board -->
+    <string name="deep_read_template_custom_empty">No custom templates yet</string>
+    <string name="deep_read_template_custom_empty_hint">Created templates will appear here</string>
+    <string name="board_pull_to_refresh">Pull to refresh</string>
+    <string name="board_custom_sources_empty">No custom sources yet</string>
+
+    <!-- Shortcuts / Council -->
+    <string name="shortcut_new_chat">New chat</string>
+    <string name="council_room_topic_label">Topic</string>
+
+    <!-- Chat / sync / reminder errors that reach UI -->
+    <string name="chat_error_stop_before_edit">Stop generation before editing messages</string>
+    <string name="chat_error_stop_before_delete">Stop generation before deleting messages</string>
+    <string name="chat_error_switch_provider_to_resume">Switch back to the original provider to resume, or regenerate.</string>
+    <string name="chat_error_cancel_not_confirmed">Cancellation of the previous response is not confirmed yet; regenerate later.</string>
+    <string name="backup_google_auth_result_empty">Google authorization result was empty</string>
+    <string name="backup_google_drive_no_snapshot">No synced snapshot in Google Drive yet</string>
+    <string name="backup_google_auth_missing_confirmation">Google authorization missing confirmation UI</string>
+    <string name="backup_google_drive_token_empty">Google Drive access token empty; re-authorize</string>
+    <string name="backup_google_drive_oauth_mismatch">This APK’s Google Drive OAuth client is unregistered or the signing certificate does not match. Check the Android OAuth client and SHA-1 for %1$s in Google API Console.</string>
+    <string name="backup_google_account_fallback">Google account</string>
+    <string name="backup_webdav_url_missing">WebDAV server URL not configured</string>
+    <string name="backup_webdav_credentials_missing">WebDAV credentials not configured</string>
+    <string name="backup_webdav_digest_mismatch">Snapshot digest mismatch; restore rejected</string>
+    <string name="reminder_open_chat_prompt">Reminder: %1$s\n%2$s</string>
+
+    <!-- Model council role display names -->
+    <string name="model_council_role_supporter">Supporter</string>
+    <string name="model_council_role_opponent">Opponent</string>
+    <string name="model_council_role_judge">Judge</string>
+    <string name="model_council_role_product">Product</string>
+    <string name="model_council_role_marketing">Marketing</string>
+    <string name="model_council_role_pr">PR</string>
+    <string name="model_council_role_engineering">Engineering</string>
+    <string name="model_council_role_ux">UX</string>
+    <string name="model_council_role_risk">Risk</string>
+
+    <!-- NewsNow preset display names (persisted English defaults) -->
+    <string name="board_newsnow_preset_zhihu">Zhihu Hot</string>
+    <string name="board_newsnow_preset_weibo">Weibo Hot Search</string>
+    <string name="board_newsnow_preset_douyin">Douyin Hot Search</string>
+    <string name="board_newsnow_preset_coolapk">Coolapk</string>
+    <string name="board_newsnow_preset_bilibili">Bilibili Hot Search</string>
+    <string name="board_newsnow_preset_v2ex">V2EX Share</string>
+    <string name="board_newsnow_preset_github">GitHub Trending</string>
+    <string name="board_newsnow_preset_36kr">36Kr Flash</string>
+    <string name="board_newsnow_preset_hupu">Hupu Street</string>
+    <string name="board_newsnow_preset_xueqiu">Xueqiu Hot Stocks</string>
+    <string name="board_newsnow_preset_wallstreet">Wallstreetcn Hot</string>
+    <string name="board_newsnow_preset_cls">CLS Telegraph</string>
+
+    <!-- Antigravity / Grok OAuth library errors (app-layer wrappers may also use these) -->
+    <string name="antigravity_oauth_stale_session">Antigravity OAuth session changed; discarded stale response. Please retry.</string>
+    <string name="antigravity_oauth_client_unconfigured">This build has no Antigravity OAuth client configured.</string>
+    <string name="antigravity_oauth_auth_timeout">Antigravity authorization timed out. Please retry.</string>
+    <string name="antigravity_oauth_auth_failed">Antigravity authorization failed: %1$s %2$s</string>
+    <string name="antigravity_oauth_state_mismatch">Antigravity OAuth state mismatch. Please retry.</string>
+    <string name="antigravity_oauth_not_signed_in">Not signed in to Antigravity. Please sign in first.</string>
+    <string name="antigravity_oauth_token_missing">Antigravity OAuth token missing. Please sign in again.</string>
+    <string name="antigravity_oauth_refresh_missing">No Antigravity refresh_token. Please sign in again.</string>
+    <string name="antigravity_oauth_refresh_failed">Antigravity OAuth refresh failed: HTTP %1$d</string>
+    <string name="antigravity_oauth_not_signed_in_settings">Not signed in to Antigravity. Please sign in in Settings first.</string>
+    <string name="antigravity_oauth_onboarding_incomplete">Antigravity onboarding is not finished. Please retry later.</string>
+    <string name="antigravity_oauth_not_signed_in_onboard">Not signed in to Antigravity; cannot onboard.</string>
+    <string name="antigravity_oauth_onboard_missing_project">onboardUser did not return cloudaicompanionProject.</string>
+    <string name="antigravity_oauth_onboard_lro_error">onboardUser LRO error: %1$s</string>
+    <string name="antigravity_oauth_onboard_lro_timeout">onboardUser LRO polling timed out. Please retry later.</string>
+    <string name="antigravity_oauth_model_request_failed">Antigravity model request failed: HTTP %1$d</string>
+    <string name="antigravity_oauth_request_failed">%1$s failed: HTTP %2$d</string>
+    <string name="antigravity_oauth_token_exchange_failed">Antigravity OAuth token exchange failed: HTTP %1$d</string>
+    <string name="antigravity_oauth_missing_access_token">Antigravity OAuth response missing access_token</string>
+    <string name="grok_oauth_stale_session">Grok OAuth session changed; discarded stale response. Please retry.</string>
+    <string name="grok_oauth_auth_timeout">Grok authorization timed out. Please retry.</string>
+    <string name="grok_oauth_auth_failed">Grok authorization failed: %1$s %2$s</string>
+    <string name="grok_oauth_state_mismatch">Grok OAuth state mismatch. Please retry.</string>
+    <string name="grok_oauth_not_signed_in">Not signed in to Grok. Please sign in first.</string>
+    <string name="grok_oauth_token_missing">Grok OAuth token missing. Please sign in again.</string>
+    <string name="grok_oauth_refresh_missing">No Grok refresh_token. Please sign in again.</string>
+    <string name="grok_oauth_refresh_failed">Grok OAuth refresh failed: HTTP %1$d</string>
+    <string name="grok_oauth_model_request_failed">Grok model request failed: HTTP %1$d</string>
+    <string name="grok_oauth_token_exchange_failed">Grok OAuth token exchange failed: HTTP %1$d</string>
+    <string name="grok_oauth_missing_access_token">Grok OAuth response missing access_token</string>
+</resources>

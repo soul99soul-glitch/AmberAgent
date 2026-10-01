@@ -118,11 +118,11 @@ private fun UnifiedLogList(logs: List<LogEntry>, modifier: Modifier = Modifier) 
         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
     ) {
         item {
-            SectionLabel("网络请求")
+            SectionLabel(stringResource(R.string.log_page_network_requests))
             NetworkLoggingToggle()
         }
         item {
-            SectionLabel("请求 · ${sortedLogs.size}")
+            SectionLabel(stringResource(R.string.log_page_requests_count, sortedLogs.size))
         }
         items(sortedLogs, key = { it.id }, contentType = { it.javaClass.simpleName }) { log ->
             when (log) {

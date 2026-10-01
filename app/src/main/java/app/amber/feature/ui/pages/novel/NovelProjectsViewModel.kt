@@ -143,7 +143,9 @@ class NovelProjectsViewModel(
                 withContext(Dispatchers.IO) {
                     val directory = workspaceRepository.projectDirectory(projectId)
                     if (NovelWorkspaceGhostwriteJobs.listActive(directory).isNotEmpty()) {
-                        throw NovelWorkspaceIoError("当前项目仍有代笔批次运行，请先让批次完成或取消后再删除")
+                        throw NovelWorkspaceIoError(
+                            context.getString(R.string.novel_project_ghostwrite_running),
+                        )
                     }
                     // Also remove the legacy original, or the first-open migration would
                     // resurrect the deleted book from its untouched legacy copy. Remove it

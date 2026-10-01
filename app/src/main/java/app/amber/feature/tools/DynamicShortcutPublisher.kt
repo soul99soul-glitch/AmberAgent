@@ -74,8 +74,8 @@ object DynamicShortcutPublisher {
 
     internal fun newChatShortcut(context: Context): ShortcutInfoCompat =
         ShortcutInfoCompat.Builder(context, "dynamic_new_chat")
-            .setShortLabel("新建会话")
-            .setLongLabel("新建会话")
+            .setShortLabel(context.getString(R.string.shortcut_new_chat))
+            .setLongLabel(context.getString(R.string.shortcut_new_chat))
             .setIntent(baseIntent(context, KIND_NEW_CHAT))
             .build()
 

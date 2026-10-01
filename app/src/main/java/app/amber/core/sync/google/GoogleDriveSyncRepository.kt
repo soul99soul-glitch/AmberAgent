@@ -22,6 +22,7 @@ import app.amber.core.sync.core.SYNC_ARCHIVE_EXTENSION
 import java.io.File
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
+import app.amber.agent.R
 
 class GoogleDriveSyncRepository(
     private val context: Context,
@@ -45,7 +46,7 @@ class GoogleDriveSyncRepository(
     suspend fun restoreAuthorizedSession(): GoogleDriveAuthorizationOutcome = authorizeDrive()
 
     fun completeAuthorization(intent: Intent?): GoogleDriveAuthSession {
-        requireNotNull(intent) { "Google 授权结果为空" }
+        requireNotNull(intent) { context.getString(R.string.backup_google_auth_result_empty) }
         val result = runCatching {
             authorizationClient.getAuthorizationResultFromIntent(intent)
         }.getOrElse { error ->
@@ -90,7 +91,7 @@ class GoogleDriveSyncRepository(
 
     suspend fun downloadLatest(session: GoogleDriveAuthSession): GoogleDriveDownloadResult = withContext(Dispatchers.IO) {
         val file = driveClient.findLatest(session.accessToken)
-            ?: error("Google Drive 云端还没有同步快照")
+            ?: error(context.getString(R.string.backup_google_drive_no_snapshot))
         val archiveFile = createTempArchiveFile("google-download")
         try {
             driveClient.downloadToFile(session.accessToken, file.id, archiveFile)
@@ -179,7 +180,7 @@ class GoogleDriveSyncRepository(
     private fun AuthorizationResult.toAuthorizationOutcome(): GoogleDriveAuthorizationOutcome {
         if (hasResolution()) {
             return GoogleDriveAuthorizationOutcome.ResolutionRequired(
-                pendingIntent = requireNotNull(pendingIntent) { "Google 授权缺少确认窗口" }
+                pendingIntent = requireNotNull(pendingIntent) { context.getString(R.string.backup_google_auth_missing_confirmation) }
             )
         }
         return GoogleDriveAuthorizationOutcome.Authorized(toSession())
@@ -188,7 +189,7 @@ class GoogleDriveSyncRepository(
     private fun AuthorizationResult.toSession(): GoogleDriveAuthSession {
         val account = toGoogleSignInAccount()
         val token = accessToken.orEmpty()
-        require(token.isNotBlank()) { "Google Drive access token 为空，请重新授权" }
+        require(token.isNotBlank()) { context.getString(R.string.backup_google_drive_token_empty) }
         return GoogleDriveAuthSession(
             accessToken = token,
             accountEmail = account?.email.orEmpty(),
@@ -201,8 +202,7 @@ class GoogleDriveSyncRepository(
     private fun Throwable.toDriveAuthorizationException(): Throwable {
         if (!isUnregisteredOAuthClientError()) return this
         return IllegalStateException(
-            "当前 APK 的 Google Drive OAuth client 未注册或签名不匹配。" +
-                "请检查 Google API Console 中 ${context.packageName} 的 Android OAuth client 和 SHA-1。",
+            context.getString(R.string.backup_google_drive_oauth_mismatch, context.packageName),
             this,
         )
     }
@@ -251,7 +251,7 @@ data class GoogleDriveAuthSession(
     val grantedScopes: List<String>,
 ) {
     val label: String
-        get() = accountEmail.ifBlank { displayName.ifBlank { "Google 账号" } }
+        get() = accountEmail.ifBlank { displayName.ifBlank { "Google account" } }
 }
 
 data class GoogleDriveUploadResult(
