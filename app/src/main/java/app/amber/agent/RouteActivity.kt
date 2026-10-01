@@ -28,7 +28,6 @@ import androidx.compose.animation.fadeIn
 import androidx.navigation3.ui.LocalNavAnimatedContentScope
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.core.CubicBezierEasing
-import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
@@ -186,23 +185,14 @@ private val RouteTransitionSpec = tween<IntOffset>(
     durationMillis = ROUTE_TRANSITION_DURATION_MILLIS,
     easing = RouteTransitionEasing,
 )
-private val PredictiveRouteTransitionSpec = tween<IntOffset>(
-    durationMillis = ROUTE_TRANSITION_DURATION_MILLIS,
-    easing = LinearEasing,
-)
 
 internal fun <S> AnimatedContentTransitionScope<S>.routePushTransition(): ContentTransform =
     slideInHorizontally(animationSpec = RouteTransitionSpec) { it } togetherWith
         slideOutHorizontally(animationSpec = RouteTransitionSpec) { -it }
 
-internal fun <S> AnimatedContentTransitionScope<S>.routePopTransition(
-    predictive: Boolean = false,
-    chat: Boolean = false,
-): ContentTransform {
-    val animationSpec = if (predictive && !chat) PredictiveRouteTransitionSpec else RouteTransitionSpec
-    return slideInHorizontally(animationSpec = animationSpec) { -it } togetherWith
-        slideOutHorizontally(animationSpec = animationSpec) { it }
-}
+internal fun <S> AnimatedContentTransitionScope<S>.routePopTransition(): ContentTransform =
+    slideInHorizontally(animationSpec = RouteTransitionSpec) { -it } togetherWith
+        slideOutHorizontally(animationSpec = RouteTransitionSpec) { it }
 
 class RouteActivity : ComponentActivity() {
     private val highlighter by inject<Highlighter>()
@@ -684,15 +674,9 @@ class RouteActivity : ComponentActivity() {
                             else routePushTransition()
                         },
                         popTransitionSpec = { routePopTransition() },
-                        predictivePopTransitionSpec = { routePopTransition(predictive = true) },
+                        predictivePopTransitionSpec = { routePopTransition() },
                         entryProvider = entryProvider {
-                            entry<Screen.Chat>(
-                                // System back from chat uses the same easing and duration as
-                                // opening it, including the predictive gesture completion.
-                                metadata = NavDisplay.predictivePopTransitionSpec {
-                                    routePopTransition(predictive = true, chat = true)
-                                },
-                            ) { key ->
+                            entry<Screen.Chat> { key ->
                                 ChatPage(
                                     enterTransition = LocalNavAnimatedContentScope.current.transition,
                                     id = Uuid.parse(key.id),
