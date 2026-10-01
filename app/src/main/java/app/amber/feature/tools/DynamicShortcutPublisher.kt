@@ -5,6 +5,7 @@ import android.content.Intent
 import android.net.Uri
 import androidx.core.content.pm.ShortcutInfoCompat
 import androidx.core.content.pm.ShortcutManagerCompat
+import app.amber.agent.R
 import app.amber.agent.RouteActivity
 import app.amber.core.model.QuickMessage
 import app.amber.core.model.Conversation
