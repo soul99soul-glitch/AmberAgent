@@ -446,7 +446,7 @@ private fun HotListTab(
                         )
                         Spacer(Modifier.width(7.dp))
                         Text(
-                            "下拉刷新",
+                            stringResource(R.string.board_pull_to_refresh),
                             style = LocalAmberType.current.meta.copy(fontSize = 11.sp),
                             color = LocalAmberTokens.current.ink2,
                         )

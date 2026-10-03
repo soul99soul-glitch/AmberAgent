@@ -143,7 +143,7 @@ fun HotListSourceSettings(
         ) {
             if (customSources.isEmpty()) {
                 Text(
-                    "还没有自定义来源",
+                    stringResource(R.string.board_custom_sources_empty),
                     Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 18.dp),
                     style = LocalAmberType.current.secondary,
                     color = tokens.ink3,

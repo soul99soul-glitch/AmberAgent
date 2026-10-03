@@ -232,17 +232,17 @@ object ModelCouncilRolePresets {
     val coreSeats = listOf(
         ModelCouncilRolePreset(
             id = "supporter",
-            name = "支持者",
+            name = "Supporter",
             prompt = "Review the proposal from a supportive position. Focus on feasibility, value, and the best implementation path while acknowledging necessary assumptions.",
         ),
         ModelCouncilRolePreset(
             id = "opponent",
-            name = "反对者",
+            name = "Opponent",
             prompt = "Review the proposal from a skeptical position. Look for risks, counterexamples, costs, failure modes, and hidden assumptions.",
         ),
         ModelCouncilRolePreset(
             id = "judge",
-            name = "裁判",
+            name = "Judge",
             prompt = "Act as the judge: synthesize the available evidence, state which conclusions are credible or still need validation, and give a final recommendation.",
         ),
     )
@@ -250,32 +250,32 @@ object ModelCouncilRolePresets {
     val lensPresets = listOf(
         ModelCouncilRolePreset(
             id = "product",
-            name = "产品",
+            name = "Product",
             prompt = "Review from a product perspective. Focus on user value, problem framing, feature trade-offs, and the reasoning behind product decisions.",
         ),
         ModelCouncilRolePreset(
             id = "marketing",
-            name = "营销",
+            name = "Marketing",
             prompt = "Review from a marketing perspective. Focus on channel choice, content strategy, growth levers, acquisition cost, and reach efficiency.",
         ),
         ModelCouncilRolePreset(
             id = "pr",
-            name = "公关",
+            name = "PR",
             prompt = "Review from a public-relations perspective. Focus on public sentiment, brand narrative, crisis response, media relationships, and long-term reputation.",
         ),
         ModelCouncilRolePreset(
             id = "engineering",
-            name = "工程",
+            name = "Engineering",
             prompt = "Review from an engineering perspective. Focus on architectural complexity, implementation cost, test coverage, maintenance burden, and rollback safety.",
         ),
         ModelCouncilRolePreset(
             id = "ux",
-            name = "用户体验",
+            name = "UX",
             prompt = "Review from a user-experience perspective. Focus on flow, interaction details, emotional response, ease of use, and visual consistency.",
         ),
         ModelCouncilRolePreset(
             id = "risk",
-            name = "风险",
+            name = "Risk",
             prompt = "Review from a risk perspective. Focus on privacy, security, permission boundaries, data corruption, misuse, and compliance limits.",
         ),
     )

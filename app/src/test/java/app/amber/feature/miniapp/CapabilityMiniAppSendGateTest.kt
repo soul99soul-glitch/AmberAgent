@@ -13,6 +13,12 @@ import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
+import android.app.Application
+import android.content.Context
+import androidx.test.core.app.ApplicationProvider
 import java.io.File
 
 /**
@@ -26,6 +32,8 @@ import java.io.File
  * - policy AUTO + high-risk auto-approval → allowed unattended.
  */
 @OptIn(ExperimentalCoroutinesApi::class)
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [34], application = Application::class)
 class CapabilityMiniAppSendGateTest {
     @get:Rule
     val tempFolder = TemporaryFolder()
@@ -39,6 +47,7 @@ class CapabilityMiniAppSendGateTest {
         permissionStore: CapabilityPermissionStore,
         highRiskAuto: Boolean,
     ) = CapabilityMiniAppSendGate(
+        context = ApplicationProvider.getApplicationContext<Context>(),
         capabilityFlags = flags,
         permissionStore = permissionStore,
         highRiskAutoApproved = { highRiskAuto },

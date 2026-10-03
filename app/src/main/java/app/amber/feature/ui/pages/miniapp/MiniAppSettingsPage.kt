@@ -292,8 +292,8 @@ private fun MiniAppCapabilityRows(
             )
             Hairline()
             MiniAppSettingRow(
-                title = "系统交互",
-                description = "允许已声明权限的小应用调用振动、设备、屏幕、语音、分享与外链；二维码也受此开关控制",
+                title = androidx.compose.ui.res.stringResource(R.string.miniapp_system_interaction_title),
+                description = androidx.compose.ui.res.stringResource(R.string.miniapp_system_interaction_description),
                 checked = miniApp.systemCapabilitiesEnabled,
                 enabled = enabled,
                 onCheckedChange = { value -> updateMiniApp { it.copy(systemCapabilitiesEnabled = value) } },

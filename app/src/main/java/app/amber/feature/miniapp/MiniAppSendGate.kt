@@ -36,6 +36,7 @@ interface MiniAppSendGate {
  *   High-risk floor (P2-01 rule).
  */
 class CapabilityMiniAppSendGate(
+    private val context: android.content.Context,
     private val capabilityFlags: CapabilityFlags,
     private val permissionStore: CapabilityPermissionStore,
     private val highRiskAutoApproved: () -> Boolean,
@@ -45,7 +46,10 @@ class CapabilityMiniAppSendGate(
         if (!capabilityPermissionsOn) return MiniAppSendDecision.RequireConfirm
         return when (permissionStore.policies()[ToolCapability.MINIAPP_SEND]) {
             CapabilityPolicy.DISABLED ->
-                MiniAppSendDecision.Denied("miniapp.send_disabled", "「写入并发送」能力已被策略禁用")
+                MiniAppSendDecision.Denied(
+                    "miniapp.send_disabled",
+                    context.getString(app.amber.agent.R.string.miniapp_send_disabled_by_policy),
+                )
             CapabilityPolicy.AUTO ->
                 if (highRiskAutoApproved()) {
                     MiniAppSendDecision.AllowAuto

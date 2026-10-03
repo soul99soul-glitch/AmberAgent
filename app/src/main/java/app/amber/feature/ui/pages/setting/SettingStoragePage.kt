@@ -75,7 +75,8 @@ fun SettingStoragePage(
     val cleanupResult by vm.cleanupResult.collectAsState()
     val days by vm.days.collectAsState()
     val cleaning by vm.cleaning.collectAsState()
-    val appLocale = LocalContext.current.appLocale()
+    val context = LocalContext.current
+    val appLocale = context.appLocale()
     val exchangeScope = rememberCoroutineScope()
     var exchangeBusy by remember { mutableStateOf(false) }
     var exchangeMessage by remember { mutableStateOf<String?>(null) }
@@ -91,11 +92,18 @@ fun SettingStoragePage(
             try {
                 runCatching { exchangeHandler.exportAllToUri(uri) }
                     .onSuccess { result ->
-                        exchangeMessage = "已导出 ${result.conversationCount} 个会话（${formatBytes(result.byteCount.toLong(), appLocale)}）"
+                        exchangeMessage = context.getString(
+                            R.string.setting_storage_exchange_exported,
+                            result.conversationCount,
+                            formatBytes(result.byteCount.toLong(), appLocale),
+                        )
                     }
                     .onFailure { error ->
                         if (error is CancellationException) throw error
-                        exchangeMessage = "导出失败：${error.message.orEmpty()}"
+                        exchangeMessage = context.getString(
+                            R.string.setting_storage_exchange_export_failed,
+                            error.message.orEmpty(),
+                        )
                     }
             } finally {
                 exchangeBusy = false
@@ -116,7 +124,10 @@ fun SettingStoragePage(
                     }
                     .onFailure { error ->
                         if (error is CancellationException) throw error
-                        exchangeMessage = "无法读取交换文件：${error.message.orEmpty()}"
+                        exchangeMessage = context.getString(
+                            R.string.setting_storage_exchange_read_failed,
+                            error.message.orEmpty(),
+                        )
                     }
             } finally {
                 exchangeBusy = false
@@ -232,22 +243,37 @@ fun SettingStoragePage(
                         runCatching { exchangeHandler.importPrepared(pending) }
                             .onSuccess { result ->
                                 importSucceeded = true
-                                exchangeMessage = (
-                                    "已导入 ${result.importedCount} 个会话" +
-                                        if (result.overwrittenCount > 0) {
-                                            "，覆盖 ${result.overwrittenCount} 个同 ID 会话"
-                                        } else {
-                                            ""
-                                        }
-                                    ) + if (result.attachmentReferenceCount > 0) {
-                                        "；保留 ${result.attachmentReferenceCount} 个附件引用（未复制文件）"
-                                    } else {
-                                        ""
+                                exchangeMessage = buildString {
+                                    append(
+                                        context.getString(
+                                            R.string.setting_storage_exchange_imported,
+                                            result.importedCount,
+                                        ),
+                                    )
+                                    if (result.overwrittenCount > 0) {
+                                        append(
+                                            context.getString(
+                                                R.string.setting_storage_exchange_overwritten_suffix,
+                                                result.overwrittenCount,
+                                            ),
+                                        )
                                     }
+                                    if (result.attachmentReferenceCount > 0) {
+                                        append(
+                                            context.getString(
+                                                R.string.setting_storage_exchange_attachment_refs_suffix,
+                                                result.attachmentReferenceCount,
+                                            ),
+                                        )
+                                    }
+                                }
                             }
                             .onFailure { error ->
                                 if (error is CancellationException) throw error
-                                exchangeMessage = "导入失败：${error.message.orEmpty()}"
+                                exchangeMessage = context.getString(
+                                    R.string.setting_storage_exchange_import_failed,
+                                    error.message.orEmpty(),
+                                )
                             }
                     } finally {
                         exchangeBusy = false
@@ -266,10 +292,10 @@ private fun ConversationExchangeCard(
     onExport: () -> Unit,
     onImport: () -> Unit,
 ) {
-    SettingCardGroup(title = "会话交换") {
+    SettingCardGroup(title = stringResource(R.string.setting_storage_exchange_title)) {
         rawItem {
             Text(
-                "可与 iOS 交换普通会话；线程关系、禁用/受污染记忆模式暂不支持。本机附件不会随文件传输。",
+                stringResource(R.string.setting_storage_exchange_desc),
                 style = LocalAmberType.current.secondary,
                 color = LocalAmberTokens.current.ink3,
             )
@@ -291,14 +317,14 @@ private fun ConversationExchangeCard(
                         )
                         Spacer(Modifier.width(8.dp))
                     }
-                    Text("导出会话")
+                    Text(stringResource(R.string.setting_storage_exchange_export))
                 }
                 Button(
                     modifier = Modifier.weight(1f),
                     onClick = onImport,
                     enabled = !busy,
                 ) {
-                    Text("导入会话")
+                    Text(stringResource(R.string.setting_storage_exchange_import))
                 }
             }
         }
@@ -322,36 +348,55 @@ private fun ConversationExchangeImportDialog(
     onConfirm: () -> Unit,
 ) {
     val preview = pending.preview
+    val untitled = stringResource(R.string.setting_storage_exchange_untitled)
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("确认导入会话") },
+        title = { Text(stringResource(R.string.setting_storage_exchange_confirm_title)) },
         text = {
             Column(
                 modifier = Modifier.verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 Text(
-                    "将导入 ${preview.conversationCount} 个会话，其中新增 ${preview.newConversationCount} 个。",
+                    stringResource(
+                        R.string.setting_storage_exchange_confirm_summary,
+                        preview.conversationCount,
+                        preview.newConversationCount,
+                    ),
                     style = LocalAmberType.current.secondary,
                     color = LocalAmberTokens.current.ink3,
                 )
                 if (preview.conflicts.isNotEmpty()) {
                     Text(
-                        "以下 ${preview.conflicts.size} 个同 ID 会话会被覆盖：",
+                        stringResource(
+                            R.string.setting_storage_exchange_conflicts_header,
+                            preview.conflicts.size,
+                        ),
                         style = LocalAmberType.current.secondary,
                         color = LocalAmberTokens.current.ink,
                     )
                     preview.conflicts.take(5).forEach { conflict ->
+                        val title = conflict.incomingTitle.ifBlank { untitled }
+                        val current = if (conflict.existingTitle.isBlank()) {
+                            ""
+                        } else {
+                            stringResource(
+                                R.string.setting_storage_exchange_current_title,
+                                conflict.existingTitle,
+                            )
+                        }
                         Text(
-                            "· ${conflict.incomingTitle.ifBlank { "无标题" }}" +
-                                if (conflict.existingTitle.isBlank()) "" else "（当前：${conflict.existingTitle}）",
+                            "· $title$current",
                             style = LocalAmberType.current.meta,
                             color = LocalAmberTokens.current.ink3,
                         )
                     }
                     if (preview.conflicts.size > 5) {
                         Text(
-                            "还有 ${preview.conflicts.size - 5} 个会话未展开。",
+                            stringResource(
+                                R.string.setting_storage_exchange_conflicts_more,
+                                preview.conflicts.size - 5,
+                            ),
                             style = LocalAmberType.current.meta,
                             color = LocalAmberTokens.current.ink3,
                         )
@@ -359,13 +404,16 @@ private fun ConversationExchangeImportDialog(
                 }
                 if (preview.attachmentReferenceCount > 0) {
                     Text(
-                        "包含 ${preview.attachmentReferenceCount} 个附件引用，文件本身不会随交换文件复制。",
+                        stringResource(
+                            R.string.setting_storage_exchange_attachment_note,
+                            preview.attachmentReferenceCount,
+                        ),
                         style = LocalAmberType.current.meta,
                         color = LocalAmberTokens.current.ink3,
                     )
                 }
                 Text(
-                    "导入会停止正在生成的会话并刷新其持久化快照。",
+                    stringResource(R.string.setting_storage_exchange_import_side_effect),
                     style = LocalAmberType.current.meta,
                     color = LocalAmberTokens.current.ink3,
                 )
@@ -380,11 +428,19 @@ private fun ConversationExchangeImportDialog(
                     )
                     Spacer(Modifier.width(8.dp))
                 }
-                Text(if (busy) "导入中" else "确认导入")
+                Text(
+                    if (busy) {
+                        stringResource(R.string.setting_storage_exchange_importing)
+                    } else {
+                        stringResource(R.string.setting_storage_exchange_confirm_import)
+                    },
+                )
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss, enabled = !busy) { Text("取消") }
+            TextButton(onClick = onDismiss, enabled = !busy) {
+                Text(stringResource(R.string.cancel))
+            }
         },
     )
 }

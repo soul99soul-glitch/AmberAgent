@@ -1260,7 +1260,7 @@ class ChatService(
         val resumeCursor = resumeRunId?.let { responsesResumeStore?.load(it.value) }
         if (resumeCursor != null && resumeCursor.providerId != model.findProvider(settings.providers)?.id?.toString()) {
             addError(
-                IllegalStateException("请切回原 Provider 后继续恢复，或选择重新生成。"),
+                IllegalStateException(context.getString(R.string.chat_error_switch_provider_to_resume)),
                 conversationId,
                 title = context.getString(R.string.error_title_regenerate_message),
             )
@@ -2132,7 +2132,7 @@ class ChatService(
                     if (previousRun != null) {
                         check(checkNotNull(storedResponseStopCancel).cancelForRegeneration(
                             previousRun.runId, checkNotNull(runTerminalStore),
-                        )) { "原响应的取消尚未确认，请稍后再重新生成。" }
+                        )) { context.getString(R.string.chat_error_cancel_not_confirmed) }
                         runRecovery?.reconcileStartedEffects(previousRun.runId)
                         refreshOutcomeUnknown()
                     }

@@ -606,8 +606,12 @@ class MiniAppBridge(
             if (method == "openURL") {
                 val url = MiniAppOpenUrlValidator.validate(params.string("url"))
                 confirm(
-                    "允许打开外部链接？",
-                    "「${appProvider().title}」想打开：\n${externalUrlPreview(url.url)}",
+                    context.getString(R.string.miniapp_confirm_open_url_title),
+                    context.getString(
+                        R.string.miniapp_confirm_open_url_message,
+                        appProvider().title,
+                        externalUrlPreview(url.url),
+                    ),
                 ) { JsonNull }
                 requireUnchangedSystemApp(authorizedApp, permission)
                 if (repository.grantDecision(appId, permission.value) != MiniAppGrantDecision.ALLOW) {
@@ -644,8 +648,13 @@ class MiniAppBridge(
             null -> Unit
         }
         val allowed = confirmation.confirm(
-            "允许使用系统能力？",
-            "「${appAtRequest.title}」想使用 ${permission.value} 系统能力（$method）。",
+            context.getString(R.string.miniapp_confirm_system_title),
+            context.getString(
+                R.string.miniapp_confirm_system_message,
+                appAtRequest.title,
+                permission.value,
+                method,
+            ),
         )
         if (closed.get()) throw MiniAppBridgeException("runner_closed", "MiniApp runner is closed")
         val currentApp = requireUnchangedSystemApp(appAtRequest, permission)
@@ -683,7 +692,8 @@ class MiniAppBridge(
         val host = url.substring(hostStart, hostEnd)
         val displayedHost = if (host.length > 200) host.take(100) + "…" + host.takeLast(100) else host
         val tail = url.substring(hostEnd, minOf(url.length, hostEnd + 80))
-        return "${url.substringBefore("://")}://$displayedHost$tail…\n\n链接较长，已省略部分内容。"
+        return "${url.substringBefore("://")}://$displayedHost$tail…" +
+            context.getString(R.string.miniapp_confirm_open_url_truncated_note)
     }
 
     private fun MiniAppEntity.declaredPermissionList(): List<String> =

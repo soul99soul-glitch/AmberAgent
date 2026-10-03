@@ -385,7 +385,7 @@ class ChatVM(
         if (parts.isEmptyInputMessage()) return false
         // 生成中编辑冲突预检（与 ChatService.editMessage 的权威守卫共用同一策略；
         // 这里同步返回 false，避免清空用户已编辑的内容）。
-        val conflictReason = blockedReason(conversationJob.value != null, "请先停止生成再编辑消息")
+        val conflictReason = blockedReason(conversationJob.value != null, context.getString(R.string.chat_error_stop_before_edit))
         if (conflictReason != null) {
             chatService.addError(
                 IllegalStateException(conflictReason),
@@ -429,7 +429,7 @@ class ChatVM(
 
     fun showDeleteBlockedWhileGeneratingError() {
         chatService.addError(
-            error = IllegalStateException("请先停止生成再删除消息"),
+            error = IllegalStateException(context.getString(R.string.chat_error_stop_before_delete)),
             conversationId = _conversationId,
             title = context.getString(R.string.error_title_operation)
         )

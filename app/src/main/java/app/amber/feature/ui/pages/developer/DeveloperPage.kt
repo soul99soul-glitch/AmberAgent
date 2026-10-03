@@ -86,9 +86,9 @@ fun LoggingPaging(vm: DeveloperVM, modifier: Modifier = Modifier) {
                         verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
                         WorkspaceLeadingIcon(icon = Lucide.FileCode2)
-                        Text("暂无日志", style = type.sessionTitle, color = t.ink)
+                        Text(stringResource(R.string.developer_logs_empty), style = type.sessionTitle, color = t.ink)
                         Text(
-                            "Generation 类型的 AI 日志会显示在这里。",
+                            stringResource(R.string.developer_logs_empty_desc),
                             style = type.secondary,
                             color = t.ink3,
                         )
@@ -130,7 +130,7 @@ private fun GenerationLogCard(log: AILogging.Generation) {
                     color = t.ink,
                 )
                 Text(
-                    text = "${log.messages.size} 条消息",
+                    text = stringResource(R.string.developer_log_message_count, log.messages.size),
                     style = type.meta,
                     color = t.ink3,
                 )

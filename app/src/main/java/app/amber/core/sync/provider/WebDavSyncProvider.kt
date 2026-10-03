@@ -15,6 +15,7 @@ import app.amber.core.sync.core.SyncExportRequest
 import app.amber.core.sync.webdav.WebDavClient
 import app.amber.core.sync.webdav.WebDavResourceInfo
 import java.io.File
+import app.amber.agent.R
 
 private const val TAG = "WebDavSyncProvider"
 
@@ -47,8 +48,10 @@ class WebDavSyncProvider(
 
     private fun config(): WebDavConfig {
         val config = settingsStore.settingsFlow.value.webDavConfig
-        require(config.url.isNotBlank()) { "WebDAV 未配置服务器地址" }
-        require(config.username.isNotBlank() && config.password.isNotBlank()) { "WebDAV 未配置凭据" }
+        require(config.url.isNotBlank()) { context.getString(R.string.backup_webdav_url_missing) }
+        require(config.username.isNotBlank() && config.password.isNotBlank()) {
+            context.getString(R.string.backup_webdav_credentials_missing)
+        }
         return config
     }
 
@@ -119,7 +122,7 @@ class WebDavSyncProvider(
                 // OVERWRITE 语义：新快照已发布，删除同 device 旧快照。
                 plan.supersededSnapshotId?.let { superseded ->
                     runCatching { deleteSnapshot(superseded) }
-                        .onFailure { Log.w(TAG, "清理被覆盖的旧快照 $superseded 失败", it) }
+                        .onFailure { Log.w(TAG, "Failed to clean superseded snapshot $superseded", it) }
                 }
 
                 SyncSnapshot(
@@ -151,7 +154,7 @@ class WebDavSyncProvider(
             // 外层 content digest 校验。
             if (manifest.contentSha256.isNotBlank()) {
                 require(crypto.sha256(target) == manifest.contentSha256) {
-                    "快照内容校验失败（digest 不匹配），已拒绝恢复"
+                    context.getString(R.string.backup_webdav_digest_mismatch)
                 }
             }
             // 归档头部（manifest.json + payload.enc 加密头）校验。
@@ -179,7 +182,7 @@ class WebDavSyncProvider(
                 client(config()).get(resource.displayName).getOrThrow().decodeToString(),
             )
         }.getOrElse { error ->
-            Log.w(TAG, "跳过无法解析的 sidecar ${resource.displayName}: ${error.message}")
+            Log.w(TAG, "Skipping unparseable sidecar ${resource.displayName}: ${error.message}")
             return null
         }
         return SyncSnapshot(

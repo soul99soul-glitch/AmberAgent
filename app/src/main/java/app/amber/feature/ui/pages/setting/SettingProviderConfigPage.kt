@@ -329,9 +329,9 @@ private fun ProviderConsoleIdentity(
                 ProviderConfigStatusPill(
                     connected = connected,
                     text = when {
-                        !provider.enabled -> "未启用"
-                        connected -> "已连接"
-                        else -> "未连接"
+                        !provider.enabled -> stringResource(R.string.setting_provider_page_disabled)
+                        connected -> stringResource(R.string.setting_provider_page_connected)
+                        else -> stringResource(R.string.setting_provider_page_not_connected)
                     },
                 )
                 Text("·", style = type.meta, color = t.ink4)
@@ -698,11 +698,23 @@ private fun GrokOAuthConsole(
             if (current.id != provider.id || client.sessionGeneration(provider.id) != loginGeneration) return
             tokens = client.cached(provider.id) ?: return
             onCommit(current.copy(baseUrl = GROK_CLI_PROXY_BASE_URL, useResponseApi = false, chatCompletionsPath = "/chat/completions"))
-            toaster.show("已登录 Grok（${result.email ?: "账号"}）", type = ToastType.Success)
+            toaster.show(
+                context.getString(
+                    R.string.setting_provider_page_grok_oauth_signed_in_toast,
+                    result.email ?: context.getString(R.string.setting_provider_page_grok_oauth_account),
+                ),
+                type = ToastType.Success,
+            )
         } catch (error: CancellationException) {
             throw error
         } catch (e: Exception) {
-            toaster.show("Grok 登录失败：${e.message ?: e}", type = ToastType.Error)
+            toaster.show(
+                context.getString(
+                    R.string.setting_provider_page_grok_oauth_login_failed,
+                    (e.message ?: e).toString(),
+                ),
+                type = ToastType.Error,
+            )
         } finally {
             busy = false
         }
@@ -717,16 +729,23 @@ private fun GrokOAuthConsole(
     ProviderLabeledField("API Base URL") {
         ProviderTextField(value = GROK_CLI_PROXY_BASE_URL, onValueChange = {}, mono = true, readOnly = true)
     }
-    ProviderMonoNote(tokens?.let { "已登录 Grok${it.email?.let { email -> "：$email" } ?: ""}" } ?: "尚未登录 Grok")
+    ProviderMonoNote(
+        tokens?.let {
+            it.email?.let { email ->
+                stringResource(R.string.setting_provider_page_grok_oauth_signed_in_as, email)
+            } ?: stringResource(R.string.setting_provider_page_grok_oauth_signed_in)
+        } ?: stringResource(R.string.setting_provider_page_grok_oauth_not_signed_in),
+    )
     ProviderCommandButton(
-        text = if (tokens == null) "登录 Grok" else "重新登录 Grok",
+        text = if (tokens == null) stringResource(R.string.setting_provider_page_grok_oauth_login)
+        else stringResource(R.string.setting_provider_page_grok_oauth_relogin),
         accent = tokens == null,
         onClick = { scope.launch { login() } },
         modifier = Modifier.fillMaxWidth(),
     )
     if (tokens != null) {
         ProviderCommandButton(
-            text = "退出 Grok",
+            text = stringResource(R.string.setting_provider_page_grok_oauth_logout),
             onClick = {
                 client.logout(provider.id)
                 tokens = null
@@ -740,7 +759,7 @@ private fun GrokOAuthConsole(
                     ),
                 )
                 store.clearBackup(provider.id)
-                toaster.show("已退出 Grok", type = ToastType.Success)
+                toaster.show(context.getString(R.string.setting_provider_page_grok_oauth_signed_out), type = ToastType.Success)
             },
             modifier = Modifier.fillMaxWidth(),
         )

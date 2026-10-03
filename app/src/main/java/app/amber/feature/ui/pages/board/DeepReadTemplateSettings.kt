@@ -197,8 +197,8 @@ fun DeepReadTemplateSettingsRow(
         ) {
             if (customTemplates.isEmpty()) {
                 Column(Modifier.fillMaxWidth().padding(vertical = 16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("还没有自定义模板", style = LocalAmberType.current.secondary, color = tokens.ink2)
-                    Text("创建后会出现在这里", style = LocalAmberType.current.meta.copy(fontSize = 11.sp), color = tokens.ink3)
+                    Text(stringResource(R.string.deep_read_template_custom_empty), style = LocalAmberType.current.secondary, color = tokens.ink2)
+                    Text(stringResource(R.string.deep_read_template_custom_empty_hint), style = LocalAmberType.current.meta.copy(fontSize = 11.sp), color = tokens.ink3)
                 }
             } else {
                 Column {

@@ -14,18 +14,18 @@ object NewsNowPresets {
         """{"itemsPath":"items","titlePath":"title","urlPath":"url","heatPath":"extra.info"}"""
 
     val ALL: List<NewsNowPreset> = listOf(
-        NewsNowPreset("zhihu", "知乎热榜"),
-        NewsNowPreset("weibo", "微博热搜"),
-        NewsNowPreset("douyin", "抖音热搜"),
-        NewsNowPreset("coolapk", "酷安"),
-        NewsNowPreset("bilibili-hot-search", "B 站热搜"),
-        NewsNowPreset("v2ex-share", "V2EX 分享"),
-        NewsNowPreset("github-trending-today", "GitHub 趋势"),
-        NewsNowPreset("36kr-quick", "36 氪 快讯"),
-        NewsNowPreset("hupu-zhugandaoretie", "虎扑步行街"),
-        NewsNowPreset("xueqiu-hotstock", "雪球 热股"),
-        NewsNowPreset("wallstreetcn-hot", "华尔街见闻 热门"),
-        NewsNowPreset("cls-telegraph", "财联社 电报"),
+        NewsNowPreset("zhihu", "Zhihu Hot"),
+        NewsNowPreset("weibo", "Weibo Hot Search"),
+        NewsNowPreset("douyin", "Douyin Hot Search"),
+        NewsNowPreset("coolapk", "Coolapk"),
+        NewsNowPreset("bilibili-hot-search", "Bilibili Hot Search"),
+        NewsNowPreset("v2ex-share", "V2EX Share"),
+        NewsNowPreset("github-trending-today", "GitHub Trending"),
+        NewsNowPreset("36kr-quick", "36Kr Flash"),
+        NewsNowPreset("hupu-zhugandaoretie", "Hupu Street"),
+        NewsNowPreset("xueqiu-hotstock", "Xueqiu Hot Stocks"),
+        NewsNowPreset("wallstreetcn-hot", "Wallstreetcn Hot"),
+        NewsNowPreset("cls-telegraph", "CLS Telegraph"),
     )
 
     fun entityIdFor(preset: NewsNowPreset): String = "$ID_PREFIX${preset.id}"

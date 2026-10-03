@@ -262,32 +262,41 @@ internal data class SubAgentCardState(
         !isQueued && (isAccepted || isDelivered || effectiveStatus == SubAgentRunStatus.RUNNING)
 
     fun statusVerb(effectiveStatus: SubAgentRunStatus): String {
-        if (isQueued) return "补充已排队"
+        // English fallback for non-Compose callers; UI uses localizedStatusVerb().
+        if (isQueued) return "Follow-up queued"
         if (isAccepted) {
             return if (latestOperation == SubAgentCardOperation.FOLLOWUP) {
-                "第${turn}轮已接受"
+                "Turn $turn accepted"
             } else {
-                "请求已接受"
+                "Request accepted"
             }
         }
-        if (isDelivered) return "补充已送达"
-        val prefix = if (turn > 1) "第${turn}轮 " else ""
+        if (isDelivered) return "Follow-up delivered"
+        val prefix = if (turn > 1) "Turn $turn " else ""
         return prefix + when (effectiveStatus) {
-            SubAgentRunStatus.RUNNING -> "正在工作"
-            SubAgentRunStatus.COMPLETED -> "已完成"
-            SubAgentRunStatus.FAILED -> "失败"
-            SubAgentRunStatus.CANCELLED -> "已取消"
-            SubAgentRunStatus.TIMED_OUT -> "超时"
-            SubAgentRunStatus.APPROVAL_REQUIRED -> "等待审批"
-            SubAgentRunStatus.INTERRUPTED -> "已中断"
+            SubAgentRunStatus.RUNNING -> "Working"
+            SubAgentRunStatus.COMPLETED -> "Completed"
+            SubAgentRunStatus.FAILED -> "Failed"
+            SubAgentRunStatus.CANCELLED -> "Cancelled"
+            SubAgentRunStatus.TIMED_OUT -> "Timed out"
+            SubAgentRunStatus.APPROVAL_REQUIRED -> "Waiting for approval"
+            SubAgentRunStatus.INTERRUPTED -> "Interrupted"
         }
     }
 }
 
 @Composable
 private fun SubAgentCardState.localizedStatusVerb(effectiveStatus: SubAgentRunStatus): String {
-    if (isQueued || isAccepted || isDelivered) return statusVerb(effectiveStatus)
-    val prefix = if (turn > 1) "第${turn}轮 " else ""
+    if (isQueued) return stringResource(R.string.chat_message_subagent_status_followup_queued)
+    if (isAccepted) {
+        return if (latestOperation == SubAgentCardOperation.FOLLOWUP) {
+            stringResource(R.string.chat_message_subagent_status_turn_accepted, turn)
+        } else {
+            stringResource(R.string.chat_message_subagent_status_request_accepted)
+        }
+    }
+    if (isDelivered) return stringResource(R.string.chat_message_subagent_status_followup_delivered)
+    val prefix = if (turn > 1) stringResource(R.string.chat_message_subagent_turn_prefix, turn) else ""
     val localizedStatus = when (effectiveStatus) {
         SubAgentRunStatus.RUNNING -> stringResource(R.string.chat_message_subagent_status_working)
         SubAgentRunStatus.COMPLETED -> stringResource(R.string.chat_message_subagent_status_completed)
