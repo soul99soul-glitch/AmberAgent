@@ -142,7 +142,7 @@ import kotlinx.serialization.json.JsonPrimitive
         ThemePackageEntity::class,
         LiveCardEntity::class,
     ],
-    version = 19
+    version = 20
 )
 @TypeConverters(TokenUsageConverter::class)
 abstract class AppDatabase : RoomDatabase() {
@@ -608,6 +608,16 @@ abstract class AppDatabase : RoomDatabase() {
                 db.execSQL(
                     "CREATE INDEX IF NOT EXISTS `index_live_card_created_at` " +
                         "ON `live_card` (`created_at`)"
+                )
+            }
+        }
+
+        /** Reinforcement counter for lifecycle promotion (use_count). */
+        val MIGRATION_19_20 = object : Migration(19, 20) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "ALTER TABLE `memoryentity` ADD COLUMN `use_count` " +
+                        "INTEGER NOT NULL DEFAULT 0"
                 )
             }
         }

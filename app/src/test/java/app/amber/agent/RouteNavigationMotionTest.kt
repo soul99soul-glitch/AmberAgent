@@ -33,7 +33,6 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 import java.util.concurrent.ConcurrentHashMap
-import kotlin.math.abs
 
 @RunWith(RobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
@@ -77,7 +76,7 @@ class RouteNavigationMotionTest {
         val positions = ConcurrentHashMap<Int, Rect>()
         compose.setContent {
             CompositionLocalProvider(LocalDensity provides Density(1f)) {
-                RouteMotionFixture(target.value, pop = true, predictive = false) { page, bounds ->
+                RouteMotionFixture(target.value, pop = true) { page, bounds ->
                     positions[page] = bounds
                 }
             }
@@ -98,13 +97,13 @@ class RouteNavigationMotionTest {
     }
 
     @Test
-    fun predictivePopUsesLinearActualTransformAtTheGestureMidpoint() {
+    fun returnCoversMostOfTheDistanceByHalfDuration() {
         compose.mainClock.autoAdvance = false
         val target = mutableStateOf(1)
         val positions = ConcurrentHashMap<Int, Rect>()
         compose.setContent {
             CompositionLocalProvider(LocalDensity provides Density(1f)) {
-                RouteMotionFixture(target.value, pop = true, predictive = true) { page, bounds ->
+                RouteMotionFixture(target.value, pop = true) { page, bounds ->
                     positions[page] = bounds
                 }
             }
@@ -115,22 +114,19 @@ class RouteNavigationMotionTest {
         val firstFrame = advanceOneFrame()
         compose.waitForIdle()
         awaitPosition(positions, 0, firstFrame)
-        var returningAtMidpoint = positions.requirePage(0)
-        repeat(20) {
-            if (abs(returningAtMidpoint.left + 160f) <= 24f) return@repeat
-            advanceOneFrame()
-            returningAtMidpoint = positions.requirePage(0)
-        }
+        compose.mainClock.advanceTimeBy(160)
+        val returningAtMidpoint = positions.requirePage(0)
         val leavingAtMidpoint = positions.requirePage(1)
-        assertEquals(-160f, returningAtMidpoint.left, 24f)
-        assertEquals(160f, leavingAtMidpoint.left, 24f)
+        assertTrue("return must cover over 70% of the distance by half duration", returningAtMidpoint.left > -96f)
+        assertTrue("return must still approach its final position", returningAtMidpoint.left < 0f)
+        assertEquals(320f + returningAtMidpoint.left, leavingAtMidpoint.left, 1f)
         assertEquals(320f, returningAtMidpoint.width, 1f)
         assertEquals(320f, leavingAtMidpoint.width, 1f)
     }
 
     @Test
     @Config(qualifiers = "w320dp-h500dp")
-    fun chatPredictiveReturnMatchesForwardMotionAtTheSameElapsedTime() {
+    fun returnMatchesForwardMotionAtTheSameElapsedTime() {
         compose.mainClock.autoAdvance = false
         val target = mutableStateOf(0)
         val pushPositions = ConcurrentHashMap<Int, Rect>()
@@ -141,7 +137,7 @@ class RouteNavigationMotionTest {
                     RouteMotionFixture(target.value, pop = false) { page, bounds ->
                         pushPositions[page] = bounds
                     }
-                    RouteMotionFixture(1 - target.value, pop = true, predictive = true, chat = true) { page, bounds ->
+                    RouteMotionFixture(1 - target.value, pop = true) { page, bounds ->
                         popPositions[page] = bounds
                     }
                 }
@@ -194,8 +190,6 @@ class RouteNavigationMotionTest {
 private fun RouteMotionFixture(
     target: Int,
     pop: Boolean,
-    predictive: Boolean = false,
-    chat: Boolean = false,
     onPositioned: (Int, Rect) -> Unit,
 ) {
     Box(
@@ -208,7 +202,7 @@ private fun RouteMotionFixture(
             targetState = target,
             modifier = Modifier.fillMaxSize(),
             transitionSpec = {
-                if (pop) routePopTransition(predictive = predictive, chat = chat) else routePushTransition()
+                if (pop) routePopTransition() else routePushTransition()
             },
             label = "route-motion-test",
         ) { page ->

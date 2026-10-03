@@ -13,15 +13,19 @@ import app.amber.agent.data.db.entity.MemoryEventEntity
 import app.amber.core.memory.dream.MemoryDreamApplier
 import app.amber.core.memory.dream.MemoryMergeSuggestion
 import app.amber.core.memory.dream.MemoryDreamPlan
+import app.amber.core.memory.dream.MemoryProfileSuggestion
 import app.amber.core.memory.dream.MemorySupersedeSuggestion
 import app.amber.core.memory.dream.MemoryTopicSuggestion
 import app.amber.core.memory.model.MemoryEventType
 import app.amber.core.memory.model.MemoryKind
 import app.amber.core.memory.model.MemoryScope
+import app.amber.core.memory.store.MemoryProfileStore
 import app.amber.core.memory.store.MemoryRepository
 import app.amber.core.memory.telemetry.MemoryEventLogger
+import java.io.File
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -234,6 +238,95 @@ class MemoryDreamApplierTest {
         assertTrue(records.first { it.id == 1 }.archived)
     }
 
+    @Test
+    fun userProfileSuggestionIsPersistedWithDurableSourceIds() = runBlocking {
+        val memoryDao = FakeMemoryDao(
+            listOf(
+                entity(1, "__long_term__", "用户偏好中文回复。", MemoryScope.LONG_TERM, MemoryKind.USER),
+                entity(2, "__long_term__", "回复要简洁分点。", MemoryScope.LONG_TERM, MemoryKind.FEEDBACK),
+                entity(3, "__global__", "用户是 AmberAgent 的开发者。", MemoryScope.CORE, MemoryKind.USER),
+                entity(4, "__short_term__", "本周在做记忆系统改造。", MemoryScope.SHORT_TERM, MemoryKind.PROJECT),
+                entity(5, "__long_term__", "一条已归档的旧事实。", MemoryScope.LONG_TERM, MemoryKind.USER, archived = true),
+            )
+        )
+        val repository = MemoryRepository(memoryDao, FakeMemoryCandidateDao(), FakeMemoryEventDao())
+        val profileFile = File.createTempFile("memory-profile", ".json")
+        val profileStore = MemoryProfileStore(profileFile)
+        val applier = MemoryDreamApplier(
+            repository,
+            MemoryEventLogger(repository),
+            profileStore = profileStore,
+        )
+
+        applier.apply(
+            MemoryDreamPlan(
+                userProfile = MemoryProfileSuggestion(content = "偏好中文简洁回复的长期用户画像。")
+            )
+        )
+
+        val profile = profileStore.get()!!
+        assertEquals("偏好中文简洁回复的长期用户画像。", profile.content)
+        // Only live core / user / feedback records stamp the derived profile —
+        // short-term project work and archived rows are not profile sources.
+        assertEquals(setOf(1, 2, 3), profile.sourceMemoryIds.toSet())
+        assertTrue(profile.isFresh(System.currentTimeMillis(), setOf(1, 2)))
+
+        // Too-short output is filtered before it can overwrite the store.
+        profileStore.clear()
+        applier.apply(MemoryDreamPlan(userProfile = MemoryProfileSuggestion(content = "太短")))
+        val stored = profileStore.get()
+        profileFile.delete()
+        assertNull(stored)
+    }
+
+    @Test
+    fun promotedRecordIsNotAlsoArchivedInTheSamePass() = runBlocking {
+        val memoryDao = FakeMemoryDao(
+            listOf(
+                entity(
+                    1,
+                    "__short_term__",
+                    "反复被用的短期项目事实。",
+                    MemoryScope.SHORT_TERM,
+                    MemoryKind.PROJECT,
+                ),
+            )
+        )
+        val repository = MemoryRepository(memoryDao, FakeMemoryCandidateDao(), FakeMemoryEventDao())
+        val applier = MemoryDreamApplier(repository, MemoryEventLogger(repository))
+
+        val applied = applier.apply(
+            MemoryDreamPlan(promoteMemoryIds = listOf(1), archiveMemoryIds = listOf(1))
+        )
+
+        val record = repository.getAllRecords().single()
+        assertEquals(MemoryScope.LONG_TERM, record.scope)
+        assertFalse(record.archived)
+        assertEquals(listOf(1), applied.promoteMemoryIds)
+        assertTrue(applied.archiveMemoryIds.isEmpty())
+    }
+
+    @Test
+    fun oneRacedWriteDoesNotAbortTheRestOfThePlan() = runBlocking {
+        val memoryDao = FakeMemoryDao(
+            listOf(
+                entity(1, "__short_term__", "会被并发改动的记录。", MemoryScope.SHORT_TERM, MemoryKind.PROJECT),
+                entity(2, "__short_term__", "正常归档的记录。", MemoryScope.SHORT_TERM, MemoryKind.PROJECT),
+            )
+        )
+        // Record 1 loses every CAS race.
+        memoryDao.failCasIds += 1
+        val repository = MemoryRepository(memoryDao, FakeMemoryCandidateDao(), FakeMemoryEventDao())
+        val applier = MemoryDreamApplier(repository, MemoryEventLogger(repository))
+
+        val applied = applier.apply(MemoryDreamPlan(archiveMemoryIds = listOf(1, 2)))
+
+        val records = repository.getAllRecords().associateBy { it.id }
+        assertFalse(records.getValue(1).archived)
+        assertTrue(records.getValue(2).archived)
+        assertEquals(listOf(2), applied.archiveMemoryIds)
+    }
+
     private fun supersede(
         oldId: Int,
         newContent: String = "用户现在偏好英文详细解释。",
@@ -257,6 +350,7 @@ class MemoryDreamApplierTest {
         sourceMessageIdsJson: String = "[]",
         confidence: Float = 0.9f,
         pinned: Boolean = false,
+        archived: Boolean = false,
     ) = MemoryEntity(
         id = id,
         assistantId = assistantId,
@@ -267,7 +361,7 @@ class MemoryDreamApplierTest {
         sourceMessageIdsJson = sourceMessageIdsJson,
         confidence = confidence,
         pinned = pinned,
-        archived = false,
+        archived = archived,
         createdAt = 1_000L + id,
         updatedAt = 1_000L + id,
     )
@@ -278,6 +372,9 @@ private class FakeMemoryDao(
 ) : MemoryDAO {
     private val memories = initial.toMutableList()
     private var nextId = (initial.maxOfOrNull { it.id } ?: 0) + 1
+
+    /** Ids whose CAS writes always lose — simulates a raced concurrent edit. */
+    val failCasIds = mutableSetOf<Int>()
 
     override fun getMemoriesOfAssistantFlow(assistantId: String): Flow<List<MemoryEntity>> =
         flowOf(memories.filter { it.assistantId == assistantId })
@@ -342,12 +439,13 @@ private class FakeMemoryDao(
         sourceTrigger: String?,
         topicTitle: String?,
         memberIdsJson: String,
+        useCount: Int,
         expectedRevision: Long,
     ): Int {
         val index = memories.indexOfFirst { it.id == id }
         if (index < 0) return 0
         val current = memories[index]
-        if (current.revision != expectedRevision) return 0
+        if (id in failCasIds || current.revision != expectedRevision) return 0
         memories[index] = current.copy(
             assistantId = assistantId,
             content = content,
@@ -368,6 +466,7 @@ private class FakeMemoryDao(
             sourceTrigger = sourceTrigger,
             topicTitle = topicTitle,
             memberIdsJson = memberIdsJson,
+            useCount = useCount,
         )
         return 1
     }
@@ -404,8 +503,13 @@ private class FakeMemoryDao(
 
     override suspend fun revisionOf(id: Int): Long? = memories.firstOrNull { it.id == id }?.revision
 
+    override fun getArchivedMemoriesFlow(): Flow<List<MemoryEntity>> =
+        flowOf(memories.filter { it.archived })
+
     override suspend fun touchMemories(ids: List<Int>, usedAt: Long) {
-        memories.replaceAll { if (it.id in ids) it.copy(lastUsedAt = usedAt) else it }
+        memories.replaceAll {
+            if (it.id in ids) it.copy(lastUsedAt = usedAt, useCount = it.useCount + 1) else it
+        }
     }
 
     override suspend fun deleteMemory(id: Int) {

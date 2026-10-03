@@ -128,6 +128,9 @@ internal class FakeMemoryDreamPlanDao : MemoryDreamPlanDAO {
     override suspend fun countPlansSince(source: String, createdAfter: Long): Int =
         plans.count { it.source == source && it.createdAt >= createdAfter }
 
+    override suspend fun getRecentPlans(limit: Int): List<MemoryDreamPlanEntity> =
+        plans.sortedByDescending { it.createdAt }.take(limit)
+
     override suspend fun updatePendingStatus(status: String, dismissedAt: Long) {
         plans.replaceAll { plan ->
             if (plan.status == MemoryDreamPlanStatus.PENDING.wireName) {

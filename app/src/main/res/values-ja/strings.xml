@@ -313,7 +313,7 @@
   <string name="prompt_page_unnamed_lorebook">名前なしのルアーブック</string>
   <string name="prompt_page_use_regex">正規表現を使用</string>
   <string name="quick_messages_page_add_title">クイックメッセージを追加</string>
-  <string name="quick_messages_page_delete_message">\"%s\"を削除してもよろしいですか？この操作は元に戻せません。</string>
+  <string name="quick_messages_page_delete_message">"%s"を削除してもよろしいですか？この操作は元に戻せません。</string>
   <string name="quick_messages_page_delete_title">クイックメッセージを削除</string>
   <string name="quick_messages_page_edit_title">クイックメッセージを編集</string>
   <string name="quick_messages_page_empty_content">コンテンツがありません</string>
@@ -578,8 +578,10 @@
   <string name="setting_page_search_agent_search_desc">有効なサービスを使って、チャットから search_web と scrape_web を利用します。</string>
   <string name="setting_page_search_enabled_services_summary">%1$d / %2$d 件有効 · 複数ソース検索</string>
   <string name="setting_page_search_builtin_sources">内蔵の無料ソース</string>
-  <string name="setting_page_search_builtin_jina">Jina Search / Reader</string>
-  <string name="setting_page_search_builtin_jina_desc">キーは任意です。可能な場合は Markdown で検索・取得します。</string>
+  <string name="setting_page_search_builtin_free_aggregate">無料アグリゲート検索</string>
+  <string name="setting_page_search_builtin_free_aggregate_desc">Bing・Brave・DuckDuckGo・360・Quark・Wikipedia・HN を同時に検索し、認証ページが出たエンジンは 10 分間停止します。</string>
+  <string name="setting_page_search_builtin_jina">Jina Reader</string>
+  <string name="setting_page_search_builtin_jina_desc">キー不要。scrape_web でページ本文を読み込みます。</string>
   <string name="setting_page_search_builtin_duckduckgo">DuckDuckGo Lite</string>
   <string name="setting_page_search_builtin_duckduckgo_desc">API Key 不要の無料公開検索ソースです。</string>
   <string name="setting_page_search_builtin_bing">Bing HTML</string>
@@ -709,7 +711,7 @@
   <string name="shortcut_take_picture">写真で質問</string>
   <string name="skill_detail_page_content">コンテンツ</string>
   <string name="skill_detail_page_create">作成</string>
-  <string name="skill_detail_page_delete_confirm">ファイル\"%s\"を削除してもよろしいですか？</string>
+  <string name="skill_detail_page_delete_confirm">ファイル"%s"を削除してもよろしいですか？</string>
   <string name="skill_detail_page_delete_failed">削除に失敗しました</string>
   <string name="skill_detail_page_delete_file">ファイルを削除</string>
   <string name="skill_detail_page_file_name">ファイル名</string>
@@ -720,7 +722,7 @@
   <string name="skill_detail_page_new_file">新規ファイル</string>
   <string name="skill_detail_page_save">保存</string>
   <string name="skills_page_add_title">スキルを追加</string>
-  <string name="skills_page_delete_message">\"%s\"を削除してもよろしいですか？この操作は元に戻せません。</string>
+  <string name="skills_page_delete_message">"%s"を削除してもよろしいですか？この操作は元に戻せません。</string>
   <string name="skills_page_delete_title">スキルを削除</string>
   <string name="skills_page_downloading">ダウンロード中…</string>
   <string name="skills_page_empty_hint">Skill ライブラリの+ボタンをタップしてスキルを追加</string>
@@ -2006,7 +2008,7 @@
   <string name="debug_create_messages_toast">%1$d 件のメッセージを含むチャットを作成中…</string>
   <string name="debug_create_oversized_button">大容量の会話を作成（%1$d MB）</string>
   <string name="debug_create_oversized_toast">%1$d MB の大容量会話を作成中…</string>
-  <string name="debug_cursor_window_error_text">\"Row too big to fit into CursorWindow\" エラーは、通常1行のデータが2 MBを超えたときに発生します。</string>
+  <string name="debug_cursor_window_error_text">"Row too big to fit into CursorWindow" エラーは、通常1行のデータが2 MBを超えたときに発生します。</string>
   <string name="debug_messages_conversation_title">%1$d 件のメッセージ会話テスト</string>
   <string name="debug_no_token_fit_records">トークンのトリミング記録はありません</string>
   <string name="debug_no_trimmed_messages">トリミングなし</string>
@@ -2032,6 +2034,12 @@
   <string name="memory_docs_empty">メモリドキュメントはまだありません。</string>
   <string name="memory_docs_info_body">トピックドキュメントは夜間メンテナンスが関連メモリをまとめて生成します。未分類のメモリは種類ごとのドキュメントにまとめられます。タップして全文を読めます。</string>
   <string name="memory_docs_title">メモリドキュメント</string>
+  <string name="memory_archived_title">アーカイブ済み</string>
+  <string name="memory_archived_empty">アーカイブはありません。クリーンアップ・マージ・置き換えで外れたメモリがここに残り、復元できます。</string>
+  <string name="memory_restore">復元</string>
+  <string name="memory_restored">メモリ #%1$d を復元しました。</string>
+  <string name="memory_restore_failed">復元に失敗しました：%1$s</string>
+  <string name="memory_accept_failed">候補の承認に失敗しました：%1$s</string>
   <string name="memory_dream_merge">マージ #%1$d &lt;- %2$s</string>
   <string name="memory_dream_reason_suffix">· %1$s</string>
   <string name="memory_dream_replace">%1$s を %2$s に置換%3$s</string>
@@ -2692,7 +2700,7 @@
   <string name="permission_decision_reason_subagent_history">履歴サブエージェントは読み取り専用の履歴ツールを事前承認されています。</string>
   <string name="permission_decision_reason_theme_pack_foreground">テーマパッケージのインポートは、前景で明示的に確認する必要があります。</string>
   <string name="permission_decision_reason_theme_pack_preview">Theme preview is a reversible in-memory change and is not persisted.</string>
-  <string name="permission_decision_reason_tool_not_found">ツールが見つからないか公開されていません。tools_list 由来の場合は、まず query=\"%1$s\" で tool_search を呼び出してから再試行してください。</string>
+  <string name="permission_decision_reason_tool_not_found">ツールが見つからないか公開されていません。tools_list 由来の場合は、まず query="%1$s" で tool_search を呼び出してから再試行してください。</string>
   <string name="permission_decision_reason_user_already_decided">ユーザーがすでに決定しています。</string>
   <string name="permission_decision_scope_assistant">アシスタント</string>
   <string name="permission_decision_scope_conversation">会話</string>
@@ -3322,7 +3330,7 @@
   <string name="setting_webmount_quick_message_template">WebMount ツールを使って次のタスクを完了してください。ガイドライン：
 1. まず wm_stations を呼び出し、利用可能なサイトとログイン状態を確認します。
 2. タスクに関係するサイトが一覧にない場合は、wm_site_add で追加します（既定値 needs_login=true）。
-3. login_status=\"unknown\" のサイトでも、サインアウトしていると決めつけず、直接 wm_open + wm_extract を試します。ページに実際にログイン画面が表示された場合のみ、設定ページからのログインを案内します。
+3. login_status="unknown" のサイトでも、サインアウトしていると決めつけず、直接 wm_open + wm_extract を試します。ページに実際にログイン画面が表示された場合のみ、設定ページからのログインを案内します。
 4. 公開サイトにはログインせず、wm_open + wm_extract を使います。
 5. ユーザーが追加したカスタムサイトを使った後、有用な selectors を記録できる場合は wm_profile_synthesize を呼び出して hints を保存し、次回の処理を速くします。
 
@@ -3622,4 +3630,14 @@
   <string name="chat_shelf_kind_web">Web page</string>
   <string name="chat_recap_no_model">No model is set for recaps. Choose a title model in settings.</string>
   <string name="chat_model_menu_context">Context</string>
+  <string name="run_kernel_completion_check_prompt">【自動チェック】このターンでファイルを変更しましたが、その後チェックを実行していません。適切なチェック（テスト、ビルド、lint）を実行し、実際の結果を報告してください。該当するチェックがない場合はそのように明記してください。</string>
+  <string name="setting_jev_purpose_auto_approval_gate">自動承認の再確認</string>
+  <string name="setting_jev_purpose_auto_approval_gate_desc">自動承認で高リスクの呼び出しを検出したら、確認を求めます</string>
+  <string name="setting_jev_purpose_completion_check">完了宣言の確認</string>
+  <string name="setting_jev_purpose_completion_check_desc">ファイル変更後にチェックせず完了と述べた場合、検証のためもう1ラウンド実行</string>
+  <string name="chat_tool_jev_auto_approval_paused">自動承認を一時停止：%1$s</string>
+  <string name="chat_tool_jev_risk_destructive">破壊的</string>
+  <string name="chat_tool_jev_risk_exfiltration">データ外部送信</string>
+  <string name="chat_tool_jev_risk_off_task">タスク範囲外</string>
+  <string name="chat_tool_jev_risk_separator">"、"</string>
 </resources>

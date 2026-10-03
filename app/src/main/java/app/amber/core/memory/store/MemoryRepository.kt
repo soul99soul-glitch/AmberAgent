@@ -43,11 +43,12 @@ open class MemoryRepository(
         const val TRIGGER_DREAM = "dream"
 
         /**
-         * Prefix MemoryExtractor puts on a pending candidate's reason when the
-         * model's intent was to update an existing record. acceptCandidate
-         * parses it back to apply the update in place.
+         * Prefix MemoryExtractor puts on a pending candidate's reason to carry
+         * the model's intent toward an existing record. acceptCandidate parses
+         * it back: "updates" supersedes (archive old + new version),
+         * "invalidates" archives the target, "confirms" reinforces it.
          */
-        private val UPDATE_TARGET_REASON = Regex("^updates memory #(\\d+)")
+        private val INTENT_TARGET_REASON = Regex("^(updates|invalidates|confirms) memory #(\\d+)")
     }
 
     fun getMemoriesOfAssistantFlow(assistantId: String): Flow<List<AssistantMemory>> =
@@ -195,6 +196,8 @@ open class MemoryRepository(
         sourceTrigger: String? = null,
         topicTitle: String? = null,
         memberIds: List<Int> = emptyList(),
+        lastUsedAt: Long? = null,
+        useCount: Int = 0,
     ): MemoryRecord {
         val now = System.currentTimeMillis()
         val id = memoryDAO.insertMemory(
@@ -217,6 +220,8 @@ open class MemoryRepository(
                 sourceTrigger = sourceTrigger,
                 topicTitle = topicTitle,
                 memberIdsJson = JsonInstant.encodeToString(memberIds.distinct()),
+                lastUsedAt = lastUsedAt,
+                useCount = useCount,
             )
         ).toInt()
         return memoryDAO.getMemoryById(id)?.toRecord() ?: error("Created memory #$id not found")
@@ -253,6 +258,7 @@ open class MemoryRepository(
             sourceTrigger = entity.sourceTrigger,
             topicTitle = entity.topicTitle,
             memberIdsJson = entity.memberIdsJson,
+            useCount = entity.useCount,
             expectedRevision = entity.revision,
         )
         if (affected == 0) {
@@ -362,6 +368,7 @@ open class MemoryRepository(
             sourceTrigger = old.sourceTrigger,
             topicTitle = old.topicTitle,
             memberIdsJson = old.memberIdsJson,
+            useCount = old.useCount,
             expectedRevision = memory.revision,
         )
         if (affected == 0) {
@@ -411,6 +418,186 @@ open class MemoryRepository(
         }
     }
 
+    /** Reinforce a memory without rewriting it (extraction "confirm" action). */
+    suspend fun reinforceMemory(id: Int, usedAt: Long = System.currentTimeMillis()) =
+        touchMemories(listOf(id), usedAt)
+
+    /** Archived records visible to the library's 已归档 section. */
+    fun getArchivedMemoriesFlow(): Flow<List<AssistantMemory>> =
+        memoryDAO.getArchivedMemoriesFlow().map { entities ->
+            entities.map { it.toAssistantMemory() }
+        }
+
+    /**
+     * Archive one record with a CAS bound to [expectedRevision]; a revision
+     * mismatch throws [MemoryStaleException] instead of touching the newer row.
+     */
+    suspend fun archiveMemoryCas(
+        id: Int,
+        expectedRevision: Long,
+        sourceRunId: String? = null,
+        sourceTrigger: String? = null,
+    ): MemoryRecord = withMemoryWriter {
+        val old = memoryDAO.getMemoryById(id)
+            ?: throw MemoryStaleException(id, expectedRevision, actualRevision = 0)
+        if (old.archived) return@withMemoryWriter old.toRecord()
+        archiveInternal(old, expectedRevision, sourceRunId, sourceTrigger).toRecord()
+    }
+
+    /**
+     * Restore an archived record. A stale expiresAt is cleared on restore so
+     * the revived row is not re-archived by the next maintenance pass.
+     */
+    suspend fun restoreMemory(id: Int, expectedRevision: Long): MemoryRecord = withMemoryWriter {
+        val old = memoryDAO.getMemoryById(id)
+            ?: throw MemoryStaleException(id, expectedRevision, actualRevision = 0)
+        val now = System.currentTimeMillis()
+        val affected = memoryDAO.updateRecordCas(
+            id = old.id,
+            assistantId = old.assistantId,
+            content = old.content,
+            scope = old.scope,
+            kind = old.kind,
+            sourceConversationId = old.sourceConversationId,
+            sourceMessageIdsJson = old.sourceMessageIdsJson,
+            supersedesIdsJson = old.supersedesIdsJson,
+            expiresAt = old.expiresAt?.takeIf { it > now },
+            confidence = old.confidence,
+            pinned = old.pinned,
+            archived = false,
+            createdAt = old.createdAt,
+            updatedAt = now,
+            lastUsedAt = old.lastUsedAt,
+            sourceRunId = old.sourceRunId,
+            sourceTrigger = old.sourceTrigger,
+            topicTitle = old.topicTitle,
+            memberIdsJson = old.memberIdsJson,
+            useCount = old.useCount,
+            expectedRevision = expectedRevision,
+        )
+        if (affected == 0) {
+            val current = memoryDAO.getMemoryById(id)
+            throw MemoryStaleException(id, expectedRevision, current?.revision ?: 0)
+        }
+        memoryDAO.getMemoryById(id)?.toRecord() ?: error("Memory record #$id not found after restore")
+    }
+
+    /**
+     * Supersede-style update: archive the old record and insert a new version
+     * linked through supersedesIds, so the previous wording stays recoverable
+     * in the archive. The archive is CAS-bound to the snapshot the caller saw;
+     * a stale snapshot throws [MemoryStaleException] before any row changes.
+     */
+    suspend fun supersedeMemory(
+        targetId: Int,
+        newContent: String,
+        expectedRevision: Long,
+        confidence: Float? = null,
+        expiresAt: Long? = null,
+        sourceConversationId: String? = null,
+        sourceMessageIds: List<String>? = null,
+        sourceRunId: String? = null,
+        sourceTrigger: String? = null,
+    ): MemoryRecord = withMemoryWriter {
+        val db = appDatabase
+        if (db == null) {
+            supersedeInternal(
+                targetId, newContent, expectedRevision, confidence, expiresAt,
+                sourceConversationId, sourceMessageIds, sourceRunId, sourceTrigger,
+            )
+        } else {
+            db.withTransaction {
+                supersedeInternal(
+                    targetId, newContent, expectedRevision, confidence, expiresAt,
+                    sourceConversationId, sourceMessageIds, sourceRunId, sourceTrigger,
+                )
+            }
+        }
+    }
+
+    private suspend fun supersedeInternal(
+        targetId: Int,
+        newContent: String,
+        expectedRevision: Long,
+        confidence: Float?,
+        expiresAt: Long?,
+        sourceConversationId: String?,
+        sourceMessageIds: List<String>?,
+        sourceRunId: String?,
+        sourceTrigger: String?,
+    ): MemoryRecord {
+        val old = memoryDAO.getMemoryById(targetId)
+            ?: throw MemoryStaleException(targetId, expectedRevision, actualRevision = 0)
+        require(old.kind != MemoryKind.TOPIC.wireName) {
+            "Memory record #$targetId is a dream-managed topic; supersede is rejected."
+        }
+        require(!old.archived) { "Memory record #$targetId is already archived." }
+        // Reject the stale snapshot before any write — outside a transaction
+        // (test fakes without AppDatabase) an inserted-then-failed archive
+        // would orphan the replacement.
+        if (old.revision != expectedRevision) {
+            throw MemoryStaleException(targetId, expectedRevision, old.revision)
+        }
+        val created = addMemoryInternal(
+            scope = MemoryScope.fromWireName(old.scope),
+            kind = MemoryKind.fromWireName(old.kind),
+            content = newContent,
+            assistantId = old.assistantId,
+            sourceConversationId = sourceConversationId ?: old.sourceConversationId,
+            sourceMessageIds = sourceMessageIds ?: decodeStringList(old.sourceMessageIdsJson),
+            supersedesIds = listOf(old.id),
+            // A superseded record whose expiry already passed must not birth
+            // a newborn zombie — the new version is fresh information.
+            expiresAt = expiresAt ?: old.expiresAt?.takeIf { it > System.currentTimeMillis() },
+            confidence = confidence ?: old.confidence,
+            pinned = old.pinned,
+            sourceRunId = sourceRunId ?: old.sourceRunId,
+            sourceTrigger = sourceTrigger ?: old.sourceTrigger,
+            // The replacement inherits the old record's reinforcement evidence:
+            // promotion credit must survive a version rewrite.
+            lastUsedAt = old.lastUsedAt,
+            useCount = old.useCount,
+        )
+        archiveInternal(old, expectedRevision, sourceRunId, sourceTrigger)
+        return created
+    }
+
+    private suspend fun archiveInternal(
+        old: MemoryEntity,
+        expectedRevision: Long,
+        sourceRunId: String?,
+        sourceTrigger: String?,
+    ): MemoryEntity {
+        val affected = memoryDAO.updateRecordCas(
+            id = old.id,
+            assistantId = old.assistantId,
+            content = old.content,
+            scope = old.scope,
+            kind = old.kind,
+            sourceConversationId = old.sourceConversationId,
+            sourceMessageIdsJson = old.sourceMessageIdsJson,
+            supersedesIdsJson = old.supersedesIdsJson,
+            expiresAt = old.expiresAt,
+            confidence = old.confidence,
+            pinned = old.pinned,
+            archived = true,
+            createdAt = old.createdAt,
+            updatedAt = System.currentTimeMillis(),
+            lastUsedAt = old.lastUsedAt,
+            sourceRunId = sourceRunId ?: old.sourceRunId,
+            sourceTrigger = sourceTrigger ?: old.sourceTrigger,
+            topicTitle = old.topicTitle,
+            memberIdsJson = old.memberIdsJson,
+            useCount = old.useCount,
+            expectedRevision = expectedRevision,
+        )
+        if (affected == 0) {
+            val current = memoryDAO.getMemoryById(old.id)
+            throw MemoryStaleException(old.id, expectedRevision, current?.revision ?: 0)
+        }
+        return memoryDAO.getMemoryById(old.id) ?: old
+    }
+
     fun getPendingCandidatesFlow(): Flow<List<MemoryCandidate>> =
         candidateDAO.getCandidatesByStatusFlow(MemoryCandidateStatus.PENDING.wireName).map { list ->
             list.map { it.toCandidate() }
@@ -444,52 +631,112 @@ open class MemoryRepository(
     }
 
     suspend fun acceptCandidate(id: String): MemoryRecord = withMemoryWriter {
-        val db = requireNotNull(appDatabase) { "acceptCandidate requires AppDatabase" }
-        db.withTransaction {
+        val db = appDatabase
+        if (db != null) {
+            db.withTransaction { acceptCandidateInternal(id) }
+        } else {
+            acceptCandidateInternal(id)
+        }
+    }
+
+    private suspend fun acceptCandidateInternal(id: String): MemoryRecord {
             val candidate = candidateDAO.getCandidateById(id)?.toCandidate()
                 ?: error("Memory candidate #$id not found")
             check(candidate.status == MemoryCandidateStatus.PENDING) {
                 "Memory candidate #$id is already ${candidate.status.wireName}"
             }
-            // A candidate carrying an update intent ("updates memory #N: ...",
-            // emitted by MemoryExtractor) is applied to the target in place so
-            // accepting it cannot duplicate the still-live record. The target's
-            // current revision is used because the reviewer's approval applies
-            // to the record as it stands now; a stale write aborts and keeps
-            // the candidate pending instead of inserting a duplicate.
-            val updateTarget = UPDATE_TARGET_REASON
-                .find(candidate.reason)
-                ?.groupValues?.get(1)?.toIntOrNull()
+            // A candidate carrying an intent prefix ("updates|invalidates|
+            // confirms memory #N: ...", emitted by MemoryExtractor) is applied
+            // to the target so accepting it cannot duplicate the still-live
+            // record. The target's current revision is used because the
+            // reviewer's approval applies to the record as it stands now; a
+            // stale write aborts and keeps the candidate pending instead of
+            // inserting a duplicate.
+            val intent = INTENT_TARGET_REASON.find(candidate.reason)
+            val intentTarget = intent
+                ?.groupValues?.get(2)?.toIntOrNull()
                 ?.let { memoryDAO.getMemoryById(it) }
-            val record = if (
-                updateTarget != null &&
-                !updateTarget.archived &&
-                updateTarget.scope != MemoryScope.CORE.wireName &&
-                updateTarget.kind != MemoryKind.TOPIC.wireName
-            ) {
-                updateContentCasInternal(
-                    id = updateTarget.id,
-                    content = candidate.content,
-                    expectedRevision = updateTarget.revision,
-                    sourceRunId = candidate.sourceConversationId,
-                    sourceTrigger = TRIGGER_AUTO_EXTRACTION,
-                )
-                memoryDAO.getMemoryById(updateTarget.id)!!.toRecord()
-            } else {
-                addMemoryInternal(
-                    scope = candidate.scope,
-                    kind = candidate.kind,
-                    content = candidate.content,
-                    assistantId = bucketForScope(candidate.scope),
-                    sourceConversationId = candidate.sourceConversationId,
-                    sourceMessageIds = candidate.sourceMessageIds,
-                    expiresAt = candidate.expiresAt,
-                    confidence = candidate.confidence,
-                )
+            val targetMutable = intentTarget != null &&
+                !intentTarget.archived &&
+                intentTarget.scope != MemoryScope.CORE.wireName &&
+                intentTarget.kind != MemoryKind.TOPIC.wireName
+            val record = when (intent?.groupValues?.get(1)) {
+                "invalidates" -> if (targetMutable) {
+                    archiveInternal(intentTarget!!, intentTarget.revision, candidate.sourceConversationId, TRIGGER_AUTO_EXTRACTION)
+                        .toRecord()
+                } else {
+                    // The target is gone or already archived — the invalidation
+                    // outcome holds without a new record.
+                    intentTarget?.toRecord() ?: addMemoryInternal(
+                        scope = candidate.scope,
+                        kind = candidate.kind,
+                        content = candidate.content,
+                        assistantId = bucketForScope(candidate.scope),
+                        sourceConversationId = candidate.sourceConversationId,
+                        sourceMessageIds = candidate.sourceMessageIds,
+                        expiresAt = candidate.expiresAt,
+                        confidence = candidate.confidence,
+                    )
+                }
+
+                "confirms" -> {
+                    // Reinforce only a live mutable target; an archived or
+                    // immutable target gets the fact re-added as a new record.
+                    if (targetMutable) {
+                        memoryDAO.touchMemories(listOf(intentTarget!!.id), System.currentTimeMillis())
+                        memoryDAO.getMemoryById(intentTarget.id)!!.toRecord()
+                    } else {
+                        addMemoryInternal(
+                            scope = candidate.scope,
+                            kind = candidate.kind,
+                            content = candidate.content,
+                            assistantId = bucketForScope(candidate.scope),
+                            sourceConversationId = candidate.sourceConversationId,
+                            sourceMessageIds = candidate.sourceMessageIds,
+                            expiresAt = candidate.expiresAt,
+                            confidence = candidate.confidence,
+                        )
+                    }
+                }
+
+                else -> if (targetMutable) {
+                    // "updates" (or an unrecognized prefix on a valid target)
+                    // supersedes: new version linked to the archived old one.
+                    supersedeInternal(
+                        targetId = intentTarget!!.id,
+                        newContent = candidate.content,
+                        expectedRevision = intentTarget.revision,
+                        confidence = candidate.confidence,
+                        expiresAt = candidate.expiresAt,
+                        sourceConversationId = candidate.sourceConversationId,
+                        sourceMessageIds = candidate.sourceMessageIds,
+                        sourceRunId = candidate.sourceConversationId,
+                        sourceTrigger = TRIGGER_AUTO_EXTRACTION,
+                    )
+                } else {
+                    addMemoryInternal(
+                        scope = candidate.scope,
+                        kind = candidate.kind,
+                        content = candidate.content,
+                        assistantId = bucketForScope(candidate.scope),
+                        sourceConversationId = candidate.sourceConversationId,
+                        sourceMessageIds = candidate.sourceMessageIds,
+                        expiresAt = candidate.expiresAt,
+                        confidence = candidate.confidence,
+                    )
+                }
             }
-            updateCandidateInternal(candidate.copy(status = MemoryCandidateStatus.ACCEPTED))
-            record
-        }
+        updateCandidateInternal(candidate.copy(status = MemoryCandidateStatus.ACCEPTED))
+        eventDAO.insert(
+            MemoryEvent(
+                type = MemoryEventType.CANDIDATE_ACCEPTED,
+                conversationId = candidate.sourceConversationId,
+                memoryId = record.id,
+                candidateId = candidate.id,
+                message = "Candidate accepted.",
+            ).toEntity()
+        )
+        return record
     }
 
     fun getRecentEventsFlow(limit: Int = 100): Flow<List<MemoryEvent>> =
@@ -530,6 +777,7 @@ open class MemoryRepository(
         createdAt = createdAt,
         updatedAt = updatedAt,
         lastUsedAt = lastUsedAt,
+        useCount = useCount,
     )
 
     private fun MemoryRecord.toAssistantMemory() = AssistantMemory(
@@ -552,6 +800,7 @@ open class MemoryRepository(
         createdAt = createdAt,
         updatedAt = updatedAt,
         lastUsedAt = lastUsedAt,
+        useCount = useCount,
     )
 
     private fun MemoryEntity.toRecord() = MemoryRecord(
@@ -575,6 +824,7 @@ open class MemoryRepository(
         revision = revision,
         sourceRunId = sourceRunId,
         sourceTrigger = sourceTrigger,
+        useCount = useCount,
     )
 
     private fun MemoryRecord.toEntity() = MemoryEntity(
@@ -600,6 +850,7 @@ open class MemoryRepository(
         revision = revision.takeIf { it > 0 } ?: 1,
         sourceRunId = sourceRunId,
         sourceTrigger = sourceTrigger,
+        useCount = useCount,
     )
 
     private fun MemoryCandidateEntity.toCandidate() = MemoryCandidate(

@@ -313,7 +313,7 @@
   <string name="prompt_page_unnamed_lorebook">Безымянная книга знаний</string>
   <string name="prompt_page_use_regex">Использовать регулярные выражения</string>
   <string name="quick_messages_page_add_title">Добавить быстрое сообщение</string>
-  <string name="quick_messages_page_delete_message">Вы уверены, что хотите удалить \"%s\"? Это действие нельзя отменить.</string>
+  <string name="quick_messages_page_delete_message">Вы уверены, что хотите удалить "%s"? Это действие нельзя отменить.</string>
   <string name="quick_messages_page_delete_title">Удалить быстрое сообщение</string>
   <string name="quick_messages_page_edit_title">Редактировать быстрое сообщение</string>
   <string name="quick_messages_page_empty_content">Нет содержимого</string>
@@ -578,8 +578,10 @@
   <string name="setting_page_search_agent_search_desc">Разрешает чатам использовать search_web и scrape_web через включённые службы.</string>
   <string name="setting_page_search_enabled_services_summary">Включено %1$d из %2$d · поиск по нескольким источникам</string>
   <string name="setting_page_search_builtin_sources">Встроенные бесплатные источники</string>
-  <string name="setting_page_search_builtin_jina">Jina Search / Reader</string>
-  <string name="setting_page_search_builtin_jina_desc">Ключ необязателен. По возможности ищет и читает страницы в Markdown.</string>
+  <string name="setting_page_search_builtin_free_aggregate">Бесплатный агрегатный поиск</string>
+  <string name="setting_page_search_builtin_free_aggregate_desc">Одновременно ищет в Bing, Brave, DuckDuckGo, 360, Quark, Wikipedia и HN; движки с проверкой на бота отключаются на 10 минут.</string>
+  <string name="setting_page_search_builtin_jina">Jina Reader</string>
+  <string name="setting_page_search_builtin_jina_desc">Без ключа; читает полный текст страницы для scrape_web.</string>
   <string name="setting_page_search_builtin_duckduckgo">DuckDuckGo Lite</string>
   <string name="setting_page_search_builtin_duckduckgo_desc">Бесплатный общедоступный источник без API Key.</string>
   <string name="setting_page_search_builtin_bing">Bing HTML</string>
@@ -709,7 +711,7 @@
   <string name="shortcut_take_picture">Сделать фото и спросить</string>
   <string name="skill_detail_page_content">Контент</string>
   <string name="skill_detail_page_create">Создать</string>
-  <string name="skill_detail_page_delete_confirm">Вы уверены, что хотите удалить файл \"%s\"?</string>
+  <string name="skill_detail_page_delete_confirm">Вы уверены, что хотите удалить файл "%s"?</string>
   <string name="skill_detail_page_delete_failed">Не удалось удалить</string>
   <string name="skill_detail_page_delete_file">Удалить файл</string>
   <string name="skill_detail_page_file_name">Имя файла</string>
@@ -720,7 +722,7 @@
   <string name="skill_detail_page_new_file">Новый файл</string>
   <string name="skill_detail_page_save">Сохранить</string>
   <string name="skills_page_add_title">Добавить навык</string>
-  <string name="skills_page_delete_message">Вы уверены, что хотите удалить \"%s\"? Это действие нельзя отменить.</string>
+  <string name="skills_page_delete_message">Вы уверены, что хотите удалить "%s"? Это действие нельзя отменить.</string>
   <string name="skills_page_delete_title">Удалить навык</string>
   <string name="skills_page_downloading">Загрузка...</string>
   <string name="skills_page_empty_hint">Нажмите кнопку + в библиотеке Skill, чтобы добавить навык</string>
@@ -2032,6 +2034,12 @@
   <string name="memory_docs_empty">Документов памяти пока нет.</string>
   <string name="memory_docs_info_body">Тематические документы создаются ночной обработкой Daydream из связанных записей; нераспределённые записи объединяются в документы по типам. Нажмите, чтобы прочитать.</string>
   <string name="memory_docs_title">Документы памяти</string>
+  <string name="memory_archived_title">В архиве</string>
+  <string name="memory_archived_empty">В архиве пусто. Записи, снятые очисткой, слиянием или заменой, хранятся здесь и могут быть восстановлены.</string>
+  <string name="memory_restore">Восстановить</string>
+  <string name="memory_restored">Память #%1$d восстановлена.</string>
+  <string name="memory_restore_failed">Ошибка восстановления: %1$s</string>
+  <string name="memory_accept_failed">Не удалось принять кандидата: %1$s</string>
   <string name="memory_dream_merge">Объединить #%1$d &lt;- %2$s</string>
   <string name="memory_dream_reason_suffix">· %1$s</string>
   <string name="memory_dream_replace">Заменить %1$s → %2$s%3$s</string>
@@ -2692,7 +2700,7 @@
   <string name="permission_decision_reason_subagent_history">Субагент истории предварительно получил доступ к инструменту чтения истории.</string>
   <string name="permission_decision_reason_theme_pack_foreground">Импорт пакета темы необходимо явно подтвердить на переднем плане.</string>
   <string name="permission_decision_reason_theme_pack_preview">Theme preview is a reversible in-memory change and is not persisted.</string>
-  <string name="permission_decision_reason_tool_not_found">Инструмент не найден или не предоставлен. Если он был получен из tools_list, сначала вызовите tool_search с query=\"%1$s\", затем повторите попытку.</string>
+  <string name="permission_decision_reason_tool_not_found">Инструмент не найден или не предоставлен. Если он был получен из tools_list, сначала вызовите tool_search с query="%1$s", затем повторите попытку.</string>
   <string name="permission_decision_reason_user_already_decided">Пользователь уже принял решение.</string>
   <string name="permission_decision_scope_assistant">ассистента</string>
   <string name="permission_decision_scope_conversation">разговора</string>
@@ -3322,7 +3330,7 @@
   <string name="setting_webmount_quick_message_template">Используйте инструменты WebMount, чтобы выполнить задачу ниже. Правила:
 1. Сначала вызовите wm_stations, чтобы проверить доступные сайты и состояние входа.
 2. Если нужного сайта нет в списке, добавьте его через wm_site_add (по умолчанию needs_login=true).
-3. Если login_status=\"unknown\", не предполагайте, что вход не выполнен — напрямую попробуйте wm_open + wm_extract; просите меня войти через страницу настроек только при фактическом появлении страницы входа.
+3. Если login_status="unknown", не предполагайте, что вход не выполнен — напрямую попробуйте wm_open + wm_extract; просите меня войти через страницу настроек только при фактическом появлении страницы входа.
 4. Для общедоступных сайтов используйте wm_open + wm_extract без входа.
 5. После использования пользовательского сайта, если удаётся сохранить полезные selectors, вызовите wm_profile_synthesize, чтобы сохранить hints и ускорить следующий запуск.
 
@@ -3622,4 +3630,14 @@
   <string name="chat_shelf_kind_web">Web page</string>
   <string name="chat_recap_no_model">No model is set for recaps. Choose a title model in settings.</string>
   <string name="chat_model_menu_context">Context</string>
+  <string name="run_kernel_completion_check_prompt">[Автопроверка] В этом ходе были изменены файлы, но после этого не запускалась ни одна проверка. Запустите подходящую проверку (тесты, сборку или lint) и сообщите фактический результат; если проверка неприменима, прямо скажите об этом.</string>
+  <string name="setting_jev_purpose_auto_approval_gate">Проверка автоодобрения</string>
+  <string name="setting_jev_purpose_auto_approval_gate_desc">Если автоодобрение пропускает рискованный вызов, запрашивает ваше подтверждение</string>
+  <string name="setting_jev_purpose_completion_check">Проверка заявления о готовности</string>
+  <string name="setting_jev_purpose_completion_check_desc">Если файлы изменены, а ответ заявляет о готовности без проверки, запускает ещё один раунд для проверки</string>
+  <string name="chat_tool_jev_auto_approval_paused">Автоодобрение приостановлено: %1$s</string>
+  <string name="chat_tool_jev_risk_destructive">разрушительно</string>
+  <string name="chat_tool_jev_risk_exfiltration">отправка данных наружу</string>
+  <string name="chat_tool_jev_risk_off_task">вне задачи</string>
+  <string name="chat_tool_jev_risk_separator">", "</string>
 </resources>

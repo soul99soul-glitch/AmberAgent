@@ -578,8 +578,10 @@
   <string name="setting_page_search_agent_search_desc">Let chats use enabled search services.</string>
   <string name="setting_page_search_enabled_services_summary">%1$d of %2$d enabled · multi-source recall</string>
   <string name="setting_page_search_builtin_sources">Built-in free sources</string>
-  <string name="setting_page_search_builtin_jina">Jina Search / Reader</string>
-  <string name="setting_page_search_builtin_jina_desc">No key required; prefers Markdown page reading.</string>
+  <string name="setting_page_search_builtin_free_aggregate">Free aggregate search</string>
+  <string name="setting_page_search_builtin_free_aggregate_desc">Queries Bing, Brave, DuckDuckGo, 360, Quark, Wikipedia and HN at once; blocked engines pause for 10 minutes.</string>
+  <string name="setting_page_search_builtin_jina">Jina Reader</string>
+  <string name="setting_page_search_builtin_jina_desc">No key required; reads full page text for scrape_web.</string>
   <string name="setting_page_search_builtin_duckduckgo">DuckDuckGo Lite</string>
   <string name="setting_page_search_builtin_duckduckgo_desc">Free public search source; no API key.</string>
   <string name="setting_page_search_builtin_bing">Bing HTML</string>
@@ -2053,6 +2055,12 @@ What would you like to talk about today?</string>
   <string name="memory_docs_empty">No memory documents yet.</string>
   <string name="memory_docs_info_body">Topic documents group related memories and are synthesized by nightly Daydream maintenance. Memories not yet grouped merge into per-kind documents. Tap a document to read it.</string>
   <string name="memory_docs_title">Memory documents</string>
+  <string name="memory_archived_title">Archived</string>
+  <string name="memory_archived_empty">Nothing archived. Records retired by cleanup, merge, or supersede land here and can be restored.</string>
+  <string name="memory_restore">Restore</string>
+  <string name="memory_restored">Restored memory #%1$d.</string>
+  <string name="memory_restore_failed">Restore failed: %1$s</string>
+  <string name="memory_accept_failed">Accept failed: %1$s</string>
   <string name="memory_dream_merge">Merge #%1$d &lt;- %2$s</string>
   <string name="memory_dream_reason_suffix">· %1$s</string>
   <string name="memory_dream_replace">Replace %1$s → %2$s%3$s</string>
@@ -3644,4 +3652,14 @@ My task:</string>
   <string name="chat_shelf_kind_web">Web page</string>
   <string name="chat_recap_no_model">No model is set for recaps. Choose a title model in settings.</string>
   <string name="chat_model_menu_context">Context</string>
+  <string name="run_kernel_completion_check_prompt">[Automatic check] Files were changed in this turn but no check was run afterwards. Please run an appropriate check (tests, build or lint) and report the actual result; if no check applies, say so plainly.</string>
+  <string name="setting_jev_purpose_auto_approval_gate">Auto-approval check</string>
+  <string name="setting_jev_purpose_auto_approval_gate_desc">When auto-approval would run a risky tool call, asks you to confirm instead</string>
+  <string name="setting_jev_purpose_completion_check">Completion check</string>
+  <string name="setting_jev_purpose_completion_check_desc">If files were changed and the reply claims done without running a check, asks for one more verification round</string>
+  <string name="chat_tool_jev_auto_approval_paused">Auto-approval paused: %1$s</string>
+  <string name="chat_tool_jev_risk_destructive">destructive</string>
+  <string name="chat_tool_jev_risk_exfiltration">sends data out</string>
+  <string name="chat_tool_jev_risk_off_task">outside the task</string>
+  <string name="chat_tool_jev_risk_separator">", "</string>
 </resources>

@@ -7,16 +7,26 @@ import app.amber.core.memory.model.MemoryRecord
 import app.amber.core.memory.safety.isSensitiveMemoryContent
 
 class MemoryCandidateFilter {
-    fun filter(candidates: List<MemoryCandidate>, existing: List<MemoryRecord>): FilterResult {
+    fun filter(
+        candidates: List<MemoryCandidate>,
+        existing: List<MemoryRecord>,
+        intentCandidateIds: Set<String> = emptySet(),
+    ): FilterResult {
         val accepted = mutableListOf<MemoryCandidate>()
         val rejected = mutableListOf<MemoryCandidate>()
         val existingNormalized = existing.map { normalize(it.content) }.toSet()
 
         candidates.forEach { candidate ->
+            // Intent candidates (confirm/invalidate/update a shown record)
+            // restate or retract existing content by design — the duplicate
+            // and low-value gates would wrongly discard them.
+            val isIntent = candidate.id in intentCandidateIds
             val normalized = normalize(candidate.content)
             val sensitive = candidate.sensitive || isSensitiveMemoryContent(candidate.content)
-            val tooWeak = candidate.content.trim().length < 12 || candidate.confidence < 0.45f
-            val duplicate = normalized in existingNormalized || accepted.any { normalize(it.content) == normalized }
+            val tooWeak = !isIntent &&
+                (candidate.content.trim().length < 12 || candidate.confidence < 0.45f)
+            val duplicate = !isIntent &&
+                (normalized in existingNormalized || accepted.any { normalize(it.content) == normalized })
             if (sensitive || tooWeak || duplicate) {
                 rejected += candidate.copy(
                     sensitive = sensitive,

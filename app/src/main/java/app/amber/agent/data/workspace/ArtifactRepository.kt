@@ -73,6 +73,7 @@ class ArtifactRepository(
     private val restoreWriteGate: SyncRestoreWriteGate? = null,
     private val copy: ArtifactLocalizedCopy = ArtifactLocalizedCopy.ENGLISH,
 ) {
+    private val backupContent = ArtifactBackupContentStore(workspaceManager)
     val observeAll: Flow<List<Artifact>> = dao.observeAll().map { list -> list.map { it.toArtifact() } }
 
     suspend fun get(artifactId: String): Artifact? = dao.getById(artifactId)?.toArtifact()
@@ -394,6 +395,7 @@ class ArtifactRepository(
 
     /** Mirror file backing the content locator (open/share path used by tests). */
     fun contentFile(artifact: Artifact): File? {
+        backupContent.restoredFile(artifact.contentLocator)?.let { return it }
         val root = workspaceManager.mirrorDir.canonicalFile
         val target = workspaceManager.mirrorDir.resolve(artifact.contentLocator).canonicalFile
         if (!target.path.startsWith(root.path + File.separator) || !target.isFile) return null
@@ -401,6 +403,7 @@ class ArtifactRepository(
     }
 
     private suspend fun readContent(locator: String): String? {
+        backupContent.restoredFile(locator)?.let { return it.readText() }
         if (workspaceManager.state.value.configured) {
             runCatching { workspaceManager.readText(locator) }.getOrNull()?.let { return it }
         }
@@ -422,9 +425,11 @@ class ArtifactRepository(
             mirror.parentFile?.mkdirs()
             mirror.writeText(content)
         }
+        backupContent.updateRestored(locator, content)
     }
 
     private suspend fun deleteContentFile(locator: String) {
+        backupContent.deleteRestored(locator)
         mirrorFile(locator).takeIf { it.isFile }?.delete()
         if (workspaceManager.state.value.configured) {
             runCatching { workspaceManager.deleteFile(locator) }

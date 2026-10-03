@@ -3,7 +3,9 @@ package app.amber.core.memory
 import kotlinx.serialization.json.Json
 import app.amber.core.memory.dream.MemoryDreamPlanner
 import app.amber.core.memory.dream.MemoryDreamPlan
+import app.amber.core.memory.dream.MemoryMergeSuggestion
 import app.amber.core.memory.dream.MemorySupersedeSuggestion
+import app.amber.core.memory.dream.NearDuplicatePair
 import app.amber.core.memory.dream.mergeWith
 import app.amber.core.memory.model.MemoryCandidate
 import app.amber.core.memory.model.MemoryKind
@@ -49,6 +51,7 @@ class MemoryDreamPlannerTest {
                     confidence = 0.88f,
                     expiresAt = null,
                     lastUsedAt = now,
+                    useCount = MemoryDreamPlanner.PROMOTE_MIN_USE_COUNT,
                     updatedAt = now,
                 ),
                 MemoryRecord(
@@ -308,6 +311,143 @@ class MemoryDreamPlannerTest {
     }
 
     @Test
+    fun promotionRequiresRepeatedUseNotMereTouch() {
+        val now = 1_800_000_000_000L
+        val base = MemoryRecord(
+            id = 0,
+            content = "AmberAgent 记忆系统升级正在推进",
+            scope = MemoryScope.SHORT_TERM,
+            kind = MemoryKind.PROJECT,
+            assistantId = "__short_term__",
+            confidence = 0.9f,
+            expiresAt = null,
+            updatedAt = now,
+        )
+        val singleUse = base.copy(id = 1, lastUsedAt = now, useCount = 1)
+        val reinforced = base.copy(id = 2, lastUsedAt = now, useCount = MemoryDreamPlanner.PROMOTE_MIN_USE_COUNT)
+        val neverUsed = base.copy(id = 3, lastUsedAt = null, useCount = 0)
+
+        val plan = MemoryDreamPlanner.planLocally(
+            records = listOf(singleUse, reinforced, neverUsed),
+            candidates = emptyList(),
+            now = now,
+        )
+
+        assertEquals(listOf(2), plan.promoteMemoryIds)
+    }
+
+    @Test
+    fun staleShortTermArchivesWhileRecentUsedAndPinnedSurvive() {
+        val now = 1_800_000_000_000L
+        val stale = now - MemoryDreamPlanner.STALE_SHORT_TERM_MS - 1
+        val base = MemoryRecord(
+            id = 0,
+            content = "这条短期事项放了很久没人用",
+            scope = MemoryScope.SHORT_TERM,
+            kind = MemoryKind.NOTE,
+            assistantId = "__short_term__",
+            expiresAt = null,
+        )
+        val untouched = base.copy(id = 1, updatedAt = stale, lastUsedAt = null)
+        val usedLongAgo = base.copy(id = 2, updatedAt = stale, lastUsedAt = stale)
+        val recentlyUsed = base.copy(id = 3, updatedAt = stale, lastUsedAt = now - 1)
+        val recentlyEdited = base.copy(id = 4, updatedAt = now - 1, lastUsedAt = null)
+        val pinned = base.copy(id = 5, updatedAt = stale, lastUsedAt = null, pinned = true)
+        val expiring = base.copy(id = 6, updatedAt = stale, expiresAt = now + 60_000)
+
+        val plan = MemoryDreamPlanner.planLocally(
+            records = listOf(untouched, usedLongAgo, recentlyUsed, recentlyEdited, pinned, expiring),
+            candidates = emptyList(),
+            now = now,
+        )
+
+        assertEquals(listOf(1, 2), plan.archiveMemoryIds.sorted())
+    }
+
+    @Test
+    fun nearDuplicatePairsFlagSimilarRecordsAcrossScripts() {
+        val records = listOf(
+            MemoryRecord(id = 1, content = "用户喜欢喝黑咖啡不加糖", scope = MemoryScope.LONG_TERM, kind = MemoryKind.USER, assistantId = "__long_term__"),
+            MemoryRecord(id = 2, content = "用户喜欢喝黑咖啡不加糖奶", scope = MemoryScope.LONG_TERM, kind = MemoryKind.USER, assistantId = "__long_term__"),
+            MemoryRecord(id = 3, content = "项目周报每周五提交", scope = MemoryScope.SHORT_TERM, kind = MemoryKind.PROJECT, assistantId = "__short_term__"),
+        )
+
+        val pairs = MemoryDreamPlanner.findNearDuplicatePairs(records)
+
+        assertEquals(1, pairs.size)
+        assertEquals(1, pairs.single().firstId)
+        assertEquals(2, pairs.single().secondId)
+        assertTrue(pairs.single().similarity >= MemoryDreamPlanner.NEAR_DUP_THRESHOLD)
+        // English tokens also score.
+        assertTrue(MemoryDreamPlanner.jaccardSimilarity("User likes black coffee", "User likes black tea") > 0f)
+    }
+
+    @Test
+    fun pairsSuggestedByRecentPlansAreNotReFlagged() {
+        val pair = NearDuplicatePair(firstId = 5, secondId = 9, similarity = 0.8f)
+        val plans = listOf(
+            MemoryDreamPlan(
+                mergeSuggestions = listOf(
+                    MemoryMergeSuggestion(
+                        targetMemoryId = 5,
+                        duplicateMemoryIds = listOf(9),
+                    )
+                )
+            )
+        )
+        val otherPlans = listOf(
+            MemoryDreamPlan(
+                supersedeSuggestions = listOf(
+                    MemorySupersedeSuggestion(
+                        oldMemoryIds = listOf(5),
+                        newContent = "替换后的新内容足够长",
+                        scope = MemoryScope.LONG_TERM,
+                        kind = MemoryKind.USER,
+                    )
+                )
+            )
+        )
+
+        assertTrue(MemoryDreamPlanner.pairHandledByPlans(pair, plans))
+        assertTrue(MemoryDreamPlanner.pairHandledByPlans(pair, otherPlans))
+        assertFalse(MemoryDreamPlanner.pairHandledByPlans(pair, emptyList()))
+        assertFalse(
+            MemoryDreamPlanner.pairHandledByPlans(
+                pair.copy(firstId = 7, secondId = 8),
+                plans,
+            )
+        )
+    }
+
+    @Test
+    fun modelPlanParsesUserProfileSuggestion() {
+        val plan = MemoryDreamPlanner.parseModelPlanJson(
+            raw = """
+                {
+                  "user_profile": {
+                    "content": "用户偏好中文简洁回复，长期在做 AmberAgent 记忆系统改造。",
+                    "reason": "profile drifted"
+                  }
+                }
+            """.trimIndent(),
+            records = emptyList(),
+            candidates = emptyList(),
+            json = Json,
+        )
+
+        assertTrue(plan.hasChanges)
+        assertEquals("用户偏好中文简洁回复，长期在做 AmberAgent 记忆系统改造。", plan.userProfile?.content)
+        // Too-short profiles are dropped.
+        val tiny = MemoryDreamPlanner.parseModelPlanJson(
+            raw = """{"user_profile": {"content": "太短"}}""",
+            records = emptyList(),
+            candidates = emptyList(),
+            json = Json,
+        )
+        assertFalse(tiny.hasChanges)
+    }
+
+    @Test
     fun hasChangesAndMergeIncludeSupersedeSuggestions() {
         val supersede = MemorySupersedeSuggestion(
             oldMemoryIds = listOf(1),
@@ -324,5 +464,62 @@ class MemoryDreamPlannerTest {
         assertTrue(model.hasChanges)
         assertEquals(listOf(2), merged.promoteMemoryIds)
         assertEquals(listOf(supersede), merged.supersedeSuggestions)
+    }
+
+    @Test
+    fun reinforcedButStaleRecordPromotesInsteadOfArchiving() {
+        val now = 1_800_000_000_000L
+        val stale = now - MemoryDreamPlanner.STALE_SHORT_TERM_MS - 1_000
+        val plan = MemoryDreamPlanner.planLocally(
+            records = listOf(
+                MemoryRecord(
+                    id = 1,
+                    content = "反复被用但一个月没动过的项目事实",
+                    scope = MemoryScope.SHORT_TERM,
+                    kind = MemoryKind.PROJECT,
+                    assistantId = "__short_term__",
+                    confidence = 0.9f,
+                    lastUsedAt = stale,
+                    updatedAt = stale,
+                    useCount = MemoryDreamPlanner.PROMOTE_MIN_USE_COUNT,
+                ),
+            ),
+            candidates = emptyList(),
+            now = now,
+        )
+
+        // Reinforcement wins over staleness — the same record must not appear
+        // in both lists, or the archive would silently undo the promotion.
+        assertEquals(listOf(1), plan.promoteMemoryIds)
+        assertFalse(1 in plan.archiveMemoryIds)
+    }
+
+    @Test
+    fun expiredRecordsArchiveInAnyScopeButPinnedAndTopicsSurvive() {
+        val now = 1_800_000_000_000L
+        fun record(id: Int, scope: MemoryScope, kind: MemoryKind, pinned: Boolean = false) =
+            MemoryRecord(
+                id = id,
+                content = "record $id 已过期的内容",
+                scope = scope,
+                kind = kind,
+                assistantId = "a",
+                expiresAt = now - 1,
+                updatedAt = now,
+                pinned = pinned,
+            )
+        val plan = MemoryDreamPlanner.planLocally(
+            records = listOf(
+                record(1, MemoryScope.LONG_TERM, MemoryKind.USER),
+                record(2, MemoryScope.CORE, MemoryKind.USER),
+                record(3, MemoryScope.LONG_TERM, MemoryKind.USER, pinned = true),
+                record(4, MemoryScope.LONG_TERM, MemoryKind.TOPIC),
+                record(5, MemoryScope.SHORT_TERM, MemoryKind.PROJECT),
+            ),
+            candidates = emptyList(),
+            now = now,
+        )
+
+        assertEquals(setOf(1, 2, 5), plan.archiveMemoryIds.toSet())
     }
 }

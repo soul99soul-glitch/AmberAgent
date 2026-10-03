@@ -3838,11 +3838,17 @@ class ChatService(
         return buildMemoryTools(
             json = json,
             onList = { scope ->
+                // memory_list is the model's view of the world: archived and
+                // expired records stay out so their revisions can't be edited
+                // and dead facts don't steer the answer.
+                val now = System.currentTimeMillis()
                 when (scope) {
                     "core" -> memoryRepository.getGlobalMemories()
                     "short_term" -> memoryRepository.getShortTermMemories()
                     "long_term" -> memoryRepository.getLongTermMemories()
                     else -> emptyList()
+                }.filter {
+                    !it.archived && it.expiresAt.let { exp -> exp == null || exp > now }
                 }
             },
             onCreation = { request ->

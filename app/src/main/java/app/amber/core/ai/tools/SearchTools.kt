@@ -30,11 +30,9 @@ fun createSearchTools(
         val enabledServices = SearchAggregator.enabledServices(settings)
         val enabledServiceNames = enabledServices.joinToString { SearchServiceOptions.TYPES[it::class] ?: "Search" }
         val builtinStatus = listOfNotNull(
-            "Jina Search/Reader".takeIf { settings.searchBuiltinJinaEnabled },
-            "DuckDuckGo".takeIf { settings.searchBuiltinDuckDuckGoEnabled },
-            "Bing".takeIf { settings.searchBuiltinBingEnabled },
-            "Wikipedia".takeIf { settings.searchBuiltinWikipediaEnabled },
-            "Hacker News".takeIf { settings.searchBuiltinHackerNewsEnabled },
+            "Free aggregate (Bing, Brave, DuckDuckGo, 360, Quark, Wikipedia, Hacker News)"
+                .takeIf { SearchOrchestrator.freeAggregateEnabled(settings) },
+            "Jina Reader (scrape_web)".takeIf { settings.searchBuiltinJinaEnabled },
             "Google WebView fallback".takeIf { includeWebViewFallbackGuidance && settings.searchGoogleWebViewFallbackEnabled },
         ).joinToString().ifBlank { "none" }
         val webViewFallbackGuidance = if (includeWebViewFallbackGuidance) {
@@ -47,7 +45,7 @@ fun createSearchTools(
                 name = "search_web",
                 description = """
                     Search the web through AmberAgent Search Orchestrator.
-                    It uses enabled API services first, then built-in public/vertical sources such as Jina, DuckDuckGo, Bing HTML fallback, Wikipedia, and Hacker News as fallback/cross-check.
+                    It uses enabled API services first, then a built-in free aggregate that queries Bing, Brave, DuckDuckGo, 360, Quark, Wikipedia, and Hacker News concurrently as fallback/cross-check.
                     Use this when the user asks for the latest news, current facts, or needs verification.
                     Enabled configured services: ${enabledServiceNames.ifBlank { "none" }}.
                     Built-in sources: $builtinStatus.
@@ -64,6 +62,7 @@ fun createSearchTools(
                     - items[].images[] (optional): relevant image URLs from the search results
                     - sources[].service, service_id, accepted_selectors, status, result_count, error
                     - If status=error with available_sources, retry once without services or with one exact selector from available_sources.
+                    - search_service_hint (optional): free sources were weak; relay it to the user if the answer is limited by missing sources.
 
                     Citations:
                     - Prefer natural Markdown source links, e.g. `[Reuters](https://www.reuters.com/...)`, after the sentence.

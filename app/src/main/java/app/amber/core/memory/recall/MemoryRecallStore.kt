@@ -8,6 +8,7 @@ import app.amber.core.memory.model.MemoryKind
 import app.amber.core.memory.model.MemoryRecord
 import app.amber.core.memory.model.MemoryScope
 import app.amber.core.memory.prompt.MemoryPromptBuilder
+import app.amber.core.memory.store.MemoryProfileStore
 import app.amber.core.memory.store.MemoryRepository
 import app.amber.core.memory.time.MemoryFreshness
 import app.amber.core.memory.time.MemoryTimeAnchorParser
@@ -17,7 +18,15 @@ import java.util.Locale
 class MemoryRecallStore(
     private val memoryRepository: MemoryRepository,
     private val semanticReranker: MemorySemanticReranker? = null,
+    private val profileStore: MemoryProfileStore? = null,
 ) {
+    /**
+     * buildPrompt runs once per tool-loop round, so the same records would be
+     * re-touched several times per user turn and farm useCount into promotion.
+     * A record touched within the cooldown counts as already reinforced.
+     */
+    private val recentTouches = HashMap<Int, Long>()
+
     suspend fun buildPrompt(
         settings: Settings,
         messages: List<UIMessage>,
@@ -26,7 +35,24 @@ class MemoryRecallStore(
     ): String {
         val selections = recallSelections(settings, messages, runKey)
         val records = selections.map { it.record }
-        memoryRepository.touchMemories(selections.map { it.record.id })
+        val touchNow = System.currentTimeMillis()
+        val freshTouchIds = synchronized(recentTouches) {
+            selections.map { it.record.id }
+                .filter { (recentTouches[it] ?: 0L) < touchNow - TOUCH_COOLDOWN_MS }
+                .also { ids -> ids.forEach { recentTouches[it] = touchNow } }
+        }
+        if (freshTouchIds.isNotEmpty()) {
+            memoryRepository.touchMemories(freshTouchIds, touchNow)
+        }
+        // The dream-synthesized profile rides along only while fresh — a stale
+        // or heavily-drifted profile injects nothing rather than misleading.
+        val now = System.currentTimeMillis()
+        val userProfile = profileStore?.get()?.takeIf { profile ->
+            val activeIds = memoryRepository.getAllRecords()
+                .filterNot { it.archived }
+                .mapTo(HashSet()) { it.id }
+            profile.isFresh(now, activeIds)
+        }
         return MemoryPromptBuilder.buildMemoryContext(
             records = records,
             debug = settings.agentRuntime.memoryRecall.debug,
@@ -38,6 +64,7 @@ class MemoryRecallStore(
                 emptyMap()
             },
             locale = locale,
+            userProfile = userProfile?.content,
         )
     }
 
@@ -89,6 +116,8 @@ class MemoryRecallStore(
     companion object {
         internal const val USER_ALWAYS_ELIGIBLE_CONFIDENCE = 0.70f
         private const val TIME_DECAY_MULTIPLIER = 0.35
+        /** Same record re-surfaced inside a turn counts as one reinforcement. */
+        internal const val TOUCH_COOLDOWN_MS: Long = 60_000
         internal const val SEMANTIC_CANDIDATE_LEXICAL_POOL = 24
         internal const val SEMANTIC_CANDIDATE_RECENT_POOL = 16
 

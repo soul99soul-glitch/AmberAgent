@@ -9,6 +9,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.coroutines.cancellation.CancellationException
@@ -121,6 +122,9 @@ class SettingAgentMemoryVM(
         .stateIn(viewModelScope, memoryFlowSharing, 0)
 
     val pendingCandidates = memoryRepository.getPendingCandidatesFlow()
+        .stateIn(viewModelScope, memoryFlowSharing, emptyList())
+
+    val archivedMemories: StateFlow<List<AssistantMemory>> = memoryRepository.getArchivedMemoriesFlow()
         .stateIn(viewModelScope, memoryFlowSharing, emptyList())
 
     val recentMemoryEvents = memoryRepository.getRecentEventsFlow()
@@ -266,7 +270,18 @@ class SettingAgentMemoryVM(
 
     fun acceptCandidate(id: String) {
         viewModelScope.launch {
-            memoryRepository.acceptCandidate(id)
+            // Accept can throw on a raced/double accept or a stale intent
+            // target — surface it as a message instead of crashing the scope.
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    memoryRepository.acceptCandidate(id)
+                }
+            }.onFailure { error ->
+                _operationMessage.value = context.getString(
+                    R.string.memory_accept_failed,
+                    error.message ?: error::class.java.simpleName,
+                )
+            }
         }
     }
 
@@ -300,6 +315,38 @@ class SettingAgentMemoryVM(
                 context.getString(R.string.memory_ignore_low_confidence_none)
             } else {
                 context.getString(R.string.memory_ignored_low_confidence, candidates.size)
+            }
+        }
+    }
+
+    /**
+     * Restore an archived record CAS-bound to the revision the user saw. A
+     * stale revision fails loudly via operationMessage — the flow refresh
+     * hands the next attempt the current revision. The in-flight id set keeps
+     * a double-tap from firing two CAS writes against one revision.
+     */
+    private val _restoringMemoryIds = MutableStateFlow<Set<Int>>(emptySet())
+    val restoringMemoryIds: StateFlow<Set<Int>> = _restoringMemoryIds.asStateFlow()
+
+    fun restoreMemory(memory: AssistantMemory) {
+        if (memory.id in _restoringMemoryIds.value) return
+        viewModelScope.launch {
+            _restoringMemoryIds.update { it + memory.id }
+            try {
+                runCatching {
+                    withContext(Dispatchers.IO) {
+                        memoryRepository.restoreMemory(memory.id, memory.revision)
+                    }
+                }.onSuccess {
+                    _operationMessage.value = context.getString(R.string.memory_restored, memory.id)
+                }.onFailure { error ->
+                    _operationMessage.value = context.getString(
+                        R.string.memory_restore_failed,
+                        error.message ?: error::class.java.simpleName,
+                    )
+                }
+            } finally {
+                _restoringMemoryIds.update { it - memory.id }
             }
         }
     }

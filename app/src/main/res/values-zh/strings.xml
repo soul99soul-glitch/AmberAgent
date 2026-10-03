@@ -851,8 +851,10 @@
   <string name="setting_page_search_agent_search_desc">允许聊天使用已启用的搜索服务。</string>
   <string name="setting_page_search_enabled_services_summary">%1$d / %2$d 个服务已启用 · 多源召回</string>
   <string name="setting_page_search_builtin_sources">内置免费源</string>
-  <string name="setting_page_search_builtin_jina">Jina Search / Reader</string>
-  <string name="setting_page_search_builtin_jina_desc">无需 Key，优先以 Markdown 读取网页。</string>
+  <string name="setting_page_search_builtin_free_aggregate">免费聚合搜索</string>
+  <string name="setting_page_search_builtin_free_aggregate_desc">同时查询 Bing、Brave、DuckDuckGo、360、夸克、维基百科和 HN，遇验证页的引擎暂停 10 分钟。</string>
+  <string name="setting_page_search_builtin_jina">Jina Reader</string>
+  <string name="setting_page_search_builtin_jina_desc">无需 Key，为 scrape_web 读取网页全文。</string>
   <string name="setting_page_search_builtin_duckduckgo">DuckDuckGo Lite</string>
   <string name="setting_page_search_builtin_duckduckgo_desc">免费公共搜索源，无需 API Key。</string>
   <string name="setting_page_search_builtin_bing">Bing HTML</string>
@@ -2049,6 +2051,12 @@
   <string name="memory_docs_empty">暂无记忆文档。</string>
   <string name="memory_docs_info_body">主题文档由夜间整理聚合相关记忆生成，未归组的记忆按类型合并为文档。点开即可阅读全文。</string>
   <string name="memory_docs_title">记忆文档</string>
+  <string name="memory_archived_title">已归档</string>
+  <string name="memory_archived_empty">暂无归档记录。被清理、合并或替换的记忆会保存在这里，可随时恢复。</string>
+  <string name="memory_restore">恢复</string>
+  <string name="memory_restored">已恢复记忆 #%1$d。</string>
+  <string name="memory_restore_failed">恢复失败：%1$s</string>
+  <string name="memory_accept_failed">接受候选失败：%1$s</string>
   <string name="memory_dream_merge">合并 #%1$d &lt;- %2$s</string>
   <string name="memory_dream_reason_suffix">· %1$s</string>
   <string name="memory_dream_replace">替换 %1$s → %2$s%3$s</string>
@@ -3642,4 +3650,14 @@
   <string name="chat_shelf_kind_web">网页</string>
   <string name="chat_recap_no_model">还没有可用来生成回顾的模型，请在设置里选择标题模型。</string>
   <string name="chat_model_menu_context">上下文</string>
+  <string name="run_kernel_completion_check_prompt">【自动校验】本轮修改了文件，但之后没有运行任何检查。请运行合适的检查（测试、构建或 lint）并如实报告结果；如果没有可用的检查，请直接说明。</string>
+  <string name="setting_jev_purpose_auto_approval_gate">自动批准复核</string>
+  <string name="setting_jev_purpose_auto_approval_gate_desc">自动批准遇到高风险调用时，改为请你确认</string>
+  <string name="setting_jev_purpose_completion_check">完成声明校验</string>
+  <string name="setting_jev_purpose_completion_check_desc">改过文件却没跑检查就宣称完成时，追加一轮去验证</string>
+  <string name="chat_tool_jev_auto_approval_paused">自动批准已暂停：%1$s</string>
+  <string name="chat_tool_jev_risk_destructive">破坏性</string>
+  <string name="chat_tool_jev_risk_exfiltration">外发数据</string>
+  <string name="chat_tool_jev_risk_off_task">超出任务范围</string>
+  <string name="chat_tool_jev_risk_separator">"、"</string>
 </resources>

@@ -102,6 +102,13 @@ data class MemoryRecord(
     val sourceRunId: String? = null,
     /** P2-06: write path ("tool" | "auto_extraction" | ...). */
     val sourceTrigger: String? = null,
+    /**
+     * Reinforcement counter: incremented each time the record is surfaced by
+     * recall or re-confirmed by extraction. Promotion to long_term requires
+     * [useCount] >= 2 so a single accidental recall cannot immortalize a
+     * short-term record.
+     */
+    val useCount: Int = 0,
 )
 
 @Serializable

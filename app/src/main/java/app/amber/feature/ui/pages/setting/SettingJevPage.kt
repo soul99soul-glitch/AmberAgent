@@ -727,6 +727,8 @@ private fun JevPurpose.title(): String = stringResource(
         JevPurpose.MODEL_ROUTING -> R.string.setting_jev_purpose_model_routing
         JevPurpose.WEB_AUTOMATION -> R.string.setting_jev_purpose_web_automation
         JevPurpose.SCREEN_AUTOMATION -> R.string.setting_jev_purpose_screen_automation
+        JevPurpose.AUTO_APPROVAL_GATE -> R.string.setting_jev_purpose_auto_approval_gate
+        JevPurpose.COMPLETION_CHECK -> R.string.setting_jev_purpose_completion_check
     },
 )
 
@@ -739,6 +741,8 @@ private fun JevPurpose.description(): String = stringResource(
         JevPurpose.MODEL_ROUTING -> R.string.setting_jev_purpose_model_routing_desc
         JevPurpose.WEB_AUTOMATION -> R.string.setting_jev_purpose_web_automation_desc
         JevPurpose.SCREEN_AUTOMATION -> R.string.setting_jev_purpose_screen_automation_desc
+        JevPurpose.AUTO_APPROVAL_GATE -> R.string.setting_jev_purpose_auto_approval_gate_desc
+        JevPurpose.COMPLETION_CHECK -> R.string.setting_jev_purpose_completion_check_desc
     },
 )
 

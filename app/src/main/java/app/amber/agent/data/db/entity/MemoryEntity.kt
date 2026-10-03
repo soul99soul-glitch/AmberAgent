@@ -52,4 +52,8 @@ data class MemoryEntity(
     val topicTitle: String? = null,
     @ColumnInfo(name = "member_ids_json", defaultValue = "'[]'")
     val memberIdsJson: String = "[]",
+    // Reinforcement counter: +1 each recall surfacing or extraction confirm.
+    // Promotion requires useCount >= 2 (a single recall is not a stable fact).
+    @ColumnInfo(name = "use_count", defaultValue = "0")
+    val useCount: Int = 0,
 )

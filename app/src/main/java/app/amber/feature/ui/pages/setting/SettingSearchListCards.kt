@@ -185,17 +185,11 @@ internal fun SearchHeroCard(
 
 @Composable
 internal fun SearchServiceListCard(
+    freeAggregateEnabled: Boolean,
     jinaEnabled: Boolean,
-    duckDuckGoEnabled: Boolean,
-    bingEnabled: Boolean,
-    wikipediaEnabled: Boolean,
-    hackerNewsEnabled: Boolean,
     googleWebViewFallbackEnabled: Boolean,
+    onFreeAggregateEnabledChange: (Boolean) -> Unit,
     onJinaEnabledChange: (Boolean) -> Unit,
-    onDuckDuckGoEnabledChange: (Boolean) -> Unit,
-    onBingEnabledChange: (Boolean) -> Unit,
-    onWikipediaEnabledChange: (Boolean) -> Unit,
-    onHackerNewsEnabledChange: (Boolean) -> Unit,
     onGoogleWebViewFallbackEnabledChange: (Boolean) -> Unit,
     services: List<SearchServiceOptions>,
     enabledServiceIds: List<Uuid>,
@@ -213,17 +207,11 @@ internal fun SearchServiceListCard(
         Column(Modifier.fillMaxWidth()) {
             SubGroupLabel(text = stringResource(R.string.setting_page_search_builtin_sources))
             BuiltinSearchRows(
+                freeAggregateEnabled = freeAggregateEnabled,
                 jinaEnabled = jinaEnabled,
-                duckDuckGoEnabled = duckDuckGoEnabled,
-                bingEnabled = bingEnabled,
-                wikipediaEnabled = wikipediaEnabled,
-                hackerNewsEnabled = hackerNewsEnabled,
                 googleWebViewFallbackEnabled = googleWebViewFallbackEnabled,
+                onFreeAggregateEnabledChange = onFreeAggregateEnabledChange,
                 onJinaEnabledChange = onJinaEnabledChange,
-                onDuckDuckGoEnabledChange = onDuckDuckGoEnabledChange,
-                onBingEnabledChange = onBingEnabledChange,
-                onWikipediaEnabledChange = onWikipediaEnabledChange,
-                onHackerNewsEnabledChange = onHackerNewsEnabledChange,
                 onGoogleWebViewFallbackEnabledChange = onGoogleWebViewFallbackEnabledChange,
             )
 
@@ -284,53 +272,26 @@ internal fun SearchServiceListCard(
 
 @Composable
 private fun BuiltinSearchRows(
+    freeAggregateEnabled: Boolean,
     jinaEnabled: Boolean,
-    duckDuckGoEnabled: Boolean,
-    bingEnabled: Boolean,
-    wikipediaEnabled: Boolean,
-    hackerNewsEnabled: Boolean,
     googleWebViewFallbackEnabled: Boolean,
+    onFreeAggregateEnabledChange: (Boolean) -> Unit,
     onJinaEnabledChange: (Boolean) -> Unit,
-    onDuckDuckGoEnabledChange: (Boolean) -> Unit,
-    onBingEnabledChange: (Boolean) -> Unit,
-    onWikipediaEnabledChange: (Boolean) -> Unit,
-    onHackerNewsEnabledChange: (Boolean) -> Unit,
     onGoogleWebViewFallbackEnabledChange: (Boolean) -> Unit,
 ) {
+    BuiltinSearchRow(
+        title = stringResource(R.string.setting_page_search_builtin_free_aggregate),
+        description = stringResource(R.string.setting_page_search_builtin_free_aggregate_desc),
+        checked = freeAggregateEnabled,
+        showDivider = true,
+        onCheckedChange = onFreeAggregateEnabledChange,
+    )
     BuiltinSearchRow(
         title = stringResource(R.string.setting_page_search_builtin_jina),
         description = stringResource(R.string.setting_page_search_builtin_jina_desc),
         checked = jinaEnabled,
         showDivider = true,
         onCheckedChange = onJinaEnabledChange,
-    )
-    BuiltinSearchRow(
-        title = stringResource(R.string.setting_page_search_builtin_duckduckgo),
-        description = stringResource(R.string.setting_page_search_builtin_duckduckgo_desc),
-        checked = duckDuckGoEnabled,
-        showDivider = true,
-        onCheckedChange = onDuckDuckGoEnabledChange,
-    )
-    BuiltinSearchRow(
-        title = stringResource(R.string.setting_page_search_builtin_bing),
-        description = stringResource(R.string.setting_page_search_builtin_bing_desc),
-        checked = bingEnabled,
-        showDivider = true,
-        onCheckedChange = onBingEnabledChange,
-    )
-    BuiltinSearchRow(
-        title = stringResource(R.string.setting_page_search_builtin_wikipedia),
-        description = stringResource(R.string.setting_page_search_builtin_wikipedia_desc),
-        checked = wikipediaEnabled,
-        showDivider = true,
-        onCheckedChange = onWikipediaEnabledChange,
-    )
-    BuiltinSearchRow(
-        title = stringResource(R.string.setting_page_search_builtin_hackernews),
-        description = stringResource(R.string.setting_page_search_builtin_hackernews_desc),
-        checked = hackerNewsEnabled,
-        showDivider = true,
-        onCheckedChange = onHackerNewsEnabledChange,
     )
     BuiltinSearchRow(
         title = stringResource(R.string.setting_page_search_google_webview_fallback),

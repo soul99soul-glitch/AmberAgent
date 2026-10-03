@@ -18,6 +18,8 @@
     <string name="setting_agent_memory_metadata_confidence">置信度</string>
     <string name="setting_agent_memory_metadata_updated">更新时间</string>
     <string name="setting_agent_memory_metadata_last_used">最近使用</string>
+    <string name="setting_agent_memory_metadata_use_count">使用次数</string>
+    <string name="setting_agent_memory_metadata_expires">过期时间</string>
     <string name="setting_agent_memory_metadata_kind">类型</string>
     <string name="setting_agent_memory_classification">归类</string>
     <string name="setting_agent_memory_scope">记忆层级</string>

@@ -23,7 +23,7 @@ import org.junit.Test
 
 class SearchOrchestratorTest {
     @Test
-    fun usesBuiltInSourcesWithoutConfiguredApiServices() {
+    fun usesFreeAggregateWithoutConfiguredApiServices() {
         val settings = Settings(
             searchServices = emptyList(),
             searchEnabledServiceIds = emptyList(),
@@ -31,18 +31,55 @@ class SearchOrchestratorTest {
 
         val sources = SearchOrchestrator.buildSources(settings)
 
-        assertTrue(sources.any { it.id == "jina_builtin" })
-        assertTrue(sources.any { it.id == "duckduckgo_builtin" })
-        assertTrue(sources.any { it.id == "bing_builtin" })
-        assertTrue(sources.any { it.id == "wikipedia_builtin" })
-        assertTrue(sources.any { it.id == "hackernews_builtin" })
+        assertEquals(listOf("free_aggregate_builtin"), sources.map { it.id })
+    }
+
+    @Test
+    fun freeAggregateStaysOnWhileEitherLegacyToggleIsOn() {
+        val bingOnly = Settings(searchBuiltinDuckDuckGoEnabled = false, searchBuiltinBingEnabled = true)
+        val bothOff = Settings(searchBuiltinDuckDuckGoEnabled = false, searchBuiltinBingEnabled = false)
+
+        assertTrue(SearchOrchestrator.buildSources(bingOnly).any { it.id == "free_aggregate_builtin" })
+        assertFalse(SearchOrchestrator.buildSources(bothOff).any { it.id == "free_aggregate_builtin" })
+    }
+
+    @Test
+    fun freeAggregateIsCappedAtTwoVariantCalls() = runBlocking {
+        val seen = mutableListOf<Int>()
+
+        SearchOrchestrator.search(
+            settings = Settings(searchServices = emptyList(), searchEnabledServiceIds = emptyList()),
+            params = buildJsonObject {
+                put("query", "小米17销量 最新")
+                put("topic", "market")
+                put("depth", "deep")
+            },
+            executor = { request, _ ->
+                seen += request.variantIndex
+                success("t${request.variantIndex}", "https://example.com/${request.variantIndex}")
+            },
+        )
+
+        assertEquals(listOf(0, 1), seen.sorted())
+    }
+
+    @Test
+    fun weakFreeOnlyResultsCarrySearchServiceHint() = runBlocking {
+        val payload = SearchOrchestrator.search(
+            settings = Settings(searchServices = emptyList(), searchEnabledServiceIds = emptyList()),
+            params = buildJsonObject { put("query", "niche topic") },
+            executor = { _, _ -> success("only one", "https://example.com/one") },
+        )
+
+        assertTrue(payload["search_service_hint"]!!.jsonPrimitive.content.contains("Tavily"))
     }
 
     @Test
     fun keepsPartialResultWhenOnePublicSourceFails() = runBlocking {
+        val tavily = SearchServiceOptions.TavilyOptions(apiKey = "test")
         val settings = Settings(
-            searchServices = emptyList(),
-            searchEnabledServiceIds = emptyList(),
+            searchServices = listOf(tavily),
+            searchEnabledServiceIds = listOf(tavily.id),
             searchCommonOptions = SearchCommonOptions(resultSize = 5),
         )
 
@@ -54,7 +91,7 @@ class SearchOrchestratorTest {
                 put("time_range", "day")
             },
             executor = { request, _ ->
-                if (request.source.id == "duckduckgo_builtin") {
+                if (request.source.id == "free_aggregate_builtin") {
                     Result.failure(IllegalStateException("blocked by test"))
                 } else {
                     success("Fresh AI News", "https://example.com/ai?utm_source=test")
@@ -118,29 +155,13 @@ class SearchOrchestratorTest {
     }
 
     @Test
-    fun verticalSourcesOnlyJoinApplicableQueries() {
-        val settings = Settings(searchServices = emptyList(), searchEnabledServiceIds = emptyList())
-
-        val technicalSources = SearchOrchestrator.buildSources(
-            settings = settings,
-            query = "Claude Code MCP 开源 项目",
-            topic = "technical",
-        )
-        val entitySources = SearchOrchestrator.buildSources(
-            settings = settings,
-            query = "OpenAI 是什么",
-            topic = "general",
-        )
-        val marketSources = SearchOrchestrator.buildSources(
-            settings = settings,
-            query = "小米17销量 最新",
-            topic = "market",
+    fun legacyEngineSelectorsStillReachFreeAggregate() {
+        val sources = SearchOrchestrator.buildSources(
+            settings = Settings(searchServices = emptyList(), searchEnabledServiceIds = emptyList()),
+            requestedServices = listOf("wikipedia"),
         )
 
-        assertTrue(technicalSources.any { it.id == "hackernews_builtin" })
-        assertTrue(entitySources.any { it.id == "wikipedia_builtin" })
-        assertFalse(marketSources.any { it.id == "hackernews_builtin" })
-        assertFalse(marketSources.any { it.id == "wikipedia_builtin" })
+        assertEquals(listOf("free_aggregate_builtin"), sources.map { it.id })
     }
 
     @Test
@@ -294,7 +315,7 @@ class SearchOrchestratorTest {
     fun sourceStatusIncludesAcceptedSelectors() {
         val status = SearchOrchestrator.status(Settings(searchServices = emptyList(), searchEnabledServiceIds = emptyList()))
         val bing = status["sources"]!!.jsonArray.first { source ->
-            source.jsonObject["id"]!!.jsonPrimitive.content == "bing_builtin"
+            source.jsonObject["id"]!!.jsonPrimitive.content == "free_aggregate_builtin"
         }
 
         assertNotNull(bing.jsonObject["accepted_selectors"])

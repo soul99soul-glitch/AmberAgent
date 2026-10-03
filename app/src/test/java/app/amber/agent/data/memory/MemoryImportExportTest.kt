@@ -238,6 +238,7 @@ private class ExportFakeMemoryDao(
         sourceTrigger: String?,
         topicTitle: String?,
         memberIdsJson: String,
+        useCount: Int,
         expectedRevision: Long,
     ): Int {
         val index = memories.indexOfFirst { it.id == id }
@@ -264,6 +265,7 @@ private class ExportFakeMemoryDao(
             sourceTrigger = sourceTrigger,
             topicTitle = topicTitle,
             memberIdsJson = memberIdsJson,
+            useCount = useCount,
         )
         return 1
     }
@@ -293,8 +295,13 @@ private class ExportFakeMemoryDao(
 
     override suspend fun revisionOf(id: Int): Long? = memories.firstOrNull { it.id == id }?.revision
 
+    override fun getArchivedMemoriesFlow(): Flow<List<MemoryEntity>> =
+        flowOf(memories.filter { it.archived })
+
     override suspend fun touchMemories(ids: List<Int>, usedAt: Long) {
-        memories.replaceAll { if (it.id in ids) it.copy(lastUsedAt = usedAt) else it }
+        memories.replaceAll {
+            if (it.id in ids) it.copy(lastUsedAt = usedAt, useCount = it.useCount + 1) else it
+        }
     }
 
     override suspend fun deleteMemory(id: Int) {

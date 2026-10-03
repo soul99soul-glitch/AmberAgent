@@ -578,8 +578,10 @@
   <string name="setting_page_search_agent_search_desc">允許聊天呼叫 search_web 和 scrape_web，使用已啟用服務。</string>
   <string name="setting_page_search_enabled_services_summary">%1$d / %2$d 個服務已啟用 · 多源召回</string>
   <string name="setting_page_search_builtin_sources">內建免費源</string>
-  <string name="setting_page_search_builtin_jina">Jina Search / Reader</string>
-  <string name="setting_page_search_builtin_jina_desc">可無 Key 使用，盡量以 Markdown 搜尋和讀取網頁。</string>
+  <string name="setting_page_search_builtin_free_aggregate">免費聚合搜尋</string>
+  <string name="setting_page_search_builtin_free_aggregate_desc">同時查詢 Bing、Brave、DuckDuckGo、360、夸克、維基百科和 HN，遇驗證頁的引擎暫停 10 分鐘。</string>
+  <string name="setting_page_search_builtin_jina">Jina Reader</string>
+  <string name="setting_page_search_builtin_jina_desc">無需 Key，為 scrape_web 讀取網頁全文。</string>
   <string name="setting_page_search_builtin_duckduckgo">DuckDuckGo Lite</string>
   <string name="setting_page_search_builtin_duckduckgo_desc">無需 API Key 的免費公共召回源。</string>
   <string name="setting_page_search_builtin_bing">Bing HTML</string>
@@ -2032,6 +2034,12 @@
   <string name="memory_docs_empty">尚無記憶文件。</string>
   <string name="memory_docs_info_body">主題文件由夜間整理聚合相關記憶產生，未歸類的記憶按類型合併為文件。點開即可閱讀全文。</string>
   <string name="memory_docs_title">記憶文件</string>
+  <string name="memory_archived_title">已歸檔</string>
+  <string name="memory_archived_empty">尚無歸檔記錄。被清理、合併或替換的記憶會保存在這裡，可隨時還原。</string>
+  <string name="memory_restore">還原</string>
+  <string name="memory_restored">已還原記憶 #%1$d。</string>
+  <string name="memory_restore_failed">還原失敗：%1$s</string>
+  <string name="memory_accept_failed">接受候選失敗：%1$s</string>
   <string name="memory_dream_merge">合併 #%1$d &lt;- %2$s</string>
   <string name="memory_dream_reason_suffix">· %1$s</string>
   <string name="memory_dream_replace">取代 %1$s → %2$s%3$s</string>
@@ -3622,4 +3630,14 @@
   <string name="chat_shelf_kind_web">網頁</string>
   <string name="chat_recap_no_model">還沒有可用來產生回顧的模型，請在設定裡選擇標題模型。</string>
   <string name="chat_model_menu_context">上下文</string>
+  <string name="run_kernel_completion_check_prompt">【自動校驗】本輪修改了檔案，但之後沒有執行任何檢查。請執行合適的檢查（測試、建置或 lint）並如實回報結果；如果沒有可用的檢查，請直接說明。</string>
+  <string name="setting_jev_purpose_auto_approval_gate">自動批准複核</string>
+  <string name="setting_jev_purpose_auto_approval_gate_desc">自動批准遇到高風險呼叫時，改為請你確認</string>
+  <string name="setting_jev_purpose_completion_check">完成聲明校驗</string>
+  <string name="setting_jev_purpose_completion_check_desc">改過檔案卻沒跑檢查就宣稱完成時，追加一輪去驗證</string>
+  <string name="chat_tool_jev_auto_approval_paused">自動批准已暫停：%1$s</string>
+  <string name="chat_tool_jev_risk_destructive">破壞性</string>
+  <string name="chat_tool_jev_risk_exfiltration">外傳資料</string>
+  <string name="chat_tool_jev_risk_off_task">超出任務範圍</string>
+  <string name="chat_tool_jev_risk_separator">"、"</string>
 </resources>

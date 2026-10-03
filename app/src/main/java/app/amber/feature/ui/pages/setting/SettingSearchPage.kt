@@ -1,5 +1,6 @@
 package app.amber.feature.ui.pages.setting
 
+import app.amber.core.ai.tools.SearchOrchestrator
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
@@ -117,14 +118,11 @@ fun SettingSearchPage(vm: SettingVM = koinViewModel()) {
                     enabled = settings.enableWebSearch,
                     enabledCount = settings.searchServices.count { it.id in settings.searchEnabledServiceIds } +
                         listOf(
+                            SearchOrchestrator.freeAggregateEnabled(settings),
                             settings.searchBuiltinJinaEnabled,
-                            settings.searchBuiltinDuckDuckGoEnabled,
-                            settings.searchBuiltinBingEnabled,
-                            settings.searchBuiltinWikipediaEnabled,
-                            settings.searchBuiltinHackerNewsEnabled,
                             settings.searchGoogleWebViewFallbackEnabled,
                         ).count { it },
-                    serviceCount = settings.searchServices.size + 6,
+                    serviceCount = settings.searchServices.size + 3,
                     onCheckedChange = { enabled ->
                         vm.updateSettings { current -> current.copy(enableWebSearch = enabled) }
                     },
@@ -133,26 +131,16 @@ fun SettingSearchPage(vm: SettingVM = koinViewModel()) {
 
             item("service_list") {
                 SearchServiceListCard(
+                    freeAggregateEnabled = SearchOrchestrator.freeAggregateEnabled(settings),
                     jinaEnabled = settings.searchBuiltinJinaEnabled,
-                    duckDuckGoEnabled = settings.searchBuiltinDuckDuckGoEnabled,
-                    bingEnabled = settings.searchBuiltinBingEnabled,
-                    wikipediaEnabled = settings.searchBuiltinWikipediaEnabled,
-                    hackerNewsEnabled = settings.searchBuiltinHackerNewsEnabled,
                     googleWebViewFallbackEnabled = settings.searchGoogleWebViewFallbackEnabled,
+                    onFreeAggregateEnabledChange = { enabled ->
+                        vm.updateSettings { current ->
+                            current.copy(searchBuiltinDuckDuckGoEnabled = enabled, searchBuiltinBingEnabled = enabled)
+                        }
+                    },
                     onJinaEnabledChange = { enabled ->
                         vm.updateSettings { current -> current.copy(searchBuiltinJinaEnabled = enabled) }
-                    },
-                    onDuckDuckGoEnabledChange = { enabled ->
-                        vm.updateSettings { current -> current.copy(searchBuiltinDuckDuckGoEnabled = enabled) }
-                    },
-                    onBingEnabledChange = { enabled ->
-                        vm.updateSettings { current -> current.copy(searchBuiltinBingEnabled = enabled) }
-                    },
-                    onWikipediaEnabledChange = { enabled ->
-                        vm.updateSettings { current -> current.copy(searchBuiltinWikipediaEnabled = enabled) }
-                    },
-                    onHackerNewsEnabledChange = { enabled ->
-                        vm.updateSettings { current -> current.copy(searchBuiltinHackerNewsEnabled = enabled) }
                     },
                     onGoogleWebViewFallbackEnabledChange = { enabled ->
                         vm.updateSettings { current -> current.copy(searchGoogleWebViewFallbackEnabled = enabled) }
