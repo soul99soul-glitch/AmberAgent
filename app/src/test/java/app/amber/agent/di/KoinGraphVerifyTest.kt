@@ -88,6 +88,11 @@ class KoinGraphVerifyTest {
             definition<app.amber.feature.reminder.ReminderStore>(
                 java.io.File::class,
             ),
+            // MemoryModule builds the file from Context inside the factory;
+            // Json is a real binding.
+            definition<app.amber.core.memory.store.MemoryProfileStore>(
+                java.io.File::class,
+            ),
             // RepositoryModule obtains this from Context rather than resolving a binding.
             definition<app.amber.core.conversation.exchange.ConversationExchangeFileHandler>(
                 android.content.ContentResolver::class,

@@ -13,8 +13,11 @@ import app.amber.core.memory.export.MemoryFrontmatterCodec
 import app.amber.core.memory.export.MemoryImportExportManager
 import app.amber.core.memory.extraction.MemoryCandidateFilter
 import app.amber.core.memory.extraction.MemoryExtractor
+import app.amber.core.memory.store.MemoryProfileStore
 import app.amber.core.memory.telemetry.MemoryEventLogger
 import org.koin.dsl.module
+import android.content.Context
+import java.io.File
 
 /**
  * Memory-domain Koin module — covers extraction, dream-mode planning/applying,
@@ -31,13 +34,17 @@ val memoryModule = module {
 
     single { MemoryExtractor(get(), get(), get(), get(), get(), get(), get(), restoreWriteGate = get()) }
 
-    single { MemoryDreamPlanner(get(), get(), get(), get(), get(), get()) }
+    single { MemoryDreamPlanner(get(), get(), get(), get(), get(), get(), planStore = get(), profileStore = get()) }
     single<MemoryDreamPlanProvider> { get<MemoryDreamPlanner>() }
 
-    single { MemoryDreamApplier(get(), get(), get()) }
+    single { MemoryDreamApplier(get(), get(), get(), profileStore = get()) }
     single<MemoryDreamPlanApplier> { get<MemoryDreamApplier>() }
 
     single { MemoryDreamPlanStore(get(), get(), get()) }
+
+    single {
+        MemoryProfileStore(File(get<Context>().filesDir, "memory_profile.json"), get())
+    }
 
     single { MemoryDreamNotifier(get()) }
     single<MemoryDreamReviewNotifier> { get<MemoryDreamNotifier>() }

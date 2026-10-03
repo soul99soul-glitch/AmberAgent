@@ -69,7 +69,7 @@ interface MemoryDAO {
             "archived = :archived, created_at = :createdAt, updated_at = :updatedAt, " +
             "last_used_at = :lastUsedAt, revision = revision + 1, source_run_id = :sourceRunId, " +
             "source_trigger = :sourceTrigger, topic_title = :topicTitle, " +
-            "member_ids_json = :memberIdsJson " +
+            "member_ids_json = :memberIdsJson, use_count = :useCount " +
             "WHERE id = :id AND revision = :expectedRevision"
     )
     suspend fun updateRecordCas(
@@ -92,6 +92,7 @@ interface MemoryDAO {
         sourceTrigger: String?,
         topicTitle: String?,
         memberIdsJson: String,
+        useCount: Int,
         expectedRevision: Long,
     ): Int
 
@@ -123,7 +124,14 @@ interface MemoryDAO {
     @Query("SELECT revision FROM memoryentity WHERE id = :id")
     suspend fun revisionOf(id: Int): Long?
 
-    @Query("UPDATE memoryentity SET last_used_at = :usedAt WHERE id IN (:ids)")
+    @Query("SELECT * FROM memoryentity WHERE archived = 1 ORDER BY updated_at DESC")
+    fun getArchivedMemoriesFlow(): Flow<List<MemoryEntity>>
+
+    /**
+     * Reinforcement touch: recall surfacing or an extraction confirm bumps the
+     * use counter so lifecycle rules can require repeated use before promoting.
+     */
+    @Query("UPDATE memoryentity SET last_used_at = :usedAt, use_count = use_count + 1 WHERE id IN (:ids)")
     suspend fun touchMemories(ids: List<Int>, usedAt: Long)
 
     @Query("DELETE FROM memoryentity WHERE id = :id")

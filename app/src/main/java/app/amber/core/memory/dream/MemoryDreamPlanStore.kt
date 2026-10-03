@@ -31,7 +31,8 @@ data class PersistedMemoryDreamPlan(
     val summary: String
         get() = "合并 ${plan.mergeSuggestions.size} · 提升 ${plan.promoteMemoryIds.size} · " +
             "归档 ${plan.archiveMemoryIds.size} · 替换 ${plan.supersedeSuggestions.size} · " +
-            "忽略候选 ${plan.ignoreCandidateIds.size} · 主题 ${plan.topicSuggestions.size}"
+            "忽略候选 ${plan.ignoreCandidateIds.size} · 主题 ${plan.topicSuggestions.size}" +
+            (if (plan.userProfile != null) " · 画像更新" else "")
 }
 
 class MemoryDreamPlanStore(
@@ -47,6 +48,17 @@ class MemoryDreamPlanStore(
 
     suspend fun countAutoPlansSince(createdAfter: Long): Int =
         dao.countPlansSince(MemoryDreamPlanSource.AUTO.wireName, createdAfter)
+
+    /**
+     * Most recent plans of any status — history for the dream prompt so pairs
+     * a previous plan already suggested are not re-flagged every run.
+     */
+    suspend fun getRecentPlans(limit: Int): List<MemoryDreamPlan> =
+        dao.getRecentPlans(limit).mapNotNull { entity ->
+            runCatching {
+                json.decodeFromString(MemoryDreamPlan.serializer(), entity.planJson)
+            }.getOrNull()
+        }
 
     suspend fun savePending(
         plan: MemoryDreamPlan,

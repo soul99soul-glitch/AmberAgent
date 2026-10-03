@@ -184,6 +184,9 @@ class MemoryImportExportManager(
                 revision = existing.revision,
                 createdAt = minOf(existing.createdAt, createdAt),
                 lastUsedAt = existing.lastUsedAt ?: lastUsedAt,
+                // The codec never exports useCount; keep the accumulated
+                // reinforcement instead of resetting promotion credit to 0.
+                useCount = maxOf(existing.useCount, useCount),
                 sourceRunId = existing.sourceRunId ?: sourceRunId,
                 sourceTrigger = existing.sourceTrigger ?: sourceTrigger,
             )

@@ -2051,6 +2051,12 @@
   <string name="memory_docs_empty">暂无记忆文档。</string>
   <string name="memory_docs_info_body">主题文档由夜间整理聚合相关记忆生成，未归组的记忆按类型合并为文档。点开即可阅读全文。</string>
   <string name="memory_docs_title">记忆文档</string>
+  <string name="memory_archived_title">已归档</string>
+  <string name="memory_archived_empty">暂无归档记录。被清理、合并或替换的记忆会保存在这里，可随时恢复。</string>
+  <string name="memory_restore">恢复</string>
+  <string name="memory_restored">已恢复记忆 #%1$d。</string>
+  <string name="memory_restore_failed">恢复失败：%1$s</string>
+  <string name="memory_accept_failed">接受候选失败：%1$s</string>
   <string name="memory_dream_merge">合并 #%1$d &lt;- %2$s</string>
   <string name="memory_dream_reason_suffix">· %1$s</string>
   <string name="memory_dream_replace">替换 %1$s → %2$s%3$s</string>

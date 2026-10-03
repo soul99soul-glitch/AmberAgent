@@ -242,6 +242,7 @@ val dataSourceModule = module {
                 AppDatabase.MIGRATION_16_17,
                 AppDatabase.MIGRATION_17_18,
                 AppDatabase.MIGRATION_18_19,
+                AppDatabase.MIGRATION_19_20,
             )
             .addCallback(object : RoomDatabase.Callback() {
                 override fun onOpen(db: SupportSQLiteDatabase) {
@@ -621,6 +622,8 @@ val dataSourceModule = module {
             toolEffectLedger = get(),
             capabilityFlags = get(),
             capabilityPermissionStore = get(),
+            autoApprovalGate = get(),
+            completionCheck = get(),
         )
     }
     single<GenerationRoundEngine> { get<ChatGenerationRoundEngine>() }
@@ -753,6 +756,7 @@ val dataSourceModule = module {
             secretRedactor = get(),
             deviceBoundBackupKey = get(),
             restoreWriteGate = get(),
+            workspaceManager = get(),
         )
     }
 

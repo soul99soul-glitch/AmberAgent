@@ -10,6 +10,7 @@ import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import app.amber.ai.core.MessageRole
 import app.amber.ai.provider.ProviderCatalog
 import app.amber.ai.provider.TextGenerationParams
 import app.amber.ai.ui.UIMessage
@@ -19,6 +20,7 @@ import app.amber.core.settings.prefs.SettingsAggregator
 import app.amber.core.settings.findProvider
 import app.amber.core.settings.resolveTaskChatModel
 import app.amber.core.memory.model.MemoryCandidate
+import app.amber.core.memory.model.MemoryCandidateStatus
 import app.amber.core.memory.model.MemoryEventType
 import app.amber.core.memory.model.MemoryKind
 import app.amber.core.memory.model.MemoryRecord
@@ -154,9 +156,48 @@ class MemoryExtractor(
                     conversationId = conversationId,
                     sourceMessageIds = sourceIds,
                 )
-                val parseMetaById = parsedCandidates.associateBy { it.candidate.id }
-                val candidates = parsedCandidates.map { it.candidate }
-                val filtered = candidateFilter.filter(candidates, activeRecords)
+                val grounded = parsedCandidates.map { parsed ->
+                    validateEvidence(parsed, sourceMessages)
+                }
+                // One intent per target per run — repeated confirm/update on
+                // the same record would farm useCount or double-write, so the
+                // extras drop into the audit trail instead.
+                val seenIntentTargets = mutableSetOf<Int>()
+                val audited = grounded.map { parsed ->
+                    val targetId = parsed.updateMemoryId
+                    val intent = parsed.action != ExtractionAction.ADD && targetId != null
+                    if (parsed.candidate.status == MemoryCandidateStatus.FILTERED ||
+                        !intent ||
+                        seenIntentTargets.add(targetId)
+                    ) {
+                        parsed
+                    } else {
+                        parsed.copy(
+                            candidate = parsed.candidate.copy(
+                                status = MemoryCandidateStatus.FILTERED,
+                                reason = listOfNotNull(
+                                    parsed.candidate.reason.takeIf { it.isNotBlank() },
+                                    "duplicate_intent",
+                                ).joinToString("; "),
+                            ),
+                        )
+                    }
+                }
+                val rejected = audited.filter { it.candidate.status == MemoryCandidateStatus.FILTERED }
+                if (rejected.isNotEmpty()) {
+                    memoryRepository.addCandidates(rejected.map { it.candidate })
+                }
+                val validParsed = audited.filterNot { it.candidate.status == MemoryCandidateStatus.FILTERED }
+                val parseMetaById = validParsed.associateBy { it.candidate.id }
+                val candidates = validParsed.map { it.candidate }
+                // Confirm/invalidate candidates carry intent, not new facts:
+                // their content restates or retracts a shown record, so the
+                // verbatim-duplicate and low-value gates don't apply.
+                val intentCandidateIds = validParsed
+                    .filter { it.action != ExtractionAction.ADD && it.updateMemoryId != null }
+                    .map { it.candidate.id }
+                    .toSet()
+                val filtered = candidateFilter.filter(candidates, activeRecords, intentCandidateIds)
                 memoryRepository.addCandidates(filtered.rejected)
                 filtered.accepted.forEach { candidate ->
                     val meta = parseMetaById[candidate.id]
@@ -165,41 +206,98 @@ class MemoryExtractor(
                         explicitScope = meta?.explicitScope == true,
                         explicitKind = meta?.explicitKind == true,
                     )
-                    // Reconcile: a model "update" rewrites the target in place via
-                    // CAS bound to the snapshot revision. Core and pinned records
-                    // are never touched; a stale snapshot goes to review instead
-                    // of adding. The gate still requires the candidate's own
-                    // explicit scope/kind even though an update keeps the
-                    // target's classification — conservative on purpose.
+                    // Reconcile: the model's intent targets only records it was
+                    // shown. Core, pinned, and topic records are never touched
+                    // by the auto path — they fall back to pending review.
                     val updateTarget = meta?.updateMemoryId?.let(recordsById::get)
-                    // Topics are dream-synthesized; extraction updates must
-                    // never rewrite them — they fall back to pending review.
-                    val updateAttempted = autoWrite &&
-                        updateTarget != null &&
+                    val targetMutable = updateTarget != null &&
                         updateTarget.scope != MemoryScope.CORE &&
                         updateTarget.kind != MemoryKind.TOPIC &&
                         !updateTarget.pinned
-                    val updateApplied = updateAttempted && applyExtractionUpdate(
-                        target = updateTarget!!,
-                        newContent = candidate.content,
-                    ) { id, content, revision ->
-                        memoryRepository.updateContentCas(
-                            id = id,
-                            content = content,
-                            expectedRevision = revision,
-                            sourceRunId = conversationId,
-                            sourceTrigger = MemoryRepository.TRIGGER_AUTO_EXTRACTION,
-                        )
+                    val applied = when {
+                        // Update keeps history: archive the old record and link
+                        // the new version through supersedesIds instead of
+                        // rewriting content in place.
+                        meta?.action == ExtractionAction.UPDATE && autoWrite && targetMutable ->
+                            applyExtractionSupersede(
+                                target = updateTarget!!,
+                                candidate = candidate,
+                            ) { id, content, revision ->
+                                memoryRepository.supersedeMemory(
+                                    targetId = id,
+                                    newContent = content,
+                                    expectedRevision = revision,
+                                    confidence = candidate.confidence,
+                                    expiresAt = candidate.expiresAt,
+                                    sourceConversationId = candidate.sourceConversationId,
+                                    sourceMessageIds = candidate.sourceMessageIds,
+                                    sourceRunId = conversationId,
+                                    sourceTrigger = MemoryRepository.TRIGGER_AUTO_EXTRACTION,
+                                )
+                            }.also { superseded ->
+                                if (superseded) {
+                                    eventLogger.log(
+                                        type = MemoryEventType.MEMORY_UPDATED,
+                                        conversationId = conversationId,
+                                        memoryId = updateTarget.id,
+                                        modelId = model.id.toString(),
+                                        message = "Superseded by extraction reconcile: ${candidate.reason.take(180)}",
+                                    )
+                                }
+                            }
+
+                        // Invalidate archives the target without a replacement —
+                        // the Mem0 DELETE action, kept recoverable.
+                        meta?.action == ExtractionAction.INVALIDATE && autoWrite && targetMutable ->
+                            applyExtractionInvalidate(
+                                target = updateTarget!!,
+                            ) { id, revision ->
+                                memoryRepository.archiveMemoryCas(
+                                    id = id,
+                                    expectedRevision = revision,
+                                    sourceRunId = conversationId,
+                                    sourceTrigger = MemoryRepository.TRIGGER_AUTO_EXTRACTION,
+                                )
+                            }.also { invalidated ->
+                                if (invalidated) {
+                                    eventLogger.log(
+                                        type = MemoryEventType.MEMORY_ARCHIVED,
+                                        conversationId = conversationId,
+                                        memoryId = updateTarget.id,
+                                        modelId = model.id.toString(),
+                                        message = "Invalidated by extraction: ${candidate.content.take(180)}",
+                                    )
+                                }
+                            }
+
+                        // Confirm re-affirms an existing record: reinforce it
+                        // without rewriting. Non-destructive, so it applies
+                        // even when the candidate itself is below the write gate.
+                        meta?.action == ExtractionAction.CONFIRM &&
+                            updateTarget != null && !updateTarget.archived ->
+                            runCatching {
+                                memoryRepository.reinforceMemory(updateTarget.id)
+                            }.isSuccess.also { reinforced ->
+                                if (reinforced) {
+                                    eventLogger.log(
+                                        type = MemoryEventType.MEMORY_UPDATED,
+                                        conversationId = conversationId,
+                                        memoryId = updateTarget.id,
+                                        modelId = model.id.toString(),
+                                        message = "Reinforced by extraction confirm.",
+                                    )
+                                }
+                            }
+
+                        else -> false
                     }
-                    if (updateApplied) {
-                        eventLogger.log(
-                            type = MemoryEventType.MEMORY_UPDATED,
-                            conversationId = conversationId,
-                            memoryId = updateTarget.id,
-                            modelId = model.id.toString(),
-                            message = "Auto-updated by extraction reconcile.",
-                        )
-                    } else if (autoWrite && meta?.updateMemoryId == null) {
+                    if (applied) {
+                        return@forEach
+                    }
+                    if (autoWrite && meta?.action != ExtractionAction.UPDATE &&
+                        meta?.action != ExtractionAction.INVALIDATE &&
+                        meta?.action != ExtractionAction.CONFIRM
+                    ) {
                         val memory = memoryRepository.addMemory(
                             scope = candidate.scope,
                             kind = candidate.kind,
@@ -224,14 +322,20 @@ class MemoryExtractor(
                             message = candidate.autoWriteEventMessage(),
                         )
                     } else {
-                        // A pending candidate that the model meant as an update
-                        // keeps the target link in its reason so review doesn't
-                        // create a duplicate of the still-live record.
-                        val pendingCandidate = meta?.updateMemoryId?.let { targetId ->
-                            candidate.copy(
-                                reason = "updates memory #$targetId: ${candidate.reason}".trim(),
-                            )
-                        } ?: candidate
+                        // A pending candidate keeps the model's intent in its
+                        // reason so review applies the update/invalidate/confirm
+                        // instead of creating a duplicate of the live record.
+                        // The prefix is only attached when the target came from
+                        // the shown list — an id the model never saw is model
+                        // error, not consent to rewrite that record on accept.
+                        val intentShown = meta?.updateMemoryId?.let { it in recordsById } == true
+                        val pendingCandidate = meta?.intentReasonPrefix()
+                            ?.takeIf { intentShown }
+                            ?.let { prefix ->
+                                candidate.copy(
+                                    reason = "$prefix${candidate.reason}".trim(),
+                                )
+                            } ?: candidate
                         memoryRepository.addCandidate(pendingCandidate)
                         eventLogger.log(
                             type = MemoryEventType.CANDIDATE_CREATED,
@@ -313,7 +417,29 @@ class MemoryExtractor(
         val explicitScope: Boolean,
         val explicitKind: Boolean,
         val updateMemoryId: Int?,
-    )
+        val action: ExtractionAction = ExtractionAction.ADD,
+        val evidence: String = "",
+    ) {
+        /** Reason prefix that lets review re-apply the model's intent. */
+        fun intentReasonPrefix(): String? = when (action) {
+            ExtractionAction.UPDATE -> updateMemoryId?.let { "updates memory #$it: " }
+            ExtractionAction.INVALIDATE -> updateMemoryId?.let { "invalidates memory #$it: " }
+            ExtractionAction.CONFIRM -> updateMemoryId?.let { "confirms memory #$it: " }
+            ExtractionAction.ADD -> null
+        }
+    }
+
+    internal enum class ExtractionAction(val wireName: String) {
+        ADD("add"),
+        UPDATE("update"),
+        INVALIDATE("invalidate"),
+        CONFIRM("confirm");
+
+        companion object {
+            fun fromWireName(value: String?): ExtractionAction =
+                entries.firstOrNull { it.wireName == value } ?: ADD
+        }
+    }
 
     companion object {
         internal const val SHORT_TERM_PROJECT_AUTO_WRITE_CONFIDENCE = 0.72f
@@ -321,6 +447,9 @@ class MemoryExtractor(
 
         /** Existing memories injected into the extraction prompt for reconcile. */
         internal const val RECONCILE_MEMORY_LIMIT = 24
+
+        /** Evidence below this length cannot anchor a memory. */
+        internal const val MIN_EVIDENCE_CHARS = 6
 
         private fun String?.isValidMemoryScope(): Boolean =
             MemoryScope.entries.any { it.wireName == this }
@@ -354,15 +483,20 @@ class MemoryExtractor(
                 val kindValue = obj["kind"]?.jsonPrimitive?.contentOrNull
                 val scope = MemoryScope.fromWireName(scopeValue)
                 val expiresAt = resolveCandidateExpiresAt(content, scope, expiresInDays)
-                val isUpdate = obj["action"]?.jsonPrimitive?.contentOrNull == "update"
+                val action = ExtractionAction.fromWireName(
+                    obj["action"]?.jsonPrimitive?.contentOrNull,
+                )
+                val evidence = obj["evidence"]?.jsonPrimitive?.contentOrNull?.trim().orEmpty()
                 ParsedMemoryCandidate(
                     explicitScope = scopeValue.isValidMemoryScope(),
                     explicitKind = kindValue.isValidMemoryKind(),
-                    updateMemoryId = if (isUpdate) {
+                    action = action,
+                    updateMemoryId = if (action != ExtractionAction.ADD) {
                         obj["update_memory_id"]?.jsonPrimitive?.intOrNull
                     } else {
                         null
                     },
+                    evidence = evidence,
                     candidate = MemoryCandidate(
                         content = content,
                         scope = scope,
@@ -371,7 +505,9 @@ class MemoryExtractor(
                         kind = MemoryKind.fromWireName(kindValue)
                             .takeIf { it != MemoryKind.TOPIC } ?: MemoryKind.NOTE,
                         confidence = obj["confidence"]?.jsonPrimitive?.floatOrNull ?: 0.55f,
-                        reason = obj["reason"]?.jsonPrimitive?.contentOrNull.orEmpty(),
+                        reason = obj["reason"]?.jsonPrimitive?.contentOrNull.orEmpty()
+                            .removeForgedIntentPrefix()
+                            .withEvidenceSuffix(evidence),
                         sourceConversationId = conversationId,
                         sourceMessageIds = sourceMessageIds,
                         expiresAt = expiresAt,
@@ -380,20 +516,107 @@ class MemoryExtractor(
             }
         }
 
+        /** Evidence rides in the candidate reason so review can audit it. */
+        private fun String.withEvidenceSuffix(evidence: String): String =
+            if (evidence.isBlank()) this else "$this（依据：$evidence）".trim()
+
         /**
-         * Auto-apply a model "update" action: the CAS binds the revision the
-         * model saw at prompt time. Returns false when the record moved in
-         * between — the caller then hands the update intent to review instead
-         * of overwriting or adding a stale duplicate.
+         * The accept-time intent channel lives in the reason prefix
+         * ("updates memory #N: ...", see MemoryRepository). Model output is
+         * untrusted text — strip any such prefix the model wrote itself so a
+         * plain "add" candidate can't smuggle a rewrite/archive intent past
+         * review.
          */
-        internal suspend fun applyExtractionUpdate(
+        private val FORGED_INTENT_PREFIX =
+            Regex("^(?:updates|invalidates|confirms) memory #\\d+: *")
+
+        private fun String.removeForgedIntentPrefix(): String =
+            replace(FORGED_INTENT_PREFIX, "")
+
+        /**
+         * Verbatim-evidence check: the model may rewrite [content] freely, but
+         * it must attach a quote copied unchanged from a user message, and any
+         * number or Latin-alphabet term in the rewrite must be grounded in the
+         * conversation or a derived absolute date. Failure marks the candidate
+         * FILTERED so it lands in the audit trail instead of the library.
+         */
+        internal fun validateEvidence(
+            parsed: ParsedMemoryCandidate,
+            sourceMessages: List<UIMessage>,
+        ): ParsedMemoryCandidate {
+            val evidence = parsed.evidence.trim()
+            val fail = { tag: String ->
+                parsed.copy(
+                    candidate = parsed.candidate.copy(
+                        status = MemoryCandidateStatus.FILTERED,
+                        reason = listOfNotNull(
+                            parsed.candidate.reason.takeIf { it.isNotBlank() },
+                            tag,
+                        ).joinToString("; "),
+                    ),
+                )
+            }
+            if (evidence.length < MIN_EVIDENCE_CHARS) return fail("missing_evidence")
+            val userTexts = sourceMessages
+                .filter { it.role == MessageRole.USER }
+                .map { it.toText() }
+            val quotedVerbatim = userTexts.any { text ->
+                text.contains(evidence) ||
+                    collapseWhitespace(text).contains(collapseWhitespace(evidence))
+            }
+            if (!quotedVerbatim) return fail("evidence_not_verbatim")
+            val conversationText = sourceMessages.joinToString("\n") { it.toText() }
+            val groundedText = collapseWhitespace(conversationText)
+            val ungrounded = GROUNDING_TOKEN_REGEX.findAll(parsed.candidate.content)
+                .map { it.value }
+                .distinct()
+                .filter { token -> !groundedText.contains(token) }
+                .toList()
+            if (ungrounded.isNotEmpty()) return fail("ungrounded_content")
+            return parsed
+        }
+
+        private fun collapseWhitespace(text: String): String =
+            text.replace(Regex("\\s+"), " ")
+
+        /** Numbers and Latin words must be traceable to the conversation. */
+        private val GROUNDING_TOKEN_REGEX = Regex("""\d+|[A-Za-z]{2,}""")
+
+        /**
+         * Auto-apply a model "update" action as supersede-with-history: insert
+         * the new version, then archive the old record CAS-bound to the
+         * snapshot revision the model saw. Returns false on a stale snapshot —
+         * the caller then hands the intent to review instead of overwriting.
+         */
+        internal suspend fun applyExtractionSupersede(
             target: MemoryRecord,
-            newContent: String,
+            candidate: MemoryCandidate,
             write: suspend (id: Int, content: String, expectedRevision: Long) -> Unit,
         ): Boolean = try {
-            write(target.id, newContent, target.revision)
+            write(target.id, candidate.content, target.revision)
             true
-        } catch (stale: MemoryStaleException) {
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            // Stale CAS, a raced archive, or any rejected target check hands
+            // the intent to pending review — one bad target never aborts the
+            // extraction run.
+            false
+        }
+
+        /**
+         * Auto-apply a model "invalidate" action: archive the target CAS-bound
+         * to the prompt-time revision. False on stale — review decides then.
+         */
+        internal suspend fun applyExtractionInvalidate(
+            target: MemoryRecord,
+            write: suspend (id: Int, expectedRevision: Long) -> Unit,
+        ): Boolean = try {
+            write(target.id, target.revision)
+            true
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
             false
         }
 

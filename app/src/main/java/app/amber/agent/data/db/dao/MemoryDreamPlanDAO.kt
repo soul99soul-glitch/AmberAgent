@@ -19,6 +19,9 @@ interface MemoryDreamPlanDAO {
     @Query("SELECT COUNT(*) FROM memory_dream_plan WHERE source = :source AND created_at >= :createdAfter")
     suspend fun countPlansSince(source: String, createdAfter: Long): Int
 
+    @Query("SELECT * FROM memory_dream_plan ORDER BY created_at DESC LIMIT :limit")
+    suspend fun getRecentPlans(limit: Int): List<MemoryDreamPlanEntity>
+
     @Query("UPDATE memory_dream_plan SET status = :status, dismissed_at = :dismissedAt WHERE status = 'pending'")
     suspend fun updatePendingStatus(status: String, dismissedAt: Long)
 

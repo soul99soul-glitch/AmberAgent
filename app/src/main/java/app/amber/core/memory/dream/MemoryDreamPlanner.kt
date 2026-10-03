@@ -24,6 +24,7 @@ import kotlinx.serialization.Serializable
 import app.amber.core.memory.model.MemoryRecord
 import app.amber.core.memory.model.MemoryScope
 import app.amber.core.memory.prompt.MemoryDreamPrompt
+import app.amber.core.memory.store.MemoryProfileStore
 import app.amber.core.memory.store.MemoryRepository
 import app.amber.core.memory.telemetry.MemoryEventLogger
 import app.amber.core.sync.core.SyncRestoreWriteEpoch
@@ -60,6 +61,8 @@ class MemoryDreamPlanner(
     private val memoryRepository: MemoryRepository,
     private val eventLogger: MemoryEventLogger,
     private val restoreWriteGate: SyncRestoreWriteGate? = null,
+    private val planStore: MemoryDreamPlanStore? = null,
+    private val profileStore: MemoryProfileStore? = null,
 ) : MemoryDreamPlanProvider {
     override suspend fun plan(): MemoryDreamPlanSplit =
         withContext(captureWriteContext()) { planInternal() }
@@ -110,13 +113,31 @@ class MemoryDreamPlanner(
         if (!worker.enabled || !MemoryWorkerDreamGate.isModelDreamEnabled(worker)) return null
         val model = resolveDaydreamModel(settings) ?: return null
         val provider = model.findProvider(settings.providers) ?: return null
+        val now = System.currentTimeMillis()
+        // Expired records are maintenance zombies — recall can't see them and
+        // the plan archives them, so the model has no use for them either.
+        val promptRecords = records
+            .filter { !it.archived && it.expiresAt.let { exp -> exp == null || exp > now } }
+            .take(80)
+        // Lexically-similar pairs are surfaced so the model can resolve them
+        // by semantics: merge true duplicates, supersede outdated records, or
+        // leave them. Pairs a recent plan already suggested are not re-flagged
+        // — repeating the same hint every run is churn.
+        val recentPlans = runCatching {
+            planStore?.getRecentPlans(RECENT_PLAN_HISTORY).orEmpty()
+        }.getOrDefault(emptyList())
+        val nearDuplicatePairs = findNearDuplicatePairs(promptRecords)
+            .filterNot { pair -> pairHandledByPlans(pair, recentPlans) }
+        val currentProfile = runCatching { profileStore?.get() }.getOrNull()
         val response = providerCatalog.text(provider).complete(
             providerSetting = provider,
             messages = listOf(
                 UIMessage.user(
                     MemoryDreamPrompt.build(
-                        records = records.filterNot { it.archived }.take(80),
+                        records = promptRecords,
                         candidates = candidates.take(50),
+                        nearDuplicatePairs = nearDuplicatePairs,
+                        currentProfile = currentProfile,
                     )
                 )
             ),
@@ -162,10 +183,12 @@ class MemoryDreamPlanner(
             now: Long = System.currentTimeMillis(),
         ): MemoryDreamPlan {
             val activeRecords = records.filterNot { it.archived }
-            val expiredProjects = records.filter { record ->
-                !record.archived &&
-                    record.scope == MemoryScope.SHORT_TERM &&
-                    record.kind != MemoryKind.TOPIC &&
+            // Expired records are zombies: invisible to recall, unreachable by
+            // review — archive them in any scope. Pinned and topic records stay
+            // user-controlled.
+            val expiredRecords = activeRecords.filter { record ->
+                record.kind != MemoryKind.TOPIC &&
+                    !record.pinned &&
                     record.expiresAt?.let { it <= now } == true
             }
             // Topics are dream-synthesized views keyed by title; verbatim
@@ -174,7 +197,7 @@ class MemoryDreamPlanner(
                 .filter { it.kind != MemoryKind.TOPIC }
                 .groupBy { normalize(it.content) }
                 .values
-                .filter { group -> group.size > 1 && group.first().content.length >= 8 }
+                .filter { group -> group.size > 1 && group.maxOf { it.content.length } >= 8 }
                 .map { group ->
                     val sorted = group.sortedWith(
                         compareByDescending<MemoryRecord> { it.pinned }
@@ -189,20 +212,40 @@ class MemoryDreamPlanner(
                         reason = "内容高度重复，保留可信度或层级更高的一条。",
                     )
                 }
+            // Promotion requires reinforcement: surfaced/recalled at least
+            // twice. A single recall is not evidence the fact is durable.
             val promoteIds = activeRecords
                 .filter { record ->
                     record.scope == MemoryScope.SHORT_TERM &&
                         record.kind == MemoryKind.PROJECT &&
                         record.expiresAt == null &&
                         record.confidence >= 0.82f &&
-                        record.lastUsedAt != null
+                        record.useCount >= PROMOTE_MIN_USE_COUNT
                 }
                 .map { it.id }
+            // The other side of the lifecycle: a short-term record nobody ever
+            // used and nobody touched for a month is stale, not durable. Pinned
+            // and time-bound records are exempt on purpose.
+            val promoteIdSet = promoteIds.toSet()
+            val staleShortTerm = activeRecords
+                .filter { record ->
+                    record.scope == MemoryScope.SHORT_TERM &&
+                        record.kind != MemoryKind.TOPIC &&
+                        !record.pinned &&
+                        record.expiresAt == null &&
+                        record.lastUsedAt.let { it == null || it < now - STALE_SHORT_TERM_MS } &&
+                        record.updatedAt < now - STALE_SHORT_TERM_MS &&
+                        // Reinforcement wins over staleness: a record used
+                        // repeatedly promotes this run, it never archives.
+                        record.id !in promoteIdSet
+                }
+                .map { it.id }
+            val activeNormalized = activeRecords.map { normalize(it.content) }.toSet()
             val noisyCandidateIds = candidates
                 .filter { candidate ->
                     candidate.content.trim().length < 12 ||
                         candidate.confidence < 0.45f ||
-                        normalize(candidate.content) in activeRecords.map { normalize(it.content) }.toSet()
+                        normalize(candidate.content) in activeNormalized
                 }
                 .map { it.id }
             // Pending candidates that expired or sat unreviewed past the TTL
@@ -231,12 +274,13 @@ class MemoryDreamPlanner(
             return MemoryDreamPlan(
                 mergeSuggestions = duplicateGroups,
                 promoteMemoryIds = promoteIds.distinct(),
-                archiveMemoryIds = expiredProjects.map { it.id }.distinct(),
+                archiveMemoryIds = (expiredRecords.map { it.id } + staleShortTerm).distinct(),
                 ignoreCandidateIds = (noisyCandidateIds + staleCandidateIds + overflowCandidateIds).distinct(),
                 notes = buildList {
                     if (duplicateGroups.isNotEmpty()) add("发现 ${duplicateGroups.size} 组可能重复的记忆，可合并后归档副本。")
                     if (promoteIds.isNotEmpty()) add("发现 ${promoteIds.size} 条反复使用的短期项目记忆，可提升为长期记忆。")
-                    if (expiredProjects.isNotEmpty()) add("发现 ${expiredProjects.size} 条过期短期项目记忆，可归档。")
+                    if (expiredRecords.isNotEmpty()) add("发现 ${expiredRecords.size} 条过期记忆，可归档。")
+                    if (staleShortTerm.isNotEmpty()) add("发现 ${staleShortTerm.size} 条长期未被使用的短期记忆，可归档。")
                     if (noisyCandidateIds.isNotEmpty()) add("发现 ${noisyCandidateIds.size} 条低价值或重复候选，可忽略。")
                     if (staleCandidateIds.isNotEmpty()) add("发现 ${staleCandidateIds.size} 条已过期或长期未审批的候选，可忽略。")
                     if (overflowCandidateIds.isNotEmpty()) add("待审批候选超出上限，可忽略置信度最低的 ${overflowCandidateIds.size} 条。")
@@ -247,11 +291,101 @@ class MemoryDreamPlanner(
         /** Pending candidates older than this are auto-ignored during maintenance. */
         internal const val PENDING_CANDIDATE_TTL_MS: Long = 14L * 24 * 60 * 60 * 1000
 
+        /** Short-term promotion requires this many reinforcements. */
+        internal const val PROMOTE_MIN_USE_COUNT: Int = 2
+
+        /** Short-term records unused and untouched this long are archived as stale. */
+        internal const val STALE_SHORT_TERM_MS: Long = 30L * 24 * 60 * 60 * 1000
+
         /** Soft cap on the pending-candidate queue; overflow drops lowest confidence first. */
         internal const val MAX_PENDING_CANDIDATES: Int = 100
 
+        /** Jaccard similarity at or above this flags a pair as near-duplicate. */
+        internal const val NEAR_DUP_THRESHOLD: Float = 0.45f
+
+        /** Near-duplicate pairs surfaced to the model prompt per run. */
+        internal const val MAX_NEAR_DUP_PAIRS: Int = 12
+
+        /** Plan history scanned when suppressing already-suggested pairs. */
+        private const val RECENT_PLAN_HISTORY: Int = 8
+
+        /** A synthesized profile shorter than this is not meaningful. */
+        private const val MIN_PROFILE_CHARS: Int = 16
+
+        /** Hard cap on the model's profile output before it is persisted. */
+        private const val MAX_PROFILE_CHARS: Int = 2_000
+
         private fun normalize(text: String): String =
             text.lowercase().filter { it.isLetterOrDigit() }.take(200)
+
+        /**
+         * Exact-normalize dedupe catches verbatim copies only. This scans
+         * active, non-topic records for lexical near-duplicates so the model
+         * can decide semantically: merge, supersede, or leave alone.
+         */
+        internal fun findNearDuplicatePairs(
+            records: List<MemoryRecord>,
+            threshold: Float = NEAR_DUP_THRESHOLD,
+        ): List<NearDuplicatePair> {
+            val managed = records.filter { !it.archived && it.kind != MemoryKind.TOPIC }
+            val pairs = mutableListOf<NearDuplicatePair>()
+            for (i in managed.indices) {
+                for (j in i + 1 until managed.size) {
+                    val score = jaccardSimilarity(managed[i].content, managed[j].content)
+                    if (score >= threshold) {
+                        pairs += NearDuplicatePair(managed[i].id, managed[j].id, score)
+                    }
+                }
+            }
+            return pairs.sortedByDescending { it.similarity }.take(MAX_NEAR_DUP_PAIRS)
+        }
+
+        /**
+         * Mixed-script Jaccard: whitespace/punctuation word tokens for Latin
+         * text plus character bigrams for CJK runs (CJK has no word spacing).
+         */
+        internal fun jaccardSimilarity(a: String, b: String): Float {
+            val tokensA = memoryTokens(a)
+            val tokensB = memoryTokens(b)
+            if (tokensA.isEmpty() || tokensB.isEmpty()) return 0f
+            val union = tokensA.union(tokensB).size
+            if (union == 0) return 0f
+            return tokensA.intersect(tokensB).size.toFloat() / union
+        }
+
+        private fun memoryTokens(text: String): Set<String> {
+            val normalized = text.lowercase()
+            val wordTokens = WORD_TOKEN_REGEX.findAll(normalized)
+                .map { it.value }
+                .filter { it.length > 1 }
+                .toSet()
+            val cjkBigrams = CJK_RUN_REGEX.findAll(normalized)
+                .flatMap { match ->
+                    match.value.windowed(2).ifEmpty { listOf(match.value) }
+                }
+                .toSet()
+            return wordTokens + cjkBigrams
+        }
+
+        private val WORD_TOKEN_REGEX = Regex("[a-z0-9_]+")
+        private val CJK_RUN_REGEX = Regex("[\\u4e00-\\u9fff]+")
+
+        /**
+         * A pair is "handled" when a recent plan already proposed a merge over
+         * it or a supersede touching either side — re-flagging it is churn.
+         */
+        internal fun pairHandledByPlans(
+            pair: NearDuplicatePair,
+            plans: List<MemoryDreamPlan>,
+        ): Boolean = plans.any { plan ->
+            plan.supersedeSuggestions.any { suggestion ->
+                pair.firstId in suggestion.oldMemoryIds ||
+                    pair.secondId in suggestion.oldMemoryIds
+            } || plan.mergeSuggestions.any { suggestion ->
+                val covered = setOf(suggestion.targetMemoryId) + suggestion.duplicateMemoryIds
+                pair.firstId in covered && pair.secondId in covered
+            }
+        }
 
         internal fun parseModelPlanJson(
             raw: String,
@@ -313,8 +447,18 @@ class MemoryDreamPlanner(
                     reason = obj["reason"]?.jsonPrimitive?.contentOrNull.orEmpty(),
                 )
             }
+            val userProfile = root["user_profile"]?.jsonObject?.let { obj ->
+                val content = obj["content"]?.jsonPrimitive?.contentOrNull?.trim()
+                    ?.takeIf { it.length >= MIN_PROFILE_CHARS }
+                    ?: return@let null
+                MemoryProfileSuggestion(
+                    content = content.take(MAX_PROFILE_CHARS),
+                    reason = obj["reason"]?.jsonPrimitive?.contentOrNull.orEmpty(),
+                )
+            }
             return MemoryDreamPlan(
                 mergeSuggestions = merges,
+                userProfile = userProfile,
                 promoteMemoryIds = root["promote"]?.jsonArray.orEmpty()
                     .mapNotNull { it.jsonPrimitive.contentOrNull?.toIntOrNull() }
                     .filter { it in memoryIds }
@@ -378,6 +522,7 @@ internal fun MemoryDreamPlan.mergeWith(other: MemoryDreamPlan?): MemoryDreamPlan
         topicSuggestions = (topicSuggestions + other.topicSuggestions)
             .distinctBy { it.title.lowercase().filter(Char::isLetterOrDigit) }
             .take(8),
+        userProfile = userProfile ?: other.userProfile,
         notes = (notes + other.notes).distinct().take(12),
     )
 }
@@ -390,6 +535,7 @@ data class MemoryDreamPlan(
     val ignoreCandidateIds: List<String> = emptyList(),
     val supersedeSuggestions: List<MemorySupersedeSuggestion> = emptyList(),
     val topicSuggestions: List<MemoryTopicSuggestion> = emptyList(),
+    val userProfile: MemoryProfileSuggestion? = null,
     val notes: List<String> = emptyList(),
 ) {
     val hasChanges: Boolean
@@ -398,8 +544,27 @@ data class MemoryDreamPlan(
             archiveMemoryIds.isNotEmpty() ||
             ignoreCandidateIds.isNotEmpty() ||
             supersedeSuggestions.isNotEmpty() ||
-            topicSuggestions.isNotEmpty()
+            topicSuggestions.isNotEmpty() ||
+            userProfile != null
 }
+
+/**
+ * Model-produced user-profile synthesis: a short derived summary of durable
+ * user traits and preferences. Reviewable like every other model op — it is
+ * written to the profile store only when its plan is applied.
+ */
+@Serializable
+data class MemoryProfileSuggestion(
+    val content: String,
+    val reason: String = "",
+)
+
+/** A lexically-similar record pair surfaced to the dream model prompt. */
+data class NearDuplicatePair(
+    val firstId: Int,
+    val secondId: Int,
+    val similarity: Float,
+)
 
 /**
  * Model-produced topic synthesis: group related memories under a named topic

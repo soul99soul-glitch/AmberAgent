@@ -18,6 +18,8 @@
     <string name="setting_agent_memory_metadata_confidence">Confidence</string>
     <string name="setting_agent_memory_metadata_updated">Updated</string>
     <string name="setting_agent_memory_metadata_last_used">Last used</string>
+    <string name="setting_agent_memory_metadata_use_count">Uses</string>
+    <string name="setting_agent_memory_metadata_expires">Expires</string>
     <string name="setting_agent_memory_metadata_kind">Type</string>
     <string name="setting_agent_memory_classification">Classification</string>
     <string name="setting_agent_memory_scope">Memory layer</string>

@@ -51,7 +51,7 @@ val repositoryModule = module {
     }
 
     single {
-        MemoryRecallStore(get(), get())
+        MemoryRecallStore(get(), get(), get())
     }
 
     single {

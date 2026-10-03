@@ -3277,6 +3277,12 @@
   <string name="memory_imported">%1$d개의 메모리를 가져왔습니다</string>
   <string name="memory_no_maintenance_needed">정리가 필요한 메모리가 없습니다</string>
   <string name="memory_no_safe_dream_plan">안전하게 적용할 수 있는 Dream 제안이 없습니다</string>
+  <string name="memory_archived_title">보관됨</string>
+  <string name="memory_archived_empty">보관된 메모리가 없습니다. 정리, 병합 또는 교체로 빠진 기록이 여기에 남아 있으며 복원할 수 있습니다.</string>
+  <string name="memory_restore">복원</string>
+  <string name="memory_restored">메모리 #%1$d을(를) 복원했습니다.</string>
+  <string name="memory_restore_failed">복원 실패: %1$s</string>
+  <string name="memory_accept_failed">후보 승인 실패: %1$s</string>
   <string name="miniapp_image_load_failed">이미지를 불러오지 못했습니다</string>
   <string name="miniapp_image_requires_data_uri">이미지는 인라인 data URI를 사용해야 합니다</string>
   <string name="miniapp_source_check_brace">중괄호 {</string>

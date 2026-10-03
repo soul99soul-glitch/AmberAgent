@@ -2026,6 +2026,12 @@
   <string name="memory_docs_empty">メモリドキュメントはまだありません。</string>
   <string name="memory_docs_info_body">トピックドキュメントは夜間メンテナンスが関連メモリをまとめて生成します。未分類のメモリは種類ごとのドキュメントにまとめられます。タップして全文を読めます。</string>
   <string name="memory_docs_title">メモリドキュメント</string>
+  <string name="memory_archived_title">アーカイブ済み</string>
+  <string name="memory_archived_empty">アーカイブはありません。クリーンアップ・マージ・置き換えで外れたメモリがここに残り、復元できます。</string>
+  <string name="memory_restore">復元</string>
+  <string name="memory_restored">メモリ #%1$d を復元しました。</string>
+  <string name="memory_restore_failed">復元に失敗しました：%1$s</string>
+  <string name="memory_accept_failed">候補の承認に失敗しました：%1$s</string>
   <string name="memory_dream_merge">マージ #%1$d &lt;- %2$s</string>
   <string name="memory_dream_reason_suffix">· %1$s</string>
   <string name="memory_dream_replace">%1$s を %2$s に置換%3$s</string>

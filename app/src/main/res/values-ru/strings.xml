@@ -3283,6 +3283,12 @@
   <string name="memory_imported">Импортировано элементов памяти: %1$d</string>
   <string name="memory_no_maintenance_needed">Память, требующая обработки, не найдена</string>
   <string name="memory_no_safe_dream_plan">Нет предложения Dream, которое можно безопасно применить</string>
+  <string name="memory_archived_title">В архиве</string>
+  <string name="memory_archived_empty">В архиве пусто. Записи, снятые очисткой, слиянием или заменой, хранятся здесь и могут быть восстановлены.</string>
+  <string name="memory_restore">Восстановить</string>
+  <string name="memory_restored">Память #%1$d восстановлена.</string>
+  <string name="memory_restore_failed">Ошибка восстановления: %1$s</string>
+  <string name="memory_accept_failed">Не удалось принять кандидата: %1$s</string>
   <string name="miniapp_image_load_failed">Не удалось загрузить изображение</string>
   <string name="miniapp_image_requires_data_uri">Изображение должно использовать встроенный data URI</string>
   <string name="miniapp_source_check_brace">фигурная скобка {</string>

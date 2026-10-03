@@ -2055,6 +2055,12 @@ What would you like to talk about today?</string>
   <string name="memory_docs_empty">No memory documents yet.</string>
   <string name="memory_docs_info_body">Topic documents group related memories and are synthesized by nightly Daydream maintenance. Memories not yet grouped merge into per-kind documents. Tap a document to read it.</string>
   <string name="memory_docs_title">Memory documents</string>
+  <string name="memory_archived_title">Archived</string>
+  <string name="memory_archived_empty">Nothing archived. Records retired by cleanup, merge, or supersede land here and can be restored.</string>
+  <string name="memory_restore">Restore</string>
+  <string name="memory_restored">Restored memory #%1$d.</string>
+  <string name="memory_restore_failed">Restore failed: %1$s</string>
+  <string name="memory_accept_failed">Accept failed: %1$s</string>
   <string name="memory_dream_merge">Merge #%1$d &lt;- %2$s</string>
   <string name="memory_dream_reason_suffix">· %1$s</string>
   <string name="memory_dream_replace">Replace %1$s → %2$s%3$s</string>

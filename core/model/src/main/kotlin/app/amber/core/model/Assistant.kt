@@ -42,6 +42,8 @@ data class AssistantMemory(
     val createdAt: Long = 0L,
     val updatedAt: Long = 0L,
     val lastUsedAt: Long? = null,
+    /** Reinforcement counter shared with MemoryRecord (surfaced/confirmed count). */
+    val useCount: Int = 0,
 )
 
 @Serializable

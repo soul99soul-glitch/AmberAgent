@@ -113,6 +113,7 @@ class MemoryCasTest {
             sourceTrigger: String?,
             topicTitle: String?,
             memberIdsJson: String,
+            useCount: Int,
             expectedRevision: Long,
         ): Int {
             val current = rows[id] ?: return 0
@@ -137,6 +138,7 @@ class MemoryCasTest {
                 sourceTrigger = sourceTrigger,
                 topicTitle = topicTitle,
                 memberIdsJson = memberIdsJson,
+                useCount = useCount,
             )
             return 1
         }
@@ -170,8 +172,12 @@ class MemoryCasTest {
 
         override suspend fun revisionOf(id: Int): Long? = rows[id]?.revision
 
+        override fun getArchivedMemoriesFlow(): Flow<List<MemoryEntity>> = emptyFlow()
+
         override suspend fun touchMemories(ids: List<Int>, usedAt: Long) {
-            ids.forEach { id -> rows[id]?.let { rows[id] = it.copy(lastUsedAt = usedAt) } }
+            ids.forEach { id ->
+                rows[id]?.let { rows[id] = it.copy(lastUsedAt = usedAt, useCount = it.useCount + 1) }
+            }
         }
 
         override suspend fun deleteMemory(id: Int) {
