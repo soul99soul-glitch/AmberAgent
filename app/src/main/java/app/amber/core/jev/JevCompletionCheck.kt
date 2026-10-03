@@ -5,6 +5,8 @@ import app.amber.ai.ui.UIMessage
 import app.amber.ai.ui.UIMessagePart
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.intOrNull
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
@@ -88,58 +90,70 @@ class JevCompletionCheck(private val runtime: JevRuntime) {
         private val WRITE_TOOLS = setOf("file_write", "file_edit", "file_move")
         private val COMMAND_TOOLS = setOf("terminal_execute", "terminal_session_exec", "terminal_job_start")
         private val CHECK_EXECUTABLES = setOf("pytest", "jest", "vitest", "tsc", "eslint", "ruff", "mypy")
-        private val CHECK_TASK = Regex("^((test|build|lint|check|assemble|compile)[a-z0-9_-]*|verify|verification)$")
+        private val CHECK_TASK = Regex("^((test|build|lint|check|assemble|compile)[a-z0-9_-]*|verify|verification)$", RegexOption.IGNORE_CASE)
 
-        /** Recognize the finite runners we support, without treating filenames or echo text as checks. */
-        private fun runsCheck(command: String): Boolean = commandSegments(command)
-            .any { segment ->
-                val words = segment.trim().split(Regex("\\s+")).filter(String::isNotBlank)
-                    .dropWhile { it.matches(Regex("[A-Za-z_][A-Za-z0-9_]*=.*")) }
-                val executable = words.firstOrNull()?.substringAfterLast('/') ?: return@any false
-                val args = words.drop(1)
-                when (executable) {
-                    in CHECK_EXECUTABLES -> true
-                    "gradle", "gradlew", "cargo" -> args.any { CHECK_TASK.matches(it.substringAfterLast(':')) }
-                    "mvn" -> args.any { it in setOf("test", "verify", "package", "compile", "install") }
-                    "make" -> args.isEmpty() || args.any { CHECK_TASK.matches(it) }
-                    "npm", "pnpm", "yarn", "bun" -> {
-                        val task = args.dropWhile { it == "run" || it == "exec" || it.startsWith('-') }.firstOrNull()
-                        task in CHECK_EXECUTABLES || task?.let(CHECK_TASK::matches) == true
-                    }
-                    "npx" -> args.firstOrNull() in CHECK_EXECUTABLES
-                    "python", "python3" -> args.take(2) == listOf("-m", "pytest")
-                    else -> false
+        /**
+         * Only recognize a complete simple command. Shell branches may be skipped or fail to parse;
+         * substitutions, redirections, pipelines and background commands need evidence we do not have.
+         */
+        private fun runsCheck(command: String): Boolean {
+            val segment = simpleCommand(command) ?: return false
+            val words = segment.trim().split(Regex("\\s+")).filter(String::isNotBlank)
+            val executable = words.firstOrNull()?.substringAfterLast('/') ?: return false
+            val args = words.drop(1).map { it.trim('\'', '"') }
+            val optionNames = args.map { it.substringBefore('=') }
+            if (optionNames.any { it in setOf("--help", "-h", "--version", "-V", "--dry-run", "-n", "-m", "--just-print", "--question", "-q", "--list", "--no-run", "--ignore-scripts", "--if-present") } &&
+                executable !in setOf("python", "python3")) return false
+            return when (executable) {
+                in CHECK_EXECUTABLES -> true
+                "gradle", "gradlew" -> args.isNotEmpty() && args.all { CHECK_TASK.matches(it.substringAfterLast(':')) }
+                "cargo" -> args.firstOrNull() in setOf("test", "build", "check")
+                "mvn" -> args.isNotEmpty() && args.all { it in setOf("test", "verify", "package", "compile", "install") }
+                "make" -> args.isNotEmpty() && args.all { CHECK_TASK.matches(it) }
+                "npm", "pnpm", "yarn", "bun" -> {
+                    val task = if (args.firstOrNull() in setOf("run", "exec")) args.getOrNull(1) else args.firstOrNull()
+                    task in CHECK_EXECUTABLES || task?.let(CHECK_TASK::matches) == true
                 }
+                "npx" -> args.firstOrNull() in CHECK_EXECUTABLES
+                "python", "python3" -> args.take(2) == listOf("-m", "pytest") && optionNames.none { it in setOf("--help", "--version", "-h", "-V") }
+                else -> false
             }
+        }
 
-        /** Only split command separators outside quotes; quoted suggestions are still arguments. */
-        private fun commandSegments(command: String): List<String> {
-            val segments = ArrayList<String>()
+        private fun simpleCommand(command: String): String? {
             val current = StringBuilder()
             var quote: Char? = null
             var index = 0
             while (index < command.length) {
                 val char = command[index]
-                if (char == '\\' && quote != '\'' && index + 1 < command.length) {
-                    current.append(char).append(command[index + 1])
-                    index += 2
-                    continue
+                if (char == '\\' && quote != '\'') {
+                    return null // Escaped syntax needs shell tokenization; keep the facts gate conservative.
                 }
                 if (char == '\'' || char == '"') {
                     if (quote == null) quote = char else if (quote == char) quote = null
                 }
+                // Expansion can fail or run arbitrary commands before the apparent runner starts.
+                if (quote != '\'' && (char == '$' || char == '`')) return null
                 val pairedSeparator = (char == '&' || char == '|') && command.getOrNull(index + 1) == char
-                if (quote == null && (char == ';' || char == '\n' || pairedSeparator)) {
-                    segments += current.toString()
-                    current.clear()
-                    if (pairedSeparator) index++
-                } else {
-                    current.append(char)
+                if (quote == null) {
+                    if (char == ';' || char == '\n' || pairedSeparator) return null
+                    if (char in "&|<>(){}#") return null
                 }
+                current.append(char)
                 index++
             }
-            segments += current.toString()
-            return segments
+            return current.toString().takeIf { quote == null }
+        }
+
+        /** A submitted/denied/running tool call is not evidence that a runner executed. */
+        private fun UIMessagePart.Tool.hasCommandResult(): Boolean = output.filterIsInstance<UIMessagePart.Text>().any { part ->
+            val result = runCatching { kotlinx.serialization.json.Json.parseToJsonElement(part.text).jsonObject }.getOrNull()
+                ?: return@any false
+            val exitCode = (result["exit_code"] as? kotlinx.serialization.json.JsonPrimitive)?.intOrNull
+            val running = (result["running"] as? kotlinx.serialization.json.JsonPrimitive)?.booleanOrNull
+            val status = (result["status"] as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull
+            exitCode != null && exitCode !in setOf(126, 127) && running != true &&
+                status in setOf(null, "completed", "failed")
         }
 
         /**
@@ -159,7 +173,7 @@ class JevCompletionCheck(private val runtime: JevRuntime) {
                         writtenPaths += tool.stringArg("path") ?: tool.stringArg("target_path") ?: tool.toolName
                         checkedSinceLastWrite = false
                     }
-                    in COMMAND_TOOLS -> if (tool.stringArg("command")?.lowercase()?.let(::runsCheck) == true) {
+                    in COMMAND_TOOLS -> if (tool.hasCommandResult() && tool.stringArg("command")?.let(::runsCheck) == true) {
                         checkedSinceLastWrite = true
                     }
                 }

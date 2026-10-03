@@ -5,6 +5,8 @@ import app.amber.ai.ui.UIMessagePart
 import app.amber.core.agent.utils.JsonInstant
 import app.amber.core.jev.JevApiMode
 import app.amber.core.jev.JevClient
+import app.amber.core.jev.JevDailyUsage
+import app.amber.core.jev.JevUsageStore
 import app.amber.core.jev.JevDataScope
 import app.amber.core.jev.JevDecisionCoordinator
 import app.amber.core.jev.JevMode
@@ -46,6 +48,12 @@ class JevStatusToolTest {
     private fun coordinator(): JevDecisionCoordinator = JevDecisionCoordinator(
         client = JevClient(transport = noNetworkTransport),
         apiKeyProvider = { "secret-key" },
+        // The default in-memory store is process-wide; other Jev test classes consume it.
+        usageStore = object : JevUsageStore {
+            private val usage = mutableMapOf<String, JevDailyUsage>()
+            override fun load(dayKey: String) = usage[dayKey] ?: JevDailyUsage()
+            override fun store(dayKey: String, usage: JevDailyUsage) { this.usage[dayKey] = usage }
+        },
         clock = { 1_000_000L },
     )
 

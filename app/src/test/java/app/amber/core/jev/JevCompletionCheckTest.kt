@@ -55,7 +55,7 @@ class JevCompletionCheckTest {
 
     private fun user(text: String) = UIMessage(role = MessageRole.USER, parts = listOf(UIMessagePart.Text(text)))
 
-    private fun tool(name: String, input: String, output: String = """{"status":"ok"}""") = UIMessage(
+    private fun tool(name: String, input: String, output: String = """{"status":"completed","exit_code":0,"running":false}""") = UIMessage(
         role = MessageRole.ASSISTANT,
         parts = listOf(
             UIMessagePart.Tool(
@@ -87,7 +87,7 @@ class JevCompletionCheckTest {
 
     @Test
     fun checkAfterLastWriteCountsAsVerifiedEvenIfItFailed() {
-        val failedTest = tool("terminal_execute", """{"command":"pytest"}""", """{"status":"failed"}""")
+        val failedTest = tool("terminal_execute", """{"command":"pytest"}""", """{"status":"failed","exit_code":1,"running":false}""")
         assertNull(JevCompletionCheck.unverifiedWrites(listOf(user("fix it"), write, failedTest, reply("done")), isFailure))
     }
 
@@ -101,7 +101,7 @@ class JevCompletionCheckTest {
 
     @Test
     fun failedWritesAndEarlierTurnsDoNotCount() {
-        val failedWrite = tool("file_write", """{"path":"a.txt"}""", """{"status":"failed"}""")
+        val failedWrite = tool("file_write", """{"path":"a.txt"}""", """{"status":"failed","exit_code":1,"running":false}""")
         assertNull(JevCompletionCheck.unverifiedWrites(listOf(user("fix it"), failedWrite, reply("done")), isFailure))
         assertNull(JevCompletionCheck.unverifiedWrites(listOf(user("fix it"), write, reply("done"), user("thanks"), reply("ok")), isFailure))
     }
@@ -168,7 +168,7 @@ class JevCompletionCheckTest {
 
     @Test
     fun commonCheckRunnersAreRecognizedInExecutionPosition() {
-        for (command in listOf("./gradlew test", "pytest", "npm test", "pnpm lint", "cargo check", "python -m pytest")) {
+        for (command in listOf("./gradlew test", "./gradlew :app:compileDebugKotlin", "pytest", "npm test", "pnpm lint", "cargo check", "python -m pytest")) {
             val checkCommand = tool("terminal_execute", """{"command":"$command"}""")
             assertNull(command, JevCompletionCheck.unverifiedWrites(
                 listOf(user("fix it"), write, checkCommand, reply("done")), isFailure,
@@ -192,8 +192,57 @@ class JevCompletionCheckTest {
                 listOf(user("fix it"), write, observation, reply("done")), isFailure,
             ))
         }
-        val actualCheck = tool("terminal_execute", """{"command":"echo 'Suggested checks; no check yet' && pytest tests"}""")
+        val actualCheck = tool("terminal_execute", """{"command":"pytest 'tests; literal name'"}""")
         assertNull(JevCompletionCheck.unverifiedWrites(listOf(user("fix it"), write, actualCheck, reply("done")), isFailure))
+    }
+
+    @Test
+    fun conditionalOrUncertainChecksDoNotSuppressCompletionCheck() {
+        val commands = listOf(
+            "true || pytest", "false && pytest", "true && pytest", "echo ready; pytest", "echo ready\npytest",
+            "if false; then pytest; fi", "pytest(){ echo done; }", "pytest > /missing/results",
+            "pytest | cat", "pytest &", "pytest $(false)", "pytest `false`", "pytest --help", "pytest \"--help\"",
+            "./gradlew test --dry-run", "make -n test", "PYTEST_ADDOPTS=--help pytest", "PYTEST", "pytest && (", "pytest && \"unterminated",
+            "pytest || true", "pytest && echo done", "cargo check; echo done", "pytest\\",
+            "cargo --list # check", "./gradlew tasks # test", "npm --prefix test list",
+            "./gradlew --project-dir test tasks", "cargo test --no-run", "cargo test -- --list",
+            "npm test --ignore-scripts", "npm run test --if-present=true", "npm test --ignore-scripts=true",
+            "./gradlew test --dry-run=true", "pytest --help=true", "./gradlew test -x test", "make",
+        )
+        commands.forEach { command ->
+            val input = kotlinx.serialization.json.buildJsonObject { put("command", command) }.toString()
+            assertEquals(command, listOf("src/Main.kt"), JevCompletionCheck.unverifiedWrites(
+                listOf(user("fix it"), write, tool("terminal_execute", input), reply("done")), isFailure,
+            ))
+        }
+    }
+
+    @Test
+    fun completedSimpleChecksWithQuotedArgumentsAreRecognized() {
+        listOf("pytest", "cargo check", "pytest 'tests; literal name'", "pytest \"tests && literal\"", "pytest 'tests # literal'").forEach { command ->
+            val input = kotlinx.serialization.json.buildJsonObject { put("command", command) }.toString()
+            assertNull(command, JevCompletionCheck.unverifiedWrites(
+                listOf(user("fix it"), write, tool("terminal_execute", input), reply("done")), isFailure,
+            ))
+        }
+    }
+
+    @Test
+    fun deniedRunningAndUnknownCommandOutcomesAreNotExecutionEvidence() {
+        listOf(
+            """{"status":"denied"}""", """{"status":"policy_denied"}""", """{"status":"failed"}""",
+            """{"status":"running","running":true}""", """{"status":"outcome_unknown","exit_code":0}""",
+            """{"status":"failed","exit_code":127}""", """{"status":"failed","exit_code":126}""",
+            """{"status":"timed_out","exit_code":1}""", """{"status":"ok"}""",
+        ).forEach { output ->
+            assertEquals(output, listOf("src/Main.kt"), JevCompletionCheck.unverifiedWrites(
+                listOf(user("fix it"), write, tool("terminal_execute", """{"command":"pytest"}""", output), reply("done")), isFailure,
+            ))
+        }
+        // Persistent session submission reports no process exit code and must remain unverified.
+        assertEquals(listOf("src/Main.kt"), JevCompletionCheck.unverifiedWrites(
+            listOf(user("fix it"), write, tool("terminal_session_exec", """{"command":"pytest"}""", """{"running":true,"output":"submitted"}""")), isFailure,
+        ))
     }
 
 }
