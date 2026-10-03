@@ -3652,4 +3652,14 @@ My task:</string>
   <string name="chat_shelf_kind_web">Web page</string>
   <string name="chat_recap_no_model">No model is set for recaps. Choose a title model in settings.</string>
   <string name="chat_model_menu_context">Context</string>
+  <string name="run_kernel_completion_check_prompt">[Automatic check] Files were changed in this turn but no check was run afterwards. Please run an appropriate check (tests, build or lint) and report the actual result; if no check applies, say so plainly.</string>
+  <string name="setting_jev_purpose_auto_approval_gate">Auto-approval check</string>
+  <string name="setting_jev_purpose_auto_approval_gate_desc">When auto-approval would run a risky tool call, asks you to confirm instead</string>
+  <string name="setting_jev_purpose_completion_check">Completion check</string>
+  <string name="setting_jev_purpose_completion_check_desc">If files were changed and the reply claims done without running a check, asks for one more verification round</string>
+  <string name="chat_tool_jev_auto_approval_paused">Auto-approval paused: %1$s</string>
+  <string name="chat_tool_jev_risk_destructive">destructive</string>
+  <string name="chat_tool_jev_risk_exfiltration">sends data out</string>
+  <string name="chat_tool_jev_risk_off_task">outside the task</string>
+  <string name="chat_tool_jev_risk_separator">", "</string>
 </resources>

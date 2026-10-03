@@ -1,5 +1,10 @@
 package app.amber.agent.data.sync
 
+import android.content.pm.ProviderInfo
+import android.net.Uri
+import org.robolectric.shadows.ShadowContentResolver
+import app.amber.agent.data.workspace.ArtifactRepository
+import app.amber.feature.workspace.WorkspaceManager
 import android.app.Application
 import android.content.Context
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
@@ -38,6 +43,7 @@ import app.amber.core.sync.core.SyncArchiveManager
 import app.amber.core.sync.core.SyncEncryptionParams
 import app.amber.core.sync.core.SyncExportRequest
 import app.amber.core.sync.core.SyncManifest
+import app.amber.core.sync.core.SyncPayloadManifest
 import app.amber.core.sync.core.SyncMode
 import app.amber.core.sync.core.SyncRestorePartialCommitException
 import app.amber.core.sync.core.SyncRestoreRequest
@@ -89,8 +95,11 @@ class SyncArchiveManagerIntegrationTest {
     fun setUp() = runBlocking {
         kotlinx.coroutines.Dispatchers.setMain(mainDispatcher)
         context = RuntimeEnvironment.getApplication()
+        context.getSharedPreferences("amberagent_workspace", Context.MODE_PRIVATE).edit().clear().commit()
+        File(context.filesDir, "amberagent/artifact-content").deleteRecursively()
+        File(context.filesDir, "amberagent/workspace-mirror").deleteRecursively()
         testRoot = File(context.cacheDir, "sync-archive-integration-${System.nanoTime()}").apply { mkdirs() }
-        listOf(FileFolders.UPLOAD, FileFolders.SKILLS, FileFolders.IMAGES, FileFolders.CHAT_IMAGES)
+        listOf(FileFolders.UPLOAD, FileFolders.SKILLS, FileFolders.IMAGES, FileFolders.CHAT_IMAGES, "amberagent/artifact-content", "amberagent/workspace-mirror")
             .forEach { File(context.filesDir, it).deleteRecursively() }
 
         appScope = AppScope()
@@ -173,7 +182,7 @@ class SyncArchiveManagerIntegrationTest {
         blockingSymlink?.let { Files.deleteIfExists(it.toPath()) }
         if (::testRoot.isInitialized) testRoot.deleteRecursively()
         if (::context.isInitialized) {
-            listOf(FileFolders.UPLOAD, FileFolders.SKILLS, FileFolders.IMAGES, FileFolders.CHAT_IMAGES)
+            listOf(FileFolders.UPLOAD, FileFolders.SKILLS, FileFolders.IMAGES, FileFolders.CHAT_IMAGES, "amberagent/artifact-content", "amberagent/workspace-mirror")
                 .forEach { File(context.filesDir, it).deleteRecursively() }
         }
         // The production preference collectors intentionally terminate the process when their
@@ -211,6 +220,101 @@ class SyncArchiveManagerIntegrationTest {
         assertTrue(localUpload.exists())
         assertEquals("keep local", localUpload.readText())
         assertFalse(File(uploadDir, "archived.txt").exists())
+    }
+
+    @Test
+    fun fullBackupCarriesArtifactBodiesWithoutOtherWorkspaceFiles() = runBlocking {
+        val workspace = WorkspaceManager(context)
+        val repository = ArtifactRepository(database.artifactDao(), workspace, database.messageNodeDao(), database.conversationDao())
+        val artifact = repository.saveDeepRead("backup-topic", "Stored result", "{\"body\":\"durable content\"}")
+        File(workspace.mirrorDir, "private-unrelated.txt").apply { parentFile!!.mkdirs(); writeText("not part of artifact backup") }
+        val archive = manager.createArchive(SyncExportRequest(mode = SyncMode.FULL, passphrase = "test-passphrase"))
+        val payload = readArchivePayload(archive, "test-passphrase")
+        assertFalse(payload.keys.any { it.contains("private-unrelated") })
+        assertFalse(payload.values.any { it.decodeToString() == "not part of artifact backup" })
+        workspace.mirrorDir.deleteRecursively()
+        database.openHelper.writableDatabase.execSQL("DELETE FROM artifact")
+
+        manager.restoreArchive(archive, restoreRequest())
+
+        val restored = requireNotNull(repository.get(artifact.artifactId))
+        assertEquals("{\"body\":\"durable content\"}", repository.readContent(restored))
+        assertTrue(requireNotNull(repository.contentFile(restored)).isFile)
+        assertFalse(File(workspace.mirrorDir, "private-unrelated.txt").exists())
+    }
+
+    @Test
+    fun restoredArtifactBodyOverridesOldSafContentWithoutWritingIntoTheUserWorkspace() = runBlocking {
+        val provider = BackupArtifactTreeProvider(File(testRoot, "saf-files"))
+        provider.attachInfo(context, ProviderInfo().apply { authority = "sync.artifact.backup" })
+        ShadowContentResolver.registerProviderInternal("sync.artifact.backup", provider)
+        val workspace = WorkspaceManager(context)
+        workspace.setWorkspace(Uri.parse("content://sync.artifact.backup/tree/root"))
+        val repository = ArtifactRepository(database.artifactDao(), workspace, database.messageNodeDao(), database.conversationDao())
+        val saved = repository.saveDeepRead("saf-topic", "SAF result", "{\"value\":\"archive body\"}")
+        workspace.writeText("unrelated.txt", "external user data")
+        val archive = manager.createArchive(SyncExportRequest(mode = SyncMode.FULL, passphrase = "test-passphrase"))
+        workspace.writeText(saved.contentLocator, "{\"value\":\"current external body\"}")
+        workspace.mirrorDir.deleteRecursively()
+
+        manager.restoreArchive(archive, restoreRequest())
+
+        val restored = requireNotNull(repository.get(saved.artifactId))
+        assertEquals("{\"value\":\"archive body\"}", repository.readContent(restored))
+        assertEquals("{\"value\":\"current external body\"}", workspace.readText(saved.contentLocator))
+        assertEquals("external user data", workspace.readText("unrelated.txt"))
+        val edited = repository.saveDeepRead("saf-topic", "Edited imported result", "{\"value\":\"edited body\"}")
+        assertEquals("{\"value\":\"edited body\"}", repository.readContent(edited))
+        assertTrue(repository.delete(edited.artifactId))
+        assertTrue(repository.contentFile(edited) == null)
+    }
+
+    @Test
+    fun artifactOwnedBodyRollsBackWithDatabaseAndSurvivesSettingsOnlyAndLegacyRestores() = runBlocking {
+        val workspace = WorkspaceManager(context)
+        val repository = ArtifactRepository(database.artifactDao(), workspace, database.messageNodeDao(), database.conversationDao())
+        val saved = repository.saveDeepRead("rollback-topic", "Result", "archive body")
+        val archive = manager.createArchive(SyncExportRequest(mode = SyncMode.FULL, passphrase = "test-passphrase"))
+        workspace.mirrorDir.deleteRecursively()
+        manager.restoreArchive(archive, restoreRequest())
+        repository.saveDeepRead("rollback-topic", "Local result", "local updated body")
+
+        val badTable = rewritePayload(archive, "test-passphrase") { it["tables/artifact.jsonl"] = "not json".toByteArray() }
+        assertTrue(runCatching { manager.restoreArchive(badTable, restoreRequest()) }.exceptionOrNull() != null)
+        assertEquals("local updated body", repository.readContent(requireNotNull(repository.get(saved.artifactId))))
+        assertFalse(File(context.cacheDir, "sync-restore-file-journal").exists())
+
+        manager.restoreArchive(archive, restoreRequest(scope = RestoreScope.CONFIG_ONLY))
+        assertEquals("local updated body", repository.readContent(requireNotNull(repository.get(saved.artifactId))))
+        val legacy = rewritePayload(archive, "test-passphrase") { entries ->
+            entries.keys.filter { it.startsWith("files/amberagent/artifact-content/") }.forEach(entries::remove)
+            val manifest = payloadManifest(entries)
+            entries["payload_manifest.json"] = JsonInstant.encodeToString(manifest.copy(datasets = manifest.datasets.filterNot { it.id == "artifact-content" })).toByteArray()
+        }
+        manager.restoreArchive(legacy, restoreRequest())
+        assertEquals("local updated body", repository.readContent(requireNotNull(repository.get(saved.artifactId))))
+    }
+
+    @Test
+    fun standardBackupRoundTripsOwnedArtifactContent() = runBlocking {
+        val workspace = WorkspaceManager(context)
+        val repository = ArtifactRepository(database.artifactDao(), workspace, database.messageNodeDao(), database.conversationDao())
+        val saved = repository.saveDeepRead("standard-topic", "Result", "standard body")
+        val archive = manager.createArchive(SyncExportRequest(mode = SyncMode.STANDARD, passphrase = "test-passphrase"))
+        workspace.mirrorDir.deleteRecursively()
+        manager.restoreArchive(archive, restoreRequest())
+        assertEquals("standard body", repository.readContent(requireNotNull(repository.get(saved.artifactId))))
+    }
+
+    @Test
+    fun artifactRestoreRejectsFilesOutsideRegistryOwnership() = runBlocking {
+        val archive = manager.createArchive(SyncExportRequest(mode = SyncMode.FULL, passphrase = "test-passphrase"))
+        val invalid = rewritePayload(archive, "test-passphrase") { entries ->
+            entries["files/amberagent/artifact-content/private.txt"] = "unowned".toByteArray()
+        }
+        val error = runCatching { manager.restoreArchive(invalid, restoreRequest()) }.exceptionOrNull()
+        assertTrue(error is IllegalArgumentException)
+        assertFalse(File(context.filesDir, "amberagent/artifact-content/private.txt").exists())
     }
 
     @Test
@@ -433,6 +537,14 @@ class SyncArchiveManagerIntegrationTest {
         archive: ByteArray,
         passphrase: String,
         secretsJson: String,
+    ): ByteArray = rewritePayload(archive, passphrase) { entries ->
+        entries["secrets.json"] = secretsJson.toByteArray()
+    }
+
+    private fun rewritePayload(
+        archive: ByteArray,
+        passphrase: String,
+        update: (MutableMap<String, ByteArray>) -> Unit,
     ): ByteArray {
         val outerEntries = readZipEntries(archive)
         val manifest = JsonInstant.decodeFromString<SyncManifest>(
@@ -445,7 +557,7 @@ class SyncArchiveManagerIntegrationTest {
             manifest,
         )
         val payloadEntries = readZipEntries(payload).toMutableMap()
-        payloadEntries["secrets.json"] = secretsJson.toByteArray()
+        update(payloadEntries)
         val rewrittenPayload = writeZipEntries(payloadEntries)
         val encryptedPayload = crypto.encrypt(
             rewrittenPayload,
@@ -460,6 +572,29 @@ class SyncArchiveManagerIntegrationTest {
             ),
         )
     }
+
+    private fun readArchivePayload(archive: ByteArray, passphrase: String): LinkedHashMap<String, ByteArray> {
+        val entries = readZipEntries(archive)
+        val manifest = JsonInstant.decodeFromString<SyncManifest>(
+            entries.getValue(SYNC_MANIFEST_ENTRY).decodeToString(),
+        )
+        val payload = SyncCrypto(nativeEnabled = false).decrypt(
+            entries.getValue(SYNC_PAYLOAD_ENTRY),
+            passphrase,
+            manifest,
+        )
+        return readZipEntries(payload)
+    }
+
+    private fun payloadManifest(entries: Map<String, ByteArray>): SyncPayloadManifest =
+        JsonInstant.decodeFromString(entries.getValue("payload_manifest.json").decodeToString())
+
+    private fun restoreRequest(scope: RestoreScope = RestoreScope.EVERYTHING) = SyncRestoreRequest(
+        passphrase = "test-passphrase",
+        scope = scope,
+        preserveConversations = false,
+        preserveGenMedia = false,
+    )
 
     private fun readZipEntries(bytes: ByteArray): LinkedHashMap<String, ByteArray> {
         val entries = linkedMapOf<String, ByteArray>()

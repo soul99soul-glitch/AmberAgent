@@ -22,6 +22,7 @@ import app.amber.feature.runtime.ToolEffectStatus
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.put
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
@@ -111,6 +112,191 @@ class DefaultRunKernelTest : DurableRuntimeTestBase() {
             chunk.messages.any { message -> message.getTools().any { it.isPending } }
         })
     }
+
+    /** Jev 复核判定高风险：自动批准收紧为人工审批，调用不执行，审批卡带命中原因。 */
+    @Test
+    fun `jev gate turns a risky auto approved call back into a manual approval`() = runTest {
+        val executions = mutableListOf<String>()
+        val transport = GateTransport(destructive = 0.95)
+        val engine = FakeRoundEngine(listOf(
+            { toolCallAssistant("rm_1", "terminal_execute", """{"command":"rm -rf build"}""") },
+            { textAssistant("已完成") },
+        ))
+        val terminals = mutableListOf<GenerationTerminal>()
+        val chunks = kernel(engine, gate(transport)).run(
+            session(
+                listOf(UIMessage.user("整理一下目录")), listOf(approvalTool("terminal_execute", executions)),
+                terminals = terminals, autoApproveHighRiskTools = true,
+            ),
+        ).toList()
+
+        assertTrue(executions.isEmpty())
+        assertEquals(1, transport.calls)
+        assertEquals(listOf<GenerationTerminal>(GenerationTerminal.WaitingUser), terminals)
+        val tool = lastMessages(chunks).last().getTools().single()
+        assertTrue(tool.isPending)
+        assertEquals(
+            """["destructive"]""",
+            tool.metadata?.get(app.amber.core.jev.JevAutoApprovalGate.METADATA_KEY).toString(),
+        )
+    }
+
+    @Test
+    fun `jev gate lets a low risk auto approved call run`() = runTest {
+        val executions = mutableListOf<String>()
+        val transport = GateTransport(destructive = 0.1)
+        val engine = FakeRoundEngine(listOf(
+            { toolCallAssistant("ls_1", "terminal_execute", """{"command":"ls"}""") },
+            { textAssistant("已完成") },
+        ))
+        kernel(engine, gate(transport)).run(
+            session(
+                listOf(UIMessage.user("看看目录")), listOf(approvalTool("terminal_execute", executions)),
+                autoApproveHighRiskTools = true,
+            ),
+        ).toList()
+
+        assertEquals(listOf("terminal_execute"), executions)
+        assertEquals(1, transport.calls)
+    }
+
+    /** 只读调用不需要审批，不问 Jev。 */
+    @Test
+    fun `jev gate never asks about read only calls`() = runTest {
+        val transport = GateTransport(destructive = 0.95)
+        val readOnly = Tool(name = "read_thing", description = "read-only", execute = { listOf(UIMessagePart.Text("ok")) })
+        val engine = FakeRoundEngine(listOf(
+            { toolCallAssistant("r_1", "read_thing") },
+            { textAssistant("读取完成") },
+        ))
+        kernel(engine, gate(transport)).run(
+            session(listOf(UIMessage.user("查一下")), listOf(readOnly), autoApproveHighRiskTools = true),
+        ).toList()
+
+        assertEquals(0, transport.calls)
+    }
+
+    /**
+     * 改过文件、没跑检查就宣称完成：以一条可见的用户消息续跑一轮（每次 run 只续跑一次）。
+     * 引擎按真实行为把同一轮输出合并进最后一条 assistant 消息。
+     */
+    @Test
+    fun `completion check continues once with a visible user message`() = runTest {
+        val executions = mutableListOf<String>()
+        val transport = CompletionTransport()
+        val engine = MergingRoundEngine(listOf(
+            listOf(UIMessagePart.Tool(toolCallId = "edit_1", toolName = "file_edit", input = """{"path":"src/Main.kt"}""")),
+            listOf(UIMessagePart.Text("已全部完成")),
+            listOf(UIMessagePart.Text("已运行测试，全部通过")),
+        ))
+        val terminals = mutableListOf<GenerationTerminal>()
+        val chunks = DefaultRunKernel(
+            context = testContext(),
+            toolDispatcher = AgentToolDispatcher(json, PermissionDecisionResolver()),
+            roundEngine = engine,
+            completionCheck = app.amber.core.jev.JevCompletionCheck(jevRuntime(transport, app.amber.core.jev.JevPurpose.COMPLETION_CHECK)),
+        ).run(
+            session(
+                listOf(UIMessage.user("修改 Main.kt")), listOf(approvalTool("file_edit", executions)),
+                terminals = terminals, autoApproveHighRiskTools = true,
+            ),
+        ).toList()
+
+        assertEquals(3, engine.requests.size)
+        val continuation = engine.requests[2].messages.last()
+        assertEquals("the continuation request ends with a user turn, never an assistant prefill", MessageRole.USER, continuation.role)
+        assertEquals(testContext().getString(app.amber.agent.R.string.run_kernel_completion_check_prompt), continuation.toText())
+        val final = lastMessages(chunks)
+        assertEquals(listOf(MessageRole.USER, MessageRole.ASSISTANT, MessageRole.USER, MessageRole.ASSISTANT), final.map { it.role })
+        assertEquals("已全部完成", (final[1].parts.last() as UIMessagePart.Text).text)
+        assertEquals("已运行测试，全部通过", final[3].toText())
+        assertEquals("nudges at most once per run", 1, transport.calls)
+        assertTrue(terminals.isEmpty())
+    }
+
+    /** 真实引擎行为：请求以 assistant 结尾时把本轮输出合并进它，否则新开一条 assistant。 */
+    private class MergingRoundEngine(private val script: List<List<UIMessagePart>>) : GenerationRoundEngine {
+        val requests = mutableListOf<GenerationRoundRequest>()
+
+        override suspend fun generateRound(
+            request: GenerationRoundRequest,
+            onUpdateMessages: suspend (GenerationUpdate) -> Unit,
+        ): GenerationRoundOutcome {
+            requests += request
+            val parts = script.getOrElse(requests.size - 1) { listOf(UIMessagePart.Text("fallback answer")) }
+            val last = request.messages.last()
+            val next = if (last.role == MessageRole.ASSISTANT) {
+                request.messages.dropLast(1) + last.copy(parts = last.parts + parts)
+            } else {
+                request.messages + UIMessage(role = MessageRole.ASSISTANT, parts = parts)
+            }
+            onUpdateMessages(GenerationUpdate.full(next))
+            return GenerationRoundOutcome(outputLimitReached = false)
+        }
+    }
+
+    private class CompletionTransport : app.amber.core.jev.JevTransport {
+        var calls = 0
+
+        override suspend fun execute(request: app.amber.core.jev.JevHttpRequest): app.amber.core.jev.JevTransportResponse {
+            calls++
+            val body = """{"model":"jev-test","answers":{"claims_done":{"type":"noul","noul":0.95},"claims_verified":{"type":"noul","noul":0.0}}}"""
+            return app.amber.core.jev.JevTransportResponse.Http(200, body.toByteArray(), null)
+        }
+    }
+
+    private fun jevRuntime(transport: app.amber.core.jev.JevTransport, purpose: app.amber.core.jev.JevPurpose) =
+        app.amber.core.jev.JevRuntime(
+            coordinator = app.amber.core.jev.JevDecisionCoordinator(
+                client = app.amber.core.jev.JevClient(transport = transport),
+                apiKeyProvider = { "key" },
+                clock = { 1_000_000L },
+            ),
+            settingsProvider = {
+                Settings(
+                    jev = app.amber.core.jev.JevSetting(
+                        enabled = true,
+                        purposes = mapOf(purpose to app.amber.core.jev.JevMode.ACTIVE),
+                        dataScopes = setOf(app.amber.core.jev.JevDataScope.TOOL_METADATA, app.amber.core.jev.JevDataScope.TASK_TEXT),
+                    ),
+                )
+            },
+        )
+
+    private class GateTransport(private val destructive: Double) : app.amber.core.jev.JevTransport {
+        var calls = 0
+
+        override suspend fun execute(request: app.amber.core.jev.JevHttpRequest): app.amber.core.jev.JevTransportResponse {
+            calls++
+            val body = """{"model":"jev-test","answers":{"destructive":{"type":"noul","noul":$destructive},""" +
+                """"exfiltration":{"type":"noul","noul":0.0},"off_task":{"type":"noul","noul":0.0},""" +
+                """"authorized":{"type":"noul","noul":0.0}}}"""
+            return app.amber.core.jev.JevTransportResponse.Http(200, body.toByteArray(), null)
+        }
+    }
+
+    private fun gate(transport: GateTransport) = app.amber.core.jev.JevAutoApprovalGate(
+        jevRuntime(transport, app.amber.core.jev.JevPurpose.AUTO_APPROVAL_GATE),
+    )
+
+    private fun approvalTool(name: String, executions: MutableList<String>) = Tool(
+        name = name,
+        description = "approval-required test tool",
+        needsApproval = true,
+        allowsAutoApproval = false,
+        execute = {
+            executions += name
+            listOf(UIMessagePart.Text("done"))
+        },
+    )
+
+    private fun kernel(engine: GenerationRoundEngine, gate: app.amber.core.jev.JevAutoApprovalGate): DefaultRunKernel =
+        DefaultRunKernel(
+            context = testContext(),
+            toolDispatcher = AgentToolDispatcher(json, PermissionDecisionResolver()),
+            roundEngine = engine,
+            autoApprovalGate = gate,
+        )
 
     private fun kernel(engine: GenerationRoundEngine): DefaultRunKernel = DefaultRunKernel(
         context = testContext(),
@@ -1395,4 +1581,62 @@ class DefaultRunKernelTest : DurableRuntimeTestBase() {
         assertTrue(toolOutput.contains("\"status\":\"policy_denied\""))
         assertEquals("已按沙箱策略拒绝", (lastMessages(chunks).last().parts.last() as UIMessagePart.Text).text)
     }
+    @Test
+    fun `jev rechecks a persisted pending call released by high risk settings`() = runTest {
+        val executions = mutableListOf<String>()
+        val transport = GateTransport(destructive = 0.99)
+        val engine = FakeRoundEngine(listOf({ textAssistant("done") }))
+        val terminals = mutableListOf<GenerationTerminal>()
+        val chunks = kernel(engine, gate(transport)).run(session(
+            messages = listOf(
+                UIMessage.user("inspect workspace"),
+                toolCallAssistant("delete-pending", "terminal_execute", """{"command":"rm -rf data"}""",
+                    approvalState = ToolApprovalState.Pending),
+            ),
+            tools = listOf(approvalTool("terminal_execute", executions)),
+            terminals = terminals,
+            autoApproveHighRiskTools = true,
+        )).toList()
+        assertTrue(executions.isEmpty())
+        assertEquals(1, transport.calls)
+        assertEquals(0, engine.requests.size)
+        assertEquals(listOf(GenerationTerminal.WaitingUser), terminals)
+        val tool = lastMessages(chunks).last().getTools().single()
+        assertTrue(tool.isPending)
+        assertEquals("""["destructive"]""", tool.metadata?.get(app.amber.core.jev.JevAutoApprovalGate.METADATA_KEY).toString())
+    }
+
+    @Test
+    fun `low risk jev result preserves high risk setting resume behavior`() = runTest {
+        val executions = mutableListOf<String>()
+        val transport = GateTransport(destructive = 0.1)
+        val engine = FakeRoundEngine(listOf({ textAssistant("done") }))
+        kernel(engine, gate(transport)).run(session(
+            messages = listOf(UIMessage.user("inspect workspace"),
+                toolCallAssistant("resume-safe", "terminal_execute", """{"command":"pwd"}""",
+                    approvalState = ToolApprovalState.Pending)),
+            tools = listOf(approvalTool("terminal_execute", executions)),
+            autoApproveHighRiskTools = true,
+        )).toList()
+        assertEquals(listOf("terminal_execute"), executions)
+        assertEquals(1, transport.calls)
+        assertEquals(1, engine.requests.size)
+    }
+
+    @Test
+    fun `jev never rechecks a manually approved persisted call`() = runTest {
+        val executions = mutableListOf<String>()
+        val transport = GateTransport(destructive = 0.99)
+        val engine = FakeRoundEngine(listOf({ textAssistant("done") }))
+        kernel(engine, gate(transport)).run(session(
+            messages = listOf(UIMessage.user("remove requested file"),
+                toolCallAssistant("approved-remove", "terminal_execute", """{"command":"rm file"}""",
+                    approvalState = ToolApprovalState.Approved)),
+            tools = listOf(approvalTool("terminal_execute", executions)),
+            autoApproveHighRiskTools = true,
+        )).toList()
+        assertEquals(listOf("terminal_execute"), executions)
+        assertEquals(0, transport.calls)
+    }
+
 }

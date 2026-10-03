@@ -27,6 +27,10 @@ data class JevPolicy(
     val screenReadOnlyThreshold: Double = 0.8,
     /** SCREEN_AUTOMATION：DONE 核验低于此值 handback。 */
     val screenDoneVerifiedThreshold: Double = 0.85,
+    /** Automatic approval may only be tightened to manual approval. */
+    val autoApprovalRiskThreshold: Double = 0.8,
+    /** Continue once when an unverified final reply claims completion. */
+    val completionClaimThreshold: Double = 0.8,
 ) {
     companion object {
         /**

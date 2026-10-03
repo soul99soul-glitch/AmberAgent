@@ -66,6 +66,8 @@ val jevModule = module {
     single<MemorySemanticReranker> { get<JevMemoryReranker>() }
     single { JevToolSemanticSearch(get()) }
     single { JevToolOutputProjector(get()) }
+    single { app.amber.core.jev.JevAutoApprovalGate(get()) }
+    single { app.amber.core.jev.JevCompletionCheck(get()) }
     single { JevCouncilPoolRanker(get()) }
     single<CouncilPoolRanker> { get<JevCouncilPoolRanker>() }
     single { JevWebGoalRunner(get()) }

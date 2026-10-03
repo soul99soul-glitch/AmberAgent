@@ -35,6 +35,8 @@ import app.amber.agent.data.db.AppDatabase
 import app.amber.agent.data.db.canonicalizeAmberOwnership
 import app.amber.core.model.AMBER_AGENT_ID
 import app.amber.agent.data.db.fts.MessageFtsManager
+import app.amber.agent.data.workspace.ArtifactBackupContentStore
+import app.amber.feature.workspace.WorkspaceManager
 import app.amber.core.files.FileFolders
 import app.amber.core.files.FilesManager
 import java.io.File
@@ -65,6 +67,7 @@ class SyncArchiveManager(
     private val restoreWriteGate: SyncRestoreWriteGate? = null,
     /** Grok OAuth token store；可选以兼容旧测试构造，生产由 DI 注入。 */
     private val grokAuthStore: GrokAuthStore? = null,
+    private val workspaceManager: WorkspaceManager? = null,
 ) {
     // Re-read the syncCrypto flag on every archive op so DataStore writes
     // take effect without a process restart. The flag check is sub-ms; the
@@ -193,8 +196,10 @@ class SyncArchiveManager(
             try {
                 require(verification.consume()) { "恢复验证结果已失效，请重新验证备份" }
                 requireRestorePayloadCompatible(verification, request)
+                val restoreArtifactContent = request.scope == RestoreScope.EVERYTHING &&
+                    verification.payloadPreview.datasets.any { it.id == ArtifactBackupContentStore.DATASET }
                 val restore = suspend {
-                    restorePayload(verification.payloadFile, verification.preview.manifest, request)
+                    restorePayload(verification.payloadFile, verification.preview.manifest, request, restoreArtifactContent)
                 }
                 if (restoreWriteGate == null) {
                     restore()
@@ -283,7 +288,7 @@ class SyncArchiveManager(
             }
         }
 
-    private fun buildPayload(
+    private suspend fun buildPayload(
         settings: Settings,
         mode: SyncMode,
         outputFile: File,
@@ -332,6 +337,7 @@ class SyncArchiveManager(
             writeTextEntry(zip, SECRETS_ENTRY, secretsJson)
             summaries += SyncDatasetSummary("secrets", recordCount = if (mode == SyncMode.FULL) 1 else 0)
 
+            val artifactLocators = mutableListOf<String>()
             val db = database.openHelper.writableDatabase
             // Keep every exported table on one SQLite read snapshot. File roots
             // are external resources and intentionally remain outside this DB
@@ -343,13 +349,22 @@ class SyncArchiveManager(
                     val rowCount = writeTableEntry(zip, db, table)
                     summaries += SyncDatasetSummary("table:$table", recordCount = rowCount)
                 }
+                db.query("SELECT content_locator FROM artifact").use { cursor ->
+                    while (cursor.moveToNext()) artifactLocators += cursor.getString(0)
+                }
                 db.setTransactionSuccessful()
             } finally {
                 db.endTransaction()
             }
 
+            val artifactSummary = writeArtifactBodies(zip, artifactLocators)
             val fileSummary = writeFileTrees(zip)
-            summaries += fileSummary
+            summaries += fileSummary.copy(
+                recordCount = fileSummary.recordCount + artifactSummary.recordCount,
+                byteCount = fileSummary.byteCount + artifactSummary.byteCount,
+            )
+            // Included in file totals; the dataset marker defines replacement ownership.
+            summaries += artifactSummary.copy(byteCount = 0)
             writeTextEntry(zip, PAYLOAD_MANIFEST_ENTRY, json.encodeToString(SyncPayloadManifest(summaries)))
         }
     }
@@ -405,6 +420,7 @@ class SyncArchiveManager(
         payloadFile: File,
         manifest: SyncManifest,
         request: SyncRestoreRequest,
+        restoreArtifactContent: Boolean,
     ) {
         recoverInterruptedFileRestore()
         val scope = request.scope
@@ -473,6 +489,13 @@ class SyncArchiveManager(
                         !skipBulkPayload && entry.name.startsWith("files/") -> {
                             val relativePath = entry.name.removePrefix("files/")
                             requireSafeRelativePath(relativePath)
+                            val relativeRoot = SYNC_FILE_ROOTS.firstOrNull { relativePath.startsWith("$it/") }
+                            require(relativeRoot != null) { "Invalid sync file root: $relativePath" }
+                            if (relativeRoot == ArtifactBackupContentStore.RELATIVE_ROOT) {
+                                require(ArtifactBackupContentStore.isOwnedLocator(relativePath.removePrefix("$relativeRoot/"))) {
+                                    "Invalid artifact content path: $relativePath"
+                                }
+                            }
                             // Per-root skip for the preserve toggles. We don't
                             // need to drain the entry bytes — ZipInputStream's
                             // closeEntry() (at the bottom of the outer loop)
@@ -484,7 +507,8 @@ class SyncArchiveManager(
                             if (
                                 (skipUpload && isUpload) ||
                                 (skipChatImages && isChatImages) ||
-                                (skipImages && isImages)
+                                (skipImages && isImages) ||
+                                (!restoreArtifactContent && relativeRoot == ArtifactBackupContentStore.RELATIVE_ROOT)
                             ) {
                                 // intentionally drop — local files of this root stay.
                             } else {
@@ -569,6 +593,8 @@ class SyncArchiveManager(
                         if (skipUpload) add(FileFolders.UPLOAD)
                         if (skipChatImages) add(FileFolders.CHAT_IMAGES)
                         if (skipImages) add(FileFolders.IMAGES)
+                        // Legacy packages have no owned artifact content dataset.
+                        if (!restoreArtifactContent) add(ArtifactBackupContentStore.RELATIVE_ROOT)
                     }
                     val fileJournal = prepareFileTreeRestore(stagedFilesRoot, skippedFileRoots)
                     var dataCommitted = false
@@ -721,10 +747,24 @@ class SyncArchiveManager(
         return values
     }
 
+    private suspend fun writeArtifactBodies(zip: ZipOutputStream, locators: List<String>): SyncDatasetSummary {
+        val content = ArtifactBackupContentStore(workspaceManager ?: WorkspaceManager(context))
+        var count = 0
+        var bytes = 0L
+        locators.distinct().forEach { locator ->
+            val body = content.readForBackup(locator) ?: return@forEach
+            writeBytesEntry(zip, "files/${ArtifactBackupContentStore.RELATIVE_ROOT}/$locator", body)
+            count++
+            bytes += body.size
+        }
+        return SyncDatasetSummary(ArtifactBackupContentStore.DATASET, count, bytes)
+    }
+
     private fun writeFileTrees(zip: ZipOutputStream): SyncDatasetSummary {
         var count = 0
         var bytes = 0L
         SYNC_FILE_ROOTS.forEach { relativeRoot ->
+            if (relativeRoot == ArtifactBackupContentStore.RELATIVE_ROOT) return@forEach
             val root = File(context.filesDir, relativeRoot)
             if (!root.exists()) return@forEach
             root.walkTopDown()
@@ -769,13 +809,8 @@ class SyncArchiveManager(
                 }
             }
         }
-        val stagedRoots = stageRoot.listFiles().orEmpty().associateBy { staged ->
-            staged.name.also { relativeRoot ->
-                require(relativeRoot in SYNC_FILE_ROOTS) {
-                    "Invalid staged sync root: $relativeRoot"
-                }
-            }
-        }
+        // Owned content roots can be nested; restore complete roots, never their parent.
+        val stagedRoots = replacedRoots.associateWith { File(stageRoot, it).takeIf(File::exists) }
         val journalRoot = File(context.cacheDir, FILE_RESTORE_JOURNAL_DIR).canonicalFile
         val backupRoot = File(journalRoot, "backup").canonicalFile
         val restoreToken = UUID.randomUUID().toString()
@@ -803,6 +838,7 @@ class SyncArchiveManager(
                     }
                 }
             }
+            writeJournalText(File(journalRoot, FILE_RESTORE_STATE), FILE_RESTORE_ROOTS_BACKED_UP)
             replacedRoots.forEach { relativeRoot ->
                 stagedRoots[relativeRoot]?.copyRecursively(
                     target = File(filesDir, relativeRoot),
@@ -908,12 +944,14 @@ class SyncArchiveManager(
         }
 
         fun rollback() {
+            val state = File(journalRoot, FILE_RESTORE_STATE).takeIf { it.isFile }?.readText()
+            val backupsComplete = state != null && state != FILE_RESTORE_PENDING
             replacedRoots.forEach { relativeRoot ->
-                File(filesDir, relativeRoot).deleteRecursively()
-            }
-            backupRoot.listFiles().orEmpty().forEach { backup ->
-                if (backup.name !in replacedRoots) return@forEach
-                backup.copyRecursively(File(filesDir, backup.name), overwrite = true)
+                val backup = File(backupRoot, relativeRoot)
+                val target = File(filesDir, relativeRoot)
+                // Before backup completes, a later root may still be the untouched original.
+                if (backupsComplete || backup.exists()) target.deleteRecursively()
+                if (backup.exists()) backup.copyRecursively(target, overwrite = true)
             }
             journalRoot.deleteRecursively()
         }
@@ -1144,6 +1182,7 @@ class SyncArchiveManager(
         private const val FILE_RESTORE_ROOTS = "roots"
         private const val FILE_RESTORE_TOKEN = "token"
         private const val FILE_RESTORE_PENDING = "pending"
+        private const val FILE_RESTORE_ROOTS_BACKED_UP = "roots_backed_up"
         private const val FILE_RESTORE_FILES_REPLACED = "files_replaced"
         private const val FILE_RESTORE_DATA_COMMITTED = "data_committed"
         private const val FILE_RESTORE_SECRETS_APPLIED = "secrets_applied"
@@ -1239,6 +1278,7 @@ class SyncArchiveManager(
             // cross-device restores leave all chat-inline images as broken
             // links. Added in the v1.6.x image-gen feature follow-up.
             FileFolders.CHAT_IMAGES,
+            ArtifactBackupContentStore.RELATIVE_ROOT,
         )
     }
 }

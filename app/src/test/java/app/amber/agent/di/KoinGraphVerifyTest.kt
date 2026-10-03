@@ -7,6 +7,7 @@ import app.amber.core.di.boardModule
 import app.amber.core.di.chatModule
 import app.amber.core.di.dataSourceModule
 import app.amber.core.di.iCloudModule
+import app.amber.core.di.jevModule
 import app.amber.core.di.memoryModule
 import app.amber.core.di.novelModule
 import app.amber.core.di.repositoryModule
@@ -54,6 +55,7 @@ class KoinGraphVerifyTest {
         viewModelModule,
         dataSourceModule,
         repositoryModule,
+        jevModule,
     )
 
     @OptIn(KoinInternalApi::class)
@@ -65,7 +67,7 @@ class KoinGraphVerifyTest {
         val aggregate = module {
             includes(loadedAtStartup)
         }
-        // 防空跑：聚合链里必须真的有定义被校验（当前 13 个启动模块共 300+ 条）。
+        // 防空跑：聚合链里必须真的有定义被校验（当前 14 个启动模块共 300+ 条）。
         val definitionCount = loadedAtStartup.sumOf { it.mappings.size }
         assertTrue(definitionCount > 250, "启动模块定义数异常偏少: $definitionCount")
         // 工厂函数构建的定义（single<T> { Factory.build(get()) }）无法从构造器
@@ -88,10 +90,38 @@ class KoinGraphVerifyTest {
             definition<app.amber.feature.reminder.ReminderStore>(
                 java.io.File::class,
             ),
+            // ChatModule computes the directory from Context and uses the
+            // store's own Json default; neither is requested from Koin.
+            definition<app.amber.core.recap.ConversationRecapStore>(
+                java.io.File::class,
+                kotlinx.serialization.json.Json::class,
+            ),
             // MemoryModule builds the file from Context inside the factory;
             // Json is a real binding.
             definition<app.amber.core.memory.store.MemoryProfileStore>(
                 java.io.File::class,
+            ),
+            // JevModule creates OkHttpJevTransport from the configured client;
+            // JevClient's Json argument uses its constructor default.
+            definition<app.amber.core.jev.JevClient>(
+                app.amber.core.jev.JevTransport::class,
+                kotlinx.serialization.json.Json::class,
+            ),
+            // The usage store is AndroidJevUsageStore(Context), and metrics is
+            // the coordinator's default. Its JevClient remains DI-owned.
+            definition<app.amber.core.jev.JevDecisionCoordinator>(
+                app.amber.core.jev.JevUsageStore::class,
+                app.amber.core.jev.JevMetrics::class,
+            ),
+            // JevModule supplies coordinator/policy/calibration with get();
+            // only the background scope comes from the constructor default.
+            definition<app.amber.core.jev.JevRuntime>(
+                kotlinx.coroutines.CoroutineScope::class,
+            ),
+            // JevModule passes the runtime only; the main dispatcher is the
+            // runner's default, not a process-wide dispatcher binding.
+            definition<app.amber.core.jev.JevScreenGoalRunner>(
+                kotlinx.coroutines.CoroutineDispatcher::class,
             ),
             // RepositoryModule obtains this from Context rather than resolving a binding.
             definition<app.amber.core.conversation.exchange.ConversationExchangeFileHandler>(

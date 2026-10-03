@@ -3552,4 +3552,14 @@
   <string name="mac_gateway_error_unauthorized">이 기기는 Mac에서 해지되었습니다. 다시 페어링하세요.</string>
   <string name="mac_gateway_error_invalid_response">Mac Gateway가 읽을 수 없는 데이터를 반환했습니다</string>
   <string name="mac_gateway_error_generic">실패: %1$s</string>
+  <string name="run_kernel_completion_check_prompt">[자동 확인] 이번 턴에 파일을 수정했지만 이후 검사를 실행하지 않았습니다. 적절한 검사(테스트, 빌드 또는 lint)를 실행하고 실제 결과를 보고해 주세요. 적용할 검사가 없다면 그렇다고 명확히 말해 주세요.</string>
+  <string name="setting_jev_purpose_auto_approval_gate">자동 승인 재확인</string>
+  <string name="setting_jev_purpose_auto_approval_gate_desc">자동 승인 중 위험한 호출이면 대신 확인을 요청합니다</string>
+  <string name="setting_jev_purpose_completion_check">완료 선언 확인</string>
+  <string name="setting_jev_purpose_completion_check_desc">파일을 바꾸고 검사 없이 완료라고 하면 검증을 위해 한 번 더 진행</string>
+  <string name="chat_tool_jev_auto_approval_paused">자동 승인 일시 중지: %1$s</string>
+  <string name="chat_tool_jev_risk_destructive">파괴적</string>
+  <string name="chat_tool_jev_risk_exfiltration">외부로 데이터 전송</string>
+  <string name="chat_tool_jev_risk_off_task">작업 범위 밖</string>
+  <string name="chat_tool_jev_risk_separator">", "</string>
 </resources>

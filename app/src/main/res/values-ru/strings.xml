@@ -3558,4 +3558,14 @@
   <string name="mac_gateway_error_unauthorized">Устройство отозвано на Mac. Выполните сопряжение заново.</string>
   <string name="mac_gateway_error_invalid_response">Mac Gateway вернул нераспознанные данные</string>
   <string name="mac_gateway_error_generic">Ошибка: %1$s</string>
+  <string name="run_kernel_completion_check_prompt">[Автопроверка] В этом ходе были изменены файлы, но после этого не запускалась ни одна проверка. Запустите подходящую проверку (тесты, сборку или lint) и сообщите фактический результат; если проверка неприменима, прямо скажите об этом.</string>
+  <string name="setting_jev_purpose_auto_approval_gate">Проверка автоодобрения</string>
+  <string name="setting_jev_purpose_auto_approval_gate_desc">Если автоодобрение пропускает рискованный вызов, запрашивает ваше подтверждение</string>
+  <string name="setting_jev_purpose_completion_check">Проверка заявления о готовности</string>
+  <string name="setting_jev_purpose_completion_check_desc">Если файлы изменены, а ответ заявляет о готовности без проверки, запускает ещё один раунд для проверки</string>
+  <string name="chat_tool_jev_auto_approval_paused">Автоодобрение приостановлено: %1$s</string>
+  <string name="chat_tool_jev_risk_destructive">разрушительно</string>
+  <string name="chat_tool_jev_risk_exfiltration">отправка данных наружу</string>
+  <string name="chat_tool_jev_risk_off_task">вне задачи</string>
+  <string name="chat_tool_jev_risk_separator">", "</string>
 </resources>

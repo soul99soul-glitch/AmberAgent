@@ -3586,4 +3586,14 @@
   <string name="chat_shelf_kind_web">網頁</string>
   <string name="chat_recap_no_model">還沒有可用來產生回顧的模型，請在設定裡選擇標題模型。</string>
   <string name="chat_model_menu_context">上下文</string>
+  <string name="run_kernel_completion_check_prompt">【自動校驗】本輪修改了檔案，但之後沒有執行任何檢查。請執行合適的檢查（測試、建置或 lint）並如實回報結果；如果沒有可用的檢查，請直接說明。</string>
+  <string name="setting_jev_purpose_auto_approval_gate">自動批准複核</string>
+  <string name="setting_jev_purpose_auto_approval_gate_desc">自動批准遇到高風險呼叫時，改為請你確認</string>
+  <string name="setting_jev_purpose_completion_check">完成聲明校驗</string>
+  <string name="setting_jev_purpose_completion_check_desc">改過檔案卻沒跑檢查就宣稱完成時，追加一輪去驗證</string>
+  <string name="chat_tool_jev_auto_approval_paused">自動批准已暫停：%1$s</string>
+  <string name="chat_tool_jev_risk_destructive">破壞性</string>
+  <string name="chat_tool_jev_risk_exfiltration">外傳資料</string>
+  <string name="chat_tool_jev_risk_off_task">超出任務範圍</string>
+  <string name="chat_tool_jev_risk_separator">"、"</string>
 </resources>

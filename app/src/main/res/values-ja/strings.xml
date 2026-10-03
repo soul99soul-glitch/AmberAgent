@@ -3552,4 +3552,14 @@
   <string name="mac_gateway_error_unauthorized">この端末は Mac で取り消されました。もう一度ペアリングしてください。</string>
   <string name="mac_gateway_error_invalid_response">Mac Gateway から読み取れないデータが返されました</string>
   <string name="mac_gateway_error_generic">失敗しました：%1$s</string>
+  <string name="run_kernel_completion_check_prompt">【自動チェック】このターンでファイルを変更しましたが、その後チェックを実行していません。適切なチェック（テスト、ビルド、lint）を実行し、実際の結果を報告してください。該当するチェックがない場合はそのように明記してください。</string>
+  <string name="setting_jev_purpose_auto_approval_gate">自動承認の再確認</string>
+  <string name="setting_jev_purpose_auto_approval_gate_desc">自動承認で高リスクの呼び出しを検出したら、確認を求めます</string>
+  <string name="setting_jev_purpose_completion_check">完了宣言の確認</string>
+  <string name="setting_jev_purpose_completion_check_desc">ファイル変更後にチェックせず完了と述べた場合、検証のためもう1ラウンド実行</string>
+  <string name="chat_tool_jev_auto_approval_paused">自動承認を一時停止：%1$s</string>
+  <string name="chat_tool_jev_risk_destructive">破壊的</string>
+  <string name="chat_tool_jev_risk_exfiltration">データ外部送信</string>
+  <string name="chat_tool_jev_risk_off_task">タスク範囲外</string>
+  <string name="chat_tool_jev_risk_separator">"、"</string>
 </resources>

@@ -3650,4 +3650,14 @@
   <string name="chat_shelf_kind_web">网页</string>
   <string name="chat_recap_no_model">还没有可用来生成回顾的模型，请在设置里选择标题模型。</string>
   <string name="chat_model_menu_context">上下文</string>
+  <string name="run_kernel_completion_check_prompt">【自动校验】本轮修改了文件，但之后没有运行任何检查。请运行合适的检查（测试、构建或 lint）并如实报告结果；如果没有可用的检查，请直接说明。</string>
+  <string name="setting_jev_purpose_auto_approval_gate">自动批准复核</string>
+  <string name="setting_jev_purpose_auto_approval_gate_desc">自动批准遇到高风险调用时，改为请你确认</string>
+  <string name="setting_jev_purpose_completion_check">完成声明校验</string>
+  <string name="setting_jev_purpose_completion_check_desc">改过文件却没跑检查就宣称完成时，追加一轮去验证</string>
+  <string name="chat_tool_jev_auto_approval_paused">自动批准已暂停：%1$s</string>
+  <string name="chat_tool_jev_risk_destructive">破坏性</string>
+  <string name="chat_tool_jev_risk_exfiltration">外发数据</string>
+  <string name="chat_tool_jev_risk_off_task">超出任务范围</string>
+  <string name="chat_tool_jev_risk_separator">"、"</string>
 </resources>

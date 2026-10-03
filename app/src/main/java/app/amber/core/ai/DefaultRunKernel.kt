@@ -1,5 +1,6 @@
 package app.amber.core.ai
 
+import app.amber.ai.core.MessageRole
 import android.content.Context
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
@@ -47,6 +48,9 @@ import java.util.Locale
 import kotlin.time.Clock
 
 private const val TAG = "RunKernel"
+
+/** PermissionDecisionResolver 中由自动批准开关放行的来源。 */
+private val AUTO_APPROVAL_SOURCES = setOf("settings", "settings_unattended")
 private const val PERF_TAG = "AmberChatPerf"
 
 // Guard notes appended to the assistant turn when a kernel guard stops the
@@ -86,14 +90,17 @@ private data class RunKernelMessages(
     val duplicateSameBatchMessage: String,
     val duplicateExistingMessage: String,
     val protocolMismatchMessage: String,
+    val completionCheckPrompt: String,
 ) {
     companion object {
+
         fun from(context: Context): RunKernelMessages = RunKernelMessages(
             outputLimitNotice = context.getString(R.string.run_kernel_output_limit_notice),
             duplicateToolCallNotice = context.getString(R.string.run_kernel_duplicate_tool_call_notice),
             duplicateSameBatchMessage = context.getString(R.string.run_kernel_duplicate_same_batch_message),
             duplicateExistingMessage = context.getString(R.string.run_kernel_duplicate_existing_message),
             protocolMismatchMessage = context.getString(R.string.run_kernel_protocol_mismatch_message),
+            completionCheckPrompt = context.getString(R.string.run_kernel_completion_check_prompt),
         )
     }
 }
@@ -115,6 +122,10 @@ class DefaultRunKernel(
     private val toolEffectLedger: ToolEffectLedger? = null,
     private val capabilityFlags: CapabilityFlags? = null,
     private val capabilityPermissionStore: CapabilityPermissionStore? = null,
+    // Jev 自动批准复核：只把自动批准收紧为人工审批，从不放行。
+    private val autoApprovalGate: app.amber.core.jev.JevAutoApprovalGate? = null,
+    // Jev 完成声明校验：改过文件却未检查就宣称完成时，续跑一轮（每次 run 至多一次）。
+    private val completionCheck: app.amber.core.jev.JevCompletionCheck? = null,
 ) : RunKernel {
 
     override fun run(session: GenerationRunSession): Flow<GenerationChunk> = flow {
@@ -169,6 +180,34 @@ class DefaultRunKernel(
         )
 
         var messages: List<UIMessage> = session.messages
+        suspend fun autoApprovalEscalation(
+            tool: UIMessagePart.Tool,
+            decision: app.amber.feature.runtime.PermissionDecision,
+        ): List<app.amber.core.jev.JevAutoApprovalGate.Risk> = if (
+            autoApprovalGate != null &&
+            tool.approvalState == ToolApprovalState.Auto &&
+            decision.action == app.amber.feature.runtime.PermissionDecisionAction.ALLOW &&
+            decision.source in AUTO_APPROVAL_SOURCES &&
+            decision.trace.policy?.needsApproval == true
+        ) {
+            autoApprovalGate.escalation(
+                toolName = tool.toolName,
+                input = tool.input,
+                recentUserTexts = messages.filter { it.role == MessageRole.USER }.takeLast(3).map { it.toText() },
+                runKey = runId,
+                userAuthored = invocationContext != app.amber.feature.runtime.ToolInvocationContext.SubAgent,
+            )
+        } else {
+            emptyList()
+        }
+        fun escalationMetadata(
+            metadata: JsonObject?,
+            risks: List<app.amber.core.jev.JevAutoApprovalGate.Risk>,
+        ): JsonObject = JsonObject(metadata.orEmpty() + (
+            app.amber.core.jev.JevAutoApprovalGate.METADATA_KEY to
+                kotlinx.serialization.json.JsonArray(risks.map { kotlinx.serialization.json.JsonPrimitive(it.key) })
+        ))
+
         val toolExposure = ToolExposureState.from(session.tools)
         // A setting change can resume a run that was already parked at the
         // approval gate. Keep the original Pending set separate from tools
@@ -184,6 +223,7 @@ class DefaultRunKernel(
             .orEmpty()
         var terminal: GenerationTerminal? = null
         var brokeEarly = false
+        var completionNudged = false
 
         // Duplicate-tool-call guard memory (aligned with the iOS ToolLoopGuard):
         // signature (toolName + argsDigest) → number of counted executions
@@ -255,7 +295,9 @@ class DefaultRunKernel(
                     autoApproveHighRiskTools &&
                     initialPendingToolCallIds.isNotEmpty() &&
                     waitingTools.isNotEmpty() &&
-                    waitingTools.all { it.toolCallId in initialPendingToolCallIds }
+                    waitingTools.all { it.toolCallId in initialPendingToolCallIds } &&
+                    // Jev 复核收紧的调用只能由用户决定，不随高风险开关释放。
+                    waitingTools.none { it.metadata?.containsKey(app.amber.core.jev.JevAutoApprovalGate.METADATA_KEY) == true }
             val autoToolsToRecheck = buildList {
                 if (pendingTools.isNotEmpty()) addAll(deferredAutoTools)
                 if (canReleaseAllWaitingToolsWithHighRisk) {
@@ -278,7 +320,13 @@ class DefaultRunKernel(
                     capabilityPermissions = capabilityState,
                     permissionContext = permissionContext,
                 )
-                tool to decision
+                val escalation = autoApprovalEscalation(tool.copy(approvalState = ToolApprovalState.Auto), decision)
+                if (escalation.isEmpty()) {
+                    tool to decision
+                } else {
+                    tool.copy(metadata = escalationMetadata(tool.metadata, escalation)) to
+                        decision.copy(action = app.amber.feature.runtime.PermissionDecisionAction.ASK)
+                }
             }
             val recheckedToolsRequiringApproval = recheckedAutoTools.filter {
                 it.second.action == app.amber.feature.runtime.PermissionDecisionAction.ASK
@@ -498,6 +546,21 @@ class DefaultRunKernel(
 
                 val awaitingExecution = completedAssistant.getTools().filterNot { it.isExecuted }
                 if (awaitingExecution.isEmpty()) {
+                    // 下一步仍能调用工具（非 FINAL 预算阶段）时才续跑，否则续跑也无法运行检查。
+                    if (completionCheck != null &&
+                        !completionNudged &&
+                        stepIndex < maxSteps - 1 &&
+                        app.amber.feature.runtime.AgentLoopBudgetPrompt.stage(stepIndex + 1, maxSteps) !=
+                        app.amber.feature.runtime.AgentLoopBudgetStage.FINAL &&
+                        completionCheck.shouldContinue(messages, runId, ::toolOutputIsFailure)
+                    ) {
+                        completionNudged = true
+                        // 以一条可见的用户消息续跑：请求以 user 收尾（不构成 assistant 预填），
+                        // 续跑输出新开一条 assistant 消息；与 steer 并入同一路径。
+                        messages = messages + UIMessage.user(runKernelMessages.completionCheckPrompt) + consumeSteerMessages()
+                        emit(GenerationChunk.Messages(messages))
+                        continue
+                    }
                     brokeEarly = true
                     break
                 }
@@ -595,6 +658,8 @@ class DefaultRunKernel(
                         capabilityPermissions = capabilityState,
                         permissionContext = permissionContext,
                     )
+                    // 仅在自动批准开关实际放行一次需审批的调用时复核（只读调用不问）。
+                    val escalation = autoApprovalEscalation(tool, decision)
                     val ledgerMetadata = preparedEffects[tool.toolCallId]?.let { effect ->
                         buildJsonObject {
                             put("effect_id", effect.effectId)
@@ -602,6 +667,18 @@ class DefaultRunKernel(
                         }
                     } ?: JsonObject(emptyMap())
                     when {
+                        // Jev 复核判定高风险：自动批准收紧为人工审批，命中原因供审批卡展示。
+                        escalation.isNotEmpty() -> {
+                            hasPendingApproval = true
+                            tool.copy(
+                                approvalState = ToolApprovalState.Pending,
+                                metadata = mergeToolMetadata(
+                                    tool.metadata,
+                                    decision.trace.toJson(),
+                                    ledgerMetadata,
+                                ).let { escalationMetadata(it, escalation) },
+                            )
+                        }
                         // Tool needs approval and state is Auto -> set to Pending
                         decision.action == app.amber.feature.runtime.PermissionDecisionAction.ASK -> {
                             hasPendingApproval = true
